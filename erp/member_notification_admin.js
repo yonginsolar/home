@@ -1,4 +1,4 @@
-/* Member notification administration v1.0.2. Read on demand; no tokens or local persistence. */
+/* Member notification administration v1.0.3. Read on demand; no tokens or local persistence. */
 (() => {
  'use strict';
  let client,owner='',generation=0,tab='summary',ctx,events=[],detailRevision=0;
