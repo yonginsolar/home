@@ -1,4 +1,4 @@
-/* Member Telegram connection v1.0.0 — optional, own authenticated profile only. */
+/* Member Telegram connection v1.0.1 — optional, own authenticated profile only. */
 (() => {
   'use strict';
   let client=null, context=null, revision=0, pending=false;
@@ -56,5 +56,6 @@
       if (isCurrent()) byId('memberTelegramState').textContent='연결 상태를 확인하지 못했습니다. 다시 시도해 주세요.';
     } finally { if (isCurrent()) setBusy(false); }
   }
-  window.MemberTelegramConnection={setContext,perform};
+  const clear=()=>setContext(null,{authUserId:null,coopId:null,profileId:null,isOwn:false});
+  window.MemberTelegramConnection={setContext,perform,clear};
 })();
