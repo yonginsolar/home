@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.106
-Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain existing state and authority.
+Version: v1.0.107
+Change: 2026-10-11 - Verify resignation changes and distinguish unavailable Telegram status.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.106 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.107 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -161,6 +161,7 @@ Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain e
     <button class="btn btn-outline-success btn-sm btn-rounded" onclick="openPayrollImportModal()">📥 급여 일괄입력</button>
   </div>
   <div class="table-responsive erp-desktop-scroll">
+    <div id="employeeTelegramReadStatus" class="small text-secondary mb-2" hidden></div>
     <table class="table table-hover align-middle" style="font-size: 0.95rem;">
       <thead class="table-light text-secondary small"><tr><th>사번</th><th>이름 / 부서</th><th>직급</th><th>상태</th><th>Telegram</th><th>시스템 권한</th></tr></thead>
       <tbody id="empListBody"><tr><td colspan="6" class="text-center p-4 text-muted">로딩 중... ⏳</td></tr></tbody>
@@ -941,6 +942,7 @@ let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
 let employeeDetailRevision = 0, employeeBasicSaveInFlight = false, employeeBasicBaseline = null;
+let employeeResignationSaveInFlight = false, employeeResignationContext = null;
 const EMPLOYEE_DETAIL_DRAFT_IDS = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
     'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate',
     'rrnFront','rrnBack','durunuriEligibilityEnabled','durunuriConfirmedMonths','durunuriConfirmedThroughMonth',
@@ -968,7 +970,7 @@ function hasUnsavedEmployeeDetail() {
     });
 }
 function isEmployeeDetailSaving() {
-    return employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight
+    return employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight
         || employeeNotificationSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight;
 }
 function requestEmployeeDetailDiscard(action) {
@@ -998,7 +1000,7 @@ function guardEmployeeDetailClose(event) {
     cancelEmployeeDetailReads();
 }
 window.addEventListener('beforeunload', event => {
-    if (hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
+    if (employeeResignationSaveInFlight || hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
 });
 let employeeSalaryLoadRevision = 0;
 const EMPLOYEE_BASIC_FIELDS = ['emp_name','member_id','phone','email','position','auth_level','department','address','hire_date','base_salary','salary_apply_date'];
@@ -1130,6 +1132,8 @@ function cancelEmployeeDetailReads() {
     });
 }
 let telegramApprovalLinkStatusMap = {};
+const employeeTelegramRead = {state:'idle',owner:'',revision:0,pending:null};
+let employeeListReadRevision = 0;
 const HR_MODAL_BASE_Z_INDEX = 1050;
 let hrModalStackOrderSeed = 0;
 let calendarIcsSettings = {
@@ -2919,7 +2923,7 @@ window.onload = async function() {
         window.ERPEmployeeSettingsView.checkpoint();
     }
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:loadList,
-        busy:() => companySettingsSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
+        busy:() => companySettingsSaveInFlight || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
             || window.ERPAnnualSettings?.isBusy()
             || window.ERPEmployeeSettingsView?.isDirty()
             || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight
@@ -3368,25 +3372,68 @@ function formatAdminEmployeeTelegramLinkedAt(value) {
 } // End of formatAdminEmployeeTelegramLinkedAt
 
 async function loadTelegramApprovalLinkStatusMap() {
+    const owner = getHrSettingsOwner();
+    if (!isHrSettingsContextCurrent(owner)) return false;
+    if (employeeTelegramRead.pending && employeeTelegramRead.owner === owner) return employeeTelegramRead.pending;
+    const revision = ++employeeTelegramRead.revision;
+    const isCurrent = () => revision === employeeTelegramRead.revision && isHrSettingsContextCurrent(owner);
+    employeeTelegramRead.owner = owner;
+    employeeTelegramRead.state = 'loading';
     telegramApprovalLinkStatusMap = {};
-    try {
-        const { data, error } = await _supabase.rpc('erp_admin_list_telegram_link_statuses');
-        if (error) throw error;
-        (Array.isArray(data) ? data : []).forEach((row) => {
-            const empId = String(row?.emp_id || '').trim();
-            if (!empId) return;
-            telegramApprovalLinkStatusMap[empId] = {
-                linked: true,
-                linked_at: String(row?.linked_at || '').trim()
-            };
-        });
-    } catch (error) {
-        console.warn('erp telegram admin status load failed:', error?.message || error);
-        telegramApprovalLinkStatusMap = {};
-    }
+    refreshEmployeeTelegramStatusUi();
+    const pending = (async () => {
+        try {
+            const {data,error} = await _supabase.rpc('erp_admin_list_telegram_link_statuses');
+            if (!isCurrent()) return false;
+            if (error || !Array.isArray(data)) throw new Error('TELEGRAM_STATUS_UNAVAILABLE');
+            const next = {};
+            for (const row of data) {
+                const empId = typeof row?.emp_id === 'string' ? row.emp_id.trim() : '';
+                if (!empId || Object.prototype.hasOwnProperty.call(next,empId)) throw new Error('TELEGRAM_STATUS_INVALID');
+                next[empId] = {linked:true,linked_at:String(row.linked_at || '').trim()};
+            }
+            telegramApprovalLinkStatusMap = next;
+            employeeTelegramRead.state = 'ready';
+            return true;
+        } catch (_) {
+            if (isCurrent()) { telegramApprovalLinkStatusMap = {}; employeeTelegramRead.state = 'error'; }
+            return false;
+        } finally {
+            if (revision === employeeTelegramRead.revision) employeeTelegramRead.pending = null;
+            if (isCurrent()) refreshEmployeeTelegramStatusUi();
+        }
+    })();
+    employeeTelegramRead.pending = pending;
+    return pending;
 } // End of loadTelegramApprovalLinkStatusMap
 
+function refreshEmployeeTelegramStatusUi() {
+    document.querySelectorAll('[data-employee-telegram-status]').forEach(cell => {
+        cell.innerHTML = buildEmployeeTelegramStatusHtml(cell.dataset.employeeTelegramStatus);
+    });
+    const notice = document.getElementById('employeeTelegramReadStatus');
+    if (!notice) return;
+    const failed = employeeTelegramRead.owner === getHrSettingsOwner() && employeeTelegramRead.state === 'error';
+    notice.hidden = !failed;
+    notice.innerHTML = failed ? '텔레그램 연결 상태를 확인하지 못했습니다. <button type="button" class="btn btn-outline-primary btn-sm ms-1" onclick="retryEmployeeTelegramStatus()">다시 확인</button>' : '';
+}
+async function retryEmployeeTelegramStatus() {
+    const owner = getHrSettingsOwner();
+    if (!isHrSettingsContextCurrent(owner) || employeeTelegramRead.pending) return;
+    try {
+        await verifyEmployeeDetailTabAccess(owner);
+        if (isHrSettingsContextCurrent(owner)) await loadTelegramApprovalLinkStatusMap();
+    } catch (_) {
+        if (isHrSettingsContextCurrent(owner)) {
+            employeeTelegramRead.owner = owner; employeeTelegramRead.state = 'error';
+            telegramApprovalLinkStatusMap = {}; refreshEmployeeTelegramStatusUi();
+        }
+    }
+}
 function buildEmployeeTelegramStatusHtml(empId) {
+    if (employeeTelegramRead.owner !== getHrSettingsOwner() || employeeTelegramRead.state === 'idle'
+        || employeeTelegramRead.state === 'loading') return '<span class="badge bg-secondary">조회 중</span>';
+    if (employeeTelegramRead.state !== 'ready') return '<span class="badge bg-warning text-dark">조회 실패</span>';
     const safeEmpId = String(empId || '').trim();
     const status = telegramApprovalLinkStatusMap[safeEmpId];
     if (!status?.linked) {
@@ -4166,15 +4213,19 @@ async function loadList() {
         return;
     }
     const tbody = document.getElementById("empListBody");
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4">로딩 중...</td></tr>';
     const owner = getHrSettingsOwner();
+    const listRevision = ++employeeListReadRevision;
+    const isCurrentList = () => listRevision === employeeListReadRevision && isHrSettingsContextCurrent(owner);
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4">로딩 중...</td></tr>';
     const { data: list, error } = await _supabase.rpc('erp_hr_list_employees', {p_choices_only:false});
-    if (error || !list) {
+    if (!isCurrentList()) return;
+    if (error || !Array.isArray(list)) {
         tbody.innerHTML = '<tr><td colspan="6" class="text-center">직원 목록을 불러오지 못했습니다. <button class="btn btn-outline-primary btn-sm" onclick="loadList().catch(() => {})">다시 불러오기</button></td></tr>';
         throw error || new Error('EMPLOYEE_LIST_UNAVAILABLE');
     }
     if (owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     await loadTelegramApprovalLinkStatusMap();
+    if (!isCurrentList()) return;
     employeeCache = Array.isArray(list) ? list.slice().sort(compareEmployeesByDisplayNo) : [];
     tbody.innerHTML = "";
     const threeYearsAgo = new Date();
@@ -4187,6 +4238,7 @@ async function loadList() {
         let statusBadge = isResigned ? (isExpired ? `<span class="badge bg-danger">3년 경과</span>` : `<span class="badge bg-secondary">퇴사</span>`) : `<span class="badge bg-success">재직</span>`;
         let roleBadge = getRoleBadge(u.role);
         const tr = document.createElement("tr");
+        tr.dataset.employeeRow = String(u.emp_id);
         if (isResigned) tr.style.opacity = "0.7";
         if (isExpired) tr.style.backgroundColor = "#fff5f5";
         tr.onclick = () => openDetail(u);
@@ -4195,7 +4247,7 @@ async function loadList() {
         const safeDept = escapeHtml(u.department || '-');
         const safePos = escapeHtml(u.position || '');
         const telegramStatusHtml = buildEmployeeTelegramStatusHtml(u.emp_id);
-        tr.innerHTML = `<td class="fw-bold text-secondary">${safeEmpId}</td><td><div class="fw-bold">${safeName}</div><div class="small text-muted">${safeDept}</div></td><td>${safePos}</td><td>${statusBadge}</td><td>${telegramStatusHtml}</td><td>${roleBadge}</td>`;
+        tr.innerHTML = `<td class="fw-bold text-secondary">${safeEmpId}</td><td><div class="fw-bold">${safeName}</div><div class="small text-muted">${safeDept}</div></td><td>${safePos}</td><td>${statusBadge}</td><td data-employee-telegram-status="${escapeHtml(u.emp_id)}">${telegramStatusHtml}</td><td>${roleBadge}</td>`;
         tbody.appendChild(tr);
     });
     if (expiredCount > 0 && !hasCheckedExpired) {
@@ -5329,8 +5381,7 @@ async function saveEmployeeNotificationAssignments() {
 } // End of saveEmployeeNotificationAssignments
 
 async function openDetail(u) {
-    if (employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight
-        || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
+    if (isEmployeeDetailSaving()) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
     if (hasUnsavedEmployeeDetail()) {
         requestEmployeeDetailDiscard(() => { void openDetail(u); });
         return;
@@ -5395,9 +5446,7 @@ async function openDetail(u) {
         ? '기존 등록 파일이 있습니다. 계약서 관리에서 이전 파일과 새 이력을 함께 확인할 수 있습니다.'
         : '직접 작성, 변경합의서 작성 또는 외부 작성 파일 등록';
 
-    const area = document.getElementById("btnResignArea");
-    if(u.resign_date) area.innerHTML = `<button class="btn btn-sm btn-warning" onclick="cancelResign()">↩️ 퇴사 취소</button><button class="btn btn-sm btn-danger ms-2" onclick="reqDeletePermanent()">🗑️ 삭제</button>`;
-    else { area.innerHTML = `<button class="btn btn-sm btn-outline-danger" onclick="doResign()">⛔ 퇴사 처리</button>`; }
+    renderEmployeeResignationActions();
     await loadDurunuriEligibilityProfile(u.emp_id);
     if (!isCurrent()) return;
     resetEmployeeModuleAccessUi();
@@ -5610,26 +5659,80 @@ async function reqDeletePermanent() {
         }
     });
 }
-function doResign() { document.getElementById("inputResignDate").value = formatAdminEmployeeKstDate(new Date()); resignModal.show(); }
+function renderEmployeeResignationActions() {
+    const area = document.getElementById('btnResignArea');
+    if (!area) return;
+    area.innerHTML = currentEmpResignDate
+        ? '<button class="btn btn-sm btn-warning" onclick="cancelResign()">↩️ 퇴사 취소</button><button class="btn btn-sm btn-danger ms-2" onclick="reqDeletePermanent()">🗑️ 삭제</button>'
+        : '<button class="btn btn-sm btn-outline-danger" onclick="doResign()">⛔ 퇴사 처리</button>';
+}
+function captureEmployeeResignationContext() {
+    return {empId:String(currentEmpId || ''),owner:getHrSettingsOwner(),revision:employeeDetailRevision,
+        previousDate:currentEmpResignDate || null,coopId:String(myInfo?.coop_id || '')};
+}
+function isEmployeeResignationContextCurrent(context) {
+    return !!context?.empId && context.empId === String(currentEmpId || '')
+        && context.revision === employeeDetailRevision && isHrSettingsContextCurrent(context.owner);
+}
+function doResign() {
+    if (isEmployeeDetailSaving()) return;
+    employeeResignationContext = captureEmployeeResignationContext();
+    if (!isEmployeeResignationContextCurrent(employeeResignationContext)) return;
+    document.getElementById('inputResignDate').value = formatAdminEmployeeKstDate(new Date());
+    resignModal.show();
+}
+async function saveEmployeeResignation(context,date) {
+    if (isEmployeeDetailSaving() || !isEmployeeResignationContextCurrent(context)) return false;
+    employeeResignationSaveInFlight = true;
+    const controls = [...document.querySelectorAll('#resignModal input,#resignModal button,#btnResignArea button')]
+        .map(element => ({element,disabled:element.disabled}));
+    controls.forEach(({element}) => {element.disabled = true;});
+    try {
+        await verifyEmployeeDetailTabAccess(context.owner);
+        if (!isEmployeeResignationContextCurrent(context)) return false;
+        const {data,error} = await _supabase.rpc('erp_hr_set_employee_resignation', {
+            p_emp_id:context.empId,p_resign_date:date,p_expected_resign_date:context.previousDate
+        });
+        if (!isEmployeeResignationContextCurrent(context)) return false;
+        if (error) throw error;
+        if (data?.verified !== true || data.emp_id !== context.empId || data.coop_id !== context.coopId
+            || data.resign_date !== date) throw new Error('EMPLOYEE_RESIGNATION_NOT_CONFIRMED');
+        currentEmpResignDate = date;
+        employeeCache.filter(row => String(row.emp_id) === context.empId).forEach(row => {row.resign_date = date;});
+        document.querySelectorAll('[data-employee-row]').forEach(row => {
+            if (row.dataset.employeeRow !== context.empId) return;
+            row.style.opacity = date ? '0.7' : ''; row.style.backgroundColor = '';
+            row.cells[3].innerHTML = date ? '<span class="badge bg-secondary">퇴사</span>' : '<span class="badge bg-success">재직</span>';
+        });
+        renderEmployeeResignationActions();
+        resignModal.hide();
+        showAlert(date ? '퇴사 처리가 반영되었습니다.' : '퇴사 취소가 반영되었습니다.');
+        return true;
+    } catch (error) {
+        if (!isEmployeeResignationContextCurrent(context)) return false;
+        const code = String(error?.message || '');
+        const message = code === 'EMPLOYEE_RESIGNATION_CHANGED'
+            ? '퇴사 정보가 다른 곳에서 변경되었습니다. 입력한 내용은 유지됩니다. 직원 목록을 다시 확인해 주세요.'
+            : code === 'RESIGNATION_BEFORE_HIRE_DATE' ? '퇴사일은 입사일보다 빠를 수 없습니다.'
+            : ['SETTINGS_ACCESS_DENIED','PERMISSION_ADMIN_REQUIRED','ERP_TASK_ACCESS_DENIED'].includes(code)
+                ? '이 직원의 퇴사 정보를 변경할 권한이 없습니다.'
+                : '퇴사 정보의 반영 여부를 확인하지 못했습니다. 입력한 내용은 유지됩니다. 직원 목록을 다시 확인해 주세요.';
+        showAlert(message);
+        return false;
+    } finally {
+        employeeResignationSaveInFlight = false;
+        controls.forEach(({element,disabled}) => {if (element.isConnected) element.disabled = disabled;});
+    }
+}
 async function confirmResign() {
     const rDate = document.getElementById("inputResignDate").value;
-    if(!rDate) return showAlert("퇴사일을 입력해주세요.");
-    resignModal.hide();
-    const { error } = await scopeEmployeeTenant(_supabase.from('ref_employees').update({ resign_date: rDate })).eq('emp_id', currentEmpId);
-    if (error) return showAlert("퇴사 처리 실패: " + error.message);
-    await logHrAudit('hr.employee.resign', `${currentEmpName} 퇴사 처리`, { resign_date: rDate });
-    detailModal.hide();
-    loadList();
-    showAlert("퇴사 처리되었습니다.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rDate)) return showAlert('퇴사일을 입력해주세요.');
+    return saveEmployeeResignation(employeeResignationContext,rDate);
 }
 async function cancelResign() {
-    showConfirm("퇴사 취소하시겠습니까?", async () => {
-        const { error } = await scopeEmployeeTenant(_supabase.from('ref_employees').update({ resign_date: null })).eq('emp_id', currentEmpId);
-        if (error) return showAlert("퇴사 취소 실패: " + error.message);
-        await logHrAudit('hr.employee.resign_cancel', `${currentEmpName} 퇴사 취소`, { resign_date: null });
-        detailModal.hide();
-        loadList();
-    });
+    if (isEmployeeDetailSaving()) return;
+    const context = captureEmployeeResignationContext();
+    showConfirm('퇴사 취소하시겠습니까?', () => saveEmployeeResignation(context,null));
 }
 
 function formatPayrollTaxWon(value) {
