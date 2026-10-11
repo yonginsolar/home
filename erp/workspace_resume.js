@@ -1,4 +1,4 @@
-/* ERP task resume v1.0.1: keep authorization checks; checkpoint explicitly completed editors. */
+/* ERP task resume v1.0.2: keep authorization checks; restore held task screens for explicit internal moves. */
 (() => {
   'use strict';
   function register(options = {}) {
@@ -25,5 +25,21 @@
     if (!root || root.ownerDocument !== document || window.parent === window) return false;
     try { return window.parent.ErpWorkspaceShell?.checkpoint(root) === true; } catch (_) { return false; }
   }
-  window.ErpWorkspaceResume = {register,checkpoint};
+  function navigate(value) {
+    const target = new URL(value, window.location.href);
+    let shell;
+    try { if (window.parent !== window) shell = window.parent.ErpWorkspaceShell; } catch (_) {}
+    if (typeof shell?.navigate === 'function') {
+      try {
+        // The existing shell alone decides allowed routes, cancellation and fresh authorization.
+        if (shell.navigate(target.href)) return;
+      } catch (_) {
+        window.alert('화면을 열지 못했습니다. 다시 시도해 주세요.');
+        return;
+      }
+    }
+    // Standalone, external/public and unregistered destinations keep their original navigation.
+    window.location.href = target.href;
+  }
+  window.ErpWorkspaceResume = {register,checkpoint,navigate};
 })();

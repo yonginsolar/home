@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.59
+Version: v1.0.60
 Change: 2026-10-05 - Keep participation and winner calculations within the current round.
 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
-  <script src="/erp/workspace_resume.js?v=20261010-9"></script>
+  <script src="/erp/workspace_resume.js?v=20261011-1"></script>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.59 | admin.html');</script>
+    <script>console.log('[Version] v1.0.60 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -747,6 +747,23 @@ function safeUrl(value) {
     let autoSchedulePollingEnabled = false;
     let autoScheduleInFlight = false;
     let liveStatsPromise = null;
+    let voterStatsPending = null;
+    let voterStatsRevision = 0;
+    let voterDetailRevision = 0;
+    const voterDetailPending = new Map();
+    function voterScreenVisible() {
+        try { return !window.frameElement?.hidden; } catch (_) { return true; }
+    }
+    function invalidateVoterReads() {
+        voterStatsRevision++;
+        voterDetailRevision++;
+        voterStatsPending = null;
+        voterDetailPending.clear();
+    }
+    window.addEventListener('pagehide', invalidateVoterReads);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) invalidateVoterReads();
+    });
     const ELECTION_NOTICE_SEAL_FALLBACK_URL = '';
     const ELECTION_NOTICE_DOC_PREFIX = '공고 제';
     const ELECTION_NOTICE_CATEGORY = '선거공고';
@@ -926,6 +943,7 @@ function safeUrl(value) {
     };
 
     window.showModal = (title, contentHtml, onConfirm = null, showCancel = true) => {
+        voterDetailRevision++;
         const modal = document.getElementById('common-modal');
 
         document.getElementById('modal-title').innerText = title;
@@ -1012,6 +1030,7 @@ function safeUrl(value) {
     };
 
     window.closeModal = () => {
+        voterDetailRevision++;
         closeModalOverlay(document.getElementById('common-modal'));
     };
 
@@ -2602,10 +2621,15 @@ window.openElectionGateway = async () => {
     }
 
 // [수정됨] 유권자 현황 로드 (투표 여부 확인 및 통계 포함)
-window.loadVoterStats = async () => {
+window.loadVoterStats = () => {
+    const electionId = currentElectionId, coopId = currentCoopId;
+    if (!electionId || !coopId || !voterScreenVisible()) return Promise.resolve();
+    if (voterStatsPending?.electionId === electionId && voterStatsPending.coopId === coopId) return voterStatsPending.promise;
+    const revision = ++voterStatsRevision;
+    const active = () => revision === voterStatsRevision && electionId === currentElectionId && coopId === currentCoopId && voterScreenVisible();
     const container = document.getElementById('voter-stats-list');
     container.innerHTML = '<p style="font-size:0.8rem;">데이터 분석 중...</p>';
-    
+    const promise = (async () => {
         try {
             // 1. 유권자 목록 & 투표 기록 병렬 조회 (Promise.all)
             const [voterRes, logRes] = await Promise.all([
@@ -2614,12 +2638,13 @@ window.loadVoterStats = async () => {
                         .from('election_voters')
                         .select('member_no, district_id, member_uuid')
                 )
-                    .eq('election_id', currentElectionId),
-                service.getParticipation(currentElectionId).then(data => ({ data }))
+                    .eq('election_id', electionId),
+                service.getParticipation(electionId).then(data => ({ data }))
             ]);
 
         if(voterRes.error) throw voterRes.error;
         if(logRes.error) throw logRes.error;
+        if (!active()) return;
 
         const voters = voterRes.data;
         const logs = logRes.data;
@@ -2632,14 +2657,7 @@ window.loadVoterStats = async () => {
         // 2. 투표자 UUID Set 생성 (빠른 검색용)
         const votedSet = new Set(logs.filter(l => l.has_voted).map(l => `${l.district_id}:${l.member_uuid}`));
 
-        // 3. 조합원 상세 정보 가져오기 (이름, 전화번호)
-        const memberNos = voters.map(v => v.member_no);
-        const members = await service.getElectionMembers(currentElectionId, { memberNos });
-
-        const memberMap = {};
-        if(members) members.forEach(m => memberMap[m.member_id] = m);
-
-        // 4. 데이터 그룹화 및 통계 계산
+        // Summary cards need participation metadata only, not names or phone numbers.
         const grouped = {};
         const districtMetaMap = {};
         districtList.forEach((d) => {
@@ -2651,7 +2669,6 @@ window.loadVoterStats = async () => {
             const districtMeta = districtMetaMap[String(v.district_id)];
             const districtTypeLabel = districtMeta ? (districtMeta.is_common ? '비례(찬반)' : '지역구') : '미지정';
             const dName = `${baseDistrictName} (${districtTypeLabel})`;
-            const memInfo = memberMap[v.member_no] || { name: '정보없음', phone: '-' };
             
             // [핵심] 투표 여부 판별
             const isVoted = votedSet.has(`${v.district_id}:${v.member_uuid}`);
@@ -2660,8 +2677,6 @@ window.loadVoterStats = async () => {
                 member_no: v.member_no,
                 district_id: v.district_id,
                 _view_district: dName,
-                _view_name: memInfo.name,
-                _view_phone: memInfo.phone,
                 is_voted: isVoted // 투표 여부 플래그 추가
             };
 
@@ -2680,7 +2695,7 @@ window.loadVoterStats = async () => {
             const div = document.createElement('div');
             div.className = 'voter-group-item';
             // 클릭 시 리스트 모달 열기
-            div.onclick = () => showVoterDetail(dName, stat.list);
+            div.onclick = () => openVoterGroup(dName, stat.list, electionId, coopId);
             
             // 미투표는 별도 줄에 표시
             const hasNotVoted = stat.notVoted > 0;
@@ -2699,10 +2714,61 @@ window.loadVoterStats = async () => {
         }
 
     } catch(e) {
-        console.error("현황 로드 실패:", e);
-        container.innerHTML = `<p style="color:red; font-size:0.8rem;">로드 실패: ${e.message}</p>`;
+        if (!active()) return;
+        container.innerHTML = '<p style="color:red; font-size:0.8rem;">현황을 불러오지 못했습니다. 새로고침 버튼으로 다시 시도해 주세요.</p>';
     }
+    })().finally(() => { if (voterStatsPending?.promise === promise) voterStatsPending = null; });
+    voterStatsPending = {electionId, coopId, promise};
+    return promise;
 };
+
+async function openVoterGroup(dName, list, electionId, coopId) {
+    if (electionId !== currentElectionId || coopId !== currentCoopId || !voterScreenVisible()) return;
+    window.showModal(`${dName} 관리`, '<p data-voter-loading>명부를 불러오는 중입니다.</p>', null, true);
+    const revision = voterDetailRevision;
+    const active = () => revision === voterDetailRevision && electionId === currentElectionId && coopId === currentCoopId && voterScreenVisible()
+        && !!document.querySelector('#modal-body [data-voter-loading]');
+    const memberNos = [...new Set(list.map(v => String(v.member_no)))];
+    try {
+        const before = await supabase.auth.getUser();
+        if (before.error || !before.data?.user?.id) throw new Error('ACCESS_DENIED');
+        if (!active()) return;
+        const key = JSON.stringify([electionId, coopId, before.data.user.id, memberNos]);
+        let pending = voterDetailPending.get(key);
+        if (!pending) {
+            // Existing RPC retains server-owned current-coop and election-admin checks.
+            // Bound URL size without parallelizing a whole membership list.
+            pending = (async () => {
+                const rows = [];
+                for (let i = 0; i < memberNos.length; i += 100) {
+                    if (electionId !== currentElectionId || coopId !== currentCoopId || !voterScreenVisible()
+                        || !document.querySelector('#modal-body [data-voter-loading]')) throw new Error('VIEW_CHANGED');
+                    rows.push(...await service.getElectionMembers(electionId, {memberNos:memberNos.slice(i, i + 100)}));
+                }
+                return rows;
+            })();
+            voterDetailPending.set(key, pending);
+            pending.finally(() => { if (voterDetailPending.get(key) === pending) voterDetailPending.delete(key); }).catch(() => {});
+        }
+        const members = await pending;
+        if (!active()) return;
+        const [after, runtimeRes, authority] = await Promise.all([
+            supabase.auth.getUser(), supabase.rpc('get_my_erp_runtime'), supabase.rpc('is_election_admin')
+        ]);
+        if (!active()) return;
+        const runtime = Array.isArray(runtimeRes.data) ? runtimeRes.data[0] : runtimeRes.data;
+        if (after.error || after.data?.user?.id !== before.data.user.id || runtimeRes.error || authority.error || authority.data !== true
+            || runtime?.coop_id !== coopId || runtime.is_active === false || runtime.modules?.member_admin === false
+            || !ErpRuntimeGuard.isModuleEnabled(runtime, 'vote') || !ErpRuntimeGuard.isModuleAssigned(runtime, 'vote')) throw new Error('ACCESS_DENIED');
+        const byNo = new Map(members.map(m => [String(m.member_id), m]));
+        showVoterDetail(dName, list.map(v => ({...v, _view_name:byNo.get(String(v.member_no))?.name || '정보없음', _view_phone:byNo.get(String(v.member_no))?.phone || '-'})));
+    } catch (_) {
+        if (!active()) return;
+        const body = document.getElementById('modal-body');
+        body.innerHTML = '<p>명부를 불러오지 못했습니다. 연결 상태와 접근 권한을 확인해 주세요.</p><button type="button" class="btn btn-outline" data-voter-retry>다시 시도</button>';
+        body.querySelector('[data-voter-retry]').onclick = () => openVoterGroup(dName, list, electionId, coopId);
+    }
+}
     window.closeAddVoterModal = () => {
         closeModalOverlay(document.getElementById('add-voter-modal'));
     };
@@ -2760,18 +2826,18 @@ window.showVoterDetail = (dName, list) => {
 
         html += `
             <tr class="voter-row" 
-                data-search="${searchKey}" 
+                data-search="${escapeHtml(searchKey)}"
                 data-voted="${v.is_voted}" 
                 style="cursor:pointer; ${rowBg}" 
                 onclick="openVoterInfo('${safeMemberNoJs}', '${safeDistrictIdJs}')">
                 
-                <td>${v.member_no}</td>
+                <td>${escapeHtml(v.member_no)}</td>
                 <td>
-                    <span style="font-weight:bold; color:var(--primary-blue);">${v._view_name}</span>
+                    <span style="font-weight:bold; color:var(--primary-blue);">${escapeHtml(v._view_name)}</span>
                     ${statusBadge}
                 </td>
                 <td>${safeDistrict}</td>
-                <td>${v._view_phone || '-'}</td>
+                <td>${escapeHtml(v._view_phone || '-')}</td>
                 <td><button class="btn btn-sm btn-outline" style="padding:2px 6px; font-size:0.7rem;">관리</button></td>
             </tr>`;
     });

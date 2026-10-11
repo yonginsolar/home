@@ -1,4 +1,4 @@
-/* Version: 1.1.3 | 2026-10-10 */
+/* Version: 1.1.4 | 2026-10-11 PDF tools on demand */
 'use strict';
 (() => {
  const db=window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
@@ -56,7 +56,51 @@
  function read(){const form={};$('workspace').querySelectorAll('[data-field]').forEach(f=>{if(f.dataset.field==='request_date')return;form[f.dataset.field]=f.type==='checkbox'?f.checked:(f.type==='number'||f.hasAttribute('data-number-group'))?Number(ERPNumberInput.raw(f.value)||0):f.value.trim();});for(const key of ['periods','wages']){if(!$(key+'Rows'))continue;form[key]=Array.from($(key+'Rows').children).map(tr=>Object.fromEntries(Array.from(tr.querySelectorAll('[data-cell]')).map(f=>[f.dataset.cell,(f.type==='number'||f.hasAttribute('data-number-group'))?Number(ERPNumberInput.raw(f.value)||0):f.value])));}return form;}
  function totals(){if(!$('totals'))return;const d=read(),sum=(arr,k)=>arr.reduce((n,r)=>n+Number(r[k]||0),0);const days=sum(d.wages,'days'),money=sum(d.wages,'basic')+sum(d.wages,'other')+Number(d.bonus||0)+Number(d.leave_pay||0);$('totals').textContent=`보수지급 기초일수 합계 ${sum(d.periods,'days')}일 · 임금 계산기간 ${days}일 · 반영 임금 ${money.toLocaleString('ko-KR')}원${days?' · 계산상 1일 평균 '+Math.round(money/days).toLocaleString('ko-KR')+'원':''}`;}
  async function save(){const p=state.current;const r=await rpc('save',{p_id:p.case.id,p_revision:p.case.revision,p_data:{form:read(),request_date:$('f_request_date')?.value||null}});state.current=r;state.baseline=snapshot();await list();message('초안을 저장했습니다. PDF 출력 전에 신고 내용을 확인해 주세요.');}
- async function exportPdf(){if(!$('confirmForm').checked){message('신고 내용을 확인한 뒤 확인란을 선택해 주세요.',true);return;}const test=$('testOutput').checked,entered=$('rrn').value.replace(/\D/g,'');let p;try{if(state.current.case.status==='draft')await save();p=await rpc('pdf',{p_id:state.current.case.id,p_revision:state.current.case.revision,p_data:{test}});if(!p.rrn&&entered)p.rrn=entered;const bytes=await window.HrInsurancePdf.create(p);if(state.pdfUrl)URL.revokeObjectURL(state.pdfUrl);state.pdfUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));$('pdfPreview').innerHTML='<h2>공식 서식 출력본</h2><p class="hint">PDF 인쇄 시 실제 크기(100%)로 인쇄하고 원본 방향을 유지해 주세요. 서명란은 서명하지 않은 상태로 남아 있습니다.</p><iframe id="preview" title="공식 신고서 PDF 미리보기"></iframe>';$('preview').src=state.pdfUrl;const a=document.createElement('a');a.href=state.pdfUrl;a.download=`${test?'시험용_':''}${names[p.case.kind]}_${p.employee.name}_${p.case.event_date}.pdf`;a.click();message('PDF를 만들었습니다. 기관 제출은 별도로 진행한 뒤 제출 확인을 기록해 주세요.');}catch(e){message(e.message||'PDF 생성에 실패했습니다.',true);}finally{if(p)p.rrn=null;$('rrn').value='';}}
+ let pdfToolsPending=null;
+ function pdfScreenVisible(){try{return !window.frameElement?.hidden;}catch(_){return true;}}
+ function loadPdfScript(path,integrity,ready){
+  if(ready())return Promise.resolve();
+  return new Promise((resolve,reject)=>{
+   const script=document.createElement('script');script.src=new URL(path,location.href).href;
+   if(integrity){script.integrity=integrity;script.crossOrigin='anonymous';}
+   const finish=ok=>{clearTimeout(timer);script.onload=script.onerror=null;if(ok&&ready())resolve();else{script.remove();reject(new Error('PDF 도구를 불러오지 못했습니다. 다시 시도해 주세요.'));}};
+   const timer=setTimeout(()=>finish(false),20000);script.onload=()=>finish(true);script.onerror=()=>finish(false);document.head.append(script);
+  });
+ }
+ function loadPdfTools(){
+  if(!pdfToolsPending)pdfToolsPending=(async()=>{
+   await loadPdfScript('assets/vendor/pdf-lib-1.17.1.min.js','sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI',()=>!!window.PDFLib?.PDFDocument);
+   await loadPdfScript('assets/vendor/pdf-fontkit-1.1.1.min.js','sha384-2p6U+1mmqF10USehFeRiyG2ESG9FwIqN+jxULn5w9jjQIihSn9Pt13dVCn/Hawjn',()=>!!window.fontkit);
+   await loadPdfScript('hr_insurance_pdf.js?v=1.0.1',null,()=>window.HrInsurancePdf?.version==='1.0.1');
+  })().finally(()=>{pdfToolsPending=null;});
+  return pdfToolsPending;
+ }
+ async function pdfContext(){
+  const [auth,runtimeRes]=await Promise.all([db.auth.getUser(),db.rpc('get_my_erp_runtime')]);
+  const runtime=Array.isArray(runtimeRes.data)?runtimeRes.data[0]:runtimeRes.data;
+  if(auth.error||!auth.data?.user?.id||runtimeRes.error||!runtime?.coop_id||runtime.is_active===false||!ErpRuntimeGuard.isModuleEnabled(runtime,'hr')||!ErpRuntimeGuard.isModuleAssigned(runtime,'hr'))throw new Error('출력 권한을 확인하지 못했습니다. 다시 로그인한 뒤 확인해 주세요.');
+  return {userId:auth.data.user.id,coopId:runtime.coop_id};
+ }
+ async function exportPdf(){
+  if(!$('confirmForm').checked){message('신고 내용을 확인한 뒤 확인란을 선택해 주세요.',true);return;}
+  const test=$('testOutput').checked,entered=$('rrn').value.replace(/\D/g,''),caseId=state.current.case.id;let p;
+  try{
+   const before=await pdfContext();await loadPdfTools();
+   if(!pdfScreenVisible()||state.current?.case.id!==caseId)return;
+   const prepared=await pdfContext();
+   if(before.userId!==prepared.userId||before.coopId!==prepared.coopId)throw new Error('로그인 또는 조합이 변경되었습니다. 다시 확인해 주세요.');
+   if(state.current.case.status==='draft')await save();
+   p=await rpc('pdf',{p_id:state.current.case.id,p_revision:state.current.case.revision,p_data:{test}});
+   if(!pdfScreenVisible()||state.current?.case.id!==caseId)return;
+   if(!p.rrn&&entered)p.rrn=entered;
+   const bytes=await window.HrInsurancePdf.create(p),after=await pdfContext();
+   if(!pdfScreenVisible()||state.current?.case.id!==caseId)return;
+   if(before.userId!==after.userId||before.coopId!==after.coopId)throw new Error('로그인 또는 조합이 변경되었습니다. 다시 확인해 주세요.');
+   if(state.pdfUrl)URL.revokeObjectURL(state.pdfUrl);state.pdfUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+   $('pdfPreview').innerHTML='<h2>공식 서식 출력본</h2><p class="hint">PDF 인쇄 시 실제 크기(100%)로 인쇄하고 원본 방향을 유지해 주세요. 서명란은 서명하지 않은 상태로 남아 있습니다.</p><iframe id="preview" title="공식 신고서 PDF 미리보기"></iframe>';$('preview').src=state.pdfUrl;
+   const a=document.createElement('a');a.href=state.pdfUrl;a.download=`${test?'시험용_':''}${names[p.case.kind]}_${p.employee.name}_${p.case.event_date}.pdf`;a.click();message('PDF를 만들었습니다. 기관 제출은 별도로 진행한 뒤 제출 확인을 기록해 주세요.');
+  }catch(e){if(pdfScreenVisible())message(e.message||'PDF 생성에 실패했습니다.',true);}finally{if(p)p.rrn=null;if($('rrn'))$('rrn').value='';}
+ }
  let statusTarget=null;
  function setStatus(status){if(state.busy||$('statusDialog').open)return;if(status==='submitted'&&!$('confirmForm').checked){message('신고 내용을 먼저 확인해 주세요.',true);return;}if(state.current.case.kind==='unpaid_confirmation'&&(!read().representative||!read().unpaid_confirmation)){message('대표자와 무보수 확인서 확인란을 선택해 주세요.',true);return;}statusTarget={status,id:state.current.case.id,revision:state.current.case.revision};$('statusTitle').textContent=status==='submitted'?'기관 제출 확인':'처리 완료 확인';$('statusDateLabel').textContent=status==='submitted'?'실제 제출일':'기관 처리 완료일';$('statusDate').value=today();$('statusDate').max=today();$('statusDate').min=status==='completed'?state.current.case.submitted_date||'':'';$('statusHelp').textContent=status==='submitted'?'제출일을 확인해 기록합니다. 기록 후에는 초안을 수정할 수 없습니다.':'기관에서 처리가 완료된 날짜를 확인해 기록합니다.';$('statusError').textContent='';renderCalendar(today().slice(0,7));$('statusCalendarPanel').classList.remove('hidden');$('statusDialog').showModal();$('statusDate').focus();}
  async function confirmStatus(){if(state.busy)return;const target=statusTarget,date=$('statusDate').value;if(!target||state.current?.case.id!==target.id||state.current.case.revision!==target.revision){$('statusError').textContent='문서가 변경되었습니다. 창을 닫고 다시 확인해 주세요.';return;}if(!validStatusDate(date,target.status,state.current.case.submitted_date)){ $('statusError').textContent='달력에서 올바른 날짜를 선택해 주세요. 미래 날짜나 제출일 이전의 처리 완료일은 기록할 수 없습니다.';return;}const button=$('statusConfirm');button.disabled=true;try{await run(async()=>{try{if(state.current.case.status==='draft')await save();const p=await rpc('status',{p_id:target.id,p_revision:state.current.case.revision,p_data:{status:target.status,date}});render(p);$('statusFilter').value='all';await list();$('statusDialog').close();statusTarget=null;message(target.status==='submitted'?'기관 제출을 기록했습니다.':'처리 완료를 기록했습니다.');}catch(e){if(state.current?.case.id===target.id)statusTarget={...target,revision:state.current.case.revision};$('statusError').textContent=errorText(e);throw e;}});}finally{button.disabled=false;}}
