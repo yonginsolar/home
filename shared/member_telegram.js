@@ -1,4 +1,4 @@
-/* Member Telegram connection v1.0.1 — optional, own authenticated profile only. */
+/* Member Telegram connection v1.0.2 — shared only for the same coop/own Auth account. */
 (() => {
   'use strict';
   let client=null, context=null, revision=0, pending=false;
@@ -39,7 +39,7 @@
         return;
       }
       if (action==='disconnect') {
-        if (!window.confirm('텔레그램 알림 연결을 해제할까요?')) return;
+        if (!window.confirm('이 조합의 본인 계정에서 사용하는 텔레그램 알림 연결을 해제할까요? ERP 연결도 함께 해제됩니다.')) return;
         const {error}=await client.rpc('member_disconnect_my_telegram_link');
         if (!isCurrent()) return;
         if (error) throw error;
@@ -48,7 +48,9 @@
       const {data,error}=await client.rpc('member_get_telegram_link_status');
       if (!isCurrent()) return;
       if (error) throw error;
-      byId('memberTelegramState').textContent=data?.linked?'연결됨':data?.enabled?'미연결':'현재 텔레그램 연결을 사용할 수 없습니다.';
+      byId('memberTelegramState').textContent=data?.connection_conflict
+        ?'ERP와 조합원 화면의 연결이 다릅니다. 연결을 해제한 뒤 본인 텔레그램을 다시 연결해 주세요.'
+        :data?.linked?(data?.shared_connection?'연결됨 · 같은 조합의 본인 ERP 계정에서도 이 연결을 사용합니다.':'연결됨'):data?.enabled?'미연결':'현재 텔레그램 연결을 사용할 수 없습니다.';
       byId('memberTelegramConnect').hidden=data?.enabled!==true || data?.linked===true;
       byId('memberTelegramDisconnect').hidden=data?.linked!==true;
       if (data?.linked) clearLink();

@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.109
-Change: 2026-10-12 - Restore cancelled edits and recover interrupted detail reads without replacing drafts.
+Version: v1.0.110
+Change: 2026-10-12 - Recover calendar/status reads without blocking lists or replacing drafts.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.109 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.110 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -943,6 +943,8 @@ let companySettingsSaveInFlight = false;
 let hrSettingsAuthorized = false, hrSettingsReadyOwner = '', hrSettingsOpenPromise = null, hrSettingsResumeReadOwner = '';
 const hrSettingsAuxLoaded = new Set();
 const hrSettingsAuxPending = new Map();
+const hrCalendarResumeReads = new Set();
+let hrCalendarResumePromise = null;
 let hrSettingsReadRetryRequired = false;
 let hrSettingsReadRetryPromise = null;
 let companySealPreviewObjectUrl = '';
@@ -3398,8 +3400,7 @@ async function loadTelegramApprovalLinkStatusMap({isReadCurrent = isHrSettingsCo
     if (!isReadCurrent(owner)) return false;
     if (employeeTelegramRead.pending && employeeTelegramRead.owner === owner) {
         if (employeeTelegramRead.isCurrent?.() !== false) return employeeTelegramRead.pending;
-        await employeeTelegramRead.pending;
-        if (!isReadCurrent(owner)) return false;
+        // An invalidated request must not hold the new list/status hostage.
     }
     const revision = ++employeeTelegramRead.revision;
     const isCurrent = () => revision === employeeTelegramRead.revision && isReadCurrent(owner);
@@ -3446,7 +3447,7 @@ function refreshEmployeeTelegramStatusUi() {
 }
 async function retryEmployeeTelegramStatus() {
     const owner = getHrSettingsOwner();
-    if (!isHrSettingsContextCurrent(owner) || employeeTelegramRead.pending) return;
+    if (!isHrSettingsContextCurrent(owner) || employeeTelegramRead.pending && employeeTelegramRead.isCurrent?.() !== false) return;
     try {
         await verifyEmployeeDetailTabAccess(owner);
         if (isHrSettingsContextCurrent(owner)) await loadTelegramApprovalLinkStatusMap();
@@ -4266,7 +4267,9 @@ async function loadList() {
         throw error || new Error('EMPLOYEE_LIST_UNAVAILABLE');
     }
     if (owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
-    await loadTelegramApprovalLinkStatusMap({isReadCurrent});
+    const isTelegramReadCurrent = () => listRevision === employeeListReadRevision && owner === getHrSettingsOwner()
+        && (isHrSettingsContextCurrent(owner) || !!readContext && window.frameElement?.id === 'erpWorkspaceFrame');
+    void loadTelegramApprovalLinkStatusMap({isReadCurrent:isTelegramReadCurrent});
     if (!isCurrentList()) return;
     employeeCache = Array.isArray(list) ? list.slice().sort(compareEmployeesByDisplayNo) : [];
     tbody.innerHTML = "";
@@ -4737,7 +4740,9 @@ function initAnnualSettings() {
             const annual = ['#setTax','#setAdvanced'].includes(event.target.getAttribute('href'));
             document.getElementById('settingTargetYearRow').hidden = !annual;
             document.getElementById('companySettingsFooter').hidden = annual;
-            loadHrSettingsTab(event.target.getAttribute('href')).catch(() => {});
+            const href = event.target.getAttribute('href');
+            const calendarInterrupted = href === '#setCalendar' && hrCalendarResumeReads.has(getHrSettingsOwner() + '|calendar');
+            (calendarInterrupted ? resumeHrCalendarRead(href) : loadHrSettingsTab(href)).catch(() => {});
         });
     }
 }
@@ -4816,7 +4821,9 @@ function loadHrSettingsTab(href, {isCurrent = null} = {}) {
     const kind = ['#setTax','#setAdvanced'].includes(href) ? 'annual' : href === '#setCalendar' ? 'calendar' : '';
     const owner = getHrSettingsOwner();
     if (!kind || !owner || hrSettingsReadyOwner !== owner || hrSettingsReadRetryRequired) return Promise.resolve();
-    const current = isCurrent || (() => isHrSettingsContextCurrent(owner));
+    let invalidated = false;
+    const readCurrent = isCurrent || (() => isHrSettingsContextCurrent(owner));
+    const current = () => !invalidated && readCurrent();
     if (!current()) return Promise.resolve();
     const key = owner + '|' + kind;
     if (hrSettingsAuxLoaded.has(key)) return Promise.resolve();
@@ -4855,15 +4862,67 @@ function loadHrSettingsTab(href, {isCurrent = null} = {}) {
             }
         } finally {
             // A failed calendar read must not enable blank values for editing/saving.
-            if (hrSettingsAuxLoaded.has(key)) {
+            if (current() && hrSettingsAuxLoaded.has(key)) {
                 controls.forEach(({element,disabled})=>{element.disabled=disabled;delete element.dataset.hrReadDisabled;});
                 if (kind === 'calendar') syncCalendarIcsActionState();
             }
-            hrSettingsAuxPending.delete(key);
+            if (hrSettingsAuxPending.get(key) === pending) hrSettingsAuxPending.delete(key);
         }
     })();
+    if (kind === 'calendar') pending.interrupt = () => {
+        invalidated = true;
+        hrCalendarResumeReads.add(key);
+        if (hrSettingsAuxPending.get(key) === pending) hrSettingsAuxPending.delete(key);
+        setHrCalendarReadInterrupted(href);
+    };
     hrSettingsAuxPending.set(key,pending);
     return pending;
+}
+function setHrCalendarReadInterrupted(href = '#setCalendar') {
+    const status = document.getElementById('hrSettingsTabStatus-calendar');
+    if (!status) return;
+    status.hidden = false;
+    status.textContent = '캘린더 설정을 다시 확인해 주세요. ';
+    const retry = document.createElement('button');
+    retry.type='button';retry.className='btn btn-outline-primary btn-sm';retry.textContent='다시 불러오기';
+    retry.onclick=() => resumeHrCalendarRead(href);
+    status.append(retry);
+}
+function resumeHrCalendarRead(href = document.querySelector('#settingTab .nav-link.active')?.getAttribute('href')) {
+    const owner = getHrSettingsOwner(), key = owner + '|calendar';
+    if (href !== '#setCalendar' || !hrCalendarResumeReads.has(key) || !isHrSettingsContextCurrent(owner)
+        || companySettingsSaveInFlight || hrSettingsReadRetryRequired) return Promise.resolve();
+    if (hrCalendarResumePromise?.owner === owner) return hrCalendarResumePromise.pending;
+    const entry = {owner,pending:null};
+    entry.pending = (async () => {
+        try {
+            await verifyEmployeeDetailTabAccess(owner);
+            if (!isHrSettingsContextCurrent(owner) || companySettingsSaveInFlight
+                || document.querySelector('#settingTab .nav-link.active')?.getAttribute('href') !== '#setCalendar') return;
+            await loadHrSettingsTab('#setCalendar');
+            if (hrSettingsAuxLoaded.has(key)) hrCalendarResumeReads.delete(key);
+        } catch (_) {
+            if (isHrSettingsContextCurrent(owner)) setHrCalendarReadInterrupted();
+        } finally {
+            if (hrCalendarResumePromise === entry) hrCalendarResumePromise = null;
+        }
+    })();
+    hrCalendarResumePromise = entry;
+    return entry.pending;
+}
+function bindHrCalendarResume() {
+    const frame = window.frameElement;
+    if (!frame) return;
+    let hidden = frame.hidden;
+    new MutationObserver(() => {
+        if (frame.hidden === hidden) return;
+        hidden = frame.hidden;
+        if (hidden) {
+            for (const [key,pending] of hrSettingsAuxPending) {
+                if (key === getHrSettingsOwner() + '|calendar') pending.interrupt?.();
+            }
+        } else void resumeHrCalendarRead();
+    }).observe(frame,{attributes:true,attributeFilter:['hidden']});
 }
 function openSettings() {
     const owner = getHrSettingsOwner();
@@ -5668,6 +5727,7 @@ document.getElementById('detailModal').addEventListener('shown.bs.modal', () => 
     void ensureEmployeeDetailTab(document.querySelector('#empTab .nav-link.active')?.getAttribute('href')?.slice(1));
 });
 bindEmployeeInfoResume();
+bindHrCalendarResume();
 function cancelEmployeeInfoEdit() {
     if (isEmployeeDetailSaving() || !isHrSettingsContextCurrent(getHrSettingsOwner())) return;
     const ids = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
