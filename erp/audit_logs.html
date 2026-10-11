@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.1.8
+Version: v1.1.9
 Change: 2026-04-22 - Align audit log screen with PC-first ERP workspace.
 -->
 <html lang="ko">
@@ -9,7 +9,7 @@ Change: 2026-04-22 - Align audit log screen with PC-first ERP workspace.
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.1.8 | audit_logs.html');</script>
+  <script>console.log('[Version] v1.1.9 | audit_logs.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -156,6 +156,32 @@ let permissionSet = new Set();
 let currentPage = 0;
 let pageSize = 50;
 let cachedLogs = [];
+let auditReadOwner = { userId:null, coopId:null, permissions:'', revision:0 };
+let auditReadSequence = 0;
+let auditReadPending = null;
+let auditAppliedFilter = '';
+
+function auditFilterValues() {
+  return ['filterSource','filterStart','filterEnd','filterAction','filterActor']
+    .map(id => document.getElementById(id).value);
+}
+
+function auditReadCurrent(owner, sequence, filterKey, allowHidden = false) {
+  return owner.userId === auditReadOwner.userId && owner.coopId === auditReadOwner.coopId
+    && owner.revision === auditReadOwner.revision && sequence === auditReadSequence
+    && filterKey === JSON.stringify(auditFilterValues()) && !document.hidden && (allowHidden || !window.frameElement?.hidden);
+}
+
+async function auditReadAuthorized(owner) {
+  const [auth, result] = await Promise.all([_supabase.auth.getUser(), _supabase.rpc('get_my_erp_runtime')]);
+  if (auth.error || result.error) throw auth.error || result.error;
+  const runtime = result.data;
+  return auth.data?.user?.id === owner.userId && runtime?.coop_id === owner.coopId
+    && runtime.is_active !== false && Array.isArray(runtime.effective_permissions)
+    && JSON.stringify(runtime.effective_permissions.slice().sort()) === owner.permissions
+    && window.ErpRuntimeGuard.isModuleEnabled(runtime,'audit')
+    && window.ErpRuntimeGuard.isModuleAssigned(runtime,'audit');
+}
 function hasAuditViewerRoleFallback() {
   const role = String(myInfo?.role || '').toLowerCase();
   return role === 'admin' || role === 'admin_all';
@@ -199,6 +225,18 @@ window.onload = async function() {
     redirectUrl: 'index.html'
   });
   if (!auditRuntimeGate.ok) return;
+  auditReadOwner = { userId:auditUserGate.authUser.id, coopId:auditRuntimeGate.runtime.coop_id,
+    permissions:JSON.stringify(auditRuntimeGate.runtime.effective_permissions.slice().sort()), revision:auditReadOwner.revision + 1 };
+  _supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== auditReadOwner.userId)) {
+      auditReadOwner = { userId:null, coopId:null, permissions:'', revision:auditReadOwner.revision + 1 };
+      auditReadSequence++;
+      cachedLogs = [];
+      currentPage = 0;
+      document.getElementById('logBody').innerHTML = '';
+      document.getElementById('btnMore').classList.add('hidden');
+    }
+  });
   document.getElementById('filterSource').addEventListener('change', function() {
     updateSourceHint();
     loadLogs(true);
@@ -207,7 +245,7 @@ window.onload = async function() {
   await loadLogs(true);
   window.ErpWorkspaceResume.register({modules:['audit'],refresh:async()=>{
     // Preserve accumulated pages and their scroll position; only requery the first page.
-    if(currentPage<=1)await loadLogs(true);
+    if(currentPage<=1)await loadLogs(true,{allowHidden:true});
   }});
 }; // End of window.onload
 
@@ -233,13 +271,33 @@ function resetFilters() {
   updateSourceHint();
 } // End of resetFilters
 
-async function loadLogs(reset) {
-  if (reset) {
-    currentPage = 0;
-    cachedLogs = [];
-    document.getElementById('logBody').innerHTML = '';
-  }
+function loadLogs(reset, options = {}) {
+  const allowHidden = options.allowHidden === true;
+  if (!auditReadOwner.userId || document.hidden || (!allowHidden && window.frameElement?.hidden)) return Promise.resolve();
+  const filterKey = JSON.stringify(auditFilterValues());
+  reset = Boolean(reset || filterKey !== auditAppliedFilter);
+  const offset = reset ? 0 : currentPage * pageSize;
+  const key = JSON.stringify([auditReadOwner.revision, filterKey, offset, allowHidden]);
+  if (auditReadPending?.key === key) return auditReadPending.promise;
+  const sequence = ++auditReadSequence;
+  const owner = { ...auditReadOwner };
+  const request = loadAuditPage(reset, offset, owner, sequence, filterKey, allowHidden);
+  auditReadPending = {key, promise:request};
+  request.finally(() => {
+    if (auditReadPending?.promise === request) {
+      auditReadPending = null;
+      document.getElementById('btnMore').disabled = false;
+      document.getElementById('logBody').removeAttribute('aria-busy');
+    }
+  }).catch(() => {});
+  return request;
+}
 
+async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHidden) {
+  const isCurrent = () => auditReadCurrent(owner, sequence, filterKey, allowHidden);
+  document.getElementById('btnMore').disabled = true;
+  document.getElementById('logBody').setAttribute('aria-busy','true');
+  try {
   const source = String(document.getElementById('filterSource').value || 'all').toLowerCase();
   const start = document.getElementById('filterStart').value;
   const end = document.getElementById('filterEnd').value;
@@ -248,7 +306,6 @@ async function loadLogs(reset) {
 
   const safeAction = sanitizeOrKeyword(action);
   const safeActor = sanitizeOrKeyword(actor);
-  const offset = currentPage * pageSize;
   const params = {
     p_start: start ? `${start}T00:00:00+09:00` : null,
     p_end: end ? `${end}T23:59:59+09:00` : null,
@@ -259,21 +316,24 @@ async function loadLogs(reset) {
     p_limit: pageSize
   };
   const { data, error } = await _supabase.rpc('erp_get_audit_logs_unified', params);
+  if (!isCurrent()) return;
   let list = Array.isArray(data) ? data : [];
   if (error) {
+    if (error.code === '42501') throw error;
     const msg = String(error?.message || '');
     const missingRpc = error?.code === 'PGRST202' || msg.includes('erp_get_audit_logs_unified');
-    if (!missingRpc) return showAlert("로그를 불러오지 못했습니다.\n" + msg);
+    if (!missingRpc) throw error;
     if (source === 'admin') {
       return showAlert("통합 감사로그 RPC가 아직 적용되지 않았습니다.\nSQL 패치를 먼저 실행해주세요.");
     }
-    let legacyQuery = _supabase.from('erp_audit_logs').select('*').eq('coop_id', String(myInfo?.coop_id || '').trim()).order('created_at', { ascending: false });
+    if (!await auditReadAuthorized(owner) || !isCurrent()) return;
+    let legacyQuery = _supabase.from('erp_audit_logs').select('*').eq('coop_id', owner.coopId).order('created_at', { ascending: false });
     if (start) legacyQuery = legacyQuery.gte('created_at', `${start}T00:00:00`);
     if (end) legacyQuery = legacyQuery.lte('created_at', `${end}T23:59:59`);
     if (safeAction) legacyQuery = legacyQuery.ilike('action', `%${safeAction}%`);
     if (safeActor) legacyQuery = legacyQuery.or(`actor_name.ilike.%${safeActor}%,actor_emp_id.ilike.%${safeActor}%`);
     const { data: legacyRows, error: legacyError } = await legacyQuery.range(offset, offset + pageSize - 1);
-    if (legacyError) return showAlert("로그를 불러오지 못했습니다.\n" + (legacyError.message || ''));
+    if (legacyError) throw legacyError;
     list = (Array.isArray(legacyRows) ? legacyRows : []).map((r) => ({
       source: 'ERP',
       created_at: r.created_at || null,
@@ -285,11 +345,31 @@ async function loadLogs(reset) {
       ip_address: ''
     }));
   }
-  cachedLogs = cachedLogs.concat(list);
+  if (!isCurrent()) return;
+  if (!await auditReadAuthorized(owner)) {
+    if (isCurrent()) {
+      cachedLogs = [];
+      document.getElementById('logBody').innerHTML = '';
+      showAlert('현재 조합과 조회 권한을 다시 확인해 주세요.');
+    }
+    return;
+  }
+  if (!isCurrent()) return;
+  cachedLogs = reset ? list : cachedLogs.concat(list);
+  auditAppliedFilter = filterKey;
   renderLogs(list, reset);
-  currentPage += 1;
+  currentPage = offset / pageSize + 1;
 
   document.getElementById('btnMore').classList.toggle('hidden', list.length < pageSize);
+  } catch (error) {
+    if (!isCurrent()) return;
+    if (error?.code === '42501') {
+      cachedLogs = [];
+      document.getElementById('logBody').innerHTML = '';
+      document.getElementById('btnMore').classList.add('hidden');
+    }
+    showAlert('로그를 불러오지 못했습니다.\n' + (error?.message || '잠시 후 다시 시도해 주세요.'));
+  }
 }
 
 function renderLogs(list, reset) {

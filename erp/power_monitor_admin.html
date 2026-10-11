@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.2 | Change: 2026-09-29 - Manage private provider contacts and handover notes. -->
+<!-- Version: v1.3.3 | Change: 2026-10-11 - Refresh live values without resetting editable settings. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.2 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.3.3 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -473,6 +473,24 @@
     let editingVendorContactId = null;
     let editingVendorDashboardId = null;
     let isSavingVendorContact = false;
+    let monitorReadOwner = { userId:null, revision:0 };
+    let monitorReadSequence = 0;
+    let monitorEditRevision = 0;
+    let monitorReadPending = null;
+
+    function monitorReadCurrent(owner, sequence, scopeKey, editRevision, allowHidden = false) {
+      return owner.userId === monitorReadOwner.userId && owner.revision === monitorReadOwner.revision
+        && sequence === monitorReadSequence && editRevision === monitorEditRevision
+        && scopeKey === String(document.getElementById('scopeSelect').value || '')
+        && !document.hidden && (allowHidden || !window.frameElement?.hidden) && !isSavingVendorContact
+        && !document.querySelector('.modal.show,dialog[open]');
+    }
+
+    async function monitorReadAuthorized(owner) {
+      const [auth, result] = await Promise.all([_supabase.auth.getUser(), _supabase.rpc('platform_get_context')]);
+      if (auth.error || result.error) throw auth.error || result.error;
+      return auth.data?.user?.id === owner.userId && result.data?.is_platform_admin === true;
+    }
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -590,10 +608,8 @@
       }).join('');
     }
 
-    async function loadVendorContacts(dashboardId) {
-      vendorContacts = [];
-      vendorContactsError = '';
-      if (!dashboardId) return;
+    async function readVendorContacts(dashboardId) {
+      if (!dashboardId) return { rows:[], message:'' };
       try {
         const { data, error } = await _supabase
           .from('power_monitor_vendor_contacts')
@@ -602,12 +618,22 @@
           .is('deleted_at', null)
           .order('provider_key')
           .order('contact_name');
-        if (String(monitorData?.dashboard?.id || '') !== String(dashboardId)) return;
         if (error) throw error;
-        vendorContacts = Array.isArray(data) ? data : [];
+        return { rows:Array.isArray(data) ? data : [], message:'' };
       } catch (_) {
-        vendorContactsError = '담당자 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
+        return { rows:[], message:'담당자 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.' };
       }
+    }
+
+    async function loadVendorContacts(dashboardId) {
+      const owner = { ...monitorReadOwner };
+      const result = await readVendorContacts(dashboardId);
+      if (String(monitorData?.dashboard?.id || '') !== String(dashboardId)
+        || owner.revision !== monitorReadOwner.revision || window.frameElement?.hidden) return;
+      if (!await monitorReadAuthorized(owner) || owner.revision !== monitorReadOwner.revision
+        || String(monitorData?.dashboard?.id || '') !== String(dashboardId) || window.frameElement?.hidden) return;
+      vendorContacts = result.rows;
+      vendorContactsError = result.message;
     }
 
     function renderVendorContacts() {
@@ -846,11 +872,11 @@
           <td>${photo}</td>
           <td><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(location)} · ${escapeHtml(formatPower(capacity))}</div></td>
           <td><span class="state-badge">${escapeHtml(plant.provider)}</span></td>
-          <td>${stateBadge(plant)}</td>
+          <td data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="state">${stateBadge(plant)}</td>
           <td><div class="form-check form-switch m-0"><input class="form-check-input plant-completion-checkbox" type="checkbox" role="switch" data-monitor-id="${escapeHtml(plant.id)}" aria-label="${escapeHtml(plant.short_name || name)} 완공 공개" ${plant.is_completed === true ? 'checked' : ''}></div></td>
-          <td class="live-number">${escapeHtml(formatPower(plant.current_kw))}</td>
-          <td class="live-number">${escapeHtml(formatEnergy(plant.today_kwh))}</td>
-          <td class="live-number">${escapeHtml(formatEnergy(plant.lifetime_kwh))}</td>
+          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="current_kw">${escapeHtml(formatPower(plant.current_kw))}</td>
+          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="today_kwh">${escapeHtml(formatEnergy(plant.today_kwh))}</td>
+          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="lifetime_kwh">${escapeHtml(formatEnergy(plant.lifetime_kwh))}</td>
           <td style="min-width:220px"><select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select></td>
           <td><button type="button" class="btn btn-outline-primary btn-sm plant-info-editor" data-monitor-id="${escapeHtml(plant.id)}" data-site-id="${escapeHtml(plant.site_power_plant_id || '')}" ${editorReady ? '' : 'disabled'}>${editorReady ? editorLabel : '조합 연결 후 등록'}</button></td>
         </tr>`;
@@ -861,9 +887,9 @@
         const editorReady = Boolean(dashboard.coop_id) && String(dashboard.coop_id) === String(coopId);
         const editorLabel = plant.site_power_plant_id ? '기본정보 수정' : '기본정보 등록';
         return `<article class="mobile-plant-card">
-          <div class="d-flex justify-content-between align-items-start gap-2"><div><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(plant.provider)} · ${escapeHtml(plant.homepage_location || plant.location_label || '주소 미등록')}</div></div>${stateBadge(plant)}</div>
+          <div class="d-flex justify-content-between align-items-start gap-2"><div><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(plant.provider)} · ${escapeHtml(plant.homepage_location || plant.location_label || '주소 미등록')}</div></div><span data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="state">${stateBadge(plant)}</span></div>
           <div class="form-check form-switch mt-3"><input class="form-check-input plant-completion-checkbox" type="checkbox" role="switch" data-monitor-id="${escapeHtml(plant.id)}" aria-label="${escapeHtml(plant.short_name || name)} 완공 공개" ${plant.is_completed === true ? 'checked' : ''}><label class="form-check-label">완공 · 공개 모니터에 표시</label></div>
-          <div class="mobile-metrics"><div><small>현재</small><strong>${escapeHtml(formatPower(plant.current_kw))}</strong></div><div><small>오늘</small><strong>${escapeHtml(formatEnergy(plant.today_kwh))}</strong></div><div><small>누적</small><strong>${escapeHtml(formatEnergy(plant.lifetime_kwh))}</strong></div></div>
+          <div class="mobile-metrics"><div><small>현재</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="current_kw">${escapeHtml(formatPower(plant.current_kw))}</strong></div><div><small>오늘</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="today_kwh">${escapeHtml(formatEnergy(plant.today_kwh))}</strong></div><div><small>누적</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="lifetime_kwh">${escapeHtml(formatEnergy(plant.lifetime_kwh))}</strong></div></div>
           <label class="form-label small fw-bold mb-1">홈페이지 발전소 연결</label>
           <select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select>
           <button type="button" class="btn btn-outline-primary btn-sm w-100 mt-2 plant-info-editor" data-monitor-id="${escapeHtml(plant.id)}" data-site-id="${escapeHtml(plant.site_power_plant_id || '')}" ${editorReady ? '' : 'disabled'}>${editorReady ? editorLabel : '조합 연결 저장 후 등록'}</button>
@@ -895,8 +921,31 @@
     }
 
     function markDirty() {
+      monitorEditRevision++;
       isDirty = true;
       setStatus('저장하지 않은 변경사항이 있습니다.', 'alert-warning');
+    }
+
+    function renderMonitorValues(data) {
+      const plants = new Map((data.monitor_plants || []).map(plant => [String(plant.id), plant]));
+      monitorData.summary = data.summary;
+      monitorData.sources = data.sources;
+      renderSummary(); renderSources();
+      document.querySelectorAll('[data-live-monitor-id]').forEach(el => {
+        const plant = plants.get(el.dataset.liveMonitorId);
+        if (!plant) return;
+        const field = el.dataset.liveField;
+        if (field === 'state') el.innerHTML = stateBadge(plant);
+        else el.textContent = field === 'current_kw' ? formatPower(plant[field]) : formatEnergy(plant[field]);
+      });
+      // Keep mappings, completion selections and editable metadata from the held screen.
+      monitorData.monitor_plants = (monitorData.monitor_plants || []).map(plant => {
+        const fresh = plants.get(String(plant.id));
+        if (!fresh) return plant;
+        const next = { ...plant };
+        ['current_kw','today_kwh','lifetime_kwh','data_state','communication_state','operational_state'].forEach(key => { next[key] = fresh[key]; });
+        return next;
+      });
     }
 
     function updateMonitorLink() {
@@ -1133,30 +1182,66 @@
       }
     }
 
-    async function loadData(scopeKey = '', silent = false) {
-      if (isLoading) return;
+    function loadData(scopeKey = '', silent = false, options = {}) {
+      const allowHidden = options.allowHidden === true;
+      if (!monitorReadOwner.userId || document.hidden || (!allowHidden && window.frameElement?.hidden)
+        || (isLoading && !monitorReadPending) || isSavingVendorContact
+        || document.querySelector('.modal.show,dialog[open]') || (silent && isDirty)) return Promise.resolve();
+      const key = JSON.stringify([monitorReadOwner.revision, scopeKey, silent, allowHidden]);
+      if (monitorReadPending?.key === key) return monitorReadPending.promise;
+      const owner = { ...monitorReadOwner };
+      const sequence = ++monitorReadSequence;
+      const selectedScope = String(document.getElementById('scopeSelect').value || '');
+      const editRevision = monitorEditRevision;
       isLoading = true;
-      document.body.classList.add('saving-shield');
+      if (!silent) document.body.classList.add('saving-shield');
+      const request = loadMonitorData(scopeKey, silent, owner, sequence, selectedScope, editRevision, allowHidden);
+      monitorReadPending = {key, promise:request};
+      request.finally(() => {
+        if (monitorReadPending?.promise === request) {
+          monitorReadPending = null;
+          isLoading = false;
+          document.body.classList.remove('saving-shield');
+        }
+      }).catch(() => {});
+      return request;
+    }
+
+    async function loadMonitorData(scopeKey, silent, owner, sequence, selectedScope, editRevision, allowHidden) {
+      const isCurrent = () => monitorReadCurrent(owner, sequence, selectedScope, editRevision, allowHidden);
       if (!silent) setStatus('발전소 정보를 불러오는 중입니다.', 'alert-info');
       try {
         const { data, error } = await _supabase.rpc('platform_get_power_monitor_admin_v2', {
           p_scope_key: scopeKey || null
         });
+        if (!isCurrent()) return;
         if (error) throw error;
-        monitorData = data || {};
-        currentScopeKey = monitorData.selected_scope_key || scopeKey;
-        await loadVendorContacts(String(monitorData?.dashboard?.id || ''));
-        renderAll();
-        setStatus(silent ? '3분 주기로 최신 수집값을 반영했습니다.' : '', 'alert-success');
-        if (silent) setTimeout(() => {
-          if (!isDirty && document.getElementById('statusArea').textContent.includes('3분 주기')) setStatus('');
-        }, 3500);
+        const next = data || {};
+        const contacts = silent ? null : await readVendorContacts(String(next.dashboard?.id || ''));
+        if (!isCurrent()) return;
+        if (!await monitorReadAuthorized(owner)) {
+          if (isCurrent()) {
+            document.querySelector('.page-shell').hidden = true;
+          }
+          return;
+        }
+        if (!isCurrent()) return;
+        if (silent) {
+          if (isDirty || !monitorData || String(next.dashboard?.id || '') !== String(monitorData.dashboard?.id || '')
+            || String(next.selected_scope_key || scopeKey) !== String(currentScopeKey)) return;
+          renderMonitorValues(next);
+        } else {
+          monitorData = next;
+          currentScopeKey = next.selected_scope_key || scopeKey;
+          vendorContacts = contacts.rows;
+          vendorContactsError = contacts.message;
+          renderAll();
+          setStatus('');
+        }
       } catch (error) {
-        console.error('[power-monitor-admin] load failed', error);
+        if (!isCurrent()) return;
+        if (error?.code === '42501') document.querySelector('.page-shell').hidden = true;
         setStatus(`불러오지 못했습니다: ${errorMessage(error)}`, 'alert-danger');
-      } finally {
-        isLoading = false;
-        document.body.classList.remove('saving-shield');
       }
     }
 
@@ -1226,12 +1311,21 @@
           setTimeout(() => { location.href = 'index.html'; }, 1200);
           return;
         }
+        monitorReadOwner = { userId:userData.user.id, revision:monitorReadOwner.revision + 1 };
+        _supabase.auth.onAuthStateChange((event, session) => {
+          if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== monitorReadOwner.userId)) {
+            monitorReadOwner = { userId:null, revision:monitorReadOwner.revision + 1 };
+            monitorReadSequence++;
+            monitorData = null; vendorContacts = [];
+            document.querySelector('.page-shell').hidden = true;
+          }
+        });
         await loadData('');
         window.ErpWorkspaceResume.register({authorize:async()=>{
           const result=await _supabase.rpc('platform_get_context');
           if(result.error)throw result.error;
           return result.data?.is_platform_admin===true;
-        },busy:()=>isDirty,refresh:()=>loadData(currentScopeKey,true)});
+        },busy:()=>isDirty,refresh:()=>loadData(currentScopeKey,true,{allowHidden:true})});
         autoRefreshTimer = setInterval(() => {
           if (!isDirty && !document.hidden && !window.frameElement?.hidden) loadData(currentScopeKey, true);
         }, 180000);

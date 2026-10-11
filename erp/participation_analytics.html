@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.2 | Change: 2026-09-01 - Keep the participation dashboard responsive on mobile. -->
+<!-- Version: v1.0.3 | Change: 2026-10-11 - Keep period queries scoped and discard superseded responses. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.2 | participation_analytics.html');</script>
+  <script>console.log('[Version] v1.0.3 | participation_analytics.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -235,6 +235,32 @@
     });
 
     const state = { data:null, activities:[] };
+    let analyticsReadOwner = { userId:null, coopId:null, permissions:'', revision:0 };
+    let analyticsReadSequence = 0;
+    let analyticsReadPending = null;
+
+    function clearAnalyticsResults() {
+      state.data = null; state.activities = [];
+      document.querySelectorAll('.summary-grid,.dashboard-grid,.dividend-panel').forEach(el => { el.classList.add('d-none'); });
+    }
+
+    function analyticsReadCurrent(owner, sequence, from, to, allowHidden = false) {
+      return owner.userId === analyticsReadOwner.userId && owner.coopId === analyticsReadOwner.coopId
+        && owner.revision === analyticsReadOwner.revision && sequence === analyticsReadSequence
+        && from === document.getElementById('dateFrom').value && to === document.getElementById('dateTo').value
+        && !document.hidden && (allowHidden || !window.frameElement?.hidden);
+    }
+
+    async function analyticsReadAuthorized(owner) {
+      const [auth, result] = await Promise.all([_supabase.auth.getUser(), _supabase.rpc('get_my_erp_runtime')]);
+      if (auth.error || result.error) throw auth.error || result.error;
+      const runtime = result.data;
+      return auth.data?.user?.id === owner.userId && runtime?.coop_id === owner.coopId
+        && runtime.is_active !== false && Array.isArray(runtime.effective_permissions)
+        && JSON.stringify(runtime.effective_permissions.slice().sort()) === owner.permissions
+        && window.ErpRuntimeGuard.isModuleEnabled(runtime,'member_admin')
+        && window.ErpRuntimeGuard.isModuleAssigned(runtime,'member_admin');
+    }
     const TYPE_LABELS = { BOARD:'이사회', DELEGATE_ASSEMBLY:'대의원 총회', EDUCATION:'교육', QUIZ:'햇빛 퀴즈', ELECTION:'선거', PREFERENCE_POLL:'선호도 투표' };
     const GROUP_LABELS = { MEETING:'이사회·총회', EDUCATION:'교육', QUIZ:'햇빛 퀴즈', VOTE:'선거·투표' };
 
@@ -424,21 +450,57 @@
       document.getElementById('generatedAt').textContent = state.data?.generated_at ? `집계 ${new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'medium',timeStyle:'short'}).format(new Date(state.data.generated_at))}` : '';
     }
 
-    async function loadAnalytics() {
+    function loadAnalytics(options = {}) {
+      const allowHidden = options.allowHidden === true;
+      if (!analyticsReadOwner.userId || document.hidden || (!allowHidden && window.frameElement?.hidden)) return Promise.resolve();
       const from = document.getElementById('dateFrom').value;
       const to = document.getElementById('dateTo').value;
-      if (!from || !to || from > to) return showError('조회 시작일과 종료일을 올바르게 확인해 주세요.');
+      if (!from || !to || from > to) {
+        analyticsReadSequence++;
+        analyticsReadPending = null;
+        showLoading(false);
+        showError('조회 시작일과 종료일을 올바르게 확인해 주세요.');
+        return Promise.resolve();
+      }
+      const key = JSON.stringify([analyticsReadOwner.revision, from, to, allowHidden]);
+      if (analyticsReadPending?.key === key) return analyticsReadPending.promise;
+      const sequence = ++analyticsReadSequence;
+      const owner = { ...analyticsReadOwner };
+      const request = loadAnalyticsPeriod(owner, sequence, from, to, allowHidden);
+      analyticsReadPending = {key, promise:request};
+      request.finally(() => {
+        if (analyticsReadPending?.promise === request) {
+          analyticsReadPending = null;
+          showLoading(false);
+        }
+      }).catch(() => {});
+      return request;
+    }
+
+    async function loadAnalyticsPeriod(owner, sequence, from, to, allowHidden) {
+      const isCurrent = () => analyticsReadCurrent(owner, sequence, from, to, allowHidden);
       showError(''); showLoading(true);
       try {
         const { data, error } = await _supabase.rpc('participation_admin_get_analytics',{ p_from:from, p_to:to });
+        if (!isCurrent()) return;
         if (error) throw error;
+        if (!await analyticsReadAuthorized(owner)) {
+          if (isCurrent()) {
+            clearAnalyticsResults();
+            showError('현재 조합과 조회 권한을 다시 확인해 주세요.');
+          }
+          return;
+        }
+        if (!isCurrent()) return;
         state.data = data || {};
         state.activities = classifyResponses(Array.isArray(data?.activities) ? data.activities : []);
+        document.querySelectorAll('.summary-grid,.dashboard-grid,.dividend-panel').forEach(el => { el.classList.remove('d-none'); });
         renderAll();
       } catch (error) {
-        console.error('participation_admin_get_analytics failed:', error);
+        if (!isCurrent()) return;
+        if (error?.code === '42501') clearAnalyticsResults();
         showError(error?.message || '참여 현황을 불러오지 못했습니다.');
-      } finally { showLoading(false); }
+      }
     }
 
     async function init() {
@@ -453,8 +515,18 @@
       if (!userGate.ok) return;
       const runtimeGate = await window.ErpRuntimeGuard.enforce(_supabase,{ moduleKeysAny:['member_admin'], moduleLabel:'조합원 참여 관리', redirectUrl:'index.html' });
       if (!runtimeGate.ok) return;
+      analyticsReadOwner = { userId:userGate.authUser.id, coopId:runtimeGate.runtime.coop_id,
+        permissions:JSON.stringify(runtimeGate.runtime.effective_permissions.slice().sort()), revision:analyticsReadOwner.revision + 1 };
+      _supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== analyticsReadOwner.userId)) {
+          analyticsReadOwner = { userId:null, coopId:null, permissions:'', revision:analyticsReadOwner.revision + 1 };
+          analyticsReadSequence++;
+          clearAnalyticsResults();
+          showError('로그인 상태를 확인한 뒤 다시 열어 주세요.');
+        }
+      });
       await loadAnalytics();
-      window.ErpWorkspaceResume.register({modules:['member_admin'],refresh:loadAnalytics});
+      window.ErpWorkspaceResume.register({modules:['member_admin'],refresh:()=>loadAnalytics({allowHidden:true})});
     }
 
     window.addEventListener('DOMContentLoaded', init);
