@@ -41,7 +41,7 @@ const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   }
 })();
 const ADMIN_MEMBER_TABS = Object.freeze({
-    member_admin: ['members', 'badges', 'funds-manage', 'applications', 'deposit'],
+    member_admin: ['members', 'badges', 'funds-manage', 'applications', 'deposit', 'notifications'],
     site_admin: ['notices', 'site'],
     documents_admin: ['site']
 });
@@ -5696,6 +5696,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-applications', memberAdminEnabled],
 ['nav-capital-returns', memberAdminEnabled],
 ['nav-deposit', memberAdminEnabled],
+['nav-notifications', memberAdminEnabled],
 ['nav-vote-hub', voteEnabled],
 ['siteOpsCategory', siteAdminEnabled || documentsAdminEnabled],
 ['nav-notices', siteAdminEnabled],
@@ -5925,6 +5926,9 @@ function switchTab(tabName) {
     else if (tabName === 'members') {
         // 회원 탭은 자동 조회 대신 '검색 유도 화면' 표시
         if(typeof renderEmptyState === 'function') renderEmptyState();
+    }
+    else if (tabName === 'notifications') {
+        void window.MemberNotificationAdmin?.open();
     }
     else if (tabName === 'notices') {
         fetchNotices();
@@ -6285,7 +6289,7 @@ function renderPendingWelcomeNotificationStatus(member) {
   const rawStatus = String(member?.welcome_notification_status || '').trim().toLowerCase();
   const isSent = member?.is_welcome_sent === true || rawStatus === 'accepted';
   const views = {
-    accepted: { label: '가입 알림톡 발송완료', className: 'bg-success' },
+    accepted: { label: '가입 알림톡 발송 접수', className: 'bg-success' },
     processing: { label: '가입 알림톡 처리중', className: 'bg-primary' },
     unknown: { label: '가입 알림톡 결과 확인 필요', className: 'bg-warning text-dark' },
     failed: { label: '가입 알림톡 발송 실패', className: 'bg-danger' },
@@ -6380,6 +6384,7 @@ function setMemberDetailReadBusy(busy) {
 }
 
 document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', () => {
+    window.MemberNotificationAdmin?.clearDetail();
     window.ContributionCertPreview?.clear();
     ++g_member_detail_revision;
     setMemberDetailReadBusy(false);
@@ -6970,6 +6975,7 @@ async function openMemberDetail(id) {
     toggleEditMode(false);
     loadMemberFunds(memberUid, m.member_id, true);
     loadConsultLogs(memberUid);
+    void window.MemberNotificationAdmin?.detail(memberUid);
     if (!isAdminMemberSiteProfile()) loadMemberFamily(memberUid);
 
     const basicTabBtn = document.querySelector('#memberDetailTab [data-bs-target="#md-tab-basic"]');
@@ -7159,6 +7165,7 @@ function bindAdminCertificateContext(authId) {
         if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== adminCertificateAuthId)) {
             adminCertificateAuthId = '';
             window.ContributionCertPreview?.clear();
+            window.MemberNotificationAdmin?.clear();
         }
     });
     // A parked workspace retains editor input, not an open personal certificate.
@@ -9235,6 +9242,7 @@ window.onload = async function() {
     }
     applyAdminMemberRuntimeUi(memberRuntimeGate.runtime);
     bindAdminCertificateContext(user?.id);
+    window.MemberNotificationAdmin?.configure(_supabase,memberRuntimeGate.runtime,user?.id);
     window.MemberExportPinUI?.init({client:_supabase,alert:myAlert});
 
     // 2. 사이드바 메뉴 활성화 (현재 URL 기반)
@@ -9263,12 +9271,14 @@ window.onload = async function() {
         window.ErpWorkspaceTask = {ready:true, refresh:async function(options = {}) {
             const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
             if (!gate.ok) throw new Error('ERP_TASK_ACCESS_DENIED');
+            window.MemberNotificationAdmin?.configure(_supabase,gate.runtime,adminCertificateAuthId);
             // Do not repopulate an open member editor or overwrite unfinished input.
             if (options.dirty || document.querySelector('.modal.show,dialog[open]')) {
                 await fetchMemberReturnSummary(); return;
             }
             const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
             if (pane === 'tab-dashboard') await loadDashboard();
+            else if (pane === 'tab-notifications') await window.MemberNotificationAdmin?.refresh();
             else if (pane === 'tab-members' && g_member_fetch_revision > 0) await fetchMembers();
             else if (pane === 'tab-applications') await fetchApplications();
             else if (pane === 'tab-funds-manage' && document.getElementById('sub-tab-donations')?.classList.contains('active')) await fetchGlobalDonations();
