@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.110
-Change: 2026-10-12 - Recover calendar/status reads without blocking lists or replacing drafts.
+Version: v1.0.111
+Change: 2026-10-12 - Protect employee detail access/notification drafts and resume interrupted reads.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.110 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.111 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -977,12 +977,26 @@ function checkpointEmployeeDetailDraft(root) {
             employeeDetailDraftBaseline.set(id, employeeDetailDraftValue(element));
         }
     });
+    // Dynamic permission/notification controls belong to their own save scope.
+    for (const key of employeeDetailDraftBaseline.keys()) {
+        if (typeof key !== 'string' && !key.isConnected) employeeDetailDraftBaseline.delete(key);
+    }
+    root.querySelectorAll('[data-employee-module-key],[data-employee-notification-key]').forEach(element => {
+        employeeDetailDraftBaseline.set(element, employeeDetailDraftValue(element));
+    });
     window.ErpWorkspaceResume?.checkpoint(root);
 }
 function hasUnsavedEmployeeDetail() {
     return [...employeeDetailDraftBaseline].some(([id, value]) => {
-        const element = document.getElementById(id);
-        return element && employeeDetailDraftValue(element) !== value;
+        const element = typeof id === 'string' ? document.getElementById(id) : id;
+        return element?.isConnected && employeeDetailDraftValue(element) !== value;
+    });
+}
+function hasUnsavedEmployeeDetailTab(tabId) {
+    const pane = document.getElementById(tabId);
+    return !!pane && [...employeeDetailDraftBaseline].some(([key, value]) => {
+        const element = typeof key === 'string' ? document.getElementById(key) : key;
+        return element?.isConnected && pane.contains(element) && employeeDetailDraftValue(element) !== value;
     });
 }
 function isEmployeeDetailSaving() {
@@ -999,7 +1013,7 @@ function requestEmployeeDetailDiscard(action) {
     }, { once: true });
     showConfirm('저장하지 않은 변경사항을 버릴까요?', () => {
         if (empId !== currentEmpId || revision !== employeeDetailRevision || isEmployeeDetailSaving()) return;
-        checkpointEmployeeDetailDraft(document.getElementById('infoContainer'));
+        checkpointEmployeeDetailDraft(document.getElementById('detailModal'));
         action();
     });
 }
@@ -1112,17 +1126,27 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
     const key = `${owner}|${empId}|${revision}|${tabId}|${month}`;
     let entry = employeeDetailTabLoads.get(key);
     if (entry?.pending) return entry.pending;
-    const wasReady = entry?.ready === true && !force;
-    if (!entry) { entry = {ready:false,pending:null}; employeeDetailTabLoads.set(key, entry); }
-    const isCurrent = () => owner === getHrSettingsOwner() && empId === String(currentEmpId || '')
-        && revision === employeeDetailRevision && isEmployeeDetailTabVisible(tabId)
+    const hasDraft = hasUnsavedEmployeeDetailTab(tabId);
+    // Retry authorization after a failed return, but never replace a held draft.
+    const wasReady = hasDraft || (entry?.ready === true && !force);
+    if (!entry) { entry = {ready:false,pending:null,readRevision:0,resume:false}; employeeDetailTabLoads.set(key, entry); }
+    const readRevision = ++entry.readRevision;
+    const isOwned = () => owner === getHrSettingsOwner() && empId === String(currentEmpId || '')
+        && revision === employeeDetailRevision
         && (tabId !== 'tabSalary' || month === document.getElementById('salaryMonth').value);
+    const isCurrent = () => isOwned() && entry.readRevision === readRevision && isEmployeeDetailTabVisible(tabId);
+    entry.context = {tabId,isOwned};
+    entry.resume = false;
     if (!wasReady) setEmployeeDetailTabState(tabId, 'loading');
     entry.pending = (async () => {
         try {
             await verifyEmployeeDetailTabAccess(owner);
             if (!isCurrent()) return;
-            if (wasReady) return;
+            if (wasReady) {
+                entry.ready = true;
+                setEmployeeDetailTabState(tabId, 'ready');
+                return;
+            }
             const loaded = await loaders[tabId]();
             if (!isCurrent()) return;
             await verifyEmployeeDetailTabAccess(owner);
@@ -1133,9 +1157,39 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
             window.ErpWorkspaceResume?.checkpoint(document.getElementById(tabId));
         } catch (_) {
             if (isCurrent()) { entry.ready = false; setEmployeeDetailTabState(tabId, 'error'); }
-        } finally { entry.pending = null; }
+        } finally {
+            if (entry.readRevision === readRevision) {
+                entry.pending = null;
+                if (isOwned() && !isEmployeeDetailTabVisible(tabId) && !entry.ready) entry.resume = true;
+            }
+        }
     })();
     return entry.pending;
+}
+function interruptEmployeeDetailTabReads(tabId) {
+    for (const entry of employeeDetailTabLoads.values()) {
+        const context = entry.context;
+        if (!entry.pending || !context?.isOwned() || (tabId && context.tabId !== tabId)
+            || !['tabModuleAccess','tabNotificationAccess'].includes(context.tabId)) continue;
+        entry.readRevision++;
+        entry.pending = null;
+        entry.resume = true;
+        const kind = context.tabId === 'tabModuleAccess' ? 'modules' : 'notifications';
+        employeeDetailReadTokens[kind]++;
+        if (kind === 'modules') employeeDetailReadTokens.approvedRights++;
+    }
+}
+function resumeEmployeeDetailTabReads() {
+    for (const entry of employeeDetailTabLoads.values()) {
+        const context = entry.context;
+        if (!entry.resume || !context?.isOwned() || !isEmployeeDetailTabVisible(context.tabId)) continue;
+        if (isEmployeeDetailSaving()) {
+            if (!entry.ready) setEmployeeDetailTabState(context.tabId, 'error');
+            return Promise.resolve();
+        }
+        return ensureEmployeeDetailTab(context.tabId);
+    }
+    return Promise.resolve();
 }
 function cancelEmployeeDetailReads() {
     employeeInfoReadEpoch++;
@@ -5238,6 +5292,7 @@ function renderEmployeeModuleAccess(payload) {
         saveBtn.disabled = !canManageAccess || modules.length === 0;
         saveBtn.classList.toggle('d-none', !canManageAccess);
     }
+    checkpointEmployeeDetailDraft(document.getElementById('tabModuleAccess'));
 } // End of renderEmployeeModuleAccess
 
 async function loadEmployeeModuleAccess() {
@@ -5409,6 +5464,7 @@ function renderEmployeeNotificationAssignments(payload) {
           </div>`;
     }).join('') || '<div class="text-center text-muted py-4">설정할 관리자성 알림이 없습니다.</div>';
     if (saveBtn) saveBtn.disabled = categories.length === 0 || employee?.is_active === false;
+    checkpointEmployeeDetailDraft(document.getElementById('tabNotificationAccess'));
 } // End of renderEmployeeNotificationAssignments
 
 async function loadEmployeeNotificationAssignments() {
@@ -5523,9 +5579,9 @@ function bindEmployeeInfoResume() {
     new MutationObserver(() => {
         if (frame.hidden === hidden) return;
         hidden = frame.hidden;
-        if (hidden) interruptEmployeeInfoReads();
+        if (hidden) { interruptEmployeeInfoReads(); interruptEmployeeDetailTabReads(); }
         // The shell exposes a retained frame only after fresh server authorization.
-        else void resumeEmployeeInfoReads();
+        else { void resumeEmployeeInfoReads(); void resumeEmployeeDetailTabReads(); }
     }).observe(frame,{attributes:true,attributeFilter:['hidden']});
 }
 function verifyEmployeeInfoAccess(context) {
@@ -5722,6 +5778,9 @@ document.querySelector('#empTab [href="#tabInsuranceStatus"]').addEventListener(
 document.getElementById('empTab').addEventListener('shown.bs.tab', event => {
     void ensureEmployeeDetailTab(event.target.getAttribute('href')?.slice(1));
     if (event.target.getAttribute('href') === '#tabInfo') void resumeEmployeeInfoReads();
+});
+document.getElementById('empTab').addEventListener('hidden.bs.tab', event => {
+    interruptEmployeeDetailTabReads(event.target.getAttribute('href')?.slice(1));
 });
 document.getElementById('detailModal').addEventListener('shown.bs.modal', () => {
     void ensureEmployeeDetailTab(document.querySelector('#empTab .nav-link.active')?.getAttribute('href')?.slice(1));
