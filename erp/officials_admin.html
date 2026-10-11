@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.26 -->
+<!-- Version: v1.0.27 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.26 | officials_admin.html');</script>
+  <script>console.log('[Version] v1.0.27 | officials_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -482,15 +482,6 @@
       { name: '선관위원', category: 'election_comm', enabled: true }
     ]);
     let officialRoleCatalog = [];
-
-    function readStoredPermissions() {
-      try {
-        const raw = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
-        return new Set(Array.isArray(raw) ? raw : []);
-      } catch (_) {
-        return new Set();
-      }
-    }
 
     async function loadPermissions(user) {
       const result = new Set();
@@ -1963,7 +1954,6 @@
       currentUser = user;
 
       permissionSet = await loadPermissions(user);
-      if (permissionSet.size === 0) permissionSet = readStoredPermissions();
       const runtimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
         moduleLabel: '임원·대의원 관리',
         alertFn: function(message) { showAlert(message, 'warning'); },
@@ -2402,7 +2392,7 @@
 
       const { data: officials, error } = await scopeByTenant(_supabase
         .from('coop_officials')
-        .select('id, member_id, category, role, term_start_date, term_end_date, real_end_date, term_count, is_registered, status, seal_url, name, official_member_type, official_identity_code, official_identity_kind, end_reason, end_note, resignation_document_path, resignation_document_name, ended_at')
+        .select('id, member_id, category, role, term_start_date, term_end_date, real_end_date, term_count, is_registered, status, seal_url, name, official_member_type, official_identity_code, official_identity_kind, end_reason, resignation_document_path')
         .in('category', ['delegate', 'executive', 'election_comm'])
         .order('status', { ascending: true })
         .order('term_start_date', { ascending: false }));
@@ -2523,7 +2513,12 @@
       await loadOfficialRoleCatalog();
       resetOfficialForm();
       await loadOfficials();
-      window.ErpWorkspaceResume.register({modules:['member_admin','signature'],refresh:loadOfficials});
+      window.ErpWorkspaceResume.register({modules:['member_admin','signature'],authorize:async()=>{
+        officialDataAuthorized = false;
+        const allowed = await ensureAccess();
+        officialDataAuthorized = allowed === true;
+        return allowed;
+      },refresh:loadOfficials});
     }
 
     init();

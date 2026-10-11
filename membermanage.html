@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.165
-Change: 2026-10-10 - Preview the issued contribution certificate before print or PDF save.
+Version: v1.0.166
+Change: 2026-10-11 - Optional personal Telegram notification connection.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.165 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.166 | membermanage.html');</script>
+<script src="shared/member_telegram.js?v=20261011-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
@@ -1701,6 +1702,16 @@ NO. <span id="infoMemberId">-</span>
 </div>
 </div>
 
+<details id="memberTelegramCard" class="border rounded p-3 mb-3" hidden ontoggle="if(this.open) MemberTelegramConnection.perform('status')">
+<summary class="fw-bold">텔레그램 알림</summary>
+<p class="small mt-2 mb-2" id="memberTelegramState" aria-live="polite"></p>
+<div class="d-flex flex-wrap gap-2">
+<button id="memberTelegramConnect" type="button" class="btn btn-sm btn-outline-primary" hidden onclick="MemberTelegramConnection.perform('connect')">연결하기</button>
+<a id="memberTelegramOpen" class="btn btn-sm btn-primary" target="_blank" rel="noopener noreferrer" hidden>텔레그램 열기</a>
+<button id="memberTelegramRefresh" type="button" class="btn btn-sm btn-outline-secondary" onclick="MemberTelegramConnection.perform('status')">연결 확인</button>
+<button id="memberTelegramDisconnect" type="button" class="btn btn-sm btn-outline-danger" hidden onclick="MemberTelegramConnection.perform('disconnect')">연결 해제</button>
+</div>
+</details>
 <div class="d-flex justify-content-end mb-3">
 <button type="button" class="btn btn-sm btn-outline-secondary profile-details-toggle" id="btnToggleProfileDetails" onclick="toggleProfileDetails()">
 <i class="bi bi-chevron-down" id="profileDetailsToggleIcon"></i>
@@ -5714,6 +5725,8 @@ setVoteQuickCardContent({
 
 // [수정] 대시보드 렌더링: 자산 카드 동적 생성 및 타임라인 통합 + 단체 정보 처리
 function renderDashboard(member, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta) {
+window.MemberTelegramConnection?.setContext(_supabase, {authUserId:curAuth?.id,coopId:currentMemberCoopId,
+  profileId:member?.id,isOwn:!!member?.id && member.id===getRootMemberProfileId()});
 // 1. 기본 정보 매핑 (기존 유지)
 renderMemberStatusBadge(member?.status);
 setText('infoMemberId', member.member_id || '-'); // 상단으로 이동된 조합원 번호

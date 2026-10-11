@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.18 -->
+<!-- Version: v1.0.19 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.18 | officials_signature_admin.html');</script>
+  <script>console.log('[Version] v1.0.19 | officials_signature_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -241,17 +241,10 @@
     let signatureTelegramStatusMap = {};
     let sealPreviewModal = null;
     let currentSignatureFilter = 'all';
+    let signatureListRequest = null;
+    let signatureListSequence = 0;
     const MAX_SEAL_LONG_EDGE = 1600;
     const MIN_SEAL_LONG_EDGE_WARNING = 600;
-
-    function readStoredPermissions() {
-      try {
-        const raw = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
-        return new Set(Array.isArray(raw) ? raw : []);
-      } catch (_) {
-        return new Set();
-      }
-    }
 
     async function loadPermissions(user) {
       const result = new Set();
@@ -360,23 +353,23 @@
       });
     }
 
-    async function loadSignatureTelegramStatusMap() {
-      signatureTelegramStatusMap = {};
+    async function loadSignatureTelegramStatusMap(isCurrent = () => true) {
+      const nextMap = {};
       try {
         const { data, error } = await _supabase.rpc('signature_admin_list_telegram_link_statuses');
         if (error) throw error;
         (Array.isArray(data) ? data : []).forEach((row) => {
           const memberId = String(row?.member_id || '').trim();
           if (!memberId) return;
-          signatureTelegramStatusMap[memberId] = {
+          nextMap[memberId] = {
             linked: true,
             linked_at: String(row?.linked_at || '').trim()
           };
         });
       } catch (error) {
         console.warn('signature telegram admin status load failed:', error?.message || error);
-        signatureTelegramStatusMap = {};
       }
+      if (isCurrent()) signatureTelegramStatusMap = nextMap;
     }
 
     function buildSignatureTelegramStatusHtml(memberId) {
@@ -448,7 +441,7 @@
         : 'all';
       const filterEl = document.getElementById('signatureFilter');
       if (filterEl) filterEl.value = currentSignatureFilter;
-      loadOfficialSignatures();
+      applySignatureFilter();
     };
 
     window.copySignatureLoginLink = async function copySignatureLoginLink() {
@@ -542,17 +535,43 @@
       };
     }
 
-    async function loadOfficialSignatures() {
+    async function loadOfficialSignatures({ allowHidden = false } = {}) {
       const body = document.getElementById('officialSignBody');
       if (!body) return;
+      // Filtering never destroys file input nodes. A refresh must also preserve a selected upload.
+      if (hasPendingSignatureUpload()) { applySignatureFilter(); return; }
+      if (signatureListRequest) return signatureListRequest;
+      const owner = currentUser, coopId = currentCoopId, sequence = ++signatureListSequence;
+      const isCurrent = () => owner === currentUser && coopId === currentCoopId && sequence === signatureListSequence && (allowHidden || !window.frameElement?.hidden);
+      const request = loadSignatureRows(body, isCurrent).finally(() => { if (signatureListRequest === request) signatureListRequest = null; });
+      signatureListRequest = request;
+      return signatureListRequest;
+    }
+
+    function hasPendingSignatureUpload() {
+      return Array.from(document.querySelectorAll('#officialSignBody input[type="file"]')).some(input => input.files?.length > 0);
+    }
+
+    function applySignatureFilter() {
+      const visible = new Set(getFilteredSignatureGroupEntries(officialSignGroups).map(group => group.key));
+      document.querySelectorAll('#officialSignBody tr[data-signature-key]').forEach(row => {
+        row.hidden = !visible.has(row.dataset.signatureKey);
+      });
+      const empty = document.getElementById('signatureFilterEmpty');
+      if (empty) empty.hidden = visible.size > 0;
+    }
+
+    async function loadSignatureRows(body, isCurrent) {
       body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">불러오는 중입니다...</td></tr>';
 
       const { data: officials, error } = await scopeByTenant(_supabase
         .from('coop_officials')
         .select('id, member_id, name, role, category, seal_url, status')
+        .or('status.eq.active,status.is.null,status.eq.""')
         .in('category', ['delegate', 'executive', 'election_comm'])
         .order('status', { ascending: true })
         .order('role', { ascending: true }));
+      if (!isCurrent() || hasPendingSignatureUpload()) return;
 
       if (error || !Array.isArray(officials)) {
         body.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">임원 정보를 불러오지 못했습니다.</td></tr>';
@@ -569,7 +588,8 @@
         return;
       }
 
-      await loadSignatureTelegramStatusMap();
+      await loadSignatureTelegramStatusMap(isCurrent);
+      if (!isCurrent()) return;
 
       const memberIds = [...new Set(filtered.map((row) => row.member_id).filter((id) => id && !String(id).startsWith('external:')))];
       let memberMap = {};
@@ -582,6 +602,7 @@
           memberMap[row.member_id] = row.name;
         });
       }
+      if (!isCurrent() || hasPendingSignatureUpload()) return;
 
       const groups = {};
       const groupKeys = [];
@@ -613,7 +634,7 @@
       officialSignGroups = groups;
       updateSignatureSummary(groups);
 
-      const filteredEntries = getFilteredSignatureGroupEntries(groups);
+      const filteredEntries = Object.values(groups);
       if (filteredEntries.length === 0) {
         const emptyMessage = currentSignatureFilter === 'missing'
           ? '서명 이미지가 아직 등록되지 않은 인원이 없습니다.'
@@ -648,7 +669,7 @@
           ? '<span class="badge bg-success">등록됨</span>'
           : `<span class="badge bg-secondary">${group.is_external ? '선택 사항' : '없음'}</span>`;
         return `
-          <tr>
+          <tr data-signature-key="${group.key}">
             <td>
               <div class="fw-bold">${name}</div>
               <div class="text-muted small">${group.is_external ? '비조합원 이사' : escapeHtml(group.member_id || '-')}</div>
@@ -670,7 +691,8 @@
             </td>
           </tr>
         `;
-      }).join('');
+      }).join('') + '<tr id="signatureFilterEmpty" hidden><td colspan="7" class="text-center text-muted py-4">표시할 인원이 없습니다.</td></tr>';
+      applySignatureFilter();
 
       body.querySelectorAll('button[data-upload-key]').forEach((btn) => {
         btn.addEventListener('click', () => uploadOfficialSeal(btn.getAttribute('data-upload-key')));
@@ -744,6 +766,8 @@
         showAlert('저장 실패: ' + updateError.message, 'danger');
         return;
       }
+      const uploadedInput = document.getElementById(`seal-file-${groupKey}`);
+      if (uploadedInput) uploadedInput.value = '';
 
       if (prepared.smallWarning) {
         showAlert('서명 이미지가 등록되었습니다. 다만 현재 파일 해상도가 낮아 문서에서 흐릿하게 보일 수 있습니다.', 'warning');
@@ -797,7 +821,6 @@
       const user = userGate.user;
       currentUser = user;
       permissionSet = await loadPermissions(user);
-      if (permissionSet.size === 0) permissionSet = readStoredPermissions();
       const runtimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
         moduleLabel: '서명 관리',
         alertFn: function(message) { showAlert(message, 'warning'); },
@@ -825,13 +848,17 @@
         if (filterEl) {
           filterEl.addEventListener('change', () => {
             currentSignatureFilter = String(filterEl.value || 'all').trim();
-            loadOfficialSignatures();
+            applySignatureFilter();
           });
         }
         const ok = await ensureAccess();
         if (!ok) return;
         await loadOfficialSignatures();
-        window.ErpWorkspaceResume.register({modules:['signature'],refresh:loadOfficialSignatures});
+        window.ErpWorkspaceResume.register({modules:['signature'],authorize:async () => {
+          ++signatureListSequence;
+          signatureListRequest = null;
+          return ensureAccess();
+        },busy:hasPendingSignatureUpload,refresh:() => loadOfficialSignatures({allowHidden:true})});
       } catch (error) {
         console.error('officials_signature_admin init error:', error);
         showAlert('서명 관리 화면을 초기화하지 못했습니다: ' + (error?.message || 'Unknown error'), 'danger');
