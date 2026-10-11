@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.108
-Change: 2026-10-11 - Preserve employee resume rows; retry detail reads and align editing with server allowance.
+Version: v1.0.109
+Change: 2026-10-12 - Restore cancelled edits and recover interrupted detail reads without replacing drafts.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.108 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.109 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -291,7 +291,7 @@ Change: 2026-10-11 - Preserve employee resume rows; retry detail reads and align
       <button type="button" id="employeeBasicAccessRetry" class="btn btn-sm btn-outline-primary" onclick="retryEmployeeBasicAccess()" hidden>권한 다시 확인</button>
       <button id="employeeBasicEditBtn" class="btn btn-sm btn-outline-primary view-mode" onclick="beginEmployeeInfoEdit()" hidden>✏️ 정보 수정</button>
       <button id="employeeRrnEditBtn" class="btn btn-sm btn-outline-primary view-mode" onclick="beginEmployeeRrnEdit()" hidden>주민번호 수정</button>
-      <button class="btn btn-sm btn-secondary edit-mode me-2" onclick="toggleEditMode(false)">취소</button>
+      <button class="btn btn-sm btn-secondary edit-mode me-2" onclick="cancelEmployeeInfoEdit()">취소</button>
       <button id="employeeBasicSaveBtn" class="btn btn-sm btn-primary edit-mode" onclick="saveBasicInfo()" hidden>직원 정보 저장</button>
     </div>
     <div class="row g-3">
@@ -954,6 +954,9 @@ let employeeResumeReadContext = null;
 const employeeBasicAccess = {state:'idle',owner:'',empId:'',revision:0,allowed:false,pending:null};
 const employeeIdentityReads = new Map();
 const employeeInfoAccessReads = new Map();
+let employeeInfoReadEpoch = 0;
+const employeeInfoActiveReads = new Map();
+const employeeInfoResumeReads = new Map();
 const EMPLOYEE_DETAIL_DRAFT_IDS = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
     'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate',
     'rrnFront','rrnBack','durunuriEligibilityEnabled','durunuriConfirmedMonths','durunuriConfirmedThroughMonth',
@@ -1133,6 +1136,9 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
     return entry.pending;
 }
 function cancelEmployeeDetailReads() {
+    employeeInfoReadEpoch++;
+    employeeInfoActiveReads.clear();
+    employeeInfoResumeReads.clear();
     employeeDetailRevision += 1;
     employeeIdentityReads.clear();
     employeeInfoAccessReads.clear();
@@ -5418,11 +5424,53 @@ async function saveEmployeeNotificationAssignments() {
 
 function employeeInfoContext() {
     const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
-    return {owner,empId,revision,isCurrent:() => !!owner && !!empId && isHrSettingsContextCurrent(owner)
-        && empId === String(currentEmpId || '') && revision === employeeDetailRevision};
+    const epoch = employeeInfoReadEpoch;
+    const isOwned = () => !!owner && !!empId && owner === getHrSettingsOwner()
+        && empId === String(currentEmpId || '') && revision === employeeDetailRevision;
+    return {owner,empId,revision,epoch,isOwned,isCurrent:() => isOwned()
+        && epoch === employeeInfoReadEpoch && isHrSettingsContextCurrent(owner)};
+}
+function interruptEmployeeInfoReads() {
+    // Hide invalidates in-flight answers, not the user's editor or other detail tabs.
+    employeeInfoReadEpoch++;
+    for (const [kind,context] of employeeInfoActiveReads) {
+        if (!context.isOwned()) continue;
+        employeeInfoResumeReads.set(kind,context);
+        if (kind === 'basic') {
+            employeeBasicAccess.state = 'error'; employeeBasicAccess.allowed = false;
+            syncEmployeeBasicAccessUi();
+        } else setEmployeeIdentityReadState(kind,'error');
+    }
+    employeeInfoActiveReads.clear();
+    employeeInfoAccessReads.clear();
+    employeeIdentityReads.clear();
+    employeeBasicAccess.pending = null;
+}
+async function resumeEmployeeInfoReads() {
+    if (!isEmployeeDetailTabVisible('tabInfo') || isEmployeeDetailSaving()) return;
+    const reads = [];
+    for (const [kind,context] of employeeInfoResumeReads) {
+        employeeInfoResumeReads.delete(kind);
+        if (!context.isOwned()) continue;
+        // These small readers recheck actual Auth/runtime and never reinitialize inputs.
+        reads.push(kind === 'basic' ? loadEmployeeBasicAccess() : loadEmployeeIdentityInfo(kind));
+    }
+    await Promise.all(reads);
+}
+function bindEmployeeInfoResume() {
+    const frame = window.frameElement;
+    if (!frame) return;
+    let hidden = frame.hidden;
+    new MutationObserver(() => {
+        if (frame.hidden === hidden) return;
+        hidden = frame.hidden;
+        if (hidden) interruptEmployeeInfoReads();
+        // The shell exposes a retained frame only after fresh server authorization.
+        else void resumeEmployeeInfoReads();
+    }).observe(frame,{attributes:true,attributeFilter:['hidden']});
 }
 function verifyEmployeeInfoAccess(context) {
-    const key = `${context.owner}|${context.empId}|${context.revision}`;
+    const key = `${context.owner}|${context.empId}|${context.revision}|${context.epoch}`;
     if (employeeInfoAccessReads.has(key)) return employeeInfoAccessReads.get(key);
     const pending = verifyEmployeeDetailTabAccess(context.owner).finally(() => {
         if (employeeInfoAccessReads.get(key) === pending) employeeInfoAccessReads.delete(key);
@@ -5454,6 +5502,8 @@ function loadEmployeeBasicAccess() {
     if (employeeBasicAccess.pending && employeeBasicAccess.owner === context.owner
         && employeeBasicAccess.empId === context.empId && employeeBasicAccess.revision === context.revision) return employeeBasicAccess.pending;
     Object.assign(employeeBasicAccess, {state:'loading',allowed:false,owner:context.owner,empId:context.empId,revision:context.revision});
+    employeeInfoResumeReads.delete('basic');
+    employeeInfoActiveReads.set('basic',context);
     syncEmployeeBasicAccessUi();
     const pending = (async () => {
         try {
@@ -5470,6 +5520,7 @@ function loadEmployeeBasicAccess() {
             return false;
         } finally {
             if (employeeBasicAccess.pending === pending) employeeBasicAccess.pending = null;
+            if (employeeInfoActiveReads.get('basic') === context) employeeInfoActiveReads.delete('basic');
             if (context.isCurrent()) syncEmployeeBasicAccessUi();
         }
     })();
@@ -5503,9 +5554,11 @@ function setEmployeeIdentityReadState(kind, state, data) {
 }
 function loadEmployeeIdentityInfo(kind) {
     if (!['birth','emergency'].includes(kind)) return Promise.resolve(false);
-    const context = employeeInfoContext(), key = `${context.owner}|${context.empId}|${context.revision}|${kind}`;
+    const context = employeeInfoContext(), key = `${context.owner}|${context.empId}|${context.revision}|${context.epoch}|${kind}`;
     if (!context.isCurrent()) return Promise.resolve(false);
     if (employeeIdentityReads.get(key)) return employeeIdentityReads.get(key);
+    employeeInfoResumeReads.delete(kind);
+    employeeInfoActiveReads.set(kind,context);
     setEmployeeIdentityReadState(kind, 'loading');
     const pending = (async () => {
         try {
@@ -5521,7 +5574,10 @@ function loadEmployeeIdentityInfo(kind) {
         } catch (_) {
             if (context.isCurrent()) setEmployeeIdentityReadState(kind, 'error');
             return false;
-        } finally { if (employeeIdentityReads.get(key) === pending) employeeIdentityReads.delete(key); }
+        } finally {
+            if (employeeIdentityReads.get(key) === pending) employeeIdentityReads.delete(key);
+            if (employeeInfoActiveReads.get(kind) === context) employeeInfoActiveReads.delete(kind);
+        }
     })();
     employeeIdentityReads.set(key,pending);
     return pending;
@@ -5537,6 +5593,9 @@ async function openDetail(u) {
         return;
     }
     employeeDetailDraftBaseline.clear();
+    employeeInfoReadEpoch++;
+    employeeInfoActiveReads.clear();
+    employeeInfoResumeReads.clear();
     const revision = ++employeeDetailRevision;
     const owner = getHrSettingsOwner();
     const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id) && isHrSettingsContextCurrent(owner);
@@ -5603,10 +5662,26 @@ async function loadEmployeeInsuranceStatus() {
 document.querySelector('#empTab [href="#tabInsuranceStatus"]').addEventListener('shown.bs.tab', loadEmployeeInsuranceStatus);
 document.getElementById('empTab').addEventListener('shown.bs.tab', event => {
     void ensureEmployeeDetailTab(event.target.getAttribute('href')?.slice(1));
+    if (event.target.getAttribute('href') === '#tabInfo') void resumeEmployeeInfoReads();
 });
 document.getElementById('detailModal').addEventListener('shown.bs.modal', () => {
     void ensureEmployeeDetailTab(document.querySelector('#empTab .nav-link.active')?.getAttribute('href')?.slice(1));
 });
+bindEmployeeInfoResume();
+function cancelEmployeeInfoEdit() {
+    if (isEmployeeDetailSaving() || !isHrSettingsContextCurrent(getHrSettingsOwner())) return;
+    const ids = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
+        'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate'];
+    for (const id of ids) {
+        const element = document.getElementById(id);
+        if (!element || !employeeDetailDraftBaseline.has(id)) continue;
+        const value = employeeDetailDraftBaseline.get(id);
+        element.value = element.hasAttribute('data-number-group') ? ERPNumberInput.format(value) : value;
+    }
+    ['rrnFront','rrnBack'].forEach(id => { document.getElementById(id).value = ''; });
+    syncDetailDepartmentInput();
+    toggleEditMode(false);
+}
 function toggleEditMode(isEdit, completedScope = 'edit') {
     const c = document.getElementById("infoContainer");
     if (isEdit) {
@@ -5615,7 +5690,7 @@ function toggleEditMode(isEdit, completedScope = 'edit') {
     }
     else {
         // Basic information, RRN and support eligibility have separate saves.
-        // Explicit cancel/close discards the edit-mode fields, never support settings.
+        // Explicit cancel restores fields first; successful saves checkpoint only their scope.
         const ids = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
             'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate'];
         if (completedScope === 'edit') ids.push('rrnFront','rrnBack');
