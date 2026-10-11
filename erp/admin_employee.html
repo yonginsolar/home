@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.107
-Change: 2026-10-11 - Verify resignation changes and distinguish unavailable Telegram status.
+Version: v1.0.108
+Change: 2026-10-11 - Preserve employee resume rows; retry detail reads and align editing with server allowance.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.107 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.108 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -73,6 +73,9 @@ Change: 2026-10-11 - Verify resignation changes and distinguish unavailable Tele
     .info-card { background: #f8f9fa; padding: 20px; border-radius: 12px; height: 100%; position: relative; }
     .view-mode { display: block; } .edit-mode { display: none; }
     .is-editing .view-mode { display: none; } .is-editing .edit-mode { display: block; }
+    .basic-info-readonly.is-editing [data-employee-basic-section] .view-mode { display: block; }
+    .basic-info-readonly.is-editing [data-employee-basic-section] .edit-mode { display: none; }
+    #infoContainer button[hidden] { display: none !important; }
     .adv-table { font-size: 0.85rem; } .adv-table input { border: none; background: #fff; padding: 2px 5px; width: 100%; border-bottom: 1px solid #eee; }
     .dept-row { border: 1px solid #e9ecef; border-radius: 10px; padding: 12px; background: #fff; margin-bottom: 10px; }
     .org-tree ul { list-style: none; padding-left: 18px; margin-bottom: 0; }
@@ -283,14 +286,17 @@ Change: 2026-10-11 - Verify resignation changes and distinguish unavailable Tele
         <div class="tab-content pt-2">
         <div class="tab-pane fade show active" id="tabInfo">
   <div id="infoContainer">
-    <div class="d-flex justify-content-end mb-2">
-      <button class="btn btn-sm btn-outline-primary view-mode" onclick="toggleEditMode(true)">✏️ 정보 수정</button>
+    <div class="d-flex flex-wrap justify-content-end align-items-center gap-2 mb-2">
+      <span id="employeeBasicAccessStatus" class="small text-muted" role="status"></span>
+      <button type="button" id="employeeBasicAccessRetry" class="btn btn-sm btn-outline-primary" onclick="retryEmployeeBasicAccess()" hidden>권한 다시 확인</button>
+      <button id="employeeBasicEditBtn" class="btn btn-sm btn-outline-primary view-mode" onclick="beginEmployeeInfoEdit()" hidden>✏️ 정보 수정</button>
+      <button id="employeeRrnEditBtn" class="btn btn-sm btn-outline-primary view-mode" onclick="beginEmployeeRrnEdit()" hidden>주민번호 수정</button>
       <button class="btn btn-sm btn-secondary edit-mode me-2" onclick="toggleEditMode(false)">취소</button>
-      <button class="btn btn-sm btn-primary edit-mode" onclick="saveBasicInfo()">직원 정보 저장</button>
+      <button id="employeeBasicSaveBtn" class="btn btn-sm btn-primary edit-mode" onclick="saveBasicInfo()" hidden>직원 정보 저장</button>
     </div>
     <div class="row g-3">
       <div class="col-12">
-        <div class="info-card">
+        <div class="info-card" data-employee-basic-section>
           <div class="section-title">👤 기본 인적사항</div>
           <div class="row g-3">
             <div class="col-md-3"><label class="small text-muted">이름</label><div class="view-mode fw-bold" id="viewName">-</div><input type="text" id="editName" class="form-control edit-mode"></div>
@@ -319,19 +325,20 @@ Change: 2026-10-11 - Verify resignation changes and distinguish unavailable Tele
       <div class="col-12">
         <div class="info-card" style="background:#fff3cd;">
            <div class="section-title text-dark">🚨 비상 연락망</div>
-           <div id="viewEmergency" class="small text-dark ps-2">-</div>
+           <div id="viewEmergency" class="small text-dark ps-2" role="status">조회 중...</div>
+           <button type="button" id="employeeEmergencyRetry" class="btn btn-sm btn-outline-primary mt-2" onclick="retryEmployeeIdentityInfo('emergency')" hidden>연락망 다시 조회</button>
         </div>
       </div>
 
       <div class="col-md-6">
         <div class="info-card">
           <div class="section-title">🎂 생년월일</div>
-          <div class="view-mode"><div class="d-flex align-items-center gap-2"><span class="fs-4 fw-bold text-dark" id="viewBirth">미등록</span></div><div class="small text-muted mt-2">* 주민번호 뒷자리 숨김</div></div>
+          <div class="view-mode"><div class="d-flex align-items-center gap-2"><span class="fs-4 fw-bold text-dark" id="viewBirth" role="status">조회 중...</span><button type="button" id="employeeBirthRetry" class="btn btn-sm btn-outline-primary" onclick="retryEmployeeIdentityInfo('birth')" hidden>다시 조회</button></div><div class="small text-muted mt-2">* 주민번호 뒷자리 숨김</div></div>
           <div class="edit-mode"><label class="small text-muted mb-1">주민번호 (전체 입력)</label><div class="d-flex align-items-center gap-2 mb-2"><input type="text" id="rrnFront" class="form-control text-center" maxlength="6" placeholder="생년월일"><span class="fw-bold text-muted">-</span><input type="password" id="rrnBack" class="form-control text-center" maxlength="7" placeholder="뒤 7자리"></div><button class="btn btn-outline-dark btn-sm w-100" onclick="saveRRN()">🔒 암호화 저장</button></div>
         </div>
       </div>
       <div class="col-md-6">
-        <div class="info-card">
+        <div class="info-card" data-employee-basic-section>
           <div class="section-title">💰 연봉 계약</div>
           <div class="view-mode"><label class="small text-muted">현재 연봉</label><div class="d-flex align-items-center gap-2"><span class="fs-5 fw-bold" id="viewSalary">******</span><i class="bi bi-eye text-primary cursor-pointer" onclick="toggleSalaryVisibility()"></i></div><div class="mt-2"><label class="small text-muted">적용 시작일: </label><span class="fw-bold" id="viewSalaryDate">-</span></div></div>
           <div class="edit-mode"><div class="mb-2"><label class="small text-muted">연봉 총액 (원)</label><input data-number-group type="number" id="editSalary" class="form-control fw-bold"></div><div class="mb-2"><label class="small text-muted">적용 시작일</label><input type="date" id="salaryApplyDate" class="form-control"></div></div>
@@ -943,6 +950,10 @@ const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
 let employeeDetailRevision = 0, employeeBasicSaveInFlight = false, employeeBasicBaseline = null;
 let employeeResignationSaveInFlight = false, employeeResignationContext = null;
+let employeeResumeReadContext = null;
+const employeeBasicAccess = {state:'idle',owner:'',empId:'',revision:0,allowed:false,pending:null};
+const employeeIdentityReads = new Map();
+const employeeInfoAccessReads = new Map();
 const EMPLOYEE_DETAIL_DRAFT_IDS = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
     'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate',
     'rrnFront','rrnBack','durunuriEligibilityEnabled','durunuriConfirmedMonths','durunuriConfirmedThroughMonth',
@@ -1123,6 +1134,11 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
 }
 function cancelEmployeeDetailReads() {
     employeeDetailRevision += 1;
+    employeeIdentityReads.clear();
+    employeeInfoAccessReads.clear();
+    employeeBasicAccess.allowed = false;
+    employeeBasicAccess.state = 'idle';
+    syncEmployeeBasicAccessUi();
     employeeDetailTabLoads.clear();
     Object.keys(employeeDetailReadTokens).forEach(key => { employeeDetailReadTokens[key] += 1; });
     employeeModuleAccessSnapshot = employeeNotificationSnapshot = null;
@@ -2922,7 +2938,7 @@ window.onload = async function() {
         showHrSettingsModal();
         window.ERPEmployeeSettingsView.checkpoint();
     }
-    window.ErpWorkspaceResume.register({modules:['hr'], refresh:loadList,
+    window.ErpWorkspaceResume.register({modules:['hr'], refresh:refreshEmployeeSettingsWorkspace,
         busy:() => companySettingsSaveInFlight || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
             || window.ERPAnnualSettings?.isBusy()
             || window.ERPEmployeeSettingsView?.isDirty()
@@ -3371,12 +3387,17 @@ function formatAdminEmployeeTelegramLinkedAt(value) {
     });
 } // End of formatAdminEmployeeTelegramLinkedAt
 
-async function loadTelegramApprovalLinkStatusMap() {
+async function loadTelegramApprovalLinkStatusMap({isReadCurrent = isHrSettingsContextCurrent} = {}) {
     const owner = getHrSettingsOwner();
-    if (!isHrSettingsContextCurrent(owner)) return false;
-    if (employeeTelegramRead.pending && employeeTelegramRead.owner === owner) return employeeTelegramRead.pending;
+    if (!isReadCurrent(owner)) return false;
+    if (employeeTelegramRead.pending && employeeTelegramRead.owner === owner) {
+        if (employeeTelegramRead.isCurrent?.() !== false) return employeeTelegramRead.pending;
+        await employeeTelegramRead.pending;
+        if (!isReadCurrent(owner)) return false;
+    }
     const revision = ++employeeTelegramRead.revision;
-    const isCurrent = () => revision === employeeTelegramRead.revision && isHrSettingsContextCurrent(owner);
+    const isCurrent = () => revision === employeeTelegramRead.revision && isReadCurrent(owner);
+    employeeTelegramRead.isCurrent = isCurrent;
     employeeTelegramRead.owner = owner;
     employeeTelegramRead.state = 'loading';
     telegramApprovalLinkStatusMap = {};
@@ -4190,6 +4211,17 @@ async function loadCoopSettingsEmployees() {
     if (!owner || owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     employeeCache = Array.isArray(data) ? data : [];
 }
+async function refreshEmployeeSettingsWorkspace() {
+    const context = {owner:getHrSettingsOwner()};
+    if (!context.owner || (window.frameElement?.hidden && window.frameElement.id !== 'erpWorkspaceFrame')) return;
+    employeeResumeReadContext = context;
+    try { await loadList(); }
+    finally { if (employeeResumeReadContext === context) employeeResumeReadContext = null; }
+}
+function isEmployeeListReadContextCurrent(owner) {
+    return isHrSettingsContextCurrent(owner) || !!owner && owner === getHrSettingsOwner()
+        && employeeResumeReadContext?.owner === owner && window.frameElement?.id === 'erpWorkspaceFrame';
+}
 async function loadList() {
     if (window.ERPEmployeeSettingsView?.isPage) {
         const owner = getHrSettingsOwner();
@@ -4215,7 +4247,11 @@ async function loadList() {
     const tbody = document.getElementById("empListBody");
     const owner = getHrSettingsOwner();
     const listRevision = ++employeeListReadRevision;
-    const isCurrentList = () => listRevision === employeeListReadRevision && isHrSettingsContextCurrent(owner);
+    const readContext = employeeResumeReadContext;
+    const isReadCurrent = () => isEmployeeListReadContextCurrent(owner)
+        && (!window.frameElement?.hidden || !!readContext && readContext === employeeResumeReadContext);
+    const isCurrentList = () => listRevision === employeeListReadRevision && isReadCurrent();
+    if (!isCurrentList()) return;
     tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4">로딩 중...</td></tr>';
     const { data: list, error } = await _supabase.rpc('erp_hr_list_employees', {p_choices_only:false});
     if (!isCurrentList()) return;
@@ -4224,7 +4260,7 @@ async function loadList() {
         throw error || new Error('EMPLOYEE_LIST_UNAVAILABLE');
     }
     if (owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
-    await loadTelegramApprovalLinkStatusMap();
+    await loadTelegramApprovalLinkStatusMap({isReadCurrent});
     if (!isCurrentList()) return;
     employeeCache = Array.isArray(list) ? list.slice().sort(compareEmployeesByDisplayNo) : [];
     tbody.innerHTML = "";
@@ -4709,7 +4745,7 @@ function isHrSettingsContextCurrent(owner) {
 function isHrSettingsReadContextCurrent(owner) {
     return isHrSettingsContextCurrent(owner) || !!owner
         && window.ERPEmployeeSettingsView?.isPage && hrSettingsResumeReadOwner === owner
-        && owner === getHrSettingsOwner();
+        && owner === getHrSettingsOwner() && window.frameElement?.id === 'erpWorkspaceFrame';
 }
 function showHrSettingsModal() {
     initAnnualSettings();
@@ -5380,6 +5416,120 @@ async function saveEmployeeNotificationAssignments() {
     }
 } // End of saveEmployeeNotificationAssignments
 
+function employeeInfoContext() {
+    const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
+    return {owner,empId,revision,isCurrent:() => !!owner && !!empId && isHrSettingsContextCurrent(owner)
+        && empId === String(currentEmpId || '') && revision === employeeDetailRevision};
+}
+function verifyEmployeeInfoAccess(context) {
+    const key = `${context.owner}|${context.empId}|${context.revision}`;
+    if (employeeInfoAccessReads.has(key)) return employeeInfoAccessReads.get(key);
+    const pending = verifyEmployeeDetailTabAccess(context.owner).finally(() => {
+        if (employeeInfoAccessReads.get(key) === pending) employeeInfoAccessReads.delete(key);
+    });
+    employeeInfoAccessReads.set(key,pending);
+    return pending;
+}
+function canEmployeeBasicEdit() {
+    return employeeBasicAccess.state === 'ready' && employeeBasicAccess.allowed === true
+        && employeeBasicAccess.owner === getHrSettingsOwner() && employeeBasicAccess.empId === String(currentEmpId || '')
+        && employeeBasicAccess.revision === employeeDetailRevision;
+}
+function syncEmployeeBasicAccessUi() {
+    const allowed = canEmployeeBasicEdit(), container = document.getElementById('infoContainer');
+    container.classList.toggle('basic-info-readonly', !allowed);
+    document.getElementById('employeeBasicEditBtn').hidden = !allowed;
+    document.getElementById('employeeBasicSaveBtn').hidden = !allowed;
+    document.getElementById('employeeRrnEditBtn').hidden = allowed || !currentEmpId || !getHrSettingsOwner();
+    const failed = employeeBasicAccess.state === 'error';
+    document.getElementById('employeeBasicAccessRetry').hidden = !failed;
+    document.getElementById('employeeBasicAccessStatus').textContent = failed
+        ? '수정 권한을 확인하지 못했습니다.' : employeeBasicAccess.state === 'loading' ? '수정 권한 확인 중…' : '';
+    container.querySelectorAll('[data-employee-basic-section] input,[data-employee-basic-section] select,[data-employee-basic-section] button')
+        .forEach(element => { element.disabled = !allowed || employeeBasicSaveInFlight; });
+}
+function loadEmployeeBasicAccess() {
+    const context = employeeInfoContext();
+    if (!context.isCurrent()) return Promise.resolve(false);
+    if (employeeBasicAccess.pending && employeeBasicAccess.owner === context.owner
+        && employeeBasicAccess.empId === context.empId && employeeBasicAccess.revision === context.revision) return employeeBasicAccess.pending;
+    Object.assign(employeeBasicAccess, {state:'loading',allowed:false,owner:context.owner,empId:context.empId,revision:context.revision});
+    syncEmployeeBasicAccessUi();
+    const pending = (async () => {
+        try {
+            await verifyEmployeeInfoAccess(context);
+            if (!context.isCurrent()) return false;
+            // The basic save uses this exact server predicate; do not infer it from HR/menu access.
+            const {data,error} = await _supabase.rpc('is_erp_privileged');
+            if (!context.isCurrent()) return false;
+            if (error || typeof data !== 'boolean') throw new Error('EMPLOYEE_EDIT_ACCESS_UNAVAILABLE');
+            employeeBasicAccess.state = 'ready'; employeeBasicAccess.allowed = data === true;
+            return data === true;
+        } catch (_) {
+            if (context.isCurrent()) { employeeBasicAccess.state = 'error'; employeeBasicAccess.allowed = false; }
+            return false;
+        } finally {
+            if (employeeBasicAccess.pending === pending) employeeBasicAccess.pending = null;
+            if (context.isCurrent()) syncEmployeeBasicAccessUi();
+        }
+    })();
+    employeeBasicAccess.pending = pending;
+    return pending;
+}
+async function retryEmployeeBasicAccess() {
+    if (!isEmployeeDetailTabVisible('tabInfo') || isEmployeeDetailSaving()) return;
+    await loadEmployeeBasicAccess();
+}
+async function beginEmployeeInfoEdit() {
+    const context = employeeInfoContext();
+    if (!isEmployeeDetailTabVisible('tabInfo') || isEmployeeDetailSaving()) return;
+    if (await loadEmployeeBasicAccess() && context.isCurrent()) toggleEditMode(true);
+}
+async function beginEmployeeRrnEdit() {
+    const context = employeeInfoContext();
+    if (!isEmployeeDetailTabVisible('tabInfo') || isEmployeeDetailSaving()) return;
+    try {
+        await verifyEmployeeDetailTabAccess(context.owner);
+        if (context.isCurrent()) toggleEditMode(true, 'rrn');
+    } catch (_) { if (context.isCurrent()) showAlert('수정 권한을 확인하지 못했습니다. 다시 시도해 주세요.'); }
+}
+function setEmployeeIdentityReadState(kind, state, data) {
+    const node = document.getElementById(kind === 'birth' ? 'viewBirth' : 'viewEmergency');
+    document.getElementById(kind === 'birth' ? 'employeeBirthRetry' : 'employeeEmergencyRetry').hidden = state !== 'error';
+    if (state !== 'ready') { node.textContent = state === 'error' ? '조회하지 못했습니다.' : '조회 중...'; return; }
+    if (kind === 'birth') { node.innerText = data || '미등록'; return; }
+    node.innerHTML = data.length ? data.map(e => `<div><span class="fw-bold">${escapeHtml(e.relation || '-')}:</span> ${escapeHtml(e.contact_name || '-')} (${escapeHtml(e.phone || '-')})</div>`).join('')
+        : '<span class="text-muted small">- 등록된 연락망 없음 -</span>';
+}
+function loadEmployeeIdentityInfo(kind) {
+    if (!['birth','emergency'].includes(kind)) return Promise.resolve(false);
+    const context = employeeInfoContext(), key = `${context.owner}|${context.empId}|${context.revision}|${kind}`;
+    if (!context.isCurrent()) return Promise.resolve(false);
+    if (employeeIdentityReads.get(key)) return employeeIdentityReads.get(key);
+    setEmployeeIdentityReadState(kind, 'loading');
+    const pending = (async () => {
+        try {
+            await verifyEmployeeInfoAccess(context);
+            if (!context.isCurrent()) return false;
+            const {data,error} = kind === 'birth'
+                ? await _supabase.rpc('get_emp_birthdate', {p_emp_id:context.empId})
+                : await scopeEmployeeTenant(_supabase.from('ref_emergency_contacts').select('relation,contact_name,phone')).eq('emp_id',context.empId);
+            if (!context.isCurrent()) return false;
+            if (error || (kind === 'emergency' ? !Array.isArray(data) : data !== null && typeof data !== 'string')) throw new Error('EMPLOYEE_IDENTITY_READ_UNAVAILABLE');
+            setEmployeeIdentityReadState(kind, 'ready', data);
+            return true;
+        } catch (_) {
+            if (context.isCurrent()) setEmployeeIdentityReadState(kind, 'error');
+            return false;
+        } finally { if (employeeIdentityReads.get(key) === pending) employeeIdentityReads.delete(key); }
+    })();
+    employeeIdentityReads.set(key,pending);
+    return pending;
+}
+async function retryEmployeeIdentityInfo(kind) {
+    if (!isEmployeeDetailTabVisible('tabInfo') || isEmployeeDetailSaving()) return;
+    await loadEmployeeIdentityInfo(kind);
+}
 async function openDetail(u) {
     if (isEmployeeDetailSaving()) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
     if (hasUnsavedEmployeeDetail()) {
@@ -5388,9 +5538,13 @@ async function openDetail(u) {
     }
     employeeDetailDraftBaseline.clear();
     const revision = ++employeeDetailRevision;
-    const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id);
+    const owner = getHrSettingsOwner();
+    const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id) && isHrSettingsContextCurrent(owner);
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
     employeeDetailTabLoads.clear();
+    employeeIdentityReads.clear();
+    employeeBasicAccess.state = 'idle'; employeeBasicAccess.allowed = false;
+    syncEmployeeBasicAccessUi();
     ['tabSalary','tabLog','tabModuleAccess','tabNotificationAccess'].forEach(tabId => setEmployeeDetailTabState(tabId, 'loading'));
     resetEmployeeModuleAccessUi();
     resetEmployeeNotificationUi();
@@ -5418,24 +5572,8 @@ async function openDetail(u) {
     document.getElementById("viewSalaryDate").innerText = u.salary_apply_date || "-"; document.getElementById("editSalary").value = u.base_salary || 0; document.getElementById("salaryApplyDate").value = u.salary_apply_date || "";
     updateMemberPullStatus('조합원 번호, 이메일, 이름 순으로 일치 대상을 찾아 값을 채웁니다.', 'muted');
 
-    const { data: birthDate } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: u.emp_id });
+    await Promise.all([loadEmployeeBasicAccess(), loadEmployeeIdentityInfo('birth'), loadEmployeeIdentityInfo('emergency')]);
     if (!isCurrent()) return;
-    document.getElementById("viewBirth").innerText = birthDate || "미등록";
-
-    // [추가된 부분] 비상 연락망 조회 및 표시
-    const { data: emList } = await scopeEmployeeTenant(_supabase.from('ref_emergency_contacts').select('*')).eq('emp_id', u.emp_id);
-    if (!isCurrent()) return;
-    const emDiv = document.getElementById("viewEmergency");
-    if(emList && emList.length > 0) {
-        emDiv.innerHTML = emList.map(e => {
-            const safeRelation = escapeHtml(e.relation || '-');
-            const safeName = escapeHtml(e.contact_name || '-');
-            const safePhone = escapeHtml(e.phone || '-');
-            return `<div><span class="fw-bold">${safeRelation}:</span> ${safeName} (${safePhone})</div>`;
-        }).join("");
-    } else {
-        emDiv.innerHTML = '<span class="text-muted small">- 등록된 연락망 없음 -</span>';
-    }
 
     toggleEditMode(false);
     document.getElementById("rrnFront").value = ""; document.getElementById("rrnBack").value = "";
@@ -5471,7 +5609,10 @@ document.getElementById('detailModal').addEventListener('shown.bs.modal', () => 
 });
 function toggleEditMode(isEdit, completedScope = 'edit') {
     const c = document.getElementById("infoContainer");
-    if (isEdit) c.classList.add("is-editing");
+    if (isEdit) {
+        if (!isHrSettingsContextCurrent(getHrSettingsOwner()) || (!canEmployeeBasicEdit() && completedScope !== 'rrn')) return;
+        c.classList.add("is-editing");
+    }
     else {
         // Basic information, RRN and support eligibility have separate saves.
         // Explicit cancel/close discards the edit-mode fields, never support settings.
@@ -5488,6 +5629,7 @@ function toggleSalaryVisibility() { const el = document.getElementById("viewSala
 async function saveBasicInfo() {
     if (employeeBasicSaveInFlight || salarySaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight
         || !currentEmpId || !employeeBasicBaseline) return;
+    if (!canEmployeeBasicEdit() || !isEmployeeDetailTabVisible('tabInfo')) return showAlert('현재 권한으로 직원 기본정보를 수정할 수 없습니다.');
     const empId = currentEmpId;
     const revision = employeeDetailRevision;
     const expected = { ...employeeBasicBaseline };
@@ -5520,6 +5662,8 @@ async function saveBasicInfo() {
         lockedInputs.push([input, input.disabled]);
         input.disabled = true;
     });
+    const accessContext = employeeInfoContext();
+    if (!await loadEmployeeBasicAccess() || !accessContext.isCurrent()) return;
     const emailConflict = await findEmployeeEmailConflict(email, { excludeEmpId: empId });
     if (revision !== employeeDetailRevision || String(currentEmpId) !== String(empId)) return;
     if (emailConflict) {
@@ -5581,6 +5725,7 @@ async function saveBasicInfo() {
     } finally {
         lockedInputs.forEach(([input, disabled]) => { input.disabled = disabled; });
         employeeBasicSaveInFlight = false;
+        syncEmployeeBasicAccessUi();
     }
 }
 
