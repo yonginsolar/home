@@ -1,4 +1,4 @@
-/* Member notification administration v1.0.0. Read on demand; no tokens or local persistence. */
+/* Member notification administration v1.0.1. Read on demand; no tokens or local persistence. */
 (() => {
  'use strict';
  let client,owner='',generation=0,tab='summary',ctx,events=[],detailRevision=0;
@@ -58,7 +58,11 @@
     $('notification-content').innerHTML='<div class="notification-metrics">'+[['텔레그램 연결',t.linked],['연결 대기',t.pending],['미연결',t.unlinked],['기간 내 발송 접수',r.accepted],['실패·결과 확인 필요',Number(r.failed||0)+Number(r.unknown||0)]].map(([label,n])=>'<div class="card p-3"><div class="text-secondary">'+label+'</div><strong class="fs-3">'+num(n)+'</strong></div>').join('')+'</div>';
    }
    $('notification-status').textContent='';
-  }catch(e){if(current()){$('notification-status').textContent=errorText(e);if(!drafts.size)$('notification-content').replaceChildren();}}
+  }catch(e){if(current()){
+   $('notification-status').textContent=errorText(e);
+   if(tab==='settings'&&events.length){ctx={...ctx,can_edit:false};renderSettings();}
+   else if(!drafts.size)$('notification-content').replaceChildren();
+  }}
  }
  function renderSettings(){
   const ownChannel=events.find(x=>x.channel_name)?.channel_name;
@@ -89,7 +93,7 @@
     }
    }
   }
-  finally{busy.delete(key);if(gen===generation)renderSettings();}
+  finally{if(gen===generation){busy.delete(key);renderSettings();}}
  }
  async function loadList(offset){
   const current=capture('list'),mode=tab;if(!['history','connections'].includes(mode))return;
@@ -113,6 +117,7 @@
   let dialog=$('notification-message-dialog');
   if(!dialog){dialog=document.createElement('dialog');dialog.id='notification-message-dialog';dialog.className='notification-message-dialog';dialog.innerHTML='<div class="d-flex justify-content-between align-items-center mb-3"><h4 class="mb-0">알림 문구</h4><button type="button" class="btn-close" aria-label="닫기"></button></div><div class="nav nav-pills mb-3"><button type="button" class="nav-link active" data-preview-channel="telegram">텔레그램</button><button type="button" class="nav-link" data-preview-channel="kakao">카톡</button></div><p id="notification-message-state" role="status"></p><pre id="notification-message-body"></pre>';document.body.append(dialog);dialog.querySelector('.btn-close').onclick=()=>dialog.close();}
   const current=capture('preview');dialog.dataset.channel='telegram';dialog.showModal();$('notification-message-state').textContent='조회 중…';$('notification-message-body').textContent='';
+  dialog.querySelectorAll('[data-preview-channel]').forEach(b=>{b.onclick=null;b.disabled=true;b.classList.toggle('active',b.dataset.previewChannel==='telegram');});
   try{
    const result=await client.functions.invoke('notification-template-preview',{body:{event_key:key},headers:{'x-erp-host':location.hostname}});
    if(result.error||result.data?.error)throw result.error||new Error(result.data.error);if(!current()||!dialog.open)return;
@@ -123,7 +128,7 @@
     $('notification-message-body').textContent=text||'이 알림은 해당 채널로 발송하지 않습니다.';
     dialog.querySelectorAll('[data-preview-channel]').forEach(b=>b.classList.toggle('active',b.dataset.previewChannel===channel));
    };
-   dialog.querySelectorAll('[data-preview-channel]').forEach(b=>{b.onclick=()=>{dialog.dataset.channel=b.dataset.previewChannel;render();};});render();
+   dialog.querySelectorAll('[data-preview-channel]').forEach(b=>{b.disabled=false;b.onclick=()=>{dialog.dataset.channel=b.dataset.previewChannel;render();};});render();
   }catch(e){if(current()&&dialog.open)$('notification-message-state').textContent=errorText(e);}
  }
  async function detail(memberUid){
