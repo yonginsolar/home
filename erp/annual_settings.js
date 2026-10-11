@@ -56,5 +56,5 @@
   document.getElementById('settingsModal').addEventListener('click',event=>{const target=event.target.closest('[data-annual-action]');if(target)save(target.dataset.annualAction);});
   document.getElementById('settingsModal').addEventListener('hide.bs.modal',event=>{if(busy){event.preventDefault();return;}if(dirty()&&!closingApproved){event.preventDefault();confirmDiscard().then(ok=>{if(ok){closingApproved=true;api.close();closingApproved=false;}});}});
  }
- global.ERPAnnualSettings={init,load,save,isDirty:dirty,isBusy:()=>busy,errorMessage:message,currentYear};
+ global.ERPAnnualSettings={init,load,save,isDirty:dirty,isBusy:()=>busy,errorMessage:message,currentYear,selection:()=>({year,period})};
 })(window);

@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.102
-Change: 2026-10-11 - Load visible detail tabs on demand while preserving edits and server authority.
+Version: v1.0.103
+Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain existing state and authority.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.102 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.103 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-  <title>직원 및 설정 관리 v2.7 (최종)</title>
+  <title>직원 관리</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
@@ -48,7 +48,8 @@ Change: 2026-10-11 - Load visible detail tabs on demand while preserving edits a
   <script src="leave_ledger.js?v=20260928-1"></script>
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
 
-<script src="annual_settings.js?v=20261010-1"></script>
+<script src="annual_settings.js?v=20261011-2"></script>
+<script src="coop_settings_view.js?v=20261011-1"></script>
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -59,6 +60,8 @@ Change: 2026-10-11 - Load visible detail tabs on demand while preserving edits a
     .nav-tabs .nav-link { color: #666; cursor: pointer; border:none; padding: 12px 20px; font-weight: 600; }
     .nav-tabs .nav-link.active { font-weight: bold; color: #0d6efd; border-bottom: 3px solid #0d6efd; background: transparent; }
     #settingsModal { word-break: keep-all; overflow-wrap: break-word; color-scheme: light; }
+    .erp-coop-settings .coop-settings-content { width: 100%; min-width: 0; }
+    .erp-coop-settings #settingTab { position: sticky; top: 0; z-index: 2; background: #fff; margin-top: 0; padding-top: 8px; }
     #settingTab .nav-item { flex: 1 1 0; }
     #settingTab .nav-link { height: 100%; text-align: center; padding: 12px 8px; }
     #annualYearTabs .btn { flex-basis: 0; min-height: 42px; }
@@ -125,7 +128,7 @@ Change: 2026-10-11 - Load visible detail tabs on demand while preserving edits a
   <script src="hr_insurance_status.js?v=1.0.0" defer></script>
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
-  <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
+  <script src="/erp/workspace_nav.js?v=20261011-15" defer></script>
   <meta name="erp-workflow-revision" content="20261010.2">
   <link rel="stylesheet" href="workflow_ease.css?v=20261010-2">
   <script src="workflow_ease.js?v=20261010-1" defer></script>
@@ -141,8 +144,8 @@ Change: 2026-10-11 - Load visible detail tabs on demand while preserving edits a
 <div id="hrPageShell" class="main-card hidden">
   <div class="hr-page-header mb-4">
     <div class="hr-page-heading">
-      <h4 class="fw-bold m-0" id="hrPageTitle">👥 직원 및 설정 관리</h4>
-      <small class="text-muted hr-page-subtitle" id="hrPageSubtitle">직원 정보·급여·근태·전자결재 설정 관리</small>
+      <h4 class="fw-bold m-0" id="hrPageTitle">👥 직원 관리</h4>
+      <small class="text-muted hr-page-subtitle" id="hrPageSubtitle">직원 정보·급여·근태 관리</small>
     </div>
     <div class="hr-page-actions">
       <button class="btn btn-light btn-sm btn-rounded" onclick="location.href='index.html'" data-erp-home-link>🏠 홈</button>
@@ -151,7 +154,6 @@ Change: 2026-10-11 - Load visible detail tabs on demand while preserving edits a
       <button class="btn btn-outline-primary btn-sm btn-rounded" data-workspace-submenu onclick="ErpWorkspaceResume.navigate('hr_insurance.html')">🧾 입사·퇴사 신고</button>
       <button class="btn btn-outline-primary btn-sm btn-rounded" data-workspace-submenu onclick="openStatsDashboard()">📈 통계</button>
       <button class="btn btn-primary btn-sm btn-rounded shadow-sm" onclick="openInviteModal()">✨ 신규등록</button>
-      <div class="workflow-action-group"><button class="btn btn-outline-secondary btn-sm btn-rounded" data-workspace-submenu onclick="openSettings()">⚙️ 조합 설정</button></div>
     </div>
   </div>
   <div class="hr-toolbar">
@@ -930,7 +932,7 @@ function getRoleBadge(roleKey) {
 
 let settings = {}; let companyInfo = {}; let advancedSettingsRaw = [];
 let companySettingsSaveInFlight = false;
-let hrSettingsAuthorized = false, hrSettingsReadyOwner = '', hrSettingsOpenPromise = null;
+let hrSettingsAuthorized = false, hrSettingsReadyOwner = '', hrSettingsOpenPromise = null, hrSettingsResumeReadOwner = '';
 let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
@@ -992,7 +994,7 @@ function guardEmployeeDetailClose(event) {
     cancelEmployeeDetailReads();
 }
 window.addEventListener('beforeunload', event => {
-    if (hasUnsavedEmployeeDetail()) { event.preventDefault(); event.returnValue = ''; }
+    if (hasUnsavedEmployeeDetail() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
 });
 let employeeSalaryLoadRevision = 0;
 const EMPLOYEE_BASIC_FIELDS = ['emp_name','member_id','phone','email','position','auth_level','department','address','hire_date','base_salary','salary_apply_date'];
@@ -2716,8 +2718,8 @@ function applyHrRuntimeProfileUi() {
     const durunuriRow = durunuriEmpEl ? durunuriEmpEl.closest('.row.g-2.mt-1') : null;
     const durunuriEligibilityCardWrap = document.getElementById('durunuriEligibilityCardWrap');
 
-    if (pageTitle) pageTitle.textContent = '👥 직원 및 설정 관리';
-    if (pageSubtitle) pageSubtitle.textContent = isLite ? '직원 정보·전자결재 설정 관리' : '직원 정보·급여·근태·전자결재 설정 관리';
+    if (pageTitle) pageTitle.textContent = '👥 직원 관리';
+    if (pageSubtitle) pageSubtitle.textContent = isLite ? '직원 정보 관리' : '직원 정보·급여·근태 관리';
     if (settingYearRow) settingYearRow.classList.toggle('d-none', isLite);
 
     if (taxTabLink && taxTabLink.parentElement) {
@@ -2764,14 +2766,15 @@ function setHrBootStateReady() {
     const loadingEl = document.getElementById('hrLoadingScreen');
     const shellEl = document.getElementById('hrPageShell');
     if (loadingEl) loadingEl.classList.add('hidden');
-    if (shellEl) shellEl.classList.remove('hidden');
+    if (shellEl && !window.ERPEmployeeSettingsView.isPage) shellEl.classList.remove('hidden');
 }
 
 window.onload = async function() {
     try {
+    window.ERPEmployeeSettingsView.prepare();
     alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
     confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
-    settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
+    settingsModal = window.ERPEmployeeSettingsView.controller(window.ERPEmployeeSettingsView.isPage ? null : new bootstrap.Modal(document.getElementById('settingsModal')));
     inviteModal = new bootstrap.Modal(document.getElementById('inviteModal'));
     detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
     adminCertModal = new bootstrap.Modal(document.getElementById('adminCertModal'));
@@ -2872,21 +2875,26 @@ window.onload = async function() {
     hrRuntimeProfile = String(hrRuntimeGate.runtime?.runtime_profile || 'legacy_full');
     applyHrRuntimeProfileUi();
 
-    await Promise.all([loadList(), loadCompanyInfo()]);
+    await Promise.all([window.ERPEmployeeSettingsView.isPage ? loadCoopSettingsEmployees() : loadList(), loadCompanyInfo({throwOnError:window.ERPEmployeeSettingsView.isPage})]);
     hrSettingsAuthorized = true;
-    await loadSettings({ loadAuxiliary: false });
+    await loadSettings({ loadAuxiliary: window.ERPEmployeeSettingsView.isPage, throwOnError: window.ERPEmployeeSettingsView.isPage });
     applyHrRuntimeProfileUi();
     syncHrProfileCompanySettingsUi();
     syncHrStructureSettingsUi();
     syncHrModalStack();
+    if (window.ERPEmployeeSettingsView.isPage) {
+        hrSettingsReadyOwner = getHrSettingsOwner();
+        showHrSettingsModal();
+    }
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:loadList,
         busy:() => companySettingsSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
+            || window.ERPAnnualSettings?.isBusy()
             || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight
             || (typeof saveRRN === 'function' && saveRRN._inFlight)
             || (typeof saveDurunuriEligibilityProfile === 'function' && saveDurunuriEligibilityProfile._inFlight)});
     } catch (error) {
         console.error('[admin_employee] boot failed:', error);
-        showAlert('직원관리 초기화 중 오류가 발생했습니다.\n' + (error?.message || '잠시 후 다시 시도해 주세요.'));
+        showAlert((window.ERPEmployeeSettingsView.isPage ? '조합 설정' : '직원 관리') + ' 초기화 중 오류가 발생했습니다.\n' + (error?.message || '잠시 후 다시 시도해 주세요.'));
     } finally {
         setHrBootStateReady();
     }
@@ -4090,7 +4098,31 @@ async function findEmployeeEmailConflict(email, options = {}) {
     }) || null;
 } // End of findEmployeeEmailConflict
 
+async function loadCoopSettingsEmployees() {
+    // Only the current coop's basic approver choices, not payroll/identity/contact data or Telegram status.
+    const {data, error} = await scopeEmployeeTenant(_supabase.from('ref_employees')
+        .select('emp_id,emp_name,display_emp_no,position,department,auth_level,resign_date')).is('resign_date', null);
+    if (error) throw error;
+    employeeCache = Array.isArray(data) ? data : [];
+}
 async function loadList() {
+    if (window.ERPEmployeeSettingsView?.isPage) {
+        const owner = getHrSettingsOwner();
+        if (!owner) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+        // The workspace rechecks Auth/runtime before refreshing a still-hidden retained page.
+        // Permit only these reads while hidden; editing and saves keep their original gates.
+        hrSettingsResumeReadOwner = owner;
+        try {
+            const isCurrent = () => isHrSettingsReadContextCurrent(owner);
+            await Promise.all([loadCoopSettingsEmployees(), loadCompanyInfo({throwOnError:true, refreshUi:false})]);
+            if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+            await loadSettings({throwOnError:true, isCurrent, annualSelection:window.ERPAnnualSettings.selection()});
+            hrSettingsReadyOwner = owner;
+        } finally {
+            if (hrSettingsResumeReadOwner === owner) hrSettingsResumeReadOwner = '';
+        }
+        return;
+    }
     const tbody = document.getElementById("empListBody");
     tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4">로딩 중...</td></tr>';
     const { data: list, error } = await scopeEmployeeTenant(_supabase.from('ref_employees').select('*'));
@@ -4549,9 +4581,10 @@ function initAnnualSettings() {
     window.ERPAnnualSettings.init({
         rpc: async args => {
             const owner = getHrSettingsOwner();
-            if (!isHrSettingsContextCurrent(owner)) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+            const isCurrent = () => args.p_action === 'get' ? isHrSettingsReadContextCurrent(owner) : isHrSettingsContextCurrent(owner);
+            if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
             const result = await _supabase.rpc('erp_annual_settings', args);
-            if (!isHrSettingsContextCurrent(owner)) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+            if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
             return result;
         },
         confirm: text => new Promise(resolve => { showConfirm(text, () => resolve(true)); const modal = document.getElementById('confirmModal'); if (modal) modal.addEventListener('hidden.bs.modal', () => resolve(false), { once: true }); }),
@@ -4572,6 +4605,11 @@ function getHrSettingsOwner() {
 }
 function isHrSettingsContextCurrent(owner) {
     return !!owner && owner === getHrSettingsOwner() && !window.frameElement?.hidden;
+}
+function isHrSettingsReadContextCurrent(owner) {
+    return isHrSettingsContextCurrent(owner) || !!owner
+        && window.ERPEmployeeSettingsView?.isPage && hrSettingsResumeReadOwner === owner
+        && owner === getHrSettingsOwner();
 }
 function showHrSettingsModal() {
     initAnnualSettings();
@@ -4607,10 +4645,10 @@ function openSettings() {
     hrSettingsOpenPromise = pending;
     return pending;
 }
-async function loadSettings({ throwOnError = false, loadAuxiliary = true, isCurrent = () => true } = {}) {
+async function loadSettings({ throwOnError = false, loadAuxiliary = true, isCurrent = () => true, annualSelection = null } = {}) {
     initAnnualSettings();
     if (loadAuxiliary) {
-        try { await window.ERPAnnualSettings.load(window.ERPAnnualSettings.currentYear()); }
+        try { await window.ERPAnnualSettings.load(annualSelection?.year ?? window.ERPAnnualSettings.currentYear(), annualSelection?.period); }
         catch (error) { if (throwOnError) throw error; showAlert(window.ERPAnnualSettings.errorMessage(error)); }
         if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
         await loadCalendarIcsSettings({ throwOnError, isCurrent });
@@ -4762,6 +4800,7 @@ async function saveSettings() {
         // 마무리
         await loadCompanyInfo({ throwOnError: true, refreshUi: false });
         await loadSettings({ throwOnError: true }); // 저장 실패와 후속 조회 실패를 구분
+        window.ErpWorkspaceResume?.checkpoint(document.getElementById('settingsModal'));
         companySettingsSaveInFlight = false;
         settingsModal.hide();
         showAlert("저장되었습니다.");

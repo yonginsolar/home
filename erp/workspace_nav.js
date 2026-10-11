@@ -1,14 +1,15 @@
-/* ERP workspace navigation v1.5.1 — original task controls remain connected on memory resume. */
+/* ERP workspace navigation v1.5.2 — separate settings entry with the existing HR boundary. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261010.9';
+  const VERSION = '20261011.15';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
     ['btnAccounting', '회계 관리', 'accounting.html', 'accounting', ['accounting.view'], '▤'],
-    ['btnAdmin', '직원·설정 관리', 'admin_employee.html', 'hr', ['hr.admin'], '⚙'],
+    ['btnAdmin', '직원 관리', 'admin_employee.html', 'hr', ['hr.admin'], '♙'],
+    ['btnCoopSettings', '조합 설정', 'admin_employee.html?section=settings', 'hr', ['hr.admin'], '⚙'],
     ['btnMemberAdmin', '조합원 관리', 'admin_member.html?scope=member_admin&tab=dashboard', 'member_admin', ['member.admin'], '♧', true],
     ['btnParticipationAnalytics', '조합원 참여 현황', 'participation_analytics.html', 'member_admin', ['member.admin'], '▥'],
     ['btnEducationParticipants', '교육·행사 관리', 'participation.html?view=education', 'education', ['member.admin', 'education.manage'], '▣'],
@@ -50,7 +51,11 @@
       const scope = params.get('scope') || 'member_admin';
       return path === leaf && scope === target.searchParams.get('scope');
     }
-    if (leaf === 'admin_employee') return ['admin_employee', 'hr_insurance', 'employment_contracts', 'village_company_info'].includes(path);
+    if (leaf === 'admin_employee') {
+      const settings = target.searchParams.get('section') === 'settings';
+      if (path === leaf) return (params.get('section') === 'settings') === settings;
+      return !settings && ['hr_insurance', 'employment_contracts', 'village_company_info'].includes(path);
+    }
     if (leaf === 'governance') return ['governance', 'meeting_workspace', 'admin_minutes', 'officials_signature_admin'].includes(path)
       || (path === 'admin_member' && params.get('scope') === 'documents_admin')
       || (path === 'participation' && params.get('view') === 'meeting');
