@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.24 | Change: 2026-10-11 - Load participation lists before meeting source details. -->
+<!-- Version: v1.3.25 | Change: 2026-10-12 - Keep private photo originals and create protected display copies. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.24 | participation.html');</script>
+  <script>console.log('[Version] v1.3.25 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -15,6 +15,9 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
+<script src="/shared/public_image_index.js?v=20261012-1"></script>
+<script src="/shared/image_display.js?v=20261012-2"></script>
+<script src="/shared/participation_image_display.js?v=20261012-1"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8My0mA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>
     window.__COOP_ROUTE_APP__ = 'erp';
@@ -508,6 +511,7 @@
   </section>
 
   <div class="image-lightbox" id="participationImageLightbox" role="dialog" aria-modal="true" aria-label="행사 사진 크게 보기" aria-hidden="true">
+    <button type="button" id="participationImageLightboxOriginal" class="btn btn-light" style="position:absolute;top:18px;right:80px;z-index:1" hidden>원본 보기</button>
     <button type="button" class="image-lightbox-close" id="participationImageLightboxClose" aria-label="닫기">&times;</button>
     <img id="participationImageLightboxImage" alt="행사 사진 크게 보기">
   </div>
@@ -575,6 +579,9 @@
     let pendingManualAttendeeLinkId = null;
     let eventModalInstance = null;
     let lightboxReturnFocus = null;
+    let lightboxStoredPhoto = null;
+    let storedPhotoRenderVersion = 0;
+    let lightboxRequestVersion = 0;
     let newPhotoPreviewUrls = [];
     const signedFileUrlCache = new Map();
 
@@ -2025,6 +2032,7 @@
     } // End of renderSourceOptions
 
     function resetEventForm() {
+      storedPhotoRenderVersion += 1;
       revokeNewPhotoPreviewUrls();
       formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
       humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
@@ -2859,6 +2867,11 @@
           await _supabase.storage.from(PARTICIPATION_BUCKET).remove([path]);
           throw metaError;
         }
+        if (kind === 'PHOTO') {
+          // The stored privacy-sanitized original remains unchanged if a display-copy upload fails.
+          try { await CoopParticipationImages.uploadCopies(_supabase,path,uploadFile); }
+          catch (_) { showAlert('formAlert','사진 원본은 저장했습니다. 화면용 사진은 다시 열 때 준비합니다.','warning'); }
+        }
       }
     } // End of uploadEventFiles
 
@@ -2889,12 +2902,16 @@
       }
     } // End of openStoredFile
 
-    function openImageLightbox(source, triggerElement) {
+    function openImageLightbox(source, triggerElement, storedPhoto = null) {
       const overlay = document.getElementById('participationImageLightbox');
       const image = document.getElementById('participationImageLightboxImage');
-      if (!source || !overlay || !image) return;
+      if ((!source && !storedPhoto) || !overlay || !image) return;
       lightboxReturnFocus = triggerElement || document.activeElement;
-      image.src = source;
+      lightboxStoredPhoto = storedPhoto;
+      lightboxRequestVersion += 1;
+      const originalButton=document.getElementById('participationImageLightboxOriginal');
+      originalButton.hidden=!storedPhoto;originalButton.disabled=false;
+      if(source)image.src=source;else image.removeAttribute('src');
       overlay.classList.add('show');
       overlay.setAttribute('aria-hidden', 'false');
       document.getElementById('participationImageLightboxClose')?.focus();
@@ -2909,7 +2926,23 @@
       if (image) image.removeAttribute('src');
       if (lightboxReturnFocus && typeof lightboxReturnFocus.focus === 'function') lightboxReturnFocus.focus();
       lightboxReturnFocus = null;
+      lightboxStoredPhoto = null;lightboxRequestVersion += 1;
+      document.getElementById('participationImageLightboxOriginal').hidden=true;
     } // End of closeImageLightbox
+
+    document.getElementById('participationImageLightboxOriginal').addEventListener('click',async function(){
+      const row=lightboxStoredPhoto,version=lightboxRequestVersion;if(!row)return;
+      const popup=window.open('about:blank','_blank');if(!popup)return;popup.opener=null;
+      this.disabled=true;
+      try{
+        const external=safeHumanitiesResourceUrl(row.external_url||'');
+        if(!external)signedFileUrlCache.delete(row.storage_path);
+        const url=external?(CoopDisplayImages.original(external)||external):await getSignedFileUrl(row.storage_path);
+        if(version!==lightboxRequestVersion||row!==lightboxStoredPhoto){popup.close();return;}
+        popup.location.replace(url);
+      }catch(_){popup.close();if(version===lightboxRequestVersion)showAlert('formAlert','원본 사진을 열지 못했습니다. 로그인과 열람 권한을 확인해 주세요.');}
+      finally{if(version===lightboxRequestVersion)this.disabled=false;}
+    });
 
     function revokeNewPhotoPreviewUrls() {
       newPhotoPreviewUrls.forEach(function(url) { URL.revokeObjectURL(url); });
@@ -2943,6 +2976,8 @@
     } // End of renderNewPhotoPreviews
 
     async function renderCurrentFiles() {
+      const renderVersion=++storedPhotoRenderVersion,eventId=formState.eventId;
+      const canContinue=()=>storedPhotoRenderVersion===renderVersion&&formState.eventId===eventId;
       const container = document.getElementById('currentFiles');
       const files = formState.currentFiles || [];
       if (files.length === 0) {
@@ -2953,15 +2988,18 @@
       const materials = files.filter(function(file) { return file.file_kind === 'MATERIAL'; });
       const photos = files.filter(function(file) { return file.file_kind === 'PHOTO'; });
       const rosterScans = files.filter(function(file) { return file.file_kind === 'ROSTER_SCAN'; });
-      const photoRows = await Promise.all(photos.map(async function(file) {
+      const photoRows = await CoopParticipationImages.mapLimit(photos,async function(file) {
         const externalUrl = safeHumanitiesResourceUrl(file.external_url || '');
-        if (externalUrl) return { file, url:externalUrl, source:'ACTIVITY' };
+        if (externalUrl) return { file, url:CoopParticipationImages.external(externalUrl,'small'), source:'ACTIVITY' };
         try {
-          return { file, url:await getSignedFileUrl(file.storage_path), source:'PARTICIPATION' };
+          await CoopParticipationImages.ensure(_supabase,file.storage_path,canContinue);
+          if(!canContinue())return {file,url:'',source:'PARTICIPATION'};
+          return { file, url:await getSignedFileUrl(CoopParticipationImages.path(file.storage_path,'small')), source:'PARTICIPATION' };
         } catch (_) {
           return { file, url:'', source:'PARTICIPATION' };
         }
-      }));
+      });
+      if(!canContinue())return;
       const materialHtml = materials.length > 0
         ? `<div class="small fw-bold mb-1">등록된 강의 자료</div>${materials.map(function(file) {
             return `<div class="current-file"><span>${escapeHtml(file.original_name)}</span><button type="button" class="btn btn-sm btn-outline-secondary" data-open-file="${escapeHtml(file.storage_path)}">열기</button></div>`;
@@ -2969,7 +3007,7 @@
         : '';
       const photoHtml = photos.length > 0
         ? `<div class="small fw-bold mt-3 mb-2">등록된 사진</div><div class="photo-strip">${photoRows.map(function(row, index) {
-            if (!row.url) return `<span class="photo-thumb d-flex align-items-center justify-content-center text-muted small text-center px-2" title="${escapeHtml(row.file.original_name || '')}">미리보기<br>불가</span>`;
+            if (!row.url) return `<button type="button" class="photo-thumb text-muted small" data-stored-photo-index="${index}">사진 보기</button>`;
             return `<button type="button" class="photo-thumb" data-stored-photo-index="${index}" title="${escapeHtml(row.file.original_name || `행사 사진 ${index + 1}`)}"><img src="${escapeHtml(row.url)}" alt="행사 사진 ${index + 1}" loading="lazy">${row.source === 'ACTIVITY' ? '<span class="position-absolute bottom-0 start-0 badge rounded-pill text-bg-success m-1">우리 소식</span>' : ''}</button>`;
           }).join('')}</div>`
         : '';
@@ -2983,9 +3021,12 @@
         button.addEventListener('click', function() { openStoredFile(button.dataset.openFile); });
       });
       container.querySelectorAll('[data-stored-photo-index]').forEach(function(button) {
-        button.addEventListener('click', function() {
+        button.addEventListener('click', async function() {
           const row = photoRows[Number(button.dataset.storedPhotoIndex)];
-          if (row?.url) openImageLightbox(row.url, button);
+          if(!row||!canContinue())return;
+          let url='';
+          try{const external=safeHumanitiesResourceUrl(row.file.external_url||'');url=external?CoopParticipationImages.external(external):await getSignedFileUrl(CoopParticipationImages.path(row.file.storage_path));}catch(_){}
+          if(canContinue())openImageLightbox(url,button,row.file);
         });
       });
       container.querySelectorAll('.photo-thumb img').forEach(function(image) {
@@ -3152,7 +3193,7 @@
       try {
         const { data, error } = await _supabase.rpc('participation_admin_delete_event', { p_event_id:formState.eventId });
         if (error) throw error;
-        const storagePaths = Array.isArray(data?.storage_paths) ? data.storage_paths.filter(Boolean) : [];
+        const storagePaths = Array.isArray(data?.storage_paths) ? data.storage_paths.filter(Boolean).flatMap(function(path){return path.includes('/photo/')?[path,...CoopParticipationImages.paths(path)]:[path];}) : [];
         let storageWarning = '';
         if (storagePaths.length > 0) {
           const { error:storageError } = await _supabase.storage.from(PARTICIPATION_BUCKET).remove(storagePaths);
@@ -3243,6 +3284,7 @@
       });
       document.getElementById('sourceMinute').addEventListener('change', handleSourceMinuteChange);
       document.getElementById('eventModal').addEventListener('hidden.bs.modal', function() {
+        storedPhotoRenderVersion += 1;closeImageLightbox();
         eventOpenRevision++;
         sourceReadRevision++;
         document.getElementById('saveEventBtn').disabled = formState.saving;
