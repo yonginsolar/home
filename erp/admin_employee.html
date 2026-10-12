@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.115
-Change: 2026-10-12 - Leave follows confirmed employee workday terms.
+Version: v1.0.116
+Change: 2026-10-13 - Preserve finalized payroll and minute precision with scoped HR access.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.115 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.116 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -44,7 +44,7 @@ Change: 2026-10-12 - Leave follows confirmed employee workday terms.
   <script src="print_service.js?v=20260510-1324-1"></script>
   <script src="payroll_tax_table.js?v=20260508-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
-  <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
+  <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261012-2"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
@@ -507,7 +507,8 @@ Change: 2026-10-12 - Leave follows confirmed employee workday terms.
       </div>
       <div class="col-md-6">
         <label class="small text-muted">근로시간</label>
-        <input type="number" id="workHours" class="form-control" step="0.5" min="0" oninput="handleSalaryWorkHoursInput()">
+        <input type="number" id="workHours" class="form-control" step="any" min="0" oninput="handleSalaryWorkHoursInput()">
+        <div class="form-text">분 단위까지 입력할 수 있습니다. 예: 2시간 15분은 2.25시간.</div>
       </div>
       <div class="col-12">
         <div class="form-text" id="salaryWorkMetaHelp">기본값 계산 전입니다.</div>
@@ -4192,10 +4193,7 @@ async function submitPayrollImport() {
                     .filter(Boolean);
                 let existingMap = new Map();
                 if (matchedEmpIds.length > 0) {
-                    const { data: existingRows, error: existingError } = await scopeEmployeeTenant(
-                        _supabase.from('hr_salary').select('*')
-                    ).eq('year_month', month).in('emp_id', matchedEmpIds);
-                    if (existingError) throw existingError;
+                    const existingRows = (await getAdminEmployeePayrollRows(null,month,month)).filter(r=>matchedEmpIds.includes(String(r.emp_id)));
                     existingMap = new Map((Array.isArray(existingRows) ? existingRows : []).map((row) => [String(row.emp_id || '').trim(), row]));
                 }
 
@@ -4216,7 +4214,7 @@ async function submitPayrollImport() {
                         payBasic = Number(existing.pay_basic || 0);
                     }
                     if (!(Number.isFinite(imported.pay_basic))) {
-                        payBasic = Math.max(0, Number(payTotal || 0) - Number(payMeal || 0) - Number(payCar || 0) - Number(payChild || 0) - Number(payBonus || 0));
+                        payBasic = Number(payTotal || 0) - Number(payMeal || 0) - Number(payCar || 0) - Number(payChild || 0) - Number(payBonus || 0) - Number(existing.pay_position || 0) - Number(existing.pay_service || 0) - Number(existing.pay_overtime || 0);
                     }
 
                     const dedPension = imported.ded_pension ?? Number(existing.ded_pension || 0);
@@ -4247,6 +4245,7 @@ async function submitPayrollImport() {
                         pay_child: Math.round(Number(payChild || 0)),
                         pay_bonus: Math.round(Number(payBonus || 0)),
                         pay_total: Math.round(Number(payTotal || 0)),
+                        pay_position:Number(existing.pay_position || 0),pay_service:Number(existing.pay_service || 0),pay_overtime:Number(existing.pay_overtime || 0),
                         ded_pension: Math.round(Number(dedPension || 0)),
                         ded_health: Math.round(Number(dedHealth || 0)),
                         ded_care: Math.round(Number(dedCare || 0)),
@@ -4259,10 +4258,9 @@ async function submitPayrollImport() {
                         net_pay: Math.round(Number(netPay || 0))
                     });
 
-                    const existingId = String(existing.id || '').trim();
-                    const { error } = existingId
-                        ? await scopeEmployeeTenant(_supabase.from('hr_salary').update(payload)).eq('id', existingId)
-                        : await _supabase.from('hr_salary').insert(payload);
+                    const {emp_id,emp_name,year_month,coop_id,...values}=payload;
+                    if (existing.contract_snapshot) values.contract_snapshot=existing.contract_snapshot;
+                    const { error } = await _supabase.rpc('erp_hr_payroll_save',{p_emp_id:empId,p_year_month:month,p_values:values,p_expected_key:existing.row_key || null,p_mode:'import'});
                     if (error) throw new Error(`${payload.emp_name || payload.emp_id}: ${error.message}`);
                 }
 
@@ -6235,6 +6233,11 @@ function calculateAdminEmployeePayrollTax(monthlyIncome, profile = {}) {
 function syncSalaryTaxPreview() {
     const previewEl = document.getElementById('salaryTaxPreviewText');
     if (!previewEl) return;
+    const context=currentPayrollContractContext;
+    if (context?.savedRow && context.moneyInput === salaryMoneyInputSignature()) {
+        previewEl.textContent = `저장된 소득세 ${formatPayrollTaxWon(context.savedRow.ded_income)} / 지방소득세 ${formatPayrollTaxWon(context.savedRow.ded_local)}`;
+        return;
+    }
     try {
         const profile = getSalaryTaxInputProfile();
         const taxBase = calculateAdminEmployeeSalaryTaxBaseFromInputs();
@@ -6294,8 +6297,9 @@ async function loadSalaryData() {
         return;
     }
 
-    const { data: saved, error: salaryError } = await _supabase.from('hr_salary')
-        .select('*').eq('coop_id', getAdminEmployeeScopedCoopId()).eq('emp_id', empId).eq('year_month', month).maybeSingle();
+    let saved = null, salaryError = null;
+    try { saved = (await getAdminEmployeePayrollRows(empId, month, month))[0] || null; }
+    catch (error) { salaryError = error; }
     if (!isCurrent() || !draftUntouched()) return false;
     if (salaryError) { setEmployeeDetailTabState('tabSalary', 'error'); return false; }
     let contractBasis = saved?.contract_snapshot || null;
@@ -6357,7 +6361,7 @@ async function loadSalaryData() {
     const previousMeal = !saved && !contractDefaults.linked ? await getAdminEmployeePreviousMonthMeal(empId, month) : {found:false,amount:0};
     const adjustedSalary = saved ? await getAdjustedSalaryRowWithDurunuri({...saved,year_month:month},month) : null;
     if (!isCurrent() || !draftUntouched()) return false;
-    currentPayrollContractContext = {basis:contractBasis,defaults:contractDefaults,saved:!!saved,empId:String(empId),month,owner};
+    currentPayrollContractContext = {basis:contractBasis,defaults:contractDefaults,saved:!!saved,savedRow:saved,empId:String(empId),month,owner};
     ContractPayroll.render(document.getElementById('salaryContractBasis'),contractBasis,!!saved);
     document.getElementById('salaryContractReviewBox').hidden = !!saved || !contractDefaults.linked;
     document.getElementById('salaryContractReviewed').checked = false;
@@ -6388,16 +6392,16 @@ async function loadSalaryData() {
         badge.className = "badge bg-primary"; // 색상 변경
 
         // 버튼 상태 변경
-        btnDelete.classList.remove("d-none"); // 삭제 버튼 표시
+        btnDelete.classList.toggle("d-none", !!saved.is_accounted);
         btnSave.innerText = "💾 수정사항 저장"; // 문구 변경
         btnSave.classList.remove("btn-success");
         btnSave.classList.add("btn-warning"); // 색상 변경 (수정 느낌)
 
         const resolvedWorkDays = roundAdminEmployeeWorkMetric(saved.work_days);
-        const resolvedWorkHours = roundAdminEmployeeWorkMetric(saved.work_hours);
+        const resolvedWorkHours = Number(saved.work_hours);
         workDescriptionInput.value = String(saved.work_description || '');
         workDaysInput.value = formatAdminEmployeeWorkMetricInput(resolvedWorkDays);
-        workHoursInput.value = formatAdminEmployeeWorkMetricInput(resolvedWorkHours);
+        workHoursInput.value = formatAdminEmployeeWorkHoursInput(resolvedWorkHours);
         markSalaryWorkHoursAutoDerived(false);
         setSalaryTaxInputs({
             familyCount: saved.withholding_family_count ?? currentPayrollTaxProfile.familyCount,
@@ -6431,7 +6435,7 @@ async function loadSalaryData() {
         workDescriptionInput.value = contractDefaults.terms?.duties || recentWorkDescription;
         const directWorkTime = !workMetaDefaultsAvailable || (contractDefaults.linked && (!contractDefaults.dailyHours || Number(contractDefaults.terms?.work_days_per_week) !== 5));
         workDaysInput.value = directWorkTime ? '' : formatAdminEmployeeWorkMetricInput(workMetaDefaults.workDays);
-        workHoursInput.value = directWorkTime ? '' : formatAdminEmployeeWorkMetricInput(workMetaDefaults.workDays * (contractDefaults.dailyHours || 8));
+        workHoursInput.value = directWorkTime ? '' : formatAdminEmployeeWorkHoursInput(workMetaDefaults.workDays * (contractDefaults.dailyHours || 8));
         markSalaryWorkHoursAutoDerived(!directWorkTime);
         setSalaryTaxInputs(currentPayrollTaxProfile);
         setSalaryTaxAdjustmentInputs();
@@ -6449,6 +6453,8 @@ async function loadSalaryData() {
 
     // 계산식 적용
     recalcSalaryComponents();
+    currentPayrollContractContext.moneyInput = salaryMoneyInputSignature();
+    syncSalaryTaxPreview();
     checkpointEmployeeDetailDraft(document.getElementById('tabSalary'));
     await loadDurunuriSupportState(month, empId);
     if (!isCurrent()) return;
@@ -6471,25 +6477,23 @@ function applyContractPayrollUnits() {
 async function deleteSalary() {
     const month = document.getElementById("salaryMonth").value;
     if (!month || !currentEmpId) return;
+    const selectedEmpId=currentEmpId, revision=employeeDetailRevision, owner=getHrSettingsOwner(), context=currentPayrollContractContext;
+    if (!context?.savedRow || context.savedRow.is_accounted || salarySaveInFlight) return showAlert('회계 반영된 급여는 삭제할 수 없습니다.');
 
     // 안전장치: 모달로 확인
     showConfirm(
         "🗑️ 급여 내역 삭제",
         `<strong>${month}</strong>월 급여 데이터를 정말 삭제하시겠습니까?<br><span class="text-danger small">삭제 후에는 자동 계산 상태로 돌아갑니다.</span>`,
         async function() {
+            if (String(selectedEmpId)!==String(currentEmpId) || revision!==employeeDetailRevision || owner!==getHrSettingsOwner() || month!==document.getElementById('salaryMonth').value) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
+            salarySaveInFlight=true;
             showLoading();
-            const { error } = await scopeEmployeeTenant(_supabase.from('hr_salary').delete())
-                .eq('emp_id', currentEmpId)
-                .eq('year_month', month);
-
-            hideLoading();
-
-            if (error) {
-                showAlert("삭제 실패: " + error.message);
-            } else {
-                showAlert("삭제되었습니다.");
-                loadSalaryData(); // 화면 갱신 (초기화)
-            }
+            try {
+                const { error } = await _supabase.rpc('erp_hr_payroll_delete', {p_emp_id:String(selectedEmpId),p_year_month:month,p_expected_key:context.savedRow.row_key});
+                if (error) return showAlert('삭제 실패: '+payrollSaveErrorMessage(error));
+                showAlert('삭제되었습니다.');
+                if (!hasUnsavedEmployeeDetailTab('tabSalary')) await loadSalaryData();
+            } finally { hideLoading();salarySaveInFlight=false; }
         }
     );
 }
@@ -6501,7 +6505,8 @@ function recalcSalaryComponents() {
     const other = Number(ERPNumberInput.raw(document.getElementById('payOtherFixed').value)) || 0;
     const overtime = Number(ERPNumberInput.raw(document.getElementById('payOvertime').value)) || 0;
     const basic = total - (meal + car + child + position + other + overtime);
-    document.getElementById("payBasic").value = basic > 0 ? basic : 0;
+    document.getElementById("payBasic").value = basic;
+    document.getElementById('payTotalFixed').setCustomValidity(basic < 0 ? '수당 합계가 월 고정 지급액을 넘습니다.' : '');
     syncSalaryTaxPreview();
 }
 
@@ -6557,18 +6562,7 @@ async function getAdminEmployeePreviousMonthMeal(empId, month) {
     const sourceMonth = addAdminEmployeeSalaryMonths(month, -1);
     const safeEmpId = String(empId || '').trim();
     if (!safeEmpId || !sourceMonth) return { found: false, sourceMonth, amount: 0 };
-    const { data, error } = await scopeEmployeeTenant(
-        _supabase
-            .from('hr_salary')
-            .select('pay_meal,year_month')
-            .eq('emp_id', safeEmpId)
-            .eq('year_month', sourceMonth)
-            .limit(1)
-    ).maybeSingle();
-    if (error) {
-        console.warn('Previous month meal allowance load failed:', error.message || error);
-        return { found: false, sourceMonth, amount: 0 };
-    }
+    const data = (await getAdminEmployeePayrollRows(safeEmpId,sourceMonth,sourceMonth))[0] || null;
     return {
         found: !!data,
         sourceMonth,
@@ -6585,6 +6579,41 @@ function roundAdminEmployeeWorkMetric(value) {
 function formatAdminEmployeeWorkMetricInput(value) {
     const rounded = roundAdminEmployeeWorkMetric(value);
     return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1).replace(/\.0$/, '');
+}
+
+function formatAdminEmployeeWorkHoursInput(value) {
+    const safe = Number(value);
+    return Number.isFinite(safe) ? String(safe) : '';
+}
+
+function salaryMoneyInputSignature() {
+    return JSON.stringify(['payTotalFixed','payMeal','payCar','payChild','payPosition','payOtherFixed','payOvertime','payBonus',
+        'salaryTaxFamilyCount','salaryTaxChildCount','salaryTaxWithholdingRate','payrollTaxAdjustmentIncome','payrollTaxAdjustmentLocal']
+        .map(id => Number(ERPNumberInput.raw(document.getElementById(id).value))));
+}
+
+function salaryPaymentInputs() {
+    const read = id => Number(ERPNumberInput.raw(document.getElementById(id).value));
+    const fixed = read('payTotalFixed'), bonus = read('payBonus');
+    const values = {pay_meal:read('payMeal'),pay_car:read('payCar'),pay_child:read('payChild'),pay_position:read('payPosition'),pay_service:read('payOtherFixed'),pay_overtime:read('payOvertime')};
+    const allowances = Object.values(values).reduce((s,n)=>s+n,0);
+    if (![fixed,bonus,...Object.values(values)].every(n=>Number.isFinite(n)&&Number.isInteger(n)&&n>=0)) throw new Error('지급액은 0원 이상의 정수로 입력해 주세요.');
+    if (allowances > fixed) throw new Error('수당 합계가 월 고정 지급액을 넘습니다. 지급액 또는 수당을 확인해 주세요.');
+    return {...values,pay_basic:fixed-allowances,pay_bonus:bonus,pay_total:fixed+bonus};
+}
+
+async function getAdminEmployeePayrollRows(empId, from, to) {
+    const result = await _supabase.rpc('erp_hr_payroll_list',{p_emp_id:empId==null?null:String(empId),p_from_ym:from,p_to_ym:to});
+    if (result.error) throw result.error;
+    if (!Array.isArray(result.data)) throw new Error('급여 조회 결과를 확인하지 못했습니다.');
+    return result.data;
+}
+
+function payrollSaveErrorMessage(error) {
+    return ({PAYROLL_RECORD_CHANGED:'다른 담당자가 먼저 급여를 수정했습니다. 입력은 유지됩니다. 다시 조회해 확인해 주세요.',
+        SETTINGS_ACCOUNTED_PAYROLL_LOCKED:'회계 반영된 급여의 금액은 변경할 수 없습니다.',
+        SETTINGS_ACCESS_DENIED:'급여를 조회·수정할 권한이 없습니다.',PAYROLL_TOTAL_MISMATCH:'지급액과 공제 합계를 확인해 주세요.',
+        PAYROLL_MINUTE_PRECISION_REQUIRED:'근로시간은 분 단위까지 입력해 주세요.'})[error?.message] || error?.message || '급여를 저장하지 못했습니다.';
 }
 
 function setSalaryWorkMetaHelpText(text) {
@@ -6605,8 +6634,8 @@ function syncSalaryWorkHoursFromDays(forceSync = false) {
     if (!workDaysInput || !workHoursInput) return;
     if (!forceSync && workHoursInput.dataset.autoDerived !== '1') return;
     const workDays = roundAdminEmployeeWorkMetric(workDaysInput.value);
-    const nextHours = roundAdminEmployeeWorkMetric(workDays * (Number(workHoursInput.dataset.contractDailyHours) || 8));
-    workHoursInput.value = formatAdminEmployeeWorkMetricInput(nextHours);
+    const nextHours = Math.round(workDays * (Number(workHoursInput.dataset.contractDailyHours) || 8) * 60) / 60;
+    workHoursInput.value = formatAdminEmployeeWorkHoursInput(nextHours);
     markSalaryWorkHoursAutoDerived(true);
 }
 
@@ -6811,71 +6840,42 @@ function buildAdminEmployeeSalaryWorkMetaSummary(workMeta) {
 function resolveAdminEmployeeSavedWorkHours(savedHours, workDays) {
     const numericSaved = Number(savedHours);
     if (Number.isFinite(numericSaved) && numericSaved !== 0) {
-        return roundAdminEmployeeWorkMetric(numericSaved);
+        return numericSaved;
     }
-    return roundAdminEmployeeWorkMetric(workDays * 8);
+    return workDays * 8;
 }
 
 async function getAdminEmployeeRecentWorkDescription(empId, month) {
-    const safeEmpId = Number(empId);
+    const safeEmpId = String(empId || '').trim();
     const safeMonth = String(month || '').trim();
-    if (!Number.isFinite(safeEmpId) || !safeMonth) return '';
-
-    const { data, error } = await _supabase.from('hr_salary')
-        .select('work_description, year_month')
-        .eq('coop_id', getAdminEmployeeScopedCoopId())
-        .eq('emp_id', safeEmpId)
-        .lt('year_month', safeMonth)
-        .order('year_month', { ascending: false })
-        .limit(120);
-
-    if (error) {
-        console.warn('Recent work description load failed:', error.message || error);
-        return '';
-    }
+    if (!safeEmpId || !safeMonth) return '';
+    const data = await getAdminEmployeePayrollRows(safeEmpId,addAdminEmployeeSalaryMonths(safeMonth,-119),addAdminEmployeeSalaryMonths(safeMonth,-1));
 
     const recentRow = (data || []).find((row) => String(row?.work_description || '').trim());
     return recentRow ? String(recentRow.work_description || '').trim() : '';
 }
 
 function saveSalary() {
-    const month = String(document.getElementById("salaryMonth")?.value || '').trim();
-    if (!month) return showAlert("귀속월을 선택해주세요.");
-    if (!currentEmpId) return showAlert("직원을 먼저 선택해주세요.");
+    const month = String(document.getElementById('salaryMonth').value || '').trim();
+    if (!month || !currentEmpId) return showAlert('직원과 귀속월을 선택해 주세요.');
     if (salarySaveInFlight || employeeBasicSaveInFlight) return;
-    const selectedEmpId = currentEmpId, detailRevision = employeeDetailRevision;
-
-    const meal = Number(ERPNumberInput.raw(document.getElementById('payMeal')?.value) || 0);
-    if (!Number.isFinite(meal) || meal < 0) return showAlert('식비는 0원 이상으로 입력해주세요.');
-
-    const state = salaryMealCarryForward;
-    let mealExplanation = '직접 입력하거나 확인한 금액';
-    if (!state.existing && currentPayrollContractContext?.defaults.linked) {
-        mealExplanation = '이 달에 적용되는 계약 조건과 확인한 금액';
-    } else if (!state.existing && state.found && !state.userEdited && Math.round(meal) === state.sourceAmount) {
-        mealExplanation = `${state.sourceMonth} 급여에서 불러온 금액`;
-    } else if (state.existing) {
-        mealExplanation = '이 달에 이미 저장된 금액';
-    } else if (!state.found) {
-        mealExplanation = '직전 달 급여 자료가 없어 현재 입력된 금액';
-    }
-
-    const actionLabel = state.existing ? '수정 저장' : '급여 확정';
-    showConfirm(
-        `💾 ${actionLabel} 확인`,
-        `${month} ${currentEmpName || ''}\n지급 총액: ${formatAdminEmployeeWon(Number(ERPNumberInput.raw(document.getElementById('payTotalFixed').value)) + Number(ERPNumberInput.raw(document.getElementById('payBonus').value)))}\n식비: ${formatAdminEmployeeWon(meal)}\n(${mealExplanation})\n근로일수: ${document.getElementById('workDays').value}일 · 근로시간: ${document.getElementById('workHours').value}시간\n\n이 금액으로 ${actionLabel}하시겠습니까?`,
+    const context = currentPayrollContractContext;
+    if (!context || context.empId !== String(currentEmpId) || context.month !== month || context.owner !== getHrSettingsOwner()) return showAlert('급여를 다시 조회해 주세요.');
+    const recalculate = !context.saved || context.moneyInput !== salaryMoneyInputSignature();
+    if (recalculate && context.savedRow?.is_accounted) return showAlert('회계 반영된 급여의 금액은 이 화면에서 변경할 수 없습니다.');
+    let payment;
+    try { payment = recalculate ? salaryPaymentInputs() : context.savedRow; } catch(error) { return showAlert(error.message); }
+    const selectedEmpId=currentEmpId, detailRevision=employeeDetailRevision, confirmedDraft=snapshotEmployeeDetailTabDraft('tabSalary');
+    const actionLabel = !context.saved ? '급여 확정' : recalculate ? '지급액·공제 다시 계산' : '메모·근태 저장';
+    showConfirm('💾 '+actionLabel+' 확인',
+        `${month} ${currentEmpName || ''}\n지급 총액: ${formatAdminEmployeeWon(payment.pay_total)}\n근로일수: ${document.getElementById('workDays').value}일 · 근로시간: ${document.getElementById('workHours').value}시간\n\n${recalculate ? '현재 입력한 조건과 해당 월의 등록 기준으로 지급액·공제를 계산합니다.' : '지급액·공제·실수령액과 적용 기준은 그대로 유지합니다.'}\n${actionLabel}하시겠습니까?`,
         async function() {
             if (salarySaveInFlight || employeeBasicSaveInFlight) return;
-            if (detailRevision !== employeeDetailRevision || String(selectedEmpId) !== String(currentEmpId)
-                || month !== String(document.getElementById('salaryMonth').value)) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
-            salarySaveInFlight = true;
-            try {
-                await persistSalary();
-            } finally {
-                salarySaveInFlight = false;
-            }
-        }
-    );
+            if (detailRevision !== employeeDetailRevision || String(selectedEmpId) !== String(currentEmpId) || month !== document.getElementById('salaryMonth').value) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
+            if ([...confirmedDraft].some(([id,v])=>employeeDetailDraftValue(document.getElementById(id))!==v)) return showAlert('입력 내용이 변경되었습니다. 다시 확인해 주세요.');
+            salarySaveInFlight=true;
+            try { await persistSalary(); } finally { salarySaveInFlight=false; }
+        });
 }
 
 // [수정] 확인을 거친 급여 저장 (연도별 요율 적용)
@@ -6890,34 +6890,40 @@ async function persistSalary() {
     if (!contractContext.saved && contractContext.defaults.linked && !document.getElementById('salaryContractReviewed').checked) return showAlert('계약 조건과 이번 달 지급액·근로시간을 확인해 주세요.');
     if (!contractContext.saved && contractContext.defaults.linked && ['workDays','workHours','payTotalFixed'].some(id=>document.getElementById(id).value==='')) return showAlert('지급액과 근로일수·근로시간을 입력해 주세요.');
 
-    // [핵심 변경] 귀속월에서 연도 추출 -> 해당 연도 요율 가져오기
-    const targetYear = month.split('-')[0]; // "2025" 추출
+    const recalculate = !contractContext.saved || contractContext.moneyInput !== salaryMoneyInputSignature();
+    if (recalculate && contractContext.savedRow?.is_accounted) return showAlert('회계 반영된 급여의 금액은 변경할 수 없습니다.');
+    const workDescription = String(document.getElementById('workDescription').value || '').trim();
+    const workDays = Number(document.getElementById('workDays').value);
+    const workHours = Number(document.getElementById('workHours').value);
+    const taxProfile = getSalaryTaxInputProfile();
+    const taxAdjustment = getSalaryTaxAdjustmentInput();
+    const savedDraft = snapshotEmployeeDetailTabDraft('tabSalary');
+    if (!Number.isFinite(workDays) || !Number.isFinite(workHours) || workDays<0 || workDays>366 || workHours<0 || workHours>8784) return showAlert('근로일수·시간의 입력 범위를 확인해 주세요.');
+    if ((!contractContext.saved || workHours !== Number(contractContext.savedRow.work_hours)) && Math.abs(workHours*60-Math.round(workHours*60))>0.000001) return showAlert('근로시간은 분 단위까지 입력해 주세요.');
+    const metadata = {work_description:workDescription,work_days:workDays,work_hours:workHours,payroll_tax_adjustment_note:taxAdjustment.note || null};
+    if (!recalculate) {
+        const result = await _supabase.rpc('erp_hr_payroll_save',{p_emp_id:String(savedEmpId),p_year_month:month,p_expected_key:contractContext.savedRow.row_key,p_mode:'metadata',p_values:metadata});
+        if (result.error) return showAlert('저장 실패: '+payrollSaveErrorMessage(result.error));
+        if (isSavedTargetCurrent()) {
+            contractContext.savedRow=result.data;
+            checkpointSavedEmployeeDetailTab('tabSalary',savedDraft);
+            if (!hasUnsavedEmployeeDetailTab('tabSalary') && isEmployeeDetailTabVisible('tabSalary')) await loadSalaryData();
+        }
+        return showAlert('메모·근태를 저장했습니다. 급여 금액과 적용 기준은 변경하지 않았습니다.');
+    }
+    let payment;
+    try { payment=salaryPaymentInputs(); } catch(error) { return showAlert(error.message); }
+    const {pay_basic:p_basic,pay_meal:p_meal,pay_car:p_car,pay_child:p_child,pay_bonus:p_bonus,pay_position:p_position,pay_service:p_service,pay_overtime:p_overtime,pay_total:p_total}=payment;
+    const contractSnapshotForSave = contractContext.saved ? contractContext.basis : {...contractContext.basis,
+        reviewed:document.getElementById('salaryContractReviewed').checked,
+        paid_units:document.getElementById('salaryContractPaidUnits').value===''?null:Number(document.getElementById('salaryContractPaidUnits').value)};
+    const targetYear=month.split('-')[0];
     let rule;
     try {
-        rule = await getTaxRates(targetYear, month);
-        if (!['employ_rate_biz','worker_comp_rate'].every(key => Number.isFinite(rule[key]))) throw new Error('사업주 고용보험·산재보험 요율을 조합별 설정에서 등록해 주세요.');
-    } catch (error) { return showAlert(window.ERPAnnualSettings.errorMessage(error)); }
+        rule=await getTaxRates(targetYear,month);
+        if (!['employ_rate_biz','worker_comp_rate'].every(k=>Number.isFinite(rule[k]))) throw new Error('사업주 고용보험·산재보험 요율을 조합별 설정에서 등록해 주세요.');
+    } catch(error) { return showAlert(window.ERPAnnualSettings.errorMessage(error)); }
     if (!isSavedTargetCurrent()) return;
-
-    // 1. 지급액 가져오기
-    const p_basic = Number(ERPNumberInput.raw(document.getElementById("payBasic").value));
-    const p_meal = Number(ERPNumberInput.raw(document.getElementById("payMeal").value));
-    const p_car = Number(ERPNumberInput.raw(document.getElementById("payCar").value));
-    const p_child = Number(ERPNumberInput.raw(document.getElementById("payChild").value));
-    const p_bonus = Number(ERPNumberInput.raw(document.getElementById("payBonus").value));
-    const p_position = Number(ERPNumberInput.raw(document.getElementById('payPosition').value));
-    const p_service = Number(ERPNumberInput.raw(document.getElementById('payOtherFixed').value));
-    const p_overtime = Number(ERPNumberInput.raw(document.getElementById('payOvertime').value));
-    const workDescription = String(document.getElementById("workDescription").value || '').trim();
-    const workDays = roundAdminEmployeeWorkMetric(document.getElementById("workDays").value);
-    const workHours = roundAdminEmployeeWorkMetric(document.getElementById("workHours").value);
-
-    if (workDays < 0 || workHours < 0) {
-        return showAlert("근로일수와 근로시간은 0 이상이어야 합니다.");
-    }
-
-    if (![p_basic,p_meal,p_car,p_child,p_bonus,p_position,p_service,p_overtime].every(n=>Number.isFinite(n)&&n>=0&&Number.isInteger(n)) || workDays>366 || workHours>8784) return showAlert('지급액과 근로일수·시간의 입력 범위를 확인해 주세요.');
-    const p_total = p_basic + p_meal + p_car + p_child + p_bonus + p_position + p_service + p_overtime;
 
     // 2. 해당 귀속월에 등록된 비과세 한도 적용
     const limit_meal = rule['limit_meal'];
@@ -6939,8 +6945,6 @@ async function persistSalary() {
     const emp = Math.floor(tax_base * (rule['employ_rate_emp']));
 
     // 4. 소득세 계산 (국세청 간이세액표 + 직원별 설정 + 정산 환급)
-    const taxProfile = getSalaryTaxInputProfile();
-    const taxAdjustment = getSalaryTaxAdjustmentInput();
     let taxCalc;
     try {
         taxCalc = calculateAdminEmployeePayrollTax(tax_base, taxProfile);
@@ -6950,29 +6954,15 @@ async function persistSalary() {
     const inc = Math.round(Number(taxCalc.incomeTax || 0));
     const loc = Math.floor((inc * Number(rule['local_tax_rate_ratio'])) / 10) * 10;
     const payrollTaxAdjustmentTotal = Math.max(0, taxAdjustment.income) + Math.max(0, taxAdjustment.local);
-    const deductionTotal = pen + hlt + care + emp + inc + loc - payrollTaxAdjustmentTotal;
+    const deductionTotal = pen + hlt + care + emp + inc + loc + Number(contractContext.savedRow?.ded_advance || 0) + Number(contractContext.savedRow?.ded_capital || 0) - payrollTaxAdjustmentTotal;
 
     const employeeTaxProfilePayload = {
         withholding_family_count: taxCalc.familyCount,
         withholding_child_count: taxCalc.childCount,
         withholding_rate: taxCalc.withholdingRate
     };
-    const savedDraft = snapshotEmployeeDetailTabDraft('tabSalary');
-    const contractSnapshotForSave = contractContext.saved ? contractContext.basis : {...contractContext.basis,
-        reviewed:document.getElementById('salaryContractReviewed').checked,
-        paid_units:document.getElementById('salaryContractPaidUnits').value===''?null:Number(document.getElementById('salaryContractPaidUnits').value)};
-    const { error: employeeTaxError } = await scopeEmployeeTenant(_supabase.from('ref_employees').update(employeeTaxProfilePayload)).eq('emp_id', savedEmpId);
-    if (employeeTaxError) {
-        return showAlert("직원별 원천세 기본값 저장 실패: " + employeeTaxError.message);
-    }
-    if (!isSavedTargetCurrent()) return;
-    currentPayrollTaxProfile = normalizeAdminEmployeePayrollTaxProfile(employeeTaxProfilePayload);
-
     // 5. DB 저장 Payload 생성
     const payload = {
-        emp_id: savedEmpId,
-        emp_name: currentEmpName,
-        year_month: month,
         pay_basic: p_basic, pay_meal: p_meal, pay_car: p_car, pay_child: p_child, pay_bonus: p_bonus, pay_total: p_total,
         pay_position:p_position,pay_service:p_service,pay_overtime:p_overtime,
         contract_snapshot:contractSnapshotForSave,
@@ -6994,21 +6984,18 @@ async function persistSalary() {
         payroll_tax_adjustment_note: taxAdjustment.note || null
     };
 
-    // [6] Insert or Update 실행
-    const { data: existing, error: existingError } = await scopeEmployeeTenant(_supabase.from('hr_salary').select('id')).eq('emp_id', savedEmpId).eq('year_month', month).maybeSingle();
-    if (!isSavedTargetCurrent()) return;
-    if (existingError) return showAlert('기존 급여 확인 실패: ' + existingError.message);
-    if (!!existing !== contractContext.saved) return showAlert('이 달의 급여 저장 상태가 변경되었습니다. 다시 조회해 주세요.');
-
-    // 직원 부담금(JS계산) 저장
-    const { error } = existing
-        ? await scopeEmployeeTenant(_supabase.from('hr_salary').update(withEmployeeTenantPayload(payload))).eq('id', existing.id)
-        : await _supabase.from('hr_salary').insert(withEmployeeTenantPayload(payload));
-
+    const {data:stored,error} = await _supabase.rpc('erp_hr_payroll_save',{
+        p_emp_id:String(savedEmpId),p_year_month:month,p_values:payload,p_mode:'recalculate',
+        p_expected_key:contractContext.savedRow?.row_key || null
+    });
     if (error) {
-        showAlert("실패: " + error.message);
+        showAlert("저장 실패: " + payrollSaveErrorMessage(error));
     } else {
-        if (isSavedTargetCurrent()) checkpointSavedEmployeeDetailTab('tabSalary', savedDraft);
+        if (isSavedTargetCurrent()) {
+            currentPayrollTaxProfile=normalizeAdminEmployeePayrollTaxProfile(employeeTaxProfilePayload);
+            contractContext.savedRow=stored;contractContext.saved=true;contractContext.moneyInput=JSON.stringify(['payTotalFixed','payMeal','payCar','payChild','payPosition','payOtherFixed','payOvertime','payBonus','salaryTaxFamilyCount','salaryTaxChildCount','salaryTaxWithholdingRate','payrollTaxAdjustmentIncome','payrollTaxAdjustmentLocal'].map(id=>Number(String(savedDraft.get(id) || '').replace(/,/g,''))));
+            checkpointSavedEmployeeDetailTab('tabSalary', savedDraft);
+        }
         // [핵심 변경] 저장 성공 후, SQL 함수 호출하여 회사 부담금 일괄 계산
         // 인자: '2025-01' 같은 형태 (month 변수)
         const { error: rpcError } = await _supabase.rpc('calc_company_share', { target_ym: month });
@@ -7787,8 +7774,10 @@ async function printLedger() {
     }
 
     // 1. 데이터 조회
-    const { data: list, error } = await scopeEmployeeTenant(_supabase.from('hr_salary').select('*')).eq('year_month', ym).order('emp_name');
-    if(error || !list || list.length === 0) return showAlert("해당 월의 급여 데이터가 없습니다.");
+    let list;
+    try { list = (await getAdminEmployeePayrollRows(null,ym,ym)).sort((a,b)=>String(a.emp_name).localeCompare(String(b.emp_name),'ko')); }
+    catch(error) { return showAlert('급여 조회 실패: '+payrollSaveErrorMessage(error)); }
+    if (!list.length) return showAlert("해당 월의 급여 데이터가 없습니다.");
 
     if (!window.SalaryLedgerModule) return showAlert("급여대장 모듈을 불러오지 못했습니다.");
     const module = getDurunuriModuleAdmin();
@@ -7868,7 +7857,7 @@ async function openStatsDashboard() {
 
     const [approvalRes, salaryRes] = await Promise.all([
         scopeEmployeeTenant(_supabase.from('ref_approval').select('*')).gte('created_at', dateStr).order('created_at', {ascending: true}),
-        scopeEmployeeTenant(_supabase.from('hr_salary').select('*')).gte('created_at', dateStr).order('year_month', {ascending: true})
+        getAdminEmployeePayrollRows(null,dateStr.slice(0,7),formatAdminEmployeeKstMonth()).then(data=>({data:data.filter(r=>r.created_at>=dateStr),error:null}))
     ]);
     if (!isCurrent()) return;
 

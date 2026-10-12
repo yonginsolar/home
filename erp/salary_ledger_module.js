@@ -1,7 +1,7 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.11';
+  const MODULE_VERSION = 'v1.0.12';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
@@ -25,6 +25,15 @@
   function formatMetric(value) {
     var rounded = roundMetric(value);
     return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1).replace(/\.0$/, '');
+  }
+
+  function formatWorkHours(value) {
+    const safe = Number(value || 0);
+    const minutes = Math.round(safe * 60);
+    if (Number.isFinite(safe) && safe >= 0 && Math.abs(safe * 60 - minutes) < 0.000001) {
+      return Math.floor(minutes / 60) + '시간' + (minutes % 60 ? ' ' + (minutes % 60) + '분' : '');
+    }
+    return Number.isFinite(safe) ? safe.toLocaleString('ko-KR', {maximumFractionDigits: 10}) : '0';
   }
 
   function escapeHtml(value) {
@@ -83,7 +92,7 @@
       work_description: src.work_description || ''
     };
     NUMERIC_FIELDS.forEach(function eachNumeric(key) {
-      normalized[key] = toInt(src[key]);
+      normalized[key] = key === 'work_hours' || key === 'work_days' ? Number(src[key] || 0) : toInt(src[key]);
     });
     return normalized;
   }
@@ -110,7 +119,7 @@
     const totals = normalizedRows.reduce(function reduceTotals(acc, row) {
       acc.pay_basic += toInt(row.pay_basic);
       acc.work_days += roundMetric(row.work_days);
-      acc.work_hours += roundMetric(row.work_hours);
+      acc.work_hours += Number(row.work_hours || 0);
       acc.pay_meal += toInt(row.pay_meal);
       acc.pay_car += toInt(row.pay_car);
       acc.pay_allow += allowance(row);
@@ -199,7 +208,7 @@
         '<td class="text-center">' + escapeHtml(row.emp_name || '') + '</td>' +
         '<td class="ledger-work-desc">' + escapeHtml(row.work_description || '') + '</td>' +
         '<td class="text-end">' + formatMetric(row.work_days) + '</td>' +
-        '<td class="text-end">' + formatMetric(row.work_hours) + '</td>' +
+        '<td class="text-end">' + formatWorkHours(row.work_hours) + '</td>' +
         '<td class="ledger-summary-cell">' + buildPaySummaryCellHtml(row) + '</td>' +
         '<td class="ledger-summary-cell">' + buildDeductionSummaryCellHtml(row, dedEtcLabel) + '</td>' +
         '<td class="text-end fw-bold ledger-net-pay">' + formatMoney(row.net_pay) + '</td>' +
@@ -268,31 +277,32 @@
       '.salary-ledger-root { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; color:#111; background:#fff; }' +
       '.ledger-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; gap:10px; }' +
       '.ledger-title-wrap { flex:1; }' +
-      '.ledger-title { margin:0; font-size:23px; font-weight:800; text-decoration:underline; letter-spacing:0.01em; }' +
-      '.ledger-subtitle { margin-top:2px; font-size:12px; color:#4b5563; }' +
+      '.ledger-title { margin:0; font-size:17pt; font-weight:800; text-decoration:underline; letter-spacing:0.01em; }' +
+      '.ledger-subtitle { margin-top:2px; font-size:11pt; color:#4b5563; }' +
       '.ledger-logo img { height:40px; max-width:240px; object-fit:contain; }' +
-      '.approval-box { width:250px; border-collapse:collapse; table-layout:fixed; font-size:11px; }' +
+      '.approval-box { width:250px; border-collapse:collapse; table-layout:fixed; font-size:11pt; }' +
       '.approval-box th, .approval-box td { border:1px solid #111; text-align:center; }' +
       '.approval-box th { height:22px; background:#f3f4f6; font-weight:700; }' +
       '.approval-box td { height:60px; padding:4px; vertical-align:top; }' +
-      '.approval-entry-name { font-size:11px; font-weight:700; color:#111; }' +
-      '.approval-entry-stamp { margin-top:6px; display:inline-block; padding:2px 6px; border:1px solid #2563eb; border-radius:999px; color:#2563eb; font-size:10px; font-weight:700; }' +
-      '.approval-entry-date { margin-top:4px; font-size:10px; color:#374151; }' +
-      '.approval-entry-note { margin-top:4px; font-size:9px; color:#6b7280; }' +
-      '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:10.75px; }' +
+      '.approval-entry-name { font-size:11pt; font-weight:700; color:#111; }' +
+      '.approval-entry-stamp { margin-top:6px; display:inline-block; padding:2px 6px; border:1px solid #2563eb; border-radius:999px; color:#2563eb; font-size:11pt; font-weight:700; }' +
+      '.approval-entry-date { margin-top:4px; font-size:11pt; color:#374151; }' +
+      '.approval-entry-note { margin-top:4px; font-size:11pt; color:#6b7280; }' +
+      '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:11pt; }' +
       '.ledger-table th, .ledger-table td { border:1px solid #111; padding:3px 4px; vertical-align:middle; }' +
       '.ledger-table thead th { background:#f3f4f6; text-align:center; font-weight:700; white-space:nowrap; }' +
       '.ledger-table tfoot th { background:#e5e7eb; }' +
       '.text-center { text-align:center; } .text-end { text-align:right; } .fw-bold { font-weight:700; }' +
       '.ledger-work-desc { white-space:normal; word-break:keep-all; overflow-wrap:anywhere; line-height:1.45; }' +
       '.ledger-summary-cell { padding:6px !important; }' +
-      '.ledger-summary-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:3px 5px; }' +
-      '.ledger-summary-item { display:flex; align-items:flex-start; justify-content:space-between; gap:6px; min-width:0; border:1px solid #d1d5db; border-radius:4px; background:#fff; padding:3px 5px; }' +
+      '.ledger-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px 5px; }' +
+      '.ledger-summary-item { display:flex; flex-direction:column; align-items:stretch; justify-content:space-between; gap:1px; min-width:0; border:1px solid #d1d5db; border-radius:4px; background:#fff; padding:3px 5px; }' +
       '.ledger-summary-item.is-highlight { background:#eef2ff; border-color:#94a3b8; }' +
-      '.ledger-summary-label { font-size:9.5px; color:#4b5563; white-space:nowrap; }' +
-      '.ledger-summary-value { font-size:10px; font-weight:700; color:#111; text-align:right; word-break:break-all; }' +
-      '.ledger-net-pay { white-space:nowrap; font-size:10.5px; }' +
-      '.ledger-footer { margin-top:6px; display:flex; justify-content:space-between; gap:8px; font-size:11px; color:#6b7280; }' +
+      '.ledger-summary-label { font-size:11pt; color:#4b5563; white-space:normal; word-break:keep-all; }' +
+      '.ledger-summary-value { font-size:11pt; font-weight:700; color:#111; text-align:right; word-break:break-all; }' +
+      '.ledger-net-pay { white-space:nowrap; font-size:11pt; }' +
+      '.ledger-footer { margin-top:6px; display:flex; justify-content:space-between; gap:8px; font-size:11pt; color:#6b7280; }' +
+      '.ledger-table tr { break-inside:avoid; page-break-inside:avoid; } .ledger-table tfoot { display:table-row-group; }' +
       '</style>' +
 
       '<div class="ledger-header">' +
@@ -310,11 +320,11 @@
       '<th style="width:40px;">No</th>' +
       '<th style="width:72px;">성명</th>' +
       '<th style="width:136px;">종사업무</th>' +
-      '<th style="width:56px;">근로일수</th>' +
-      '<th style="width:60px;">근로시간</th>' +
-      '<th style="width:258px;">지급내역</th>' +
-      '<th style="width:304px;">공제내역</th>' +
-      '<th style="width:82px;">차인지급액</th>' +
+      '<th style="width:76px;">근로일수</th>' +
+      '<th style="width:82px;">근로시간</th>' +
+      '<th style="width:230px;">지급내역</th>' +
+      '<th style="width:230px;">공제내역</th>' +
+      '<th style="width:114px;">차인지급액</th>' +
       '</tr>' +
       '</thead>' +
       '<tbody>' + buildRowsHtml(rows, state.dedEtcLabel) + '</tbody>' +
@@ -322,7 +332,7 @@
       '<tr>' +
       '<th colspan="3">합계 (' + rows.length + '명)</th>' +
       '<th class="text-end">' + formatMetric(totals.work_days) + '</th>' +
-      '<th class="text-end">' + formatMetric(totals.work_hours) + '</th>' +
+      '<th class="text-end">' + formatWorkHours(totals.work_hours) + '</th>' +
       '<th class="ledger-summary-cell">' + buildSummaryItemsHtml([
         { label: '기본급', value: totals.pay_basic },
         { label: '식대', value: totals.pay_meal },
@@ -448,7 +458,7 @@
       'html,body{margin:0;padding:0;background:#fff;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;}' +
       '.print-wrap{max-width:1300px;margin:0 auto;padding:12px;}' +
       '.print-actions{position:fixed;right:16px;bottom:16px;display:flex;gap:8px;z-index:9999;}' +
-      '.print-actions button{border:1px solid #cbd5e1;background:#fff;padding:6px 10px;border-radius:6px;font-size:12px;cursor:pointer;}' +
+      '.print-actions button{border:1px solid #cbd5e1;background:#fff;padding:6px 10px;border-radius:6px;font-size:11pt;cursor:pointer;}' +
       '.print-actions button.primary{background:#111;color:#fff;border-color:#111;}' +
       '@media print { .print-actions{display:none;} .print-wrap{padding:0;} }' +
       '</style></head><body>' +
