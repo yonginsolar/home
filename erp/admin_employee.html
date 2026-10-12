@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.111
-Change: 2026-10-12 - Protect employee detail access/notification drafts and resume interrupted reads.
+Version: v1.0.112
+Change: 2026-10-12 - Protect payroll drafts and isolate leave adjustments between employees.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.111 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.112 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -425,7 +425,7 @@ Change: 2026-10-12 - Protect employee detail access/notification drafts and resu
 
   <div class="d-flex align-items-center mb-3">
     <label class="me-2 fw-bold small">귀속월</label>
-    <input type="month" id="salaryMonth" class="form-control form-control-sm w-auto me-2" onchange="ensureEmployeeDetailTab('tabSalary', {force:true})">
+    <input type="month" id="salaryMonth" class="form-control form-control-sm w-auto me-2" onchange="changeEmployeeSalaryMonth()">
     <button class="btn btn-sm btn-outline-dark" onclick="printSalaryAdmin()">🖨️ 명세서 인쇄</button>
   </div>
 
@@ -962,9 +962,14 @@ const employeeInfoResumeReads = new Map();
 const EMPLOYEE_DETAIL_DRAFT_IDS = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
     'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate',
     'rrnFront','rrnBack','durunuriEligibilityEnabled','durunuriConfirmedMonths','durunuriConfirmedThroughMonth',
-    'durunuriVerificationMethod','durunuriEligibilityNote'];
+    'durunuriVerificationMethod','durunuriEligibilityNote',
+    'payTotalFixed','salaryTaxFamilyCount','salaryTaxChildCount','salaryTaxWithholdingRate',
+    'payrollTaxAdjustmentIncome','payrollTaxAdjustmentLocal','payrollTaxAdjustmentNote',
+    'workDescription','workDays','workHours','payMeal','payCar','payChild','payBonus',
+    'logType','logValue','logReason'];
 const employeeDetailDraftBaseline = new Map();
 let employeeDetailDiscardPending = false, employeeDetailDiscardAllowed = false;
+let employeeSalarySelectedMonth = '', employeeLeaveSaveInFlight = false;
 function employeeDetailDraftValue(element) {
     if (element.type === 'checkbox') return element.checked;
     return element.hasAttribute('data-number-group') ? ERPNumberInput.raw(element.value) : element.value;
@@ -1001,11 +1006,11 @@ function hasUnsavedEmployeeDetailTab(tabId) {
 }
 function isEmployeeDetailSaving() {
     return employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight
-        || employeeNotificationSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight;
+        || employeeNotificationSaveInFlight || employeeLeaveSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight;
 }
-function requestEmployeeDetailDiscard(action) {
+function requestEmployeeDetailDiscard(action, {tabId = ''} = {}) {
     if (employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
-    if (!hasUnsavedEmployeeDetail()) { action(); return; }
+    if (!(tabId ? hasUnsavedEmployeeDetailTab(tabId) : hasUnsavedEmployeeDetail())) { action(); return; }
     employeeDetailDiscardPending = true;
     const empId = currentEmpId, revision = employeeDetailRevision;
     document.getElementById('confirmModal').addEventListener('hidden.bs.modal', () => {
@@ -1013,9 +1018,31 @@ function requestEmployeeDetailDiscard(action) {
     }, { once: true });
     showConfirm('저장하지 않은 변경사항을 버릴까요?', () => {
         if (empId !== currentEmpId || revision !== employeeDetailRevision || isEmployeeDetailSaving()) return;
-        checkpointEmployeeDetailDraft(document.getElementById('detailModal'));
+        checkpointEmployeeDetailDraft(document.getElementById(tabId || 'detailModal'));
         action();
     });
+}
+function changeEmployeeSalaryMonth() {
+    const input = document.getElementById('salaryMonth');
+    const requestedMonth = input.value;
+    input.value = employeeSalarySelectedMonth;
+    if (requestedMonth === employeeSalarySelectedMonth || employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
+    const empId = currentEmpId, revision = employeeDetailRevision, owner = getHrSettingsOwner();
+    requestEmployeeDetailDiscard(() => {
+        if (empId !== currentEmpId || revision !== employeeDetailRevision || owner !== getHrSettingsOwner()) return;
+        employeeSalarySelectedMonth = requestedMonth;
+        input.value = requestedMonth;
+        void ensureEmployeeDetailTab('tabSalary', {force:true});
+    }, {tabId:'tabSalary'});
+}
+function snapshotEmployeeDetailTabDraft(tabId) {
+    const pane = document.getElementById(tabId);
+    return new Map(EMPLOYEE_DETAIL_DRAFT_IDS.filter(id => pane?.contains(document.getElementById(id)))
+        .map(id => [id, employeeDetailDraftValue(document.getElementById(id))]));
+}
+function checkpointSavedEmployeeDetailTab(tabId, values) {
+    for (const [id, value] of values) employeeDetailDraftBaseline.set(id, value);
+    if (!hasUnsavedEmployeeDetailTab(tabId)) window.ErpWorkspaceResume?.checkpoint(document.getElementById(tabId));
 }
 function guardEmployeeDetailClose(event) {
     if (isEmployeeDetailSaving()) return event.preventDefault();
@@ -1030,7 +1057,7 @@ function guardEmployeeDetailClose(event) {
     cancelEmployeeDetailReads();
 }
 window.addEventListener('beforeunload', event => {
-    if (employeeResignationSaveInFlight || hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
+    if (isEmployeeDetailSaving() || hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
 });
 let employeeSalaryLoadRevision = 0;
 const EMPLOYEE_BASIC_FIELDS = ['emp_name','member_id','phone','email','position','auth_level','department','address','hire_date','base_salary','salary_apply_date'];
@@ -5715,6 +5742,11 @@ async function openDetail(u) {
     const owner = getHrSettingsOwner();
     const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id) && isHrSettingsContextCurrent(owner);
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
+    employeeSalarySelectedMonth = document.getElementById('salaryMonth').value;
+    document.getElementById('logType').value = '지급';
+    document.getElementById('logValue').value = '';
+    document.getElementById('logReason').value = '';
+    checkpointEmployeeDetailDraft(document.getElementById('tabLog'));
     employeeDetailTabLoads.clear();
     employeeIdentityReads.clear();
     employeeBasicAccess.state = 'idle'; employeeBasicAccess.allowed = false;
@@ -5732,6 +5764,7 @@ async function openDetail(u) {
     currentPayrollTaxProfile = normalizeAdminEmployeePayrollTaxProfile(u);
     setSalaryTaxInputs(currentPayrollTaxProfile);
     setSalaryTaxAdjustmentInputs();
+    checkpointEmployeeDetailDraft(document.getElementById('tabSalary'));
 
     document.getElementById("detailName").innerText = u.emp_name; document.getElementById("viewMemberId").innerText = u.member_id || "-";
     document.getElementById("editMemberId").value = u.member_id || "";document.getElementById("detailId").innerText = `사번 ${currentEmpDisplayNo}`;
@@ -6194,7 +6227,8 @@ async function loadSalaryData() {
     const empId = currentEmpId, revision = employeeDetailRevision, salaryRevision = ++employeeSalaryLoadRevision;
     const owner = getHrSettingsOwner();
     const isCurrent = () => revision === employeeDetailRevision && salaryRevision === employeeSalaryLoadRevision && String(empId) === String(currentEmpId)
-        && owner === getHrSettingsOwner() && isEmployeeDetailTabVisible('tabSalary');
+        && owner === getHrSettingsOwner() && isEmployeeDetailTabVisible('tabSalary')
+        && month === document.getElementById('salaryMonth').value;
     const month = document.getElementById("salaryMonth").value;
     const badge = document.getElementById("salaryStatusBadge");
     const alertBox = document.getElementById("salaryAlertBox");
@@ -6373,6 +6407,7 @@ async function loadSalaryData() {
 
     // 계산식 적용
     recalcSalaryComponents();
+    checkpointEmployeeDetailDraft(document.getElementById('tabSalary'));
     return true;
 }
 
@@ -6784,6 +6819,9 @@ function saveSalary() {
 async function persistSalary() {
     const month = document.getElementById("salaryMonth").value;
     if (!month) return showAlert("귀속월을 선택해주세요.");
+    const savedEmpId = currentEmpId, savedRevision = employeeDetailRevision, savedOwner = getHrSettingsOwner();
+    const isSavedTargetCurrent = () => savedEmpId === currentEmpId && savedRevision === employeeDetailRevision
+        && savedOwner === getHrSettingsOwner() && month === document.getElementById('salaryMonth').value;
 
     // [핵심 변경] 귀속월에서 연도 추출 -> 해당 연도 요율 가져오기
     const targetYear = month.split('-')[0]; // "2025" 추출
@@ -6877,6 +6915,7 @@ async function persistSalary() {
         payroll_tax_adjustment_note: taxAdjustment.note || null
     };
 
+    const savedDraft = snapshotEmployeeDetailTabDraft('tabSalary');
     // [6] Insert or Update 실행
     const { data: existing } = await scopeEmployeeTenant(_supabase.from('hr_salary').select('id')).eq('emp_id', currentEmpId).eq('year_month', month).maybeSingle();
 
@@ -6888,6 +6927,7 @@ async function persistSalary() {
     if (error) {
         showAlert("실패: " + error.message);
     } else {
+        if (isSavedTargetCurrent()) checkpointSavedEmployeeDetailTab('tabSalary', savedDraft);
         // [핵심 변경] 저장 성공 후, SQL 함수 호출하여 회사 부담금 일괄 계산
         // 인자: '2025-01' 같은 형태 (month 변수)
         const { error: rpcError } = await _supabase.rpc('calc_company_share', { target_ym: month });
@@ -6904,7 +6944,11 @@ async function persistSalary() {
             } catch (syncError) {
                 showAlert(`급여와 회사부담금은 저장됐지만 두루누리 지원금 연동에 실패했습니다.\n${syncError?.message || syncError}\n회계 반영을 진행하지 말고 원인을 확인해주세요.`);
             }
-            await loadSalaryData(); // 화면 갱신
+            if (isSavedTargetCurrent() && !hasUnsavedEmployeeDetailTab('tabSalary') && isEmployeeDetailTabVisible('tabSalary')) {
+                setEmployeeDetailTabState('tabSalary', 'loading');
+                const loaded = await loadSalaryData();
+                if (isSavedTargetCurrent() && isEmployeeDetailTabVisible('tabSalary')) setEmployeeDetailTabState('tabSalary', loaded === true ? 'ready' : 'error');
+            }
         }
     }
 }
@@ -7357,7 +7401,33 @@ async function applyBulkLeaveAdjustment() {
     });
 } // End of applyBulkLeaveAdjustment
 
-async function saveLog() { const type = document.getElementById("logType").value; const val = Number(document.getElementById("logValue").value); const reason = document.getElementById("logReason").value; if(!val || !reason) return showAlert("입력 필요"); const { error } = await _supabase.from('hr_leave_adj').insert(withEmployeeTenantPayload({ emp_id: currentEmpId, adj_type: type, days: val, reason: reason })); if (error) return showAlert("반영 실패: " + error.message); showAlert("반영됨"); document.getElementById("logValue").value = ""; document.getElementById("logReason").value = ""; loadLeave(); }
+async function saveLog() {
+    if (isEmployeeDetailSaving() || !currentEmpId) return;
+    const empId = currentEmpId, revision = employeeDetailRevision, owner = getHrSettingsOwner();
+    const type = document.getElementById('logType').value;
+    const val = Number(document.getElementById('logValue').value);
+    const reason = document.getElementById('logReason').value;
+    if (!val || !reason) return showAlert('입력 필요');
+    const savedDraft = snapshotEmployeeDetailTabDraft('tabLog');
+    employeeLeaveSaveInFlight = true;
+    try {
+        const { error } = await _supabase.from('hr_leave_adj').insert(withEmployeeTenantPayload({ emp_id: empId, adj_type: type, days: val, reason: reason }));
+        if (empId !== currentEmpId || revision !== employeeDetailRevision || owner !== getHrSettingsOwner()) return;
+        if (error) return showAlert('반영 실패: ' + error.message);
+        showAlert('반영됨');
+        const unchanged = [...savedDraft].every(([id, value]) => employeeDetailDraftValue(document.getElementById(id)) === value);
+        for (const id of ['logValue','logReason']) {
+            if (unchanged) document.getElementById(id).value = '';
+            savedDraft.set(id, '');
+        }
+        checkpointSavedEmployeeDetailTab('tabLog', savedDraft);
+        await loadLeave();
+    } catch (error) {
+        showAlert('반영 실패: ' + (error?.message || '연결을 확인해 주세요.'));
+    } finally {
+        employeeLeaveSaveInFlight = false;
+    }
+}
 
 function openAdminCertModal() { document.getElementById("adminCertPurpose").value = "관공서 제출용"; toggleAdminEtc(); adminCertModal.show(); }
 function toggleAdminEtc() { const v = document.getElementById("adminCertPurpose").value; const e = document.getElementById("adminCertEtc"); if(v==='기타') { e.style.display='block'; e.focus(); } else e.style.display='none'; }
