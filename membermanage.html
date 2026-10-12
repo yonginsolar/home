@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.169
+Version: v1.0.170
 Change: 2026-10-12 - Display protected education and meeting photo copies before originals.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.169 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.170 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261002-1"></script>
@@ -46,7 +46,7 @@ allowKakaoApp: true
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script src="/shared/public_image_index.js?v=20261012-1"></script>
 <script src="/shared/image_display.js?v=20261012-2"></script>
-<script src="/shared/participation_image_display.js?v=20261012-1"></script>
+<script src="/shared/participation_image_display.js?v=20261012-2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
 <script src="cert_generator.js?v=20261010_01"></script>
 <script src="shared/contribution_cert_preview.js?v=20261010-1"></script>
@@ -6452,15 +6452,16 @@ document.getElementById('participationHistoryInfiniteSentinel')?.remove();
 if (!append) {
 list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>사진을 불러오는 중...</div>';
 }
-const photoPaths = Array.from(new Set(renderEvents.flatMap(function(event) {
-const firstPhoto=(Array.isArray(event.files) ? event.files : []).find(function(file){return file.file_kind==='PHOTO';});
-return firstPhoto&&!firstPhoto.external_url&&firstPhoto.storage_path?[String(firstPhoto.storage_path).trim()]:[];
-})));
-const photoUrlRows = await CoopParticipationImages.mapLimit(photoPaths,async function(path) {
+const photoUrlRows = await CoopParticipationImages.mapLimit(renderEvents,async function(event) {
+const file=(Array.isArray(event.files)?event.files:[]).find(f=>f.file_kind==='PHOTO');
+if(!file)return ['', ''];
+const external=safeUrl(file.external_url||''),key=external||String(file.storage_path||'').trim();
 try {
-return [path, await getParticipationSignedUrl(CoopParticipationImages.path(path,'small'))];
+if(external){const known=CoopParticipationImages.external(external,'small');if(known)return [key,known];}
+const path=external?await CoopParticipationImages.linkedPath(currentMemberCoopId,event.event_id,external):key;
+return [key, await getParticipationSignedUrl(CoopParticipationImages.path(path,'small'))];
 } catch (_) {
-return [path, ''];
+return [key, ''];
 }
 });
 if (renderVersion !== participationHistoryRenderVersion) return;
@@ -6503,6 +6504,7 @@ return `<button type="button" class="btn btn-sm btn-outline-primary" data-partic
 const eventTypeLabel = participationEventTypeLabel(event.event_type);
 const photoGalleryPayload = photos.map(function(file, index) {
 return {
+eventId:String(event.event_id || ''),
 storagePath: String(file.storage_path || '').trim(),
 externalUrl: safeUrl(file.external_url || ''),
 alt: String(file.original_name || `${eventTypeLabel} 사진 ${index + 1}`).trim()
@@ -6510,7 +6512,7 @@ alt: String(file.original_name || `${eventTypeLabel} 사진 ${index + 1}`).trim(
 }).filter(function(item) { return item.storagePath || item.externalUrl; });
 const firstPhoto = photoGalleryPayload[0] || null;
 const firstPhotoKey = firstPhoto ? (firstPhoto.externalUrl || firstPhoto.storagePath) : '';
-const firstPhotoUrl = firstPhoto ? (firstPhoto.externalUrl ? CoopParticipationImages.external(firstPhoto.externalUrl,'small') : photoUrlMap.get(firstPhoto.storagePath) || '') : '';
+const firstPhotoUrl = firstPhoto ? photoUrlMap.get(firstPhotoKey) || '' : '';
 const hasPhoto = Boolean(firstPhoto);
 const titleHtml = event.event_type !== 'EDUCATION' && event.document_available === true
 ? `<button type="button" class="participation-meeting-title" data-participation-document="${escapeHtml(event.event_id)}" aria-label="${escapeHtml(event.title)} 회의록 보기"><span>${escapeHtml(event.title)}</span><i class="bi bi-box-arrow-up-right small" aria-hidden="true"></i></button>`
@@ -6792,7 +6794,12 @@ probe.src = url;
 
 async function resolveParticipationGalleryUrl(item, forceRefresh) {
 const externalUrl = safeUrl(item?.externalUrl || '');
-if (externalUrl) {const display=CoopParticipationImages.external(externalUrl);if(!display)throw new Error('PHOTO_DISPLAY_UNAVAILABLE');return display;}
+if (externalUrl) {
+const display=CoopParticipationImages.external(externalUrl);if(display)return display;
+const original=await CoopParticipationImages.linkedPath(currentMemberCoopId,item.eventId,externalUrl),displayPath=CoopParticipationImages.path(original);
+if(forceRefresh)participationSignedUrlCache.delete(displayPath);
+return getParticipationSignedUrl(displayPath);
+}
 const existingUrl = String(item?.signedUrl || '').trim();
 if (existingUrl.startsWith('data:')) return existingUrl;
 const displayPath=CoopParticipationImages.path(item.storagePath);

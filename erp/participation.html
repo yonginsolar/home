@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.25 | Change: 2026-10-12 - Keep private photo originals and create protected display copies. -->
+<!-- Version: v1.3.26 | Change: 2026-10-12 - Protected display copies for uploaded and linked education photos. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.25 | participation.html');</script>
+  <script>console.log('[Version] v1.3.26 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -17,7 +17,7 @@
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script src="/shared/public_image_index.js?v=20261012-1"></script>
 <script src="/shared/image_display.js?v=20261012-2"></script>
-<script src="/shared/participation_image_display.js?v=20261012-1"></script>
+<script src="/shared/participation_image_display.js?v=20261012-2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8My0mA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>
     window.__COOP_ROUTE_APP__ = 'erp';
@@ -581,6 +581,8 @@
     let lightboxReturnFocus = null;
     let lightboxStoredPhoto = null;
     let storedPhotoRenderVersion = 0;
+    let humanitiesPhotoRenderVersion = 0;
+    let linkedPhotoPaths = new Set();
     let lightboxRequestVersion = 0;
     let newPhotoPreviewUrls = [];
     const signedFileUrlCache = new Map();
@@ -1446,6 +1448,7 @@
     } // End of syncEducationFileSections
 
     function renderHumanitiesResources(resetInternalFiles = false) {
+      const photoVersion=++humanitiesPhotoRenderVersion;
       const section = document.getElementById('humanitiesPublicResources');
       const meta = document.getElementById('humanitiesSourceMeta');
       const resourcesTarget = document.getElementById('humanitiesSourceResources');
@@ -1502,7 +1505,7 @@
       }
       const photoHtml = photoItems.length
         ? `<div class="small fw-bold mb-2">공개 사진</div><div class="photo-strip">${photoItems.map(function(item, index) {
-            return `<button type="button" class="photo-thumb" data-humanities-photo-index="${index}" title="${escapeHtml(item.title || `교육 사진 ${index + 1}`)}"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.title || `교육 사진 ${index + 1}`)}" loading="lazy"></button>`;
+            return `<button type="button" class="photo-thumb" data-humanities-photo-index="${index}" title="${escapeHtml(item.title || `교육 사진 ${index + 1}`)}"><span class="text-muted small">사진 준비 중</span></button>`;
           }).join('')}</div>`
         : '';
       const typeLabel = { file:'자료', video:'영상', link:'링크' };
@@ -1514,10 +1517,25 @@
         : '';
       resourcesTarget.innerHTML = photoHtml + linkHtml;
       resourcesTarget.querySelectorAll('[data-humanities-photo-index]').forEach(function(button) {
-        button.addEventListener('click', function() {
+        button.addEventListener('click', async function() {
           const photo = photoItems[Number(button.dataset.humanitiesPhotoIndex)];
-          if (photo?.url) openImageLightbox(photo.url, button);
+          if (!photo?.url) return;
+          let url='';try{const original=await CoopParticipationImages.linkedPath(dashboardData.coop_id,formState.eventId,photo.url);url=await getSignedFileUrl(CoopParticipationImages.path(original));}catch(_){}
+          if(photoVersion===humanitiesPhotoRenderVersion)openImageLightbox(url,button,{external_url:photo.url});
         });
+      });
+      const eventId=formState.eventId;
+      const canContinue=()=>photoVersion===humanitiesPhotoRenderVersion&&formState.eventId===eventId&&humanitiesLinkState.course===course&&!formState.saving;
+      void CoopParticipationImages.mapLimit(photoItems,async function(photo,index){
+        let url='';try{
+          const ready=await CoopParticipationImages.ensureLinked(_supabase,dashboardData.coop_id,eventId,photo.url,canContinue);
+          if(!canContinue())return;
+          CoopParticipationImages.paths(ready.original).forEach(p=>linkedPhotoPaths.add(p));
+          url=await getSignedFileUrl(CoopParticipationImages.path(ready.original,'small'));
+        }catch(_){}
+        if(!canContinue())return;
+        const button=resourcesTarget.querySelector(`[data-humanities-photo-index="${index}"]`);
+        if(button)button.innerHTML=url?`<img src="${escapeHtml(url)}" alt="교육 사진 ${index+1}" loading="lazy">`:'<span class="text-muted small">사진 보기</span>';
       });
     } // End of renderHumanitiesResources
 
@@ -2033,6 +2051,7 @@
 
     function resetEventForm() {
       storedPhotoRenderVersion += 1;
+      humanitiesPhotoRenderVersion += 1;linkedPhotoPaths = new Set();
       revokeNewPhotoPreviewUrls();
       formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
       humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
@@ -3193,7 +3212,7 @@
       try {
         const { data, error } = await _supabase.rpc('participation_admin_delete_event', { p_event_id:formState.eventId });
         if (error) throw error;
-        const storagePaths = Array.isArray(data?.storage_paths) ? data.storage_paths.filter(Boolean).flatMap(function(path){return path.includes('/photo/')?[path,...CoopParticipationImages.paths(path)]:[path];}) : [];
+        const storagePaths = [...(Array.isArray(data?.storage_paths) ? data.storage_paths.filter(Boolean).flatMap(function(path){return path.includes('/photo/')?[path,...CoopParticipationImages.paths(path)]:[path];}) : []),...linkedPhotoPaths];
         let storageWarning = '';
         if (storagePaths.length > 0) {
           const { error:storageError } = await _supabase.storage.from(PARTICIPATION_BUCKET).remove(storagePaths);
@@ -3285,6 +3304,7 @@
       document.getElementById('sourceMinute').addEventListener('change', handleSourceMinuteChange);
       document.getElementById('eventModal').addEventListener('hidden.bs.modal', function() {
         storedPhotoRenderVersion += 1;closeImageLightbox();
+        humanitiesPhotoRenderVersion += 1;
         eventOpenRevision++;
         sourceReadRevision++;
         document.getElementById('saveEventBtn').disabled = formState.saving;

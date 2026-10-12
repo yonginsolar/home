@@ -1,4 +1,4 @@
-/* Version 1.0.0 — Private copies use the original event folder and caller's checked uploads. */
+/* Version 1.0.1 — Private copies use the event folder and caller's checked uploads. */
 (function(root){
  'use strict';
  const suffixes={small:'.thumb.webp',large:'.screen.webp'},pending=new WeakMap();
@@ -8,6 +8,13 @@
   return p+suffixes[size==='small'?'small':'large'];
  }
  function paths(original){return [path(original,'small'),path(original,'large')];}
+ async function linkedPath(coopId,eventId,value){
+  const u=new URL(String(value||''));
+  if(u.protocol!=='https:'||u.hostname!=='wmynvcuedusjnufmhdqv.supabase.co'||u.username||u.password||u.search||u.hash||!/^\/storage\/v1\/object\/public\/archive-media\/[0-9a-f-]{36}\/[^/]+\.(?:jpe?g|png|webp)$/i.test(u.pathname))throw Error('PHOTO_LINKED_SOURCE_INVALID');
+  const digest=await root.crypto.subtle.digest('SHA-256',new TextEncoder().encode(u.href));
+  const id=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+  const original=String(coopId||'')+'/'+String(eventId||'')+'/photo/linked-'+id+'.jpg';path(original);return original;
+ }
  function external(value,size='large'){
   const raw=String(value||'');if(!raw)return '';
   const display=root.CoopDisplayImages?.display(raw,size)||raw;
@@ -69,10 +76,33 @@
   })();
   cache.set(original,request);try{return await request;}finally{if(cache.get(original)===request)cache.delete(original);}
  }
+ async function ensureLinked(client,coopId,eventId,url,canContinue=()=>true){
+  const original=await linkedPath(coopId,eventId,url);let cache=pending.get(client);if(!cache){cache=new Map();pending.set(client,cache);}
+  if(cache.has(original))return cache.get(original);
+  const request=(async()=>{
+   const bucket=client.storage.from('participation-files'),needed=[];
+   for(const size of ['small','large']){
+    if(!canContinue())throw Error('PHOTO_REQUEST_CANCELLED');
+    const result=await bucket.createSignedUrl(path(original,size),600);
+    if(result.error||!result.data?.signedUrl){if(!missing(result.error))throw Error('PHOTO_DISPLAY_LOOKUP_FAILED');needed.push(size);}
+   }
+   if(!needed.length)return {ready:true,reused:true,original};
+   if(!canContinue())throw Error('PHOTO_REQUEST_CANCELLED');
+   const response=await root.fetch(url,{credentials:'omit',redirect:'error'});
+   if(!response.ok||!/^image\/(jpeg|png|webp)(?:;|$)/i.test(response.headers.get('Content-Type')||''))throw Error('PHOTO_LINKED_SOURCE_FAILED');
+   if(Number(response.headers.get('Content-Length'))>20971520)throw Error('PHOTO_FORMAT_INVALID');
+   const reader=response.body.getReader(),chunks=[];let bytes=0;
+   try{for(;;){if(!canContinue())throw Error('PHOTO_REQUEST_CANCELLED');const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(bytes>20971520)throw Error('PHOTO_FORMAT_INVALID');chunks.push(value);}}
+   finally{await reader.cancel().catch(()=>{});}
+   const file=new Blob(chunks,{type:response.headers.get('Content-Type').split(';')[0].toLowerCase()});
+   await uploadCopies(client,original,file,canContinue,needed);return {ready:true,original};
+  })();
+  cache.set(original,request);try{return await request;}finally{if(cache.get(original)===request)cache.delete(original);}
+ }
  async function mapLimit(items,worker,limit=2){
   const out=new Array(items.length);let next=0;
   await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length){const i=next++;out[i]=await worker(items[i],i);}}));
   return out;
  }
- root.CoopParticipationImages=Object.freeze({path,paths,external,make,uploadCopies,ensure,mapLimit,version:'1.0.0'});
+ root.CoopParticipationImages=Object.freeze({path,paths,linkedPath,external,make,uploadCopies,ensure,ensureLinked,mapLimit,version:'1.0.1'});
 })(window);
