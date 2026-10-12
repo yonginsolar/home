@@ -21,7 +21,9 @@
         Object.freeze({src: new URL('site_editor_drafts.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-EbfUPXazsNn8Ls1+1MosAAoCgvtGnTkzJFr3y/guzmHIS3qZ7rEDd1Vy/AsQU09P', ready: () => typeof root.SiteEditorDrafts?.create === 'function'}),
         Object.freeze({src: new URL('../shared/home_design.js?v=20261009-3', document.baseURI).href, integrity: 'sha384-w7le8YvS38GKPdQQ6A4Jjp/+Xlqoda5IEU97x+Gwj8gdTOdOh+iXxZuW2ZeO9uDp', ready: () => typeof root.CoopHomeDesign?.normalizeLayout === 'function'}),
         Object.freeze({src: new URL('../shared/site_text_styles.js?v=20261009-17', document.baseURI).href, integrity: 'sha384-QjRL2pjNqVnMgC37LaVoPTXaST81Wrogi/v6nRwDo/zzz0mCX6+YZNAAz6ORU2MH', ready: () => typeof root.CoopTextStyles?.normalize === 'function'}),
-        Object.freeze({src: new URL('admin_member_site.js?v=20261012-1', document.baseURI).href, integrity: 'sha384-kiQ3E1MLvP+7a6CeoPr97unNbCgc34BucUe2VwYTaNPNFBJTbG9KnLVjQzDpyIkz', ready: () => root.AdminMemberSite?.version === '20261012-1'}),
+        Object.freeze({src: new URL('../shared/participation_image_display.js?v=20261012-2', document.baseURI).href, integrity: 'sha384-BAhSAOuwT81zoUXrZQVqiEgLHCl625ndKclSPUIO9cKHaf9spvIsk1RgPz9Gb04S', ready: () => root.CoopParticipationImages?.version === '1.0.1'}),
+        Object.freeze({src: new URL('../shared/activity_photo_viewer.js?v=20261012-1', document.baseURI).href, integrity: 'sha384-EY00pwIUzEP8WOxijMpFaT9V7txklu4gJpDNrnluPaI/JDlyGj/YaR/75McSxkRX', ready: () => root.CoopActivityPhotoViewer?.version === '1.0.0'}),
+        Object.freeze({src: new URL('admin_member_site.js?v=20261012-2', document.baseURI).href, integrity: 'sha384-P7Y/Zj7tL9hLg6L++u//eZDfMjiN2DKOB4yFzyVlyD78jc8+1RB95D0Rc15luvk3', ready: () => root.AdminMemberSite?.version === '20261012-2'}),
         Object.freeze({src: new URL('site_legal_samples.js?v=20261008-1', document.baseURI).href, integrity: 'sha384-8En93aFZlH8BEdzebQ4j4kJzZycfI/wI+t+wVTm3KyhVwDb/9SHzDV9cBcC3s2oq', ready: () => !!root.CoopSiteLegalSamples}),
         Object.freeze({src: new URL('site_inline_editor.js?v=20261010-3', document.baseURI).href, integrity: 'sha384-P4vouZfwr+qtHzdHll3+71NqTLaxbyz5rW/tTZSYVf4z49D/+/xaCQDhUPW7BXTa', ready: () => typeof root.CoopSiteInlineHost?.mount === 'function'}),
         Object.freeze({src: new URL('home_visual_editor.js?v=20261010-5', document.baseURI).href, integrity: 'sha384-oGxufjZ/O/BlhmzIqADgjZ3aUOBQTX+6BEdNLXhfMIWu2dKonsmfcR30+eqmAiPh', ready: () => typeof root.CoopHomeVisualEditor?.mount === 'function'}),
@@ -67,8 +69,8 @@
     }
     async function ensureSite() {
         // Definitions may arrive together; visual adapters require the shared helpers first.
-        await Promise.all(siteAssets.slice(0, 5).map((asset, index) => ensureAsset('SITE_' + index, asset, asset.ready)));
-        await Promise.all(siteAssets.slice(5).map((asset, index) => ensureAsset('SITE_' + (index + 5), asset, asset.ready)));
+        await Promise.all(siteAssets.slice(0, 7).map((asset, index) => ensureAsset('SITE_' + index, asset, asset.ready)));
+        await Promise.all(siteAssets.slice(7).map((asset, index) => ensureAsset('SITE_' + (index + 7), asset, asset.ready)));
         return root.AdminMemberSite;
     }
     function showBootFailure() {

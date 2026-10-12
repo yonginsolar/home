@@ -1,6 +1,28 @@
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261010-3') return;
+    if (root.AdminMemberSite?.version === '20261012-2') return;
+let activityPhotoRenderRevision=0;
+async function activityDisplayUrl(item,size='small') {
+ if(item.kind==='file')return item.objectUrl||'';
+ if(item.kind==='participation'){
+  const path=String(item.storagePath||'');
+  const {data,error}=await _supabase.storage.from('participation-files').createSignedUrl(CoopParticipationImages.path(path,size),600);
+  if(error)throw error;return data?.signedUrl||'';
+ }
+ const raw=normalizeAdminHttpUrl(item.url||'');
+ const display=CoopDisplayImages.display(raw,size);
+ return display!==raw||/\.screen\.webp(?:\?|$)/.test(display)?display:'';
+}
+function openActivityPhotoPreview(item,trigger){
+ const runtime=g_adminMemberRuntime;
+ const source=getActivitySourceEventId(),items=activityGalleryItems;
+ CoopActivityPhotoViewer.open({trigger,caption:'활동 사진',isCurrent:()=>g_adminMemberRuntime===runtime&&items===activityGalleryItems&&source===getActivitySourceEventId(),
+  display:()=>activityDisplayUrl(item,'large'),original:async()=>{
+   if(item.kind==='file')return item.objectUrl||'';
+   if(item.kind==='participation'){const {data,error}=await _supabase.storage.from('participation-files').createSignedUrl(item.storagePath,600);if(error)throw error;return data?.signedUrl||'';}
+   return CoopDisplayImages.original(normalizeAdminHttpUrl(item.url||''));
+  },onError:message=>myAlert(message,'error')});
+}
 function normalizeHistoryContentForCompare(value) {
     return String(value || '')
         .replace(/<br\s*\/?>/gi, '\n')
@@ -1724,6 +1746,7 @@ document.getElementById('activity-cover-removed').value = activityGalleryItems.l
 }
 
 function renderActivityCoverPreview() {
+const revision=++activityPhotoRenderRevision;
 queueHomePreviewUpdate();
 const gridEl = document.getElementById('activity-gallery-preview');
 const placeholderEl = document.getElementById('activity-cover-placeholder');
@@ -1738,7 +1761,7 @@ return;
 
 placeholderEl.style.display = 'none';
 gridEl.innerHTML = activityGalleryItems.map((item, index) => {
-const src = item.kind === 'file' ? item.objectUrl : (item.kind === 'participation' ? item.previewUrl : item.url);
+const src = item.kind === 'file' ? item.objectUrl : (item.kind === 'participation' ? item.previewUrl : (()=>{const raw=normalizeAdminHttpUrl(item.url||''),display=CoopDisplayImages.display(raw,'small');return display!==raw||/\.screen\.webp(?:\?|$)/.test(display)?display:'';})());
 const pendingBadge = item.kind === 'file'
 ? '<span class="activity-gallery-pending-badge">추가 예정</span>'
 : (item.kind === 'participation' ? '<span class="activity-gallery-pending-badge">참여 관리 사진</span>' : '');
@@ -1748,7 +1771,7 @@ const coverButton = index === 0
 : `<button type="button" class="btn btn-sm btn-light border" title="대표사진 지정" onclick="event.stopPropagation(); setActivityGalleryCover(${index})"><i class="bi bi-star"></i></button>`;
 return `
   <div class="activity-gallery-thumb">
-    <img src="${escapeHtml(src)}" alt="활동 사진 ${index + 1}">
+    <button type="button" class="activity-photo-preview-button" data-activity-photo-index="${index}" aria-label="활동 사진 ${index+1} 크게 보기">${src?`<img src="${escapeHtml(src)}" alt="활동 사진 ${index+1}" loading="lazy">`:'<span>사진 보기</span>'}</button>
     ${pendingBadge}
     ${coverBadge}
     <div class="activity-gallery-actions">
@@ -1757,6 +1780,7 @@ return `
     </div>
   </div>`;
 }).join('');
+gridEl.querySelectorAll('[data-activity-photo-index]').forEach(button=>button.addEventListener('click',()=>{const item=activityGalleryItems[Number(button.dataset.activityPhotoIndex)];if(revision===activityPhotoRenderRevision&&item)openActivityPhotoPreview(item,button);}));
 }
 
 function setActivityGalleryItemsFromUrls(urls) {
@@ -1882,10 +1906,10 @@ return [];
 
 async function getActivityParticipationPhotoPreview(file) {
 const externalUrl = normalizeAdminHttpUrl(file?.external_url || '');
-if (externalUrl) return externalUrl;
+if (externalUrl) {const display=CoopDisplayImages.display(externalUrl,'small');return display!==externalUrl||/\.screen\.webp(?:\?|$)/.test(display)?display:'';}
 const path = String(file?.storage_path || '').trim();
 if (!path) return '';
-const { data, error } = await _supabase.storage.from('participation-files').createSignedUrl(path, 600);
+const { data, error } = await _supabase.storage.from('participation-files').createSignedUrl(CoopParticipationImages.path(path,'small'), 600);
 if (error) throw error;
 return String(data?.signedUrl || '').trim();
 } // End of getActivityParticipationPhotoPreview
@@ -2040,8 +2064,10 @@ return true;
 g_siteActivities.forEach((row) => {
 const parsedActivity = parseActivityContentWithGallery(row.content || '', row.file_url || '');
 const coverUrl = normalizeAdminHttpUrl(parsedActivity.galleryUrls[0] || row.file_url);
+const smallCover=coverUrl?CoopDisplayImages.display(coverUrl,'small'):'';
+const hasDisplay=smallCover&&(smallCover!==coverUrl||/\.screen\.webp(?:\?|$)/.test(smallCover));
 const coverHtml = coverUrl
-? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(row.title || '활동 대표 사진')}" style="width:72px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;">`
+? `<button type="button" class="activity-photo-preview-button" data-activity-view-id="${escapeHtml(row.id)}" aria-label="${escapeHtml(row.title || '활동')} 사진 크게 보기">${hasDisplay?`<img src="${escapeHtml(smallCover)}" alt="${escapeHtml(row.title || '활동 대표 사진')}" loading="lazy" style="width:72px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;">`:'<span>사진 보기</span>'}</button>`
 : '<span class="text-muted small">없음</span>';
 const visibleBadge = row.is_current
 ? '<span class="badge bg-success">공개중</span>'
@@ -2063,6 +2089,7 @@ tbody.innerHTML += `<tr>
 </td>
 </tr>`;
 });
+tbody.querySelectorAll('[data-activity-view-id]').forEach(button=>button.addEventListener('click',()=>{const row=g_siteActivities.find(row=>String(row.id)===button.dataset.activityViewId);if(!row)return;const parsed=parseActivityContentWithGallery(row.content||'',row.file_url||'');openActivityPhotoPreview({kind:'url',url:parsed.galleryUrls[0]||row.file_url},button);}));
 return true;
 }
 
@@ -2085,7 +2112,7 @@ if (!modal || modal.dataset.draftGuardBound === '1') return;
 modal.dataset.draftGuardBound = '1';
 modal.addEventListener('show.bs.modal', () => { modal.dataset.activityShown = '0'; });
 modal.addEventListener('shown.bs.modal', () => { modal.dataset.activityShown = '1'; });
-modal.addEventListener('hidden.bs.modal', () => { modal.dataset.activityShown = '0'; });
+modal.addEventListener('hidden.bs.modal', () => { modal.dataset.activityShown = '0';CoopActivityPhotoViewer.close();activityPhotoRenderRevision++; });
 document.getElementById('activity-date')?.addEventListener('input', () => { g_activityDateUserEdited = true; });
 document.getElementById('activity-date')?.addEventListener('change', () => { g_activityDateUserEdited = true; });
 modal.addEventListener('hide.bs.modal', event => {
@@ -3198,5 +3225,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
         initialized = true;
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
-    root.AdminMemberSite = Object.freeze({ version: '20261012-1', initialize, isInitialized: () => initialized });
+    root.AdminMemberSite = Object.freeze({ version: '20261012-2', initialize, isInitialized: () => initialized });
 })(window);
