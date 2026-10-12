@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.112
-Change: 2026-10-12 - Protect payroll drafts and isolate leave adjustments between employees.
+Version: v1.0.113
+Change: 2026-10-12 - Hour-based leave and separately recorded extra leave grants.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.112 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.113 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -45,7 +45,8 @@ Change: 2026-10-12 - Protect payroll drafts and isolate leave adjustments betwee
   <script src="payroll_tax_table.js?v=20260508-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
-  <script src="leave_ledger.js?v=20260928-1"></script>
+  <script src="leave_time.js?v=20261012-1"></script>
+  <script src="leave_ledger.js?v=20261012-1"></script>
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
 
 <script src="annual_settings.js?v=20261011-2"></script>
@@ -544,8 +545,9 @@ Change: 2026-10-12 - Protect payroll drafts and isolate leave adjustments betwee
 </div>
 </div>
           <div class="tab-pane fade" id="tabLog">
-            <div class="card bg-light border-0 p-3 mb-3 text-center leave-summary-card-button" role="button" tabindex="0" onclick="showAdminLeaveDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdminLeaveDetail();}" title="연차 상세 리포트 보기"><small class="text-muted">사용 가능 연차</small><h3 class="fw-bold text-primary m-0" id="displayLeaveRemain">0일</h3><div class="small text-primary mt-2">상세 보기</div></div>
-            <div class="mb-2"><label class="small text-muted">구분</label><select id="logType" class="form-select"><option value="지급">🎁 지급 (포상 등)</option><option value="차감">⚠️ 차감 (징계 등)</option></select></div>
+            <div class="card bg-light border-0 p-3 mb-3 text-center leave-summary-card-button" role="button" tabindex="0" onclick="showAdminLeaveDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdminLeaveDetail();}" title="연차 상세 리포트 보기"><small class="text-muted">사용 가능 휴가</small><h3 class="fw-bold text-primary m-0" id="displayLeaveRemain">0일 0시간</h3><div class="small text-primary mt-2">상세 보기</div></div>
+            <div class="mb-2"><label class="small text-muted">구분</label><select id="logType" class="form-select" onchange="syncExtraLeaveInputs()"><option value="지급">🎁 지급 (포상 등)</option><option value="차감">⚠️ 차감 (징계 등)</option><option value="extra">추가 근로에 따른 추가 휴가</option></select></div>
+            <div id="extraLeaveInputs" hidden><div class="mb-2"><label class="small text-muted">추가 근로일</label><input type="date" id="extraLeaveWorkDate" class="form-control"></div><div class="row g-2 mb-2"><div class="col-6"><label class="small text-muted">실제 추가 근로시간</label><input type="number" id="extraLeaveWorkHours" min="0.0166666667" max="24" step="any" class="form-control"></div><div class="col-6"><label class="small text-muted">부여할 추가 휴가시간</label><input type="number" id="extraLeaveGrantHours" min="0.0166666667" max="48" step="any" class="form-control"></div></div><div class="mb-2"><label class="small text-muted">추가 근로 내용</label><textarea id="extraLeaveReason" class="form-control" maxlength="1000" rows="3"></textarea></div><div class="small text-muted mb-2">법정 연차와 구분해 올해 추가 휴가로 기록합니다. 실제 근로시간과 부여할 휴가시간을 각각 입력하세요.</div></div>
             <div class="mb-2"><label class="small text-muted">일수</label><input type="number" id="logValue" class="form-control" placeholder="예: 1"></div>
             <div class="mb-3"><label class="small text-muted">사유</label><input type="text" id="logReason" class="form-control" placeholder="사유를 입력하세요"></div>
             <button class="btn btn-primary w-100 btn-rounded" onclick="saveLog()">✅ 반영하기</button>
@@ -966,7 +968,7 @@ const EMPLOYEE_DETAIL_DRAFT_IDS = ['editName','editMemberId','editPhone','editEm
     'payTotalFixed','salaryTaxFamilyCount','salaryTaxChildCount','salaryTaxWithholdingRate',
     'payrollTaxAdjustmentIncome','payrollTaxAdjustmentLocal','payrollTaxAdjustmentNote',
     'workDescription','workDays','workHours','payMeal','payCar','payChild','payBonus',
-    'logType','logValue','logReason'];
+    'logType','logValue','logReason','extraLeaveWorkDate','extraLeaveWorkHours','extraLeaveGrantHours','extraLeaveReason'];
 const employeeDetailDraftBaseline = new Map();
 let employeeDetailDiscardPending = false, employeeDetailDiscardAllowed = false;
 let employeeSalarySelectedMonth = '', employeeLeaveSaveInFlight = false;
@@ -5746,6 +5748,7 @@ async function openDetail(u) {
     document.getElementById('logType').value = '지급';
     document.getElementById('logValue').value = '';
     document.getElementById('logReason').value = '';
+    resetExtraLeaveInputs();
     checkpointEmployeeDetailDraft(document.getElementById('tabLog'));
     employeeDetailTabLoads.clear();
     employeeIdentityReads.clear();
@@ -6970,7 +6973,8 @@ async function loadLeave() {
             if (!isCurrent()) return;
             currentEmployeeLeaveSnapshot = snapshot;
             const remain = Number(snapshot?.effectiveRemainDays || 0);
-            document.getElementById("displayLeaveRemain").innerText = remain + "일";
+            document.getElementById("displayLeaveRemain").innerText = CoopLeaveTime.formatDays(remain);
+            await loadExtraLeaveAccess();
             return true;
         }
     } catch (error) {
@@ -6986,7 +6990,8 @@ async function loadLeave() {
         return;
     }
     currentEmployeeLeaveSnapshot = { effectiveRemainDays: Number(remainDays || 0), reservedDays: 0, summary: { reservedDocs: [], pastOrUsedDocs: [], unknownDateDocs: [] } };
-    document.getElementById("displayLeaveRemain").innerText = remainDays + "일";
+    document.getElementById("displayLeaveRemain").innerText = CoopLeaveTime.formatDays(remainDays);
+    await loadExtraLeaveAccess();
     return true;
 }
 function getAdminEmployeeLeaveTypeCatalog() {
@@ -7402,6 +7407,7 @@ async function applyBulkLeaveAdjustment() {
 } // End of applyBulkLeaveAdjustment
 
 async function saveLog() {
+    if(document.getElementById('logType').value==='extra')return saveExtraLeave();
     if (isEmployeeDetailSaving() || !currentEmpId) return;
     const empId = currentEmpId, revision = employeeDetailRevision, owner = getHrSettingsOwner();
     const type = document.getElementById('logType').value;
@@ -7427,6 +7433,38 @@ async function saveLog() {
     } finally {
         employeeLeaveSaveInFlight = false;
     }
+}
+
+let extraLeaveAccess=false,extraLeaveRequest=null;
+function syncExtraLeaveInputs(){const extra=document.getElementById('logType').value==='extra';document.getElementById('extraLeaveInputs').hidden=!extra;for(const id of ['logValue','logReason'])document.getElementById(id).parentElement.hidden=extra;}
+function resetExtraLeaveInputs(){for(const id of ['extraLeaveWorkDate','extraLeaveWorkHours','extraLeaveGrantHours','extraLeaveReason'])document.getElementById(id).value='';extraLeaveRequest=null;extraLeaveAccess=false;document.querySelector('#logType option[value="extra"]').disabled=true;syncExtraLeaveInputs();}
+async function loadExtraLeaveAccess(){
+ const empId=currentEmpId,revision=employeeDetailRevision,owner=getHrSettingsOwner();
+ let data,error;try{({data,error}=await _supabase.rpc('erp_hr_extra_leave',{p_action:'access'}));}catch(caught){error=caught;}
+ if(empId!==currentEmpId||revision!==employeeDetailRevision||owner!==getHrSettingsOwner())return;
+ extraLeaveAccess=!error&&data?.allowed===true;document.querySelector('#logType option[value="extra"]').disabled=!extraLeaveAccess;
+}
+async function saveExtraLeave(){
+ if(isEmployeeDetailSaving()||!currentEmpId)return;
+ if(!extraLeaveAccess)return showAlert('추가 휴가를 부여할 권한을 확인하지 못했습니다.');
+ const empId=currentEmpId,revision=employeeDetailRevision,owner=getHrSettingsOwner();
+ let payload;try{payload={p_action:'grant',p_emp_id:empId,p_work_date:document.getElementById('extraLeaveWorkDate').value,
+  p_worked_minutes:CoopLeaveTime.hoursToMinutes(document.getElementById('extraLeaveWorkHours').value),
+  p_granted_minutes:CoopLeaveTime.hoursToMinutes(document.getElementById('extraLeaveGrantHours').value,2880),p_reason:document.getElementById('extraLeaveReason').value.trim()};
+  if(!payload.p_work_date||!payload.p_reason)throw Error('추가 근로일과 내용을 입력해 주세요.');
+ }catch(error){return showAlert(error.message);}
+ const signature=JSON.stringify(payload);if(extraLeaveRequest?.signature!==signature)extraLeaveRequest={signature,key:crypto.randomUUID()};payload.p_request_key=extraLeaveRequest.key;
+ const saved=snapshotEmployeeDetailTabDraft('tabLog');employeeLeaveSaveInFlight=true;
+ try{
+  const {data,error}=await _supabase.rpc('erp_hr_extra_leave',payload);if(error)throw error;
+  if(empId!==currentEmpId||revision!==employeeDetailRevision||owner!==getHrSettingsOwner())return;
+  if(data?.verified!==true||data.granted_minutes!==payload.p_granted_minutes)throw Error('추가 휴가 반영을 확인하지 못했습니다. 같은 내용으로 다시 확인해 주세요.');
+  const unchanged=[...saved].every(([id,value])=>employeeDetailDraftValue(document.getElementById(id))===value);
+  for(const id of ['extraLeaveWorkDate','extraLeaveWorkHours','extraLeaveGrantHours','extraLeaveReason']){if(unchanged)document.getElementById(id).value='';saved.set(id,'');}
+  checkpointSavedEmployeeDetailTab('tabLog',saved);extraLeaveRequest=null;
+  showAlert('추가 휴가 '+CoopLeaveTime.formatDays(payload.p_granted_minutes/480)+'를 반영했습니다.');await loadLeave();
+ }catch(error){showAlert('추가 휴가 반영 실패: '+(error.message||'연결을 확인해 주세요.'));}
+ finally{employeeLeaveSaveInFlight=false;}
 }
 
 function openAdminCertModal() { document.getElementById("adminCertPurpose").value = "관공서 제출용"; toggleAdminEtc(); adminCertModal.show(); }

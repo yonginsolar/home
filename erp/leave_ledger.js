@@ -42,7 +42,7 @@
   }
 
   function roundLeaveDays(value) {
-    return Math.round((toNumber(value, 0) + Number.EPSILON) * 2) / 2;
+    return Math.round((toNumber(value, 0) + Number.EPSILON) * 480) / 480;
   }
 
   function formatKstIsoDate(value) {
@@ -130,7 +130,7 @@
       else if (slot === 'pm' || slot === 'afternoon') slotLabel = '오후';
       else if (slot === 'full' || slot === 'day' || slot === 'all_day') slotLabel = '전일';
     }
-    return dateText + (slotLabel ? ' ' + slotLabel : '');
+    return dateText + (slotLabel ? ' ' + slotLabel : '') + (item?.slot==='hour'?' '+normalizeText(item.start_time)+'~'+normalizeText(item.end_time):'');
   }
 
   function isLeaveDocType(docType) {
@@ -576,7 +576,7 @@
         html += '<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>'
           + escapeHtml(formatLeaveDocType(doc || doc && doc.doc_type || '휴가'))
           + ' ' + statusBadge + periodLabel
-          + '</span><span class="fw-bold ' + escapeHtml(amountClass) + '">' + escapeHtml(amountPrefix) + amount + escapeHtml(amountSuffix) + '</span></div><div class="text-muted" style="font-size:0.75rem;">'
+          + '</span><span class="fw-bold ' + escapeHtml(amountClass) + '">' + escapeHtml(amountPrefix) + (global.CoopLeaveTime?global.CoopLeaveTime.formatDays(amount)+escapeHtml(amountSuffix==='일'?'':amountSuffix.replace(/^일/,'')):amount+escapeHtml(amountSuffix)) + '</span></div><div class="text-muted" style="font-size:0.75rem;">'
           + createdAt + '</div></li>';
       });
     } else {
@@ -627,7 +627,8 @@
         var prefix = positive ? '+' : '-';
         html += '<li><span class="' + toneClass + ' fw-bold">[' + escapeHtml(item && item.adj_type || '') + ']</span> '
           + escapeHtml(item && item.reason || '')
-          + ' (' + prefix + Number(item && item.days || 0) + '일)</li>';
+          + ' (' + prefix + (global.CoopLeaveTime?global.CoopLeaveTime.formatDays(item && item.days || 0):Number(item && item.days || 0)+'일') + ')'
+          + (item?.leave_kind==='extra'?'<div class="text-secondary small">추가 휴가 · 근로일 '+escapeHtml(item.work_date||'')+' · 근로 '+Number(item.worked_minutes||0)/60+'시간 · 부여 '+Number(item.granted_minutes||0)/60+'시간</div>':'') + '</li>';
       });
     } else {
       html += '<li class="text-muted">- 없음 -</li>';
