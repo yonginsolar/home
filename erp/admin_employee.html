@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.113
-Change: 2026-10-12 - Hour-based leave and separately recorded extra leave grants.
+Version: v1.0.114
+Change: 2026-10-12 - Leave follows confirmed employee workday terms.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.113 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.114 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -45,8 +45,8 @@ Change: 2026-10-12 - Hour-based leave and separately recorded extra leave grants
   <script src="payroll_tax_table.js?v=20260508-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
-  <script src="leave_time.js?v=20261012-1"></script>
-  <script src="leave_ledger.js?v=20261012-1"></script>
+  <script src="leave_time.js?v=20261012-2"></script>
+  <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
 
 <script src="annual_settings.js?v=20261011-2"></script>
@@ -6973,12 +6973,14 @@ async function loadLeave() {
             if (!isCurrent()) return;
             currentEmployeeLeaveSnapshot = snapshot;
             const remain = Number(snapshot?.effectiveRemainDays || 0);
-            document.getElementById("displayLeaveRemain").innerText = CoopLeaveTime.formatDays(remain);
+            document.getElementById("displayLeaveRemain").innerText = CoopLeaveTime.formatDays(remain, snapshot.workBasis?.day_minutes || 480);
             await loadExtraLeaveAccess();
             return true;
         }
     } catch (error) {
         console.error(error);
+        if (isCurrent()) { document.getElementById('displayLeaveRemain').textContent='조회 실패'; currentEmployeeLeaveSnapshot=null; }
+        return false;
     }
 
     // 공통 모듈 미사용/오류 시 기존 RPC로 폴백
@@ -7118,6 +7120,7 @@ async function showAdminLeaveDetail() {
         if (typeof leaveLedger.buildLeaveDetailReportHtml === 'function') {
             bodyEl.innerHTML = leaveLedger.buildLeaveDetailReportHtml({
                 hireDate: employeeRow?.hire_date || '',
+                workBasis: currentEmployeeLeaveSnapshot?.workBasis,
                 adjustments: adjustments || [],
                 summary,
                 pendingDocs: leaveDocs.filter((doc) => String(doc?.status || '').trim() === '진행중' && isAdminEmployeeDeductibleLeaveDoc(doc)),
@@ -7390,8 +7393,12 @@ async function applyBulkLeaveAdjustment() {
                 days: input.days,
                 reason: input.reason
             }));
-            const { error } = await _supabase.from('hr_leave_adj').insert(rows);
+            const request = JSON.stringify(rows);
+            if (applyBulkLeaveAdjustment._request !== request) { applyBulkLeaveAdjustment._request = request; applyBulkLeaveAdjustment._requestKey = crypto.randomUUID(); }
+            const { error } = await _supabase.rpc('erp_hr_leave_adjustment', {p_rows:rows,p_request_key:applyBulkLeaveAdjustment._requestKey});
             if (error) throw error;
+            applyBulkLeaveAdjustment._requestKey = null;
+            applyBulkLeaveAdjustment._request = null;
             if (bulkLeaveModal) bulkLeaveModal.hide();
             if (currentEmpId && selectedIdSet.has(String(currentEmpId))) {
                 loadLeave();
@@ -7417,7 +7424,11 @@ async function saveLog() {
     const savedDraft = snapshotEmployeeDetailTabDraft('tabLog');
     employeeLeaveSaveInFlight = true;
     try {
-        const { error } = await _supabase.from('hr_leave_adj').insert(withEmployeeTenantPayload({ emp_id: empId, adj_type: type, days: val, reason: reason }));
+        const rows = [{emp_id:empId,adj_type:type,days:val,reason}];
+        const request = JSON.stringify(rows);
+        if (saveLog._request !== request) { saveLog._request = request; saveLog._requestKey = crypto.randomUUID(); }
+        const { error } = await _supabase.rpc('erp_hr_leave_adjustment', {p_rows:rows,p_request_key:saveLog._requestKey});
+        if (!error) { saveLog._request=null; saveLog._requestKey=null; }
         if (empId !== currentEmpId || revision !== employeeDetailRevision || owner !== getHrSettingsOwner()) return;
         if (error) return showAlert('반영 실패: ' + error.message);
         showAlert('반영됨');

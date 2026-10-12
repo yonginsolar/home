@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.91 | Change: 2026-10-12 - Time leave excludes lunch and preserves minute precision. -->
+<!-- Version: v1.2.92 | Change: 2026-10-12 - Flexible time leave follows employee contract workday. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
@@ -38,8 +38,8 @@
   <script src="approval_service_contract.js?v=1.0.0"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
-  <script src="leave_time.js?v=20261012-1"></script>
-  <script src="leave_ledger.js?v=20261012-1"></script>
+  <script src="leave_time.js?v=20261012-2"></script>
+  <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_permission_request.js?v=1.2.1"></script>
@@ -4361,6 +4361,13 @@ function getApprovalLeaveMixedRowsContainer() {
     return document.getElementById('mixedLeaveRows');
 }
 
+function getApprovalWorkBasis() {
+    return leaveSnapshotState?.workBasis || { day_minutes: 480, periods: [] };
+}
+function formatApprovalWorkDays(value) {
+    return CoopLeaveTime.formatDays(value, getApprovalWorkBasis().day_minutes);
+}
+
 function isApprovalMixedLeaveDetailMode() {
     return String(document.getElementById('mixedLeaveDetailMode')?.value || '').trim() === '1';
 }
@@ -4467,6 +4474,13 @@ function addApprovalLeaveMixedRow(initialItem = {}, options = {}) {
     const timeFields=document.createElement('div');timeFields.className='row g-2 mt-1';timeFields.dataset.leaveTimeFields='1';timeFields.classList.toggle('hidden',selectedSlot!=='hour');
     for(const [key,label] of [['start_time','시작 시간'],['end_time','종료 시간']]){const col=document.createElement('div');col.className='col-6';const labelEl=document.createElement('label');labelEl.className='small text-muted';labelEl.textContent=label;const input=document.createElement('input');input.type='time';input.step='60';input.className='form-control';input.dataset.leaveTime=key;input.value=String(safeItem[key]||'');input.addEventListener('input',calcLeaveDays);col.append(labelEl,input);timeFields.append(col);}
     row.append(timeFields);
+    const modeCol=document.createElement('div');modeCol.className='col-12';
+    const modeSelect=document.createElement('select');modeSelect.className='form-select';modeSelect.dataset.leaveTimeMode='1';
+    for(const [value,label] of [['hours','사용할 시간 입력'],['range','시작·종료 시간으로 계산']]){const option=document.createElement('option');option.value=value;option.textContent=label;modeSelect.append(option);}
+    modeSelect.value=safeItem.time_input_mode||(safeItem.start_time?'range':'hours');modeCol.append(modeSelect);timeFields.prepend(modeCol);
+    const hoursCol=document.createElement('div');hoursCol.className='col-12';const hoursLabel=document.createElement('label');hoursLabel.textContent='사용할 시간 (휴게시간 제외)';const hoursInput=document.createElement('input');hoursInput.type='number';hoursInput.min='0';hoursInput.step='any';hoursInput.className='form-control';hoursInput.dataset.leaveNetHours='1';hoursInput.value=safeItem.net_hours??(safeItem.entered_minutes!=null?String(safeItem.entered_minutes/60):'');hoursInput.addEventListener('input',calcLeaveDays);hoursCol.append(hoursLabel,hoursInput);timeFields.append(hoursCol);
+    const breakCol=document.createElement('div');breakCol.className='col-12';const breakLabel=document.createElement('label');breakLabel.textContent='제외할 휴게시간 (분)';const breakInput=document.createElement('input');breakInput.type='number';breakInput.min='0';breakInput.step='1';breakInput.className='form-control';breakInput.dataset.leaveBreakMinutes='1';breakInput.value=String(safeItem.break_minutes??0);breakInput.addEventListener('input',calcLeaveDays);breakCol.append(breakLabel,breakInput);timeFields.append(breakCol);
+    const syncMode=()=>{const byHours=modeSelect.value==='hours';hoursCol.classList.toggle('hidden',!byHours);breakCol.classList.toggle('hidden',byHours);timeFields.querySelectorAll('[data-leave-time]').forEach(input=>input.parentElement.classList.toggle('hidden',byHours));};modeSelect.addEventListener('change',()=>{syncMode();calcLeaveDays();});syncMode();
     container.appendChild(row);
 
     if (!options.skipCalc) calcLeaveDays();
@@ -4504,13 +4518,13 @@ function normalizeApprovalMixedLeaveItems(rawValue) {
     })();
     return source.map((item) => {
         const meta = getApprovalMixedLeaveSlotMeta(item?.slot || item?.slot_label);
-        if(meta.value==='hour'){try{return CoopLeaveTime.hourItem(item,approvalCompanyInfo);}catch(_){return {...item,slot:'hour',slot_label:'시간차',deducted_days:0,deducted_hours:0};}}
+        if (item?.deducted_days != null) return { ...item, slot: meta.value, slot_label: item.slot_label || meta.label, deducted_hours:item.deducted_hours ?? Number(item.deducted_days)*8, deducted_minutes:item.deducted_minutes ?? Math.round(Number(item.deducted_days)*480) };
+        if(meta.value==='hour'){try{return CoopLeaveTime.hourItem(item,getApprovalWorkBasis());}catch(_){return {...item,slot:'hour',slot_label:'시간차',deducted_days:0,deducted_hours:0};}}
         return {
             leave_date: String(item?.leave_date || item?.date || '').trim(),
             slot: meta.value,
             slot_label: meta.label,
-            deducted_days: meta.days,
-            deducted_hours: meta.hours
+            ...CoopLeaveTime.dayItem({leave_date:String(item?.leave_date || item?.date || '').trim(),slot:meta.value},getApprovalWorkBasis())
         };
     }).filter((item) => item.leave_date || item.slot==='hour');
 }
@@ -4518,7 +4532,8 @@ function normalizeApprovalMixedLeaveItems(rawValue) {
 function collectApprovalLeaveMixedDraftItems(){
  return Array.from(getApprovalLeaveMixedRowsContainer()?.querySelectorAll('.approval-leave-mixed-row')||[]).map(row=>({
   leave_date:row.querySelector('[data-leave-mixed-date]')?.value||'',slot:row.querySelector('[data-leave-mixed-slot]')?.value||'full',
-  start_time:row.querySelector('[data-leave-time="start_time"]')?.value||'',end_time:row.querySelector('[data-leave-time="end_time"]')?.value||''
+  start_time:row.querySelector('[data-leave-time="start_time"]')?.value||'',end_time:row.querySelector('[data-leave-time="end_time"]')?.value||'',
+  time_input_mode:row.querySelector('[data-leave-time-mode]')?.value||'hours',net_hours:row.querySelector('[data-leave-net-hours]')?.value||'',break_minutes:row.querySelector('[data-leave-break-minutes]')?.value||'0'
  }));
 }
 
@@ -4566,16 +4581,15 @@ function getApprovalMixedLeaveDetailSummary(options = {}) {
             errors.push(`${index + 1}번째 연차 날짜 형식이 올바르지 않습니다.`);
             return;
         }
-        if (isApprovalWeekendIsoDate(dateValue)) {
-            errors.push(`${index + 1}번째 연차 날짜는 주말입니다. 근무일을 선택하세요.`);
-            return;
-        }
+        const dayItem = CoopLeaveTime.dayItem({leave_date:dateValue,slot:meta.value},getApprovalWorkBasis());
+        meta = {...meta,days:dayItem.deducted_days,hours:dayItem.deducted_hours};
         let hourItem;
         if(slotValue==='hour'){
-            try{hourItem=CoopLeaveTime.hourItem({leave_date:dateValue,start_time:row.querySelector('[data-leave-time="start_time"]').value,end_time:row.querySelector('[data-leave-time="end_time"]').value},approvalCompanyInfo);meta={...meta,days:hourItem.deducted_days,hours:hourItem.deducted_hours};}
+            try{hourItem=CoopLeaveTime.hourItem({leave_date:dateValue,time_input_mode:row.querySelector('[data-leave-time-mode]').value,net_hours:row.querySelector('[data-leave-net-hours]').value,break_minutes:Number(row.querySelector('[data-leave-break-minutes]').value),start_time:row.querySelector('[data-leave-time="start_time"]').value,end_time:row.querySelector('[data-leave-time="end_time"]').value},getApprovalWorkBasis());meta={...meta,days:hourItem.deducted_days,hours:hourItem.deducted_hours};}
             catch(error){if(requireComplete||row.querySelector('[data-leave-time="start_time"]').value||row.querySelector('[data-leave-time="end_time"]').value)errors.push(`${index+1}번째 ${error.message}`);return;}
             const sameDate=items.filter(item=>item.leave_date===dateValue);
-            if(sameDate.some(item=>item.slot!=='hour'||hourItem.start_time<item.end_time&&hourItem.end_time>item.start_time)){errors.push(`${dateValue} 휴가 시간이 겹칩니다.`);return;}
+            if(sameDate.some(item=>item.slot!=='hour'||item.time_input_mode==='hours'||hourItem.time_input_mode==='hours'||hourItem.start_time<item.end_time&&hourItem.end_time>item.start_time)){errors.push(`${dateValue} 휴가 시간이 겹칩니다. 시간만 입력할 때는 한 줄에 합쳐 주세요.`);return;}
+            if(sameDate.reduce((sum,item)=>sum+item.deducted_minutes,0)+hourItem.deducted_minutes>hourItem.basis_day_minutes){errors.push(`${dateValue}의 1일 근로시간을 초과했습니다.`);return;}
         }else if(items.some(item=>item.leave_date===dateValue&&item.slot==='hour')){errors.push(`${dateValue} 시간차와 전일·반차는 한 줄로 나누어 입력해 주세요.`);return;}
 
         const usedSlots = slotsByDate.get(dateValue) || new Set();
@@ -4598,8 +4612,7 @@ function getApprovalMixedLeaveDetailSummary(options = {}) {
             leave_date: dateValue,
             slot: meta.value,
             slot_label: meta.label,
-            deducted_days: meta.days,
-            deducted_hours: meta.hours
+            ...dayItem
         });
     });
 
@@ -4628,8 +4641,7 @@ function buildApprovalMixedLeaveRangeItem(dateValue, slotValue) {
         leave_date: dateValue,
         slot: meta.value,
         slot_label: meta.label,
-        deducted_days: meta.days,
-        deducted_hours: meta.hours
+        ...CoopLeaveTime.dayItem({leave_date:dateValue,slot:meta.value},getApprovalWorkBasis())
     };
 }
 
@@ -4674,7 +4686,7 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
         }
     }
 
-    const totalDays = Math.round(items.reduce((sum, item) => sum + Number(item.deducted_days || 0), 0) * 2) / 2;
+    const totalDays = CoopLeaveTime.roundDays(items.reduce((sum, item) => sum + Number(item.deducted_days || 0), 0));
     const totalHours = items.reduce((sum, item) => sum + Number(item.deducted_hours || 0), 0);
     if (requireComplete && totalDays <= 0) {
         errors.push('선택한 기간에 계산할 근무일이 없습니다.');
@@ -4692,9 +4704,26 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
 }
 
 function getApprovalMixedLeaveSummary(options = {}) {
+    if (options.requireComplete && !leaveSnapshotState?.workBasis) return { ok:false, items:[], totalDays:0, totalHours:0, errors:['근로시간과 사용 가능 휴가를 먼저 조회해 주세요.'] };
     return isApprovalMixedLeaveDetailMode()
         ? getApprovalMixedLeaveDetailSummary(options)
         : getApprovalMixedLeaveRangeSummary(options);
+}
+
+function getApprovalPreparedLeaveSummary(config, options = {}) {
+    if (isApprovalMixedDayLeaveType(config)) return getApprovalMixedLeaveSummary(options);
+    if (!isApprovalDeductibleLeaveType(config)) return null;
+    if (options.requireComplete && !leaveSnapshotState?.workBasis) return {ok:false,items:[],totalDays:0,errors:['근로시간과 사용 가능 휴가를 먼저 조회해 주세요.']};
+    const half=isApprovalHalfDayLeaveType(config),single=isApprovalSingleDayLeaveType(config);
+    const start=String(document.getElementById(half?'halfDate':single?'singleLeaveDate':'leaveStart')?.value||'');
+    const end=half||single?start:String(document.getElementById('leaveEnd')?.value||'');
+    const items=[];
+    if(/^\d{4}-\d{2}-\d{2}$/.test(start)&&/^\d{4}-\d{2}-\d{2}$/.test(end)&&start<=end){
+        const cursor=new Date(start+'T00:00:00Z'),last=new Date(end+'T00:00:00Z');
+        while(cursor<=last&&items.length<=200){const date=cursor.toISOString().slice(0,10);if(half||single||![0,6].includes(cursor.getUTCDay()))items.push({...CoopLeaveTime.dayItem({leave_date:date,slot:half?'am':'full'},getApprovalWorkBasis()),slot_label:half?'반차':'전일'});cursor.setUTCDate(cursor.getUTCDate()+1);}
+    }
+    const totalDays=CoopLeaveTime.roundDays(items.reduce((sum,item)=>sum+item.deducted_days,0));
+    return {inputMode:'range',items,totalDays,totalHours:items.reduce((sum,item)=>sum+item.deducted_hours,0),ok:items.length>0&&items.length<=200,errors:items.length>200?['휴가 기간이 너무 깁니다.']:items.length?[]:['휴가 날짜를 입력해 주세요.']};
 }
 
 function collectApprovalLeaveMixedItems(options = {}) {
@@ -4716,14 +4745,14 @@ function formatApprovalMixedLeaveItemsLabel(items, totalDays = null) {
         : Number(totalDays || 0);
     const firstLabel = formatApprovalMixedLeaveItemLabel(normalized[0]);
     if (normalized.length === 1) return firstLabel;
-    return `${firstLabel} 외 ${normalized.length - 1}건 총 ${CoopLeaveTime.formatDays(total)}`;
+    return `${firstLabel} 외 ${normalized.length - 1}건 총 ${formatApprovalWorkDays(total)}`;
 }
 
 function formatApprovalMixedLeaveDetailText(items) {
     const normalized = normalizeApprovalMixedLeaveItems(items);
     if (normalized.length === 0) return '';
     return normalized
-        .map((item) => `- ${formatApprovalMixedLeaveItemLabel(item)}${item.slot==='hour'?` ${item.start_time}~${item.end_time}`:''}: ${CoopLeaveTime.formatDays(item.deducted_days)}`)
+        .map((item) => `- ${formatApprovalMixedLeaveItemLabel(item)}${item.slot==='hour'&&item.time_input_mode!=='hours'?` ${item.start_time}~${item.end_time}`:''}: ${CoopLeaveTime.formatDays(item.deducted_days,item.basis_day_minutes||480)}`)
         .join('\n');
 }
 
@@ -10499,13 +10528,13 @@ function applyLeaveRemainToUi(snapshot) {
     const effective = Number(snapshot?.effectiveRemainDays || 0);
 
     document.getElementById("remainDaysBadge").dataset.leaveDays=String(effective);
-    document.getElementById("remainDaysBadge").innerText = CoopLeaveTime.formatDays(effective);
+    document.getElementById("remainDaysBadge").innerText = CoopLeaveTime.formatDays(effective, snapshot?.workBasis?.day_minutes || 480);
     const halfBadge = document.getElementById("remainDaysBadgeHalf");
-    if (halfBadge) halfBadge.innerText = CoopLeaveTime.formatDays(effective);
+    if (halfBadge) halfBadge.innerText = CoopLeaveTime.formatDays(effective, snapshot?.workBasis?.day_minutes || 480);
     const singleBadge = document.getElementById("remainDaysBadgeSingle");
-    if (singleBadge) singleBadge.innerText = CoopLeaveTime.formatDays(effective);
+    if (singleBadge) singleBadge.innerText = CoopLeaveTime.formatDays(effective, snapshot?.workBasis?.day_minutes || 480);
     const mixedBadge = document.getElementById("remainDaysBadgeMixed");
-    if (mixedBadge) mixedBadge.innerText = CoopLeaveTime.formatDays(effective);
+    if (mixedBadge) mixedBadge.innerText = CoopLeaveTime.formatDays(effective, snapshot?.workBasis?.day_minutes || 480);
     syncApprovalPendingLeaveDaysBadge();
 }
 
@@ -10546,21 +10575,31 @@ async function calculateLeave() {
         return;
     }
 
+    const lookupRevision = (calculateLeave.revision || 0) + 1;
+    calculateLeave.revision = lookupRevision;
+    const isCurrent = () => calculateLeave.revision === lookupRevision && targetId === (document.getElementById('chkProxy')?.checked ? document.getElementById('proxyTargetSelect')?.value : myInfo.emp_id);
+    leaveSnapshotState = null;
+    document.getElementById('remainDaysBadge').textContent = '조회 중';
     try {
         if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
-            leaveSnapshotState = await window.LeaveLedger.getLeaveSnapshot(_supabase, targetId, {
+            const loaded = await window.LeaveLedger.getLeaveSnapshot(_supabase, targetId, {
                 columns: approvalLeaveSnapshotSupported ? APPROVAL_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT : undefined,
                 reservedStatuses: APPROVAL_LEAVE_RESERVED_STATUSES,
                 includeToday: true,
                 unknownAsReserved: false
             });
+            if (!isCurrent()) return;
+            leaveSnapshotState = loaded;
             applyLeaveRemainToUi(leaveSnapshotState);
+            calcLeaveDays();
             await refreshApprovalLeaveCancelCandidates();
             await refreshApprovalBusinessTripCancelCandidates();
             return;
         }
     } catch (err) {
         CoopSafeLog.error("Leave snapshot load failed:", err);
+        if (isCurrent()) { document.getElementById('remainDaysBadge').textContent='조회 실패'; leaveSnapshotState=null; }
+        return;
     }
 
     // 공통 모듈 로드 실패 시 기존 RPC 값으로 폴백
@@ -11679,9 +11718,7 @@ function buildApprovalSubmitPreviewData() {
         const lType = getApprovalCurrentLeaveTypeLabel();
         if (!leaveTypeConfig || !lType) throw new Error('휴가 종류를 먼저 설정하거나 선택하세요.');
         subType = `휴가(${getApprovalCurrentLeaveTypeStoredKey()})`;
-        const mixedSummary = isApprovalMixedDayLeaveType(leaveTypeConfig)
-            ? getApprovalMixedLeaveSummary({ requireComplete: true })
-            : null;
+        const mixedSummary = getApprovalPreparedLeaveSummary(leaveTypeConfig, { requireComplete:true });
         if (mixedSummary && !mixedSummary.ok) throw new Error(mixedSummary.errors[0] || '연차 사용 내역을 확인하세요.');
         leaveSnapshotPayload = {
             type_id: String(leaveTypeConfig.id || getApprovalCurrentLeaveTypeStoredKey() || '').trim(),
@@ -11696,6 +11733,7 @@ function buildApprovalSubmitPreviewData() {
             leaveSnapshotPayload.items = mixedSummary.items;
             leaveSnapshotPayload.total_days = mixedSummary.totalDays;
             leaveSnapshotPayload.total_hours = mixedSummary.totalHours;
+            if (leaveTypeConfig.deductible) leaveSnapshotPayload.work_basis_version = 2;
         }
         const days = mixedSummary ? mixedSummary.totalDays : Number(document.getElementById("leaveDaysCalc")?.value || 0);
         if (days <= 0) throw new Error('기간을 선택하세요.');
@@ -12303,10 +12341,18 @@ function calcLeaveDays() {
         return;
     }
 
+    if (isApprovalDeductibleLeaveType(leaveConfig) && !isApprovalMixedDayLeaveType(leaveConfig)) {
+        const summary=getApprovalPreparedLeaveSummary(leaveConfig);
+        document.getElementById('leaveDaysBadge').textContent=formatApprovalWorkDays(summary.totalDays);
+        document.getElementById('leaveDaysCalc').value=summary.totalDays;
+        syncApprovalPendingLeaveDaysBadge(summary.totalDays);
+        if(msg){const validation=getApprovalLeaveValidationSummary(lType);msg.classList.toggle('hidden',!isApprovalLeaveValidationBlocked(validation,summary.totalDays));}
+        return;
+    }
     if (isApprovalMixedDayLeaveType(leaveConfig)) {
         ensureApprovalLeaveMixedRows();
         const summary = getApprovalMixedLeaveSummary({ requireComplete: false });
-        document.getElementById("leaveDaysBadge").innerText = CoopLeaveTime.formatDays(summary.totalDays);
+        document.getElementById("leaveDaysBadge").innerText = formatApprovalWorkDays(summary.totalDays);
         document.getElementById("leaveDaysCalc").value = summary.totalDays;
         syncApprovalPendingLeaveDaysBadge(summary.totalDays);
 
@@ -12942,9 +12988,7 @@ async function handleDraftSubmit(e) {
         const lType = getApprovalCurrentLeaveTypeLabel();
         if (!leaveTypeConfig || !lType) return showAlert("휴가 종류를 먼저 설정하거나 선택하세요.");
         subType = `휴가(${getApprovalCurrentLeaveTypeStoredKey()})`;
-        const mixedSummary = isApprovalMixedDayLeaveType(leaveTypeConfig)
-            ? getApprovalMixedLeaveSummary({ requireComplete: true })
-            : null;
+        const mixedSummary = getApprovalPreparedLeaveSummary(leaveTypeConfig, { requireComplete:true });
         if (mixedSummary && !mixedSummary.ok) {
             return showAlert(mixedSummary.errors[0] || '연차 사용 내역을 확인하세요.');
         }
@@ -12961,6 +13005,7 @@ async function handleDraftSubmit(e) {
             leaveSnapshotPayload.items = mixedSummary.items;
             leaveSnapshotPayload.total_days = mixedSummary.totalDays;
             leaveSnapshotPayload.total_hours = mixedSummary.totalHours;
+            if (leaveTypeConfig.deductible) leaveSnapshotPayload.work_basis_version = 2;
         }
 
         const days = mixedSummary ? mixedSummary.totalDays : Number(document.getElementById("leaveDaysCalc").value);

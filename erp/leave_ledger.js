@@ -462,10 +462,16 @@
       ? opts.pendingStatuses
       : DEFAULT_PENDING_STATUSES;
 
-    var rpc = await supabase.rpc('calculate_leave_days', { p_emp_id: empId });
+    var rpc = await supabase.rpc('erp_leave_snapshot_base', { p_emp_id: empId });
     if (rpc.error) throw rpc.error;
+    var basis = rpc;
+    if (!basis.data || !Number.isInteger(Number(basis.data.day_minutes)) || !Number.isFinite(Number(basis.data.balance_units))) {
+      var basisError = new Error('휴가 계산에 필요한 근로시간을 확인하지 못했습니다. 다시 조회해 주세요.');
+      basisError.code = 'LEAVE_BASIS_UNAVAILABLE';
+      throw basisError;
+    }
 
-    var baseRemainDays = roundLeaveDays(toNumber(rpc.data, 0));
+    var baseRemainDays = roundLeaveDays(toNumber(rpc.data.balance_units, 0));
     var allDocs = await fetchLeaveApprovals(supabase, empId, {
       statuses: Array.from(new Set(reservedStatuses.concat(pendingStatuses))),
       columns: opts.columns
@@ -491,6 +497,7 @@
 
     return {
       baseRemainDays: baseRemainDays,
+      workBasis: basis.data,
       effectiveRemainDays: effectiveRemainDays,
       reservedDays: summary.reservedDays,
       pendingHoldDays: pendingSummary.holdDays,
@@ -576,7 +583,7 @@
         html += '<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>'
           + escapeHtml(formatLeaveDocType(doc || doc && doc.doc_type || '휴가'))
           + ' ' + statusBadge + periodLabel
-          + '</span><span class="fw-bold ' + escapeHtml(amountClass) + '">' + escapeHtml(amountPrefix) + (global.CoopLeaveTime?global.CoopLeaveTime.formatDays(amount)+escapeHtml(amountSuffix==='일'?'':amountSuffix.replace(/^일/,'')):amount+escapeHtml(amountSuffix)) + '</span></div><div class="text-muted" style="font-size:0.75rem;">'
+          + '</span><span class="fw-bold ' + escapeHtml(amountClass) + '">' + escapeHtml(amountPrefix) + (global.CoopLeaveTime?global.CoopLeaveTime.formatDays(amount,doc?._leave_item?.basis_day_minutes||480)+escapeHtml(amountSuffix==='일'?'':amountSuffix.replace(/^일/,'')):amount+escapeHtml(amountSuffix)) + '</span></div><div class="text-muted" style="font-size:0.75rem;">'
           + createdAt + '</div></li>';
       });
     } else {
@@ -604,12 +611,15 @@
     if (today < oneYear) {
       var months = (today.getFullYear() - hireDate.getFullYear()) * 12 + (today.getMonth() - hireDate.getMonth());
       if (today.getDate() < hireDate.getDate()) months -= 1;
-      html += '<li class="text-primary">🟢 1년 미만: ' + Math.min(11, Math.max(0, months)) + '개</li>';
+      var monthlyCount=Math.min(11,Math.max(0,months)),monthlyMinutes=0;
+      for(var month=1;month<=monthlyCount;month++){var anniversary=new Date(hireDate);anniversary.setMonth(anniversary.getMonth()+month);monthlyMinutes+=global.CoopLeaveTime?global.CoopLeaveTime.basisMinutes(opts.workBasis,formatKstIsoDate(anniversary)):480;}
+      html += '<li class="text-primary">🟢 1년 미만: ' + monthlyCount + '일 · 총 '+monthlyMinutes/60+'시간</li>';
     } else {
       html += '<li class="text-muted">⚪ 1년 미만: 0개</li>';
     }
     if (today.getFullYear() > hireDate.getFullYear()) {
-      html += '<li class="text-primary">🔵 회계연도(' + today.getFullYear() + '): 15개</li>';
+      var fiscalDay=global.CoopLeaveTime?global.CoopLeaveTime.basisMinutes(opts.workBasis,String(today.getFullYear())+'-01-01'):480;
+      html += '<li class="text-primary">🔵 회계연도(' + today.getFullYear() + '): 15일 · 총 '+15*fiscalDay/60+'시간</li>';
     } else {
       html += '<li class="text-muted">⚪ 회계연도: 0개</li>';
     }
@@ -627,7 +637,7 @@
         var prefix = positive ? '+' : '-';
         html += '<li><span class="' + toneClass + ' fw-bold">[' + escapeHtml(item && item.adj_type || '') + ']</span> '
           + escapeHtml(item && item.reason || '')
-          + ' (' + prefix + (global.CoopLeaveTime?global.CoopLeaveTime.formatDays(item && item.days || 0):Number(item && item.days || 0)+'일') + ')'
+          + ' (' + prefix + (global.CoopLeaveTime?global.CoopLeaveTime.formatDays(item && item.days || 0,item?.basis_day_minutes||480):Number(item && item.days || 0)+'일') + ')'
           + (item?.leave_kind==='extra'?'<div class="text-secondary small">추가 휴가 · 근로일 '+escapeHtml(item.work_date||'')+' · 근로 '+Number(item.worked_minutes||0)/60+'시간 · 부여 '+Number(item.granted_minutes||0)/60+'시간</div>':'') + '</li>';
       });
     } else {
@@ -673,16 +683,17 @@
     return map;
   }
 
-  function buildLeaveYearMetricText(yearSummary, pendingSummary) {
+  function buildLeaveYearMetricText(yearSummary, pendingSummary, dayMinutes) {
     var metrics = [];
     var used = Number(yearSummary && yearSummary.pastOrUsedDays || 0);
     var reserved = Number(yearSummary && yearSummary.reservedDays || 0);
     var pending = Number(pendingSummary && pendingSummary.days || 0);
     var unknown = Number(yearSummary && yearSummary.unknownDateDays || 0);
-    if (used > 0) metrics.push('사용 ' + used + '일');
-    if (reserved > 0) metrics.push('예정 ' + reserved + '일');
-    if (pending > 0) metrics.push('결재중 ' + pending + '일');
-    if (unknown > 0) metrics.push('일자 확인 필요 ' + unknown + '일');
+    var format=value=>global.CoopLeaveTime?global.CoopLeaveTime.formatDays(value,dayMinutes):value+'일';
+    if (used > 0) metrics.push('사용 ' + format(used));
+    if (reserved > 0) metrics.push('예정 ' + format(reserved));
+    if (pending > 0) metrics.push('결재중 ' + format(pending));
+    if (unknown > 0) metrics.push('일자 확인 필요 ' + format(unknown));
     return metrics.length > 0 ? metrics.join(' · ') : '사용 내역 없음';
   }
 
@@ -720,14 +731,16 @@
       var key = String(year);
       var yearSummary = yearMap[key];
       var pendingSummary = pendingByYear[key] || { docs: [], days: 0 };
+      var dayMinutes=global.CoopLeaveTime?global.CoopLeaveTime.basisMinutes(opts.workBasis,year===currentYear?null:String(year)+'-01-01'):480;
+      var format=value=>global.CoopLeaveTime?global.CoopLeaveTime.formatDays(value,dayMinutes):Number(value||0)+'일';
       html += '<details class="leave-year-accordion"><summary><span>📅 ' + year + '년</span><span class="leave-year-summary-metrics">'
-        + escapeHtml(buildLeaveYearMetricText(yearSummary, pendingSummary)) + '</span></summary><div class="leave-year-body">';
+        + escapeHtml(buildLeaveYearMetricText(yearSummary, pendingSummary,dayMinutes)) + '</span></summary><div class="leave-year-body">';
       html += '<div class="leave-section"><h6>🎁 발생 내역</h6>'
-        + buildLeaveGrantListHtml(opts.hireDate, { today: buildLeaveReportAsOfDate(year, today) }) + '</div>';
+        + buildLeaveGrantListHtml(opts.hireDate, { today: buildLeaveReportAsOfDate(year, today),workBasis:opts.workBasis }) + '</div>';
       html += '<div class="leave-section"><h6>⚖️ 조정 내역</h6>'
         + buildLeaveAdjustmentListHtml(adjustmentsByYear[key] || []) + '</div>';
       if (pendingSummary.docs.length > 0) {
-        html += '<div class="leave-section"><h6>⏳ 결재 예정 내역 <span class="text-warning">' + Number(pendingSummary.days || 0) + '일 신청</span></h6>'
+        html += '<div class="leave-section"><h6>⏳ 결재 예정 내역 <span class="text-warning">' + format(pendingSummary.days || 0) + ' 신청</span></h6>'
           + '<div class="small text-muted mb-2">결재 진행 중입니다. 휴가일이 지난 신청은 중복 사용을 막기 위해 사용 가능 연차에 임시 반영되며, 승인되면 확정 사용 내역으로 자동 이동합니다.</div>'
           + renderLeaveDocListHtml(sortLeaveRowsByDate(pendingSummary.docs), {
             formatDate: opts.formatDate,
@@ -738,13 +751,13 @@
             amountSuffix: '일 신청'
           }) + '</div>';
       }
-      html += '<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-' + Number(yearSummary.reservedDays || 0) + '일</span></h6>'
+      html += '<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-' + format(yearSummary.reservedDays || 0) + '</span></h6>'
         + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.reservedDocs), {
           formatDate: opts.formatDate,
           formatLeaveDocType: opts.formatLeaveDocType,
           emptyText: '- 없음 -'
         }) + '</div>';
-      html += '<div class="leave-section"><h6>🎫 사용/처리 내역 <span class="text-danger">-' + Number(yearSummary.pastOrUsedDays || 0) + '일</span></h6>'
+      html += '<div class="leave-section"><h6>🎫 사용/처리 내역 <span class="text-danger">-' + format(yearSummary.pastOrUsedDays || 0) + '</span></h6>'
         + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.pastOrUsedDocs), {
           formatDate: opts.formatDate,
           formatLeaveDocType: opts.formatLeaveDocType,

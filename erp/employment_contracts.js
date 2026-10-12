@@ -1,4 +1,4 @@
-/* Version: v1.2.4 | 2026-10-11 */
+/* Version: v1.3.0 | 2026-10-12 */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -27,6 +27,7 @@ const state = {
   contractLoadError: false,
   company: {},
   editing: null,
+  uploadAttempt: null,
   amendmentBaseTerms: null,
   customTerms: [],
   editorBaseline: null,
@@ -420,7 +421,7 @@ function emptyWorkspace(message = '계약 이력을 선택해 주세요') {
 function defaultTerms() {
   const employee = state.employee || {};
   return {
-    contract_format_version: 2,
+    contract_format_version: 3,
     company_name: companyValue('company_name', 'orgName') || '조합명 미설정',
     employer_name: companyValue('chairman_name', 'ceoName'),
     employer_role: '이사장',
@@ -433,6 +434,9 @@ function defaultTerms() {
     employee_address: asText(employee.address),
     employee_email: asText(employee.email),
     employment_type: 'regular',
+    work_time_basis: 'full_time',
+    work_schedule_type: 'fixed',
+    work_schedule_terms: '',
     contract_start_date: todayKst(),
     contract_end_date: '',
     indefinite_term: true,
@@ -501,8 +505,10 @@ function cloneJson(value) {
 
 function prepareTermsForEditor(source, options = {}) {
   const raw = source && typeof source === 'object' ? cloneJson(source) : {};
-  const terms = { ...defaultTerms(), ...raw, contract_format_version: 2 };
+  const terms = { ...defaultTerms(), ...raw, contract_format_version: 3 };
+  if (!raw.work_time_basis) terms.work_time_basis = raw.employment_type === 'part_time' ? 'part_time' : 'full_time';
   if (!raw.employment_type) terms.employment_type = raw.indefinite_term === false ? 'fixed' : 'regular';
+  if (raw.employment_type === 'part_time') terms.employment_type = raw.indefinite_term === false ? 'fixed' : 'regular';
   if (!raw.wage_basis) terms.wage_basis = 'annual';
   if (raw.wage_amount == null) terms.wage_amount = Number(raw.annual_salary || 0);
   if (!raw.wage_calculation_terms) terms.wage_calculation_terms = asText(raw.wage_components, defaultTerms().wage_calculation_terms);
@@ -614,9 +620,8 @@ function renderEditor(preserveBaseline = false) {
 
 function renderFullContractEditor(terms) {
   const employmentTypeOptions = [
-    ['regular', '기간을 정하지 않은 통상근로'],
-    ['fixed', '기간제 근로'],
-    ['part_time', '단시간 근로']
+    ['regular', '기간을 정하지 않음'],
+    ['fixed', '기간제 근로']
   ].map(([value, label]) => `<option value="${value}" ${terms.employment_type === value ? 'selected' : ''}>${label}</option>`).join('');
   const wageBasisOptions = [
     ['annual', '연봉'], ['monthly', '월급'], ['daily', '일급'], ['hourly', '시급']
@@ -625,7 +630,7 @@ function renderFullContractEditor(terms) {
     <div class="section-card">
       <h3 class="section-title">계약 기간과 업무</h3>
       <div class="row g-3">
-        <div class="col-md-4"><label class="form-label required" for="employmentType">근로 형태</label><select class="form-select" id="employmentType">${employmentTypeOptions}</select></div>
+        <div class="col-md-4"><label class="form-label required" for="employmentType">계약 형태</label><select class="form-select" id="employmentType">${employmentTypeOptions}</select></div>
         <div class="col-md-4"><label class="form-label required" for="contractStart">근로 시작일</label><input type="date" class="form-control" id="contractStart" value="${escapeHtml(terms.contract_start_date)}"></div>
         <div class="col-md-4"><label class="form-label" for="contractEnd">근로 종료일</label><input type="date" class="form-control" id="contractEnd" value="${escapeHtml(terms.contract_end_date)}"></div>
         <div class="col-md-6"><label class="form-label required" for="workplace">근무 장소</label><input class="form-control" id="workplace" maxlength="300" value="${escapeHtml(terms.workplace)}"></div>
@@ -635,6 +640,9 @@ function renderFullContractEditor(terms) {
     <div class="section-card">
       <h3 class="section-title">근로시간과 휴일</h3>
       <div class="row g-3">
+        <div class="col-12"><label class="form-label required" for="workTimeBasis">근무 형태</label><select class="form-select" id="workTimeBasis"><option value="full_time" ${terms.work_time_basis === 'full_time' ? 'selected' : ''}>전일제</option><option value="part_time" ${terms.work_time_basis === 'part_time' ? 'selected' : ''}>시간제</option></select></div>
+        <div class="col-md-4"><label class="form-label required" for="workScheduleType">근무 시각</label><select class="form-select" id="workScheduleType"><option value="fixed" ${terms.work_schedule_type !== 'flexible' ? 'selected' : ''}>정해진 시각</option><option value="flexible" ${terms.work_schedule_type === 'flexible' ? 'selected' : ''}>협의·유연근무</option></select></div>
+        <div class="col-md-8"><label class="form-label" for="workScheduleTerms">근무·휴게시간 합의 내용</label><input class="form-control" id="workScheduleTerms" maxlength="1500" value="${escapeHtml(terms.work_schedule_terms)}" placeholder="유연근무일 때 시작·종료와 휴게시간을 정하는 방법"></div>
         <div class="col-md-5"><label class="form-label required" for="workDays">근무일</label><input class="form-control" id="workDays" maxlength="200" value="${escapeHtml(terms.work_days)}"></div>
         <div class="col-md-2"><label class="form-label required" for="workDaysPerWeek">주 근무일</label><div class="input-group"><input type="number" min="1" max="7" step="0.5" class="form-control" id="workDaysPerWeek" value="${escapeHtml(terms.work_days_per_week)}"><span class="input-group-text">일</span></div></div>
         <div class="col-md-2"><label class="form-label required" for="dailyWorkHours">1일 소정근로</label><div class="input-group"><input type="number" min="0.5" max="24" step="0.5" class="form-control" id="dailyWorkHours" value="${escapeHtml(terms.daily_work_hours)}"><span class="input-group-text">시간</span></div></div>
@@ -645,7 +653,7 @@ function renderFullContractEditor(terms) {
         <div class="col-md-3"><label class="form-label required" for="breakEnd">휴게 종료</label><input type="time" class="form-control" id="breakEnd" value="${escapeHtml(terms.break_end_time)}"></div>
         <div class="col-md-4"><label class="form-label required" for="weeklyHoliday">주휴일</label><input class="form-control" id="weeklyHoliday" maxlength="100" value="${escapeHtml(terms.weekly_holiday)}"></div>
         <div class="col-md-8"><label class="form-label required" for="holidayTerms">그 밖의 휴일</label><input class="form-control" id="holidayTerms" maxlength="500" value="${escapeHtml(terms.holiday_terms)}"></div>
-        <div class="col-12 conditional-field ${terms.employment_type === 'part_time' ? '' : 'hidden'}" data-condition="employmentType:part_time"><label class="form-label required" for="partTimeSchedule">단시간 근로자의 요일별 근로시간</label><textarea class="form-control" id="partTimeSchedule" rows="2" maxlength="1200" placeholder="예: 월·수·금 09:00~13:00, 휴게시간 없음">${escapeHtml(terms.part_time_schedule)}</textarea></div>
+        <div class="col-12 conditional-field ${terms.work_time_basis === 'part_time' ? '' : 'hidden'}" data-condition="workTimeBasis:part_time"><label class="form-label required" for="partTimeSchedule">시간제 근로자의 근무일·시간</label><textarea class="form-control" id="partTimeSchedule" rows="2" maxlength="1200" placeholder="예: 월·수·금, 하루 4시간. 시작 시각은 협의">${escapeHtml(terms.part_time_schedule)}</textarea></div>
       </div>
     </div>
     <div class="section-card">
@@ -750,15 +758,21 @@ function bindEditorEvents() {
     document.querySelector(`[data-clause-body="${checkbox.dataset.toggleClause}"]`)?.classList.toggle('hidden', !checkbox.checked);
   }));
   document.getElementById('employmentType')?.addEventListener('change', (event) => {
-    document.querySelector('[data-condition="employmentType:part_time"]')?.classList.toggle('hidden', event.target.value !== 'part_time');
+    if (event.target.value === 'part_time') { document.getElementById('workTimeBasis').value = 'part_time'; document.getElementById('workTimeBasis').dispatchEvent(new Event('change')); }
     if (event.target.value === 'fixed') document.getElementById('contractEnd')?.focus();
   });
+  document.getElementById('workTimeBasis')?.addEventListener('change', (event) => {
+    document.querySelector('[data-condition="workTimeBasis:part_time"]')?.classList.toggle('hidden', event.target.value !== 'part_time');
+  });
+  const syncClock = () => { const flexible = inputValue('workScheduleType') === 'flexible'; ['workStart', 'workEnd', 'breakStart', 'breakEnd'].forEach(id => { const input = document.getElementById(id); if (input) input.closest('[class*="col-"]').classList.toggle('hidden', flexible); }); };
+  document.getElementById('workScheduleType')?.addEventListener('change', syncClock);
+  syncClock();
   document.getElementById('parentContract')?.addEventListener('change', (event) => loadAmendmentParent(event.target.value));
   document.querySelectorAll('.wage-part').forEach((input) => input.addEventListener('input', updateMonthlyWageTotal));
   updateMonthlyWageTotal();
-  document.getElementById('previewDraftButton').addEventListener('click', previewDraft);
-  document.getElementById('saveDraftButton').addEventListener('click', (event) => saveDraft(false, event.currentTarget));
-  document.getElementById('submitDraftButton').addEventListener('click', (event) => saveDraft(true, event.currentTarget));
+  document.getElementById('previewDraftButton')?.addEventListener('click', previewDraft);
+  document.getElementById('saveDraftButton')?.addEventListener('click', (event) => saveDraft(false, event.currentTarget));
+  document.getElementById('submitDraftButton')?.addEventListener('click', (event) => saveDraft(true, event.currentTarget));
 }
 
 function previewDraft() {
@@ -856,9 +870,9 @@ function buildTermSectionSummaries(terms) {
   ].filter(([, amount]) => Number(amount || 0) > 0).map(([label, amount]) => `${label} ${formatMoney(amount)}원`);
   const insurance = selectedInsuranceNames(terms);
   return new Map([
-    ['계약 형태와 기간', `${employmentTypeLabel(terms.employment_type)}\n${period}`],
+    ['계약 형태와 기간', `${employmentTypeLabel(terms.employment_type)} · ${terms.work_time_basis === 'part_time' ? '시간제' : '전일제'}\n${period}`],
     ['근무 장소와 담당 업무', `근무 장소: ${asText(terms.workplace, '-')}\n담당 업무: ${asText(terms.duties, '-')}`],
-    ['근로시간과 휴일', `${asText(terms.work_days, '-')} · 주 ${terms.work_days_per_week || '-'}일\n${asText(terms.work_start_time, '-')}~${asText(terms.work_end_time, '-')} · 휴게 ${asText(terms.break_start_time, '-')}~${asText(terms.break_end_time, '-')}\n1일 ${terms.daily_work_hours || '-'}시간 · 주 ${terms.weekly_work_hours || '-'}시간\n주휴일 ${asText(terms.weekly_holiday, '-')} · ${asText(terms.holiday_terms, '-')}${terms.employment_type === 'part_time' ? `\n요일별 시간: ${asText(terms.part_time_schedule, '-')}` : ''}`],
+    ['근로시간과 휴일', `${asText(terms.work_days, '-')} · 주 ${terms.work_days_per_week || '-'}일\n${terms.work_schedule_type === 'flexible' ? asText(terms.work_schedule_terms, '-') : `${asText(terms.work_start_time, '-')}~${asText(terms.work_end_time, '-')} · 휴게 ${asText(terms.break_start_time, '-')}~${asText(terms.break_end_time, '-')}`}\n1일 ${terms.daily_work_hours || '-'}시간 · 주 ${terms.weekly_work_hours || '-'}시간\n주휴일 ${asText(terms.weekly_holiday, '-')} · ${asText(terms.holiday_terms, '-')}${(terms.employment_type === 'part_time' || terms.work_time_basis === 'part_time') ? `\n요일별 시간: ${asText(terms.part_time_schedule, '-')}` : ''}`],
     ['임금', `${wageBasisLabel(terms.wage_basis)} ${formatMoney(terms.wage_amount)}원${monthlyParts.length ? `\n월 구성: ${monthlyParts.join(', ')}` : ''}\n${asText(terms.wage_calculation_terms || terms.wage_components, '-')}\n${asText(terms.pay_day, '-')} · ${asText(terms.payment_method, '-')}`],
     ['휴가와 사회보험', `${asText(terms.annual_leave, '-')}\n${insurance.length ? insurance.join('·') : '적용 보험 없음'}${terms.social_insurance_note ? ` · ${terms.social_insurance_note}` : ''}`],
     ['수습기간', terms.probation_enabled ? `${formatDate(terms.probation_start_date)}~${formatDate(terms.probation_end_date)}\n${asText(terms.probation_wage_terms, '-')}` : '적용하지 않음'],
@@ -891,7 +905,9 @@ function optionalText(enabledId, textId, label) {
 }
 
 function collectFullTerms(seed) {
-  const terms = { ...seed, contract_format_version: 2 };
+  const terms = { ...seed, contract_format_version: 3 };
+  terms.work_time_basis = requireField(inputValue('workTimeBasis'), '근무 형태');
+  if (!['full_time', 'part_time'].includes(terms.work_time_basis)) throw new Error('근무 형태를 선택해 주세요.');
   terms.employment_type = requireField(inputValue('employmentType'), '근로 형태');
   terms.contract_start_date = requireField(inputValue('contractStart'), '근로 시작일');
   terms.indefinite_term = terms.employment_type !== 'fixed';
@@ -904,16 +920,23 @@ function collectFullTerms(seed) {
   terms.work_days_per_week = numberValue('workDaysPerWeek');
   terms.daily_work_hours = numberValue('dailyWorkHours');
   terms.weekly_work_hours = numberValue('weeklyWorkHours');
-  if (terms.work_days_per_week <= 0 || terms.daily_work_hours <= 0 || terms.weekly_work_hours <= 0) throw new Error('소정근로일수와 근로시간을 확인해 주세요.');
-  terms.work_start_time = requireField(inputValue('workStart'), '근무 시작 시간');
-  terms.work_end_time = requireField(inputValue('workEnd'), '근무 종료 시간');
-  terms.break_start_time = requireField(inputValue('breakStart'), '휴게 시작 시간');
-  terms.break_end_time = requireField(inputValue('breakEnd'), '휴게 종료 시간');
-  if (terms.work_end_time <= terms.work_start_time) throw new Error('근무 종료 시간은 시작 시간보다 뒤여야 합니다.');
-  if (terms.break_end_time <= terms.break_start_time) throw new Error('휴게 종료 시간은 시작 시간보다 뒤여야 합니다.');
+  if (terms.work_days_per_week <= 0 || terms.work_days_per_week > 7 || terms.daily_work_hours <= 0 || terms.daily_work_hours > 24 || terms.weekly_work_hours <= 0 || terms.weekly_work_hours > 168 || Math.abs(terms.daily_work_hours*30-Math.round(terms.daily_work_hours*30))>1e-7) throw new Error('소정근로일수와 근로시간을 확인해 주세요. 1일 근로시간은 2분 단위로 입력할 수 있습니다.');
+  terms.work_schedule_type = inputValue('workScheduleType') || 'fixed';
+  terms.work_schedule_terms = inputValue('workScheduleTerms');
+  if (terms.work_schedule_type === 'flexible') {
+    requireField(terms.work_schedule_terms, '근무·휴게시간 합의 내용');
+    terms.work_start_time = terms.work_end_time = terms.break_start_time = terms.break_end_time = '';
+  } else {
+    terms.work_start_time = requireField(inputValue('workStart'), '근무 시작 시간');
+    terms.work_end_time = requireField(inputValue('workEnd'), '근무 종료 시간');
+    terms.break_start_time = requireField(inputValue('breakStart'), '휴게 시작 시간');
+    terms.break_end_time = requireField(inputValue('breakEnd'), '휴게 종료 시간');
+    if (terms.work_end_time <= terms.work_start_time) throw new Error('근무 종료 시간은 시작 시간보다 뒤여야 합니다.');
+    if (terms.break_end_time <= terms.break_start_time) throw new Error('휴게 종료 시간은 시작 시간보다 뒤여야 합니다.');
+  }
   terms.weekly_holiday = requireField(inputValue('weeklyHoliday'), '주휴일');
   terms.holiday_terms = requireField(inputValue('holidayTerms'), '그 밖의 휴일');
-  terms.part_time_schedule = terms.employment_type === 'part_time'
+  terms.part_time_schedule = terms.work_time_basis === 'part_time'
     ? requireField(inputValue('partTimeSchedule'), '단시간 근로자의 요일별 근로시간')
     : '';
 
@@ -1074,7 +1097,7 @@ async function showContract(id) {
 
 function renderPreview(contract, unsaved) {
   const paper = contract.source_type === 'upload'
-    ? `<div class="empty-state"><div class="fs-1 mb-3">📎</div><h3 class="h5 fw-bold">외부 작성 원본이 등록되어 있습니다</h3><p class="mb-1">${escapeHtml(contract.original_file_name || contract.title)}</p><p class="small text-muted mb-0">등록일 ${escapeHtml(formatDate(contract.created_at))} · 적용일 ${escapeHtml(formatDate(contract.effective_date))}</p></div>`
+    ? `<div class="section-card"><h3 class="h5 fw-bold">외부 작성 계약서</h3><p>${escapeHtml(contract.original_file_name || contract.title)}</p><p>등록일 ${escapeHtml(formatDate(contract.created_at))} · 적용일 ${escapeHtml(formatDate(contract.effective_date))}</p>${contract.terms?.work_time_basis ? `<h4 class="h6 fw-bold mt-4">등록한 근로조건</h4><dl>${Array.from(buildTermSectionSummaries(contract.terms)).map(([label, value]) => `<dt class="mt-3">${escapeHtml(label)}</dt><dd class="mb-0" style="white-space:pre-wrap;word-break:keep-all">${escapeHtml(value)}</dd>`).join('')}</dl>` : ''}</div>`
     : renderContractDocument(contract);
   const canEmployerSign = !unsaved && state.admin && !state.forceSelf && contract.status === 'awaiting_signatures' && !contract.employer_signed_at;
   const canEmployeeSign = !unsaved && (!state.admin || state.forceSelf) && contract.status === 'awaiting_signatures' && !contract.employee_signed_at;
@@ -1176,16 +1199,16 @@ function renderFullContractDocumentBody(terms) {
     .map((item) => [item.title, item.content]);
   return `
     <h2>계약 기간과 업무</h2><table>
-      <tr><th>근로 형태</th><td>${escapeHtml(employmentTypeLabel(terms.employment_type))}</td></tr>
+      <tr><th>근로 형태</th><td>${escapeHtml(employmentTypeLabel(terms.employment_type))}${terms.work_time_basis ? ` · ${terms.work_time_basis === 'part_time' ? '시간제' : '전일제'}` : ''}</td></tr>
       <tr><th>근로계약 기간</th><td>${escapeHtml(period)}</td></tr>
       <tr><th>근무 장소</th><td>${escapeHtml(terms.workplace || '-')}</td></tr>
       <tr><th>담당 업무</th><td>${escapeHtml(terms.duties || '-')}</td></tr>
     </table>
     <h2>근로시간·휴일·휴가</h2><table>
       <tr><th>근무일</th><td>${escapeHtml(terms.work_days || '-')} · 주 ${escapeHtml(terms.work_days_per_week || '-')}일</td></tr>
-      <tr><th>소정근로시간</th><td>1일 ${escapeHtml(terms.daily_work_hours || '-')}시간 · 1주 ${escapeHtml(terms.weekly_work_hours || '-')}시간 · ${escapeHtml(terms.work_start_time || '-')}부터 ${escapeHtml(terms.work_end_time || '-')}까지</td></tr>
-      <tr><th>휴게시간</th><td>${escapeHtml(terms.break_start_time || '-')}부터 ${escapeHtml(terms.break_end_time || '-')}까지</td></tr>
-      ${terms.employment_type === 'part_time' ? `<tr><th>요일별 근로시간</th><td>${multilineHtml(terms.part_time_schedule)}</td></tr>` : ''}
+      <tr><th>소정근로시간</th><td>1일 ${escapeHtml(terms.daily_work_hours || '-')}시간 · 1주 ${escapeHtml(terms.weekly_work_hours || '-')}시간${terms.work_schedule_type === 'flexible' ? '' : ` · ${escapeHtml(terms.work_start_time || '-')}부터 ${escapeHtml(terms.work_end_time || '-')}까지`}</td></tr>
+      ${terms.work_schedule_type === 'flexible' ? `<tr><th>근무·휴게시간</th><td>${multilineHtml(terms.work_schedule_terms)}</td></tr>` : `<tr><th>휴게시간</th><td>${escapeHtml(terms.break_start_time || '-')}부터 ${escapeHtml(terms.break_end_time || '-')}까지</td></tr>`}
+      ${terms.employment_type === 'part_time' || terms.work_time_basis === 'part_time' ? `<tr><th>요일별 근로시간</th><td>${multilineHtml(terms.part_time_schedule)}</td></tr>` : ''}
       <tr><th>주휴일</th><td>${escapeHtml(terms.weekly_holiday || '-')}</td></tr>
       <tr><th>그 밖의 휴일</th><td>${multilineHtml(terms.holiday_terms)}</td></tr>
       <tr><th>연차유급휴가</th><td>${multilineHtml(terms.annual_leave)}</td></tr>
@@ -1429,41 +1452,50 @@ function fileExtension(file) {
 }
 
 function openUpload() {
-  if (state.busy || !state.contractsLoaded || !state.employee) return;
-  requestContractTransition(() => {
-  state.detailRevision++;
-  if (hasUnsavedContractChanges()) {
-    resetContractEditTracking();
-    state.editing = null;
-    emptyWorkspace();
-  }
-  document.getElementById('uploadTitle').value = `${state.employee.emp_name} 외부 작성 근로계약서`;
-  document.getElementById('uploadKind').value = 'uploaded';
-  document.getElementById('uploadEffectiveDate').value = todayKst();
-  document.getElementById('uploadFile').value = '';
-  uploadModal.show();
+  if (state.busy || !state.admin || state.forceSelf || !state.contractsLoaded || !state.employee) return;
+  requestContractTransition(async () => {
+    const owner = contractReadOwner();
+    try {
+      if (!await loadContractDefaults(owner) || !owner.isCurrent()) return;
+      state.editing = { emp_id: state.employee.emp_id, source_type: 'upload', terms: defaultTerms() };
+      state.uploadAttempt = null;
+      state.customTerms = [];
+      document.getElementById('workspace').innerHTML = `<div class="d-flex justify-content-between gap-3 flex-wrap mb-4"><h2 class="h4 fw-bold">외부 작성 계약서 등록</h2><button type="button" class="btn btn-primary" id="saveUploadContractButton">등록</button></div><div class="section-card"><h3 class="section-title">원본 파일</h3><div class="row g-3"><div class="col-md-8"><label class="form-label required" for="contractTitle">문서 제목</label><input class="form-control" id="contractTitle" maxlength="200" value="${escapeHtml(state.employee.emp_name)} 외부 작성 근로계약서"></div><div class="col-md-4"><label class="form-label required" for="effectiveDate">적용일</label><input type="date" class="form-control" id="effectiveDate" value="${todayKst()}"></div><div class="col-md-4"><label class="form-label" for="uploadDocumentKind">문서 종류</label><select class="form-select" id="uploadDocumentKind"><option value="uploaded">외부 작성 계약서</option><option value="initial">근로계약서</option><option value="amendment">근로조건 변경합의서</option><option value="consolidated">통합 근로계약서</option></select></div><div class="col-md-8"><label class="form-label required" for="uploadSourceFile">서명한 계약서</label><input type="file" class="form-control" id="uploadSourceFile" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"><div class="form-text">PDF·JPG·PNG, 최대 20MB</div></div></div></div>${renderFullContractEditor(state.editing.terms)}<div class="section-card"><label class="form-check"><input type="checkbox" class="form-check-input" id="uploadTermsConfirmed"><span class="form-check-label">서명한 원본과 입력한 근로조건이 일치함을 확인했습니다.</span></label></div>`;
+      bindEditorEvents();
+      document.getElementById('saveUploadContractButton').addEventListener('click', registerUpload);
+      state.editorBaseline = contractEditorSnapshot();
+      state.previewDirty = false;
+    } catch (error) { if (owner.isCurrent()) showAlert(normalizeError(error)); }
   });
 }
 
 async function registerUpload(event) {
   if (state.busy) return;
   const button = event.currentTarget;
-  const file = document.getElementById('uploadFile').files[0];
+  const file = document.getElementById('uploadSourceFile')?.files[0];
   let storagePath = '';
   let uploaded = false;
   try {
-    const title = requireField(inputValue('uploadTitle'), '문서 제목');
-    const kind = inputValue('uploadKind');
-    const effective = requireField(inputValue('uploadEffectiveDate'), '적용일');
+    if (!state.admin || state.forceSelf || state.editing?.source_type !== 'upload' || state.editing.emp_id !== state.employee?.emp_id) throw new Error('HR_ADMIN_REQUIRED');
+    const title = requireField(inputValue('contractTitle'), '문서 제목');
+    const kind = inputValue('uploadDocumentKind');
+    const effective = requireField(inputValue('effectiveDate'), '적용일');
+    const terms = collectFullTerms(state.editing.terms);
+    if (!isChecked('uploadTermsConfirmed')) throw new Error('원본과 입력한 근로조건이 일치하는지 확인해 주세요.');
     if (!file) throw new Error('계약서 파일을 선택해 주세요.');
     const ext = fileExtension(file);
     if (!['pdf', 'jpg', 'jpeg', 'png'].includes(ext)) throw new Error('PDF·JPG·PNG 파일만 등록할 수 있습니다.');
     if (file.size > 20 * 1024 * 1024) throw new Error('파일은 20MB 이하로 등록해 주세요.');
     const coopId = asText(state.user?.coop_id);
     const entropy = window.crypto?.randomUUID ? window.crypto.randomUUID().replace(/-/g, '').slice(0, 12) : Math.random().toString(36).slice(2, 14);
-    storagePath = `${coopId}/${state.employee.emp_id}_contract_${Date.now()}_${entropy}.${ext === 'jpeg' ? 'jpg' : ext}`;
+    const fingerprint = contractEditorSnapshot();
+    const prior = state.uploadAttempt;
+    storagePath = prior?.file === file && prior.fingerprint === fingerprint ? prior.path : `${coopId}/${state.employee.emp_id}_contract_${Date.now()}_${entropy}.${ext === 'jpeg' ? 'jpg' : ext}`;
+    uploaded = Boolean(prior?.file === file && prior.fingerprint === fingerprint && prior.uploaded);
+    state.uploadAttempt = {file,fingerprint,path:storagePath,uploaded};
     button.dataset.label = button.textContent;
     setBusy(true, button);
+    if (!uploaded) {
     const { error: uploadError } = await db.storage.from('contracts').upload(storagePath, file, {
       upsert: false,
       contentType: file.type || undefined,
@@ -1471,21 +1503,26 @@ async function registerUpload(event) {
     });
     if (uploadError) throw uploadError;
     uploaded = true;
-    const { data, error } = await db.rpc('erp_register_uploaded_employment_contract', {
+    state.uploadAttempt.uploaded = true;
+    }
+    const { data, error } = await db.rpc('erp_register_uploaded_employment_contract_terms', {
       p_emp_id: state.employee.emp_id,
       p_title: title,
       p_effective_date: effective,
       p_file_path: storagePath,
       p_original_file_name: sanitizeFileName(file.name),
-      p_document_kind: kind
+      p_document_kind: kind,
+      p_terms: terms
     });
     if (error) throw error;
-    uploadModal.hide();
+    resetContractEditTracking();
+    state.editing = null;
+    state.uploadAttempt = null;
     await loadContracts();
     openContract((Array.isArray(data) ? data[0] : data)?.id, { afterSave: true });
     showAlert('외부 작성 계약서를 새 이력으로 등록했습니다. 기존 계약서는 그대로 보존됩니다.');
   } catch (error) {
-    if (uploaded) await db.storage.from('contracts').remove([storagePath]).catch(() => {});
+    // A response lost after commit is not proof that registration failed: retain its original.
     console.error('[employment_contracts] upload failed', error);
     showAlert(normalizeError(error));
   } finally {
