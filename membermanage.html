@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.168
-Change: 2026-10-12 - Optimize public partner logo uploads without changing account permissions.
+Version: v1.0.169
+Change: 2026-10-12 - Display protected education and meeting photo copies before originals.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.168 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.169 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261002-1"></script>
@@ -44,7 +44,9 @@ allowKakaoApp: true
 <script src="shared/browser_env_guard.js?v=20260421-3"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
+<script src="/shared/public_image_index.js?v=20261012-1"></script>
 <script src="/shared/image_display.js?v=20261012-2"></script>
+<script src="/shared/participation_image_display.js?v=20261012-1"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
 <script src="cert_generator.js?v=20261010_01"></script>
 <script src="shared/contribution_cert_preview.js?v=20261010-1"></script>
@@ -697,6 +699,12 @@ font-size: 1.5rem;
 line-height: 1;
 z-index: 3;
 }
+.participation-image-lightbox-original {
+position: fixed;top:14px;right:72px;min-height:44px;padding:8px 16px;
+border:1px solid #fff;border-radius:8px;background:#fff;color:#0f172a;
+font-weight:700;z-index:3;word-break:keep-all;
+}
+.participation-image-lightbox-original:disabled {opacity:.6;}
 .participation-history-item {
 border: 1px solid #e5e7eb;
 border-radius: 12px;
@@ -2333,6 +2341,7 @@ oninput="autoHyphen(this)"> </div>
 </div>
 
 <div id="participationImageLightbox" class="participation-image-lightbox" role="dialog" aria-modal="true" aria-label="행사 사진 크게 보기" aria-hidden="true">
+<button type="button" id="participationImageLightboxOriginal" class="participation-image-lightbox-original" onclick="openParticipationPhotoOriginal()">원본 보기</button>
 <button type="button" class="participation-image-lightbox-close" id="participationImageLightboxClose" aria-label="닫기" onclick="closeParticipationImageLightbox()">&times;</button>
 <button type="button" class="participation-image-lightbox-nav prev" id="participationImageLightboxPrev" aria-label="이전 사진" hidden>&lsaquo;</button>
 <div class="participation-image-lightbox-stage">
@@ -6091,6 +6100,8 @@ MEETING: createParticipationHistoryPageState()
 } // End of createEmptyParticipationHistoryPages
 
 function resetParticipationHistoryState(memberUuid) {
+closeParticipationImageLightbox();
+participationSignedUrlCache.clear();
 if (participationHistoryInfiniteObserver) {
 participationHistoryInfiniteObserver.disconnect();
 participationHistoryInfiniteObserver = null;
@@ -6442,18 +6453,16 @@ if (!append) {
 list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>사진을 불러오는 중...</div>';
 }
 const photoPaths = Array.from(new Set(renderEvents.flatMap(function(event) {
-return (Array.isArray(event.files) ? event.files : [])
-.filter(function(file) { return file.file_kind === 'PHOTO' && !file.external_url; })
-.map(function(file) { return String(file.storage_path || '').trim(); })
-.filter(Boolean);
+const firstPhoto=(Array.isArray(event.files) ? event.files : []).find(function(file){return file.file_kind==='PHOTO';});
+return firstPhoto&&!firstPhoto.external_url&&firstPhoto.storage_path?[String(firstPhoto.storage_path).trim()]:[];
 })));
-const photoUrlRows = await Promise.all(photoPaths.map(async function(path) {
+const photoUrlRows = await CoopParticipationImages.mapLimit(photoPaths,async function(path) {
 try {
-return [path, await getParticipationSignedUrl(path)];
+return [path, await getParticipationSignedUrl(CoopParticipationImages.path(path,'small'))];
 } catch (_) {
 return [path, ''];
 }
-}));
+});
 if (renderVersion !== participationHistoryRenderVersion) return;
 const photoUrlMap = new Map(photoUrlRows);
 
@@ -6501,7 +6510,7 @@ alt: String(file.original_name || `${eventTypeLabel} 사진 ${index + 1}`).trim(
 }).filter(function(item) { return item.storagePath || item.externalUrl; });
 const firstPhoto = photoGalleryPayload[0] || null;
 const firstPhotoKey = firstPhoto ? (firstPhoto.externalUrl || firstPhoto.storagePath) : '';
-const firstPhotoUrl = firstPhoto ? (firstPhoto.externalUrl || photoUrlMap.get(firstPhoto.storagePath) || '') : '';
+const firstPhotoUrl = firstPhoto ? (firstPhoto.externalUrl ? CoopParticipationImages.external(firstPhoto.externalUrl,'small') : photoUrlMap.get(firstPhoto.storagePath) || '') : '';
 const hasPhoto = Boolean(firstPhoto);
 const titleHtml = event.event_type !== 'EDUCATION' && event.document_available === true
 ? `<button type="button" class="participation-meeting-title" data-participation-document="${escapeHtml(event.event_id)}" aria-label="${escapeHtml(event.title)} 회의록 보기"><span>${escapeHtml(event.title)}</span><i class="bi bi-box-arrow-up-right small" aria-hidden="true"></i></button>`
@@ -6783,11 +6792,12 @@ probe.src = url;
 
 async function resolveParticipationGalleryUrl(item, forceRefresh) {
 const externalUrl = safeUrl(item?.externalUrl || '');
-if (externalUrl) return externalUrl;
+if (externalUrl) {const display=CoopParticipationImages.external(externalUrl);if(!display)throw new Error('PHOTO_DISPLAY_UNAVAILABLE');return display;}
 const existingUrl = String(item?.signedUrl || '').trim();
 if (existingUrl.startsWith('data:')) return existingUrl;
-if (forceRefresh) participationSignedUrlCache.delete(item.storagePath);
-const signedUrl = await getParticipationSignedUrl(item.storagePath);
+const displayPath=CoopParticipationImages.path(item.storagePath);
+if (forceRefresh) participationSignedUrlCache.delete(displayPath);
+const signedUrl = await getParticipationSignedUrl(displayPath);
 item.signedUrl = signedUrl;
 return signedUrl;
 } // End of resolveParticipationGalleryUrl
@@ -6801,6 +6811,8 @@ if (!image || !item) return;
 participationImageIndex = normalizedIndex;
 syncParticipationImageLightboxControls();
 const loadVersion = ++participationImageLoadVersion;
+document.getElementById('participationImageLightboxOriginal').disabled=false;
+image.alt=item.alt || `행사 사진 ${normalizedIndex + 1}`;
 image.classList.add('is-loading');
 try {
 let signedUrl = await resolveParticipationGalleryUrl(item, false);
@@ -6819,12 +6831,29 @@ image.alt = item.alt || `행사 사진 ${normalizedIndex + 1}`;
 image.src = signedUrl;
 } catch (error) {
 if (loadVersion !== participationImageLoadVersion) return;
-closeParticipationImageLightbox();
-showModal('사진을 열지 못했습니다.\n' + (error?.message || '잠시 후 다시 시도해주세요.'));
+image.removeAttribute('src');
+const meta=document.getElementById('participationImageLightboxMeta');
+meta.hidden=false;meta.textContent='미리보기를 불러오지 못했습니다. 원본 보기로 확인해 주세요.';
 } finally {
 if (loadVersion === participationImageLoadVersion) image.classList.remove('is-loading');
 }
 } // End of showParticipationImageAt
+
+async function openParticipationPhotoOriginal() {
+const item=participationImageGallery[participationImageIndex],version=participationImageLoadVersion,sessionVersion=participationHistorySessionVersion;
+const button=document.getElementById('participationImageLightboxOriginal');
+if(!item||button.disabled)return;
+const popup=window.open('about:blank','_blank');if(!popup)return;popup.opener=null;button.disabled=true;
+try{
+const external=safeUrl(item.externalUrl||'');
+let url;
+if(external)url=CoopDisplayImages.original(external)||external;
+else {participationSignedUrlCache.delete(item.storagePath);url=await getParticipationSignedUrl(item.storagePath);}
+if(version!==participationImageLoadVersion||sessionVersion!==participationHistorySessionVersion||participationImageGallery[participationImageIndex]!==item){popup.close();return;}
+popup.location.replace(url);
+}catch(_){popup.close();if(version===participationImageLoadVersion)showModal('원본 사진을 열지 못했습니다. 로그인과 열람 권한을 확인해 주세요.');}
+finally{if(version===participationImageLoadVersion)button.disabled=false;}
+} // End of openParticipationPhotoOriginal
 
 function stepParticipationImage(delta) {
 if (participationImageGallery.length <= 1) return;
@@ -6947,6 +6976,7 @@ participationImageReturnFocus = null;
 participationImageGallery = [];
 participationImageIndex = -1;
 participationImageSwipeStart = null;
+document.getElementById('participationImageLightboxOriginal').disabled=false;
 syncParticipationImageLightboxControls();
 } // End of closeParticipationImageLightbox
 
@@ -6977,10 +7007,11 @@ const imageOverlay = document.getElementById('participationImageLightbox');
 if (imageOverlay && imageOverlay.classList.contains('show')) {
 if (event.key === 'Tab') {
 const focusable = [
+document.getElementById('participationImageLightboxOriginal'),
 document.getElementById('participationImageLightboxClose'),
 document.getElementById('participationImageLightboxPrev'),
 document.getElementById('participationImageLightboxNext')
-].filter(function(element) { return element && !element.hidden; });
+].filter(function(element) { return element && !element.hidden && !element.disabled; });
 if (focusable.length) {
 event.preventDefault();
 event.stopImmediatePropagation();
