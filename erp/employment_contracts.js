@@ -1,4 +1,4 @@
-/* Version: v1.3.0 | 2026-10-12 */
+/* Version: v1.3.1 | 2026-10-12 */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -841,7 +841,8 @@ function selectedInsuranceNames(terms) {
   ].filter(Boolean);
 }
 
-function employmentTypeLabel(value) {
+function employmentTypeLabel(value, formatVersion = 2) {
+  if (Number(formatVersion) >= 3 && value === 'regular') return '기간을 정하지 않음';
   return ({ regular: '기간을 정하지 않은 통상근로', fixed: '기간제 근로', part_time: '단시간 근로' })[value] || value || '-';
 }
 
@@ -870,7 +871,7 @@ function buildTermSectionSummaries(terms) {
   ].filter(([, amount]) => Number(amount || 0) > 0).map(([label, amount]) => `${label} ${formatMoney(amount)}원`);
   const insurance = selectedInsuranceNames(terms);
   return new Map([
-    ['계약 형태와 기간', `${employmentTypeLabel(terms.employment_type)} · ${terms.work_time_basis === 'part_time' ? '시간제' : '전일제'}\n${period}`],
+    ['계약 형태와 기간', `${employmentTypeLabel(terms.employment_type, terms.contract_format_version)} · ${terms.work_time_basis === 'part_time' ? '시간제' : '전일제'}\n${period}`],
     ['근무 장소와 담당 업무', `근무 장소: ${asText(terms.workplace, '-')}\n담당 업무: ${asText(terms.duties, '-')}`],
     ['근로시간과 휴일', `${asText(terms.work_days, '-')} · 주 ${terms.work_days_per_week || '-'}일\n${terms.work_schedule_type === 'flexible' ? asText(terms.work_schedule_terms, '-') : `${asText(terms.work_start_time, '-')}~${asText(terms.work_end_time, '-')} · 휴게 ${asText(terms.break_start_time, '-')}~${asText(terms.break_end_time, '-')}`}\n1일 ${terms.daily_work_hours || '-'}시간 · 주 ${terms.weekly_work_hours || '-'}시간\n주휴일 ${asText(terms.weekly_holiday, '-')} · ${asText(terms.holiday_terms, '-')}${(terms.employment_type === 'part_time' || terms.work_time_basis === 'part_time') ? `\n요일별 시간: ${asText(terms.part_time_schedule, '-')}` : ''}`],
     ['임금', `${wageBasisLabel(terms.wage_basis)} ${formatMoney(terms.wage_amount)}원${monthlyParts.length ? `\n월 구성: ${monthlyParts.join(', ')}` : ''}\n${asText(terms.wage_calculation_terms || terms.wage_components, '-')}\n${asText(terms.pay_day, '-')} · ${asText(terms.payment_method, '-')}`],
@@ -1199,7 +1200,7 @@ function renderFullContractDocumentBody(terms) {
     .map((item) => [item.title, item.content]);
   return `
     <h2>계약 기간과 업무</h2><table>
-      <tr><th>근로 형태</th><td>${escapeHtml(employmentTypeLabel(terms.employment_type))}${terms.work_time_basis ? ` · ${terms.work_time_basis === 'part_time' ? '시간제' : '전일제'}` : ''}</td></tr>
+      <tr><th>근로 형태</th><td>${escapeHtml(employmentTypeLabel(terms.employment_type, terms.contract_format_version))}${terms.work_time_basis ? ` · ${terms.work_time_basis === 'part_time' ? '시간제' : '전일제'}` : ''}</td></tr>
       <tr><th>근로계약 기간</th><td>${escapeHtml(period)}</td></tr>
       <tr><th>근무 장소</th><td>${escapeHtml(terms.workplace || '-')}</td></tr>
       <tr><th>담당 업무</th><td>${escapeHtml(terms.duties || '-')}</td></tr>
