@@ -1,4 +1,4 @@
-/* Version 1.0.0 — Public display copies; original requests are user initiated. */
+/* Version 1.0.1 — Public display copies; original requests are user initiated. */
 (function(global){
  'use strict';
  const prefix='/storage/v1/object/public/assets/',host='ifdqlwxgqgsvnawmhlfc.supabase.co',suffix='.screen.webp';
@@ -42,15 +42,20 @@
   document.body.appendChild(dialog);close.onclick=()=>dialog.close();dialog.addEventListener('close',()=>{image.removeAttribute('src');dialog.remove();});dialog.showModal();
  }
  function enableImage(image){
-  const source=image.dataset.originalSrc||'';if(!storageUrl(source)||image.closest('a,button,[onclick],.partner-logo-renderer')||new URLSearchParams(global.location?.search||'').get('home_preview')==='1'||global.location?.pathname?.startsWith('/erp/'))return;
+  if(!canViewImage(image))return;
   image.dataset.imageViewer='true';image.setAttribute('tabindex','0');image.setAttribute('role','button');image.setAttribute('aria-label',(image.alt||'사진')+' 크게 보기');
+ }
+ function canViewImage(image){
+  if(!storageUrl(image.dataset.originalSrc||'')||image.closest('a,button,[onclick],.partner-logo-renderer')||new URLSearchParams(global.location?.search||'').get('home_preview')==='1'||global.location?.pathname?.startsWith('/erp/'))return false;
+  for(let n=image;n&&n!==document.body;n=n.parentElement){if(typeof n.onclick==='function'||(n!==image&&n.getAttribute('role')==='button'))return false;}
+  return true;
  }
  if(global.document&&!/^erp\./.test(global.location?.hostname||'')&&!global.location?.pathname?.startsWith('/erp/')&&!global.location?.pathname?.startsWith('/membermanage')&&new URLSearchParams(global.location?.search||'').get('home_preview')!=='1'){
   const style=document.createElement('style');style.textContent='.coop-image-viewer{width:min(94vw,1100px);max-height:94vh;padding:16px;border:0;border-radius:12px;background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#20252a);word-break:keep-all}html[data-theme=dark] .coop-image-viewer{background:#1f2723;color:#f1f5f2}.coop-image-viewer::backdrop{background:#0009}.coop-image-viewer>div{display:flex;justify-content:flex-end;align-items:center;gap:20px;margin-bottom:12px}.coop-image-viewer button{background:#186841;color:#fff;border:0;border-radius:6px;padding:8px 18px}.coop-image-viewer a{color:inherit;text-decoration:underline}.coop-image-viewer img{max-width:100%;max-height:78vh;display:block;margin:auto;object-fit:contain}img[data-image-viewer=true]{cursor:zoom-in}';document.head.appendChild(style);
-  document.addEventListener('click',event=>{const im=event.target.closest?.('img[data-image-viewer=true]');if(im){event.preventDefault();view(im.dataset.originalSrc,im.alt);}});
-  document.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)&&event.target.matches?.('img[data-image-viewer=true]')){event.preventDefault();view(event.target.dataset.originalSrc,event.target.alt);}});
+  document.addEventListener('click',event=>{const im=event.target.closest?.('img[data-image-viewer=true]');if(im&&canViewImage(im)){event.preventDefault();view(im.dataset.originalSrc,im.alt);}});
+  document.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)&&event.target.matches?.('img[data-image-viewer=true]')&&canViewImage(event.target)){event.preventDefault();view(event.target.dataset.originalSrc,event.target.alt);}});
   const scan=root=>{if(root.matches?.('img[data-original-src]'))enableImage(root);root.querySelectorAll?.('img[data-original-src]').forEach(enableImage);};
   document.addEventListener('DOMContentLoaded',()=>{scan(document.body);new MutationObserver(changes=>{for(const change of changes){if(change.type==='attributes')enableImage(change.target);else change.addedNodes.forEach(node=>scan(node));}}).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-original-src']});});
  }
- global.CoopDisplayImages=Object.freeze({display,original,prepare,upload,view,version:'1.0.0'});
+ global.CoopDisplayImages=Object.freeze({display,original,prepare,upload,view,version:'1.0.1'});
 })(window);
