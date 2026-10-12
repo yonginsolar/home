@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.137
-Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
+Version: v1.0.138
+Change: 2026-10-12 - Display optimized public photos with an explicit original viewer.
 -->
 <html lang="ko">
 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.137 | index.html');</script>
+<script>console.log('[Version] v1.0.138 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -72,6 +72,8 @@ Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
 
 
   <script src="shared/tenant_head.js?v=20261007-5"></script>
+  <script src="shared/public_image_index.js?v=20261012-1"></script>
+  <script src="shared/image_display.js?v=20261012-1"></script>
 
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css" />
 
@@ -1760,13 +1762,13 @@ Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
   gtag('config', 'G-TR217L7JN9');
 </script>
   <script src="shared/theme.js?v=20261009-14"></script>
-  <script src="shared/partner_logo_theme.js?v=20260917-2"></script>
+  <script src="shared/partner_logo_theme.js?v=20261012-1"></script>
   <link href="shared/theme.css?v=20260917-2" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <script src="shared/home_design.js?v=20261009-3"></script>
 <script src="shared/site_text_styles.js?v=20261009-17" defer></script>
 <script src="shared/site_inline_editor.js?v=20261010-3" defer></script>
-<script src="shared/home_preview_editor.js?v=20261009-15" defer></script>
+<script src="shared/home_preview_editor.js?v=20261012-1" defer></script>
   <link rel="stylesheet" href="shared/home_design.css?v=20261009-1">
 </head>
 
@@ -1850,7 +1852,7 @@ Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
           </div>
 
           <div class="col-lg-6 pt-4 pt-lg-0">
-             <img src="https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/img/about.jpg" class="img-fluid" alt="협동조합 소개 이미지" id="about-img-src" style="border-radius:8px; width:100%;">
+             <img src="/assets/image-display/9ab212d2e86bc30e15173bdb-1600.webp" data-original-src="https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/img/about.jpg" loading="lazy" class="img-fluid" alt="협동조합 소개 이미지" id="about-img-src" style="border-radius:8px; width:100%;">
           </div>
         </div>
 
@@ -1875,7 +1877,8 @@ Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
               <img
                 class="village-map-background"
                 id="public-impact-image"
-                src="https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/demo/village-dashboard.png"
+                src="/assets/image-display/d46bddeb3d55b04c29a085b6-1600.webp"
+                loading="lazy"
                 alt="태양광 지붕이 있는 다섯 채의 마을집과 공동 출자금 금고 일러스트"
                 width="1365"
                 height="768"
@@ -2675,7 +2678,7 @@ Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
             heroSubtitle.hidden = !heroSubtitle.textContent.trim();
         }
         if (hero && settings.hero_image_url) {
-            hero.style.setProperty('--hero-background-image', `url(${JSON.stringify(String(settings.hero_image_url))})`);
+            hero.style.setProperty('--hero-background-image', `url(${JSON.stringify(window.CoopDisplayImages?.display(settings.hero_image_url)||String(settings.hero_image_url))})`);
         } else if (hero) {
             hero.style.removeProperty('--hero-background-image');
         }
@@ -2736,14 +2739,14 @@ Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
             if (useSimpleImpact || useBrandImpact) {
                 impact.classList.remove('tenant-impact-image');
                 if (settings.impact_image_url) {
-                    impact.style.setProperty('--impact-background-image', `url(${JSON.stringify(String(settings.impact_image_url))})`);
+                    impact.style.setProperty('--impact-background-image', `url(${JSON.stringify(window.CoopDisplayImages?.display(settings.impact_image_url)||String(settings.impact_image_url))})`);
                 } else {
                     impact.style.removeProperty('--impact-background-image');
                 }
             } else {
                 impact.style.removeProperty('--impact-background-image');
                 if (impactImage && settings.impact_image_url) {
-                    impactImage.src = settings.impact_image_url;
+                    impactImage.src = window.CoopDisplayImages?.display(settings.impact_image_url)||settings.impact_image_url;
                     impact.classList.add('tenant-impact-image');
                 } else {
                     impact.classList.remove('tenant-impact-image');
@@ -3032,7 +3035,7 @@ Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
                 }
                 if (item.image_url) {
                     const img = document.createElement('img');
-                    img.src = item.image_url;
+                    img.src = window.CoopDisplayImages?.display(item.image_url,'small')||item.image_url;
                     img.alt = `${item.name || '공식 인증'} 이미지`;
                     img.loading = 'lazy';
                     card.appendChild(img);
@@ -4421,7 +4424,7 @@ const SUPABASE_IMAGE_TRANSFORM_ENABLED = false;
 function getOptimizedSupabaseImageUrl(url, options = {}) {
     const originalUrl = safeUrl(url);
     if (!originalUrl) return '';
-    if (!SUPABASE_IMAGE_TRANSFORM_ENABLED) return originalUrl;
+    if (!SUPABASE_IMAGE_TRANSFORM_ENABLED) return window.CoopDisplayImages?.display(originalUrl,options.width<=800?'small':'large') || originalUrl;
     try {
         const imageUrl = new URL(originalUrl);
         if (!imageUrl.pathname.includes('/storage/v1/object/public/')) {
@@ -5395,7 +5398,7 @@ function openNoticeDetail(id) {
 	                  <div class="col-lg-4 col-md-6 portfolio-item mb-4" data-aos="fade-up">
                     <div class="portfolio-wrap shadow-sm rounded overflow-hidden">
                       <div style="height:250px; overflow:hidden;">
-                        <img src="${imgUrl}" class="img-fluid w-100 h-100" style="object-fit:cover;" alt="${safePlantName}">
+                        <img ${buildOptimizedImageAttrs(imgUrl,{width:640})} class="img-fluid w-100 h-100" style="object-fit:cover;" alt="${safePlantName}">
 	                      </div>
 	                      <div class="portfolio-info p-3 bg-white">
 	                        <div class="mb-2">${typeBadge}</div>
@@ -5433,7 +5436,8 @@ function openPlantDetail(id) {
     document.getElementById('plant-modal-title').innerText = p.name;
 
     const imgEl = document.getElementById('plant-modal-img');
-    imgEl.src = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
+    imgEl.dataset.originalSrc = safeUrl(p.image_url) || '';
+    imgEl.src = window.CoopDisplayImages?.display(safeUrl(p.image_url)) || safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
 
     // 2) 리스트 구성 (동적으로 생성)
 	    const listContainer = document.getElementById('plant-modal-info-list');
@@ -5694,7 +5698,7 @@ function openPlantDetail(id) {
                   <div class="row align-items-center">
                       <div class="col-md-5 mb-3 mb-md-0">
                           <div class="progress-plant-image">
-                              <img src="${img}" alt="${safeName}">
+                    <img ${buildOptimizedImageAttrs(img,{width:640})} alt="${safeName}">
                           </div>
                       </div>
                       <div class="col-md-7">
@@ -5978,7 +5982,7 @@ function openPlantDetail(id) {
         // 1. 이미지
         const imgEl = document.getElementById('about-img-src');
         if(imgEl) {
-            if (defaultData.image_url) imgEl.src = defaultData.image_url;
+            if (defaultData.image_url) { imgEl.dataset.originalSrc = defaultData.image_url; imgEl.src = window.CoopDisplayImages?.display(defaultData.image_url)||defaultData.image_url; }
             else imgEl.removeAttribute('src');
             imgEl.hidden = !defaultData.image_url;
             imgEl.style.display = defaultData.image_url ? 'block' : 'none';
@@ -6093,7 +6097,7 @@ function openPlantDetail(id) {
            // 리스트 화면: 로고 있으면 이미지, 없으면 텍스트
            const content = safeLogo
                ? `<span class="partner-logo-renderer" data-logo-url="${escapeHtml(safeLogo)}">
-                    <img crossorigin="anonymous" src="${safeLogo}" class="partner-logo-original img-fluid" alt="${safeName}">
+                    <img crossorigin="anonymous" src="${escapeHtml(window.CoopDisplayImages?.display(safeLogo,'small')||safeLogo)}" class="partner-logo-original img-fluid" alt="${safeName}" loading="lazy">
                     <img src="" class="partner-logo-cleaned img-fluid" alt="" aria-hidden="true">
                   </span>`
                : `<span class="partner-text">${safeName}</span>`;
@@ -6126,7 +6130,7 @@ function openPlantDetail(id) {
         //              로고가 없으면 -> 텍스트 로고 크게 보여줌
         const modalLogo = p.logo_url ? safeUrl(p.logo_url) : null;
         if(modalLogo) {
-            imgEl.src = modalLogo;
+            imgEl.src = window.CoopDisplayImages?.display(modalLogo)||modalLogo;
             imgEl.alt = p.name || '단체 로고';
             logoRendererEl.style.display = 'flex';
             window.PartnerLogoTheme?.enhance(logoRendererEl, modalLogo);

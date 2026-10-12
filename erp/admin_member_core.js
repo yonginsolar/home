@@ -1074,6 +1074,8 @@ const fileExt = file.name.split('.').pop();
 const randomName = Math.random().toString(36).substring(2, 10);
 const safeFileName = `${folderName}/${Date.now()}_${randomName}.${fileExt}`;
 
+// Keep the original; the public display copy is uploaded with the same authority.
+if (window.CoopDisplayImages) return window.CoopDisplayImages.upload(_supabase,file,safeFileName);
 // 2. 스토리지 업로드
 const { error: uploadError } = await _supabase.storage.from('assets').upload(safeFileName, file);
 if (uploadError) throw uploadError; // 에러 발생 시 호출한 곳으로 던짐
@@ -1088,7 +1090,8 @@ async function deleteOldFile(fullUrl) {
 if (!fullUrl) return;
 try {
 const path = fullUrl.split('/assets/')[1];
-if (path) await _supabase.storage.from('assets').remove([path]);
+// Original image files are retained; replacing a display copy is not erasure.
+if (path?.endsWith('.screen.webp')) await _supabase.storage.from('assets').remove([path]);
 } catch (e) { CoopSafeLog.error("파일 삭제 오류:", e); }
 }
 

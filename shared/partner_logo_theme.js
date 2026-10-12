@@ -37,7 +37,7 @@ Change: Keep the cleaned logo as the only visible and accessible variant after b
       image.decoding = 'async';
       image.onload = function () { resolve(image); };
       image.onerror = function () { reject(new Error('PARTNER_LOGO_LOAD_FAILED')); };
-      image.src = url;
+      image.src = global.CoopDisplayImages?.display(url,'small') || url;
     });
   }
 

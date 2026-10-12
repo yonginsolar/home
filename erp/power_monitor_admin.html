@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.3 | Change: 2026-10-11 - Refresh live values without resetting editable settings. -->
+<!-- Version: v1.3.4 | Change: 2026-10-12 - Retain original plant photos and display optimized copies. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.3 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.3.4 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -16,6 +16,8 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
+<script src="/shared/public_image_index.js?v=20261012-1"></script>
+<script src="/shared/image_display.js?v=20261012-1"></script>
   <script>
     window.__COOP_ROUTE_APP__ = 'erp';
     (function enforceErpPathPrefix() {
@@ -840,7 +842,7 @@
         content.innerHTML = `<div class="row g-3">${homepagePlants.map((plant) => `
           <div class="col-md-6 col-xl-4">
             <div class="border rounded-4 p-3 h-100 bg-light-subtle d-flex gap-3">
-              ${plant.image_url ? `<img class="plant-photo" src="${escapeHtml(plant.image_url)}" alt="">` : '<div class="plant-photo placeholder">☀️</div>'}
+              ${plant.image_url ? `<img class="plant-photo" src="${escapeHtml(window.CoopDisplayImages?.display(plant.image_url,'small')||plant.image_url)}" alt="">` : '<div class="plant-photo placeholder">☀️</div>'}
               <div class="flex-grow-1"><div class="plant-name">${escapeHtml(plant.name || '-')}</div><div class="plant-meta">${escapeHtml(plant.location || '주소 미등록')}</div><div class="plant-meta">${escapeHtml(formatPower(plant.capacity_kw))} · 모니터 연결 전</div><button type="button" class="btn btn-outline-primary btn-sm mt-2 plant-info-editor" data-site-id="${escapeHtml(plant.id)}">기본정보 수정</button></div>
             </div>
           </div>`).join('')}</div>`;
@@ -864,7 +866,7 @@
         const location = plant.homepage_location || plant.location_label || '주소 미등록';
         const capacity = plant.homepage_capacity_kw ?? plant.capacity_kw;
         const photo = plant.homepage_image_url
-          ? `<img class="plant-photo" src="${escapeHtml(plant.homepage_image_url)}" alt="">`
+          ? `<img class="plant-photo" src="${escapeHtml(window.CoopDisplayImages?.display(plant.homepage_image_url,'small')||plant.homepage_image_url)}" alt="">`
           : '<div class="plant-photo placeholder">☀️</div>';
         const editorReady = Boolean(dashboard.coop_id) && String(dashboard.coop_id) === String(coopId);
         const editorLabel = plant.site_power_plant_id ? '정보 수정' : '정보 등록';
@@ -991,7 +993,7 @@
       const safeUrl = String(url || '').trim();
       preview.classList.toggle('hidden', !safeUrl);
       placeholder.classList.toggle('hidden', Boolean(safeUrl));
-      preview.src = safeUrl;
+      preview.src = window.CoopDisplayImages?.display(safeUrl)||safeUrl;
     }
 
     function togglePlantParticipationFields() {
@@ -1125,6 +1127,8 @@
             ? String(imageFile.name).split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '')
             : 'jpg';
           uploadedPath = `power-monitors/${editingPlantContext.dashboardId || editingPlantContext.coopId}/${Date.now()}_${crypto.randomUUID()}.${extension || 'jpg'}`;
+          if (window.CoopDisplayImages) imageUrl = await window.CoopDisplayImages.upload(_supabase,imageFile,uploadedPath);
+          else {
           const { error: uploadError } = await _supabase.storage.from('assets').upload(uploadedPath, imageFile, {
             cacheControl: '3600',
             contentType: imageFile.type,
@@ -1132,6 +1136,7 @@
           });
           if (uploadError) throw uploadError;
           imageUrl = _supabase.storage.from('assets').getPublicUrl(uploadedPath).data.publicUrl;
+          }
         }
 
         const payload = {
@@ -1169,7 +1174,7 @@
       } catch (error) {
         if (uploadedPath) {
           try {
-            await _supabase.storage.from('assets').remove([uploadedPath]);
+            await _supabase.storage.from('assets').remove([uploadedPath,uploadedPath+'.screen.webp']);
           } catch (_) {
             // 저장 RPC가 실패했을 때 방금 올린 미사용 파일만 정리한다.
           }

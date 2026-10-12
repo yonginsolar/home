@@ -46,10 +46,10 @@
         article.dataset.activityId=draft.activity.id;
         const title=document.createElement('h3');CoopTextStyles.paint(title,String(draft.activity.title||''),draft.activity.text_styles?.activityTitle);
         const date=document.createElement('p');date.textContent=[draft.activity.event_date,draft.activity.is_current?'':'비공개'].filter(Boolean).join(' · ');
-        const content=document.createElement('div');content.id='home-preview-activity-body';content.innerHTML=sanitizeHtml(String(draft.activity.content||''));
+        const content=document.createElement('div');content.id='home-preview-activity-body';const body=sanitizeHtml(String(draft.activity.content||''));content.innerHTML=typeof optimizeActivityContentImages==='function'?optimizeActivityContentImages(body):body;
         article.append(title,date);
         const url=imageUrl(draft.activity.file_url);
-        if(url){const img=document.createElement('img');img.src=url;img.alt='';img.style.cssText='max-width:100%;max-height:320px;object-fit:contain;margin-bottom:20px';article.append(img);}
+        if(url){const img=document.createElement('img');img.src=window.CoopDisplayImages?.display(url)||url;img.alt='';img.style.cssText='max-width:100%;max-height:320px;object-fit:contain;margin-bottom:20px';article.append(img);}
         article.append(content);container.after(article);
         CoopTextStyles.adapt(article);
         if(previousId!==draft.activity.id)article.scrollIntoView?.({block:'start'});
