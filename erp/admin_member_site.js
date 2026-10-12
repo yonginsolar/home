@@ -1982,12 +1982,9 @@ const destinationPath = `site-activities/participation_${fileId}.${activityPubli
 if (window.CoopDisplayImages) {
 const {data:source,error:sourceError}=await _supabase.storage.from('participation-files').download(storagePath);
 if (sourceError || !source) throw sourceError || new Error('사진을 불러오지 못했습니다.');
-const file = new File([source],destinationPath.split('/').pop(),{type:source.type || item.mimeType || 'image/jpeg'});
-try { return {url:await window.CoopDisplayImages.upload(_supabase,file,destinationPath),created:true}; }
-catch(error) {
-if (!/duplicate|already exists|resource already exists/i.test(String(error.message || ''))) throw error;
-return {url:String(_supabase.storage.from('assets').getPublicUrl(destinationPath).data?.publicUrl || ''),created:false};
-}
+const publicPath = `site-activities/participation_${fileId}_${crypto.randomUUID()}.${activityPublishedPhotoExtension(item)}`;
+const file = new File([source],publicPath.split('/').pop(),{type:source.type || item.mimeType || 'image/jpeg'});
+return {url:await window.CoopDisplayImages.upload(_supabase,file,publicPath),created:true};
 }
 const { error } = await _supabase.storage.from('participation-files').copy(
 storagePath,
