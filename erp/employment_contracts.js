@@ -1,4 +1,4 @@
-/* Version: v1.3.1 | 2026-10-12 */
+/* Version: v1.3.2 | 2026-10-12 */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -255,7 +255,8 @@ function normalizeError(error) {
     ONLY_EDITOR_DRAFT_CAN_BE_UPDATED: '전자 확인을 요청한 문서는 수정할 수 없습니다.',
     CONTRACT_NOT_AWAITING_SIGNATURES: '전자 확인을 기다리는 문서가 아닙니다.',
     CONTRACT_CONTENT_CHANGED: '전자 확인 요청 뒤 문서 내용이 달라졌습니다. 새 초안으로 다시 작성해 주세요.',
-    EMPLOYEE_SIGNATURE_REQUIRED: '이 계약의 직원 본인만 확인할 수 있습니다.'
+    EMPLOYEE_SIGNATURE_REQUIRED: '이 계약의 직원 본인만 확인할 수 있습니다.',
+    CONTRACT_SCHEDULE_HOURS_MISMATCH: '시작·종료 시각에서 휴게시간을 뺀 시간이 1일 소정근로시간과 같아야 합니다.'
   };
   const key = Object.keys(map).find((item) => raw.includes(item));
   return key ? map[key] : raw;
@@ -934,6 +935,8 @@ function collectFullTerms(seed) {
     terms.break_end_time = requireField(inputValue('breakEnd'), '휴게 종료 시간');
     if (terms.work_end_time <= terms.work_start_time) throw new Error('근무 종료 시간은 시작 시간보다 뒤여야 합니다.');
     if (terms.break_end_time <= terms.break_start_time) throw new Error('휴게 종료 시간은 시작 시간보다 뒤여야 합니다.');
+    const minutes=value=>Number(value.slice(0,2))*60+Number(value.slice(3));
+    if (terms.break_start_time < terms.work_start_time || terms.break_end_time > terms.work_end_time || Math.abs(minutes(terms.work_end_time)-minutes(terms.work_start_time)-(minutes(terms.break_end_time)-minutes(terms.break_start_time))-terms.daily_work_hours*60)>1e-7) throw new Error('시작·종료 시각에서 휴게시간을 뺀 시간이 1일 소정근로시간과 같아야 합니다. 시각을 정하지 않았다면 협의·유연근무를 선택해 주세요.');
   }
   terms.weekly_holiday = requireField(inputValue('weeklyHoliday'), '주휴일');
   terms.holiday_terms = requireField(inputValue('holidayTerms'), '그 밖의 휴일');
