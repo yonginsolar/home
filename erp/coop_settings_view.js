@@ -3,6 +3,7 @@
   'use strict';
   const isPage = new URLSearchParams(global.location.search).get('section') === 'settings';
   let baseline = null;
+  let entryFocused = false;
   function fields() {
     const root = document.getElementById('settingsModal');
     if (!root) return [];
@@ -72,7 +73,15 @@
   function controller(modal) {
     if (!isPage) return modal;
     // The same form is a page here: saving does not close it or create a second copy.
-    return { show() { document.getElementById('settingsModal').classList.remove('hidden'); }, hide() {} };
+    return { show() {
+      document.getElementById('settingsModal').classList.remove('hidden');
+      if (!entryFocused && new URLSearchParams(global.location.search).get('focus') === 'capital') {
+        entryFocused = true;
+        const heading=document.getElementById('companyCapitalHeading');
+        heading?.scrollIntoView({block:'center',behavior:'auto'});
+        heading?.closest('section')?.querySelector('button')?.focus({preventScroll:true});
+      }
+    }, hide() {} };
   }
   // Baselines stay in this retained page's memory; no settings or files are cached offline.
   global.ERPEmployeeSettingsView = Object.freeze({isPage, prepare, controller, checkpoint, checkpointSection, isDirty, capture, restore});

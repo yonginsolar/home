@@ -153,5 +153,5 @@
   const key=String(userId||'')+':'+String(runtime?.coop_id||'');if(key!==owner){clear();owner=key;}client=api;
  }
  window.addEventListener('beforeunload',e=>{if(drafts.size||busy.size){e.preventDefault();e.returnValue='';}});
- window.MemberNotificationAdmin={configure,open:refresh,refresh,detail,clearDetail,clear,hasUnsaved:()=>drafts.size>0||busy.size>0};
+ window.MemberNotificationAdmin={configure,open:refresh,refresh,select:async value=>{if(!['summary','connections','history','settings'].includes(value))return;tab=value;await refresh();},detail,clearDetail,clear,hasUnsaved:()=>drafts.size>0||busy.size>0};
 })();

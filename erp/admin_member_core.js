@@ -5855,6 +5855,14 @@ try {
 const params = new URLSearchParams(window.location.search || '');
 if (getInitialAdminMemberTab() !== 'site') return;
 const requestedSub = String(params.get('sub') || '').trim();
+if (requestedSub === 'legal' && hasAdminMemberScopePermission('site_admin') && isAdminMemberRuntimeModuleEnabled('site_admin')) {
+if (!(await ensureAdminMemberSiteReady())) return;
+selectAdminMemberSiteSubTab('sub-legal');
+CoopHomeVisualEditor.select('legal', false);
+await fetchSiteLegalDocuments();
+const kind = params.get('document');
+if (['signup_purpose','signup_privacy','terms','privacy'].includes(kind)) CoopSiteLegalEditor.select(kind);
+}
 if (requestedSub === 'plants') {
 if (!(await ensureAdminMemberSiteReady())) return;
 selectAdminMemberSiteSubTab('sub-plants');
@@ -9290,6 +9298,16 @@ window.onload = async function() {
     }
     await openAdminMemberActivityDeepLink();
     await openAdminMemberSiteSubDeepLink();
+    const workEntry = new URLSearchParams(window.location.search);
+    if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && canAccessAdminMemberTab('applications') && workEntry.get('sub') === 'pending-all') {
+        filterAppType('all'); filterAppList('pending');
+    }
+    if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && canAccessAdminMemberTab('notifications') && workEntry.get('sub') === 'settings') {
+        await window.MemberNotificationAdmin?.select('settings');
+    }
+    if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && hasAdminMemberScopePermission('member_admin') && isAdminMemberRuntimeModuleEnabled('member_admin') && workEntry.get('sub') === 'capital') {
+        await openMemberCapitalSettings();
+    }
 
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {
         window.ErpWorkspaceTask = {ready:true, refresh:async function(options = {}) {

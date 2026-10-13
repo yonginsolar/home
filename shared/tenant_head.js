@@ -62,7 +62,7 @@ Change: Keep homepage brand names text-only while retaining ERP logos and favico
   favicon.dataset.tenantFavicon = 'sun';
   if (!document.querySelector('link[rel="icon"][type="image/png"]')) document.head.appendChild(favicon);
   if (!document.querySelector('script[data-coop-branding]')) {
-    const script=document.createElement('script');script.src='/shared/coop_branding.js?v=1.0.1';script.defer=true;script.dataset.coopBranding='true';document.head.appendChild(script);
+    const script=document.createElement('script');script.src='/shared/coop_branding.js?v=1.0.2';script.defer=true;script.dataset.coopBranding='true';document.head.appendChild(script);
   }
 
   global.CoopTenantHead = Object.freeze({

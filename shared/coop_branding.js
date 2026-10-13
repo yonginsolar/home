@@ -1,4 +1,4 @@
-/* v1.0.1 — Keep homepage names text-only; retain ERP logos and per-cooperative favicons. */
+/* v1.0.2 — Observe only an existing document node, including early redirect documents. */
 (function(root){
  'use strict';
  let data=null,request=null;
@@ -10,7 +10,14 @@
   if(icon){let link=document.querySelector('link[data-coop-logo-icon]');if(!link){link=document.createElement('link');link.rel='icon';link.type='image/png';link.sizes='512x512';link.dataset.coopLogoIcon='true';document.head.appendChild(link);}link.href='/coop-favicon.png';}
  }
  async function load(){if(request)return request;request=(async()=>{try{const r=await fetch('/coop-branding.json',{credentials:'omit',redirect:'error',signal:AbortSignal.timeout(6000)});if(r.ok){const value=await r.json();apply(value);return value;}}catch(_){}return null;})();return request;}
- function ready(){load();const observer=new MutationObserver(changes=>{if(data&&changes.some(c=>[...c.addedNodes].some(n=>n.nodeType===3||n.id==='erpBrandTitle'||n.id==='siteBrandName'||n.id==='footer-coop-name')))apply(data);});observer.observe(document.body,{childList:true,subtree:true});}
+ function ready(){
+  const target=document.body||document.documentElement;
+  if(!target){document.addEventListener('DOMContentLoaded',ready,{once:true});return;}
+  void load();
+  const observer=new MutationObserver(changes=>{if(data&&changes.some(c=>[...c.addedNodes].some(n=>n.nodeType===3||n.id==='erpBrandTitle'||n.id==='siteBrandName'||n.id==='footer-coop-name')))apply(data);});
+  observer.observe(target,{childList:true,subtree:true});
+  root.addEventListener('pagehide',()=>observer.disconnect(),{once:true});
+ }
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready,{once:true});else ready();
- root.CoopBranding=Object.freeze({apply,load,safe,version:'1.0.1'});
+ root.CoopBranding=Object.freeze({apply,load,safe,version:'1.0.2'});
 })(window);
