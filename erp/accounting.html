@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.143 | Change: 2026-10-11 - Exclude read-only report filters from unsaved edits. -->
+<!-- Version: v1.0.144 | Change: 2026-10-14 - Local bank-file comparison with scoped ledger candidates. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,7 +8,8 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.143 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.144 | accounting.html');</script>
+  <script src="accounting_bank_compare.js?v=1.0.0"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261002-3">
@@ -662,7 +663,7 @@
 	    <div class="tab-pane fade" id="tabHistory">
 	      <div class="d-flex justify-content-between align-items-center mb-2">
 	          <h6 class="fw-bold m-0">최근 전표</h6>
-	          <button class="btn btn-sm btn-outline-primary" onclick="loadHistory()">🔄 새로고침</button>
+	          <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary" onclick="openBankCompare()">통장 파일 대조</button><button class="btn btn-sm btn-outline-primary" onclick="loadHistory()">🔄 새로고침</button></div>
 	      </div>
 	      <div class="d-flex justify-content-end align-items-center mb-3">
 	          <small class="text-muted" id="historyMeta"></small>
@@ -9344,6 +9345,12 @@ function loadHistory() {
             }
             renderHistoryDouble(data || []);
         });
+}
+
+function openBankCompare() {
+    if (!canPerform('accounting.view') && !canPerform('accounting.edit')) return showAlert('회계 조회 권한이 없습니다.');
+    window.CoopBankCompare.open({client:_supabase,context:()=>myInfo&&({coop_id:myInfo.coop_id,actor:String(myInfo.emp_id||myInfo.id||''),auth_user_id:myInfo.auth_user_id,year:Number(document.getElementById('reportYearSelect').value)||new Date().getFullYear()}),
+        canEdit:()=>canPerform('accounting.edit'),edit:async transId=>window.CoopPaymentDates.edit(_supabase,[transId],async()=>{await refreshDashboard();await loadHistory();})});
 }
 
 function isCashLikeAccount(accountName) {
