@@ -169,6 +169,7 @@
  document.addEventListener('focusout',()=>hint(null));
  document.addEventListener('scroll',()=>hint(null),true);
  document.addEventListener('click',event=>{
+  if(event.target.closest('[data-coop-dialog]'))return;
   if(!origin)return;
   const control=event.target.closest('[data-inline-control]');if(control){event.preventDefault();event.stopImmediatePropagation();const area=control.dataset.inlineArea,kind=control.dataset.inlineControl;if(kind==='section')sectionControls(area);else if(kind==='list'&&area==='about')begin('aboutList',document.querySelector(targets.aboutList));else if(area==='about'&&['aboutTitle','aboutSubtitle','aboutContent'].includes(kind))begin(kind,document.querySelector(targets[kind]));else{finish();send({type:'coop-home-inline-control',area,kind});}return;}
   // Let each toolbar button receive its own click before stopping bubbling.
@@ -184,6 +185,7 @@
  document.addEventListener('scroll',()=>{if(active)showToolbar();},true);
  document.addEventListener('contextmenu',event=>{if(active?.node.contains(event.target)){event.preventDefault();showToolbar();}});
  document.addEventListener('keydown',event=>{
+  if(event.target.closest('[data-coop-dialog]'))return;
   if(active?.kind==='plain'&&event.key==='Enter'&&root.CoopTextStyles){event.preventDefault();const sel=root.getSelection();if(sel.rangeCount&&active.node.contains(sel.anchorNode)){remember();const range=sel.getRangeAt(0);range.deleteContents();const n=document.createTextNode('\n');range.insertNode(n);active.node.querySelectorAll('[data-inline-caret]').forEach(b=>b.remove());if(fieldValue().endsWith('\n')){const caret=document.createElement('br');caret.dataset.inlineCaret='';active.node.append(caret);}range.setStart(n,n.length);range.collapse(true);sel.removeAllRanges();sel.addRange(range);transmit();}return;}
   if(!origin)return;if(event.key==='Escape'){if(active){event.preventDefault();finish(true);}sectionMenu.hidden=true;}
   if(event.key==='Enter'&&!active&&event.target.dataset.inlineField){event.preventDefault();begin(event.target.dataset.inlineField,event.target);}

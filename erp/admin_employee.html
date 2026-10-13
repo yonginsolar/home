@@ -1,17 +1,17 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.127
-Change: 2026-10-13 - Preserve raw leave-type drafts on row changes and associate employee/payroll labels without changing permission gates.
+Version: v1.0.128
+Change: 2026-10-13 - Preserve new employee inputs until explicit discard, without changing employee permissions or registration payloads.
 -->
 <html>
 <head>
-  <script src="/shared/coop_dialog.js?v=20261013-1" integrity="sha384-8gfaNJ+tOrjsb3avbF6PbylmbhA3tpWVOK3yK7+QhF/I3h3HNJfbXFnwdPhBEqS9" crossorigin="anonymous"></script>
+  <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
   <script>console.log('[Version] ui.20261013.1 | admin_employee.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.127 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.128 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1110,8 +1110,69 @@ function guardEmployeeDetailClose(event) {
     cancelEmployeeDetailReads();
 }
 window.addEventListener('beforeunload', event => {
-    if (isEmployeeDetailSaving() || hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
+    if (runInvite._inFlight || hasUnsavedEmployeeInvite() || isEmployeeDetailSaving() || hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
 });
+let inviteDraftBaseline = null, inviteDiscardPending = false, inviteDiscardAllowed = false;
+const EMPLOYEE_INVITE_DRAFT_IDS = ['newName','newEmail','newRank','newDeptSelect','newDeptCustom','newRole','newAuthLevel'];
+function employeeInviteDraftValues() {
+    const values = new Map(EMPLOYEE_INVITE_DRAFT_IDS.map(id => [id, document.getElementById(id)?.value ?? '']));
+    document.querySelectorAll('#inviteModal [data-invite-module-key]').forEach(element => {
+        values.set('module:' + element.dataset.inviteModuleKey, element.value);
+    });
+    return values;
+}
+function employeeInviteDraftSignature() {
+    return JSON.stringify([...employeeInviteDraftValues()]
+        .filter(([key,value]) => !key.startsWith('module:') || value !== 'inherit')
+        .sort(([a],[b]) => a.localeCompare(b)));
+}
+function hasUnsavedEmployeeInvite() {
+    return inviteDraftBaseline !== null && [...employeeInviteDraftValues()].some(([key,value]) =>
+        value !== (inviteDraftBaseline.get(key) ?? (key.startsWith('module:') ? 'inherit' : '')));
+}
+function restoreEmployeeInviteDraftBaseline() {
+    if (!inviteDraftBaseline) return;
+    EMPLOYEE_INVITE_DRAFT_IDS.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.value = inviteDraftBaseline.get(id) ?? '';
+    });
+    document.querySelectorAll('#inviteModal [data-invite-module-key]').forEach(element => {
+        element.value = inviteDraftBaseline.get('module:' + element.dataset.inviteModuleKey) ?? 'inherit';
+    });
+    syncInviteDepartmentInput();
+}
+function resetEmployeeInviteAfterClose() {
+    restoreEmployeeInviteDraftBaseline();
+    inviteDraftBaseline = null;
+    inviteDiscardPending = false;
+    inviteDiscardAllowed = false;
+    inviteModuleAccessLoadToken += 1;
+    resetInviteModuleAccessUi();
+    window.ErpWorkspaceResume?.checkpoint(document.getElementById('inviteModal'));
+    setInviteStatus('');
+    const submitBtn = document.getElementById('inviteSubmitBtn');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = '등록하기'; }
+    runInvite._inFlight = false;
+}
+function guardEmployeeInviteClose(event) {
+    if (inviteDiscardAllowed) return;
+    if (runInvite._inFlight) { event.preventDefault(); return; }
+    if (!hasUnsavedEmployeeInvite()) return;
+    event.preventDefault();
+    if (inviteDiscardPending) return;
+    const owner = getHrSettingsOwner(), snapshot = employeeInviteDraftSignature();
+    inviteDiscardPending = true;
+    void (async () => {
+        try {
+            if (!(await window.CoopDialog.confirm('직원 등록에 입력한 내용을 버리고 닫을까요?'))) return;
+            if (owner !== getHrSettingsOwner() || snapshot !== employeeInviteDraftSignature()
+                || runInvite._inFlight || window.frameElement?.hidden
+                || !document.getElementById('inviteModal')?.classList.contains('show')) return;
+            inviteDiscardAllowed = true;
+            inviteModal.hide();
+        } finally { inviteDiscardPending = false; inviteDiscardAllowed = false; }
+    })().catch(() => showAlert('입력한 내용을 유지했습니다. 다시 시도해 주세요.'));
+}
 let employeeSalaryLoadRevision = 0;
 const EMPLOYEE_BASIC_FIELDS = ['emp_name','member_id','phone','email','position','auth_level','department','address','hire_date','base_salary','salary_apply_date'];
 function employeeBasicSnapshot(row) {
@@ -3014,17 +3075,8 @@ window.onload = async function() {
     });
     if (inviteModalEl && !inviteModalEl.dataset.inviteStatusResetBound) {
         inviteModalEl.dataset.inviteStatusResetBound = '1';
-        inviteModalEl.addEventListener('hidden.bs.modal', () => {
-            inviteModuleAccessLoadToken += 1;
-            resetInviteModuleAccessUi();
-            setInviteStatus('');
-            const submitBtn = document.getElementById('inviteSubmitBtn');
-            if (submitBtn) {
-                submitBtn.disabled = true;
-                submitBtn.innerText = '등록하기';
-            }
-            runInvite._inFlight = false;
-        });
+        inviteModalEl.addEventListener('hide.bs.modal', guardEmployeeInviteClose);
+        inviteModalEl.addEventListener('hidden.bs.modal', resetEmployeeInviteAfterClose);
     }
     const payrollImportModalEl = document.getElementById('payrollImportModal');
     if (payrollImportModalEl && !payrollImportModalEl.dataset.resetBound) {
@@ -3109,7 +3161,8 @@ window.onload = async function() {
         window.ERPEmployeeSettingsView.checkpoint();
     }
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:refreshEmployeeSettingsWorkspace,
-        busy:() => companySettingsSaveInFlight || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
+        busy:() => runInvite._inFlight || inviteDiscardPending || hasUnsavedEmployeeInvite()
+            || companySettingsSaveInFlight || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
             || payrollImportBatchController?.busy()
             || window.ERPAnnualSettings?.isBusy()
             || window.ERPEmployeeSettingsView?.isDirty()
@@ -4722,6 +4775,11 @@ function collectInviteModuleAccess() {
 } // End of collectInviteModuleAccess
 
 function openInviteModal() {
+    if (inviteDiscardPending || runInvite._inFlight) return;
+    if (document.getElementById('inviteModal').classList.contains('show') || hasUnsavedEmployeeInvite()) {
+        inviteModal.show();
+        return;
+    }
     document.getElementById("newName").value = "";
     document.getElementById("newEmail").value = "";
     populateInvitePositionOptions('사원');
@@ -4731,6 +4789,7 @@ function openInviteModal() {
     document.getElementById("newDeptCustom").value = "";
     setInviteStatus('');
     resetInviteModuleAccessUi();
+    inviteDraftBaseline = employeeInviteDraftValues();
     inviteModal.show();
     void loadInviteModuleAccessCatalog();
 } // End of openInviteModal
@@ -4756,6 +4815,7 @@ async function runInvite() {
     }
 
     runInvite._inFlight = true;
+    const submissionOwner = getHrSettingsOwner(), submissionSignature = employeeInviteDraftSignature();
     try {
         const emailConflict = await findEmployeeEmailConflict(email);
         if (emailConflict) {
@@ -4783,7 +4843,12 @@ async function runInvite() {
         const createdEmpId = String(created?.employee?.emp_id || '').trim();
         if (!createdEmpId) throw new Error('직원 등록 결과를 확인하지 못했습니다.');
 
-        inviteModal.hide();
+        if (submissionOwner === getHrSettingsOwner() && submissionSignature === employeeInviteDraftSignature()) {
+            inviteDiscardAllowed = true;
+            try { inviteModal.hide(); } finally { inviteDiscardAllowed = false; }
+        } else {
+            setInviteStatus('직원 등록을 마쳤습니다. 이후 입력한 내용은 유지했습니다.', 'success');
+        }
         await loadList();
         showAlert(created?.access_detail?.can_manage_access === true ? `${name} 직원의 기본정보와 업무 권한을 함께 등록했습니다.` : `${name} 직원을 등록했습니다. 필요한 업무 권한은 권한 관리자에게 요청해 주세요.`);
     } catch (err) {

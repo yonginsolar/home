@@ -1,8 +1,8 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Sun village operations v1.0.2 — internal village identifiers are server-generated and never requested from users. */
+/* Sun village operations v1.0.3 — include the current host in Auth email requests for tenant-specific branding. */
 (() => {
   'use strict';
-  const VERSION = '1.0.2';
+  const VERSION = '1.0.3';
   const F = (key, label, type = 'text', options = {}) => ({key, label, type, ...options});
   const TYPES = {
     member: {label:'👥 구성원', title:'성명 / 단체명', date:'가입·등록일', amount:'출자금 기록액', help:'조합원과 주민을 구분합니다. 주민등록번호·계좌번호는 이 화면에서 받지 않습니다. 출자금은 등록 정보이며 장부에 자동 반영되지 않습니다.', fields:[F('phone','휴대전화번호','tel',{max:30}),F('member_type','구성원 구분','select',{items:['조합원','주민','임원']}),F('status','가입 상태','select',{items:['가입 대기','정조합원','탈퇴']}),F('position','직책','text',{max:80}),F('note','참고사항','textarea',{max:2000})]},
@@ -94,7 +94,7 @@
         const email=values.login_email.trim().toLowerCase();s.pendingEmail=email;
         try{sessionStorage.setItem('sv-login-cooldown',String(Date.now()+60000));}catch(_){}
         // Existing verified accounts only; no signup, role changes, or automatic invitations.
-        await s.client.auth.signInWithOtp({email,options:{shouldCreateUser:false}});
+        await s.client.auth.signInWithOtp({email,options:window.CoopAuthEmail.withOtpOptions({shouldCreateUser:false})});
         $('loginCodeForm').hidden=false;message('로그인 가능한 계정이면 인증 메일이 발송됩니다. 메일이 오지 않으면 관리자에게 계정 등록을 확인해 주세요.');
       }else{
         if(!s.pendingEmail)throw new Error('OTP_REQUIRED');

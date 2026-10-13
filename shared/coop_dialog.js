@@ -1,4 +1,4 @@
-/* Cooperative dialogs v1.0.0 | 2026-10-13
+/* Cooperative dialogs v1.0.1 | 2026-10-13
  * Text-only, async choices. No Auth, network, storage or native-alert fallback. */
 (function (root) {
   'use strict';
@@ -31,10 +31,10 @@
       dialog.coop-dialog{box-sizing:border-box;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 40px);padding:0;border:1px solid #cbd5e1;border-radius:16px;background:#fff;color:#172033;box-shadow:0 24px 70px #0f172a40;font:16px/1.65 Pretendard,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;word-break:keep-all;overflow:auto;color-scheme:light}
       dialog.coop-dialog:not([open]){display:none}dialog.coop-dialog::backdrop{background:#0f172a75}
       .coop-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 24px;border-bottom:1px solid #e2e8f0}.coop-dialog-heading h2{margin:0;font-family:inherit;font-weight:700;font-size:19px;line-height:1.5}.coop-dialog-close{border:0;background:none;color:inherit;padding:4px 8px;font-family:inherit;font-size:24px;line-height:1;cursor:pointer}
-      .coop-dialog-message{margin:0;padding:22px 24px;white-space:pre-wrap;overflow-wrap:break-word}.coop-dialog-input{box-sizing:border-box;display:block;width:calc(100% - 48px);margin:0 24px 20px;padding:11px 12px;border:1px solid #94a3b8;border-radius:8px;background:#fff;color:#172033;font:inherit}
+      .coop-dialog-message{margin:0;padding:22px 24px;white-space:pre-wrap;overflow-wrap:break-word}dialog.coop-dialog .coop-dialog-input{box-sizing:border-box;display:block;min-width:0;max-width:calc(100% - 48px);width:calc(100% - 48px);margin:0 24px 20px;padding:11px 12px;border:1px solid #94a3b8;border-radius:8px;background:#fff;color:#172033;font:inherit}
       .coop-dialog-actions{display:flex;justify-content:flex-end;gap:10px;padding:16px 24px;border-top:1px solid #e2e8f0}.coop-dialog-button{border:1px solid #94a3b8;background:#fff;color:#172033;border-radius:8px;padding:9px 20px;font-family:inherit;font-weight:600;font-size:16px;line-height:1.5;cursor:pointer}.coop-dialog-button[data-choice="yes"]{background:#166534;border-color:#166534;color:#fff}.coop-dialog-button:hover{filter:brightness(.95)}.coop-dialog-button:focus-visible,.coop-dialog-close:focus-visible,.coop-dialog-input:focus-visible{outline:3px solid #60a5fa;outline-offset:3px}
       dialog.coop-dialog[data-theme="dark"]{background:#172033;color:#f1f5f9;border-color:#475569;color-scheme:dark}dialog.coop-dialog[data-theme="dark"] .coop-dialog-heading,dialog.coop-dialog[data-theme="dark"] .coop-dialog-actions{border-color:#475569}dialog.coop-dialog[data-theme="dark"] .coop-dialog-input,dialog.coop-dialog[data-theme="dark"] .coop-dialog-button{background:#253149;color:#f1f5f9;border-color:#64748b}dialog.coop-dialog[data-theme="dark"] .coop-dialog-button[data-choice="yes"]{background:#166534;color:#fff}
-      @media(max-width:480px){.coop-dialog-heading,.coop-dialog-actions{padding:14px 18px}.coop-dialog-message{padding:18px}.coop-dialog-input{width:calc(100% - 36px);margin-left:18px;margin-right:18px}}@media print{dialog.coop-dialog,dialog.coop-dialog::backdrop{display:none!important}}
+      @media(max-width:480px){.coop-dialog-heading,.coop-dialog-actions{padding:14px 18px}.coop-dialog-message{padding:18px}dialog.coop-dialog .coop-dialog-input{max-width:calc(100% - 36px);width:calc(100% - 36px);margin-left:18px;margin-right:18px}}@media print{dialog.coop-dialog,dialog.coop-dialog::backdrop{display:none!important}}
     `;
     root.document.head.append(node);
   }
@@ -86,7 +86,13 @@
       const accept = add('yes',item.options.confirmText||'확인');dialog.append(actions);
       dialog.addEventListener('cancel',event=>{event.preventDefault();finish(item,cancelled(item.kind));});
       dialog.addEventListener('close',()=>{if(!item.done)finish(item,cancelled(item.kind));});
-      dialog.addEventListener('keydown',event=>{if(event.key==='Enter'&&item.kind==='prompt'&&!event.isComposing){event.preventDefault();accept.click();}});
+      // The choice belongs to this dialog, not an editor/Bootstrap modal behind it.
+      dialog.addEventListener('click',event=>event.stopPropagation());
+      dialog.addEventListener('keydown',event=>{
+        event.stopPropagation();
+        if(event.key==='Escape'){event.preventDefault();finish(item,cancelled(item.kind));}
+        else if(event.key==='Enter'&&item.kind==='prompt'&&!event.isComposing){event.preventDefault();accept.click();}
+      });
       // A standalone Bootstrap editor's focus trap accepts descendants of its own modal.
       (doc.querySelector('.modal.show')||doc.body).append(dialog);
       dialog.showModal();(input||cancel||accept).focus({preventScroll:true});if(input)input.select();
@@ -117,7 +123,7 @@
     confirm:(message,options)=>request('confirm',message,'',options),
     prompt:(message,value='',options)=>request('prompt',message,value,options),
     forOwner:(owner,kind,message,value,options)=>{const up=host();return up?up.forOwner(owner,kind,message,value,options):localRequest(kind,message,value,options,owner);},cancelAll,
-    hasPending:()=>!!active||queue.length>0,version:'1.0.0'
+    hasPending:()=>!!active||queue.length>0,version:'1.0.1'
   });
   root.addEventListener('pagehide',()=>cancelAll(root));
 })(window);
