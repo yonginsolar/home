@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* v1.3.0 — Preserve drafts and discard stale scoped reads on resume. */
 (() => {
   'use strict';
@@ -149,10 +150,10 @@
         const date=field(form,'실제 입금일','received_date','date',today(),{required:true});date.max=today();
         const amount=field(form,'실제 받은 금액','amount','number',plan.outstanding_amount,{required:true,max:plan.outstanding_amount});
         const submit=node('button','입금 확인·회계 기록');submit.type='submit';form.append(submit);
-        form.addEventListener('submit',e=>{
+        form.addEventListener('submit',async e=>{
           e.preventDefault();if(!editable || !form.reportValidity() || busy)return;
           const data={id:plan.id,version:plan.version,received_date:date.value,amount:Number(ERPNumberInput.raw(amount.value))};
-          if(!confirm(`${plan.payer_name}에서 ${money(data.amount)}을 실제로 받으셨나요?\n입금 확인과 회계 전표를 함께 저장합니다. 이미 회계에 입력했다면 취소하고 ‘기존 전표 연결’을 이용해 주세요.`))return;
+          if(!(await window.CoopDialog.confirm(`${plan.payer_name}에서 ${money(data.amount)}을 실제로 받으셨나요?\n입금 확인과 회계 전표를 함께 저장합니다. 이미 회계에 입력했다면 취소하고 ‘기존 전표 연결’을 이용해 주세요.`)))return;
           run(async()=>{await rpc('receive',keyed(`receive:${plan.id}`,data));requestKeys.delete(`receive:${plan.id}`);await reload();setStatus('입금 확인과 회계 전표 저장을 완료했습니다.');});
         });
         showEditor(card,'실제 입금 확인',form);
@@ -168,10 +169,10 @@
         const info=node('p','선택한 기존 전표에 연결합니다. 새 전표는 만들지 않습니다.','muted full');form.append(info);
         select.addEventListener('change',()=>{const j=journals[Number(select.value)];info.textContent=select.value!==''&&j?`${j.received_date} · ${money(j.amount)} 입금에 연결합니다. 새 전표는 만들지 않습니다.`:'선택한 기존 전표에 연결합니다. 새 전표는 만들지 않습니다.';});
         const submit=node('button','기존 전표 연결');submit.type='submit';form.append(submit);
-        form.addEventListener('submit',e=>{
+        form.addEventListener('submit',async e=>{
           e.preventDefault();if(!editable || !form.reportValidity() || busy)return;
           const j=journals[Number(select.value)];if(!j || select.value==='')return;
-          if(!confirm(`${j.received_date} · ${money(j.amount)}\n${j.description || ''}\n이 기존 전표에 연결할까요? 회계 금액을 다시 입력하지 않습니다.`))return;
+          if(!(await window.CoopDialog.confirm(`${j.received_date} · ${money(j.amount)}\n${j.description || ''}\n이 기존 전표에 연결할까요? 회계 금액을 다시 입력하지 않습니다.`)))return;
           run(async()=>{await rpc('link',keyed(`link:${plan.id}`,{id:plan.id,version:plan.version,received_date:j.received_date,amount:Number(j.amount),journal_trans_id:j.journal_trans_id}));requestKeys.delete(`link:${plan.id}`);await reload();setStatus('기존 전표에 연결했습니다. 새 회계 전표는 만들지 않았습니다.');});
         });
         showEditor(card,'기존 회계 전표 연결',form);setStatus('연결할 기존 전표를 선택해 주세요.');

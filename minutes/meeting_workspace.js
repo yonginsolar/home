@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
 Version: v1.10.5
 Change: 2026-10-11 - Show the authorized list first; defer form defaults and historical numbering.
@@ -576,7 +577,7 @@ async function loadPreviousBooklet() {
   if (error) throw error;
   const raw = data?.package?.assembly_booklet_data;
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Object.keys(raw).length) throw new Error('선택한 총회에는 저장된 자료집 입력이 없습니다. 작성 예시를 참고해 직접 입력해 주세요.');
-  if (!window.confirm('사업보고·계획·예산·차입금 입력을 선택한 지난 자료로 바꿀까요? 현재 입력은 바뀝니다. 새 연도에 맞게 내용과 금액을 확인해야 합니다. 결산자료·서명 문서는 가져오지 않습니다.')) return;
+  if (!(await window.CoopDialog.confirm('사업보고·계획·예산·차입금 입력을 선택한 지난 자료로 바꿀까요? 현재 입력은 바뀝니다. 새 연도에 맞게 내용과 금액을 확인해야 합니다. 결산자료·서명 문서는 가져오지 않습니다.'))) return;
   state.current = { ...state.current, assembly_booklet_data: normalizedAssemblyBookletData(data.package) };
   renderAssemblyBookletInputs();
   scheduleAutoDraftRefresh('agendas');
@@ -1454,7 +1455,7 @@ async function resetAuditDraft() {
   if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY' || state.current.assembly_kind === 'EXTRAORDINARY') {
     throw new Error('감사보고서 연동은 정기총회에서만 사용합니다.');
   }
-  if (state.auditDraftDirty && !window.confirm('현재 고친 감사보고서 내용을 결산자료 기준 초안으로 다시 만들까요?')) return;
+  if (state.auditDraftDirty && !(await window.CoopDialog.confirm('현재 고친 감사보고서 내용을 결산자료 기준 초안으로 다시 만들까요?'))) return;
   await saveInfo({ quiet: true });
   const source = await loadAssemblySources();
   if (!source?.closing_report) {
@@ -1553,7 +1554,7 @@ async function recordAuditChangeRequest() {
   if (Number.isNaN(requestedAt.getTime())) throw new Error('수정 요청 일시를 확인해 주세요.');
 
   const createRevision = auditReportLocked(audit);
-  if (createRevision && !window.confirm('기존 전자서명본은 그대로 보존하고, 감사 전원이 다시 확인할 개정본을 만들까요?')) return;
+  if (createRevision && !(await window.CoopDialog.confirm('기존 전자서명본은 그대로 보존하고, 감사 전원이 다시 확인할 개정본을 만들까요?'))) return;
   const { data, error } = await MeetingPackageService.recordAuditChangeRequest(state.current.id, {
     request_key: crypto.randomUUID(),
     requested_auditor_official_id: auditorId,
@@ -1601,7 +1602,7 @@ async function generateAllDocuments() {
   if (state.current.status === 'FINAL') throw new Error('의사록으로 확정된 회의의 준비문서는 다시 만들 수 없습니다.');
   if (state.documentDirty) rememberActiveDocument();
   const hasManualDraft = [...state.documents.values()].some(doc => doc.manually_edited && doc.content_html);
-  if (hasManualDraft && !window.confirm('직접 고친 초안이 있습니다. 공통정보와 안건으로 다시 만들면 현재 문구가 바뀝니다. 계속할까요?')) return;
+  if (hasManualDraft && !(await window.CoopDialog.confirm('직접 고친 초안이 있습니다. 공통정보와 안건으로 다시 만들면 현재 문구가 바뀝니다. 계속할까요?'))) return;
   await saveInfo({ quiet: true });
   await saveAgendas({ quiet: true });
   const generatedAt = new Date().toISOString();
@@ -1890,7 +1891,7 @@ async function printCurrentChapter() {
 
 async function openPackage(id, { internal = false } = {}) {
   if (state.loading && !internal) return;
-  if (hasUnsavedPacketChanges() && !window.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?')) return;
+  if (hasUnsavedPacketChanges() && !(await window.CoopDialog.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?'))) return;
   window.clearTimeout(state.autoDraftTimer);
   setBusy(true);
   try {
@@ -1985,7 +1986,7 @@ async function createPackage() {
 async function deletePackage() {
   if (!state.current) return;
   if (state.current.published_minute_id) throw new Error('전자서명 문서로 넘긴 회의 꾸러미는 삭제할 수 없습니다.');
-  if (!window.confirm(`「${state.current.title}」 준비 자료와 초안을 삭제할까요?`)) return;
+  if (!(await window.CoopDialog.confirm(`「${state.current.title}」 준비 자료와 초안을 삭제할까요?`))) return;
   const { error } = await MeetingPackageService.deletePackage(state.current.id);
   if (error) throw error;
   state.current = null;
@@ -2049,14 +2050,14 @@ function removeBudgetRow(button) {
   scheduleAutoDraftRefresh('agendas');
 }
 
-function handleAgendaAction(button) {
+async function handleAgendaAction(button) {
   const card = button.closest('.agenda-card');
   if (!card) return;
   state.agendas = collectAgendasFromDom();
   const index = Number(card.dataset.agendaIndex);
   const action = button.dataset.agendaAction;
   if (action === 'delete') {
-    if (!window.confirm('이 안건을 목록에서 뺄까요? 저장을 누르면 삭제가 확정됩니다.')) return;
+    if (!(await window.CoopDialog.confirm('이 안건을 목록에서 뺄까요? 저장을 누르면 삭제가 확정됩니다.'))) return;
     state.agendas.splice(index, 1);
   } else if (action === 'up' && index > 0) {
     [state.agendas[index - 1], state.agendas[index]] = [state.agendas[index], state.agendas[index - 1]];
@@ -2114,7 +2115,7 @@ function addChapter() {
   $('chapterTitle').select();
 }
 
-function deleteChapter() {
+async function deleteChapter() {
   if (!chapterMode() || !state.chapters.length) return;
   if (activeChapterLock().locked) return showToast('연결된 확정 자료는 자료집에서 수정하거나 삭제할 수 없습니다.');
   const index = activeChapterIndex();
@@ -2123,7 +2124,7 @@ function deleteChapter() {
     showToast('이 챕터 뒤에 붙인 PDF를 먼저 삭제해 주세요.');
     return;
   }
-  if (!window.confirm(`「${title}」 챕터를 자료집에서 뺄까요? 저장하기 전까지는 새로고침하면 되돌릴 수 있습니다.`)) return;
+  if (!(await window.CoopDialog.confirm(`「${title}」 챕터를 자료집에서 뺄까요? 저장하기 전까지는 새로고침하면 되돌릴 수 있습니다.`))) return;
   state.chapters.splice(index, 1);
   state.activeChapterId = state.chapters[Math.min(index, state.chapters.length - 1)]?.id || null;
   state.documentDirty = true;
@@ -2161,7 +2162,7 @@ async function addPdfAttachment(file) {
 async function deletePdfAttachment(id) {
   const row = state.pdfAttachments.find(item => item.id === id);
   if (!row) return;
-  if (!window.confirm(`「${row.title}」 PDF를 자료집과 비공개 저장소에서 삭제할까요?`)) return;
+  if (!(await window.CoopDialog.confirm(`「${row.title}」 PDF를 자료집과 비공개 저장소에서 삭제할까요?`))) return;
   const { error } = await MeetingPackageService.deletePdfAttachment(id);
   if (error) throw error;
   state.pdfAttachments = state.pdfAttachments.filter(item => item.id !== id);

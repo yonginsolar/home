@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Version: v1.6.5 | 2026-10-10 | Grouped numeric inputs keep canonical draft values. */
 (() => {
   'use strict';
@@ -1049,9 +1050,9 @@
     updateSelectedOverlayAngle();
   }
 
-  function clearOverlays() {
+  async function clearOverlays() {
     if (!state.customOverlays.length) return;
-    if (!window.confirm('사진 위에 만든 대상지 표시를 모두 지울까요?')) return;
+    if (!(await window.CoopDialog.confirm('사진 위에 만든 대상지 표시를 모두 지울까요?'))) return;
     state.library?.markDirty();
     state.customOverlays = [];
     state.selectedOverlayId = '';
@@ -1133,16 +1134,16 @@
     return true;
   }
 
-  function renderPreview({ force = false, applyPending = false } = {}) {
+  async function renderPreview({ force = false, applyPending = false } = {}) {
     if (!state.templateHtml) return false;
     if (state.formPending && !applyPending) {
       setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 제안서 전체에 한 번에 반영됩니다.', true);
       return false;
     }
     if ((state.manualDirty || state.copyRestoreMismatch) && force) {
-      const overwrite = window.confirm(state.copyRestoreMismatch
+      const overwrite = (await window.CoopDialog.confirm(state.copyRestoreMismatch
         ? '저장한 제안서의 직접 수정 문구 중 현재 서식과 맞지 않는 항목이 있습니다. 입력값·사진·표시 영역은 유지하고 최신 서식으로 다시 만들까요?'
-        : '미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 제안서 전체를 다시 만들까요?');
+        : '미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 제안서 전체를 다시 만들까요?'));
       if (!overwrite) return false;
       state.loadedCopyEdits = [];
       state.copyRestoreMismatch = false;
@@ -1214,9 +1215,9 @@
       setStatus('입력값이 바뀌었습니다. 직접 고친 문구를 유지하려면 먼저 파일로 저장하고, 새로 반영하려면 위 버튼을 누르세요.', true);
       return;
     }
-    state.renderTimer = window.setTimeout(() => {
+    state.renderTimer = window.setTimeout(async () => {
       state.renderTimer = 0;
-      renderPreview();
+      (await renderPreview());
     }, 280);
   }
 
@@ -1296,7 +1297,7 @@
       if (state.manualDirty || state.editMode || state.formPending) {
         const fields = collectFields();
         for (const key of Object.keys(imported)) if (state.previewFields) state.previewFields[key] = fields[key];
-      } else renderPreview();
+      } else (await renderPreview());
       status.textContent = `${asOf} 기준 · 정조합원 ${Number(stats.count).toLocaleString('ko-KR')}명 · 출자금 ${Number(stats.amount).toLocaleString('ko-KR')}원. 보관하려면 제안서를 저장해 주세요.`;
     } catch (error) {
       status.textContent = '최신 현황을 불러오지 못했습니다. 기존 입력값은 유지했습니다. 연결을 확인한 뒤 다시 시도해 주세요.';
@@ -1477,7 +1478,7 @@
     setFields(snapshot.fields);
     el.siteImage.value = '';
     el.siteImageName.textContent = photo ? state.photoName || '저장한 대상지 사진' : state.useSamplePhoto ? '남사읍 예시 위성사진 사용 중' : '대상지 사진 미등록';
-    renderPreview();
+    (await renderPreview());
     await withTimeout(waitForPreview(), 'PREVIEW');
     updateOverlayControls();
     const restoredCount = [...el.previewFrame.contentDocument.querySelectorAll('[data-copy-id]')].filter((node) => node.textContent !== node.dataset.copyBase).length;
@@ -1713,8 +1714,8 @@
   }
 
   async function resetSample() {
-    if (!window.confirm('입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?')) return;
-    await state.library.resetLocally(() => {
+    if (!(await window.CoopDialog.confirm('입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?'))) return;
+    await state.library.resetLocally(async () => {
     el.form.reset();
     state.documentEpoch = (state.documentEpoch || 0) + 1;
     state.useSamplePhoto = true;
@@ -1738,7 +1739,7 @@
     el.siteImageName.textContent = '남사읍 예시 위성사진 사용 중';
     syncExistingInstallationUi();
     updateOverlayControls();
-    renderPreview();
+    (await renderPreview());
     });
   }
 
@@ -1753,7 +1754,7 @@
     state.eventsBound = true;
     el.form.addEventListener('submit', (event) => {
       event.preventDefault();
-      void state.library?.applyLocally(() => renderPreview({ force: true, applyPending: true }));
+      void state.library?.applyLocally(async () => (await renderPreview({ force: true, applyPending: true })));
     });
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage) return;
@@ -1912,7 +1913,7 @@
       el.bootActions.hidden = true;
       el.bootPanel.hidden = true;
       el.appShell.classList.add('ready');
-      renderPreview();
+      (await renderPreview());
       state.library = window.ProposalLibrary.init({ client, coopId: userGate.user.coop_id,
         userId: userGate.authUser?.id || userGate.user.emp_id,
         snapshot: captureSnapshot, restore: restoreSnapshot, newSite: startSite,

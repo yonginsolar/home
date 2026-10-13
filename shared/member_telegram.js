@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Member Telegram connection v1.0.2 — shared only for the same coop/own Auth account. */
 (() => {
   'use strict';
@@ -39,7 +40,7 @@
         return;
       }
       if (action==='disconnect') {
-        if (!window.confirm('이 조합의 본인 계정에서 사용하는 텔레그램 알림 연결을 해제할까요? ERP 연결도 함께 해제됩니다.')) return;
+        if (!(await window.CoopDialog.confirm('이 조합의 본인 계정에서 사용하는 텔레그램 알림 연결을 해제할까요? ERP 연결도 함께 해제됩니다.'))) return;
         const {error}=await client.rpc('member_disconnect_my_telegram_link');
         if (!isCurrent()) return;
         if (error) throw error;

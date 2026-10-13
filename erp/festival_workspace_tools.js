@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* v1.2.0 — Refresh scoped stock summaries without replacing newer edits. */
 (() => {
   'use strict';
@@ -118,11 +119,11 @@
     }
     $('eventInventoryPrevious').addEventListener('click',()=>{inventoryOffset=Math.max(0,inventoryOffset-100);void reloadInventory();});
     $('eventInventoryNext').addEventListener('click',()=>{inventoryOffset+=100;void reloadInventory();});
-    $('eventUseForm').addEventListener('submit',e=>{
+    $('eventUseForm').addEventListener('submit',async e=>{
       e.preventDefault();const event=getEvent();if(!editable||!event||busy||isBusy()||!e.currentTarget.reportValidity())return;
       const data={event_id:event.id,item_id:$('eventUseItem').value,movement_date:$('eventUseDate').value,movement_type:$('eventUseType').value,quantity:Number(ERPNumberInput.raw($('eventUseQuantity').value)),note:$('eventUseNote').value.trim()};
       const fingerprint=JSON.stringify(data);if(pendingUsage?.fingerprint!==fingerprint)pendingUsage={fingerprint,key:crypto.randomUUID()};
-      if(!confirm(`${event.event_name}\n${data.quantity}개를 사용한 기록을 저장할까요? 재고가 줄어들고 매출 전표는 만들지 않습니다.`))return;
+      if(!(await window.CoopDialog.confirm(`${event.event_name}\n${data.quantity}개를 사용한 기록을 저장할까요? 재고가 줄어들고 매출 전표는 만들지 않습니다.`)))return;
       run(async()=>{await rpc('movement',{...data,request_key:pendingUsage.key});pendingUsage=null;$('eventUseQuantity').value='';$('eventUseNote').value='';await onStockChanged();status('이 축제의 사용 수량과 재고를 저장했습니다. 매출을 추가로 만들지 않았습니다.');},'operationStatus');
     });
     return {isBusy:()=>busy,reloadDashboard,reloadInventory,refreshItems,selectEvent:()=>reloadInventory(true),close:()=>{if(dialog.open&&!busy)dialog.close();}};

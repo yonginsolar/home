@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Only an authenticated editor parent activates inline editing. No network or persistence. */
 (function(root){
  'use strict';
@@ -86,7 +87,7 @@
   }
   reselect(mark);transmit();showToolbar();
  }
- function command(name,color){
+ async function command(name,color){
   if(!active)return;if(name==='done'){finish();return;}
   if(name==='undo'||name==='redo'){const from=name==='undo'?active.undo:active.redo,to=name==='undo'?active.redo:active.undo;if(from.length){to.push(snapshot());restore(from.pop());}return;}
   if(name==='clearHighlight'&&active.key==='heroTitle'&&!root.CoopTextStyles){if(active.highlight){remember();active.highlight='';paintHero(fieldValue());sendHighlight();showToolbar();}return;}
@@ -107,7 +108,9 @@
   if(name==='highlight')wrapper.style.backgroundColor=color||toolbar.querySelector('[data-color-kind="highlight"]').value;
   if(name==='color')wrapper.style.color=color||toolbar.querySelector('[data-color-kind="color"]').value;
   if(name==='link'){
-   const url=root.prompt('연결할 주소','https://');if(url===null)return;
+   const owner=active,range=selectionRange.cloneRange(),before=fieldValue();
+   const url=(await window.CoopDialog.prompt('연결할 주소','https://'));if(url===null||active!==owner||!owner.node.isConnected||fieldValue()!==before||!range.startContainer.isConnected||!range.endContainer.isConnected)return;
+   selectionRange=range;
    if(!/^(https?:\/\/|mailto:|tel:|\/[^/]|#[^\s])/i.test(url.trim())){announce('https://, /, #, mailto: 또는 tel:로 시작하는 주소를 입력해 주세요.');return;}
    wrapper.setAttribute('href',url.trim());wrapper.setAttribute('rel','noopener noreferrer');
   }

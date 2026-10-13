@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Version: v1.3.2 | 2026-10-12 */
 'use strict';
 
@@ -1295,7 +1296,7 @@ async function signContract(id, role, button) {
   const message = role === 'employee'
     ? '계약 내용을 모두 확인했으며 전자 서명하시겠습니까? 확인 뒤에는 내용을 수정할 수 없습니다.'
     : '사용자 측에서 이 계약 내용을 확인하시겠습니까? 확인 뒤에는 내용을 수정할 수 없습니다.';
-  if (!window.confirm(message)) return;
+  if (!(await window.CoopDialog.confirm(message))) return;
   try {
     button.dataset.label = button.textContent;
     setBusy(true, button);

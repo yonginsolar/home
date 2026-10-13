@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* 1.3.2 · Load billing records only when the billing tab is opened. */
 (() => {
  'use strict';
@@ -27,15 +28,15 @@
    <section class="card card-body"><h2 class="h5">발행한 청구서</h2><div id="invoiceList"></div><div id="invoiceDetail" class="mt-3"></div></section>`;
   if(ctx.provider){for(const c of ctx.coops){const o=document.createElement('option');o.value=c.id;o.textContent=c.name;$('billingCoop').append(o);}$('billingCoop').value=co;
    $('billingCoop').setAttribute('data-erp-query-control','');
-   $('billingCoop').onchange=()=>{const next=$('billingCoop').value;if(dirty()&&!confirm('저장하지 않은 요금 설정을 버리고 다른 조합을 볼까요?')){$('billingCoop').value=co;return;}co=next;loaded=false;feeBaseline='';run(load);};
+   $('billingCoop').onchange=async ()=>{const next=$('billingCoop').value;if(dirty()&&!(await window.CoopDialog.confirm('저장하지 않은 요금 설정을 버리고 다른 조합을 볼까요?'))){$('billingCoop').value=co;return;}co=next;loaded=false;feeBaseline='';run(load);};
    $('villageFeeForm').onsubmit=e=>{e.preventDefault();run(async()=>{await call('save_settings',{annual_supply:Number(ERPNumberInput.raw($('villageAnnualFee').value)),period_start:$('villagePeriodStart').value,period_end:$('villagePeriodEnd').value,payment_instructions:$('villagePaymentInfo').value,revision:setting.revision||0,confirmed:$('feeAgreed').checked});await load();status('요금을 저장했습니다. 이미 발행한 청구서 금액은 바뀌지 않습니다.');});};
    $('invoiceForm').onsubmit=e=>{e.preventDefault();run(async()=>{if(dirty())throw Error('VILLAGE_FEE_CHANGED');preview=await call('preview',invoiceInput());$('invoicePreview').innerHTML=invoiceHtml({snapshot:preview,supply:preview.supply,vat:preview.vat,state:'preview'})+'<button type="button" id="issueVillageInvoice" class="btn btn-primary mt-3">이 금액으로 청구서 발행</button>';
-    $('issueVillageInvoice').onclick=()=>run(async()=>{if(!preview||!confirm('확인한 금액으로 청구서를 발행할까요?'))return;const issued=await call('issue',{...invoiceInput(),digest:preview.digest});await load();await openInvoice(issued.id);status('청구서를 발행했습니다. 상대 조합의 청구서 탭에서 확인할 수 있습니다.');});
+    $('issueVillageInvoice').onclick=()=>run(async()=>{if(!preview||!(await window.CoopDialog.confirm('확인한 금액으로 청구서를 발행할까요?')))return;const issued=await call('issue',{...invoiceInput(),digest:preview.digest});await load();await openInvoice(issued.id);status('청구서를 발행했습니다. 상대 조합의 청구서 탭에서 확인할 수 있습니다.');});
    });};
    $('invoiceForm').oninput=()=>{preview=null;$('invoicePreview').replaceChildren();};
   }else{for(const x of $('villageFeeForm').querySelectorAll('input'))x.disabled=true;}
   $('villageFeeForm').oninput=()=>{preview=null;if($('invoicePreview'))$('invoicePreview').replaceChildren();};
-  $('reloadBilling').onclick=()=>{if(!dirty()||confirm('저장하지 않은 설정을 버리고 다시 불러올까요?'))run(load);};
+  $('reloadBilling').onclick=async ()=>{if(!dirty()||(await window.CoopDialog.confirm('저장하지 않은 설정을 버리고 다시 불러올까요?')))run(load);};
  }
  function invoiceInput(){return {period_start:$('invoiceStart').value,period_end:$('invoiceEnd').value,due_on:$('invoiceDue').value,include_contract:$('invoiceIncludeContract').checked,village_ids:[...$('invoiceVillages').querySelectorAll('input:checked')].map(x=>x.value)};}
  async function notices(){if(!ctx.provider)return;const rows=await call('notices');$('billingTab').textContent='청구서 확인'+(rows.filter(x=>!x.seen_at).length?' · 새 마을 '+rows.filter(x=>!x.seen_at).length:'');
@@ -77,8 +78,8 @@
    tax.onsubmit=e=>{e.preventDefault();const date=$('invoiceTaxDate').value;run(async()=>{await call('tax_invoice',{issued_on:date,confirmed:true},i.id);await openInvoice(i.id);status('세금계산서 발행 확인과 회계 연동을 저장했습니다.');});};$('invoiceDetail').append(tax);}
   if(ctx.provider&&ctx.can_accounting!==false&&i.state==='issued'){
    const form=document.createElement('form');form.className='service-toolbar mt-3';form.innerHTML='<label class="form-check"><input id="invoicePaidConfirmed" type="checkbox" class="form-check-input" required><span class="form-check-label">입금을 확인했습니다.</span></label><label for="invoicePaidDate">실제 입금일</label><input id="invoicePaidDate" type="date" class="form-control w-auto" max="'+today+'" required><button type="submit" class="btn btn-primary">입금 확인</button>'+(!a.tax_invoice_issued?'<button type="button" id="cancelVillageInvoice" class="btn btn-outline-danger">청구서 취소</button>':'');
-   form.onsubmit=e=>{e.preventDefault();run(async()=>{if(!confirm('실제 입금을 확인하고 납부 완료로 표시할까요?'))return;await call('paid',{paid_on:$('invoicePaidDate').value},i.id);await load();await openInvoice(i.id);status('입금 완료를 기록했습니다.');});};
-   $('invoiceDetail').append(form);if($('cancelVillageInvoice'))$('cancelVillageInvoice').onclick=()=>{const reason=prompt('청구서를 취소하는 사유를 입력해 주세요.');if(reason?.trim())run(async()=>{await call('cancel',{reason},i.id);await load();await openInvoice(i.id);status('청구서를 취소했습니다. 기록은 유지됩니다.');});};
+   form.onsubmit=e=>{e.preventDefault();run(async()=>{if(!(await window.CoopDialog.confirm('실제 입금을 확인하고 납부 완료로 표시할까요?')))return;await call('paid',{paid_on:$('invoicePaidDate').value},i.id);await load();await openInvoice(i.id);status('입금 완료를 기록했습니다.');});};
+   $('invoiceDetail').append(form);if($('cancelVillageInvoice'))$('cancelVillageInvoice').onclick=async ()=>{const reason=(await window.CoopDialog.prompt('청구서를 취소하는 사유를 입력해 주세요.'));if(reason?.trim())run(async()=>{await call('cancel',{reason},i.id);await load();await openInvoice(i.id);status('청구서를 취소했습니다. 기록은 유지됩니다.');});};
    if(a.tax_invoice_issued){const b=document.createElement('button');b.type='button';b.id='correctVillageInvoice';b.className='btn btn-outline-danger mt-3';b.textContent='세금계산서 정정·청구 취소';b.onclick=()=>run(()=>openCancellation(i,today));$('invoiceDetail').append(b);}
   }
  }

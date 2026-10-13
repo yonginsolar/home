@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* v1.0.1 - Reauthenticate using the current cooperative's social provider. */
 (function(global) {
   'use strict';
@@ -76,14 +77,16 @@
     } catch(error) { fail(error); }
     finally {busy=false;}
   }
-  function openSocial() {
+  async function openSocial() {
     if(!socialUrl||!pending)return;
-    popup=global.open(socialUrl,'coop-pin-reauth','popup,width=520,height=720');
+    const request=pending,url=socialUrl;
+    popup=global.open(url,'coop-pin-reauth','popup,width=520,height=720');
     if(!popup) {
-      if(!global.confirm('브라우저가 인증창을 차단했습니다. 현재 화면에서 작성 중인 내용을 저장한 뒤 인증 화면으로 이동할까요?'))return;
+      if(!(await window.CoopDialog.confirm('브라우저가 인증창을 차단했습니다. 현재 화면에서 작성 중인 내용을 저장한 뒤 인증 화면으로 이동할까요?')))return;
+      if(pending!==request||socialUrl!==url)return;
       const current=new URL(location.href);current.searchParams.set('pin_reauth_return','1');
       sessionStorage.setItem('coop_export_pin_return',current.href);
-      location.assign(socialUrl);
+      location.assign(url);
     }
   }
   async function verifyEmail() {

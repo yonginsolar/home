@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* ERP employee detail: appoint the operating cooperative's village manager. */
 (() => {
   'use strict';
@@ -66,7 +67,7 @@
     const empId = selectedEmpId;
     const enabled = checkbox.checked;
     const action = enabled ? '전체 관리자로 지정' : '전체 관리자에서 해제';
-    if (!window.confirm(`${currentEmpName || '선택한 직원'}을(를) 햇빛소득마을 ${action}할까요?`)) {
+    if (!(await window.CoopDialog.confirm(`${currentEmpName || '선택한 직원'}을(를) 햇빛소득마을 ${action}할까요?`))) {
       checkbox.checked = savedValue;
       updateSaveState();
       return;

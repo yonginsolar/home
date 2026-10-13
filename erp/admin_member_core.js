@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 // ★ Supabase 설정 (브라우저용 publishable key + RPC/RLS 권한 검사)
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
@@ -2835,7 +2836,7 @@ async function ensureNoticeRichEditor() {
             placeholder: '공지 내용을 입력해 주세요.',
             buildHtmlFromSource: noticeContentToEditorHtml,
             normalizeHtml: sanitizeAboutHtml,
-            askText: async (label, options) => window.prompt(label, options?.value || ''),
+            askText: async (label, options) => (await window.CoopDialog.prompt(label, options?.value || '')),
             showMessage: (message) => myAlert(message, 'warning')
         });
     }

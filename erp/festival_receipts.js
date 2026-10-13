@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* v2.9.0 — Scoped tab reads and fresh, input-preserving workspace resume. */
 (() => {
   'use strict';
@@ -476,7 +477,7 @@
       if (!partial.checked && quantity !== remaining && !note) {
         setOperationStatus('불량·누락 등 수량 차이의 이유를 검수 메모에 적어 주세요.', true); return;
       }
-      if (!window.confirm(`${purchase.item_name}\n결재 수량: ${purchase.expected_quantity}${purchase.unit}\n이번 입고: ${quantity}${purchase.unit}\n${partial.checked ? `남은 입고 대기: ${remaining-quantity}${purchase.unit}` : '최종 검수: 남은 입고 대기를 종료합니다.'}\n수령일: ${inputs.received_date.value}\n${note ? `검수 메모: ${note}\n` : ''}저장할까요?`)) return;
+      if (!(await window.CoopDialog.confirm(`${purchase.item_name}\n결재 수량: ${purchase.expected_quantity}${purchase.unit}\n이번 입고: ${quantity}${purchase.unit}\n${partial.checked ? `남은 입고 대기: ${remaining-quantity}${purchase.unit}` : '최종 검수: 남은 입고 대기를 종료합니다.'}\n수령일: ${inputs.received_date.value}\n${note ? `검수 메모: ${note}\n` : ''}저장할까요?`))) return;
       operationBusy = true; save.disabled = cancel.disabled = true;
       try {
         const data={id:purchase.id,quantity,received_date:inputs.received_date.value,note,partial:partial.checked,expected_received:Number(purchase.received_quantity||0)};
@@ -726,7 +727,7 @@
         dateInput.focus();
         return;
       }
-      if (!window.confirm(`${sale.overpayment_name || '입금자'}에게 ${money(amount)}을 실제로 반환하셨나요?\n확인을 누르면 매출·부가세 반환 전표가 저장됩니다.`)) return;
+      if (!(await window.CoopDialog.confirm(`${sale.overpayment_name || '입금자'}에게 ${money(amount)}을 실제로 반환하셨나요?\n확인을 누르면 매출·부가세 반환 전표가 저장됩니다.`))) return;
       operationBusy = true;
       save.disabled = cancel.disabled = true;
       try {
@@ -905,7 +906,7 @@
         setOperationStatus('실제 입금일과 미정산액 이하의 입금액을 확인해 주세요.', true);
         return;
       }
-      if (!window.confirm(`${item.voucher_organizer}에서 ${money(amount)}을 실제로 입금했나요?\n확인을 누르면 미수금에서 보통예금으로 옮겨 기록합니다.`)) return;
+      if (!(await window.CoopDialog.confirm(`${item.voucher_organizer}에서 ${money(amount)}을 실제로 입금했나요?\n확인을 누르면 미수금에서 보통예금으로 옮겨 기록합니다.`))) return;
       operationBusy = true;
       save.disabled = cancel.disabled = true;
       try {

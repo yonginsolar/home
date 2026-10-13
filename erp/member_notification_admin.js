@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Member notification administration v1.0.8. Distinguish connected adapters from a tenant's missing channel. */
 (() => {
  'use strict';
@@ -78,7 +79,7 @@
   const draft=drafts.get(key);if(!draft||busy.has(key))return;const gen=generation;busy.add(key);renderSettings();
   const savedEvent=events.find(e=>e.event_key===key);
   if(savedEvent&&draft.revision!==savedEvent.revision){
-   if(!window.confirm('다른 담당자가 변경한 현재 설정에 이 변경을 적용할까요?')){busy.delete(key);renderSettings();return;}
+   if(!(await window.CoopDialog.confirm('다른 담당자가 변경한 현재 설정에 이 변경을 적용할까요?'))){busy.delete(key);renderSettings();return;}
    draft.revision=savedEvent.revision;
   }
   try{

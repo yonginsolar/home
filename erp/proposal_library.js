@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Version: v1.5.3 | Incompatible legacy copy can be explicitly migrated to the latest template. */
 (() => {
   'use strict';
@@ -100,8 +101,8 @@
         byId('printTopButton').disabled = Boolean(resumeId || localRestorePending);
       }
     }
-    function mayReplace() {
-      return !(dirty || hooks.isDirty()) || window.confirm('현재 화면의 저장하지 않은 변경을 버리고 다른 대상지를 불러올까요? 보관하려면 취소 후 먼저 저장해 주세요.');
+    async function mayReplace() {
+      return !(dirty || hooks.isDirty()) || (await window.CoopDialog.confirm('현재 화면의 저장하지 않은 변경을 버리고 다른 대상지를 불러올까요? 보관하려면 취소 후 먼저 저장해 주세요.'));
     }
     async function readSnapshot(row) {
       const { data, error } = await request(hooks.client.storage.from(BUCKET).download(row.object_path));
@@ -113,7 +114,7 @@
     async function load() {
       const value = select.value;
       if (!value) { say('먼저 불러올 대상지를 선택해 주세요.'); return; }
-      if (!mayReplace()) return;
+      if (!(await mayReplace())) return;
       if (value.startsWith('preset:')) {
         const preset = window.ProposalPresets.items.find((site) => `preset:${site.id}` === value);
         if (!preset) return;
@@ -193,7 +194,7 @@
     byId('schoolProposalKindButton').addEventListener('click', () => setPresetFilter('school'));
     byId('loadSiteButton').addEventListener('click', () => run(load));
     byId('newSiteButton').addEventListener('click', () => run(async () => {
-      if (!mayReplace()) return;
+      if (!(await mayReplace())) return;
       await hooks.newSite({ fields: window.ProposalPresets.blank(presetFilter) }); await detach(); name.value = ''; dirty = true;
       say(presetFilter === 'school'
         ? '새 학교 제안서를 시작합니다. 학교 정보와 설치 계획을 입력해 저장해 주세요.'
@@ -225,7 +226,7 @@
     }
     const applyLocally = (render) => run(async () => {
       assertRestored();
-      if (render() === false) return;
+      if (await render() === false) return;
       const snapshot = await hooks.snapshot();
       if (!resumeKey || !window.ProposalDrafts) throw new Error('브라우저 임시 보관을 시작하지 못했습니다. ERP에 이름을 붙여 저장해 주세요.');
       const payload = JSON.stringify({format: 1, snapshot, current, name: name.value});
@@ -241,7 +242,7 @@
     const refreshAndResume = async () => {
       if (localRestorePending) await restoreLocalDraft();
       // Reopen the user's exact saved ID first; a failed list refresh cannot lose the photo.
-      if (resumeId) { if (!mayReplace()) return; await loadSaved(resumeId); }
+      if (resumeId) { if (!(await mayReplace())) return; await loadSaved(resumeId); }
       const message = status.textContent;
       await refresh();
       if ((current && !dirty) || (hadLocalDraft && localDraftPresent)) { select.value = current ? `saved:${current.id}` : ''; say(message); }
@@ -251,7 +252,7 @@
     window.addEventListener('beforeunload', (event) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
     const ready = run(refreshAndResume);
     return { markDirty, detach, ready, hadSavedSession, assertRestored, applyLocally,
-      resetLocally: (reset) => run(async () => { await detach(); reset(); }),
+      resetLocally: (reset) => run(async () => { await detach(); await reset(); }),
       get hadLocalDraft() { return hadLocalDraft; } };
   }
   window.ProposalLibrary = Object.freeze({ init });

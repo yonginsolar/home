@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Sun village operations v1.0.2 — internal village identifiers are server-generated and never requested from users. */
 (() => {
   'use strict';
@@ -228,9 +229,9 @@
       $('editorError').textContent=uncertain?'서버의 저장 결과를 아직 확인하지 못했습니다. 아래 버튼으로 같은 요청을 다시 확인하세요. 중복 등록되지 않도록 입력값은 잠시 잠갔습니다.':friendly(error);$('editorError').hidden=false;
     }finally{s.busy=false;$('save').disabled=false;}
   }
-  function closeEditor(){
+  async function closeEditor(){
     if(s.busy)return;
-    if((s.dirty||s.uncertain)&&!confirm(s.uncertain?'저장 결과가 불확실합니다. 닫은 뒤 목록에서 저장 여부를 먼저 확인해 주세요. 닫을까요?':'입력 중인 내용이 있습니다. 저장하지 않고 닫을까요?'))return;
+    if((s.dirty||s.uncertain)&&!(await window.CoopDialog.confirm(s.uncertain?'저장 결과가 불확실합니다. 닫은 뒤 목록에서 저장 여부를 먼저 확인해 주세요. 닫을까요?':'입력 중인 내용이 있습니다. 저장하지 않고 닫을까요?')))return;
     s.dirty=false;s.uncertain=false;s.editor=null;s.request=null;$('editorFields').replaceChildren();$('editor').close();$('save').hidden=false;
   }
   function exportPage(){

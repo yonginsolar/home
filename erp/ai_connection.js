@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* v1.2.4 — meeting-transcript drafting examples; ERP tools remain read-only. */
 (function () {
   'use strict';
@@ -149,7 +150,7 @@
             if (active) {
               const revoke = element('button', '연결 해제', 'btn btn-outline-danger'); revoke.type = 'button';
               revoke.addEventListener('click', async () => {
-                if (!window.confirm('이 AI의 조회 연결을 해제할까요? 다시 연결하려면 새로 로그인해야 합니다.')) return;
+                if (!(await window.CoopDialog.confirm('이 AI의 조회 연결을 해제할까요? 다시 연결하려면 새로 로그인해야 합니다.'))) return;
                 revoke.disabled = true;
                 try { await rpc(client, 'revoke', { id: c.id }); await load(); } catch (e) { status.textContent = e.message; revoke.disabled = false; }
               }); row.append(revoke);

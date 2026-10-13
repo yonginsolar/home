@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* v1.2.0 - Use the common title, editor, references and attachment workflow. */
 (function (root) {
     'use strict';
@@ -127,9 +128,9 @@
             document = data.document;
             payload = { p_target_emp_id: data.target.emp_id, p_permission_keys: data.selected, p_approver_emp_ids: data.line.map(person => person.emp_id),
                 p_title: document.title, p_content: document.content, p_ref_emp_ids: document.references.map(person => person.emp_id) };
-        } catch (error) { alert(error.message); return; }
+        } catch (error) { (await window.CoopDialog.alert(error.message)); return; }
         const signature = JSON.stringify([payload, document.attachmentSignature]);
-        if (preparedDocument && signature !== requestPayload) { alert('이전 상신 결과를 확인 중입니다. 같은 입력으로 다시 상신해 결과를 확인한 뒤 새 문서를 작성해 주세요.'); return; }
+        if (preparedDocument && signature !== requestPayload) { (await window.CoopDialog.alert('이전 상신 결과를 확인 중입니다. 같은 입력으로 다시 상신해 결과를 확인한 뒤 새 문서를 작성해 주세요.')); return; }
         if (!requestKey || signature !== requestPayload) { requestKey = crypto.randomUUID(); requestPayload = signature; }
         busy = true; const button = el('btnSubmit'); button.disabled = true; button.textContent = '상신 중...';
         try {
@@ -147,8 +148,8 @@
             requestKey = ''; requestPayload = ''; preparedDocument = null; documentUi.reset();
             await load(client); render();
             try { await refreshed(); } catch (_) { /* Request is already committed; never retry a successful write. */ }
-            alert('권한 부여 요청을 상신했습니다. 최종 승인 전에는 권한이 바뀌지 않습니다.' + (notificationFailed ? '\n알림 전송을 확인하지 못했습니다. 결재함에서 요청을 확인해 주세요.' : ''));
-        } catch (error) { alert(errorMessage(error)); }
+            (await window.CoopDialog.alert('권한 부여 요청을 상신했습니다. 최종 승인 전에는 권한이 바뀌지 않습니다.' + (notificationFailed ? '\n알림 전송을 확인하지 못했습니다. 결재함에서 요청을 확인해 주세요.' : '')));
+        } catch (error) { (await window.CoopDialog.alert(errorMessage(error))); }
         finally { busy = false; button.disabled = false; button.textContent = '상신하기'; }
     }
     async function process(client, doc, action, reason, notify) {

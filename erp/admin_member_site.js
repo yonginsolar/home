@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
     if (root.AdminMemberSite?.version === '20261012-2') return;
@@ -2162,7 +2163,7 @@ source:'#activity-content', editor:'#activity-content-editor', toolbar:'#activit
 siteColors:true,
 placeholder:'우리 소식에 올릴 내용을 작성하세요.',
 buildHtmlFromSource:noticeContentToEditorHtml, normalizeHtml:sanitizeAboutHtml,
-askText:async (label, options) => window.prompt(label, options?.value || ''),
+askText:async (label, options) => (await window.CoopDialog.prompt(label, options?.value || '')),
 showMessage:message => myAlert(message, 'warning')
 });
 g_activityEditorBridge.ensure();

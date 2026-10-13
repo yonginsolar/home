@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Persistent ERP workspace v1.2.5 — only actual input changes create generic dirty state. */
 (() => {
   'use strict';
@@ -9,7 +10,7 @@
   let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', userId = '', transition = 0;
   const retained = new Map(), attached = new WeakSet();
   const RETAIN_LIMIT = 6;
-  let printableEntry = null;
+  let printableEntry = null, navigationPending = false;
   document.documentElement.setAttribute('data-erp-print-locked', '');
   const view = () => routes.route(new URLSearchParams(location.search).get('view') || '');
   const home = target => {
@@ -80,8 +81,8 @@
   function printTask(entry = activeEntry) {
     if (canPrint(entry)) entry.frame.contentWindow.print();
   }
-  function canLeave() {
-    return leaving || canRetain(activeEntry) || !changed() || window.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 이동할까요?');
+  async function canLeave() {
+    return leaving || canRetain(activeEntry) || !changed() || await window.CoopDialog.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 이동할까요?');
   }
   function eligible(entry) {
     if (!entry?.route) return false;
@@ -96,11 +97,13 @@
   }
   function removeEntry(entry) {
     if (!entry) return;
+    try { window.CoopDialog.cancelAll(entry.frame.contentWindow); } catch (_) {}
     if (retained.get(entry.route) === entry) retained.delete(entry.route);
     entry.frame.remove(); entry.fields.clear();
   }
   function purge() {
     lockPrint();
+    window.CoopDialog.cancelAll();
     transition += 1;
     for (const entry of new Set([...retained.values(), activeEntry])) removeEntry(entry);
     retained.clear(); window.ErpWorkspace.detachDocument();
@@ -114,6 +117,7 @@
         removeEntry(victim);
       }
       retained.delete(activeEntry.route); retained.set(activeEntry.route, activeEntry);
+      try { window.CoopDialog.cancelAll(activeEntry.frame.contentWindow); } catch (_) {}
       activeEntry.frame.hidden = true; activeEntry.frame.removeAttribute('id');
     } else removeEntry(activeEntry);
   }
@@ -198,15 +202,20 @@
     if (!next && !isHome) return false;
     if (next && (next === requested || (next === current && !requested))) return true;
     if (!ready) return true;
-    if (isHome) {
-      if ([activeEntry,...retained.values()].some(entry=>changed(entry))
-        && !window.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 전체 메뉴로 이동할까요?')) return true;
-      purge();
-      leaving = true; location.assign(target.href); return true;
-    }
-    if (!canLeave()) return true;
-    history.pushState({erpWorkspace:true}, '', routes.address(next));
-    load(next); window.ErpWorkspace.closeDrawer(); return true;
+    if (navigationPending) return true;
+    navigationPending = true;
+    const entry = activeEntry, ticket = transition;
+    void (async () => {
+      const allowed = isHome ? ![activeEntry,...retained.values()].some(item=>changed(item))
+        || await window.CoopDialog.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 전체 메뉴로 이동할까요?') : await canLeave();
+      if (!allowed || !ready || leaving || entry !== activeEntry || ticket !== transition) return;
+      if (isHome) { purge(); leaving=true; location.assign(target.href); return; }
+      history.pushState({erpWorkspace:true}, '', routes.address(next));
+      load(next); window.ErpWorkspace.closeDrawer();
+    })().catch(() => { status.textContent='화면을 이동하지 못했습니다. 작성 중인 내용은 유지됩니다.';status.hidden=false; })
+      .finally(() => { navigationPending=false; });
+    // Claim the link synchronously; callers must prevent native navigation before awaiting a choice.
+    return true;
   }
   function attachDocument(doc, entry = activeEntry) {
     if (attached.has(doc)) return;
@@ -216,7 +225,7 @@
       const node = event.target;
       if (!event.isTrusted || !node?.matches?.('input,textarea,select,[contenteditable="true"]')) return null;
       // Also protect editors built without a form wrapper (proposals, meeting text, website fields).
-      if (node.disabled || node.readOnly || node.type === 'hidden' || node.hasAttribute('data-erp-query-control') || node.type === 'search') return null;
+      if (node.disabled || node.readOnly || node.type === 'hidden' || node.hasAttribute('data-erp-query-control') || node.closest('[data-coop-dialog]') || node.type === 'search') return null;
       return node;
     };
     const remember = event => {
@@ -288,14 +297,24 @@
     if (!anchor || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     if (navigate(anchor.href)) event.preventDefault();
   });
-  window.addEventListener('popstate', () => {
+  window.addEventListener('popstate', async () => {
     const next = view();
-    if (!next) return home();
+    if (!next) {
+      history.replaceState({erpWorkspace:true}, '', routes.address(current));
+      navigate(new URL('index.html',location.href).href);return;
+    }
     // Back may return to the visible-before-loading route. It must cancel the
     // pending destination too, and recheck the restored task before revealing it.
     if (next === requested || (next === current && !requested)) return;
-    if (!canLeave()) { history.pushState({erpWorkspace:true}, '', routes.address(current)); return; }
-    load(next);
+    if (navigationPending) { history.replaceState({erpWorkspace:true}, '', routes.address(current));return; }
+    const entry=activeEntry,ticket=transition;navigationPending=true;
+    try {
+      if (!await canLeave()) { history.pushState({erpWorkspace:true}, '', routes.address(current)); return; }
+      if (ready && !leaving && entry===activeEntry && ticket===transition) load(next);
+    } catch (_) {
+      history.replaceState({erpWorkspace:true}, '', routes.address(current));
+      status.textContent='화면을 이동하지 못했습니다. 작성 중인 내용은 유지됩니다.';status.hidden=false;
+    } finally { navigationPending=false; }
   });
   window.addEventListener('beforeunload', event => {
     if (!leaving && ([activeEntry,...retained.values()].some(entry=>changed(entry)))) { event.preventDefault(); event.returnValue = ''; }

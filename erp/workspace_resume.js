@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* ERP task resume v1.0.2: keep authorization checks; restore held task screens for explicit internal moves. */
 (() => {
   'use strict';
@@ -34,7 +35,7 @@
         // The existing shell alone decides allowed routes, cancellation and fresh authorization.
         if (shell.navigate(target.href)) return;
       } catch (_) {
-        window.alert('화면을 열지 못했습니다. 다시 시도해 주세요.');
+        window.CoopDialog.alert('화면을 열지 못했습니다. 다시 시도해 주세요.');
         return;
       }
     }

@@ -1,3 +1,4 @@
+/* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* v1.0.2 — Confirmed save results update displays without a follow-up RPC. */
 (function (global) {
   'use strict';
@@ -6,7 +7,7 @@
   function notice(message, kind) {
     if (global.myAlert) global.myAlert(message, kind || 'error');
     else if (global.showStatus) global.showStatus(message, kind === 'success' ? 'success' : 'danger');
-    else global.alert(message);
+    else window.CoopDialog.alert(message);
   }
   function syncDisplays(rules) {
     ['memberExportShareUnitAmount', 'member-certificate-share-unit', 'set_memberShareUnitAmount', 'member_export_share_unit_amount'].forEach(id => {
