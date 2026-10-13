@@ -1,16 +1,17 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.60
+Version: v1.0.61
 Change: 2026-10-05 - Keep participation and winner calculations within the current round.
 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
+  <script src="/erp/business_notifications.js?v=20261013-1"></script>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.60 | admin.html');</script>
+    <script>console.log('[Version] v1.0.61 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -386,6 +387,10 @@ Change: 2026-10-05 - Keep participation and winner calculations within the curre
             </div>
 
             <div id="tab-vote" class="tab-content" style="display:none;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+                    <button type="button" class="btn btn-outline" data-business-event="vote_open" onclick="sendElectionNotice('vote_open',this)">투표 시작 안내</button>
+                    <button type="button" class="btn btn-outline" data-business-event="vote_reminder" onclick="sendElectionNotice('vote_reminder',this)">미투표자 마감 안내</button>
+                </div>
                 <h4>🗳️ 투표소 운영</h4>
                 <div style="display:flex; gap:1rem; margin-bottom:2rem;">
                     <button onclick="confirmAction('OPEN', '투표를 시작합니다.')" class="btn btn-success" style="flex:1;">▶ 투표 시작</button>
@@ -404,6 +409,7 @@ Change: 2026-10-05 - Keep participation and winner calculations within the curre
 
             <div id="tab-result" class="tab-content" style="display:none;">
                 <h4>🏆 개표 및 결과</h4>
+                <button type="button" class="btn btn-outline" data-business-event="vote_published" onclick="sendElectionNotice('vote_published',this)">결과 공개 안내</button>
                 <div id="result-control">
                     <button onclick="openBallotBox()" class="btn" style="padding:1rem; background:#374151; color:white; width: 100%;">🔐 개표함 열기</button>
                     <button id="btn-back-to-nomination-uncontested" onclick="rollbackToNominationFromUncontested()" class="btn btn-outline" style="display:none; width:100%; margin-top:10px;">
@@ -733,6 +739,9 @@ function safeUrl(value) {
     
     const service = new AdminService();
     let currentElectionId = null;
+    window.sendElectionNotice=(event,button)=>{
+        if(currentElectionId)return window.ERPBusinessNotifications.send(supabase,'election',currentElectionId,event,button);
+    };
     let currentElectionData = null; 
     let cachedDistricts = {}; 
     let districtList = []; // [신규] 선거구 전체 정보(is_common 포함) 저장용 배열
@@ -2490,6 +2499,9 @@ window.openElectionGateway = async () => {
         if (!currentElectionData) return;
         
         const status = currentElectionData.status;
+        document.querySelectorAll('[data-business-event]').forEach(button=>{
+            button.disabled=button.dataset.businessEvent==='vote_published'?!['PUBLISHED','ENDED'].includes(status):status!=='OPEN';
+        });
 
         // 1. 모든 탭 내용 숨기기 (초기화)
         document.querySelectorAll('.tab-content').forEach(el => {

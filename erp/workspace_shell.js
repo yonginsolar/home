@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.2.4 — track edits, not focus or read-only query changes. */
+/* Persistent ERP workspace v1.2.5 — only actual input changes create generic dirty state. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -44,8 +44,9 @@
   }
   function fieldValue(node) {
     if(node.hasAttribute('data-number-group'))return String(node.value||'').replace(/,/g,'');
+    if(node.isContentEditable && !node.textContent.trim() && !node.querySelector('img,video,audio,table,hr,iframe,svg,canvas'))return '';
     return node.type === 'checkbox' || node.type === 'radio' ? node.checked
-      : node.type === 'file' ? node.files.length : node.isContentEditable ? node.innerHTML : node.value;
+      : node.type === 'file' ? JSON.stringify(Array.from(node.files||[]).map(f=>[f.name,f.size,f.type,f.lastModified])) : node.isContentEditable ? node.innerHTML : node.value;
   }
   // Called only by an editor's successful save or explicit discard. Never rebase other drafts.
   function checkpoint(root) {
@@ -223,8 +224,8 @@
       if (!node || entry.fields.has(node)) return;
       // Merely focusing a field must not turn later initialization into a user edit.
       baselines.set(node, fieldValue(node));
-      // Formatting toolbar commands can modify an existing rich-text selection.
-      if (node.isContentEditable) entry.fields.set(node, fieldValue(node));
+      // Focus and initialization are not edits. Native editor input commands and
+      // each task's own payload/draft guard still protect formatting and content.
     };
     const edited = event => {
       const node = editable(event);

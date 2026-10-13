@@ -1,17 +1,18 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.3
+Version: v1.0.4
 Change: 2026-10-11 - Restore held poll drafts and guard stale selection responses with server authority.
 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
+  <script src="/erp/business_notifications.js?v=20261013-1"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선호도 투표 관리</title>
-    <script>console.log('[Version] v1.0.3 | poll_admin.html');</script>
+    <script>console.log('[Version] v1.0.4 | poll_admin.html');</script>
     <style>
         :root {
             --bg: #f5f7fb;
@@ -126,6 +127,8 @@ Change: 2026-10-11 - Restore held poll drafts and guard stale selection response
                     <button class="btn" type="button" id="btnEditPoll">설정 수정</button>
                     <button class="btn success" type="button" id="btnPublishPoll">공개 / 대상자 확정</button>
                     <button class="btn warning" type="button" id="btnClosePoll">강제 종료</button>
+                    <button class="btn" type="button" id="btnNotifyPollOpen">투표 시작 안내</button>
+                    <button class="btn" type="button" id="btnNotifyPollReminder">미투표자 마감 안내</button>
                 </div>
                 <div class="summary-grid">
                     <div class="summary-box"><span class="inline-note">대상자 수</span><strong id="summaryTotal">-</strong></div>
@@ -315,6 +318,10 @@ Change: 2026-10-11 - Restore held poll drafts and guard stale selection response
             return;
         }
         const phase = derivePreferencePollPhase(poll);
+        for(const [id,event] of [['btnNotifyPollOpen','vote_open'],['btnNotifyPollReminder','vote_reminder']]){
+            const button=document.getElementById(id);button.disabled=phase!=='OPEN'||pollOperationBusy;
+            button.onclick=()=>{if(isCurrent()&&!pollOperationBusy)return window.ERPBusinessNotifications.send(supabase,'poll',poll.id,event,button);};
+        }
         const result = ['CLOSED', 'SETTLED'].includes(phase) ? await service.getAdminResults(pollId) : null;
         if (!isCurrent()) return;
         const access = await service.initializeAdminContext();
