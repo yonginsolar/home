@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: 1.1.5 | 2026-10-14 Confirmed work defaults; saved forms stay unchanged */
+/* Version: 1.1.6 | 2026-10-14 Confirmed work defaults and missing-hours output guidance */
 'use strict';
 (() => {
  const db=window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
@@ -102,7 +102,7 @@
    if(state.pdfUrl)URL.revokeObjectURL(state.pdfUrl);state.pdfUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
    $('pdfPreview').innerHTML='<h2>공식 서식 출력본</h2><p class="hint">PDF 인쇄 시 실제 크기(100%)로 인쇄하고 원본 방향을 유지해 주세요. 서명란은 서명하지 않은 상태로 남아 있습니다.</p><iframe id="preview" title="공식 신고서 PDF 미리보기"></iframe>';$('preview').src=state.pdfUrl;
    const a=document.createElement('a');a.href=state.pdfUrl;a.download=`${test?'시험용_':''}${names[p.case.kind]}_${p.employee.name}_${p.case.event_date}.pdf`;a.click();message('PDF를 만들었습니다. 기관 제출은 별도로 진행한 뒤 제출 확인을 기록해 주세요.');
-  }catch(e){if(pdfScreenVisible())message(e.message||'PDF 생성에 실패했습니다.',true);}finally{if(p)p.rrn=null;if($('rrn'))$('rrn').value='';}
+  }catch(e){if(pdfScreenVisible())message(e.message==='WORK_HOURS_REQUIRED'?errorText(e):e.message||'PDF 생성에 실패했습니다.',true);}finally{if(p)p.rrn=null;if($('rrn'))$('rrn').value='';}
  }
  let statusTarget=null;
  function setStatus(status){if(state.busy||$('statusDialog').open)return;if(status==='submitted'&&!$('confirmForm').checked){message('신고 내용을 먼저 확인해 주세요.',true);return;}if(state.current.case.kind==='unpaid_confirmation'&&(!read().representative||!read().unpaid_confirmation)){message('대표자와 무보수 확인서 확인란을 선택해 주세요.',true);return;}statusTarget={status,id:state.current.case.id,revision:state.current.case.revision};$('statusTitle').textContent=status==='submitted'?'기관 제출 확인':'처리 완료 확인';$('statusDateLabel').textContent=status==='submitted'?'실제 제출일':'기관 처리 완료일';$('statusDate').value=today();$('statusDate').max=today();$('statusDate').min=status==='completed'?state.current.case.submitted_date||'':'';$('statusHelp').textContent=status==='submitted'?'제출일을 확인해 기록합니다. 기록 후에는 초안을 수정할 수 없습니다.':'기관에서 처리가 완료된 날짜를 확인해 기록합니다.';$('statusError').textContent='';renderCalendar(today().slice(0,7));$('statusCalendarPanel').classList.remove('hidden');$('statusDialog').showModal();$('statusDate').focus();}
