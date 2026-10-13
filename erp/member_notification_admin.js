@@ -1,4 +1,4 @@
-/* Member notification administration v1.0.7. Preserve producer policies while previewing approved candidates. */
+/* Member notification administration v1.0.8. Distinguish connected adapters from a tenant's missing channel. */
 (() => {
  'use strict';
  let client,owner='',generation=0,tab='summary',ctx,events=[],detailRevision=0;
@@ -70,7 +70,7 @@
    '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>알림</th><th>카톡 사용</th><th>설정 상태</th><th>문구</th><th>저장</th></tr></thead><tbody>'+events.map(e=>{
    const draft=drafts.get(e.event_key),telegramOnly=e.adapter==='telegram_only',value=telegramOnly?false:draft?draft.value:e.requested_enabled,locked=!ctx.can_edit||!e.ready;
     return '<tr><td>'+esc(e.label)+'</td><td>'+(telegramOnly?'—':'<label class="form-check form-switch"><input type="checkbox" class="form-check-input" data-erp-query-control data-notification-setting="'+esc(e.event_key)+'" aria-label="'+esc(e.label)+' 카톡 사용" '+(value?'checked ':'')+(locked?'disabled':'')+'></label>')+'</td>'+
-     '<td>'+(e.adapter==='telegram_only'?'텔레그램 전용':!e.ready?(e.adapter==='common_prepared'?'승인 · 업무 연결 준비':e.event_key==='signature_request'?'업무 연결 준비':e.adapter==='pending'?'검수·연동 대기':'채널 연결 필요'):(draft?'미저장':e.enabled?'사용':'사용 안 함'))+'</td><td><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-message="'+esc(e.event_key)+'">문구 보기</button></td>'+
+     '<td>'+(e.adapter==='telegram_only'?'텔레그램 전용':!e.ready?(e.adapter==='common_prepared'?'승인 · 업무 연결 준비':e.adapter==='pending'&&e.event_key==='signature_request'?'업무 연결 준비':e.adapter==='pending'?'검수·연동 대기':'채널 연결 필요'):(draft?'미저장':e.enabled?'사용':'사용 안 함'))+'</td><td><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-message="'+esc(e.event_key)+'">문구 보기</button></td>'+
      '<td>'+(telegramOnly?'—':'<button type="button" class="btn btn-primary btn-sm" data-notification-save="'+esc(e.event_key)+'" '+(!draft||!ctx.can_edit||busy.has(e.event_key)?'disabled':'')+'>저장</button>')+'</td></tr>';
    }).join('')+'</tbody></table></div>';
  }
