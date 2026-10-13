@@ -31,6 +31,7 @@ let memberCertificateSealPreviewObjectUrl = '';
 let memberOrgLogoUrl = '';
 let memberOrgOriginalLogoUrl = '';
 let memberOrgLogoRevision = 0;
+let memberOrgFaviconField = null;
 let memberOrgLogoPreviewObjectUrl = '';
 const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   try {
@@ -367,6 +368,7 @@ async function openMemberCertificateSettingsModal() {
     const sealFileInput = document.getElementById('member-certificate-seal-file');
     const logoFileInput = document.getElementById('member-org-logo-file');
     if (!chairmanInput || !shareUnitInput || !sealFileInput || !logoFileInput) return;
+    memberOrgFaviconField ||= CoopFaviconField.mount(logoFileInput.parentElement.parentElement, 'member-org-favicon');
 
     showLoading(true);
     try {
@@ -374,6 +376,7 @@ async function openMemberCertificateSettingsModal() {
         revokeMemberOrgLogoPreview();
         sealFileInput.value = '';
         logoFileInput.value = '';
+        memberOrgFaviconField.reset();
         memberCertificateSealStoragePath = '';
         memberOrgLogoUrl = '';
         memberOrgOriginalLogoUrl = '';
@@ -395,6 +398,7 @@ async function openMemberCertificateSettingsModal() {
         const branding = await _supabase.rpc('erp_coop_branding', {p_action:'get',p_data:{}});
         if (branding.error) throw branding.error;
         memberOrgLogoRevision = Number(branding.data?.revision || 0);
+        memberOrgFaviconField.sync(branding.data || {});
 
         let previewUrl = '';
         if (memberCertificateSealStoragePath) {
@@ -434,11 +438,13 @@ async function saveMemberCertificateSettings() {
     const sealFile = getMemberCertificateSealFile();
     const logoFileInput = document.getElementById('member-org-logo-file');
     const logoFile = logoFileInput?.files?.[0] || null;
+    const faviconFile = memberOrgFaviconField?.file();
     if (!coopId) return myAlert('조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.', 'error');
     if (shareUnitAmount !== null && (!Number.isInteger(shareUnitAmount) || shareUnitAmount <= 0)) return myAlert('출자 1좌 금액을 정확히 입력해 주세요.', 'warning');
     try {
         validateMemberCertificateSealFile(sealFile);
         validateMemberOrgLogoFile(logoFile);
+        if (faviconFile) CoopLogoUpload.validate(faviconFile);
     } catch (error) {
         return myAlert(error?.message || error, 'warning');
     }
@@ -457,11 +463,12 @@ async function saveMemberCertificateSettings() {
         }
 
         let logoUrl = memberOrgLogoUrl;
-        if (logoFile) {
-            const branding = await CoopLogoUpload.save(_supabase, coopId, logoFile, memberOrgLogoRevision);
+        if (logoFile || faviconFile) {
+            const branding = await CoopLogoUpload.saveSelection(_supabase, coopId, logoFile, faviconFile, memberOrgLogoRevision);
             newlyUploadedLogoUrl = branding.display_url;
             memberOrgLogoRevision = branding.revision;
             logoUrl = newlyUploadedLogoUrl;
+            memberOrgFaviconField.sync(branding);
         }
 
         const read = (id) => String(document.getElementById(id)?.value || '').trim();
@@ -486,6 +493,7 @@ async function saveMemberCertificateSettings() {
         memberOrgOriginalLogoUrl = logoUrl;
         if (sealFileInput) sealFileInput.value = '';
         if (logoFileInput) logoFileInput.value = '';
+        memberOrgFaviconField?.clearSaved(faviconFile);
         revokeMemberCertificateSealPreview();
         revokeMemberOrgLogoPreview();
         // Previous originals and logo versions are preserved. Never delete on
