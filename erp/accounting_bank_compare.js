@@ -1,4 +1,4 @@
-/* v1.0.1 — Local workbook reading, scoped ledger candidates, no automatic writes. */
+/* v1.0.2 — Local workbook reading, scoped ledger candidates, no automatic writes. */
 (function(host){
  'use strict';
  const MAX_ROWS=20000, MAX_FILE=5*1024*1024;
@@ -14,7 +14,7 @@
  function bankRows(rows,map,header,date1904=false){
   if(!Array.isArray(rows)||rows.length>MAX_ROWS+1)throw new Error('2만 행 이하의 파일을 선택해 주세요.');
   if(!Number.isInteger(header)||header<0||header>=rows.length)throw new Error('제목 행을 확인해 주세요.');
-  if(!Number.isInteger(map.date)||!Number.isInteger(map.deposit)||!Number.isInteger(map.withdrawal)||new Set([map.date,map.deposit,map.withdrawal]).size!==3)throw new Error('거래일·입금·출금 열을 각각 선택해 주세요.');
+  if(![map.date,map.deposit,map.withdrawal].every(n=>Number.isInteger(n)&&n>=0&&n<rows[header].length)||new Set([map.date,map.deposit,map.withdrawal]).size!==3)throw new Error('거래일·입금·출금 열을 각각 선택해 주세요.');
   const valid=[],invalid=[];
   for(let i=header+1;i<rows.length;i++){
    const row=rows[i];if(!row?.some(v=>String(v??'').trim()))continue;
