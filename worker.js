@@ -1,4 +1,4 @@
-const VERSION='20261013-1';
+const VERSION='20261013-2';
 const SUN_IMAGE='/shared/sun_share.png';
 const SUN_ICON='/shared/sun_favicon.svg?v=1.0.0';
 const NOINDEX='noindex, nofollow, noarchive, nosnippet';
@@ -307,7 +307,7 @@ async function routeRequest(request,env){
     }})
     .on('script[src*="tenant_head.js"]',{element(e){e.setAttribute('src','/shared/tenant_head.js?v=20261013-1');}})
     .on('#siteBrandName, #public-hero-title, #opsContactOrgName',{element(element){
-      if(p.id==='hwaseong'||p.id==='hwaseong-erp')element.setInnerContent(p.name);
+      if(!p.passThrough)element.setInnerContent(p.name);
     }})
     .on('#public-contact-email-wrap, #public-contact-phone-wrap, #public-contact-address-wrap, #opsContactPhone, #opsContactEmail',{element(element){
       if(!p.passThrough)element.setAttribute('hidden','');
