@@ -5637,6 +5637,11 @@ return isAdminMemberRuntimeModuleEnabled('site_admin')
     && (permissionSet?.size ? permissionSet.has('site.admin') : hasAdminMemberScopePermission('site_admin'));
 }
 
+function canManageAdminMemberIndividualBadges() {
+return !isAdminMemberSiteProfile()
+    || (hasAdminMemberBadgePermission() && hasAdminMemberScopePermission('member_admin'));
+}
+
 function canAccessAdminMemberTab(tabName) {
 const safeTab = String(tabName || '').trim();
 if (!safeTab) return true;
@@ -5773,12 +5778,13 @@ if (faqFinanceCategory) faqFinanceCategory.textContent = isSiteMemberProfile ? '
   'md-tab-family',
   'md-tab-participation',
   'member-detail-account-manager-panel',
-  'member-detail-badges-group',
   'member-detail-sns-status-column'
 ].forEach((id) => {
   const el = document.getElementById(id);
   if (el) el.classList.toggle('hidden', isSiteMemberProfile);
 });
+const detailBadgesGroup = document.getElementById('member-detail-badges-group');
+if (detailBadgesGroup) detailBadgesGroup.classList.toggle('hidden', !canManageAdminMemberIndividualBadges());
 const preferredNameInput = document.getElementById('md-preferred-name');
 if (preferredNameInput) preferredNameInput.placeholder = isSiteMemberProfile ? '' : '예: 나무와나';
 const preferredNamePosition = document.getElementById('md-preferred-name-position');
@@ -6876,7 +6882,7 @@ async function openMemberDetail(id) {
         accountManagerLabel = await resolveMemberAccountManagerLabel(m);
         if (requestRevision !== g_member_detail_revision) return;
     }
-    if (!isAdminMemberSiteProfile()) {
+    if (canManageAdminMemberIndividualBadges()) {
         await ensureBadgesReady();
         if (requestRevision !== g_member_detail_revision) return;
         if (!g_badges || g_badges.length === 0) {
@@ -7553,7 +7559,7 @@ async function saveMemberBasic() {
             if (basicError) throw basicError;
             document.getElementById('md-email-original').value = emailInput;
 
-            if (!isAdminMemberSiteProfile()) {
+            if (canManageAdminMemberIndividualBadges()) {
                 const selectedCodes = [];
                 document.querySelectorAll('#member-badge-checkboxes input:checked').forEach(cb => {
                     selectedCodes.push(cb.value);
