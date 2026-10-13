@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.118
+Version: v1.0.119
 Change: 2026-10-13 - Preserve finalized payroll and minute precision with scoped HR access.
 -->
 <html>
@@ -8,7 +8,7 @@ Change: 2026-10-13 - Preserve finalized payroll and minute precision with scoped
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.118 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.119 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -51,6 +51,7 @@ Change: 2026-10-13 - Preserve finalized payroll and minute precision with scoped
 
 <script src="annual_settings.js?v=20261011-2"></script>
 <script src="contract_payroll.js?v=1.0.0"></script>
+<script src="payroll_import_guard.js?v=1.0.0"></script>
 <script src="coop_settings_view.js?v=20261011-3"></script>
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
@@ -717,7 +718,7 @@ Change: 2026-10-13 - Preserve finalized payroll and minute precision with scoped
         <div class="row g-3 align-items-end mb-3">
           <div class="col-md-3">
             <label class="small text-muted mb-1">귀속월</label>
-            <input type="month" id="payrollImportMonth" class="form-control">
+            <input type="month" id="payrollImportMonth" class="form-control" onchange="rebuildPayrollImportPreview()">
           </div>
           <div class="col-md-9">
             <label class="small text-muted mb-1">엑셀 파일</label>
@@ -777,6 +778,8 @@ Change: 2026-10-13 - Preserve finalized payroll and minute precision with scoped
               <tbody id="payrollImportPreviewBody"></tbody>
             </table>
           </div>
+          <div id="payrollImportContractReview" class="mt-3" style="word-break:keep-all;overflow-wrap:break-word"></div>
+          <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="getPayrollImportBatchController().prepare()">급여·계약 다시 확인</button>
         </div>
       </div>
       <div class="modal-footer">
@@ -1034,7 +1037,8 @@ function hasUnsavedEmployeeDetailTab(tabId) {
 }
 function isEmployeeDetailSaving() {
     return employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight
-        || employeeNotificationSaveInFlight || employeeLeaveSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight;
+        || employeeNotificationSaveInFlight || employeeLeaveSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight
+        || (typeof payrollImportBatchController !== 'undefined' && payrollImportBatchController?.busy());
 }
 function requestEmployeeDetailDiscard(action, {tabId = ''} = {}) {
     if (employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
@@ -2982,8 +2986,11 @@ window.onload = async function() {
     const payrollImportModalEl = document.getElementById('payrollImportModal');
     if (payrollImportModalEl && !payrollImportModalEl.dataset.resetBound) {
         payrollImportModalEl.dataset.resetBound = '1';
+        payrollImportModalEl.addEventListener('hide.bs.modal', event => {
+            if (getPayrollImportBatchController().busy()) event.preventDefault();
+        });
         payrollImportModalEl.addEventListener('hidden.bs.modal', () => {
-            resetPayrollImportState({ keepMonth: false });
+            getPayrollImportBatchController().onHide();
         });
     }
     const bulkLeaveModalEl = document.getElementById('bulkLeaveModal');
@@ -3057,6 +3064,7 @@ window.onload = async function() {
     }
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:refreshEmployeeSettingsWorkspace,
         busy:() => companySettingsSaveInFlight || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
+            || payrollImportBatchController?.busy()
             || window.ERPAnnualSettings?.isBusy()
             || window.ERPEmployeeSettingsView?.isDirty()
             || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight
@@ -3729,6 +3737,7 @@ function resetPayrollImportValidationUi() {
 } // End of resetPayrollImportValidationUi
 
 function resetPayrollImportState(options = {}) {
+    getPayrollImportBatchController().clear();
     const keepMonth = options?.keepMonth === true;
     const defaultMonth = document.getElementById('salaryMonth')?.value || formatAdminEmployeeKstMonth();
     payrollImportState = {
@@ -3759,8 +3768,9 @@ function resetPayrollImportState(options = {}) {
 } // End of resetPayrollImportState
 
 function openPayrollImportModal() {
-    resetPayrollImportState({ keepMonth: false });
+    if (!payrollImportState?.rows?.length) resetPayrollImportState({ keepMonth: false });
     payrollImportModal?.show();
+    if (payrollImportState?.rows?.length) void getPayrollImportBatchController().prepare();
 } // End of openPayrollImportModal
 
 let payrollImportFileSequence = 0;
@@ -3944,6 +3954,10 @@ function buildPayrollImportPreviewRows() {
         return {
             rowNumber: index + 2,
             raw: row,
+            providedFields: numericKeys.filter(key => {
+                const value = getPayrollImportRawCellValue(row, mapping, key);
+                return value !== null && value !== undefined && String(value).trim() !== '';
+            }),
             resolvedEmployee,
             warnings,
             errors,
@@ -3991,6 +4005,7 @@ function rebuildPayrollImportPreview() {
     if (!payrollImportState) return;
     payrollImportState.previewRows = buildPayrollImportPreviewRows();
     renderPayrollImportPreview();
+    void getPayrollImportBatchController().prepare();
 } // End of rebuildPayrollImportPreview
 
 function renderPayrollImportPreview() {
@@ -4056,10 +4071,11 @@ function renderPayrollImportPreview() {
     }).join('');
 
     const applyBtn = document.getElementById('btnApplyPayrollImport');
-    if (applyBtn) applyBtn.disabled = errorCount > 0;
+    if (applyBtn) applyBtn.disabled = true; // server preview and explicit contract review enable it
 } // End of renderPayrollImportPreview
 
 async function handlePayrollImportFileChange(input) {
+    getPayrollImportBatchController().clear();
     const file = input?.files?.[0];
     const request = ++payrollImportFileSequence;
     const owner = myInfo;
@@ -4171,116 +4187,33 @@ async function persistPayrollImportMapping() {
     companyInfo[HR_PAYROLL_IMPORT_MAPPING_KEY] = JSON.stringify(payload);
 } // End of persistPayrollImportMapping
 
-async function submitPayrollImport() {
-    const month = String(document.getElementById('payrollImportMonth')?.value || '').trim();
-    if (!month) return showAlert('귀속월을 선택해주세요.');
-    if (!payrollImportState || !Array.isArray(payrollImportState.previewRows) || payrollImportState.previewRows.length === 0) {
-        return showAlert('먼저 엑셀 파일을 업로드해주세요.');
-    }
-    const previewRows = payrollImportState.previewRows;
-    const errorCount = previewRows.filter((row) => row.errors.length > 0).length;
-    if (errorCount > 0) {
-        return showAlert('오류가 있는 행이 있어 저장할 수 없습니다. 칼럼 매핑 또는 원본 엑셀을 확인해주세요.');
-    }
-
-    showConfirm(
-        `총 ${previewRows.length}건의 급여 데이터를 ${month} 귀속월에 반영하시겠습니까?\n기존 같은 월 데이터는 해당 직원 기준으로 덮어씁니다.`,
-        async () => {
-            showLoading();
-            try {
-                const matchedEmpIds = previewRows
-                    .map((row) => String(row?.resolvedEmployee?.matched?.emp_id || '').trim())
-                    .filter(Boolean);
-                let existingMap = new Map();
-                if (matchedEmpIds.length > 0) {
-                    const existingRows = (await getAdminEmployeePayrollRows(null,month,month)).filter(r=>matchedEmpIds.includes(String(r.emp_id)));
-                    existingMap = new Map((Array.isArray(existingRows) ? existingRows : []).map((row) => [String(row.emp_id || '').trim(), row]));
-                }
-
-                for (const row of previewRows) {
-                    const matchedEmployee = row.resolvedEmployee.matched;
-                    const empId = String(matchedEmployee?.emp_id || '').trim();
-                    const existing = existingMap.get(empId) || {};
-                    const imported = row.mappedValues || {};
-
-                    const payMeal = imported.pay_meal ?? Number(existing.pay_meal || 0);
-                    const payCar = imported.pay_car ?? Number(existing.pay_car || 0);
-                    const payChild = imported.pay_child ?? Number(existing.pay_child || 0);
-                    const payBonus = imported.pay_bonus ?? Number(existing.pay_bonus || 0);
-                    let payTotal = imported.pay_total;
-                    if (!Number.isFinite(payTotal)) payTotal = Number(existing.pay_total || 0);
-                    let payBasic = imported.pay_basic;
-                    if (!Number.isFinite(payBasic)) {
-                        payBasic = Number(existing.pay_basic || 0);
-                    }
-                    if (!(Number.isFinite(imported.pay_basic))) {
-                        payBasic = Number(payTotal || 0) - Number(payMeal || 0) - Number(payCar || 0) - Number(payChild || 0) - Number(payBonus || 0) - Number(existing.pay_position || 0) - Number(existing.pay_service || 0) - Number(existing.pay_overtime || 0);
-                    }
-
-                    const dedPension = imported.ded_pension ?? Number(existing.ded_pension || 0);
-                    const dedHealth = imported.ded_health ?? Number(existing.ded_health || 0);
-                    const dedCare = imported.ded_care ?? Number(existing.ded_care || 0);
-                    const dedEmploy = imported.ded_employ ?? Number(existing.ded_employ || 0);
-                    const dedIncome = imported.ded_income ?? Number(existing.ded_income || 0);
-                    const dedLocal = imported.ded_local ?? Number(existing.ded_local || 0);
-                    const dedAdvance = imported.ded_advance ?? Number(existing.ded_advance || 0);
-                    const dedCapital = imported.ded_capital ?? Number(existing.ded_capital || 0);
-                    const dedTotal = Number.isFinite(imported.ded_total)
-                        ? imported.ded_total
-                        : Number(dedPension || 0) + Number(dedHealth || 0) + Number(dedCare || 0) + Number(dedEmploy || 0) + Number(dedIncome || 0) + Number(dedLocal || 0) + Number(dedAdvance || 0) + Number(dedCapital || 0);
-                    const netPay = Number.isFinite(imported.net_pay)
-                        ? imported.net_pay
-                        : Number(payTotal || 0) - Number(dedTotal || 0);
-
-                    const payload = withEmployeeTenantPayload({
-                        emp_id: empId,
-                        emp_name: String(matchedEmployee?.emp_name || row.resolvedEmployee.rawName || existing.emp_name || '').trim(),
-                        year_month: month,
-                        work_description: imported.work_description || String(existing.work_description || '').trim(),
-                        work_days: Number.isFinite(imported.work_days) ? imported.work_days : Number(existing.work_days || 0),
-                        work_hours: Number.isFinite(imported.work_hours) ? imported.work_hours : Number(existing.work_hours || 0),
-                        pay_basic: Math.round(Number(payBasic || 0)),
-                        pay_meal: Math.round(Number(payMeal || 0)),
-                        pay_car: Math.round(Number(payCar || 0)),
-                        pay_child: Math.round(Number(payChild || 0)),
-                        pay_bonus: Math.round(Number(payBonus || 0)),
-                        pay_total: Math.round(Number(payTotal || 0)),
-                        pay_position:Number(existing.pay_position || 0),pay_service:Number(existing.pay_service || 0),pay_overtime:Number(existing.pay_overtime || 0),
-                        ded_pension: Math.round(Number(dedPension || 0)),
-                        ded_health: Math.round(Number(dedHealth || 0)),
-                        ded_care: Math.round(Number(dedCare || 0)),
-                        ded_employ: Math.round(Number(dedEmploy || 0)),
-                        ded_income: Math.round(Number(dedIncome || 0)),
-                        ded_local: Math.round(Number(dedLocal || 0)),
-                        ded_advance: Math.round(Number(dedAdvance || 0)),
-                        ded_capital: Math.round(Number(dedCapital || 0)),
-                        ded_total: Math.round(Number(dedTotal || 0)),
-                        net_pay: Math.round(Number(netPay || 0))
-                    });
-
-                    const {emp_id,emp_name,year_month,coop_id,...values}=payload;
-                    if (existing.contract_snapshot) values.contract_snapshot=existing.contract_snapshot;
-                    const { error } = await _supabase.rpc('erp_hr_payroll_save',{p_emp_id:empId,p_year_month:month,p_values:values,p_expected_key:existing.row_key || null,p_mode:'import'});
-                    if (error) throw new Error(`${payload.emp_name || payload.emp_id}: ${error.message}`);
-                }
-
-                const { error: rpcError } = await _supabase.rpc('calc_company_share', { target_ym: month });
-                if (rpcError) throw new Error('회사부담금 재계산 실패: ' + rpcError.message);
-
-                await persistPayrollImportMapping();
-                hideLoading();
-                payrollImportModal?.hide();
-                if (String(document.getElementById('salaryMonth')?.value || '') === month && currentEmpId
-                    && isEmployeeDetailTabVisible('tabSalary') && !hasUnsavedEmployeeDetailTab('tabSalary')) {
-                    await loadSalaryData();
-                }
-                showAlert(`${month} 급여 일괄입력이 완료되었습니다.`);
-            } catch (error) {
-                hideLoading();
-                showAlert('급여 일괄입력 실패: ' + (error?.message || error));
-            }
+let payrollImportBatchController = null;
+function getPayrollImportBatchController() {
+    if (!payrollImportBatchController) payrollImportBatchController = PayrollImportGuard.create({
+        client: () => _supabase,
+        state: () => payrollImportState,
+        month: () => String(document.getElementById('payrollImportMonth')?.value || ''),
+        owner: getHrSettingsOwner,
+        visible: () => document.getElementById('payrollImportModal')?.classList.contains('show')
+            && !window.frameElement?.hidden && !document.getElementById('hrPageShell')?.classList.contains('hidden'),
+        modal: () => document.getElementById('payrollImportModal'),
+        button: () => document.getElementById('btnApplyPayrollImport'),
+        reviewRoot: () => document.getElementById('payrollImportContractReview'),
+        renderContract: (root,basis) => ContractPayroll.render(root,basis,false),
+        alert: showAlert,
+        confirm: showConfirm,
+        mapping: buildPayrollImportPersistedMapping,
+        mappingSaved: value => { companyInfo[HR_PAYROLL_IMPORT_MAPPING_KEY] = JSON.stringify(value); },
+        afterSave: async month => {
+            if (String(document.getElementById('salaryMonth')?.value || '') === month && currentEmpId
+                && isEmployeeDetailTabVisible('tabSalary') && !hasUnsavedEmployeeDetailTab('tabSalary'))
+                await loadSalaryData();
         }
-    );
+    });
+    return payrollImportBatchController;
+}
+function submitPayrollImport() {
+    return getPayrollImportBatchController().save();
 } // End of submitPayrollImport
 
 function isLoginRelevantEmployeeRow(row) {
