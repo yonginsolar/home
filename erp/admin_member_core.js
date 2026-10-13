@@ -5632,7 +5632,8 @@ return cachedRoleIsAdmin;
 }
 
 function hasAdminMemberBadgePermission() {
-return !isAdminMemberSiteProfile() && isAdminMemberRuntimeModuleEnabled('site_admin')
+return isAdminMemberRuntimeModuleEnabled('site_admin')
+    && (!isAdminMemberSiteProfile() || g_adminMemberRuntime?.module_access?.site_admin === true)
     && (permissionSet?.size ? permissionSet.has('site.admin') : hasAdminMemberScopePermission('site_admin'));
 }
 
@@ -5802,7 +5803,7 @@ if (capitalChartColumn) {
   if (el) el.classList.toggle('hidden', isSiteMemberProfile);
 });
 const demographicAgeHelp = document.getElementById('member-demographic-age-status');
-if (demographicAgeHelp) demographicAgeHelp.classList.toggle('hidden', isSiteMemberProfile);
+if (demographicAgeHelp) demographicAgeHelp.classList.remove('hidden');
 if (isSiteMemberProfile) {
 const activeSitePane = document.querySelector('#tab-site .tab-content > .tab-pane.show.active');
 if (activeSitePane && activeSitePane.id === 'sub-external-news') {

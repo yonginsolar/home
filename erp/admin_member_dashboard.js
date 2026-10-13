@@ -194,9 +194,6 @@ function formatDashboardAgePercentage(count, total) {
 }
 
 function buildDashboardAgeTooltipLabel(context) {
-    if (isAdminMemberSiteProfile()) {
-        return formatDashboardAgePercentage(context.raw, getDashboardChartDatasetTotal(context.chart, context.datasetIndex || 0));
-    }
     return MemberDemographics.ageTooltip(context);
 }
 
@@ -349,14 +346,7 @@ async function loadDashboard() {
 
         // Regional and age composition are read-only server aggregates, loaded
         // independently so a failure in unrelated capital statistics cannot block them.
-        // Preserve the existing age-only chart for the site/member-only profile.
-        if (isAdminMemberSiteProfile()) {
-            const ageData = buildDashboardAgeChartData(stats.age_group || {});
-            renderChart('age', 'chart-age', 'bar', {
-                labels: ageData.labels,
-                datasets: [{ label: '조합원 수', data: ageData.data, backgroundColor: '#ffc107' }]
-            });
-        }
+        // The common demographic reader owns the age chart for every profile.
 
         // (4) 탈퇴 사유 (Horizontal Bar)
         const reasons = stats.exit_reasons || []; // [{reason: '...', count: 1}, ...]
@@ -378,7 +368,7 @@ async function loadDashboard() {
 function loadMemberDemographicCharts() {
     return MemberDemographics.load({
         client: _supabase, cacheKey: String(g_adminMemberRuntime?.coop_id || ''),
-        enabled: !isAdminMemberSiteProfile(), renderChart,
+        enabled: true, regionsEnabled: !isAdminMemberSiteProfile(), renderChart,
         clearCharts() { for (const key of ['location','locationGyeonggi','age']) { g_charts[key]?.destroy(); delete g_charts[key]; } }
     });
 }

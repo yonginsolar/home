@@ -8,7 +8,7 @@ let memberInformationOpeningDetail = false;
 async function loadMemberInformationSummary() {
   const sequence = ++memberInformationSummaryRequest;
   const genderPanel = document.getElementById('dashboard-gender-panel');
-  genderPanel.hidden = isAdminMemberSiteProfile();
+  genderPanel.hidden = false;
   if (genderPanel.hidden) genderPanel.nextElementSibling.className = 'col-12';
   else genderPanel.nextElementSibling.className = 'col-md-6';
   try {

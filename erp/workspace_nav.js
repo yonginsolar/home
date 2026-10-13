@@ -1,4 +1,4 @@
-/* ERP workspace navigation v1.5.4 — tenant-scoped logo without changing capabilities. */
+/* ERP workspace navigation v1.5.5 — keep site/member workspaces to their three assigned menus. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
@@ -446,8 +446,8 @@
     const set = permissions(runtime);
     const [order, platform, service, festival, monitor, villages, election, workspace] = await Promise.all([
       read(client, 'erp_get_menu_order',undefined,true),
-      read(client, 'platform_get_context'),
-      read(client, 'erp_service_contract', { p_action: 'context' }),
+      !narrow ? read(client, 'platform_get_context') : null,
+      !narrow ? read(client, 'erp_service_contract', { p_action: 'context' }) : null,
       full && enabled(runtime, 'accounting') && set.has('accounting.view') ? read(client, 'festival_receipts_admin', { p_action: 'access', p_data: {} }) : null,
       full ? read(client, 'get_my_power_monitor_entry') : null,
       !narrow ? read(client, 'sun_village_total_manager_context') : null,
@@ -464,7 +464,7 @@
         item[0] === 'btnAdmin' ? [item[0], '마을 기본정보', 'village_company_info.html', ...item.slice(3)] : item);
     }
     state.orderLoaded=order.ok;state.order=cleanOrder(order.data);
-    state.canOrder=platform?.is_platform_admin===true || set.has('member.admin') || set.has('site.admin');
+    state.canOrder=!narrow && (platform?.is_platform_admin===true || set.has('member.admin') || set.has('site.admin'));
     if (election === true) state.items.push(['btnVoteHub', '선거·투표 관리', 'vote_hub.html', '', [], '☑']);
     if (service && (service.admin || service.platform || service.representative || service.draft_reviewer)) {
       state.items.push(['btnServiceContracts', '이용계약·청구서', 'service_contracts.html', '', [], '▢']);

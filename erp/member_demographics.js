@@ -33,7 +33,7 @@
   }
   function draw(data, options) {
     model = data;
-    for (const scope of Object.keys(labels)) {
+    for (const scope of options.regionsEnabled === false ? [] : Object.keys(labels)) {
       const rows = [...(data[scope] || [])].filter(row => count(row.count)>0).sort((a,b) => labels[scope].indexOf(a.label)-labels[scope].indexOf(b.label));
       const select = node(`member-demographic-select-${scope}`);
       select.innerHTML = '<option value="">지역별 구성 보기</option>' + rows.map(row => `<option value="${escape(row.label)}">${escape(row.label)} · ${count(row.count).toLocaleString()}명</option>`).join('');

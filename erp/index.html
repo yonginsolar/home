@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.101 | Change: 2026-10-13 - Stack the cooperative logo above the ERP title; retain login and menu permissions. -->
+<!-- Version: v1.0.102 | Change: 2026-10-13 - Canonical ERP entry path and three-menu site/member profile. -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.101 | index.html');</script>
+  <script>console.log('[Version] v1.0.102 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -34,8 +34,6 @@
   <script>
   window.__COOP_ROUTE_APP__ = 'erp';
   (function enforceErpPathPrefix() {
-    var host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
-    if (/^erp\./.test(host)) return;
     var path = String(window.location.pathname || '');
     if (path === '/erp' || path === '/erp/' || path.indexOf('/erp/') === 0) return;
     var targetPath = (path === '/' || path === '/index' || path === '/index.html')
@@ -2189,9 +2187,10 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     const menuCheck = (applyMenuPermissions.checkVersion || 0) + 1;
     applyMenuPermissions.checkVersion = menuCheck;
     const isCurrentMenuCheck = () => applyMenuPermissions.checkVersion === menuCheck;
+    const isSiteMemberProfile = String(runtime?.runtime_profile || '') === 'site_member';
     document.getElementById('btnServiceContracts')?.classList.add('hidden');
     ['mobileDocumentsMenu', 'btnMobileDocuments', 'btnMobileSignature'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
-    _supabase.rpc('erp_service_contract', { p_action: 'context' }).then(({ data, error }) => {
+    if (!isSiteMemberProfile) _supabase.rpc('erp_service_contract', { p_action: 'context' }).then(({ data, error }) => {
         if (isCurrentMenuCheck() && !retiredGraceAccess && !error && (data?.admin || data?.platform || data?.representative || data?.draft_reviewer)) {
             const menu = document.getElementById('btnServiceContracts');
             menu?.classList.remove('hidden');
@@ -2262,7 +2261,6 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     const officialsAdminEnabled = memberAdminEnabled || signatureEnabled;
     const auditEnabled = isModuleEnabled(runtime, 'audit');
     const permissionEnabled = isModuleEnabled(runtime, 'permission');
-    const isSiteMemberProfile = String(runtime?.runtime_profile || '') === 'site_member';
     const moduleAccess = runtime?.module_access && typeof runtime.module_access === 'object'
         ? runtime.module_access
         : {};
@@ -2312,11 +2310,6 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         if (canOpenMemberAdmin) document.getElementById('btnMemberAdmin')?.classList.remove('hidden');
         if (canOpenSiteAdmin) document.getElementById('btnSiteAdmin')?.classList.remove('hidden');
         if (canOpenAudit) document.getElementById('btnAudit')?.classList.remove('hidden');
-        if (platformCtx && platformCtx.is_platform_admin === true) {
-            document.getElementById('btnPowerMonitorAdmin')?.classList.remove('hidden');
-            document.getElementById('btnPlatform')?.classList.remove('hidden');
-        }
-
         applyMenuOrder();
         updateMenuOrderButtonVisibility(false);
         return;
