@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.103 | Change: 2026-10-13 - Assigned site/member duties require explicit server permissions. -->
+<!-- Version: v1.0.104 | Change: 2026-10-14 - Pending counts distinguish loading and lookup failure. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,7 +8,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.103 | index.html');</script>
+  <script>console.log('[Version] v1.0.104 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -189,6 +189,10 @@
       </div>
       <div class="d-flex justify-content-end align-items-center mb-3">
         <button class="btn btn-outline-primary btn-sm hidden" id="btnMenuOrder" onclick="openMenuOrderModal()">↕️ 모듈 순서</button>
+      </div>
+      <div id="menuTaskStatus" class="alert alert-warning d-flex align-items-center gap-3 hidden" role="status">
+        <span id="menuTaskStatusText" class="flex-grow-1"></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="retryMenuTasks" onclick="void loadMainMenuTaskAttention()">다시 확인</button>
       </div>
       
       <div class="d-grid gap-2" id="menuButtons">
@@ -1845,10 +1849,39 @@ async function loadCoopRuntime() {
     }
 }
 
-function setMenuTaskAttention(buttonId, badgeId, count, detailLabel) {
+const menuTaskStates = new Map();
+let menuTaskRequest = null;
+function menuTaskOwnerKey() { return `${String(myInfo?.id || myInfo?.auth_user_id || '')}|${String(myInfo?.coop_id || '')}`; }
+function menuTaskQueryCurrent(owner, key, button) {
+    return myInfo === owner && menuTaskOwnerKey() === key && button?.isConnected
+        && !button.classList.contains('hidden') && !document.getElementById('menuArea')?.classList.contains('hidden');
+}
+function updateMenuTaskSummaryStatus() {
+    const status = document.getElementById('menuTaskStatus');
+    if (!status) return;
+    const failed = Array.from(menuTaskStates).filter(([id, state]) => state === 'failed' && !document.getElementById(id)?.classList.contains('hidden'));
+    status.classList.toggle('hidden', failed.length === 0);
+    const text = document.getElementById('menuTaskStatusText');
+    if (text) text.textContent = failed.length ? '처리할 일 건수를 불러오지 못했습니다. 업무 메뉴는 그대로 이용할 수 있습니다.' : '';
+    const retry = document.getElementById('retryMenuTasks');
+    if (retry) retry.disabled = Array.from(menuTaskStates.values()).some(state => state === 'loading');
+}
+function setMenuTaskAttention(buttonId, badgeId, count, detailLabel, state = 'ready') {
     const button = document.getElementById(buttonId);
     const badge = document.getElementById(badgeId);
     if (!button || !badge) return;
+    menuTaskStates.set(buttonId, state);
+    badge.dataset.state = state;
+    if (state !== 'ready') {
+        badge.textContent = state === 'loading' ? '…' : '!';
+        badge.classList.remove('hidden');
+        button.classList.remove('has-attention');
+        badge.title = `${detailLabel} · ${state === 'loading' ? '조회 중' : '조회 실패'}`;
+        badge.setAttribute('aria-label', badge.title);
+        button.title = badge.title;
+        updateMenuTaskSummaryStatus();
+        return;
+    }
     const safeCount = Math.max(0, Number(count || 0) || 0);
     const hasTasks = safeCount > 0;
     badge.textContent = hasTasks ? (safeCount > 99 ? '99+' : String(safeCount)) : '';
@@ -1864,6 +1897,7 @@ function setMenuTaskAttention(buttonId, badgeId, count, detailLabel) {
         badge.removeAttribute('aria-label');
         button.removeAttribute('title');
     }
+    updateMenuTaskSummaryStatus();
 } // End of setMenuTaskAttention
 
 async function fetchTenantPendingCount(tableName, statusValue) {
@@ -1877,40 +1911,54 @@ async function fetchTenantPendingCount(tableName, statusValue) {
         .eq('coop_id', coopId)
         .eq('status', statusValue);
     if (error) throw error;
-    return Math.max(0, Number(count || 0) || 0);
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('ERP_TASK_COUNT_UNAVAILABLE');
+    return count;
 } // End of fetchTenantPendingCount
 
 async function loadApprovalTaskAttention() {
     const button = document.getElementById('btnApproval');
     if (!button || button.classList.contains('hidden')) return;
+    const owner = myInfo, key = menuTaskOwnerKey();
+    setMenuTaskAttention('btnApproval', 'approvalTaskBadge', null, '내 결재 대기', 'loading');
     try {
         const { data, error } = await _supabase.rpc('erp_get_approval_bootstrap_summary');
         if (error) throw error;
+        if (!menuTaskQueryCurrent(owner, key, button)) return;
+        if (!Number.isSafeInteger(data?.todo_count) || data.todo_count < 0) throw new Error('ERP_TASK_COUNT_UNAVAILABLE');
         setMenuTaskAttention('btnApproval', 'approvalTaskBadge', data?.todo_count, '내 결재 대기');
     } catch (error) {
-        console.warn('ERP approval task count unavailable:', String(error?.code || error?.message || 'unknown'));
-        setMenuTaskAttention('btnApproval', 'approvalTaskBadge', 0, '내 결재 대기');
+        if (!menuTaskQueryCurrent(owner, key, button)) return;
+        console.warn('ERP approval task count unavailable:', String(error?.code || 'ERP_TASK_COUNT_UNAVAILABLE'));
+        setMenuTaskAttention('btnApproval', 'approvalTaskBadge', null, '내 결재 대기', 'failed');
     }
 } // End of loadApprovalTaskAttention
 
 async function loadMemberAdminTaskAttention() {
     const button = document.getElementById('btnMemberAdmin');
     if (!button || button.classList.contains('hidden')) return;
+    const owner = myInfo, key = menuTaskOwnerKey();
+    setMenuTaskAttention('btnMemberAdmin', 'memberAdminTaskBadge', null, '처리 대기 업무 신청', 'loading');
     try {
         const pendingRequests = await fetchTenantPendingCount('coop_applications', 'pending');
+        if (!menuTaskQueryCurrent(owner, key, button)) return;
+        if (!Number.isSafeInteger(pendingRequests) || pendingRequests < 0) throw new Error('ERP_TASK_COUNT_UNAVAILABLE');
         setMenuTaskAttention('btnMemberAdmin', 'memberAdminTaskBadge', pendingRequests, '처리 대기 업무 신청');
     } catch (error) {
-        console.warn('ERP member task count unavailable:', String(error?.code || error?.message || 'unknown'));
-        setMenuTaskAttention('btnMemberAdmin', 'memberAdminTaskBadge', 0, '조합원 관리 할 일');
+        if (!menuTaskQueryCurrent(owner, key, button)) return;
+        console.warn('ERP member task count unavailable:', String(error?.code || 'ERP_TASK_COUNT_UNAVAILABLE'));
+        setMenuTaskAttention('btnMemberAdmin', 'memberAdminTaskBadge', null, '처리 대기 업무 신청', 'failed');
     }
 } // End of loadMemberAdminTaskAttention
 
 async function loadMainMenuTaskAttention() {
     if (!myInfo || retiredGraceAccess) return;
-    await Promise.allSettled([
+    if (menuTaskRequest) return menuTaskRequest;
+    const request = Promise.allSettled([
         loadApprovalTaskAttention(),
         loadMemberAdminTaskAttention()
-    ]);
+    ]).finally(() => { if (menuTaskRequest === request) menuTaskRequest = null; });
+    menuTaskRequest = request;
+    return request;
 } // End of loadMainMenuTaskAttention
 
 function hasPermission(key) {
