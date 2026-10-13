@@ -1,0 +1,15 @@
+/* v1.0.0 — Original-preserving cooperative logos and fitted square icons. */
+(function(root){
+ 'use strict';
+ const pending=new WeakMap(),types={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'};
+ function validate(file){if(!file||!types[file.type]||!file.size||file.size>5*1024*1024)throw Error('PNG·JPG·WebP 로고를 선택해 주세요. 최대 5MB까지 등록할 수 있습니다.');return types[file.type];}
+ function layout(w,h,size,square=false){if(!(w>0&&h>0)||w*h>40000000)throw Error('로고의 해상도가 너무 크거나 이미지를 읽을 수 없습니다.');const ratio=Math.min(square?Infinity:1,(square?size*0.88:size)/Math.max(w,h));const dw=Math.max(1,Math.round(w*ratio)),dh=Math.max(1,Math.round(h*ratio));return {width:square?size:dw,height:square?size:dh,x:square?(size-dw)/2:0,y:square?(size-dh)/2:0,dw,dh};}
+ async function prepare(file){validate(file);let image,url;try{if(root.createImageBitmap)image=await root.createImageBitmap(file,{imageOrientation:'from-image'});else{url=URL.createObjectURL(file);image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('로고 이미지를 읽을 수 없습니다.'));im.src=url;});}const w=image.width||image.naturalWidth,h=image.height||image.naturalHeight;
+  async function render(size,square,type,name){const p=layout(w,h,size,square),c=document.createElement('canvas');c.width=p.width;c.height=p.height;const ctx=c.getContext('2d');if(!ctx)throw Error('이미지 변환을 지원하지 않는 브라우저입니다.');ctx.drawImage(image,p.x,p.y,p.dw,p.dh);const blob=await new Promise(r=>c.toBlob(r,type,0.9));if(!blob||blob.type!==type)throw Error('로고 변환에 실패했습니다.');return new File([blob],name,{type});}
+  return {original:file,display:await render(640,false,'image/webp','display.webp'),icon:await render(512,true,'image/png','icon.png')};
+ }finally{image?.close?.();if(url)URL.revokeObjectURL(url);}}
+ async function stage(client,coopId,file){if(!/^[0-9a-f-]{36}$/i.test(coopId))throw Error('조합 정보를 확인할 수 없습니다.');let files=pending.get(client);if(!files){files=new WeakMap();pending.set(client,files);}let scopes=files.get(file);if(!scopes){scopes=new Map();files.set(file,scopes);}if(!scopes.has(coopId)){const job=(async()=>{const outputs=await prepare(file),base=`coop-branding/${coopId}/logo/${root.crypto.randomUUID()}/`,paths={original_path:base+'original.'+validate(file),display_path:base+'display.webp',icon_path:base+'icon.png'};
+   for(const [key,input] of [['original_path',outputs.original],['display_path',outputs.display],['icon_path',outputs.icon]]){const {error}=await client.storage.from('assets').upload(paths[key],input,{upsert:false,contentType:input.type,cacheControl:'31536000'});if(error)throw error;}return paths;})();scopes.set(coopId,job);job.catch(()=>{if(scopes.get(coopId)===job)scopes.delete(coopId);});}return scopes.get(coopId);}
+ async function save(client,coopId,file,revision=0){const paths=await stage(client,coopId,file);const {data,error}=await client.rpc('erp_coop_branding',{p_action:'save',p_data:{...paths,expected_revision:Number(revision)||0}});if(error)throw error;return data;}
+ root.CoopLogoUpload=Object.freeze({validate,layout,prepare,stage,save,version:'1.0.0'});
+})(window);

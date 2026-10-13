@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.5.3 — separate settings; preserve the village basic-info entry. */
+/* ERP workspace navigation v1.5.4 — tenant-scoped logo without changing capabilities. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261011.16';
+  const VERSION = '20261013.1';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -26,7 +26,7 @@
   const compare = (a,b) => a.localeCompare(b,'ko-KR') || (a<b?-1:a>b?1:0);
   const cleanOrder = order => [...new Set((Array.isArray(order)?order:[]).filter(id=>typeof id==='string' && /^btn[A-Za-z0-9_-]{1,80}$/.test(id)))];
   function defaultOrder(ids, fallback = id=>id) { return [...ids].sort((a,b)=>compare(labels.get(a)||fallback(a),labels.get(b)||fallback(b)) || compare(a,b)); }
-  let state = null, generation = 0, panel, list, brand, toggle, backdrop, returnFocus, orderButton, orderDialog, orderDraft, orderBusy=false;
+  let state = null, generation = 0, panel, list, brand, brandImage, brandSun, toggle, backdrop, returnFocus, orderButton, orderDialog, orderDraft, orderBusy=false;
   let connections = new WeakMap();
   const authBound = new WeakSet();
   const localRoots = '.erp-local-navigation .sidebar-menu,.nav-tabs,.nav-pills,[role="tablist"],.step-tabs,.doc-tabs,.tabs,.sub-tabs,[data-workspace-submenu]';
@@ -102,6 +102,9 @@
   function render() {
     if (!panel || !state) return;
     brand.textContent = state.runtime.coop_name || '협동조합 ERP';
+    const logo=safeBrandAsset(state.branding?.display_url);
+    if(brandImage){brandImage.hidden=!logo;if(logo)brandImage.src=logo;else brandImage.removeAttribute('src');}
+    if(brandSun)brandSun.hidden=!!logo;
     const ordered = [...state.items].sort((a, b) => {
       const rank = id => { const n = state.order.indexOf(id); return n < 0 ? 1000 : n; };
       return rank(a[0]) - rank(b[0]) || compare(a[1],b[1]) || compare(a[0],b[0]);
@@ -354,8 +357,9 @@
     panel.id = 'erpWorkspaceSidebar'; panel.className = 'erp-workspace-sidebar';
     panel.setAttribute('aria-label', 'ERP 업무 메뉴');
     const heading = document.createElement('div'); heading.className = 'erp-workspace-brand';
-    const sun = document.createElement('span'); sun.textContent = '☀'; sun.className = 'erp-workspace-sun'; sun.setAttribute('aria-hidden', 'true');
-    brand = document.createElement('strong'); heading.append(sun, brand);
+    const sun = document.createElement('span'); sun.textContent = '☀'; sun.className = 'erp-workspace-sun'; sun.setAttribute('aria-hidden', 'true');brandSun=sun;
+    brandImage=document.createElement('img');brandImage.alt='';brandImage.hidden=true;brandImage.style.cssText='width:38px;height:38px;object-fit:contain;flex:0 0 38px';
+    brand = document.createElement('strong'); heading.append(brandImage,sun, brand);
     const collapse = document.createElement('button'); collapse.type = 'button'; collapse.className = 'erp-workspace-collapse';
     collapse.textContent = '‹'; collapse.setAttribute('aria-label', '업무 메뉴 접기');
     collapse.setAttribute('aria-controls', panel.id); collapse.setAttribute('aria-expanded', 'true');
@@ -425,13 +429,18 @@
     } catch (_) { return null; }
   }
 
+  function safeBrandAsset(value){try{const u=new URL(value);return u.protocol==='https:'&&u.hostname==='ifdqlwxgqgsvnawmhlfc.supabase.co'&&!u.search&&!u.hash&&!u.username&&!u.password&&u.pathname.startsWith('/storage/v1/object/public/assets/')?u.href:null;}catch(_){return null;}}
+  async function refreshBrand(client,ticket,coopId){const result=await read(client,'erp_coop_branding',{p_action:'get',p_data:{}});if(ticket!==generation||!state||state.runtime.coop_id!==coopId)return;if(result?.coop_id!==coopId)return;state.branding=result;render();const icon=safeBrandAsset(result.icon_url);if(icon){let el=document.querySelector('link[data-erp-brand-icon]');if(!el){el=document.createElement('link');el.rel='icon';el.type='image/png';el.sizes='512x512';el.dataset.erpBrandIcon='true';document.head.appendChild(el);}el.href=icon;}}
+
   async function hydrate(client, runtime) {
     const ticket = ++generation;
     if (!runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) { clear(); return; }
     state = { runtime, client, items: allowedItems(runtime), order: [],orderLoaded:false,canOrder:false };
+    document.querySelector('link[data-erp-brand-icon]')?.remove();
     if (document.readyState === 'loading') await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
     if (ticket !== generation) return;
     mount(); render();
+    refreshBrand(client,ticket,runtime.coop_id).catch(()=>{});
     const narrow = runtime.runtime_profile === 'site_member';
     const full = runtime.runtime_profile === 'legacy_full';
     const set = permissions(runtime);
@@ -481,6 +490,8 @@
     if (submenuFrame != null) cancelAnimationFrame(submenuFrame);
     submenuFrame = null; clearSubmenu(); localNavigationRoots = [];
     if (brand) brand.textContent = '협동조합 ERP';
+    if(brandImage){brandImage.hidden=true;brandImage.removeAttribute('src');}if(brandSun)brandSun.hidden=false;
+    document.querySelector('link[data-erp-brand-icon]')?.remove();
     document.body?.classList.remove('erp-workspace', 'erp-workspace-drawer-open', 'erp-workspace-election');
     if (backdrop) backdrop.hidden = true;
     if (panel) panel.hidden = true;
@@ -506,7 +517,7 @@
     return promise;
   }
 
-  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, closeDrawer:()=>setDrawer(false) };
+  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, refreshBrand:()=>state?refreshBrand(state.client,generation,state.runtime.coop_id):Promise.resolve(), closeDrawer:()=>setDrawer(false) };
   window.addEventListener('erp-workspace-runtime', event => { void connect(event.detail.client, event.detail.runtime); });
   // Used only by classic-script ERP pages with an already configured tenant-aware client.
   window.addEventListener('load', () => {

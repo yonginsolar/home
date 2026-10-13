@@ -30,6 +30,7 @@ let memberCertificateSealStoragePath = '';
 let memberCertificateSealPreviewObjectUrl = '';
 let memberOrgLogoUrl = '';
 let memberOrgOriginalLogoUrl = '';
+let memberOrgLogoRevision = 0;
 let memberOrgLogoPreviewObjectUrl = '';
 const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   try {
@@ -391,6 +392,9 @@ async function openMemberCertificateSettingsModal() {
         memberCertificateSealStoragePath = String(config.seal_url || '').trim();
         memberOrgLogoUrl = String(config.logo_horizontal_url || '').trim();
         memberOrgOriginalLogoUrl = memberOrgLogoUrl;
+        const branding = await _supabase.rpc('erp_coop_branding', {p_action:'get',p_data:{}});
+        if (branding.error) throw branding.error;
+        memberOrgLogoRevision = Number(branding.data?.revision || 0);
 
         let previewUrl = '';
         if (memberCertificateSealStoragePath) {
@@ -454,7 +458,9 @@ async function saveMemberCertificateSettings() {
 
         let logoUrl = memberOrgLogoUrl;
         if (logoFile) {
-            newlyUploadedLogoUrl = await uploadFileToStorage(logoFile, `${MEMBER_ORG_LOGO_PREFIX}/${coopId}`);
+            const branding = await CoopLogoUpload.save(_supabase, coopId, logoFile, memberOrgLogoRevision);
+            newlyUploadedLogoUrl = branding.display_url;
+            memberOrgLogoRevision = branding.revision;
             logoUrl = newlyUploadedLogoUrl;
         }
 
@@ -482,9 +488,8 @@ async function saveMemberCertificateSettings() {
         if (logoFileInput) logoFileInput.value = '';
         revokeMemberCertificateSealPreview();
         revokeMemberOrgLogoPreview();
-        if (newlyUploadedLogoUrl && previousLogoUrl && previousLogoUrl !== newlyUploadedLogoUrl) {
-            await deleteOldFile(previousLogoUrl);
-        }
+        // Previous originals and logo versions are preserved. Never delete on
+        // an ambiguous settings reply or replace another cooperative's asset.
         const modalEl = document.getElementById('memberCertificateSettingsModal');
         const modal = bootstrap.Modal.getInstance(modalEl);
         if (modal) modal.hide();

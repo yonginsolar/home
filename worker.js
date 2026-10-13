@@ -1,9 +1,24 @@
-const VERSION='20261007-2';
+const VERSION='20261013-1';
 const SUN_IMAGE='/shared/sun_share.png';
 const SUN_ICON='/shared/sun_favicon.svg?v=1.0.0';
 const NOINDEX='noindex, nofollow, noarchive, nosnippet';
 const PRIVATE_ROBOTS='User-agent: *\nDisallow: /\n';
 const SECURITY_VERSION='20261004-1';
+const BRAND_API='https://ifdqlwxgqgsvnawmhlfc.supabase.co/rest/v1/rpc/get_public_coop_branding';
+const BRAND_KEY='sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+const BRAND_PREFIX='https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/';
+function brandAsset(value){try{const u=new URL(value);return u.href.startsWith(BRAND_PREFIX)&&!u.search&&!u.hash&&!u.username&&!u.password&&/\.(png|jpg|webp)$/.test(u.pathname)?u.href:'';}catch(_){return '';}}
+async function publicBrand(request,env){
+ const u=new URL(request.url),p=getProfile(u.hostname);
+ if(p.id==='unregistered'||p.id==='auth')return {};
+ const key=new Request(u.origin+'/__public_branding_cache_v1');
+ const cached=await caches.default.match(key);if(cached)return cached.json();
+ try{const req=new Request(BRAND_API,{method:'POST',headers:{apikey:BRAND_KEY,'Content-Type':'application/json','x-public-host':u.hostname},body:'{}',signal:AbortSignal.timeout(4000)});
+  const r=await (env.BRANDING?env.BRANDING.fetch(req):fetch(req));if(!r.ok)return {};
+  const j=await r.json(),value={coop_name:String(j.coop_name||''),display_url:brandAsset(j.display_url),icon_url:brandAsset(j.icon_url)};
+  await caches.default.put(key,new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json','Cache-Control':'public,max-age=300'}}));return value;
+ }catch(_){return {};}
+}
 
 const profile=(id,name,appName,description,origin,publicHosts=[],extra={})=>Object.freeze({
   id,name,appName,description,origin,publicHosts:new Set(publicHosts),...extra
@@ -141,13 +156,14 @@ function labelFor(p,pathname){
   return '';
 }
 
-function headMetadata(p,url){
+function headMetadata(p,url,branding={}){
   const pathname=cleanPath(url.pathname),blocked=noIndex(p,url.hostname,url.pathname),label=labelFor(p,url.pathname);
   const title=label?`${label} | ${p.name}`:p.appName;
   const description=label?`${p.name} ${label} 페이지입니다.`:p.description;
   const origin=p.origin||`${url.protocol}//${url.host}`;
   const canonical=origin+pathname;
-  const image=(p.imageOrigin||origin)+SUN_IMAGE+'?v='+VERSION;
+  const image=branding.icon_url?origin+'/coop-logo-icon.png':(p.imageOrigin||origin)+SUN_IMAGE+'?v='+VERSION;
+  const icon=branding.icon_url?'<link rel="icon" type="image/png" sizes="512x512" href="/coop-favicon.png">':'<link rel="icon" type="image/svg+xml" href="'+SUN_ICON+'">';
   const meta=(kind,name,value)=>`<meta ${kind}="${name}" content="${esc(value)}">`;
   let result='<meta charset="utf-8"><title>'+esc(title)+'</title>'
     +'<link rel="canonical" href="'+esc(canonical)+'">'
@@ -158,13 +174,16 @@ function headMetadata(p,url){
     +meta('property','og:type','website')+meta('property','og:site_name',p.name)+meta('property','og:title',title)
     +meta('property','og:description',description)+meta('property','og:url',canonical)+meta('property','og:image',image)
     +meta('property','og:image:type','image/png')+meta('property','og:image:width','512')+meta('property','og:image:height','512')
-    +meta('property','og:image:alt',p.name+' 태양')+meta('name','twitter:card','summary')
+    +meta('property','og:image:alt',p.name+(branding.icon_url?' 로고':' 태양'))+meta('name','twitter:card','summary')
     +meta('name','twitter:title',title)+meta('name','twitter:description',description)+meta('name','twitter:image',image)
-    +'<link rel="icon" type="image/svg+xml" href="'+SUN_ICON+'"><link rel="apple-touch-icon" href="'+esc(image)+'">';
+    +icon+'<link rel="apple-touch-icon" href="'+esc(image)+'">';
   if(!blocked&&p.naver)result+=meta('name','naver-site-verification',p.naver);
   if(!blocked&&p.feedOrigin)result+='<link rel="alternate" type="application/rss+xml" title="'+esc(p.name)+' RSS" href="'+p.feedOrigin+'/rss.xml">';
   if(!blocked)result+='<script type="application/ld+json">'+JSON.stringify({
-    '@context':'https://schema.org','@type':'Organization',name:p.name,url:origin+'/',logo:image
+    '@context':'https://schema.org','@graph':[
+      {'@type':'WebSite',name:p.name,url:origin+'/'},
+      {'@type':'Organization',name:p.name,url:origin+'/',logo:image}
+    ]
   })+'</script>';
   return result;
 }
@@ -233,7 +252,23 @@ async function routeRequest(request,env){
     headers.delete('Set-Cookie');
     return new Response(upstream.body,{status:upstream.status,headers});
   }
-  if(p.passThrough)return env.ASSETS.fetch(request);
+  if(url.pathname==='/coop-branding.json'){
+    const value=await publicBrand(request,env);
+    return textResponse(request,JSON.stringify(value),'application/json; charset=utf-8',p.id==='unregistered'||p.id==='auth'?404:200);
+  }
+  if(['/coop-favicon.png','/coop-logo-icon.png','/favicon.ico','/apple-touch-icon.png'].includes(url.pathname)){
+    const branding=await publicBrand(request,env);
+    if(branding.icon_url){try{const r=await fetch(branding.icon_url,{redirect:'manual',signal:AbortSignal.timeout(4000)});if(r.ok&&(r.headers.get('content-type')||'').startsWith('image/png'))return withProfileHeaders(r,p,false,request.method==='HEAD');}catch(_){/* Keep the local fallback usable without following a redirect. */}}
+    const iconUrl=new URL(request.url);iconUrl.pathname=SUN_IMAGE;return env.ASSETS.fetch(new Request(iconUrl,request));
+  }
+  if(p.passThrough){
+    const response=await env.ASSETS.fetch(request);
+    if(request.method!=='GET'||!(response.headers.get('content-type')||'').includes('text/html'))return response;
+    const branding=await publicBrand(request,env);
+    if(!branding.icon_url)return response;
+    const rewritten=new HTMLRewriter().on('head',{element(e){e.prepend('<link rel="icon" type="image/png" sizes="512x512" href="/coop-favicon.png"><link rel="apple-touch-icon" href="/coop-logo-icon.png">',{html:true});}}).on('head link[rel*="icon"]',new RemoveElement()).transform(response);
+    rewritten.headers.delete('etag');rewritten.headers.delete('content-length');return rewritten;
+  }
 
   if(p.id==='hwaseong'&&isPublic(p,hostname)){
     if(url.pathname==='/robots.txt')return textResponse(request,HWASEONG_ROBOTS,'text/plain; charset=utf-8');
@@ -248,10 +283,6 @@ async function routeRequest(request,env){
   if(url.pathname==='/rss.xml'||url.pathname==='/feed.xml')return p.id==='citizen'&&isPublic(p,hostname)
     ?textResponse(request,CITIZEN_RSS,'application/rss+xml; charset=utf-8')
     :textResponse(request,'Not Found\n','text/plain; charset=utf-8',404);
-  if(url.pathname==='/favicon.ico'||url.pathname==='/apple-touch-icon.png'){
-    const iconUrl=new URL(request.url);iconUrl.pathname=SUN_IMAGE;
-    return env.ASSETS.fetch(new Request(iconUrl,request));
-  }
 
   const leaf=url.pathname.split('/').pop()||'',headRequest=request.method==='HEAD';
   let assetRequest=request;
@@ -263,8 +294,9 @@ async function routeRequest(request,env){
   if(!(response.headers.get('content-type')||'').toLowerCase().includes('text/html'))return withProfileHeaders(response,p,blocked,headRequest);
   if(headRequest)return withProfileHeaders(response,p,blocked,true,true);
 
+  const branding=await publicBrand(request,env);
   const rewritten=new HTMLRewriter()
-    .on('head',{element(element){element.prepend(headMetadata(p,url),{html:true});}})
+    .on('head',{element(element){element.prepend(headMetadata(p,url,branding),{html:true});}})
     .on('head title, head link[rel="canonical"], head link[rel*="icon"], head link[rel="alternate"][type="application/rss+xml"], head script[type="application/ld+json"]',new RemoveElement())
     .on('head meta',{element(element){
       const name=(element.getAttribute('name')||element.getAttribute('property')||'').toLowerCase();
@@ -273,11 +305,20 @@ async function routeRequest(request,env){
         'citizen-brand-version','coop-tenant-profile','coop-tenant-name','tenant-metadata-version'
       ].includes(name))element.remove();
     }})
+    .on('script[src*="tenant_head.js"]',{element(e){e.setAttribute('src','/shared/tenant_head.js?v=20261013-1');}})
     .on('#siteBrandName, #public-hero-title, #opsContactOrgName',{element(element){
       if(p.id==='hwaseong'||p.id==='hwaseong-erp')element.setInnerContent(p.name);
     }})
     .on('#public-contact-email-wrap, #public-contact-phone-wrap, #public-contact-address-wrap, #opsContactPhone, #opsContactEmail',{element(element){
-      if(p.id==='hwaseong'||p.id==='hwaseong-erp')element.setAttribute('hidden','');
+      if(!p.passThrough)element.setAttribute('hidden','');
+    }})
+    .on('#public-contact-email, #public-contact-phone, #public-contact-address, #opsContactPhone, #opsContactEmail',{element(element){
+      // Hidden text can still be collected for snippets. Remove inherited text
+      // from the actual response; the page fills only its own public settings.
+      if(!p.passThrough)element.setInnerContent('');
+    }})
+    .on('#contact, #opsContactModal, #public-contact-pending, #opsContactPending',{element(element){
+      element.setAttribute('data-nosnippet','');
     }})
     .on('#about-title, #about-subtitle, #about-content, #about-list',{element(element){
       if(p.id==='hwaseong')element.setInnerContent('');

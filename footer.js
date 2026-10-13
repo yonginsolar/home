@@ -1,5 +1,5 @@
 /*
-Version: v1.0.12
+Version: v1.0.13
 Change: Link explicitly registered tenant terms while preserving existing main-cooperative policies.
 */
 // footer.js
@@ -372,6 +372,16 @@ document.addEventListener("DOMContentLoaded", function() {
     const footerElement = document.getElementById("footer");
     if (footerElement) {
         footerElement.innerHTML = footerHtml;
+        // Public page settings may arrive later. Never leave the main
+        // cooperative's hidden fallback contacts in another tenant's DOM.
+        const tenantName=String(window.__PUBLIC_SITE_COOP_NAME__||'').trim();
+        if(tenantName&&tenantName!=='용인모두의햇빛협동조합'){
+          for(const kind of ['address','email','phone']){
+            const node=document.getElementById('footer-contact-'+kind);if(node)node.textContent='';
+            const row=document.getElementById('footer-contact-'+kind+'-row');if(row)row.hidden=true;
+          }
+        }
+        document.getElementById('footer-contact-details')?.setAttribute('data-nosnippet','');
         window.applyFooterCoopName(window.__PUBLIC_SITE_COOP_NAME__);
         window.syncPublicSectionLinks?.();
     }

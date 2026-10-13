@@ -1,5 +1,5 @@
 /*
-Version: v1.0.5
+Version: v1.0.6
 Change: Withhold shared homepage sections until the current cooperative's settings are ready.
 */
 (function applyTenantHead(global) {
@@ -60,7 +60,10 @@ Change: Withhold shared homepage sections until the current cooperative's settin
   favicon.sizes = 'any';
   favicon.href = '/shared/sun_favicon.svg?v=1.0.0';
   favicon.dataset.tenantFavicon = 'sun';
-  document.head.appendChild(favicon);
+  if (!document.querySelector('link[rel="icon"][type="image/png"]')) document.head.appendChild(favicon);
+  if (!document.querySelector('script[data-coop-branding]')) {
+    const script=document.createElement('script');script.src='/shared/coop_branding.js?v=1.0.0';script.defer=true;script.dataset.coopBranding='true';document.head.appendChild(script);
+  }
 
   global.CoopTenantHead = Object.freeze({
     host,
