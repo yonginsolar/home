@@ -16,7 +16,7 @@
   void load();
   const observer=new MutationObserver(changes=>{if(data&&changes.some(c=>[...c.addedNodes].some(n=>n.nodeType===3||n.id==='erpBrandTitle'||n.id==='siteBrandName'||n.id==='footer-coop-name')))apply(data);});
   observer.observe(target,{childList:true,subtree:true});
-  root.addEventListener('pagehide',()=>observer.disconnect(),{once:true});
+  root.addEventListener('pagehide',event=>{if(!event.persisted)observer.disconnect();});
  }
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready,{once:true});else ready();
  root.CoopBranding=Object.freeze({apply,load,safe,version:'1.0.2'});
