@@ -1,6 +1,6 @@
 /*
-Version: v1.0.6
-Change: Withhold shared homepage sections until the current cooperative's settings are ready.
+Version: v1.0.7
+Change: Keep homepage brand names text-only while retaining ERP logos and favicons.
 */
 (function applyTenantHead(global) {
   'use strict';
@@ -62,7 +62,7 @@ Change: Withhold shared homepage sections until the current cooperative's settin
   favicon.dataset.tenantFavicon = 'sun';
   if (!document.querySelector('link[rel="icon"][type="image/png"]')) document.head.appendChild(favicon);
   if (!document.querySelector('script[data-coop-branding]')) {
-    const script=document.createElement('script');script.src='/shared/coop_branding.js?v=1.0.0';script.defer=true;script.dataset.coopBranding='true';document.head.appendChild(script);
+    const script=document.createElement('script');script.src='/shared/coop_branding.js?v=1.0.1';script.defer=true;script.dataset.coopBranding='true';document.head.appendChild(script);
   }
 
   global.CoopTenantHead = Object.freeze({
