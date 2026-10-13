@@ -1,4 +1,4 @@
-/* Member notification administration v1.0.4. Read on demand; no tokens or local persistence. */
+/* Member notification administration v1.0.5. Read on demand; no tokens or local persistence. */
 (() => {
  'use strict';
  let client,owner='',generation=0,tab='summary',ctx,events=[],detailRevision=0;
@@ -70,7 +70,7 @@
    '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>알림</th><th>카톡 사용</th><th>설정 상태</th><th>문구</th><th>저장</th></tr></thead><tbody>'+events.map(e=>{
     const draft=drafts.get(e.event_key),value=e.adapter==='telegram_only'?false:draft?draft.value:e.requested_enabled,locked=!ctx.can_edit||!e.ready;
     return '<tr><td>'+esc(e.label)+'</td><td><label class="form-check form-switch"><input type="checkbox" class="form-check-input" data-erp-query-control data-notification-setting="'+esc(e.event_key)+'" aria-label="'+esc(e.label)+' 카톡 사용" '+(value?'checked ':'')+(locked?'disabled':'')+'></label></td>'+
-     '<td>'+(e.adapter==='telegram_only'?'텔레그램 전용':!e.ready?(e.adapter==='pending'?'검수·연동 대기':'채널 연결 필요'):(draft?'미저장':e.enabled?'사용':'사용 안 함'))+'</td><td><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-message="'+esc(e.event_key)+'">문구 보기</button></td>'+
+     '<td>'+(e.adapter==='telegram_only'?'텔레그램 전용':!e.ready?(e.adapter==='common_prepared'?'승인 · 업무 연결 준비':e.adapter==='pending'?'검수·연동 대기':'채널 연결 필요'):(draft?'미저장':e.enabled?'사용':'사용 안 함'))+'</td><td><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-message="'+esc(e.event_key)+'">문구 보기</button></td>'+
      '<td><button type="button" class="btn btn-primary btn-sm" data-notification-save="'+esc(e.event_key)+'" '+(!draft||!ctx.can_edit||busy.has(e.event_key)?'disabled':'')+'>저장</button></td></tr>';
    }).join('')+'</tbody></table></div>';
  }
@@ -124,8 +124,8 @@
    const data=result.data;
    const render=()=>{
     const channel=dialog.dataset.channel,text=data[channel];
-    $('notification-message-state').textContent=channel==='kakao'?({telegram_only:'카톡으로 발송하지 않습니다.',review_pending:'검수 중인 문안',not_connected:'이 조합의 카카오 채널이 연결되지 않았습니다.',not_configured:'템플릿 설정이 필요합니다.',not_sendable:'사용 가능한 승인 템플릿을 확인할 수 없습니다.',approved:'연결된 승인 문안'}[data.source]||''):
-     (data.source==='telegram_only'?'텔레그램으로만 발송합니다.':data.source==='review_pending'||['guardian_request','guardian_complete'].includes(key)?'연동 준비 문안':'');
+    $('notification-message-state').textContent=channel==='kakao'?({telegram_only:'카톡으로 발송하지 않습니다.',review_pending:'검수 중인 문안',approved_prepared:'승인 문안 · 업무 연결 준비 중',not_connected:'이 조합의 카카오 채널이 연결되지 않았습니다.',not_configured:'템플릿 설정이 필요합니다.',not_sendable:'사용 가능한 승인 템플릿을 확인할 수 없습니다.',approved:'연결된 승인 문안'}[data.source]||''):
+     (data.source==='telegram_only'?'텔레그램으로만 발송합니다.':data.source==='approved_prepared'?'승인 문안 · 업무 연결 준비 중':data.source==='review_pending'||['guardian_request','guardian_complete'].includes(key)?'연동 준비 문안':'');
     $('notification-message-body').textContent=text||'이 알림은 해당 채널로 발송하지 않습니다.';
     dialog.querySelectorAll('[data-preview-channel]').forEach(b=>{b.classList.toggle('active',b.dataset.previewChannel===channel);b.setAttribute('aria-selected',String(b.dataset.previewChannel===channel));});
    };
