@@ -1,4 +1,4 @@
-/* v1.0.0 — Scoped initial configuration; retain editors, no base role or notification mutation. */
+/* v1.0.1 — Scoped initial configuration; retain editors, no base role or notification mutation. */
 (function(root){
  'use strict';const $=id=>document.getElementById(id);let client,runtime,status,busy=false,area='basic',identity='',generation=0,brandingReady=false;
  const loaded=new Map(),baselines=new Map();const forms={basic:'setupBasicForm',capital:'setupCapitalForm',accounts:'setupAccountForm'};
@@ -15,7 +15,7 @@
   for(const el of document.querySelectorAll('[data-area]'))el.hidden=!status?.areas?.[el.dataset.area]&&!loaded.has(el.dataset.area);
   $('setupSiteLink').hidden=!active||!status?.areas?.site;
   $('setupStatus').textContent=active?'사용 기한: '+new Date(status.expires_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false}):status?.can_manage?'직원의 초기 설정 권한을 부여·회수할 수 있습니다.':'초기 설정 기간이 끝났거나 권한이 회수되었습니다. 입력한 내용은 보존되며, 새 저장은 할 수 없습니다.';
-  $('setupStatus').classList.toggle('setup-expired',!active);
+  $('setupStatus').classList.toggle('setup-expired',!active&&status?.can_manage!==true);
  }
  async function refreshAccess(){
   try{status=await rpc('erp_initial_setup_status');availability();return status.active===true||status.can_manage===true;}
@@ -57,7 +57,7 @@
   try{const result=await root.CoopLogoSettings.saveIfSelected(client,runtime.coop_id);if(result){root.ErpWorkspaceResume.checkpoint($('setCompany'));await tell('로고·파비콘을 저장했습니다.');}else await tell('새 파일을 선택해 주세요.');}
   catch(e){await tell(root.ERPInitialSetupAccess.message(e));}finally{busy=false;availability();}}
  document.addEventListener('DOMContentLoaded',async()=>{
-  console.log('[Version] v1.0.0 | initial_setup');
+  console.log('[Version] v1.0.1 | initial_setup');
   client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
   const gate=await root.ErpRuntimeGuard.requireUser(client,{alertFn:tell,redirectUrl:'index.html'});if(!gate.ok)return;identity=gate.authUser?.id||'';runtime=await root.ErpRuntimeGuard.getRuntime(client);
   if(!await refreshAccess())return;
