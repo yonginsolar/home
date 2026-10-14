@@ -19,7 +19,7 @@
   choice.addEventListener('change',()=>{show();onChange?.(read());});custom.addEventListener('input',()=>onChange?.(read()));
   return {read,set(value){const v=String(value||'');choice.value=targets.some(x=>x[0]===v)&&v!=='__custom__'?v:'__custom__';custom.value=choice.value==='__custom__'?v:'';show();}};
  }
- function lock(){panel?.querySelectorAll('input,textarea,select,button').forEach(n=>{const item=items.find(x=>x.id===n.closest('[data-slide-card]')?.dataset.slideCard),i=items.indexOf(item);n.disabled=!loaded||saving||(n.dataset.slideAction==='up'&&i===0)||(n.dataset.slideAction==='down'&&i===items.length-1);});if(list)list.hidden=mode.value!=='slides';const add=panel?.querySelector('[data-slide-add]');if(add)add.hidden=mode.value!=='slides';}
+ function lock(){const blocked=!loaded||saving||typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site');panel?.querySelectorAll('input,textarea,select,button').forEach(n=>{const item=items.find(x=>x.id===n.closest('[data-slide-card]')?.dataset.slideCard),i=items.indexOf(item);n.disabled=blocked||(n.dataset.slideAction==='up'&&i===0)||(n.dataset.slideAction==='down'&&i===items.length-1);});if(list)list.hidden=mode.value!=='slides';const add=panel?.querySelector('[data-slide-add]');if(add)add.hidden=mode.value!=='slides';}
  function row(item){
   if(cards.has(item.id))return cards.get(item.id);
   const card=document.createElement('article');card.dataset.slideCard=item.id;card.className='border rounded-3 p-3 mt-3';const heading=document.createElement('h6');heading.className='fw-bold';card.append(heading);
@@ -67,5 +67,5 @@
   source.value=JSON.stringify(raw());return payload();
  }
  async function preview(readFile){const p=payload(true);const slides=[];for(const [i,item] of items.entries())slides.push({...p.p_hero_slides[i],image_url:item.file?await readFile(item.file):item.value.image_url});return {hero_slides_enabled:p.p_hero_slides_enabled,hero_slides:slides,hero_autoplay:p.p_hero_autoplay,hero_banner_link:p.p_hero_banner_link};}
- root.CoopHeroSlides=Object.freeze({mount,set,payload,uploadPending,preview,enabled:()=>mode?.value==='slides',setSaving(value){saving=!!value;lock();}});
+ root.CoopHeroSlides=Object.freeze({mount,set,payload,uploadPending,preview,refresh:lock,enabled:()=>mode?.value==='slides',setSaving(value){saving=!!value;lock();}});
 })(window);
