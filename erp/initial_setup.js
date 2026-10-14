@@ -1,8 +1,8 @@
-/* v1.0.4 — Retry branding reads independently without replacing setup drafts. */
+/* v1.0.5 — Initial setup is limited to website, cooperative profile and capital. */
 (function(root){
  'use strict';const $=id=>document.getElementById(id);let client,runtime,status,busy=false,area='basic',identity='',generation=0,brandingReady=false,accessKnown=false;
  let brandingState='idle',brandingPending=null,brandingRetryBusy=false;
- const loaded=new Map(),baselines=new Map();const forms={basic:'setupBasicForm',capital:'setupCapitalForm',accounts:'setupAccountForm'};
+ const loaded=new Map(),baselines=new Map();const forms={basic:'setupBasicForm',capital:'setupCapitalForm'};
  const snapshot=id=>JSON.stringify([...$(id).elements].filter(e=>e.matches('input,select,textarea')).map(e=>[e.id,e.type==='checkbox'?e.checked:e.value.replace(e.hasAttribute('data-number-group')?/,/g:/$^/g,'')]));
  const dirty=key=>baselines.has(key)&&snapshot(forms[key])!==baselines.get(key);
  const changed=()=>busy||[...baselines.keys()].some(dirty)||!!$('set_logoFile')?.files.length||!!$('set_favicon-file')?.files.length;
@@ -18,6 +18,7 @@
   if(active)$('setupContent').hidden=false;
   for(const el of document.querySelectorAll('[data-area]'))el.hidden=!status?.areas?.[el.dataset.area]&&!loaded.has(el.dataset.area);
   $('setupSiteLink').hidden=!active||!status?.areas?.site;
+  $('setupLegalLink').hidden=!active||!status?.areas?.site;
   $('setupStatus').textContent=active?'사용 기한: '+new Date(status.expires_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false}):status?.can_manage?'직원의 초기 설정 권한을 부여·회수할 수 있습니다.':'초기 설정 기간이 끝났거나 권한이 회수되었습니다. 입력한 내용은 보존되며, 새 저장은 할 수 없습니다.';
   $('setupStatus').classList.toggle('setup-expired',!active&&status?.can_manage!==true);
  }
@@ -52,11 +53,10 @@
    baselines.set(key,snapshot(forms[key]));availability();
    await loadBranding();if(epoch!==generation)return;
   }else if(key==='capital'){$('setupMinimum').value=Number(value.data.minimum).toLocaleString('en-US');$('setupUnit').value=Number(value.data.unit).toLocaleString('en-US');}
-  else{const body=$('setupAccountRows');body.replaceChildren();for(const row of value.data){const tr=document.createElement('tr');for(const key of ['type','code','category','name']){const td=document.createElement('td');td.textContent=row[key]||'';tr.append(td);}body.append(tr);}}
   if(key!=='basic')baselines.set(key,snapshot(forms[key]));root.ErpWorkspaceResume.checkpoint($(forms[key]));availability();
  }
  async function switchArea(key){
-  if(busy||(!status?.areas?.[key]&&!loaded.has(key)))return;
+  if(busy||!Object.hasOwn(forms,key)||(!status?.areas?.[key]&&!loaded.has(key)))return;
   area=key;for(const node of document.querySelectorAll('[data-panel]'))node.hidden=node.dataset.panel!==key;
   for(const node of document.querySelectorAll('[data-area]'))node.classList.toggle('active',node.dataset.area===key);
   try{await load(key);}catch(e){await tell(root.ERPInitialSetupAccess.message(e));}
@@ -64,14 +64,14 @@
  function payload(key){
   if(key==='basic'){const data={};for(const e of $(forms.basic).querySelectorAll('[data-key]'))data[e.dataset.key]=e.value.trim();data.orgName=data.company_name;data.ceoName=data.chairman_name;return data;}
   if(key==='capital')return {minimum:$('setupMinimum').value.replace(/,/g,''),unit:$('setupUnit').value.replace(/,/g,'')};
-  return {type:$('setupAccountType').value,category:$('setupAccountCategory').value.trim(),name:$('setupAccountName').value.trim(),code:$('setupAccountCode').value.trim()};
+  throw Error('INITIAL_SETUP_AREA_DENIED');
  }
  async function save(key){
   if(busy||!loaded.has(key))return;if(!await refreshAccess()||!status.areas?.[key])return tell('초기 설정 권한이 종료되었습니다. 입력한 내용은 유지됩니다.');
   if(key==='capital'&&Object.values(payload(key)).some(v=>!/^\d{1,10}$/.test(v)||Number(v)<1||Number(v)>1000000000))return tell('출자금은 1원 이상 10억 원 이하로 입력해 주세요.');
   busy=true;availability();const value=payload(key);try{
    const result=await rpc('erp_initial_setup_config',{p_area:key,p_action:'save',p_data:value,p_expected_revision:loaded.get(key).revision});
-   loaded.set(key,result);if(key==='accounts'){$(forms.accounts).reset();loaded.delete(key);await load(key);}
+   loaded.set(key,result);
    baselines.set(key,snapshot(forms[key]));root.ErpWorkspaceResume.checkpoint($(forms[key]));await tell('저장했습니다.');
   }catch(e){await tell(root.ERPInitialSetupAccess.message(e));}finally{busy=false;availability();}
  }
@@ -79,7 +79,7 @@
   try{const result=await root.CoopLogoSettings.saveIfSelected(client,runtime.coop_id);if(result){root.ErpWorkspaceResume.checkpoint($('setCompany'));await tell('로고·파비콘을 저장했습니다.');}else await tell('새 파일을 선택해 주세요.');}
   catch(e){await tell(root.ERPInitialSetupAccess.message(e));}finally{busy=false;availability();}}
  document.addEventListener('DOMContentLoaded',async()=>{
-  console.log('[Version] v1.0.4 | initial_setup');
+  console.log('[Version] v1.0.5 | initial_setup');
   client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
   const gate=await root.ErpRuntimeGuard.requireUser(client,{alertFn:tell,redirectUrl:'index.html'});if(!gate.ok)return;identity=gate.authUser?.id||'';runtime=await root.ErpRuntimeGuard.getRuntime(client);
   if(!await refreshAccess())return;
@@ -89,7 +89,7 @@
   $('setupBrandSave').addEventListener('click',()=>void brandSave());
   $('setupBrandRetry').addEventListener('click',()=>void retryBranding());
   for(const id of ['setupMinimum','setupUnit'])$(id).addEventListener('input',()=>{$(id).value=$(id).value.replace(/[^0-9]/g,'').replace(/\B(?=(\d{3})+(?!\d))/g,',');});
-  if(status.active)await switchArea(['basic','capital','accounts'].find(k=>status.areas[k])||'basic');
+  if(status.active)await switchArea(['basic','capital'].find(k=>status.areas[k])||'basic');
   root.ErpWorkspaceResume.register({authorize:async()=>{await refreshAccess();return accessKnown;},busy:()=>changed()||brandingRetryBusy||!!brandingPending,refresh:async()=>{if(!status.active||!status.areas?.[area])return;if(!dirty(area))loaded.delete(area);await load(area);}});
   client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==identity)){generation++;status={active:false,areas:{}};availability();}});
   setInterval(()=>{if(!document.hidden&&!busy)void refreshAccess();},45000);
