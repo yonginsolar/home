@@ -7,6 +7,7 @@ Change: 2026-10-07 - Use registered tenant signup purpose and privacy consent.
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
+<script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
   <script>console.log('[Version] v1.0.54 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -453,7 +454,7 @@ oninput="clearFieldWarning(this)">
 <h3 class="fw-bold mt-3">가입 신청 완료</h3>
 <p id="successModalCopy" class="text-muted small">신청이 성공적으로 접수되었습니다.<br>10일 이내로 출자금 입금 부탁드립니다.</p>
 <div id="successAccountBox" class="p-3 bg-light rounded-3 text-start small mb-3" style="display:none;">
-🏦 <b id="successDepositAccount">신협 131-022-855516</b><br><span id="successDepositHolder">(예금주: 용인모두의햇빛협동조합)</span>
+🏦 <b id="successDepositAccount"></b><br><span id="successDepositHolder"></span>
 </div>
 <div id="successKakaoBox" class="kakao-box" style="display:none;"><a id="successKakaoLink" href="https://invite.kakao.com/tc/cLtR3LGLQX" target="_blank" class="kakao-link-btn">📢 카카오톡 팀채팅방 참여하기</a></div>
 <button class="btn btn-success w-100" onclick="location.href='index.html'">홈으로 이동</button>
@@ -613,6 +614,13 @@ signupPublicSettingsPromise = (async () => {
 const { data, error } = await _supabase.rpc('get_public_home_settings');
 if (error) throw error;
 signupPublicSettings = Array.isArray(data) ? (data[0] || null) : (data || null);
+try {
+ const guide = await CoopCapitalDepositGuide.read();
+ if (guide.coop_name === signupPublicSettings?.coop_name) Object.assign(signupPublicSettings, {member_capital_deposit_bank:guide.bank,member_capital_deposit_account:guide.account,member_capital_deposit_holder:guide.holder});
+ else if(signupPublicSettings)Object.assign(signupPublicSettings,{member_capital_deposit_bank:'',member_capital_deposit_account:'',member_capital_deposit_holder:''});
+} catch (_) {
+ if (signupPublicSettings) Object.assign(signupPublicSettings,{member_capital_deposit_bank:'',member_capital_deposit_account:'',member_capital_deposit_holder:''});
+}
 return signupPublicSettings;
 })().catch((error) => {
 signupPublicSettingsPromise = null;
@@ -910,7 +918,7 @@ const holderLine = document.getElementById('signupDepositHolderLine');
 const successAccount = document.getElementById('successDepositAccount');
 const successHolder = document.getElementById('successDepositHolder');
 const deposit = getSignupPublicDepositAccount();
-const canShow = isDeferredSignupProfile() && !!(deposit.bank && deposit.account);
+const canShow = !!(deposit.bank && deposit.account && deposit.holder);
 
 if (guide) guide.hidden = !canShow;
 if (!canShow) return false;
@@ -947,7 +955,7 @@ const hasPublicDepositAccount = applySignupPublicDepositAccount();
 
 if (signupTenant.coop_code === DEFAULT_SIGNUP_COOP_CODE) {
 if (successModalCopy) successModalCopy.innerHTML = '신청이 성공적으로 접수되었습니다.<br>10일 이내로 출자금 입금 부탁드립니다.';
-if (successAccountBox) successAccountBox.style.display = '';
+if (successAccountBox) successAccountBox.style.display = hasPublicDepositAccount ? '' : 'none';
 if (successKakaoBox) successKakaoBox.style.display = '';
 if (successKakaoLink) successKakaoLink.href = DEFAULT_SIGNUP_KAKAO_URL;
 } else {

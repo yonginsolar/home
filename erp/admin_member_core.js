@@ -25,6 +25,24 @@ const _supabaseEdge = supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_K
 let permissionSet = new Set();
 let pendingAdminOtpEmail = '';
 let g_adminMemberRuntime = null;
+let memberOrgProfileRevision = null;
+let memberOrgSettingsOwner = '', memberOrgSettingsBaseline = null, memberOrgSettingsSaving = false;
+function memberOrgSettingsSnapshot() {
+    return JSON.stringify([...document.querySelectorAll('#memberCertificateSettingsModal input,#memberCertificateSettingsModal select')].map(n=>[n.id,n.type==='file'?[...n.files].map(f=>[f.name,f.size,f.lastModified]):n.value]));
+}
+function canOpenFullCoopSettings() {
+    return !isAdminMemberSiteProfile() && g_adminMemberRuntime?.is_active !== false
+      && ((g_adminMemberRuntime?.effective_permissions?.includes('hr.admin') && g_adminMemberRuntime?.modules?.hr !== false)
+        || g_adminMemberRuntime?.initial_setup?.active === true);
+}
+function ensureMemberOrgProfileFields() {
+    if (document.getElementById('member-org-contact-name')) return;
+    const row = document.getElementById('member-org-address')?.closest('.row');
+    if (!row) return;
+    const fields = document.createElement('div'); fields.className = 'col-12';
+    fields.innerHTML = '<div class="row g-3"><div class="col-md-6"><label class="form-label" for="member-org-contact-name">공식 담당자</label><input id="member-org-contact-name" class="form-control" maxlength="100"></div><div class="col-md-6"><label class="form-label" for="member-org-est-date">설립일</label><input id="member-org-est-date" type="date" class="form-control"></div></div>';
+    row.append(fields);
+}
 const MEMBER_CERTIFICATE_SEAL_PREFIX = 'company-seals';
 const MEMBER_ORG_LOGO_PREFIX = 'coop-branding';
 let memberCertificateSealStoragePath = '';
@@ -363,7 +381,13 @@ function clearMemberOrgLogo() {
 } // End of clearMemberOrgLogo
 
 async function openMemberCertificateSettingsModal() {
-    if (!isAdminMemberSiteProfile()) return;
+    if (!isAdminMemberSiteProfile()) {
+        if (!canOpenFullCoopSettings()) return;
+        ErpWorkspaceResume.navigate(g_adminMemberRuntime?.initial_setup?.active && !g_adminMemberRuntime?.effective_permissions?.includes('hr.admin')
+          ? 'initial_setup.html' : 'admin_employee.html?section=settings');
+        return;
+    }
+    ensureMemberOrgProfileFields();
     const chairmanInput = document.getElementById('member-certificate-chairman-name');
     const shareUnitInput = document.getElementById('member-certificate-share-unit');
     const sealFileInput = document.getElementById('member-certificate-seal-file');
@@ -373,6 +397,13 @@ async function openMemberCertificateSettingsModal() {
 
     showLoading(true);
     try {
+        const auth=await _supabase.auth.getUser();if(auth.error||!auth.data?.user?.id)throw Error('로그인 상태를 다시 확인해 주세요.');
+        const owner=auth.data.user.id+'|'+await getAdminMemberCoopId();
+        if(owner===memberOrgSettingsOwner&&memberOrgSettingsBaseline!==null&&memberOrgSettingsSnapshot()!==memberOrgSettingsBaseline){
+            const check=await _supabase.rpc('get_my_site_member_org_settings');if(check.error)throw check.error;
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('memberCertificateSettingsModal')).show();return;
+        }
+        memberOrgSettingsOwner=owner;memberOrgSettingsBaseline=null;
         revokeMemberCertificateSealPreview();
         revokeMemberOrgLogoPreview();
         sealFileInput.value = '';
@@ -384,11 +415,17 @@ async function openMemberCertificateSettingsModal() {
         const { data, error } = await _supabase.rpc('get_my_site_member_org_settings');
         if (error) throw error;
         const config = data && typeof data === 'object' ? data : {};
+        const profile = await _supabase.rpc('erp_coop_profile');
+        if (profile.error) throw profile.error;
+        memberOrgProfileRevision = profile.data.revision;
+        Object.assign(config,profile.data.data);
         chairmanInput.value = String(config.chairman_name || config.ceoName || '');
         await refreshMemberCapitalDisplays();
         document.getElementById('member-org-address').value = String(config.company_address || '');
-        document.getElementById('member-org-contact').value = String(config.company_contact || '');
-        document.getElementById('member-org-email').value = String(config.company_email || '');
+        document.getElementById('member-org-contact').value = String(config.company_contact_phone || '');
+        document.getElementById('member-org-email').value = String(config.company_contact_email || '');
+        document.getElementById('member-org-contact-name').value = String(config.company_contact_name || '');
+        document.getElementById('member-org-est-date').value = String(config.estDate || '');
         document.getElementById('member-org-business-number').value = String(config.bizNum || '');
         document.getElementById('member-org-deposit-bank').value = String(config.member_capital_deposit_bank || '');
         document.getElementById('member-org-deposit-account').value = String(config.member_capital_deposit_account || '');
@@ -420,6 +457,8 @@ async function openMemberCertificateSettingsModal() {
         }
         renderMemberOrgLogoPreview(memberOrgLogoUrl, '현재 등록된 가로형 로고');
         const modalEl = document.getElementById('memberCertificateSettingsModal');
+        memberOrgSettingsBaseline=memberOrgSettingsSnapshot();
+        if(!modalEl.dataset.orgSavingGuard){modalEl.dataset.orgSavingGuard='1';modalEl.addEventListener('hide.bs.modal',event=>{if(memberOrgSettingsSaving)event.preventDefault();});}
         applyAdminMemberModalLayer(modalEl);
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
     } catch (error) {
@@ -430,8 +469,12 @@ async function openMemberCertificateSettingsModal() {
 } // End of openMemberCertificateSettingsModal
 
 async function saveMemberCertificateSettings() {
-    if (!isAdminMemberSiteProfile()) return;
-    const coopId = String(await getAdminMemberCoopId() || '').trim();
+    if (!isAdminMemberSiteProfile() || memberOrgSettingsSaving) return;
+    let coopId,auth;
+    try{coopId=String(await getAdminMemberCoopId()||'').trim();auth=await _supabase.auth.getUser();}
+    catch(_){return myAlert('계정 정보를 확인하지 못했습니다. 입력 내용은 유지됩니다. 다시 시도해 주세요.','warning');}
+    if(auth.error||auth.data?.user?.id+'|'+coopId!==memberOrgSettingsOwner)return myAlert('현재 계정의 조합 설정을 다시 확인해 주세요. 입력 내용은 유지됩니다.','warning');
+    if(memberOrgSettingsSaving)return;
     const chairmanName = String(document.getElementById('member-certificate-chairman-name')?.value || '').trim();
     const shareUnitRaw = String(ERPNumberInput.raw(document.getElementById('member-certificate-share-unit')?.value) || '').trim();
     const shareUnitAmount = shareUnitRaw ? Math.trunc(Number(shareUnitRaw)) : null;
@@ -451,12 +494,24 @@ async function saveMemberCertificateSettings() {
     }
 
     const saveButton = document.getElementById('member-certificate-settings-save');
+    const orgControls=[...document.querySelectorAll('#memberCertificateSettingsModal input,#memberCertificateSettingsModal select,#memberCertificateSettingsModal button')].map(element=>({element,disabled:element.disabled}));
+    memberOrgSettingsSaving=true;orgControls.forEach(({element})=>element.disabled=true);
     if (saveButton) saveButton.disabled = true;
     showLoading(true);
     let newlyUploadedLogoUrl = '';
     let orgSettingsSaved = false;
+    let profileSettingsSaved = false;
     const previousLogoUrl = memberOrgOriginalLogoUrl;
     try {
+        const readProfile = id => String(document.getElementById(id)?.value || '').trim();
+        const profileSaved = await _supabase.rpc('erp_coop_profile',{p_action:'save',p_expected_revision:memberOrgProfileRevision,p_data:{
+          chairman_name:chairmanName,company_address:readProfile('member-org-address'),company_contact_name:readProfile('member-org-contact-name'),
+          company_contact_phone:readProfile('member-org-contact'),company_contact_email:readProfile('member-org-email'),
+          bizNum:readProfile('member-org-business-number'),estDate:readProfile('member-org-est-date')
+        }});
+        if (profileSaved.error) throw profileSaved.error;
+        memberOrgProfileRevision = profileSaved.data.revision;
+        profileSettingsSaved = true;
         let sealPath = memberCertificateSealStoragePath;
         if (sealFile) {
             const uploadFile = await convertMemberCertificateSealToPng(sealFile);
@@ -501,13 +556,16 @@ async function saveMemberCertificateSettings() {
         // an ambiguous settings reply or replace another cooperative's asset.
         const modalEl = document.getElementById('memberCertificateSettingsModal');
         const modal = bootstrap.Modal.getInstance(modalEl);
+        memberOrgSettingsBaseline=memberOrgSettingsSnapshot();memberOrgSettingsSaving=false;
+        window.ErpWorkspaceResume?.checkpoint(modalEl);
         if (modal) modal.hide();
         myAlert('조합 공식 정보, 출자증서와 입금 안내 설정을 저장했습니다.', 'success');
     } catch (error) {
         // A lost RPC reply is not proof of rollback. Keep newly uploaded files
         // rather than deleting a seal/logo that the server may have accepted.
-        myAlert(orgSettingsSaved ? '설정은 저장되었습니다. 화면을 다시 열어 확인해 주세요.' : '조합 기본 설정 저장 실패: ' + (error?.message || error), orgSettingsSaved ? 'warning' : 'error');
+        myAlert(orgSettingsSaved ? '설정은 저장되었습니다. 화면을 다시 열어 확인해 주세요.' : (profileSettingsSaved ? '기본정보는 저장되었지만 이미지·입금 안내 저장을 완료하지 못했습니다. 입력 내용은 유지됩니다. ' : '조합 기본 설정 저장 실패: ') + (error?.hint || error?.message || error), orgSettingsSaved || profileSettingsSaved ? 'warning' : 'error');
     } finally {
+        memberOrgSettingsSaving=false;orgControls.forEach(({element,disabled})=>{if(element.isConnected)element.disabled=disabled;});
         showLoading(false);
         if (saveButton) saveButton.disabled = false;
     }
@@ -5713,7 +5771,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-members', memberAdminEnabled],
 ['nav-badges', memberAdminEnabled && hasAdminMemberBadgePermission()],
 ['member-capital-settings-button', memberAdminEnabled],
-['nav-org-settings', isSiteMemberProfile && memberAdminEnabled],
+['nav-org-settings', memberAdminEnabled && (isSiteMemberProfile || canOpenFullCoopSettings())],
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
 ['nav-applications', memberAdminEnabled],
@@ -5735,7 +5793,7 @@ el.classList.toggle('hidden', !enabled);
 ['site-external-news-nav-item', !isSiteMemberProfile],
 ['site-legal-nav-item', siteAdminEnabled],
 ['partnerInnerTabs', !isSiteMemberProfile],
-['site-org-settings-button', isSiteMemberProfile && siteAdminEnabled],
+['site-org-settings-button', siteAdminEnabled && (isSiteMemberProfile || canOpenFullCoopSettings())],
 ['sub-external-news', !isSiteMemberProfile],
 ['tab-badges', memberAdminEnabled && hasAdminMemberBadgePermission()],
 ['sub-legal', siteAdminEnabled],

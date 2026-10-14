@@ -29,6 +29,7 @@ Change: Mark account helper page as noindex and add description metadata.
         
         .btn-toss { background-color: #0064FF; color: white; box-shadow: 0 4px 10px rgba(0, 100, 255, 0.2); }
         .btn-copy { background-color: #f2f4f6; color: #4e5968; }
+        .btn:disabled { opacity: .5; cursor: default; }
 
         /* [핵심 수정] CSS로 제어: 기본은 숨김(none) */
         .mobile-only-btn { display: none; }
@@ -56,6 +57,7 @@ Change: Mark account helper page as noindex and add description metadata.
         .copy-help-actions .btn-secondary { background: #f2f4f6; color: #4e5968; }
         .copy-help-actions .btn-primary { background: #111827; color: #fff; }
     </style>
+    <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
     <script src="shared/theme.js?v=20260802-1"></script>
     <link href="shared/theme.css?v=20260829-1" rel="stylesheet">
 </head>
@@ -66,15 +68,16 @@ Change: Mark account helper page as noindex and add description metadata.
     
     <p class="desc" id="guideText">
         <span class="pc-guide">스마트폰 뱅킹으로 입금해 주세요.</span>
-        <span class="mobile-only-btn" style="display:none; flex-direction:column;">조합원님, 아래 신협 계좌로<br>출자금을 입금해 주세요.</span>
+        <span class="mobile-only-btn" style="display:none; flex-direction:column;">아래 계좌로 출자금을 입금해 주세요.</span>
     </p>
     
     <div class="account-card">
-        <span class="bank-name">신협</span>
-        <div class="account-num">131-022-855516</div>
+        <span class="bank-name" id="depositBank">계좌 확인 중</span>
+        <div class="account-num" id="depositAccount"></div>
+        <div id="depositHolder"></div>
         <div class="amount-area">
             <span class="amount-label">입금하실 금액</span>
-            <span class="amount-val"><span id="displayAmount">0</span>원</span>
+            <span class="amount-val"><span id="displayAmount">—</span>원</span>
         </div>
     </div>
 
@@ -82,9 +85,11 @@ Change: Mark account helper page as noindex and add description metadata.
         토스로 바로 보내기
     </a>
 
-    <button class="btn btn-copy" onclick="copyAccount()">
+    <button class="btn btn-copy" id="copyAccountButton" onclick="copyAccount()" disabled>
         계좌번호 복사하기
     </button>
+    <p id="depositStatus" role="status">입금 안내를 불러오고 있습니다.</p>
+    <button class="btn btn-copy" id="depositRetry" type="button" hidden onclick="loadDepositGuide()">다시 불러오기</button>
     
     <p style="font-size: 13px; color: #8b95a1; margin-top: 16px;">
         계좌 복사 후 사용하시는 은행 앱에서<br>붙여넣기 하시면 됩니다.
@@ -115,42 +120,51 @@ Change: Mark account helper page as noindex and add description metadata.
     }
 
 
-    const CONFIG = {
-        bankCode: '048', // 신협
-        accountNo: '131022855516' // 숫자만
-    };
-
-    document.addEventListener('DOMContentLoaded', () => {
-
-        // URL 파라미터 처리
+    const CONFIG = {bankCode: '', accountNo: ''};
+    let depositLoading = false;
+    async function loadDepositGuide() {
+        if (depositLoading) return;
+        depositLoading = true;
+        document.getElementById('depositRetry').hidden = true;
+        document.getElementById('copyAccountButton').disabled = true;
+        const toss = document.getElementById('linkToss');
+        toss.removeAttribute('href'); toss.style.setProperty('display', 'none', 'important');
+        const status = document.getElementById('depositStatus');
+        status.textContent = '입금 안내를 불러오고 있습니다.';
+        try {
+        const guide = await CoopCapitalDepositGuide.read();
+        document.title = guide.coop_name + ' 출자금 입금 안내';
         const params = new URLSearchParams(window.location.search);
-        let amount = params.get('amount');
-        const userName = params.get('name');
-
-        const numericAmount = parseInt(String(amount || '').replace(/[^0-9]/g, ''), 10);
-        amount = (!numericAmount || Number.isNaN(numericAmount) || numericAmount <= 0) ? 100000 : numericAmount;
-
-        // 화면 표시
-        document.getElementById('displayAmount').innerText = amount.toLocaleString();
-
-        // 이름이 있으면 멘트 교체 (모바일용 멘트 태그 찾아서 넣기)
-        if (userName) {
-            const decodedName = String(userName);
-            // 모바일용 멘트 영역 찾기 (.mobile-only-btn 클래스를 가진 span)
-            const mobileTextSpan = document.querySelector('p.desc .mobile-only-btn');
-            if(mobileTextSpan) {
-                const safeName = escapeHtml(decodedName);
-                mobileTextSpan.innerHTML = `<b>${safeName}</b> 조합원님,<br>아래 신협 계좌로 입금해 주세요.`;
-            }
+        const rawAmount = String(params.get('amount') || '').replace(/,/g, '');
+        const amount = /^\d{1,10}$/.test(rawAmount) && Number(rawAmount) > 0 && Number(rawAmount) <= 1000000000
+            ? Number(rawAmount) : Number(guide.minimum || 0);
+        const userName = String(params.get('name') || '').slice(0, 100);
+        document.getElementById('displayAmount').textContent = amount > 0 ? amount.toLocaleString('ko-KR') : '—';
+        document.getElementById('depositBank').textContent = guide.bank || '';
+        document.getElementById('depositAccount').textContent = guide.account || '';
+        document.getElementById('depositHolder').textContent = guide.holder ? '예금주: ' + guide.holder : '';
+        const mobile = document.querySelector('p.desc .mobile-only-btn');
+        mobile.textContent = (userName ? userName + ' 조합원님, ' : '') + '아래 계좌로 입금해 주세요.';
+        if (!guide.bank || !guide.account || !guide.holder) {
+            CONFIG.accountNo = ''; status.textContent = '출자금 납입 계좌가 아직 등록되지 않았습니다.'; return;
         }
-
-        // 토스 링크 생성 (모바일 여부와 상관없이 미리 만들어둡니다. 어차피 PC에선 버튼이 안 보이니까요)
-        const cleanAccountNo = CONFIG.accountNo.replace(/[^0-9]/g, '');
-        const tossUrl = `supertoss://send?bankCode=${CONFIG.bankCode}&accountNo=${cleanAccountNo}&amount=${amount}&origin=link`;
-        document.getElementById('linkToss').href = tossUrl;
-    });
+        CONFIG.accountNo = String(guide.account).replace(/[^0-9]/g, '');
+        CONFIG.bankCode = /^(신협|신용협동조합)$/.test(String(guide.bank).trim()) ? '048' : '';
+        document.getElementById('copyAccountButton').disabled = !CONFIG.accountNo;
+        if (CONFIG.bankCode && amount > 0) {
+            toss.href = `supertoss://send?bankCode=${CONFIG.bankCode}&accountNo=${CONFIG.accountNo}&amount=${amount}&origin=link`;
+            toss.style.removeProperty('display');
+        }
+        status.textContent = '';
+        } catch (_) {
+            CONFIG.accountNo = ''; status.textContent = '입금 안내를 불러오지 못했습니다. 다시 확인해 주세요.';
+            document.getElementById('depositRetry').hidden = false;
+        } finally { depositLoading = false; }
+    }
+    document.addEventListener('DOMContentLoaded', loadDepositGuide);
 
     async function copyAccount() {
+        if (depositLoading || !CONFIG.accountNo) return;
         const textToCopy = CONFIG.accountNo; 
         try {
             await navigator.clipboard.writeText(textToCopy);

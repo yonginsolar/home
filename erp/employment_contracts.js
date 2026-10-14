@@ -51,7 +51,7 @@ const selectContractColumns = [
 ].join(',');
 const contractHistoryColumns = 'id,coop_id,emp_id,document_kind,source_type,title,version_no,parent_contract_id,status,effective_date,file_path,created_at,updated_at';
 const employeeListColumns = 'emp_id,emp_name,display_emp_no,contract_url,coop_id,is_active,resign_date';
-const contractCompanyKeys = ['company_name','orgName','chairman_name','ceoName','company_address','address','bizNum','business_number','company_contact','company_contact_phone','company_email','email'];
+const contractCompanyKeys = ['company_name','orgName','chairman_name','ceoName','company_address','address','bizNum','business_number','company_contact_name','company_contact','company_contact_phone','company_contact_email','company_email','email'];
 const contractDetailReads = new Map();
 
 function contractReadOwner() {
@@ -280,8 +280,7 @@ async function loadPermissions(user) {
 
 function companyValue(...keys) {
   for (const key of keys) {
-    const value = asText(state.company[key]);
-    if (value) return value;
+    if (Object.hasOwn(state.company,key) && state.company[key] != null) return asText(state.company[key]);
   }
   return '';
 }
@@ -429,8 +428,10 @@ function defaultTerms() {
     employer_role: '이사장',
     company_address: companyValue('company_address', 'address'),
     company_business_number: companyValue('bizNum', 'business_number'),
-    company_contact: companyValue('company_contact', 'company_contact_phone'),
-    company_email: companyValue('company_email', 'email'),
+    company_contact: Object.hasOwn(state.company || {}, 'company_contact_name') || Object.hasOwn(state.company || {}, 'company_contact_phone')
+      ? [companyValue('company_contact_name'),companyValue('company_contact_phone')].filter(Boolean).join(' · ')
+      : companyValue('company_contact'),
+    company_email: companyValue('company_contact_email', 'company_email', 'email'),
     employee_name: asText(employee.emp_name),
     employee_position: asText(employee.position),
     employee_address: asText(employee.address),

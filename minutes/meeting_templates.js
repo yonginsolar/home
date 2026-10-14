@@ -71,16 +71,21 @@ function firstCompanyValue(company, ...keys) {
 }
 
 function organizationProfile(company, coopName) {
-  const contactName = firstCompanyValue(company, 'contact_name', 'company_contact_name');
-  const phone = firstCompanyValue(company, 'contact_phone', 'company_contact_phone', 'phone');
+  const profileValue = (...keys) => {
+    for (const key of keys) if (Object.hasOwn(company || {},key) && company[key] != null) return String(company[key]).trim();
+    return '';
+  };
+  const contactName = profileValue('company_contact_name', 'contact_name');
+  const phone = profileValue('company_contact_phone', 'contact_phone', 'phone');
   const rawContact = firstCompanyValue(company, 'contact', 'company_contact');
-  const contact = rawContact || [contactName, phone].filter(Boolean).join(' · ');
+  const contact = Object.hasOwn(company || {},'company_contact_name') || Object.hasOwn(company || {},'company_contact_phone')
+    ? [contactName, phone].filter(Boolean).join(' · ') : rawContact;
   return {
     name: String(coopName || firstCompanyValue(company, 'company_name', 'orgName') || '협동조합').trim(),
-    address: firstCompanyValue(company, 'address', 'company_address'),
+    address: profileValue('company_address', 'address'),
     contact,
     phone,
-    email: firstCompanyValue(company, 'email', 'company_email'),
+    email: profileValue('company_contact_email', 'company_email', 'email'),
     homepage: firstCompanyValue(company, 'homepage', 'homepage_url', 'website', 'site_url')
   };
 }

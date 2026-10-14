@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.136
+Version: v1.0.138
 Change: 2026-10-13 - Preserve new employee inputs until explicit discard, without changing employee permissions or registration payloads.
 -->
 <html>
@@ -11,7 +11,7 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.136 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.138 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -62,6 +62,8 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
 <script src="coop_settings_view.js?v=20261014-1"></script>
 <script src="initial_setup_access.js?v=1.1.6"></script>
 <script src="initial_setup_employee.js?v=1.0.1"></script>
+<script src="permission_settings.js?v=1.0.0"></script>
+<link rel="stylesheet" href="permission_settings.css?v=1.0.0">
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -996,6 +998,7 @@ function getRoleBadge(roleKey) {
 }
 
 let settings = {}; let companyInfo = {}; let advancedSettingsRaw = [];
+let companyProfileState = null;
 let companySettingsSaveInFlight = false;
 let hrSettingsAuthorized = false, hrSettingsReadyOwner = '', hrSettingsOpenPromise = null, hrSettingsResumeReadOwner = '';
 const hrSettingsAuxLoaded = new Set();
@@ -3136,6 +3139,7 @@ window.onload = async function() {
     if (!hrUserGate.ok) return;
     myInfo = hrUserGate.user;
     hrAuthorizedUserId = String(hrUserGate.authUser?.id || '');
+    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId))window.ERPPermissionSettings?.invalidate();});
     const villageWorkspace = await _supabase.rpc('sun_village_workspace_context');
     if (!villageWorkspace.error && villageWorkspace.data?.workspaces?.some(item => item?.is_current === true && item?.is_management_coop === false)) {
         location.replace('village_company_info.html');
@@ -3174,7 +3178,7 @@ window.onload = async function() {
     }
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:refreshEmployeeSettingsWorkspace,
         authorize:async runtime => { if (!window.ERPEmployeeSettingsView.isPage) await window.ERPInitialSetupEmployee.refresh(_supabase,runtime); return true; },
-        busy:() => document.getElementById('coopDepositSetup')?.certificateSetupController?.busy() || document.getElementById('coopDepositSetup')?.certificateSetupController?.dirty() || window.ERPInitialSetupEmployee.busy() || runInvite._inFlight || inviteDiscardPending || hasUnsavedEmployeeInvite()
+        busy:() => window.ERPPermissionSettings?.busy() || document.getElementById('coopDepositSetup')?.certificateSetupController?.busy() || document.getElementById('coopDepositSetup')?.certificateSetupController?.dirty() || window.ERPInitialSetupEmployee.busy() || runInvite._inFlight || inviteDiscardPending || hasUnsavedEmployeeInvite()
             || companySettingsSaveInFlight || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
             || payrollImportBatchController?.busy()
             || window.ERPAnnualSettings?.isBusy()
@@ -3467,15 +3471,13 @@ function resolveAdminEmployeeChairmanName(info) {
 } // End of resolveAdminEmployeeChairmanName
 
 function buildAdminEmployeeCompanyContact(info) {
-    const direct = trimAdminEmployeeCompanyValue(info?.company_contact);
-    if (direct) return direct;
-
     const parts = [
         trimAdminEmployeeCompanyValue(info?.company_contact_name),
         trimAdminEmployeeCompanyValue(info?.company_contact_phone)
     ].filter(Boolean);
-    if (parts.length > 0) return parts.join(' ');
-
+    if (Object.hasOwn(info || {}, 'company_contact_name') || Object.hasOwn(info || {}, 'company_contact_phone')) return parts.join(' ');
+    const direct = trimAdminEmployeeCompanyValue(info?.company_contact);
+    if (direct) return direct;
     return trimAdminEmployeeCompanyValue(info?.email);
 } // End of buildAdminEmployeeCompanyContact
 
@@ -5129,6 +5131,8 @@ function ensureCoopDepositSettings() {
         },checkpoint:node=>window.ERPEmployeeSettingsView.checkpointSection('#'+node.closest('#coopDepositSetup').id)});
 }
 async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null } = {}) {
+    ensureCoopProfileFields();
+    ensureCoopPermissionLaunchers();
     ensureCoopDepositSettings();
     initAnnualSettings();
     if (loadAuxiliary) {
@@ -5138,12 +5142,20 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCur
         await loadCalendarIcsSettings({ throwOnError, isCurrent });
     }
     if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+    const profileOwner = getHrSettingsOwner();
+    const profileRequest = _supabase.rpc('erp_coop_profile');
+    const profileResult = await (profileRequest.abortSignal ? profileRequest.abortSignal(AbortSignal.timeout(15000)) : profileRequest);
+    if (profileResult.error) throw profileResult.error;
+    if (!isCurrent() || !isHrSettingsContextCurrent(profileOwner)) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+    Object.assign(companyInfo, profileResult.data.data);
+    companyProfileState = {owner:profileOwner,revision:profileResult.data.revision};
     // 회사 정보는 연도와 무관하게 공통 관리 (원본 그대로 로드)
     // *회사 정보는 보통 매년 바뀌지 않으므로 ref_company_info 하나만 씁니다.
     document.getElementById("set_orgName").value = resolveAdminEmployeeCompanyName(companyInfo);
     document.getElementById("set_ceoName").value = resolveAdminEmployeeChairmanName(companyInfo);
     document.getElementById("set_bizNum").value = companyInfo['bizNum'] || "";
     document.getElementById("set_address").value = companyInfo['company_address'] || "";
+    for (const [id,key] of COOP_PROFILE_DETAIL_FIELDS) document.getElementById(id).value = companyInfo[key] || '';
     document.getElementById("set_workLunchStartTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_START_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.start);
     document.getElementById("set_workLunchEndTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_END_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.end);
     await refreshMemberCapitalDisplays();
@@ -5156,6 +5168,34 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCur
 }
 
 // 회사 정보·캘린더·알림·결재 설정 저장 (연도별 기준은 별도 저장)
+const COOP_PROFILE_DETAIL_FIELDS = [['set_contactName','company_contact_name'],['set_contactPhone','company_contact_phone'],['set_contactEmail','company_contact_email'],['set_estDate','estDate']];
+function ensureCoopPermissionLaunchers() {
+    const full = ['admin','admin_all'].includes(String(myInfo?.role||''));
+    const canManage = full || permissionSet.has('permission.manage');
+    if (!document.getElementById('coopPermissionDefaultsButton')) {
+        const panel=document.createElement('section');panel.className='coop-setting-panel';
+        const h=document.createElement('h3');h.className='coop-setting-heading';h.textContent='🔐 기본 업무 권한';
+        const body=document.createElement('div');body.className='coop-setting-body';
+        const b=document.createElement('button');b.type='button';b.id='coopPermissionDefaultsButton';b.className='btn btn-outline-primary';b.textContent='역할·직급별 기본 권한';
+        b.onclick=()=>window.ERPPermissionSettings.dialog(_supabase,'defaults',getHrSettingsOwner);body.append(b);panel.append(h,body);
+        document.getElementById('companyProfileDetails')?.after(panel);
+    }
+    const toolbar=document.querySelector('.hr-toolbar');
+    if(toolbar&&!document.getElementById('employeeBulkPermissionsButton')) {
+        const b=document.createElement('button');b.type='button';b.id='employeeBulkPermissionsButton';b.className='btn btn-outline-primary btn-sm btn-rounded';b.textContent='🔐 권한 일괄 변경';
+        b.onclick=()=>window.ERPPermissionSettings.dialog(_supabase,'bulk',getHrSettingsOwner);toolbar.append(b);
+    }
+    const bulk=document.getElementById('employeeBulkPermissionsButton');if(bulk)bulk.hidden=!canManage;
+}
+function ensureCoopProfileFields() {
+    if (document.getElementById('companyProfileDetails')) return;
+    const identity = document.getElementById('companyIdentityHeading')?.closest('section');
+    if (!identity) return;
+    identity.id = 'companyIdentityPanel';
+    const panel = document.createElement('section'); panel.id = 'companyProfileDetails'; panel.className = 'coop-setting-panel';
+    panel.innerHTML = '<h3 class="coop-setting-heading" id="companyProfileDetailsHeading">📅 설립일 · 공식 연락처</h3><div class="coop-setting-body"><div class="row g-3"><div class="col-md-6"><label for="set_estDate" class="form-label">설립일</label><input id="set_estDate" type="date" class="form-control"></div><div class="col-md-6"><label for="set_contactName" class="form-label">공식 담당자</label><input id="set_contactName" class="form-control" maxlength="100"></div><div class="col-md-6"><label for="set_contactPhone" class="form-label">공식 전화번호</label><input id="set_contactPhone" type="tel" class="form-control" maxlength="40"></div><div class="col-md-6"><label for="set_contactEmail" class="form-label">공식 이메일</label><input id="set_contactEmail" type="email" class="form-control" maxlength="254"></div></div></div>';
+    panel.setAttribute('aria-labelledby','companyProfileDetailsHeading'); identity.after(panel);
+}
 async function saveSettings() {
     if (companySettingsSaveInFlight) return;
     const depositSetup=document.getElementById('coopDepositSetup')?.certificateSetupController;
@@ -5195,13 +5235,10 @@ async function saveSettings() {
         ) {
             throw new Error('중간결재와 최종결재는 서로 다른 직원으로 지정해주세요.');
         }
+        const profileData = {company_name:org.trim(),chairman_name:ceo.trim(),bizNum:document.getElementById('set_bizNum').value.trim(),company_address:document.getElementById('set_address').value.trim()};
+        for (const [id,key] of COOP_PROFILE_DETAIL_FIELDS) profileData[key] = document.getElementById(id).value.trim();
+        if (!companyProfileState || companyProfileState.owner !== getHrSettingsOwner()) throw new Error('기본정보를 다시 불러와 확인해 주세요.');
         const cUpdates = [
-            { coop_id: coopId, key: 'orgName', value: org },
-            { coop_id: coopId, key: 'company_name', value: org },
-            { coop_id: coopId, key: 'ceoName', value: ceo },
-            { coop_id: coopId, key: 'chairman_name', value: ceo },
-            { coop_id: coopId, key: 'bizNum', value: document.getElementById("set_bizNum").value },
-            { coop_id: coopId, key: 'company_address', value: document.getElementById("set_address").value },
             { coop_id: coopId, key: HR_WORK_LUNCH_START_TIME_KEY, value: lunchTimeSettings.start },
             { coop_id: coopId, key: HR_WORK_LUNCH_END_TIME_KEY, value: lunchTimeSettings.end },
 
@@ -5253,6 +5290,13 @@ async function saveSettings() {
         }
         // Validate all settings before staging the file. Upload does not change
         // the registered path or clear the user's selection until commit.
+        const profileSaved = await _supabase.rpc('erp_coop_profile',{p_action:'save',p_data:profileData,p_expected_revision:companyProfileState.revision});
+        if (profileSaved.error) throw profileSaved.error;
+        companyProfileState = {owner:getHrSettingsOwner(),revision:profileSaved.data.revision};
+        Object.assign(companyInfo,profileSaved.data.data);
+        confirmedSteps += 1;
+        window.ERPEmployeeSettingsView?.checkpointSection('#companyIdentityPanel');
+        window.ERPEmployeeSettingsView?.checkpointSection('#companyProfileDetails');
         const sealStoragePath = await uploadCompanySealIfNeeded(coopId);
         if (sealStoragePath || companyInfo._seal_row_present) cUpdates.push({ coop_id: coopId, key: 'seal_url', value: sealStoragePath });
         const { error: companySaveError } = await _supabase.from('ref_company_info').upsert(cUpdates, { onConflict: 'coop_id,key' });
@@ -5327,7 +5371,7 @@ const EMPLOYEE_MODULE_DESCRIPTIONS = Object.freeze({
     approval: '기안, 결재 처리와 승인 문서를 관리합니다.',
     mypage: '본인 정보, 급여·근태 내역과 개인 업무를 확인합니다.',
     accounting: '회계 장부, 전표, 결산과 현금매출을 관리합니다.',
-    hr: '직원 등록, 급여·근태와 직원별 업무 권한을 관리합니다.',
+    hr: '직원 등록, 급여·근태를 관리합니다. 업무 권한 변경은 별도 권한 관리자가 처리합니다.',
     site_admin: '홈페이지 콘텐츠와 공개 정보를 관리합니다.',
     member_admin: '조합원 명부, 출자금과 가입·탈퇴 업무를 관리합니다.',
     education: '교육·행사, 참석자와 현장 운영을 관리합니다.',
@@ -5388,10 +5432,10 @@ function renderEmployeeModuleAccess(payload) {
         const selectedValue = getEmployeeModuleAccessSelectValue(module?.override_enabled);
         const description = EMPLOYEE_MODULE_DESCRIPTIONS[moduleKey] || '이 업무 모듈의 사용 여부를 직원별로 정합니다.';
         const options = [
-            ['inherit', '기본 권한 따름'],
+            ['inherit', '조합 기본 권한 따름'],
             ['enabled', '사용'],
             ['disabled', '사용 안 함']
-        ].map(([value, label]) => `<option value="${value}"${selectedValue === value ? ' selected' : ''}>${label}</option>`).join('');
+        ].map(([value, label]) => `<option value="${value}"${selectedValue === value ? ' selected' : ''}${!orgEnabled&&value==='enabled'?' disabled':''}>${label}</option>`).join('');
         return `
           <div class="employee-module-row ${orgEnabled ? '' : 'module-off'}" data-module-row="${escapeHtml(moduleKey)}">
             <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
@@ -5422,9 +5466,30 @@ function renderEmployeeModuleAccess(payload) {
     if (saveBtn) {
         saveBtn.disabled = !canManageAccess || modules.length === 0;
         saveBtn.classList.toggle('d-none', !canManageAccess);
+        if(!document.getElementById('employeeModuleAccessRefreshBtn')) {
+            const retry=document.createElement('button');retry.type='button';retry.id='employeeModuleAccessRefreshBtn';retry.className='btn btn-outline-secondary btn-sm ms-2';retry.textContent='최신 권한 확인';
+            retry.onclick=()=>void refreshEmployeeModuleAccessKeepingDraft();saveBtn.after(retry);
+        }
     }
     checkpointEmployeeDetailDraft(document.getElementById('tabModuleAccess'));
 } // End of renderEmployeeModuleAccess
+
+async function refreshEmployeeModuleAccessKeepingDraft() {
+    if(employeeModuleAccessSaveInFlight)return;
+    const {empId,isCurrent}=beginEmployeeDetailRead('modules',{requireVisible:true});if(!empId)return;
+    const button=document.getElementById('employeeModuleAccessRefreshBtn');if(button)button.disabled=true;
+    try{
+        const request=_supabase.rpc('erp_admin_get_employee_module_access',{p_emp_id:empId});
+        const result=await(request.abortSignal?request.abortSignal(AbortSignal.timeout(15000)):request);
+        if(!isCurrent())return;if(result.error)throw result.error;
+        const pending=[];
+        document.querySelectorAll('[data-employee-module-key]').forEach(n=>{const old=employeeModuleAccessSnapshot?.modules?.find(m=>m.module_key===n.dataset.employeeModuleKey);if(old&&n.value!==getEmployeeModuleAccessSelectValue(old.override_enabled))pending.push([n.dataset.employeeModuleKey,n.value]);});
+        renderEmployeeModuleAccess(result.data);
+        for(const [key,value]of pending){const n=[...document.querySelectorAll('[data-employee-module-key]')].find(n=>n.dataset.employeeModuleKey===key);if(n){n.value=value;n.dispatchEvent(new Event('change',{bubbles:true}));}}
+        showAlert('최신 권한을 확인했습니다. 작성 중인 변경 내용은 유지됩니다.');
+    }catch(_){if(isCurrent())showAlert('권한을 확인하지 못했습니다. 작성 중인 내용은 유지됩니다. 다시 시도해 주세요.');}
+    finally{if(button?.isConnected)button.disabled=false;}
+}
 
 async function loadEmployeeModuleAccess() {
     if (employeeModuleAccessSaveInFlight) return;
@@ -5491,9 +5556,12 @@ async function saveEmployeeModuleAccess() {
         const moduleKey = String(select.dataset.employeeModuleKey || '').trim();
         if (!moduleKey) return;
         const value = String(select.value || 'inherit');
-        access[moduleKey] = value === 'enabled' ? true : (value === 'disabled' ? false : null);
+        const next=value === 'enabled' ? true : (value === 'disabled' ? false : null);
+        const before=employeeModuleAccessSnapshot.modules.find(module=>module.module_key===moduleKey)?.override_enabled??null;
+        if(next!==before)access[moduleKey]=next;
     });
 
+    if(!Object.keys(access).length)return showAlert('변경한 업무 권한이 없습니다.');
     const saveBtn = document.getElementById('employeeModuleAccessSaveBtn');
     const { isCurrent } = beginEmployeeDetailRead('modules');
     const controls = [...document.querySelectorAll('[data-employee-module-key]')].map(element => ({element, disabled:element.disabled}));
@@ -5504,9 +5572,10 @@ async function saveEmployeeModuleAccess() {
         saveBtn.textContent = '저장 중...';
     }
     try {
-        const { data, error } = await _supabase.rpc('erp_admin_save_employee_module_access', {
+        const { data, error } = await _supabase.rpc('erp_admin_save_employee_module_access_v2', {
             p_emp_id: empId,
-            p_access: access
+            p_access: access,
+            p_expected_revision: employeeModuleAccessSnapshot.permission_revision
         });
         if (error) throw error;
         if (!isCurrent()) return;
@@ -5518,6 +5587,8 @@ async function saveEmployeeModuleAccess() {
         const message = String(error?.message || '저장하지 못했습니다.');
         if (message.includes('PERMISSION_ADMIN_REQUIRED')) {
             showAlert('업무 권한 변경은 권한 관리자에게 요청해 주세요.');
+        } else if(error?.code==='PT409') {
+            showAlert('다른 담당자가 권한을 변경했습니다. 입력 내용은 유지됩니다. 최신 권한 확인 후 다시 저장해 주세요.');
         } else if (message.includes('CANNOT_REMOVE_OWN_HR_ACCESS')) {
             showAlert('현재 로그인한 본인의 직원관리 권한은 이 화면에서 끌 수 없습니다. 다른 관리자 계정에서 변경해 주세요.');
         } else {
