@@ -27,7 +27,7 @@
  }
  function mount(){
   hero=document.getElementById('hero');if(!hero||controls)return;
-  mobileImage=document.createElement('img');mobileImage.className='hero-mobile-image';mobileImage.alt='';mobileImage.setAttribute('aria-hidden','true');mobileImage.decoding='async';hero.prepend(mobileImage);
+  mobileImage=document.createElement('img');mobileImage.className='hero-mobile-image';mobileImage.alt='';mobileImage.setAttribute('aria-hidden','true');mobileImage.decoding='async';mobileImage.onload=()=>root.AOS?.refresh?.();hero.prepend(mobileImage);
   transition=document.createElement('div');transition.className='hero-banner-transition';transition.setAttribute('aria-hidden','true');hero.append(transition);
   link=document.createElement('a');link.className='hero-banner-link';link.hidden=true;link.id='hero-banner-link';hero.append(link);
   controls=document.createElement('div');controls.className='hero-banner-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','메인 배너 사진');controls.hidden=true;hero.append(controls);
@@ -47,6 +47,6 @@
   hero.classList.toggle('is-caption-positioned',!slides.length&&['top','bottom'].includes(value.hero_text_position));
   if(slides.length)choose(current);else{imageTicket++;painted='';transition.style.opacity='0';fitPhoto(image(value.hero_image_url));hero.style.setProperty('--hero-content-align',{top:'flex-start',center:'center',bottom:'flex-end'}[value.hero_text_position]||'center');linked(value.hero_banner_link,value.hero_title||value.coop_name);}
  }
- root.CoopHeroBanner=Object.freeze({apply,version:'1.1.1'});
+ root.CoopHeroBanner=Object.freeze({apply,version:'1.1.2'});
  if(root.__COOP_HERO_PENDING__){const pending=root.__COOP_HERO_PENDING__;delete root.__COOP_HERO_PENDING__;apply(pending);}
 })(window);
