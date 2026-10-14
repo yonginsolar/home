@@ -1,7 +1,7 @@
 /* Optional banner settings. Existing home draft, Auth, checked-upload and save RPC only. */
 (function(root){
  'use strict';
- let mounted=false,loaded=false,saving=false,items=[],panel,list,source,mode,play,link,lastBlocked=null;
+ let mounted=false,loaded=false,saving=false,items=[],panel,list,source,mode,play,link,lastBlocked=null,singleDisplay;
  const cards=new Map(),targets=[['','연결 안 함'],['/signup.html','조합원 가입'],['#about','조합 소개'],['#activities','조합 소식'],['#contact','문의하기'],['#status','발전량 현황'],['__custom__','직접 입력']];
  const singleMobileUploads=new WeakMap(),photoSelections=new WeakMap();
  function validatePhotoFile(file){if(file&&(!/^image\/(png|jpeg|webp|gif|avif)$/.test(file.type||'')||file.size>10*1024*1024))throw Error('PNG·JPG·WebP·GIF·AVIF 사진을 10MB 이하로 선택해 주세요.');return file;}
@@ -17,6 +17,14 @@
  function label(container,text,id){const n=document.createElement('label');n.className='form-label mt-2';n.htmlFor=id;n.textContent=text;container.append(n);return n;}
  function input(container,text,id,type='text',max=240){label(container,text,id);const n=document.createElement(type==='textarea'?'textarea':'input');if(type!=='textarea')n.type=type;n.id=id;n.className='form-control';n.maxLength=max;if(type==='textarea')n.rows=2;container.append(n);return n;}
  function select(container,text,id,values){label(container,text,id);const n=document.createElement('select');n.id=id;n.className='form-select';for(const [value,text] of values){const o=document.createElement('option');o.value=value;o.textContent=text;n.append(o);}container.append(n);return n;}
+ function mobileDisplay(container,id,read,change){
+  const group=document.createElement('div');group.id=id;group.className='border-top mt-3 pt-2';container.append(group);
+  const fit=select(group,'모바일 사진 표시',id+'-fit',[['contain','전체 보기 (줄이기)'],['cover','화면 채우기 (자르기)']]);
+  const position=select(group,'자르기 기준 위치',id+'-position',[['center','가운데'],['top','위'],['bottom','아래'],['left','왼쪽'],['right','오른쪽']]),positionLabel=group.querySelector(`label[for="${position.id}"]`),positionBox=document.createElement('div');positionBox.append(positionLabel,position);group.append(positionBox);
+  const sync=(p=read()||{})=>{fit.value=p.mobile_fit==='cover'?'cover':'contain';position.value=['center','top','bottom','left','right'].includes(p.mobile_position)?p.mobile_position:'center';positionBox.hidden=fit.value!=='cover';};
+  fit.onchange=()=>{if(allowed()&&['contain','cover'].includes(fit.value))change('mobileFit',fit.value);sync();};position.onchange=()=>{if(allowed()&&fit.value==='cover'&&['center','top','bottom','left','right'].includes(position.value))change('mobilePosition',position.value);sync();};sync();return {group,fit,position,sync};
+ }
+ function changeMobileDisplay(item,property,value){if(!allowed()||!items.includes(item))return false;const p={...(item.presentation||{})},key=property==='mobileFit'?'mobile_fit':'mobile_position',fallback=property==='mobileFit'?'contain':'center';if(value===fallback)delete p[key];else p[key]=value;item.presentation=p;changed();return true;}
  function linkField(container,text,id,onChange){
   const choice=select(container,text,id,targets),custom=input(container,'이동할 주소',id+'-custom','url',500);custom.placeholder='https:// 또는 /로 시작하는 주소';
   const read=()=>choice.value==='__custom__'?custom.value.trim():choice.value;
@@ -24,7 +32,7 @@
   choice.addEventListener('change',()=>{show();onChange?.(read());});custom.addEventListener('input',()=>onChange?.(read()));
   return {read,set(value){const v=String(value||'');choice.value=targets.some(x=>x[0]===v)&&v!=='__custom__'?v:'__custom__';custom.value=choice.value==='__custom__'?v:'';show();}};
  }
- function lock(){const blocked=!loaded||saving||typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site');panel?.querySelectorAll('input,textarea,select,button').forEach(n=>{if(n.closest('.hero-visual-ui'))return;const item=items.find(x=>x.id===n.closest('[data-slide-card]')?.dataset.slideCard),i=items.indexOf(item);n.disabled=blocked||(n.dataset.slideAction==='up'&&i===0)||(n.dataset.slideAction==='down'&&i===items.length-1);});if(list)list.hidden=mode.value!=='slides';const add=panel?.querySelector('[data-slide-add]');if(add)add.hidden=mode.value!=='slides';if(lastBlocked!==blocked){lastBlocked=blocked;panel?.dispatchEvent(new Event('coop-banner-change'));}root.CoopHeroVisual?.refresh();}
+ function lock(){const blocked=!loaded||saving||typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site');panel?.querySelectorAll('input,textarea,select,button').forEach(n=>{if(n.closest('.hero-visual-ui'))return;const item=items.find(x=>x.id===n.closest('[data-slide-card]')?.dataset.slideCard),i=items.indexOf(item);n.disabled=blocked||(n.dataset.slideAction==='up'&&i===0)||(n.dataset.slideAction==='down'&&i===items.length-1);});if(singleDisplay)singleDisplay.group.hidden=mode.value!=='single';if(list)list.hidden=mode.value!=='slides';const add=panel?.querySelector('[data-slide-add]');if(add)add.hidden=mode.value!=='slides';if(lastBlocked!==blocked){lastBlocked=blocked;panel?.dispatchEvent(new Event('coop-banner-change'));}root.CoopHeroVisual?.refresh();}
  function row(item){
   if(cards.has(item.id))return cards.get(item.id);
   const card=document.createElement('article');card.dataset.slideCard=item.id;card.className='border rounded-3 p-3 mt-3';const heading=document.createElement('h6');heading.className='fw-bold';card.append(heading);
@@ -36,7 +44,8 @@
   const mobilePreview=document.createElement('img');mobilePreview.id=item.id+'-mobile-preview';mobilePreview.alt='모바일용 배너 사진 미리보기';mobilePreview.style.cssText='display:block;max-width:100%;height:150px;object-fit:contain;margin-top:8px';mobilePreview.hidden=true;card.append(mobilePreview);
   const mobileName=document.createElement('div');mobileName.className='form-text';card.append(mobileName);preview.id=item.id+'-pc-preview';
   mobilePhoto.addEventListener('change',()=>{if(!allowed())return;const file=acceptPhotoFile(mobilePhoto);if(!file)return;if(item.mobileObjectUrl)URL.revokeObjectURL(item.mobileObjectUrl);item.mobileFile=file;item.mobileObjectUrl=URL.createObjectURL(file);mobilePreview.src=item.mobileObjectUrl;mobilePreview.hidden=false;mobileName.textContent=file.name;changed();});
-  const mobileClear=document.createElement('button');mobileClear.id=item.id+'-mobile-clear';mobileClear.type='button';mobileClear.className='btn btn-sm btn-outline-secondary mt-2';mobileClear.textContent='모바일용을 빼고 PC용 사용';mobileClear.onclick=()=>{if(!allowed()||!items.includes(item))return;if(item.mobileObjectUrl)URL.revokeObjectURL(item.mobileObjectUrl);item.mobileObjectUrl='';item.mobileFile=null;item.uploadedMobileFile=null;item.value.mobile_image_url='';mobilePhoto.value='';resetPhotoSelection(mobilePhoto);mobilePreview.removeAttribute('src');mobilePreview.hidden=true;mobileName.textContent='PC용 사진 전체를 사용합니다.';changed();};card.append(mobileClear);
+  const mobileClear=document.createElement('button');mobileClear.id=item.id+'-mobile-clear';mobileClear.type='button';mobileClear.className='btn btn-sm btn-outline-secondary mt-2';mobileClear.textContent='모바일용을 빼고 PC용 사용';mobileClear.onclick=()=>{if(!allowed()||!items.includes(item))return;if(item.mobileObjectUrl)URL.revokeObjectURL(item.mobileObjectUrl);item.mobileObjectUrl='';item.mobileFile=null;item.uploadedMobileFile=null;item.value.mobile_image_url='';mobilePhoto.value='';resetPhotoSelection(mobilePhoto);mobilePreview.removeAttribute('src');mobilePreview.hidden=true;mobileName.textContent='PC용 사진을 사용합니다.';changed();};card.append(mobileClear);
+  const display=mobileDisplay(card,item.id+'-mobile-display',()=>item.presentation,(property,value)=>changeMobileDisplay(item,property,value));
   const controls={};
   for(const [field,text,type,max] of [['title','제목','text',120],['subtitle','설명','textarea',240],['button_label','버튼 문구','text',40]]){const n=input(card,text,item.id+'-'+field,type,max);controls[field]=n;n.addEventListener('input',()=>{if(!allowed())return;n.value=n.value.slice(0,max);item.value[field]=n.value;changed();});}
   const button=linkField(card,'버튼 연결 위치',item.id+'-button-url',v=>{if(allowed()){item.value.button_url=v;changed();}}),click=linkField(card,'사진 클릭 시 이동',item.id+'-link-url',v=>{if(allowed()){item.value.link_url=v;changed();}});
@@ -44,12 +53,12 @@
   const overlay=input(card,'사진 어둡게 (%)',item.id+'-overlay','number');overlay.min='0';overlay.max='80';controls.overlay=overlay;overlay.addEventListener('input',()=>{if(allowed()){item.value.overlay=Number(overlay.value);changed();}});
   const actions=document.createElement('div');actions.className='d-flex gap-2 mt-3';card.append(actions);
   for(const [action,text] of [['up','위로'],['down','아래로'],['remove','사진 삭제']]){const b=document.createElement('button');b.type='button';b.className='btn btn-sm btn-outline-secondary';b.textContent=text;b.dataset.slideAction=action;b.onclick=async()=>{if(!allowed())return;const i=items.indexOf(item);if(i<0)return;if(action==='remove'){if(!await root.CoopDialog.confirm('이 사진의 배너 설정을 삭제할까요?'))return;if(!allowed()||!items.includes(item))return;items=items.filter(x=>x!==item);if(item.objectUrl)URL.revokeObjectURL(item.objectUrl);if(item.mobileObjectUrl)URL.revokeObjectURL(item.mobileObjectUrl);card.remove();cards.delete(item.id);}else{const next=i+(action==='up'?-1:1);if(next<0||next>=items.length)return;[items[i],items[next]]=[items[next],items[i]];}render();changed();};actions.append(b);}
-  const record={card,heading,photo,preview,name,mobilePhoto,mobilePreview,mobileName,controls,button,click};cards.set(item.id,record);return record;
+  const record={card,heading,photo,preview,name,mobilePhoto,mobilePreview,mobileName,display,controls,button,click};cards.set(item.id,record);return record;
  }
  function render(){
-  items.forEach((item,i)=>{const r=row(item);r.heading.textContent='사진 '+(i+1);list.append(r.card);for(const [field,n] of Object.entries(r.controls))if(n.value!==String(item.value[field]??''))n.value=String(item.value[field]??'');r.button.set(item.value.button_url);r.click.set(item.value.link_url);
+  items.forEach((item,i)=>{const r=row(item);r.heading.textContent='사진 '+(i+1);list.append(r.card);r.display.sync();for(const [field,n] of Object.entries(r.controls))if(n.value!==String(item.value[field]??''))n.value=String(item.value[field]??'');r.button.set(item.value.button_url);r.click.set(item.value.link_url);
    if(!item.file){r.name.textContent='';if(item.value.image_url){r.preview.src=root.CoopDisplayImages?.display(item.value.image_url)||item.value.image_url;r.preview.hidden=false;}else{r.preview.removeAttribute('src');r.preview.hidden=true;}}
-   if(!item.mobileFile){r.mobileName.textContent=item.value.mobile_image_url?'':'없으면 PC용 사진 전체를 사용합니다.';if(item.value.mobile_image_url){r.mobilePreview.src=root.CoopDisplayImages?.display(item.value.mobile_image_url)||item.value.mobile_image_url;r.mobilePreview.hidden=false;}else{r.mobilePreview.removeAttribute('src');r.mobilePreview.hidden=true;}}
+   if(!item.mobileFile){r.mobileName.textContent=item.value.mobile_image_url?'':'없으면 PC용에 선택한 표시 방식을 적용합니다.';if(item.value.mobile_image_url){r.mobilePreview.src=root.CoopDisplayImages?.display(item.value.mobile_image_url)||item.value.mobile_image_url;r.mobilePreview.hidden=false;}else{r.mobilePreview.removeAttribute('src');r.mobilePreview.hidden=true;}}
    r.card.querySelector('[data-slide-action="up"]').disabled=i===0;r.card.querySelector('[data-slide-action="down"]').disabled=i===items.length-1;
   });lock();
  }
@@ -61,7 +70,8 @@
   mode=select(panel,'배너 사진 구성','site-home-slide-mode',[['single','한 장 배너'],['slides','슬라이드 배너 (최대 4장)']]);mode.addEventListener('change',()=>{if(!allowed())return;lock();changed();});
   link=linkField(panel,'한 장 배너 클릭 시 이동','site-home-banner-click',()=>{if(allowed())changed();});
   const playLabel=document.createElement('label');playLabel.className='form-check mt-3';playLabel.htmlFor='site-home-slide-autoplay';play=document.createElement('input');play.type='checkbox';play.className='form-check-input';play.id=playLabel.htmlFor;play.checked=true;playLabel.append(play,document.createTextNode('8초마다 자동 전환'));panel.append(playLabel);play.addEventListener('change',()=>{if(allowed())changed();});
-  const help=document.createElement('p');help.className='form-text';help.textContent='PC용 1920 × 720px, 모바일용 1080 × 810px, 사진 한 장당 최대 10MB입니다. 모바일용이 없으면 PC용 전체를 사용하며, 기기별 사진 틀은 일정합니다. 사진별 제목·설명·버튼을 비우면 사진만 표시합니다.';panel.append(help);
+  const help=document.createElement('p');help.className='form-text';help.textContent='PC용 1920 × 720px, 모바일용 1080 × 810px, 사진 한 장당 최대 10MB입니다. 모바일용이 없으면 PC용에 선택한 표시 방식을 적용하며, 기기별 사진 틀은 일정합니다. 사진별 제목·설명·버튼을 비우면 사진만 표시합니다.';panel.append(help);
+  singleDisplay=mobileDisplay(panel,'site-home-single-mobile-display',()=>root.CoopHeroVisual?.payload().hero,(property,value)=>{if(mode.value==='single')root.CoopHeroVisual?.config('hero',property,value);});
   list=document.createElement('div');list.id='site-home-slide-list';panel.append(list);
   const add=document.createElement('button');add.type='button';add.dataset.slideAdd='';add.className='btn btn-outline-primary btn-sm mt-3';add.textContent='사진 추가';add.onclick=()=>{if(!allowed())return;if(items.length>=4)return error('배너 사진은 최대 4장까지 등록할 수 있습니다.');items.push({id:key(),value:defaults(),file:null});render();changed();};panel.append(add);
   mounted=true;source.value=JSON.stringify(raw());lock();
@@ -69,7 +79,7 @@
  function set(settings){
   mount();if(!mounted)return;items.forEach(x=>{if(x.objectUrl)URL.revokeObjectURL(x.objectUrl);if(x.mobileObjectUrl)URL.revokeObjectURL(x.mobileObjectUrl);});cards.clear();list.replaceChildren();
   items=(Array.isArray(settings?.hero_slides)?settings.hero_slides:[]).slice(0,4).map((value,i)=>({id:key(),value:{...defaults(),...value},presentation:settings?.home_display_options?.slides?.[i]||{},file:null}));
-  mode.value=settings?.hero_slides_enabled===true?'slides':'single';play.checked=settings?.hero_autoplay!==false;link.set(settings?.hero_banner_link||'');loaded=true;render();source.value=JSON.stringify(raw());panel.dispatchEvent(new Event('coop-banner-change'));
+  mode.value=settings?.hero_slides_enabled===true?'slides':'single';play.checked=settings?.hero_autoplay!==false;link.set(settings?.hero_banner_link||'');loaded=true;render();singleDisplay.sync(settings?.home_display_options?.hero||{});source.value=JSON.stringify(raw());panel.dispatchEvent(new Event('coop-banner-change'));
   document.getElementById('site-home-hero-text-position').value=settings?.hero_text_position||'center';root.CoopHeroVisual?.refresh();
  }
  function validateLink(value){const v=String(value||'').trim();if(!v)return '';if(/[\x00-\x20<>"'\\]/.test(v)||/^\/\//.test(v))throw Error('연결 주소를 확인해 주세요.');if(/^#[A-Za-z0-9_-]+$/.test(v)||/^\/[^/]/.test(v))return v;try{const u=new URL(v);if(u.protocol==='https:'&&!u.username&&!u.password)return u.href;}catch(_){}throw Error('연결 주소는 https://, / 또는 #으로 시작해야 합니다.');}
@@ -85,7 +95,7 @@
  function edit(id,field,value){if(!allowed())return false;const item=items.find(x=>x.id===id),record=item&&cards.get(id),node=record?.controls[field];if(!node||node.disabled)return false;node.value=String(value);node.dispatchEvent(new Event(node.tagName==='SELECT'?'change':'input',{bubbles:true}));return true;}
  function move(id,target){if(!allowed())return false;const from=items.findIndex(x=>x.id===id),to=items.findIndex(x=>x.id===target);if(from<0||to<0||from===to)return false;const [item]=items.splice(from,1);items.splice(to,0,item);render();changed();return true;}
  function action(id,kind){if(!allowed()||!['photo','up','down','remove'].includes(kind))return false;const record=cards.get(id);if(!record)return false;if(kind==='photo'){record.photo.click();return true;}const b=record.card.querySelector(`[data-slide-action="${kind}"]`);if(!b||b.disabled)return false;b.click();return true;}
- function present(id,value){if(!allowed())return false;const item=items.find(x=>x.id===id);if(!item)return false;item.presentation=JSON.parse(JSON.stringify(value));changed();return true;}
+ function present(id,value){if(!allowed())return false;const item=items.find(x=>x.id===id);if(!item)return false;item.presentation=JSON.parse(JSON.stringify(value));cards.get(id)?.display.sync();changed();return true;}
  function view(){return {enabled:mode?.value==='slides',editable:loaded&&!saving&&typeof canAccessAdminMemberTab==='function'&&canAccessAdminMemberTab('site')&&document.getElementById('site-home-hero-title')?.disabled===false,items:items.map(x=>({id:x.id,value:{...x.value},presentation:JSON.parse(JSON.stringify(x.presentation||{})),image:x.objectUrl||root.CoopDisplayImages?.display(x.value.image_url)||x.value.image_url||'',thumb:x.objectUrl||root.CoopDisplayImages?.display(x.value.image_url,'small')||x.value.image_url||''}))};}
  root.CoopHeroSlides=Object.freeze({mount,set,payload,uploadPending,preview,edit,move,action,view,present,validatePhotoFile,acceptPhotoFile,resetPhotoSelection,refresh:lock,enabled:()=>mode?.value==='slides',setSaving(value){saving=!!value;lock();panel?.dispatchEvent(new Event('coop-banner-change'));}});
 })(window);
