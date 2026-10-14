@@ -1,7 +1,7 @@
-/* v1.1.0 — Multiple local bank files, source dates and scoped candidates; no automatic writes. */
+/* v1.1.1 — Up to 50 local bank files with bounded expanded size; no automatic writes. */
 (function(host){
  'use strict';
- const MAX_ROWS=20000, MAX_FILE=5*1024*1024, MAX_FILES=10, MAX_BYTES=20*1024*1024;
+ const MAX_ROWS=20000, MAX_FILE=5*1024*1024, MAX_FILES=50, MAX_BYTES=20*1024*1024, MAX_EXPANDED=50*1024*1024;
  const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
  function date(value,date1904=false){
   if(typeof value==='number' && Number.isFinite(value) && value>=(date1904?35064:36526) && value<=110000) return new Date(Date.UTC(1899,11,30)+(Math.floor(value)+(date1904?1462:0))*86400000).toISOString().slice(0,10);
@@ -60,6 +60,7 @@
    const name=new TextDecoder().decode(new Uint8Array(bytes,p+46,nameLen));total+=uncompressed;
    if(flags&1||uncompressed>20*1024*1024||total>50*1024*1024||/vbaProject|\.bin$|(^|\/)\.\.\//i.test(name))throw new Error('암호화·매크로 또는 너무 큰 파일은 읽을 수 없습니다. CSV로 저장해 주세요.');p+=46+nameLen+extra+comment;
   }
+  return total;
  }
  async function loadLedger(client,coop,start,end,current){
   const all=[];let total=null,editable=false;
@@ -132,7 +133,7 @@
   head.append(title,close);const body=el('div','modal-body');body.append(el('p','text-muted','XLSX·CSV 파일을 읽어 장부의 확인 후보를 보여줍니다. 파일은 서버로 전송하지 않으며, 날짜나 금액은 자동으로 수정하지 않습니다.'));
   function field(parent,key,label,type,value){const col=el('div','col-md-4'),l=el('label','form-label',label),input=el(type==='select'?'select':'input','form-control');input.id='bankCompare'+key;l.htmlFor=input.id;if(type!=='select')input.type=type;if(value!==undefined)input.value=value;input.dataset.erpQueryControl='true';col.append(l,input);parent.append(col);return input;}
   const grid=el('div','row g-3'),file=field(grid,'file','통장 파일 추가 (여러 개 선택)','file');file.accept='.xlsx,.csv';file.multiple=true;file.parentElement.className='col-12';
-  grid.append(el('div','small text-muted','파일당 5MB · 최대 10개, 전체 20MB · 통장 3개도 함께 선택할 수 있습니다.'));
+  grid.append(el('div','small text-muted','파일당 5MB · 최대 50개, 전체 20MB · 여러 번 추가해도 함께 대조합니다.'));
   const fileList=el('div','mt-3'),advanced=el('details','mt-3'),advancedGrid=el('div','row g-3 mt-1');advanced.append(el('summary','fw-semibold','상세 설정'));
   const days=field(advancedGrid,'days','날짜가 다른 장부 후보도 찾기 (±일)','number','7');days.min='0';days.max='30';advanced.append(advancedGrid,el('p','small text-muted mt-2','통장 날짜와 장부 기록일이 다른 거래도 찾습니다. 0이면 같은 날짜만 비교하며, 날짜는 자동으로 바뀌지 않습니다.'));
   body.append(grid,fileList,advanced);const preview=el('div','small text-muted mt-3'),status=el('p','mt-3');status.setAttribute('role','status');const result=el('div','table-responsive');
@@ -142,7 +143,7 @@
   function refreshPreview(){try{const parsed=collectFiles(s.files);preview.textContent=`파일 ${s.files.length}개 · 거래 ${parsed.banks.length.toLocaleString('ko-KR')}건 · ${parsed.start} ~ ${parsed.end} 전체 대조`;}catch(e){preview.textContent=s.files.length?e.message:'';}}
   function readSheet(f){f.rows=host.XLSX.utils.sheet_to_json(f.workbook.Sheets[f.sheet],{header:1,defval:'',raw:true,blankrows:true});Object.assign(f,detectHeader(f.rows));}
   function renderFile(f){
-   const card=el('div','border rounded p-3 mb-2'),bar=el('div','d-flex align-items-center justify-content-between gap-2'),label=el('strong','',f.name),remove=el('button','btn btn-sm btn-outline-secondary','제외');remove.type='button';bar.append(label,remove);card.append(bar);
+   const card=el('div','border rounded p-3 mb-2'),bar=el('div','d-flex align-items-start justify-content-between gap-2'),label=el('strong','text-break',f.name),remove=el('button','btn btn-sm btn-outline-secondary flex-shrink-0','제외');remove.type='button';label.style.minWidth='0';bar.append(label,remove);card.append(bar);
    const summary=el('div','small text-muted mt-1'),details=el('details','mt-2'),inputs=el('div','row g-3 mt-1');details.append(el('summary','','파일 읽기 설정'));details.append(inputs);card.append(summary,details);
    const sheet=field(inputs,'sheet'+f.id,'시트','select'),header=field(inputs,'header'+f.id,'제목 행 번호','number',f.header+1);header.min='1';header.max=String(MAX_ROWS);const cols={};
    for(const name of f.workbook.SheetNames){const op=el('option','',name);op.value=name;sheet.append(op);}sheet.value=f.sheet;
@@ -155,11 +156,13 @@
    remove.onclick=()=>{invalidate();s.files=s.files.filter(x=>x!==f);card.remove();refreshPreview();};mapping();fileList.append(card);
   }
   file.onchange=async()=>{if(s.loading)return;const selected=[...file.files];file.value='';if(!selected.length)return;invalidate();const serial=s.seq;s.loading=true;file.disabled=run.disabled=true;
-   try{if(selected.length+s.files.length>MAX_FILES||selected.reduce((n,f)=>n+f.size,0)+s.files.reduce((n,f)=>n+f.size,0)>MAX_BYTES)throw new Error('파일은 최대 10개, 전체 20MB까지 선택할 수 있습니다.');
+   try{if(selected.length+s.files.length>MAX_FILES||selected.reduce((n,f)=>n+f.size,0)+s.files.reduce((n,f)=>n+f.size,0)>MAX_BYTES)throw new Error('파일은 최대 50개, 전체 20MB까지 선택할 수 있습니다.');
     if(selected.some(f=>f.size>MAX_FILE||!/^.+\.(xlsx|csv)$/i.test(f.name)))throw new Error('파일당 5MB 이하의 XLSX·CSV를 선택해 주세요.');
-    await host.ErpWorkflowAssets.load('spreadsheet');const added=[],hashes=new Set(s.files.map(f=>f.hash));let duplicate=0;
+    await host.ErpWorkflowAssets.load('spreadsheet');const added=[],hashes=new Set(s.files.map(f=>f.hash));let duplicate=0,expandedTotal=s.files.reduce((n,f)=>n+f.expandedBytes,0);
     for(const f of selected){const bytes=await f.arrayBuffer();if(!current(serial))return;const hash=Array.from(new Uint8Array(await host.crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');if(!current(serial))return;
-     if(hashes.has(hash)){duplicate++;continue;}const workbook=workbookFile(bytes,f.name);const item={id:s.nextId++,name:f.name,size:f.size,hash,workbook,sheet:workbook.SheetNames[0]};readSheet(item);added.push(item);hashes.add(hash);}
+     if(hashes.has(hash)){duplicate++;continue;}const expandedBytes=/\.xlsx$/i.test(f.name)?checkZip(bytes):bytes.byteLength;expandedTotal+=expandedBytes;
+     if(expandedTotal>MAX_EXPANDED)throw new Error('엑셀 압축을 푼 전체 데이터가 너무 큽니다. 파일을 나누어 대조해 주세요.');
+     const workbook=workbookFile(bytes,f.name);const item={id:s.nextId++,name:f.name,size:f.size,expandedBytes,hash,workbook,sheet:workbook.SheetNames[0]};readSheet(item);added.push(item);hashes.add(hash);}
     if(!current(serial))return;s.files.push(...added);added.forEach(renderFile);refreshPreview();status.textContent=duplicate?`동일한 파일 ${duplicate}개는 중복 추가하지 않았습니다.`:'';
    }catch(e){if(current(serial))status.textContent=e.message||'파일을 읽지 못했습니다.';}finally{s.loading=false;file.disabled=run.disabled=false;}
   };
