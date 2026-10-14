@@ -19,17 +19,18 @@
         integrity: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk'
     });
     const siteAssets = Object.freeze([
-        Object.freeze({src: new URL('site_editor_drafts.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-EbfUPXazsNn8Ls1+1MosAAoCgvtGnTkzJFr3y/guzmHIS3qZ7rEDd1Vy/AsQU09P', ready: () => typeof root.SiteEditorDrafts?.create === 'function'}),
+        Object.freeze({src: new URL('home_settings_conflict.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-2dLr0r0obVLbc9+OB2t4zQ/93bWr/XN6tUV8fMHwIggYDmjZ6ezKQX91b3CHjNz6', ready: () => root.CoopHomeConflict?.version === '1.0.0'}),
+        Object.freeze({src: new URL('site_editor_drafts.js?v=1.1.0', document.baseURI).href, integrity: 'sha384-avf0MN4qCGjirM7RyH6TywwTUqp333nFCV4SsJFyRtaeRmmQKwtJzU7csLBKgFJ+', ready: () => typeof root.SiteEditorDrafts?.create === 'function'}),
         Object.freeze({src: new URL('../shared/home_design.js?v=20261009-3', document.baseURI).href, integrity: 'sha384-w7le8YvS38GKPdQQ6A4Jjp/+Xlqoda5IEU97x+Gwj8gdTOdOh+iXxZuW2ZeO9uDp', ready: () => typeof root.CoopHomeDesign?.normalizeLayout === 'function'}),
         Object.freeze({src: new URL('../shared/site_text_styles.js?v=20261009-17', document.baseURI).href, integrity: 'sha384-QjRL2pjNqVnMgC37LaVoPTXaST81Wrogi/v6nRwDo/zzz0mCX6+YZNAAz6ORU2MH', ready: () => typeof root.CoopTextStyles?.normalize === 'function'}),
         Object.freeze({src: new URL('../shared/participation_image_display.js?v=20261012-2', document.baseURI).href, integrity: 'sha384-BAhSAOuwT81zoUXrZQVqiEgLHCl625ndKclSPUIO9cKHaf9spvIsk1RgPz9Gb04S', ready: () => root.CoopParticipationImages?.version === '1.0.1'}),
         Object.freeze({src: new URL('../shared/activity_photo_viewer.js?v=20261012-1', document.baseURI).href, integrity: 'sha384-EY00pwIUzEP8WOxijMpFaT9V7txklu4gJpDNrnluPaI/JDlyGj/YaR/75McSxkRX', ready: () => root.CoopActivityPhotoViewer?.version === '1.0.0'}),
-        Object.freeze({src: new URL('admin_member_site.js?v=20261014-9', document.baseURI).href, integrity: 'sha384-FP9gHL3dSJctYXkxQIuJHSLMIpP7NF5A+nj8HR5EmG//lmOcGrkX+dLmpOZOJxZR', ready: () => root.AdminMemberSite?.version === '20261014-9'}),
+Object.freeze({src: new URL('admin_member_site.js?v=20261015-1', document.baseURI).href, integrity: 'sha384-Yi0T2p5zrOfRB5wLLPqLCikweE1eRasztDZlO2GrnAf5YFoz80acLJ971lvu/KdQ', ready: () => root.AdminMemberSite?.version === '20261015-1'}),
         Object.freeze({src: new URL('site_legal_samples.js?v=20261008-1', document.baseURI).href, integrity: 'sha384-8En93aFZlH8BEdzebQ4j4kJzZycfI/wI+t+wVTm3KyhVwDb/9SHzDV9cBcC3s2oq', ready: () => !!root.CoopSiteLegalSamples}),
-Object.freeze({src: new URL('site_inline_editor.js?v=20261015-1', document.baseURI).href, integrity: 'sha384-83FU22+Mc4ej/Wr0SjLr8VcXwaCcwkSs97i38pK6BZcsLmjJgdXBYUUyty3G+Vc5', ready: () => typeof root.CoopSiteInlineHost?.mount === 'function'}),
+Object.freeze({src: new URL('site_inline_editor.js?v=20261015-2', document.baseURI).href, integrity: 'sha384-/yUtGKxyojNCkTh1EqN8pbT65Dw0WRdrPeShcvONGuA/YfhLMKkeWkQJPsotlclp', ready: () => typeof root.CoopSiteInlineHost?.mount === 'function'}),
         Object.freeze({src: new URL('home_visual_editor.js?v=20261014-4', document.baseURI).href, integrity: 'sha384-D0JGVp886uNEn3Z4EPxkUXkeam6evT4L7kbus0cXcmNFMmBuqPn79mPmLlVlcMe+', ready: () => typeof root.CoopHomeVisualEditor?.mount === 'function'}),
-        Object.freeze({src: new URL('hero_slides_editor.js?v=1.3.0', document.baseURI).href, integrity: 'sha384-EYaOHgW/eUkTrrIOcPNSPAv+syzGSKwg5vg2akYcShbj8dMgVgqxaxgc/imKwOTc', ready: () => typeof root.CoopHeroSlides?.mount === 'function'}),
-        Object.freeze({src: new URL('hero_slides_visual.js?v=2.1.0', document.baseURI).href, integrity: 'sha384-Gi9oNO1P3ZkFwJPy2IZZb8UcDNv+Vf8oitLNKAWVHxdoMLfifVuSenhk5MVpwFgW', ready: () => root.CoopHeroVisual?.version === '2.1.0'}),
+        Object.freeze({src: new URL('hero_slides_editor.js?v=1.4.0', document.baseURI).href, integrity: 'sha384-6S0Xgjztn7kR9Kgh/YhGpEUtXUJV/ARQI9rJrgSBgq7RsMbTYObLecpkOVnKxrsA', ready: () => typeof root.CoopHeroSlides?.mount === 'function'}),
+        Object.freeze({src: new URL('hero_slides_visual.js?v=2.2.0', document.baseURI).href, integrity: 'sha384-rAn53Mj3E1C9wfuAo343fwEEUwvoxef3e411WLvEMDKyp7w9L161FdCgNycwzG9s', ready: () => root.CoopHeroVisual?.version === '2.2.0'}),
         Object.freeze({src: new URL('site_legal_editor.js?v=20261010-6', document.baseURI).href, integrity: 'sha384-xMvV6OBb3zFW+p4ufeMCwcEPNwMkhGxNMewbBE4vfrJrhllBCQuFm2qTgdWonFyw', ready: () => typeof root.CoopSiteLegalEditor?.refreshPreview === 'function'})
     ]);
     const pending = new Map();

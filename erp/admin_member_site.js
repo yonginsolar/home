@@ -3,6 +3,20 @@
 (function (root) {
     if (root.AdminMemberSite?.version === '20261012-2') return;
 let activityPhotoRenderRevision=0;
+let homeSettingsBaseline=null;
+const homeUploadedFiles=new WeakMap();
+async function readCurrentHomeSettings(runtime) {
+ const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),15000);
+ try {
+  if(g_adminMemberRuntime!==runtime||!canAccessAdminMemberTab('site'))throw Error('현재 홈페이지 관리 권한을 확인해 주세요.');
+  const {data,error}=await _supabase.rpc('get_my_home_settings').abortSignal(controller.signal);
+  if(error)throw error;
+  if(controller.signal.aborted)throw Error('설정 조회 시간이 길어졌습니다. 작성 내용은 유지됩니다. 다시 시도해 주세요.');
+  if(g_adminMemberRuntime!==runtime||!canAccessAdminMemberTab('site'))throw Error('현재 홈페이지 관리 권한을 확인해 주세요.');
+  if(!data||typeof data!=='object'||Array.isArray(data)||(data.updated_at!=null&&typeof data.updated_at!=='string'))throw Error('저장된 설정을 확인하지 못했습니다. 작성 내용은 유지됩니다.');
+  return data;
+ }finally{window.clearTimeout(timer);}
+}
 async function activityDisplayUrl(item,size='small') {
  if(item.kind==='file')return item.objectUrl||'';
  if(item.kind==='participation'){
@@ -894,16 +908,16 @@ setHomeImagePreview(kind, document.getElementById(`site-home-${kind}-image-url`)
 updateHomeOverlayLabel();
 CoopHomeVisualEditor.setExternal(settings);
 updateHomeFontSelection();
+homeSettingsBaseline={payload:collectHomeSettingsPayload(true),styles:CoopSiteInlineHost.readStyles('home',true)};
 }
 
 async function fetchHomeSettings() {
 try {
 CoopHomeVisualEditor.mount();
-await getSiteEditorDraft('home').load(async () => {
-const { data, error } = await _supabase.rpc('get_my_home_settings');
-if (error) throw error;
-return data || {};
-}, data => { setHomeSettingsForm(data); bindHomePreviewInputs(); });
+const runtime=g_adminMemberRuntime;
+// Do not replace original controls borrowed by a photo/link dialog, even when clean.
+if(getSiteEditorDraft('home').refresh().loaded&&document.querySelector('dialog[open],.modal.show'))return;
+await getSiteEditorDraft('home').load(() => readCurrentHomeSettings(runtime), data => { setHomeSettingsForm(data); bindHomePreviewInputs(); },{reload:true});
 if (!g_homeVisualStarted && getSiteEditorDraft('home').refresh().loaded) {
 g_homeVisualStarted = true;
 window.setTimeout(() => openHomePreview('hero', { preserveArea:true }), 0);
@@ -984,6 +998,8 @@ const button = document.getElementById('btn-save-home-settings');
 if (button) button.disabled = true;
 showLoading(true);
 try {
+const runtime=g_adminMemberRuntime;
+if(!canAccessAdminMemberTab('site')||!homeSettingsBaseline)throw new Error('현재 홈페이지 관리 권한과 설정을 확인해 주세요.');
 const coopId = String(g_adminMemberRuntime?.coop_id || '').trim();
 const validatedBeforeUpload = collectHomeSettingsPayload();
 if (Object.keys(validatedBeforeUpload.p_home_external_fonts).length && !validatedBeforeUpload.p_external_font_rights_confirmed) throw new Error('외부 글꼴의 사용 권한과 이용 조건을 확인해 주세요.');
@@ -995,24 +1011,47 @@ if (!file) continue;
 if (!file.type.startsWith('image/')) throw new Error('이미지 파일만 올릴 수 있습니다.');
 if (file.size > 10 * 1024 * 1024) throw new Error('사진은 한 장당 10MB 이하로 올려 주세요.');
 const folder = coopId ? `site-home/${coopId}` : 'site-home';
-const uploadedUrl = await uploadFileToStorage(file, folder);
+let uploaded=homeUploadedFiles.get(file);if(!uploaded){uploaded=new Map();homeUploadedFiles.set(file,uploaded);}
+let uploadedUrl=uploaded.get(folder);if(!uploadedUrl){uploadedUrl=await uploadFileToStorage(file, folder);uploaded.set(folder,uploadedUrl);}
 document.getElementById(`site-home-${kind}-image-url`).value = uploadedUrl;
 }
 
-const payload = collectHomeSettingsPayload();
+let payload = collectHomeSettingsPayload();
 if (Object.keys(payload.p_home_external_fonts).length && !payload.p_external_font_rights_confirmed) throw new Error('외부 글꼴의 사용 권한과 이용 조건을 확인해 주세요.');
-const { data, error } = await _supabase.rpc('upsert_site_home_settings_v6', {p_settings:payload,p_text_styles:CoopSiteInlineHost.readStyles('home',true)});
-if (error) throw error;
-setHomeSettingsForm(data || payload);
-draft.accept();
+let styles=CoopSiteInlineHost.readStyles('home',true);
+let submitted=siteEditorFormSnapshot('sub-home-settings');
+let response=await _supabase.rpc('upsert_site_home_settings_v6', {p_settings:payload,p_text_styles:styles});
+if(response.error?.message==='HOME_SETTINGS_STALE'){
+ if(siteEditorFormSnapshot('sub-home-settings')!==submitted)throw Error('저장 중에 추가로 작성한 내용이 있습니다. 모두 그대로 유지됩니다. 다시 저장을 눌러 최신 설정과 비교해 주세요.');
+ const form=siteEditorFormSnapshot('sub-home-settings'),mine={payload,styles};
+ const latest=await readCurrentHomeSettings(runtime);
+ const review=CoopHomeConflict.plan(homeSettingsBaseline,mine,CoopHomeConflict.fromSettings(latest,homeSettingsBaseline));
+ showLoading(false);
+ if(!await CoopDialog.confirm(CoopHomeConflict.message(review),{title:'최신 설정과 내 변경 확인',confirmText:'검토한 내용 저장',cancelText:'취소'}))return;
+ if(g_adminMemberRuntime!==runtime||!canAccessAdminMemberTab('site')||siteEditorFormSnapshot('sub-home-settings')!==form)throw Error('확인하는 동안 화면이나 입력이 바뀌었습니다. 작성 내용은 유지됩니다. 다시 저장해 주세요.');
+ payload=review.payload;styles=review.styles;
+ if(Object.keys(payload.p_home_external_fonts).length&&!payload.p_external_font_rights_confirmed)throw Error('최신 설정의 외부 글꼴 사용 권한을 확인한 뒤 다시 저장해 주세요. 작성 내용은 유지됩니다.');
+ showLoading(true);
+ submitted=siteEditorFormSnapshot('sub-home-settings');
+ response=await _supabase.rpc('upsert_site_home_settings_v6',{p_settings:payload,p_text_styles:styles});
+}
+if(response.error)throw response.error;
+if(g_adminMemberRuntime!==runtime||!canAccessAdminMemberTab('site'))throw Error('저장 응답 이후 현재 권한을 확인하지 못했습니다. 작성 내용은 유지됩니다.');
+if(!response.data||typeof response.data.updated_at!=='string')throw Error('저장 결과를 확인하지 못했습니다. 자동으로 다시 저장하지 않습니다. 작성 내용은 유지됩니다.');
+const editedWhileSaving=siteEditorFormSnapshot('sub-home-settings')!==submitted;
+if(editedWhileSaving){
+ // Keep the original three-way baseline: merged server fields have not been
+ // painted into this still-edited form. The next manual save must review them.
+ draft.accept(submitted);
+}else{setHomeSettingsForm(response.data);draft.accept();}
 const impactSection = Array.isArray(g_sectionDrafts) ? g_sectionDrafts.find((item) => item.id === 'impact') : null;
 if (impactSection) impactSection.is_visible = payload.p_impact_visible;
 const savedImpactSection = Array.isArray(g_siteSections) ? g_siteSections.find((item) => item.id === 'impact') : null;
 if (savedImpactSection) savedImpactSection.is_visible = payload.p_impact_visible;
-myAlert('메인 화면, 참여 현황과 연락처 설정을 저장했습니다.');
+myAlert(editedWhileSaving?'저장했습니다. 저장 중에 추가로 작성한 내용은 그대로 남아 있습니다. 이 변경도 반영하려면 다시 저장해 주세요.':'메인 화면, 참여 현황과 연락처 설정을 저장했습니다.');
 } catch (error) {
-CoopSafeLog.error("[saveHomeSettings] failed:", error);
-myAlert('메인 화면 저장 실패: ' + (error?.message || error), 'error');
+if(error?.message==='HOME_SETTINGS_STALE')myAlert('확인하는 동안 다른 창에서 설정이 다시 바뀌었습니다. 작성 내용은 유지됩니다. 다시 저장을 눌러 최신 내용과 비교해 주세요.','warning');
+else {CoopSafeLog.error("[saveHomeSettings] failed:", error);myAlert('메인 화면 저장 실패: ' + (error?.message || error), 'error');}
 } finally {
 showLoading(false);
 g_homeSettingsSaving = false;
@@ -3259,5 +3298,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
         initialized = true;
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
-    root.AdminMemberSite = Object.freeze({ version: '20261014-9', initialize, isInitialized: () => initialized });
+    root.AdminMemberSite = Object.freeze({ version: '20261015-1', initialize, isInitialized: () => initialized });
 })(window);

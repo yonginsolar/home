@@ -30,9 +30,9 @@
   }else if(property==='crop'&&field==='hero'){
    if(!value||!['x','y'].every(k=>typeof value[k]==='number'&&Number.isFinite(value[k])&&value[k]>=0&&value[k]<=100))return false;
    const target=row?o:(o.hero||= {});target.image_x=value.x;target.image_y=value.y;
-  }else if(field==='hero'&&['mobileFit','mobilePosition'].includes(property)){
-   if(!(property==='mobileFit'?['contain','cover']:['center','top','bottom','left','right']).includes(value))return false;
-   const target=row?o:(o.hero||= {}),key=property==='mobileFit'?'mobile_fit':'mobile_position',fallback=property==='mobileFit'?'contain':'center';if(value===fallback)delete target[key];else target[key]=value;if(!row&&!Object.keys(target).length)delete o.hero;
+  }else if(field==='hero'&&['mobileFit','mobilePosition','desktopFit','desktopPosition'].includes(property)){
+   if(!(property.endsWith('Fit')?['contain','cover']:['center','top','bottom','left','right']).includes(value))return false;
+   const target=row?o:(o.hero||= {}),key=property.replace(/(Fit|Position)$/,s=>'_'+s.toLowerCase()),fallback=property.endsWith('Fit')?'contain':'center';if(value===fallback)delete target[key];else target[key]=value;if(!row&&!Object.keys(target).length)delete o.hero;
   }else if(property==='visible'&&Object.hasOwn(textFields,field)&&typeof value==='boolean'){
    const target=row?o:(o.hero||= {});target[textFields[field]==='button_label'?'button_visible':textFields[field]+'_visible']=value;
   }else return false;
@@ -65,5 +65,5 @@
   for(const [kind,text]of[['up','앞으로'],['down','뒤로'],['remove','선택 사진 삭제']]){const b=document.createElement('button');b.type='button';b.textContent=text;b.onclick=async()=>{const row=current();if(!row||!allowed())return;if(!(await flush())||current()?.id!==row.id)return;root.CoopHeroSlides.action(row.id,kind);};actions.append(b);}strip.append(actions);
   stage.after(strip);mounted=true;document.getElementById('site-home-slide-config')?.addEventListener('coop-banner-change',refresh);for(const type of['input','change'])form.addEventListener(type,e=>{if(e.target!==source)refresh();});refresh();
  }
- root.CoopHeroVisual=Object.freeze({mount,set,payload,fields,edit,config,action,editor,select,refresh,version:'2.1.0'});
+ root.CoopHeroVisual=Object.freeze({mount,set,payload,fields,edit,config,action,editor,select,refresh,version:'2.2.0'});
 })(window);

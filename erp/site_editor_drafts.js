@@ -1,4 +1,4 @@
-/* v1.0.0 — page-memory drafts only; no storage, network or authorization changes. */
+/* v1.1.0 — explicit clean refresh only; no storage, network or authorization changes. */
 (function (root) {
   'use strict';
   function create(read, notify = () => {}) {
@@ -11,15 +11,16 @@
       notify(status);
       return status;
     }
-    function accept() {
+    function accept(savedSnapshot) {
       loaded = true;
-      baseline = last = read();
+      last = read();
+      baseline = typeof savedSnapshot === 'string' ? savedSnapshot : last;
       revision++;
       return refresh();
     }
-    function load(fetchValue, apply) {
+    function load(fetchValue, apply, options = {}) {
       const state = refresh();
-      if (state.loaded || state.dirty || busy) return Promise.resolve(false);
+      if (state.loaded && !options.reload || state.dirty || busy) return Promise.resolve(false);
       if (pending) return pending;
       const ticket = revision;
       loading = true;
