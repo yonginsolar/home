@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.5 — only actual input changes create generic dirty state. */
+/* Persistent ERP workspace v1.2.6 — preserve base-authorized drafts across setup-overlay expiry. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -127,7 +127,33 @@
     return value;
   }
   function runtimeKey(runtime) {
-    return JSON.stringify(stable({...runtime,effective_permissions:runtime.effective_permissions.slice().sort()}));
+    const value={...runtime,effective_permissions:runtime.effective_permissions.slice().sort()};
+    // Only the expiring setup overlay is independent of base business authority.
+    // Real identity, coop, modules, employee blocks and base permission changes still purge.
+    if (Array.isArray(runtime.base_effective_permissions)) {
+      value.effective_permissions=runtime.base_effective_permissions.slice().sort();
+      delete value.initial_setup; delete value.base_effective_permissions;
+      if (runtime.runtime_profile==='site_member' && runtime.module_access) {
+        value.module_access={...runtime.module_access,site_admin:runtime.base_effective_permissions.includes('site.admin')};
+      }
+    }
+    return JSON.stringify(stable(value));
+  }
+  function initialOverlayAllows(entry,runtime) {
+    if (!Array.isArray(runtime?.base_effective_permissions)) return true;
+    const target=new URL(entry.route,location.origin),leaf=target.pathname.replace(/\.html$/,'').split('/').pop();
+    const scoped=leaf==='admin_member' && target.searchParams.get('scope')==='member_admin';
+    if (scoped) return true; // This page never derives member rights from the setup overlay.
+    const usesSite=['admin_member','quiz_admin','proposal_builder','governance','admin_minutes','meeting_workspace'].includes(leaf);
+    if (!usesSite) return true;
+    const ordinary=runtime.base_effective_permissions;
+    const rights=leaf==='governance'||leaf==='admin_minutes'||leaf==='meeting_workspace'
+      ? ['site.admin','member.admin','minutes.manage','documents.manage','signature.manage']
+      : leaf==='admin_member' && target.searchParams.get('scope')==='documents_admin'
+        ? ['site.admin','member.admin','documents.manage'] : ['site.admin','member.admin'];
+    if (rights.some(k=>ordinary.includes(k))) return true;
+    return runtime.initial_setup?.active===true && runtime.initial_setup?.areas?.site===true
+      && runtime.effective_permissions.includes('site.admin');
   }
   async function serverAccess() {
     const [identity, access] = await Promise.all([client.auth.getUser(), client.rpc('get_my_erp_runtime')]);
@@ -164,6 +190,11 @@
             activeEntry={frame:document.createElement('iframe'),route:'',fields:new Map()};
             document.getElementById('erpWorkspaceContent').append(activeEntry.frame); frame=activeEntry.frame;
             load(target,true); return;
+          }
+          if (!initialOverlayAllows(cached,access.runtime)) {
+            // Keep this owner's held draft locked; other unchanged-authority tasks survive.
+            status.textContent='초기 설정 권한이 종료되어 화면을 열 수 없습니다. 작성 내용은 보존됩니다.';
+            status.hidden=false; error.hidden=false; return;
           }
           await task(cached).refresh({runtime:access.runtime,dirty:changed(cached)});
           if (ticket !== transition) return;
