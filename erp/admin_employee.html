@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.130
+Version: v1.0.131
 Change: 2026-10-13 - Preserve new employee inputs until explicit discard, without changing employee permissions or registration payloads.
 -->
 <html>
@@ -11,7 +11,7 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.130 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.131 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -59,6 +59,8 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
 <script src="contract_payroll.js?v=1.0.0"></script>
 <script src="payroll_import_guard.js?v=1.0.0"></script>
 <script src="coop_settings_view.js?v=20261014-1"></script>
+<script src="initial_setup_access.js?v=1.1.0"></script>
+<script src="initial_setup_employee.js?v=1.0.0"></script>
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -154,7 +156,7 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
   <script src="hr_insurance_status.js?v=1.0.0" defer></script>
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
-  <script src="/erp/workspace_nav.js?v=20261011-16" defer></script>
+  <script src="/erp/workspace_nav.js?v=20261014-setup2" defer></script>
   <meta name="erp-workflow-revision" content="20261010.2">
   <link rel="stylesheet" href="workflow_ease.css?v=20261010-2">
   <script src="workflow_ease.js?v=20261010-1" defer></script>
@@ -167,6 +169,7 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
   <div class="small text-muted">권한과 설정 정보를 확인한 뒤 목록을 표시합니다.</div>
 </div>
 
+<div id="hrInitialSetupOnly" class="main-card hidden"><h1 class="h4 fw-bold">직원 관리 · 초기 설정 권한</h1><div id="hrInitialSetupOnlyAccess"></div></div>
 <div id="hrPageShell" class="main-card hidden">
   <div class="hr-page-header mb-4">
     <div class="hr-page-heading">
@@ -180,8 +183,10 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
       <button class="btn btn-outline-primary btn-sm btn-rounded" data-workspace-submenu onclick="ErpWorkspaceResume.navigate('hr_insurance.html')">🧾 입사·퇴사 신고</button>
       <button class="btn btn-outline-primary btn-sm btn-rounded" data-workspace-submenu onclick="openStatsDashboard()">📈 통계</button>
       <button class="btn btn-primary btn-sm btn-rounded shadow-sm" onclick="openInviteModal()">✨ 신규등록</button>
+      <a class="btn btn-outline-primary btn-sm btn-rounded" id="employeeSetupWorkLink" href="initial_setup.html" hidden>조합 초기 설정</a>
     </div>
   </div>
+  <div id="employeeInitialSetupAccess" hidden></div>
   <div class="hr-toolbar">
     <button class="btn btn-outline-primary btn-sm btn-rounded" onclick="openBulkLeaveModal()">🌿 전체 휴가 관리</button>
     <button class="btn btn-outline-success btn-sm btn-rounded" onclick="openPayrollImportModal()">📥 급여 일괄입력</button>
@@ -3050,6 +3055,7 @@ function setHrBootStateReady() {
 }
 
 window.onload = async function() {
+    if (await window.ERPInitialSetupEmployee.boot(_supabase)) return;
     try {
     window.ERPEmployeeSettingsView.prepare();
     alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
@@ -3153,6 +3159,7 @@ window.onload = async function() {
     applyHrRuntimeProfileUi();
 
     hrSettingsAuthorized = true;
+    if (!window.ERPEmployeeSettingsView.isPage) void window.ERPInitialSetupEmployee.attach(_supabase);
     await Promise.all([window.ERPEmployeeSettingsView.isPage ? loadCoopSettingsEmployees() : loadList(), loadCompanyInfo({throwOnError:true})]);
     await loadSettings({ loadAuxiliary: false, throwOnError: true });
     applyHrRuntimeProfileUi();

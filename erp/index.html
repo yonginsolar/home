@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.108 | Change: 2026-10-14 - Time-limited initial setup entry. -->
+<!-- Version: v1.0.109 | Change: 2026-10-14 - Initial delegation in staff management. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,7 +8,7 @@
   <script src="/erp/workspace_boot.js?v=20261014-setup"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.108 | index.html');</script>
+  <script>console.log('[Version] v1.0.109 | index.html');</script>
   <script src="work_overview.js?v=1.0.1"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -112,7 +112,7 @@
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
-  <script src="/erp/workspace_nav.js?v=20261014-setup" defer></script>
+  <script src="/erp/workspace_nav.js?v=20261014-setup2" defer></script>
 </head>
 <body class="erp-unified erp-menu-workspace erp-auth-screen" data-erp-mobile-task="menu">
 
@@ -248,10 +248,6 @@
             <span class="d-block small text-muted">교육·행사 등록, 참가자·체크인·알림, 자료와 참석부 관리</span>
         </button>
 
-        <button class="btn btn-white btn-menu hidden" id="btnInitialSetup" onclick="location.href='initial_setup.html'">
-            ⚒ <strong>초기 설정</strong>
-            <span class="d-block small text-muted">조합 기본정보·홈페이지·출자 기준·계정과목 설정</span>
-        </button>
         <button class="btn btn-white btn-menu hidden" id="btnSiteAdmin" onclick="location.href='admin_member.html?scope=site_admin&amp;tab=site'">
             🌐 <strong>홈페이지 관리</strong>
             <span class="d-block small text-muted">공지, 사이트 컨텐츠, FAQ 운영</span>
@@ -2331,7 +2327,6 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         : {};
     const isAssignedModuleAdmin = (moduleKey) => !isSiteMemberProfile || moduleAccess[moduleKey] === true;
     // Initial setup adds no general accounting/HR/document menu permissions.
-    document.getElementById('btnInitialSetup')?.classList.toggle('hidden', isSiteMemberProfile || retiredGraceAccess || !(runtime?.initial_setup?.active === true || runtime?.initial_setup?.can_manage === true));
 
     const canApproval = hasPermission('approval.view');
     const canMypage = hasPermission('mypage.view');
@@ -2402,6 +2397,12 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         document.getElementById('btnAdmin')?.classList.remove('hidden');
     }
     document.getElementById('btnCoopSettings')?.classList.toggle('hidden', document.getElementById('btnAdmin')?.classList.contains('hidden') !== false);
+    const setupManagerOnly = runtime?.initial_setup?.can_manage === true && !(hrEnabled && canAdmin === true);
+    const setupWorkerOnly = runtime?.initial_setup?.active === true && !(hrEnabled && canAdmin === true);
+    if (setupManagerOnly) document.getElementById('btnAdmin')?.classList.remove('hidden');
+    document.getElementById('btnAdmin').onclick = () => { location.href=setupManagerOnly?'admin_employee.html?section=initial_setup':'admin_employee.html'; };
+    if (setupWorkerOnly) document.getElementById('btnCoopSettings')?.classList.remove('hidden');
+    document.getElementById('btnCoopSettings').onclick = () => { location.href=setupWorkerOnly?'initial_setup.html':'admin_employee.html?section=settings'; };
 
     if (!memberAdminEnabled) {
         document.getElementById('btnMemberAdmin')?.classList.add('hidden');

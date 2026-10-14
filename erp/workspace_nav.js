@@ -3,7 +3,7 @@
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261014.setup1';
+  const VERSION = '20261014.setup2';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -83,7 +83,8 @@
       }
       return true;
     });
-    if ((runtime.initial_setup?.active || runtime.initial_setup?.can_manage) && !narrow) items.push(['btnInitialSetup','초기 설정','initial_setup.html','',[],'⚒']);
+    if (!narrow && runtime.initial_setup?.can_manage && !items.some(item=>item[0]==='btnAdmin')) items.push(['btnAdmin','직원 관리','admin_employee.html?section=initial_setup','',[],'♙']);
+    if (!narrow && runtime.initial_setup?.active && !items.some(item=>item[0]==='btnCoopSettings')) items.push(['btnCoopSettings','조합 설정','initial_setup.html','',[],'⚙']);
     return items;
   }
 

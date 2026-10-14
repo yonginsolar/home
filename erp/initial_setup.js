@@ -1,4 +1,4 @@
-/* v1.0.2 — Preserve own locked drafts after setup expiry; no base permission changes. */
+/* v1.0.3 — Delegation lives in staff management, not the recipient setup page. */
 (function(root){
  'use strict';const $=id=>document.getElementById(id);let client,runtime,status,busy=false,area='basic',identity='',generation=0,brandingReady=false,accessKnown=false;
  const loaded=new Map(),baselines=new Map();const forms={basic:'setupBasicForm',capital:'setupCapitalForm',accounts:'setupAccountForm'};
@@ -10,7 +10,7 @@
  async function rpc(name,args){const {data,error}=await client.rpc(name,args);if(error)throw error;return data;}
  function availability(){
   const active=status?.active===true;for(const el of document.querySelectorAll('form input,form select,form button,#setCompany input,#setCompany button')){const key=el.closest('[data-panel]')?.dataset.panel||'basic';el.disabled=busy||!active||!status.areas?.[key]||!baselines.has(key)||(!!el.closest('#setCompany')&&!brandingReady);}
-  $('setupManager').hidden=status?.can_manage!==true;
+  $('setupManager').hidden=true;
   if(active)$('setupContent').hidden=false;
   for(const el of document.querySelectorAll('[data-area]'))el.hidden=!status?.areas?.[el.dataset.area]&&!loaded.has(el.dataset.area);
   $('setupSiteLink').hidden=!active||!status?.areas?.site;
@@ -57,11 +57,11 @@
   try{const result=await root.CoopLogoSettings.saveIfSelected(client,runtime.coop_id);if(result){root.ErpWorkspaceResume.checkpoint($('setCompany'));await tell('로고·파비콘을 저장했습니다.');}else await tell('새 파일을 선택해 주세요.');}
   catch(e){await tell(root.ERPInitialSetupAccess.message(e));}finally{busy=false;availability();}}
  document.addEventListener('DOMContentLoaded',async()=>{
-  console.log('[Version] v1.0.2 | initial_setup');
+  console.log('[Version] v1.0.3 | initial_setup');
   client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
   const gate=await root.ErpRuntimeGuard.requireUser(client,{alertFn:tell,redirectUrl:'index.html'});if(!gate.ok)return;identity=gate.authUser?.id||'';runtime=await root.ErpRuntimeGuard.getRuntime(client);
   if(!await refreshAccess())return;
-  if(status.can_manage)root.ERPInitialSetupAccess.mount(client,$('setupManager'));
+  if(status.can_manage&&!status.active){$('setupStatus').textContent='초기 설정 권한 부여·회수는 직원 관리에서 확인하세요.';}
   for(const formKey of Object.keys(forms))$(forms[formKey]).addEventListener('submit',event=>{event.preventDefault();void save(formKey);});
   for(const button of document.querySelectorAll('[data-area]'))button.addEventListener('click',()=>void switchArea(button.dataset.area));
   $('setupBrandSave').addEventListener('click',()=>void brandSave());
