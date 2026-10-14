@@ -1,4 +1,4 @@
-/* v1.0.5 — Initial setup is limited to website, cooperative profile and capital. */
+/* v1.0.6 — Bounded branding reads preserve drafts and reject late responses. */
 (function(root){
  'use strict';const $=id=>document.getElementById(id);let client,runtime,status,busy=false,area='basic',identity='',generation=0,brandingReady=false,accessKnown=false;
  let brandingState='idle',brandingPending=null,brandingRetryBusy=false;
@@ -24,14 +24,14 @@
  }
  async function refreshAccess(){
   const epoch=generation;
-  try{const next=await rpc('erp_initial_setup_status');if(epoch!==generation)return false;status=next;accessKnown=true;availability();return status.active===true||status.can_manage===true;}
+  try{const next=await root.ERPInitialSetupAccess.read(client,'erp_initial_setup_status');if(epoch!==generation)return false;status=next;accessKnown=true;availability();return status.active===true||status.can_manage===true;}
   catch(e){if(epoch!==generation)return false;accessKnown=false;status={active:false,areas:{}};availability();$('setupStatus').textContent='권한을 확인하지 못했습니다. 다시 확인해 주세요. 입력한 내용은 유지됩니다.';return false;}
  }
  async function loadBranding(){
   if(brandingPending)return brandingPending;
   const epoch=generation;brandingReady=false;brandingState='loading';availability();
   const request=(async()=>{
-   try{const brand=await rpc('erp_coop_branding',{p_action:'get'});
+   try{const brand=await root.ERPInitialSetupAccess.read(client,'erp_coop_branding',{p_action:'get'});
     if(epoch!==generation)return;
     if(!accessKnown||!status?.active||!status.areas?.basic){brandingState='error';return;}
     root.CoopLogoSettings.sync({logo_horizontal_url:brand.display_url,logo_original_url:brand.original_url,logo_favicon_url:brand.icon_url,logo_favicon_original_url:brand.icon_original_url,logo_favicon_custom:String(brand.icon_custom),logo_revision:brand.revision});
@@ -50,8 +50,8 @@
   if(loaded.has(key)||dirty(key))return;const epoch=generation,value=await rpc('erp_initial_setup_config',{p_area:key});
   if(epoch!==generation||dirty(key))return;loaded.set(key,value);
   if(key==='basic'){for(const e of $(forms.basic).querySelectorAll('[data-key]'))e.value=value.data[e.dataset.key]||'';
-   baselines.set(key,snapshot(forms[key]));availability();
-   await loadBranding();if(epoch!==generation)return;
+   baselines.set(key,snapshot(forms[key]));root.ErpWorkspaceResume.checkpoint($(forms[key]));availability();
+   await loadBranding();return;
   }else if(key==='capital'){$('setupMinimum').value=Number(value.data.minimum).toLocaleString('en-US');$('setupUnit').value=Number(value.data.unit).toLocaleString('en-US');}
   if(key!=='basic')baselines.set(key,snapshot(forms[key]));root.ErpWorkspaceResume.checkpoint($(forms[key]));availability();
  }
@@ -79,9 +79,10 @@
   try{const result=await root.CoopLogoSettings.saveIfSelected(client,runtime.coop_id);if(result){root.ErpWorkspaceResume.checkpoint($('setCompany'));await tell('로고·파비콘을 저장했습니다.');}else await tell('새 파일을 선택해 주세요.');}
   catch(e){await tell(root.ERPInitialSetupAccess.message(e));}finally{busy=false;availability();}}
  document.addEventListener('DOMContentLoaded',async()=>{
-  console.log('[Version] v1.0.5 | initial_setup');
+  console.log('[Version] v1.0.6 | initial_setup');
   client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
   const gate=await root.ErpRuntimeGuard.requireUser(client,{alertFn:tell,redirectUrl:'index.html'});if(!gate.ok)return;identity=gate.authUser?.id||'';runtime=await root.ErpRuntimeGuard.getRuntime(client);
+  client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==identity)){generation++;status={active:false,areas:{}};availability();}});
   if(!await refreshAccess())return;
   if(status.can_manage&&!status.active){$('setupStatus').textContent='초기 설정 권한 부여·회수는 직원 관리에서 확인하세요.';}
   for(const formKey of Object.keys(forms))$(forms[formKey]).addEventListener('submit',event=>{event.preventDefault();void save(formKey);});
@@ -89,10 +90,9 @@
   $('setupBrandSave').addEventListener('click',()=>void brandSave());
   $('setupBrandRetry').addEventListener('click',()=>void retryBranding());
   for(const id of ['setupMinimum','setupUnit'])$(id).addEventListener('input',()=>{$(id).value=$(id).value.replace(/[^0-9]/g,'').replace(/\B(?=(\d{3})+(?!\d))/g,',');});
-  if(status.active)await switchArea(['basic','capital'].find(k=>status.areas[k])||'basic');
   root.ErpWorkspaceResume.register({authorize:async()=>{await refreshAccess();return accessKnown;},busy:()=>changed()||brandingRetryBusy||!!brandingPending,refresh:async()=>{if(!status.active||!status.areas?.[area])return;if(!dirty(area))loaded.delete(area);await load(area);}});
-  client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==identity)){generation++;status={active:false,areas:{}};availability();}});
   setInterval(()=>{if(!document.hidden&&!busy)void refreshAccess();},45000);
+  if(status.active)await switchArea(['basic','capital'].find(k=>status.areas[k])||'basic');
  });
  root.addEventListener('beforeunload',event=>{if(changed()){event.preventDefault();event.returnValue='';}});
 })(window);
