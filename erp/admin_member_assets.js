@@ -28,7 +28,7 @@
         Object.freeze({src: new URL('site_legal_samples.js?v=20261008-1', document.baseURI).href, integrity: 'sha384-8En93aFZlH8BEdzebQ4j4kJzZycfI/wI+t+wVTm3KyhVwDb/9SHzDV9cBcC3s2oq', ready: () => !!root.CoopSiteLegalSamples}),
         Object.freeze({src: new URL('site_inline_editor.js?v=20261014-3', document.baseURI).href, integrity: 'sha384-1tczuD7AwYpFIg4eJFSvBGNuWKv87UnFmNNx8nzmeklV7xNMdgCs53e226tnrDDt', ready: () => typeof root.CoopSiteInlineHost?.mount === 'function'}),
         Object.freeze({src: new URL('home_visual_editor.js?v=20261014-2', document.baseURI).href, integrity: 'sha384-NwuHWlCMTOFkhKGQ8EIfOdvdYadZoDV/k70U+r247AcNTZPFfb6auKdmUBY0hiKe', ready: () => typeof root.CoopHomeVisualEditor?.mount === 'function'}),
-        Object.freeze({src: new URL('hero_slides_editor.js?v=1.0.3', document.baseURI).href, integrity: 'sha384-ed9dqUDrEaZEkidl6mqqe7naZ2fCz2zJhyCwRG4VgVzaWQzIk5WCJ8UOrReuTINk', ready: () => typeof root.CoopHeroSlides?.mount === 'function'}),
+        Object.freeze({src: new URL('hero_slides_editor.js?v=1.0.4', document.baseURI).href, integrity: 'sha384-HXWnoqdam1aFUtSHy2zTE5v+d7i8uZHbL7/mZoRrod3YT18ki/17/akMXKXmXWzs', ready: () => typeof root.CoopHeroSlides?.mount === 'function'}),
         Object.freeze({src: new URL('hero_slides_visual.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-PyCb9gSnjdXhkyHlHAQ4hU+PnKru2Z5WSr4OvcgAUIbwD7hLqwbWIXf/9Rcd8+s2', ready: () => root.CoopHeroVisual?.version === '1.0.0'}),
         Object.freeze({src: new URL('site_legal_editor.js?v=20261010-6', document.baseURI).href, integrity: 'sha384-xMvV6OBb3zFW+p4ufeMCwcEPNwMkhGxNMewbBE4vfrJrhllBCQuFm2qTgdWonFyw', ready: () => typeof root.CoopSiteLegalEditor?.refreshPreview === 'function'})
     ]);
