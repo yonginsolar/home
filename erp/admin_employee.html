@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.135
+Version: v1.0.136
 Change: 2026-10-13 - Preserve new employee inputs until explicit discard, without changing employee permissions or registration payloads.
 -->
 <html>
@@ -11,7 +11,7 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.135 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.136 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -23,8 +23,9 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
 <script src="number_input.js?v=20261010-1"></script>
 <script src="../shared/company_seal_upload.js?v=20261009-17"></script>
 <script src="../shared/coop_logo_upload.js?v=1.1.0"></script>
-<script src="../shared/coop_favicon_field.js?v=1.0.0"></script>
-<script src="coop_logo_settings.js?v=1.1.2"></script>
+<script src="../shared/coop_favicon_field.js?v=1.0.1"></script>
+<script src="coop_logo_settings.js?v=1.1.3"></script>
+<script src="coop_certificate_setup.js?v=1.0.0"></script>
 <script src="../shared/member_capital.js?v=20261008-3"></script>
 <script src="member_capital_settings.js?v=20261010-2-uimodal-20261013-1"></script>
   <script>
@@ -59,7 +60,7 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
 <script src="contract_payroll.js?v=1.0.0"></script>
 <script src="payroll_import_guard.js?v=1.0.0"></script>
 <script src="coop_settings_view.js?v=20261014-1"></script>
-<script src="initial_setup_access.js?v=1.1.5"></script>
+<script src="initial_setup_access.js?v=1.1.6"></script>
 <script src="initial_setup_employee.js?v=1.0.1"></script>
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
@@ -1115,7 +1116,7 @@ function guardEmployeeDetailClose(event) {
     cancelEmployeeDetailReads();
 }
 window.addEventListener('beforeunload', event => {
-    if (runInvite._inFlight || hasUnsavedEmployeeInvite() || isEmployeeDetailSaving() || hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
+    if (runInvite._inFlight || hasUnsavedEmployeeInvite() || isEmployeeDetailSaving() || hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || document.getElementById('coopDepositSetup')?.certificateSetupController?.dirty() || document.getElementById('coopDepositSetup')?.certificateSetupController?.writing() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
 });
 let inviteDraftBaseline = null, inviteDiscardPending = false, inviteDiscardAllowed = false;
 const EMPLOYEE_INVITE_DRAFT_IDS = ['newName','newEmail','newRank','newDeptSelect','newDeptCustom','newRole','newAuthLevel'];
@@ -3173,7 +3174,7 @@ window.onload = async function() {
     }
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:refreshEmployeeSettingsWorkspace,
         authorize:async runtime => { if (!window.ERPEmployeeSettingsView.isPage) await window.ERPInitialSetupEmployee.refresh(_supabase,runtime); return true; },
-        busy:() => window.ERPInitialSetupEmployee.busy() || runInvite._inFlight || inviteDiscardPending || hasUnsavedEmployeeInvite()
+        busy:() => document.getElementById('coopDepositSetup')?.certificateSetupController?.busy() || document.getElementById('coopDepositSetup')?.certificateSetupController?.dirty() || window.ERPInitialSetupEmployee.busy() || runInvite._inFlight || inviteDiscardPending || hasUnsavedEmployeeInvite()
             || companySettingsSaveInFlight || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
             || payrollImportBatchController?.busy()
             || window.ERPAnnualSettings?.isBusy()
@@ -5113,7 +5114,22 @@ function openSettings() {
     hrSettingsOpenPromise = pending;
     return pending;
 }
+function ensureCoopDepositSettings() {
+    if (document.getElementById('coopDepositSetup') || !window.CoopCertificateSetup) return;
+    const panel=document.createElement('section');panel.id='coopDepositSetup';panel.className='coop-setting-panel p-3';
+    document.getElementById('companyCapitalHeading').closest('section').before(panel);
+    const owner=getHrSettingsOwner();
+    window.CoopCertificateSetup.mount(panel,{client:_supabase,coopId:()=>myInfo?.coop_id,
+        authorize:async()=>{
+            if (!isHrSettingsContextCurrent(owner)) return false;
+            const auth=await _supabase.auth.getUser();
+            if (auth.error || String(auth.data?.user?.id||'')!==hrAuthorizedUserId || !isHrSettingsContextCurrent(owner)) return false;
+            const runtime=await window.ErpRuntimeGuard.getRuntime(_supabase);
+            return isHrSettingsContextCurrent(owner)&&runtime?.coop_id===myInfo?.coop_id&&runtime.is_active!==false&&runtime.effective_permissions?.includes('hr.admin');
+        },checkpoint:node=>window.ERPEmployeeSettingsView.checkpointSection('#'+node.closest('#coopDepositSetup').id)});
+}
 async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null } = {}) {
+    ensureCoopDepositSettings();
     initAnnualSettings();
     if (loadAuxiliary) {
         try { await window.ERPAnnualSettings.load(annualSelection?.year ?? window.ERPAnnualSettings.currentYear(), annualSelection?.period); }
@@ -5142,6 +5158,8 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCur
 // 회사 정보·캘린더·알림·결재 설정 저장 (연도별 기준은 별도 저장)
 async function saveSettings() {
     if (companySettingsSaveInFlight) return;
+    const depositSetup=document.getElementById('coopDepositSetup')?.certificateSetupController;
+    if (depositSetup?.busy() || depositSetup?.dirty()) return showAlert('출자금 납입 안내를 먼저 저장하거나 입력 취소해 주세요.');
     if (hrSettingsAuxPending.size || hrSettingsReadRetryPromise) return showAlert('설정을 불러오는 중입니다. 완료 후 저장해 주세요.');
     if (!isHrSettingsContextCurrent(getHrSettingsOwner()) || hrSettingsReadyOwner !== getHrSettingsOwner() || hrSettingsReadRetryRequired) return showAlert('설정 다시 불러오기로 확인해 주세요.');
     if (window.ERPAnnualSettings?.isBusy()) return;

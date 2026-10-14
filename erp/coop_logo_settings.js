@@ -1,4 +1,4 @@
-/* v1.1.2 — Clarify document/ERP logo use; keep original save/permission gate. */
+/* v1.1.3 — Illustrated logo locations without changing the save/permission gate. */
 (function(root){
  'use strict';let info={},preview='',epoch=0,iconField=null;
  const get=id=>document.getElementById(id);
@@ -11,6 +11,7 @@
  function mount(){const pane=get('setCompany');if(!pane||get('set_logoFile'))return;const field=document.createElement('div');field.className=get('companyBrandingFields')?'col-12 col-lg-6':'col-12';field.innerHTML='<label for="set_logoFile" class="small text-muted">조합 로고</label><input id="set_logoFile" type="file" accept="image/png,image/jpeg,image/webp" class="form-control form-control-sm"><div class="d-flex align-items-center gap-3 mt-2"><img id="set_logoPreview" alt="조합 로고 미리보기" hidden style="max-width:220px;height:70px;object-fit:contain"><span id="set_logoEmpty" class="small text-muted">등록된 조합 로고가 없습니다.</span></div><div id="set_logoMeta" class="form-text"></div><div class="d-flex justify-content-end gap-3 mt-2"><a id="set_logoOriginal" hidden target="_blank" rel="noopener noreferrer">원본 보기</a><button id="set_logoCancel" type="button" class="btn btn-outline-secondary btn-sm">선택 취소</button></div><div class="form-text">PNG·JPG·WebP, 5MB 이하. 새 파일을 선택하지 않으면 현재 로고를 유지합니다.</div>';
   const seal=get('set_sealFile')?.parentElement;seal?.before(field);if(!field.isConnected)pane.querySelector('.row').append(field);
   iconField=root.CoopFaviconField.mount(get('companyBrandingFields')||pane.querySelector('.row'),'set_favicon');
+  const guide=document.createElement('div');guide.className='col-12';guide.innerHTML='<details class="border rounded-3 p-3 mt-2"><summary class="fw-bold">로고·파비콘 사용 위치 보기</summary><figure class="mb-0 mt-3"><img src="/erp/assets/branding-usage-guide.svg?v=1.0.0" alt="조합 로고는 ERP 접속 화면과 문서에, 글자 없는 파비콘은 브라우저 탭과 검색 아이콘에 표시되는 예시" loading="lazy" style="width:100%;height:auto"><figcaption class="form-text mt-2">조합 로고는 비율을 유지해 축소합니다. 파비콘은 글자 없는 정사각형 심볼을 권장하며, 홈페이지 상단에는 조합명 텍스트를 표시합니다.</figcaption></figure></details>';(get('companyBrandingFields')||pane.querySelector('.row')).append(guide);
   if(get('companyBrandingFields')){iconField.node.classList.add('col-lg-6');seal?.before(iconField.node);}
   get('set_logoCancel').addEventListener('click',()=>{epoch++;get('set_logoFile').value='';revoke();paint();});get('set_logoFile').addEventListener('change',()=>{epoch++;revoke();const file=get('set_logoFile').files[0];if(file){try{root.CoopLogoUpload.validate(file);preview=URL.createObjectURL(file);}catch(e){get('set_logoFile').value='';root.showAlert?.(e.message);}}paint();});paint();
  }

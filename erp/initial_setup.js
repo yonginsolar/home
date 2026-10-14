@@ -1,16 +1,17 @@
-/* v1.0.6 — Bounded branding reads preserve drafts and reject late responses. */
+/* v1.0.7 — Website completion includes canonical deposit guide and cooperative seal. */
 (function(root){
  'use strict';const $=id=>document.getElementById(id);let client,runtime,status,busy=false,area='basic',identity='',generation=0,brandingReady=false,accessKnown=false;
  let brandingState='idle',brandingPending=null,brandingRetryBusy=false;
- const loaded=new Map(),baselines=new Map();const forms={basic:'setupBasicForm',capital:'setupCapitalForm'};
+ let certificateSetup;const loaded=new Map(),baselines=new Map();const forms={basic:'setupBasicForm',capital:'setupCapitalForm'};
  const snapshot=id=>JSON.stringify([...$(id).elements].filter(e=>e.matches('input,select,textarea')).map(e=>[e.id,e.type==='checkbox'?e.checked:e.value.replace(e.hasAttribute('data-number-group')?/,/g:/$^/g,'')]));
  const dirty=key=>baselines.has(key)&&snapshot(forms[key])!==baselines.get(key);
- const changed=()=>busy||[...baselines.keys()].some(dirty)||!!$('set_logoFile')?.files.length||!!$('set_favicon-file')?.files.length;
+ const changed=()=>busy||certificateSetup?.dirty()||certificateSetup?.writing()||[...baselines.keys()].some(dirty)||!!$('set_logoFile')?.files.length||!!$('set_favicon-file')?.files.length;
  const tell=message=>root.CoopDialog.alert(message);
  root.showAlert=tell;
  async function rpc(name,args){const {data,error}=await client.rpc(name,args);if(error)throw error;return data;}
  function availability(){
-  const active=status?.active===true;for(const el of document.querySelectorAll('form input,form select,form button,#setCompany input,#setCompany button')){if(el.id==='setupBrandRetry')continue;const key=el.closest('[data-panel]')?.dataset.panel||'basic';el.disabled=busy||!active||!status.areas?.[key]||!baselines.has(key)||(!!el.closest('#setCompany')&&!brandingReady);}
+  const active=status?.active===true;for(const el of document.querySelectorAll('form input,form select,form button,#setCompany input,#setCompany button')){if(el.id==='setupBrandRetry'||el.closest('#certificateSetupContainer'))continue;const key=el.closest('[data-panel]')?.dataset.panel||'basic';el.disabled=busy||!active||!status.areas?.[key]||!baselines.has(key)||(!!el.closest('#setCompany')&&!brandingReady);}
+  certificateSetup?.setEnabled(active&&status.areas?.basic===true&&!busy);
   $('setupBrandStatus').hidden=brandingState!=='loading'&&brandingState!=='error';
   $('setupBrandStatusText').textContent=brandingState==='loading'?'로고·파비콘 정보를 불러오고 있습니다.':brandingState==='error'?'로고·파비콘 정보를 불러오지 못했습니다. 작성 중인 내용은 그대로 유지됩니다.':'';
   $('setupBrandRetry').hidden=brandingState!=='error';$('setupBrandRetry').disabled=busy||brandingRetryBusy||!!brandingPending||!active||!status.areas?.basic||!loaded.has('basic');
@@ -79,10 +80,11 @@
   try{const result=await root.CoopLogoSettings.saveIfSelected(client,runtime.coop_id);if(result){root.ErpWorkspaceResume.checkpoint($('setCompany'));await tell('로고·파비콘을 저장했습니다.');}else await tell('새 파일을 선택해 주세요.');}
   catch(e){await tell(root.ERPInitialSetupAccess.message(e));}finally{busy=false;availability();}}
  document.addEventListener('DOMContentLoaded',async()=>{
-  console.log('[Version] v1.0.6 | initial_setup');
+  console.log('[Version] v1.0.7 | initial_setup');
   client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
   const gate=await root.ErpRuntimeGuard.requireUser(client,{alertFn:tell,redirectUrl:'index.html'});if(!gate.ok)return;identity=gate.authUser?.id||'';runtime=await root.ErpRuntimeGuard.getRuntime(client);
-  client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==identity)){generation++;status={active:false,areas:{}};availability();}});
+  client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==identity)){generation++;certificateSetup?.invalidate();status={active:false,areas:{}};availability();}});
+  certificateSetup=root.CoopCertificateSetup?.mount($('certificateSetupContainer'),{client,coopId:()=>runtime.coop_id,authorize:async()=>await refreshAccess()&&status.active===true&&status.areas?.basic===true,seal:true});
   if(!await refreshAccess())return;
   if(status.can_manage&&!status.active){$('setupStatus').textContent='초기 설정 권한 부여·회수는 직원 관리에서 확인하세요.';}
   for(const formKey of Object.keys(forms))$(forms[formKey]).addEventListener('submit',event=>{event.preventDefault();void save(formKey);});
@@ -90,7 +92,7 @@
   $('setupBrandSave').addEventListener('click',()=>void brandSave());
   $('setupBrandRetry').addEventListener('click',()=>void retryBranding());
   for(const id of ['setupMinimum','setupUnit'])$(id).addEventListener('input',()=>{$(id).value=$(id).value.replace(/[^0-9]/g,'').replace(/\B(?=(\d{3})+(?!\d))/g,',');});
-  root.ErpWorkspaceResume.register({authorize:async()=>{await refreshAccess();return accessKnown;},busy:()=>changed()||brandingRetryBusy||!!brandingPending,refresh:async()=>{if(!status.active||!status.areas?.[area])return;if(!dirty(area))loaded.delete(area);await load(area);}});
+  root.ErpWorkspaceResume.register({authorize:async()=>{await refreshAccess();return accessKnown;},busy:()=>changed()||certificateSetup?.busy()||brandingRetryBusy||!!brandingPending,refresh:async()=>{if(!status.active||!status.areas?.[area])return;if(!dirty(area))loaded.delete(area);await load(area);}});
   setInterval(()=>{if(!document.hidden&&!busy)void refreshAccess();},45000);
   if(status.active)await switchArea(['basic','capital'].find(k=>status.areas[k])||'basic');
  });
