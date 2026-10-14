@@ -914,7 +914,7 @@ if (!safeValue || /^(https:\/\/|\/|#)/i.test(safeValue)) return safeValue;
 throw new Error(`${label} 연결 주소는 https://, / 또는 #으로 시작해야 합니다.`);
 }
 
-function collectHomeSettingsPayload() {
+function collectHomeSettingsPayload(previewOnly = false) {
 const read = (id) => String(document.getElementById(id)?.value || '').trim();
 const mode = String(document.querySelector('input[name="site-home-impact-mode"]:checked')?.value || 'total');
 const regions = readHomeImpactRegions();
@@ -927,7 +927,7 @@ CoopHomeVisualEditor.select('impact');
 throw new Error('같은 지역을 두 번 등록할 수 없습니다.');
 }
 return {
-...CoopHeroSlides.payload(),
+...CoopHeroSlides.payload(previewOnly),
 p_home_layout_mode: read('site-home-layout-mode') || 'existing',
 p_home_title_font: read('site-home-title-font') || 'legacy',
 p_home_body_font: read('site-home-body-font') || 'legacy',
@@ -1065,7 +1065,7 @@ return result;
 }
 
 async function collectHomePreviewSettings(includeLocalFiles = true) {
-const payload = collectHomeSettingsPayload();
+const payload = collectHomeSettingsPayload(true);
 const settings = {
 ...g_homeSettingsRecord,
 home_layout_mode: payload.p_home_layout_mode,
@@ -1179,7 +1179,7 @@ return;
 }
 await fetchHomeSettings();
 if (!getSiteEditorDraft('home').refresh().loaded) throw new Error('메인 화면 설정을 먼저 불러와 주세요.');
-const previewPayload = collectHomeSettingsPayload();
+const previewPayload = collectHomeSettingsPayload(true);
 const frame = document.getElementById('site-home-preview-frame');
 const url = getHomePreviewUrl();
 const previewSections = { hero:'hero', about:'about', impact:'impact', progress:'progress', portfolio:'portfolio', status:'status', activities:'activities', partners:'partners', faq:'faq', contact:'contact', documents:'documents', calculator:'calculator', 'ops-system':'ops-system', 'game-hall':'game-hall' };
@@ -3241,5 +3241,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
         initialized = true;
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
-    root.AdminMemberSite = Object.freeze({ version: '20261014-3', initialize, isInitialized: () => initialized });
+    root.AdminMemberSite = Object.freeze({ version: '20261014-4', initialize, isInitialized: () => initialized });
 })(window);

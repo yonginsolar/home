@@ -60,12 +60,12 @@
   mode.value=settings?.hero_slides_enabled===true?'slides':'single';play.checked=settings?.hero_autoplay!==false;link.set(settings?.hero_banner_link||'');loaded=true;render();source.value=JSON.stringify(raw());
  }
  function validateLink(value){const v=String(value||'').trim();if(!v)return '';if(/[\x00-\x20<>"'\\]/.test(v)||/^\/\//.test(v))throw Error('연결 주소를 확인해 주세요.');if(/^#[A-Za-z0-9_-]+$/.test(v)||/^\/[^/]/.test(v))return v;try{const u=new URL(v);if(u.protocol==='https:'&&!u.username&&!u.password)return u.href;}catch(_){}throw Error('연결 주소는 https://, / 또는 #으로 시작해야 합니다.');}
- function payload(){mount();const state=raw();if(state.enabled&&items.length<1)throw Error('슬라이드 배너 사진을 한 장 이상 추가해 주세요.');const rows=state.slides.map(x=>({...x,button_url:validateLink(x.button_url),link_url:validateLink(x.link_url)}));return {p_hero_slides_enabled:state.enabled,p_hero_slides:rows,p_hero_autoplay:state.autoplay,p_hero_banner_link:validateLink(state.banner_link)};}
+ function payload(previewOnly=false){mount();const state=raw();if(!previewOnly&&state.enabled&&items.length<1)throw Error('슬라이드 배너 사진을 한 장 이상 추가해 주세요.');const readLink=value=>{if(!previewOnly)return validateLink(value);try{return validateLink(value);}catch(_){return '';}};const rows=state.slides.map(x=>({...x,button_url:readLink(x.button_url),link_url:readLink(x.link_url)}));return {p_hero_slides_enabled:state.enabled,p_hero_slides:rows,p_hero_autoplay:state.autoplay,p_hero_banner_link:readLink(state.banner_link)};}
  async function uploadPending(coopId,upload){
   if(!loaded)throw Error('배너 설정을 먼저 불러와 주세요.');const owner=String(coopId||'');if(!owner)throw Error('조합 정보를 확인할 수 없습니다.');
   for(const item of items){const file=item.file;if(!file||item.uploadedFile===file)continue;item.value.image_url=await upload(file,`site-home/${owner}`);item.uploadedFile=file;}
   source.value=JSON.stringify(raw());return payload();
  }
- async function preview(readFile){const p=payload();const slides=[];for(const item of items)slides.push({...item.value,image_url:item.file?await readFile(item.file):item.value.image_url});return {hero_slides_enabled:p.p_hero_slides_enabled,hero_slides:slides,hero_autoplay:p.p_hero_autoplay,hero_banner_link:p.p_hero_banner_link};}
+ async function preview(readFile){const p=payload(true);const slides=[];for(const [i,item] of items.entries())slides.push({...p.p_hero_slides[i],image_url:item.file?await readFile(item.file):item.value.image_url});return {hero_slides_enabled:p.p_hero_slides_enabled,hero_slides:slides,hero_autoplay:p.p_hero_autoplay,hero_banner_link:p.p_hero_banner_link};}
  root.CoopHeroSlides=Object.freeze({mount,set,payload,uploadPending,preview,enabled:()=>mode?.value==='slides',setSaving(value){saving=!!value;lock();}});
 })(window);
