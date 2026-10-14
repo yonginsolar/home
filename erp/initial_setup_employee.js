@@ -1,13 +1,18 @@
-/* v1.0.0 — Staff-management placement without expanding HR authority. */
+/* v1.0.1 — Refresh only delegation metadata on an authorized HR return. */
 (function(root){
  'use strict';
  async function status(client){const {data,error}=await client.rpc('erp_initial_setup_status');if(error)throw error;return data;}
- async function attach(client){
+ async function refresh(client,runtime){
   const box=document.getElementById('employeeInitialSetupAccess');
-  try{const s=await status(client);box.hidden=s.can_manage!==true;if(s.can_manage)root.ERPInitialSetupAccess.mount(client,box);
+  if(!box)return;
+  try{const s=runtime?.initial_setup||await status(client);box.hidden=s.can_manage!==true;
+   if(s.can_manage){const controller=root.ERPInitialSetupAccess.mount(client,box);if(box.querySelector('details').open&&!controller.busy())await controller.refresh();}
+   else box.setupController?.invalidate();
    const link=document.getElementById('employeeSetupWorkLink');if(link)link.hidden=s.active!==true;
-  }catch(_){box.hidden=true;}
+  }catch(_){box.setupController?.invalidate();box.hidden=true;}
  }
+ const attach=client=>refresh(client);
+ const busy=()=>document.getElementById('employeeInitialSetupAccess')?.setupController?.busy()===true;
  async function boot(client){
   if(new URLSearchParams(location.search).get('section')!=='initial_setup')return false;
   const box=document.getElementById('hrInitialSetupOnly');
@@ -24,5 +29,5 @@
   }catch(_){document.getElementById('hrLoadingScreen').classList.add('hidden');await root.CoopDialog.alert('초기 설정 권한 관리 권한을 확인하지 못했습니다.');}
   return true;
  }
- root.ERPInitialSetupEmployee=Object.freeze({boot,attach});
+ root.ERPInitialSetupEmployee=Object.freeze({boot,attach,refresh,busy});
 })(window);
