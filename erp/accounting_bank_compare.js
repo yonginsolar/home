@@ -1,4 +1,4 @@
-/* v1.1.1 — Up to 50 local bank files with bounded expanded size; no automatic writes. */
+/* v1.1.2 — Preserve file settings during bounded multi-file reading; no automatic writes. */
 (function(host){
  'use strict';
  const MAX_ROWS=20000, MAX_FILE=5*1024*1024, MAX_FILES=50, MAX_BYTES=20*1024*1024, MAX_EXPANDED=50*1024*1024;
@@ -155,7 +155,8 @@
    for(const [key,input] of Object.entries(cols))input.onchange=()=>{invalidate();f.map[key]=Number(input.value);rowSummary();};
    remove.onclick=()=>{invalidate();s.files=s.files.filter(x=>x!==f);card.remove();refreshPreview();};mapping();fileList.append(card);
   }
-  file.onchange=async()=>{if(s.loading)return;const selected=[...file.files];file.value='';if(!selected.length)return;invalidate();const serial=s.seq;s.loading=true;file.disabled=run.disabled=true;
+  file.onchange=async()=>{if(s.loading)return;const selected=[...file.files];file.value='';if(!selected.length)return;invalidate();const serial=s.seq;s.loading=true;file.disabled=run.disabled=true;status.textContent='통장 파일을 읽는 중…';
+   const heldControls=[days,...fileList.querySelectorAll('input,select,button')].map(node=>({node,disabled:node.disabled}));heldControls.forEach(({node})=>{node.disabled=true;});
    try{if(selected.length+s.files.length>MAX_FILES||selected.reduce((n,f)=>n+f.size,0)+s.files.reduce((n,f)=>n+f.size,0)>MAX_BYTES)throw new Error('파일은 최대 50개, 전체 20MB까지 선택할 수 있습니다.');
     if(selected.some(f=>f.size>MAX_FILE||!/^.+\.(xlsx|csv)$/i.test(f.name)))throw new Error('파일당 5MB 이하의 XLSX·CSV를 선택해 주세요.');
     await host.ErpWorkflowAssets.load('spreadsheet');const added=[],hashes=new Set(s.files.map(f=>f.hash));let duplicate=0,expandedTotal=s.files.reduce((n,f)=>n+f.expandedBytes,0);
@@ -164,7 +165,7 @@
      if(expandedTotal>MAX_EXPANDED)throw new Error('엑셀 압축을 푼 전체 데이터가 너무 큽니다. 파일을 나누어 대조해 주세요.');
      const workbook=workbookFile(bytes,f.name);const item={id:s.nextId++,name:f.name,size:f.size,expandedBytes,hash,workbook,sheet:workbook.SheetNames[0]};readSheet(item);added.push(item);hashes.add(hash);}
     if(!current(serial))return;s.files.push(...added);added.forEach(renderFile);refreshPreview();status.textContent=duplicate?`동일한 파일 ${duplicate}개는 중복 추가하지 않았습니다.`:'';
-   }catch(e){if(current(serial))status.textContent=e.message||'파일을 읽지 못했습니다.';}finally{s.loading=false;file.disabled=run.disabled=false;}
+   }catch(e){if(current(serial))status.textContent=e.message||'파일을 읽지 못했습니다.';}finally{s.loading=false;file.disabled=run.disabled=false;heldControls.forEach(({node,disabled})=>{if(node.isConnected)node.disabled=disabled;});}
   };
   days.addEventListener('input',invalidate);days.addEventListener('change',invalidate);
   clearFile.onclick=()=>{invalidate();file.value='';s.files=[];fileList.replaceChildren();refreshPreview();};
