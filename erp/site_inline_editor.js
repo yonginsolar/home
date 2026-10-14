@@ -77,7 +77,7 @@
  function elementControls(area,kind){
   if(!CoopHomeVisualEditor.select(area,false))return;
   const key=area==='about'?'aboutTitle':area==='impact'?'impactTitle':'heroTitle';if(!ready(key))return;
-  if(kind==='button'&&['hero','impact'].includes(area))controls('버튼 설정',[[`site-home-${area}-cta-label`,'버튼 문구'],[`site-home-${area}-cta-target`,'연결 위치'],[`site-home-${area}-cta-custom`,'직접 입력 주소']]);
+  if(kind==='button'&&['hero','impact'].includes(area)){const id=area==='hero'?root.CoopHeroVisual?.editor().slideId:'';controls('버튼 바로가기',id?[[id+'-button_label','버튼 문구'],[id+'-button-url','연결 위치'],[id+'-button-url-custom','직접 입력 주소']]:[[`site-home-${area}-cta-label`,'버튼 문구'],[`site-home-${area}-cta-target`,'연결 위치'],[`site-home-${area}-cta-custom`,'직접 입력 주소']]);}
   else if(kind==='image'){
    if(area==='about')controls('조합 소개 사진',[['admin-about-img-file','사진 교체']]);
    else if(area==='hero'&&root.CoopHeroVisual)bannerPhoto(root.CoopHeroVisual.editor().slideId);
@@ -150,7 +150,7 @@
   const data=event.data;if(!data||!permitted())return;
   if(data.type==='coop-home-inline-edit'){
    const accepted=update(data.field,data.value,data.restore===true,data.styles,data.scope||'');lastRejected=!accepted;send({type:'coop-home-inline-result',field:data.field,accepted,requestId:data.requestId,value:accepted?fieldState(data.field).value:undefined,styles:accepted?fieldState(data.field).runs:undefined});
-  }else if(data.type==='coop-home-inline-control')elementControls(data.area,data.kind);
+  }else if(data.type==='coop-home-inline-control'){if(data.area==='hero'&&(data.scope||'')!==(root.CoopHeroVisual?.editor().slideId||''))return;elementControls(data.area,data.kind);}
   else if(data.type==='coop-home-mobile-control'){
    const scope=root.CoopHeroVisual.editor().slideId;if((data.scope||'')!==scope&&['hero','heroTitle','heroSubtitle','heroButton'].includes(data.field))return;
    const key=data.field==='hero'?'heroTitle':data.field;if(!Object.hasOwn(fields,key)||!ready(key))return;

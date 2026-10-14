@@ -50,7 +50,7 @@
   mode=select(panel,'배너 사진 구성','site-home-slide-mode',[['single','한 장 배너'],['slides','슬라이드 배너 (최대 4장)']]);mode.addEventListener('change',()=>{if(!allowed())return;lock();changed();});
   link=linkField(panel,'한 장 배너 클릭 시 이동','site-home-banner-click',()=>{if(allowed())changed();});
   const playLabel=document.createElement('label');playLabel.className='form-check mt-3';playLabel.htmlFor='site-home-slide-autoplay';play=document.createElement('input');play.type='checkbox';play.className='form-check-input';play.id=playLabel.htmlFor;play.checked=true;playLabel.append(play,document.createTextNode('8초마다 자동 전환'));panel.append(playLabel);play.addEventListener('change',()=>{if(allowed())changed();});
-  const help=document.createElement('p');help.className='form-text';help.textContent='사진별 제목·설명·버튼을 비우면 사진만 표시합니다. 사진은 화면 크기에 따라 일부가 잘릴 수 있습니다.';panel.append(help);
+  const help=document.createElement('p');help.className='form-text';help.textContent='사진별 제목·설명·버튼을 비우면 사진만 표시합니다. 모바일에서는 사진 전체를 축소하고, PC에서는 화면을 채워 일부가 잘릴 수 있습니다.';panel.append(help);
   list=document.createElement('div');list.id='site-home-slide-list';panel.append(list);
   const add=document.createElement('button');add.type='button';add.dataset.slideAdd='';add.className='btn btn-outline-primary btn-sm mt-3';add.textContent='사진 추가';add.onclick=()=>{if(!allowed())return;if(items.length>=4)return error('배너 사진은 최대 4장까지 등록할 수 있습니다.');items.push({id:key(),value:defaults(),file:null});render();changed();};panel.append(add);
   mounted=true;source.value=JSON.stringify(raw());lock();

@@ -6,6 +6,15 @@
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
   const homeAreas=new Set(['hero','impact','contact','design','fonts']);
   const utilities=['sections','legal','design','fonts','documents'];
+  function mountZoom(stage,shell){
+    const controls=document.createElement('div');controls.className='home-preview-zoom';controls.setAttribute('role','group');controls.setAttribute('aria-label','미리보기 확대·축소');
+    const viewport=document.createElement('div');viewport.className='home-preview-viewport';const canvas=document.createElement('div');canvas.className='home-preview-canvas';viewport.append(canvas);canvas.append(shell);
+    let fit=true,scale=1;
+    const output=document.createElement('output');output.setAttribute('aria-label','미리보기 배율');
+    const layout=()=>{const width=viewport.clientWidth,height=viewport.clientHeight;if(!width||!height)return;const base=shell.classList.contains('is-mobile')?390:1200;if(fit)scale=Math.min(1,width/base);shell.style.width=base+'px';shell.style.height=(height/scale)+'px';shell.style.transform='scale('+scale+')';canvas.style.width=(base*scale)+'px';canvas.style.height=height+'px';output.textContent=Math.round(scale*100)+'%';};
+    for(const [name,label,action]of [['out','−',()=>{fit=false;scale=Math.max(.1,scale-.1);}],['in','+',()=>{fit=false;scale=Math.min(1.5,scale+.1);}],['fit','맞춤',()=>{fit=true;}],['actual','100%',()=>{fit=false;scale=1;}]]){const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';button.dataset.previewZoom=name;button.textContent=label;button.setAttribute('aria-label',name==='out'?'미리보기 축소':name==='in'?'미리보기 확대':name==='fit'?'미리보기 화면에 맞춤':'미리보기 실제 크기');button.onclick=()=>{action();layout();};controls.append(button);if(name==='out')controls.append(output);}
+    stage.append(controls,viewport);if(typeof ResizeObserver==='function')new ResizeObserver(layout).observe(viewport);else root.addEventListener('resize',layout);new MutationObserver(layout).observe(shell,{attributes:true,attributeFilter:['class']});queueMicrotask(layout);
+  }
   function syncOrder(rows, renderedIds){
     if(Array.isArray(rows))sectionRows=rows;
     if(Array.isArray(renderedIds))previewOrder=renderedIds.filter(id=>typeof id==='string'&&/^[a-z-]{1,40}$/.test(id)).slice(0,40);
@@ -85,7 +94,7 @@
     const pending=document.createElement('button');pending.type='button';pending.className='btn btn-sm btn-primary';pending.id='site-home-pending-save';pending.hidden=true;pending.textContent='메인 화면 변경 저장';pending.onclick=async()=>{if(await (window.CoopSiteInlineHost?.flush()??Promise.resolve(true)))saveHomeSettings();else myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');};toolbar.append(pending);
     const workspace=document.createElement('div'); workspace.id='site-home-visual-workspace';workspace.className='home-visual-workspace';
     const stage=document.createElement('div'); stage.className='home-visual-stage';
-    stage.append(document.getElementById('site-home-preview-shell'));
+    const previewShell=document.getElementById('site-home-preview-shell');mountZoom(stage,previewShell);
     // Device choice is presentation only; it must not mark the home draft dirty.
     stage.querySelector('#site-home-preview-shell')?.classList.add('is-mobile');
     toolbar.querySelector('#site-home-preview-mobile')?.classList.add('active');
