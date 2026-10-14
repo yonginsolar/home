@@ -3,7 +3,7 @@
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261013.1';
+  const VERSION = '20261014.setup1';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -69,9 +69,11 @@
   function allowedItems(runtime) {
     const set = permissions(runtime);
     const narrow = runtime.runtime_profile === 'site_member';
-    return catalog.filter(item => {
+    const baseSet = new Set(runtime.base_effective_permissions || [...set]);
+    const items = catalog.filter(item => {
       const [id, , , key, rights] = item;
       if (!enabled(runtime, key) || !any(set, rights)) return false;
+      if (runtime.initial_setup?.active && !any(baseSet, rights) && id !== 'btnSiteAdmin') return false;
       if (id === 'btnGovernanceHub' && !['minutes', 'documents', 'signature'].some(k => enabled(runtime, k))) return false;
       if (id === 'btnOfficialsAdmin' && !['member_admin', 'signature'].some(k => enabled(runtime, k))) return false;
       if (id === 'btnPerm' && runtime.runtime_profile === 'workforce_lite') return false;
@@ -81,6 +83,8 @@
       }
       return true;
     });
+    if ((runtime.initial_setup?.active || runtime.initial_setup?.can_manage) && !narrow) items.push(['btnInitialSetup','초기 설정','initial_setup.html','',[],'⚒']);
+    return items;
   }
 
   function link(item) {
