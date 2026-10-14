@@ -150,6 +150,7 @@
     notice.innerHTML='<p>외부 글꼴은 등록하는 조합이 웹사이트 사용·임베딩 허용 여부를 확인하고 필요한 이용 권한을 확보해야 합니다. 방문자의 브라우저가 해당 글꼴 제공처에 접속합니다.</p><label class="form-check-label"><input type="checkbox" class="form-check-input me-2" id="site-home-external-rights-confirmed">이 글꼴의 웹사이트 사용 권한과 이용 조건을 확인했습니다.</label><p class="mt-2 mb-0">지원 주소: Google Fonts 파일 CDN, jsDelivr, cdnjs의 .woff2·.woff 파일</p>';
     fontCard.append(notice);
     mounted=true;updateExternalUi();
+    window.CoopHeroSlides?.mount();
     window.CoopSiteLegalEditor?.mount(); // Legal definitions can arrive before this lazy workspace mounts.
     window.CoopSiteInlineHost?.mount();
     // Do not change the active tab or run a data read while taking initial baselines.

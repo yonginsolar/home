@@ -28,7 +28,7 @@
   return document.getElementById('activityModal')?.classList.contains('show')&&!isSavingActivity&&!g_activityModalOpening;
  }
  function collect(){
-  const result={};for(const [key,cfg] of Object.entries(fields))if(ready(key)){const state=fieldState(key);result[key]={value:state.value,kind:cfg[2],maxLength:cfg[3],styles:state.runs};}return result;
+  const result={};for(const [key,cfg] of Object.entries(fields))if(ready(key)&&!(cfg[0]==='hero'&&root.CoopHeroSlides?.enabled())){const state=fieldState(key);result[key]={value:state.value,kind:cfg[2],maxLength:cfg[3],styles:state.runs};}return result;
  }
  function update(key,value,restore=false,styles){
   if(!Object.hasOwn(fields,key)||!ready(key)||typeof value!=='string')return false;
@@ -63,7 +63,7 @@
   const first=ids.map(([id])=>document.getElementById(id)).find(input=>input&&!input.disabled);
   const form=first?.closest('#sub-home-settings,#sub-about');if(!form)return;
   if(!dialog){dialog=document.createElement('dialog');dialog.className='home-element-dialog';dialog.setAttribute('aria-labelledby','home-element-dialog-title');dialog.addEventListener('close',closeDialog);dialog.addEventListener('cancel',e=>{e.preventDefault();closeDialog();});
-   for(const type of ['input','change'])dialog.addEventListener(type,event=>{const rootId=event.target.dataset.inlineOriginalRoot;if(rootId)getSiteEditorDraft(rootId==='sub-about'?'about':'home').refresh();queueHomePreviewUpdate();});
+   for(const type of ['input','change'])dialog.addEventListener(type,event=>{const rootId=event.target.closest('[data-inline-original-root]')?.dataset.inlineOriginalRoot;if(rootId)getSiteEditorDraft(rootId==='sub-about'?'about':'home').refresh();queueHomePreviewUpdate();});
   }
   // Native dialogs still disappear inside a display:none inspector. Retain each
   // field's logical draft scope while presenting it outside that hidden ancestor.
@@ -78,7 +78,7 @@
   if(kind==='button'&&['hero','impact'].includes(area))controls('버튼 설정',[[`site-home-${area}-cta-label`,'버튼 문구'],[`site-home-${area}-cta-target`,'연결 위치'],[`site-home-${area}-cta-custom`,'직접 입력 주소']]);
   else if(kind==='image'){
    if(area==='about')controls('조합 소개 사진',[['admin-about-img-file','사진 교체']]);
-   else if(['hero','impact'].includes(area))controls('사진 설정',[[`site-home-${area}-image-file`,'사진 교체'],[`site-home-${area}-image-position`,'사진 위치'],...(area==='hero'?[['site-home-hero-content-visible','제목·설명·버튼 표시'],['site-home-hero-overlay','사진 어둡게'],['site-home-hero-text-align','글자 정렬']]:[])]);
+   else if(['hero','impact'].includes(area))controls('사진 설정',[[`site-home-${area}-image-file`,'사진 교체'],[`site-home-${area}-image-position`,'사진 위치'],...(area==='hero'?[['site-home-hero-content-visible','제목·설명·버튼 표시'],['site-home-hero-overlay','사진 어둡게'],['site-home-hero-text-align','글자 정렬'],['site-home-slide-config','슬라이드 배너·클릭 연결']]:[])]);
   }
  }
  function sectionAction(id,action){

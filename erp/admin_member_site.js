@@ -569,7 +569,7 @@ if (!CoopHomeVisualEditor.select(sectionId)) document.querySelector(`#site-conte
 
 function siteEditorFormSnapshot(rootId) {
 const root = document.getElementById(rootId);
-const loaned = document.querySelectorAll(`[data-inline-original-root="${rootId}"]`);
+const loaned = Array.from(document.querySelectorAll(`[data-inline-original-root="${rootId}"]`)).flatMap(el=>el.matches('input,textarea,select')?[el]:Array.from(el.querySelectorAll('input,textarea,select')));
 return JSON.stringify(Array.from(new Set([...Array.from(root?.querySelectorAll('input, textarea, select') || []), ...loaned]))
 .filter(el => !el.closest('.about-editor-toolbar'))
 .sort((a, b) => String(a.id || a.name || '').localeCompare(String(b.id || b.name || '')))
@@ -865,6 +865,7 @@ const el = document.getElementById(id);
 if (el) el.value = value == null ? '' : String(value);
 });
 document.getElementById('site-home-hero-content-visible').checked = settings?.hero_content_visible !== false;
+CoopHeroSlides.set(settings);
 setHomeCtaValue('hero', settings?.hero_cta_url == null ? '#about' : settings.hero_cta_url);
 setHomeCtaValue('impact', settings?.impact_cta_url == null ? '#contact' : settings.impact_cta_url);
 const impactMode = ['total', 'regions', 'village'].includes(String(settings?.impact_display_mode || ''))
@@ -926,6 +927,7 @@ CoopHomeVisualEditor.select('impact');
 throw new Error('같은 지역을 두 번 등록할 수 없습니다.');
 }
 return {
+...CoopHeroSlides.payload(),
 p_home_layout_mode: read('site-home-layout-mode') || 'existing',
 p_home_title_font: read('site-home-title-font') || 'legacy',
 p_home_body_font: read('site-home-body-font') || 'legacy',
@@ -968,6 +970,7 @@ const state = draft.refresh();
 if (!state.loaded || state.loading || !state.dirty) return;
 g_homeSettingsSaving = true;
 draft.setBusy(true);
+CoopHeroSlides.setSaving(true);
 const button = document.getElementById('btn-save-home-settings');
 if (button) button.disabled = true;
 showLoading(true);
@@ -975,6 +978,7 @@ try {
 const coopId = String(g_adminMemberRuntime?.coop_id || '').trim();
 const validatedBeforeUpload = collectHomeSettingsPayload();
 if (Object.keys(validatedBeforeUpload.p_home_external_fonts).length && !validatedBeforeUpload.p_external_font_rights_confirmed) throw new Error('외부 글꼴의 사용 권한과 이용 조건을 확인해 주세요.');
+await CoopHeroSlides.uploadPending(coopId,uploadFileToStorage);
 for (const kind of ['hero', 'impact']) {
 const fileInput = document.getElementById(`site-home-${kind}-image-file`);
 const file = fileInput?.files?.[0] || null;
@@ -1004,6 +1008,7 @@ myAlert('메인 화면 저장 실패: ' + (error?.message || error), 'error');
 showLoading(false);
 g_homeSettingsSaving = false;
 draft.setBusy(false);
+CoopHeroSlides.setSaving(false);
 }
 }
 
@@ -1100,6 +1105,7 @@ const file = document.getElementById(`site-home-${kind}-image-file`)?.files?.[0]
 if (file) settings[`${kind}_image_url`] = await readHomePreviewFile(file);
 }
 settings.site_preview = await collectSitePreviewDraft(includeLocalFiles);
+Object.assign(settings,await CoopHeroSlides.preview(includeLocalFiles?readHomePreviewFile:async()=>''));
 settings.inline_fields = window.CoopSiteInlineHost?.collect() || {};
 return settings;
 }
@@ -1204,6 +1210,8 @@ g_homePreviewStorageKey = `coop-home-preview-draft:${storageToken}`;
 const initialHomeDraft = await collectHomePreviewSettings(false);
 delete initialHomeDraft.site_preview; // Content/legal/news drafts stay in the live iframe message channel only.
 delete initialHomeDraft.inline_fields;
+delete initialHomeDraft.hero_slides; // New caption/file drafts stay in the live peer channel only.
+delete initialHomeDraft.hero_banner_link;
 sessionStorage.setItem(g_homePreviewStorageKey, JSON.stringify(initialHomeDraft));
 url.searchParams.set('home_preview_token', storageToken);
 } catch (error) {
@@ -3233,5 +3241,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
         initialized = true;
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
-    root.AdminMemberSite = Object.freeze({ version: '20261014-2', initialize, isInitialized: () => initialized });
+    root.AdminMemberSite = Object.freeze({ version: '20261014-3', initialize, isInitialized: () => initialized });
 })(window);
