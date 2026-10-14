@@ -845,6 +845,7 @@ const valueMap = {
 'site-home-hero-highlight': settings?.hero_highlight,
 'site-home-hero-subtitle': settings?.hero_subtitle,
 'site-home-hero-image-url': settings?.hero_image_url,
+'site-home-hero-mobile-image-url': settings?.hero_mobile_image_url,
 'site-home-hero-image-position': settings?.hero_image_position || 'center',
 'site-home-hero-overlay': settings?.hero_overlay_percent ?? 50,
 'site-home-hero-text-align': settings?.hero_text_align || 'center',
@@ -882,7 +883,7 @@ const visible = document.getElementById('site-home-impact-visible');
 if (visible) visible.checked = settings?.impact_visible !== false;
 renderHomeImpactRegions(settings?.impact_regions || []);
 updateHomeImpactModeUi();
-['hero', 'impact'].forEach((kind) => {
+['hero', 'impact', 'hero-mobile'].forEach((kind) => {
 const fileInput = document.getElementById(`site-home-${kind}-image-file`);
 if (fileInput) fileInput.value = '';
 setHomeImagePreview(kind, document.getElementById(`site-home-${kind}-image-url`)?.value || '');
@@ -944,6 +945,7 @@ p_hero_title: read('site-home-hero-title'),
 p_hero_highlight: read('site-home-hero-highlight'),
 p_hero_subtitle: read('site-home-hero-subtitle'),
 p_hero_image_url: read('site-home-hero-image-url'),
+p_hero_mobile_image_url: read('site-home-hero-mobile-image-url'),
 p_hero_image_position: read('site-home-hero-image-position') || 'center',
 p_hero_overlay_percent: Number(read('site-home-hero-overlay') || 50),
 p_hero_text_align: read('site-home-hero-text-align') || 'center',
@@ -1070,6 +1072,8 @@ return result;
 
 async function collectHomePreviewSettings(includeLocalFiles = true) {
 const payload = collectHomeSettingsPayload(true);
+const editor = window.CoopHeroVisual?.editor();
+const isPhone = document.getElementById('site-home-preview-shell')?.classList.contains('is-mobile') === true;
 const settings = {
 ...g_homeSettingsRecord,
 home_layout_mode: payload.p_home_layout_mode,
@@ -1085,6 +1089,7 @@ hero_title: payload.p_hero_title,
 hero_highlight: payload.p_hero_highlight,
 hero_subtitle: payload.p_hero_subtitle,
 hero_image_url: payload.p_hero_image_url,
+hero_mobile_image_url: payload.p_hero_mobile_image_url,
 hero_image_position: payload.p_hero_image_position,
 hero_overlay_percent: payload.p_hero_overlay_percent,
 hero_text_align: payload.p_hero_text_align,
@@ -1106,14 +1111,16 @@ contact_phone: payload.p_contact_phone,
 contact_email: payload.p_contact_email,
 contact_address: payload.p_contact_address
 };
-if (includeLocalFiles) for (const kind of ['hero', 'impact']) {
+if (includeLocalFiles) for (const kind of ['hero', 'impact', 'hero-mobile']) {
+if (kind === 'hero-mobile' && !isPhone) continue;
+if (kind === 'hero' && isPhone && (document.getElementById('site-home-hero-mobile-image-file')?.files?.length || settings.hero_mobile_image_url)) continue;
 const file = document.getElementById(`site-home-${kind}-image-file`)?.files?.[0] || null;
-if (file) settings[`${kind}_image_url`] = await readHomePreviewFile(file);
+if (file) settings[kind === 'hero-mobile' ? 'hero_mobile_image_url' : `${kind}_image_url`] = await readHomePreviewFile(file);
 }
 settings.site_preview = await collectSitePreviewDraft(includeLocalFiles);
-Object.assign(settings,await CoopHeroSlides.preview(includeLocalFiles?readHomePreviewFile:async()=>''));
+Object.assign(settings,await CoopHeroSlides.preview(includeLocalFiles?readHomePreviewFile:async()=>'',{slideId:editor?.slideId||'',device:isPhone?'mobile':'desktop'}));
 settings.inline_fields = window.CoopSiteInlineHost?.collect() || {};
-settings.mobile_editor = window.CoopHeroVisual?.editor();
+settings.mobile_editor = editor;
 return settings;
 }
 
@@ -1173,6 +1180,7 @@ const isMobile = device === 'mobile';
 document.getElementById('site-home-preview-shell')?.classList.toggle('is-mobile', isMobile);
 document.getElementById('site-home-preview-desktop')?.classList.toggle('active', !isMobile);
 document.getElementById('site-home-preview-mobile')?.classList.toggle('active', isMobile);
+queueHomePreviewUpdate();
 }
 
 async function openHomePreview(sectionId = 'hero', options = {}) {
@@ -3248,5 +3256,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
         initialized = true;
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
-    root.AdminMemberSite = Object.freeze({ version: '20261014-7', initialize, isInitialized: () => initialized });
+    root.AdminMemberSite = Object.freeze({ version: '20261014-8', initialize, isInitialized: () => initialized });
 })(window);

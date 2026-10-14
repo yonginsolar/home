@@ -71,7 +71,7 @@
   document.body.append(dialog);
   dialog.replaceChildren();const heading=document.createElement('h2');heading.id='home-element-dialog-title';heading.textContent=title;dialog.append(heading);
   dialog.classList.toggle('home-banner-gui',ids.some(([id])=>id==='site-home-slide-config'));
-  for(const [id,label] of ids){const input=document.getElementById(id);if(!input||input.disabled)continue;const marker=document.createComment('inline field return');input.before(marker);input.dataset.inlineOriginalRoot=form.id;moved.push([input,marker]);const lab=document.createElement('label');lab.htmlFor=id;lab.className='form-label';lab.textContent=label;dialog.append(lab,input);}
+  for(const [id,label] of ids){const input=document.getElementById(id);if(!input||input.disabled)continue;const marker=document.createComment('inline field return');input.before(marker);input.dataset.inlineOriginalRoot=form.id;moved.push([input,marker]);if(label){const lab=document.createElement('label');lab.htmlFor=id;lab.className='form-label';lab.textContent=label;dialog.append(lab);}dialog.append(input);}
   if(!moved.length)return;const done=document.createElement('button');done.type='button';done.className='btn btn-primary mt-3';done.textContent='확인';done.onclick=closeDialog;dialog.append(done);dialog.showModal();
  }
  function elementControls(area,kind){
@@ -84,7 +84,7 @@
    else if(['hero','impact'].includes(area))controls('사진 설정',[[`site-home-${area}-image-file`,'사진 교체'],[`site-home-${area}-image-position`,'사진 위치'],...(area==='hero'?[['site-home-hero-content-visible','제목·설명·버튼 표시'],['site-home-hero-overlay','사진 어둡게'],['site-home-hero-text-align','글자 정렬'],['site-home-slide-config','슬라이드 배너·클릭 연결']]:[])]);
   }
  }
- function bannerPhoto(id){if(!permitted())return;controls('배너 사진',[[id?id+'-image':'site-home-hero-image-file','사진 선택·교체']]);}
+ function bannerPhoto(id){if(!permitted())return;controls('PC·모바일 배너 사진',id?[[id+'-image','PC용 · 권장 1920 × 720px'],[id+'-pc-preview',''],[id+'-mobile-image','모바일용 (선택) · 권장 1080 × 810px'],[id+'-mobile-preview',''],[id+'-mobile-clear','']]:[['site-home-hero-image-file','PC용 · 권장 1920 × 720px'],['site-home-hero-image-preview',''],['site-home-hero-mobile-image-file','모바일용 (선택) · 권장 1080 × 810px'],['site-home-hero-mobile-image-preview',''],['site-home-hero-mobile-image-clear','']]);}
  function bannerLinks(id){if(!permitted())return;const prefix=id?id+'-':'';controls('배너 연결',id?[[prefix+'button-url','버튼 연결'],[prefix+'button-url-custom','직접 입력 주소'],[prefix+'link-url','배너 클릭 연결'],[prefix+'link-url-custom','직접 입력 주소']]:[['site-home-hero-cta-target','버튼 연결'],['site-home-hero-cta-custom','직접 입력 주소'],['site-home-banner-click','배너 클릭 연결'],['site-home-banner-click-custom','직접 입력 주소']]);}
  function sectionAction(id,action){
   if(!permitted()||typeof g_sectionSaving==='undefined'||g_sectionSaving)return false;
