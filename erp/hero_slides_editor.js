@@ -1,13 +1,13 @@
 /* Optional banner settings. Existing home draft, Auth, checked-upload and save RPC only. */
 (function(root){
  'use strict';
- let mounted=false,loaded=false,saving=false,items=[],panel,list,source,mode,play,link;
+ let mounted=false,loaded=false,saving=false,items=[],panel,list,source,mode,play,link,lastBlocked=null;
  const cards=new Map(),targets=[['','연결 안 함'],['/signup.html','조합원 가입'],['#about','조합 소개'],['#activities','조합 소식'],['#contact','문의하기'],['#status','발전량 현황'],['__custom__','직접 입력']];
  const defaults=()=>({image_url:'',title:'',subtitle:'',button_label:'',button_url:'',link_url:'',image_position:'center',text_align:'center',text_position:'center',overlay:35});
  const key=()=>root.crypto?.randomUUID?.()||Math.random().toString(36).slice(2);
  function allowed(){return loaded&&!saving&&typeof canAccessAdminMemberTab==='function'&&canAccessAdminMemberTab('site')&&getSiteEditorDraft('home').refresh().loaded&&!getSiteEditorDraft('home').refresh().busy;}
  function raw(){return {enabled:mode?.value==='slides',autoplay:play?.checked!==false,banner_link:link?.read()||'',slides:items.map(x=>({...x.value})),files:items.map(x=>x.file?[x.id,x.file.name,x.file.size,x.file.lastModified,x.file.type]:null)};}
- function changed(){source.value=JSON.stringify(raw());source.dispatchEvent(new Event('input',{bubbles:true}));queueHomePreviewUpdate();}
+ function changed(){source.value=JSON.stringify(raw());source.dispatchEvent(new Event('input',{bubbles:true}));queueHomePreviewUpdate();panel.dispatchEvent(new Event('coop-banner-change'));}
  function error(message){root.myAlert(message,'warning');}
  function label(container,text,id){const n=document.createElement('label');n.className='form-label mt-2';n.htmlFor=id;n.textContent=text;container.append(n);return n;}
  function input(container,text,id,type='text',max=240){label(container,text,id);const n=document.createElement(type==='textarea'?'textarea':'input');if(type!=='textarea')n.type=type;n.id=id;n.className='form-control';n.maxLength=max;if(type==='textarea')n.rows=2;container.append(n);return n;}
@@ -19,7 +19,7 @@
   choice.addEventListener('change',()=>{show();onChange?.(read());});custom.addEventListener('input',()=>onChange?.(read()));
   return {read,set(value){const v=String(value||'');choice.value=targets.some(x=>x[0]===v)&&v!=='__custom__'?v:'__custom__';custom.value=choice.value==='__custom__'?v:'';show();}};
  }
- function lock(){const blocked=!loaded||saving||typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site');panel?.querySelectorAll('input,textarea,select,button').forEach(n=>{const item=items.find(x=>x.id===n.closest('[data-slide-card]')?.dataset.slideCard),i=items.indexOf(item);n.disabled=blocked||(n.dataset.slideAction==='up'&&i===0)||(n.dataset.slideAction==='down'&&i===items.length-1);});if(list)list.hidden=mode.value!=='slides';const add=panel?.querySelector('[data-slide-add]');if(add)add.hidden=mode.value!=='slides';}
+ function lock(){const blocked=!loaded||saving||typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site');panel?.querySelectorAll('input,textarea,select,button').forEach(n=>{if(n.closest('.hero-visual-ui'))return;const item=items.find(x=>x.id===n.closest('[data-slide-card]')?.dataset.slideCard),i=items.indexOf(item);n.disabled=blocked||(n.dataset.slideAction==='up'&&i===0)||(n.dataset.slideAction==='down'&&i===items.length-1);});if(list)list.hidden=mode.value!=='slides';const add=panel?.querySelector('[data-slide-add]');if(add)add.hidden=mode.value!=='slides';if(lastBlocked!==blocked){lastBlocked=blocked;panel?.dispatchEvent(new Event('coop-banner-change'));}}
  function row(item){
   if(cards.has(item.id))return cards.get(item.id);
   const card=document.createElement('article');card.dataset.slideCard=item.id;card.className='border rounded-3 p-3 mt-3';const heading=document.createElement('h6');heading.className='fw-bold';card.append(heading);
@@ -45,6 +45,7 @@
  function mount(){
   if(mounted)return;const file=document.getElementById('site-home-hero-image-file');const parent=file?.closest('.card-body');if(!parent)return;
   source=document.createElement('input');source.type='hidden';source.id='site-home-slide-draft';source.value='{}';parent.append(source);
+  const position=document.createElement('input');position.type='hidden';position.id='site-home-hero-text-position';position.value='center';parent.append(position);
   panel=document.createElement('div');panel.id='site-home-slide-config';panel.className='border-top pt-3 mt-3';parent.append(panel);
   mode=select(panel,'배너 사진 구성','site-home-slide-mode',[['single','한 장 배너'],['slides','슬라이드 배너 (최대 4장)']]);mode.addEventListener('change',()=>{if(!allowed())return;lock();changed();});
   link=linkField(panel,'한 장 배너 클릭 시 이동','site-home-banner-click',()=>{if(allowed())changed();});
@@ -57,7 +58,8 @@
  function set(settings){
   mount();if(!mounted)return;items.forEach(x=>{if(x.objectUrl)URL.revokeObjectURL(x.objectUrl);});cards.clear();list.replaceChildren();
   items=(Array.isArray(settings?.hero_slides)?settings.hero_slides:[]).slice(0,4).map(value=>({id:key(),value:{...defaults(),...value},file:null}));
-  mode.value=settings?.hero_slides_enabled===true?'slides':'single';play.checked=settings?.hero_autoplay!==false;link.set(settings?.hero_banner_link||'');loaded=true;render();source.value=JSON.stringify(raw());
+  mode.value=settings?.hero_slides_enabled===true?'slides':'single';play.checked=settings?.hero_autoplay!==false;link.set(settings?.hero_banner_link||'');loaded=true;render();source.value=JSON.stringify(raw());panel.dispatchEvent(new Event('coop-banner-change'));
+  document.getElementById('site-home-hero-text-position').value=settings?.hero_text_position||'center';root.CoopHeroVisual?.refresh();
  }
  function validateLink(value){const v=String(value||'').trim();if(!v)return '';if(/[\x00-\x20<>"'\\]/.test(v)||/^\/\//.test(v))throw Error('연결 주소를 확인해 주세요.');if(/^#[A-Za-z0-9_-]+$/.test(v)||/^\/[^/]/.test(v))return v;try{const u=new URL(v);if(u.protocol==='https:'&&!u.username&&!u.password)return u.href;}catch(_){}throw Error('연결 주소는 https://, / 또는 #으로 시작해야 합니다.');}
  function payload(previewOnly=false){mount();const state=raw();if(!previewOnly&&state.enabled&&items.length<1)throw Error('슬라이드 배너 사진을 한 장 이상 추가해 주세요.');const readLink=value=>{if(!previewOnly)return validateLink(value);try{return validateLink(value);}catch(_){return '';}};const rows=state.slides.map(x=>({...x,button_url:readLink(x.button_url),link_url:readLink(x.link_url)}));return {p_hero_slides_enabled:state.enabled,p_hero_slides:rows,p_hero_autoplay:state.autoplay,p_hero_banner_link:readLink(state.banner_link)};}
@@ -67,5 +69,9 @@
   source.value=JSON.stringify(raw());return payload();
  }
  async function preview(readFile){const p=payload(true);const slides=[];for(const [i,item] of items.entries())slides.push({...p.p_hero_slides[i],image_url:item.file?await readFile(item.file):item.value.image_url});return {hero_slides_enabled:p.p_hero_slides_enabled,hero_slides:slides,hero_autoplay:p.p_hero_autoplay,hero_banner_link:p.p_hero_banner_link};}
- root.CoopHeroSlides=Object.freeze({mount,set,payload,uploadPending,preview,refresh:lock,enabled:()=>mode?.value==='slides',setSaving(value){saving=!!value;lock();}});
+ function edit(id,field,value){if(!allowed())return false;const item=items.find(x=>x.id===id),record=item&&cards.get(id),node=record?.controls[field];if(!node||node.disabled)return false;node.value=String(value);node.dispatchEvent(new Event(node.tagName==='SELECT'?'change':'input',{bubbles:true}));return true;}
+ function move(id,target){if(!allowed())return false;const from=items.findIndex(x=>x.id===id),to=items.findIndex(x=>x.id===target);if(from<0||to<0||from===to)return false;const [item]=items.splice(from,1);items.splice(to,0,item);render();changed();return true;}
+ function action(id,kind){if(!allowed()||!['photo','up','down','remove'].includes(kind))return false;const record=cards.get(id);if(!record)return false;if(kind==='photo'){record.photo.click();return true;}const b=record.card.querySelector(`[data-slide-action="${kind}"]`);if(!b||b.disabled)return false;b.click();return true;}
+ function view(){return {enabled:mode?.value==='slides',editable:loaded&&!saving&&typeof canAccessAdminMemberTab==='function'&&canAccessAdminMemberTab('site'),items:items.map(x=>({id:x.id,value:{...x.value},image:x.objectUrl||root.CoopDisplayImages?.display(x.value.image_url)||x.value.image_url||'',thumb:x.objectUrl||root.CoopDisplayImages?.display(x.value.image_url,'small')||x.value.image_url||''}))};}
+ root.CoopHeroSlides=Object.freeze({mount,set,payload,uploadPending,preview,edit,move,action,view,refresh:lock,enabled:()=>mode?.value==='slides',setSaving(value){saving=!!value;lock();panel?.dispatchEvent(new Event('coop-banner-change'));}});
 })(window);

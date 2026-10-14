@@ -36,14 +36,15 @@
  }
  function apply(value){
   mount();if(!hero||!value||typeof value!=='object')return;
-  const next=JSON.stringify([value.hero_slides_enabled,value.hero_slides,value.hero_autoplay,value.hero_content_visible,value.hero_banner_link,value.coop_name]);
+  const next=JSON.stringify([value.hero_slides_enabled,value.hero_slides,value.hero_autoplay,value.hero_content_visible,value.hero_banner_link,value.coop_name,value.hero_text_position]);
   settings=value;if(next===signature){if(slides.length)choose(current);else linked(value.hero_banner_link,value.hero_title||value.coop_name);return;}signature=next;stop();
   slides=value.hero_slides_enabled===true&&Array.isArray(value.hero_slides)?value.hero_slides.filter(s=>s&&image(s.image_url)).slice(0,4):[];hero.classList.toggle('is-slider-banner',slides.length>0);controls.hidden=slides.length<2;
   controls.querySelectorAll('[data-banner-index]').forEach(n=>n.remove());
   slides.forEach((s,i)=>{const b=document.createElement('button');b.type='button';b.dataset.bannerIndex=String(i);b.textContent=String(i+1);b.setAttribute('aria-label',(i+1)+'번째 배너 사진');b.onclick=()=>choose(i);controls.append(b);});
   manualPause=reduced?.matches===true;current=Math.min(current,Math.max(0,slides.length-1));
-  if(slides.length)choose(current);else{imageTicket++;painted='';transition.style.opacity='0';hero.style.removeProperty('--hero-content-align');linked(value.hero_banner_link,value.hero_title||value.coop_name);}
+  hero.classList.toggle('is-caption-positioned',!slides.length&&['top','bottom'].includes(value.hero_text_position));
+  if(slides.length)choose(current);else{imageTicket++;painted='';transition.style.opacity='0';hero.style.setProperty('--hero-content-align',{top:'flex-start',center:'center',bottom:'flex-end'}[value.hero_text_position]||'center');linked(value.hero_banner_link,value.hero_title||value.coop_name);}
  }
- root.CoopHeroBanner=Object.freeze({apply,version:'1.0.0'});
+ root.CoopHeroBanner=Object.freeze({apply,version:'1.0.1'});
  if(root.__COOP_HERO_PENDING__){const pending=root.__COOP_HERO_PENDING__;delete root.__COOP_HERO_PENDING__;apply(pending);}
 })(window);

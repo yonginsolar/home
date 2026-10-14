@@ -69,6 +69,7 @@
   // field's logical draft scope while presenting it outside that hidden ancestor.
   document.body.append(dialog);
   dialog.replaceChildren();const heading=document.createElement('h2');heading.id='home-element-dialog-title';heading.textContent=title;dialog.append(heading);
+  dialog.classList.toggle('home-banner-gui',ids.some(([id])=>id==='site-home-slide-config'));
   for(const [id,label] of ids){const input=document.getElementById(id);if(!input||input.disabled)continue;const marker=document.createComment('inline field return');input.before(marker);input.dataset.inlineOriginalRoot=form.id;moved.push([input,marker]);const lab=document.createElement('label');lab.htmlFor=id;lab.className='form-label';lab.textContent=label;dialog.append(lab,input);}
   if(!moved.length)return;const done=document.createElement('button');done.type='button';done.className='btn btn-primary mt-3';done.textContent='확인';done.onclick=closeDialog;dialog.append(done);dialog.showModal();
  }
@@ -78,6 +79,7 @@
   if(kind==='button'&&['hero','impact'].includes(area))controls('버튼 설정',[[`site-home-${area}-cta-label`,'버튼 문구'],[`site-home-${area}-cta-target`,'연결 위치'],[`site-home-${area}-cta-custom`,'직접 입력 주소']]);
   else if(kind==='image'){
    if(area==='about')controls('조합 소개 사진',[['admin-about-img-file','사진 교체']]);
+   else if(area==='hero'&&root.CoopHeroVisual)controls('배너 편집',[['site-home-slide-config','']]);
    else if(['hero','impact'].includes(area))controls('사진 설정',[[`site-home-${area}-image-file`,'사진 교체'],[`site-home-${area}-image-position`,'사진 위치'],...(area==='hero'?[['site-home-hero-content-visible','제목·설명·버튼 표시'],['site-home-hero-overlay','사진 어둡게'],['site-home-hero-text-align','글자 정렬'],['site-home-slide-config','슬라이드 배너·클릭 연결']]:[])]);
   }
  }

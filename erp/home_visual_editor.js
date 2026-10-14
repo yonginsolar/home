@@ -151,6 +151,7 @@
     fontCard.append(notice);
     mounted=true;updateExternalUi();
     window.CoopHeroSlides?.mount();
+    window.CoopHeroVisual?.mount();
     window.CoopSiteLegalEditor?.mount(); // Legal definitions can arrive before this lazy workspace mounts.
     window.CoopSiteInlineHost?.mount();
     // Do not change the active tab or run a data read while taking initial baselines.
