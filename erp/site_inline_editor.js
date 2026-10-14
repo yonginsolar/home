@@ -106,7 +106,8 @@
  function mount(){
   for(const group of ['home','about','activities'])styleInput(group);
   const workspace=document.getElementById('site-home-visual-workspace'),toolbar=document.querySelector('.home-visual-toolbar');if(!workspace||!toolbar||document.getElementById('home-inline-settings-toggle'))return;
-  const toggle=document.createElement('button');toggle.id='home-inline-settings-toggle';toggle.type='button';toggle.className='btn btn-sm btn-outline-secondary';toggle.textContent='세부 설정';toggle.setAttribute('aria-expanded','false');toggle.onclick=()=>{const open=workspace.classList.toggle('show-settings');toggle.setAttribute('aria-expanded',String(open));};toolbar.append(toggle);
+  let explicitSettings=false;
+  const toggle=document.createElement('button');toggle.id='home-inline-settings-toggle';toggle.type='button';toggle.className='btn btn-sm btn-outline-secondary';toggle.textContent='세부 설정';toggle.setAttribute('aria-expanded','false');toggle.onclick=()=>{const open=workspace.classList.toggle('show-settings');explicitSettings=open;toggle.setAttribute('aria-expanded',String(open));};toolbar.append(toggle);
   const actions=document.createElement('div');actions.className='home-inline-save-actions';toolbar.append(actions);
   const zone=document.createElement('div');zone.className='home-inline-save-zone';toolbar.append(zone);
   const status=document.createElement('span');status.id='home-inline-save-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');zone.append(status,actions);
@@ -140,7 +141,7 @@
    if(['hero','impact','contact','design','fonts','about'].includes(area)&&retry&&!retry.hidden){const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';button.textContent='다시 불러오기';button.disabled=retry.disabled||!allowed;button.onclick=()=>{if(permitted()&&!retry.disabled)retry.click();};actions.append(button);}
    publicLink.hidden=true;publicLink.removeAttribute('href');
    try{const url=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(url&&url.protocol==='https:'&&!url.username&&!url.password){url.search='';url.hash='';publicLink.href=url.href;publicLink.hidden=false;}}catch(_){}
-   if(!['hero','impact','about','activities','contact','legal'].includes(area))workspace.classList.add('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
+   if(!['hero','impact','about','activities','contact','legal'].includes(area))workspace.classList.add('show-settings');else if(!explicitSettings)workspace.classList.remove('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
   }
   new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class','src']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
  }
