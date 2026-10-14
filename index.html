@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.144
-Change: 2026-10-14 - Support optional banner slides and click destinations.
+Version: v1.0.145
+Change: 2026-10-14 - Mobile-first direct editing and tenant-safe initial banners.
 -->
 <html lang="ko">
 
@@ -11,7 +11,7 @@ Change: 2026-10-14 - Support optional banner slides and click destinations.
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.144 | index.html');</script>
+<script>console.log('[Version] v1.0.145 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -29,6 +29,7 @@ Change: 2026-10-14 - Support optional banner slides and click destinations.
   })();
 </script>
   <meta charset="utf-8">
+  <script>if(['yonginsolar.kr','www.yonginsolar.kr','localhost','127.0.0.1'].includes(location.hostname))document.documentElement.dataset.coopHomeMain='true';</script>
   <meta content="width=device-width, initial-scale=1.0" name="viewport">
   <title>용인모두의햇빛협동조합 | 시민이 만드는 태양광 협동조합</title>
   <link rel="canonical" href="https://www.yonginsolar.kr/">
@@ -87,7 +88,7 @@ Change: 2026-10-14 - Support optional banner slides and click destinations.
 
   <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
 
-  <link href="style.css?v=20260917-4" rel="stylesheet">
+  <link href="style.css?v=20261014-1" rel="stylesheet">
   <style>
     body {
       word-break: keep-all;
@@ -138,6 +139,7 @@ Change: 2026-10-14 - Support optional banner slides and click destinations.
       gap: 12px;
       margin-top: 24px;
     }
+    #public-hero-certifications[hidden],#public-site-certifications[hidden]{display:none!important;margin:0!important;padding:0!important;}
     .site-certification-card {
       display: flex;
       align-items: center;
@@ -1770,9 +1772,10 @@ Change: 2026-10-14 - Support optional banner slides and click destinations.
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <script src="shared/home_design.js?v=20261009-3"></script>
 <script src="shared/site_text_styles.js?v=20261009-17" defer></script>
-<script src="shared/site_inline_editor.js?v=20261013-2" defer></script>
+<script src="shared/home_display_options.js?v=1.0.0" defer></script>
+<script src="shared/site_inline_editor.js?v=20261014-mobile-1" defer></script>
 <script src="shared/home_preview_editor.js?v=20261012-1" defer></script>
-<script src="shared/hero_banner.js?v=1.0.1" defer></script>
+<script src="shared/hero_banner.js?v=1.1.0" defer></script>
 <link rel="stylesheet" href="shared/hero_banner.css?v=1.0.1">
   <link rel="stylesheet" href="shared/home_design.css?v=20261009-1">
 </head>
@@ -2709,6 +2712,9 @@ Change: 2026-10-14 - Support optional banner slides and click destinations.
         }
         if(window.CoopHeroBanner)window.CoopHeroBanner.apply(settings);
         else window.__COOP_HERO_PENDING__=settings;
+        // The carousel owns the currently selected photo and its presentation.
+        // Repainting photo 0 here would mix its caption into another photo.
+        if (!(settings.hero_slides_enabled === true && settings.hero_slides?.length)) window.CoopHomeDisplay?.apply(settings);
 
         const isSiteMemberProfile = String(settings.runtime_profile || '') === 'site_member';
         const homeTemplate = ['community', 'simple', 'brand', 'editorial', 'campaign'].includes(String(settings.home_template || ''))
@@ -2914,7 +2920,7 @@ Change: 2026-10-14 - Support optional banner slides and click destinations.
         document.documentElement.dataset.homePreview = 'true';
         let homePreviewHomeSignature = '', homePreviewInlineSignature = '';
         let homePreviewPendingDraft = null;
-        const homePreviewToolsReady = () => typeof window.CoopTextStyles?.paint === 'function'
+        const homePreviewToolsReady = () => typeof window.CoopTextStyles?.paint === 'function' && typeof window.CoopHomeDisplay?.apply === 'function'
             && (window.parent === window || (typeof window.CoopSitePreview?.apply === 'function'
                 && typeof window.CoopSiteInline?.defer === 'function'
                 && typeof window.CoopSiteInline?.refresh === 'function'));
@@ -2956,7 +2962,7 @@ Change: 2026-10-14 - Support optional banner slides and click destinations.
         document.addEventListener('DOMContentLoaded', resumeHomePreviewDraft, { once: true });
         document.addEventListener('load', (event) => {
             const script = event.target;
-            if (script?.tagName === 'SCRIPT' && /\/shared\/(site_text_styles|site_inline_editor|home_preview_editor)\.js(?:\?|$)/.test(script.src)) {
+            if (script?.tagName === 'SCRIPT' && /\/shared\/(site_text_styles|home_display_options|site_inline_editor|home_preview_editor)\.js(?:\?|$)/.test(script.src)) {
                 resumeHomePreviewDraft();
             }
         }, true);

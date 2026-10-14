@@ -34,6 +34,7 @@
     if(!Object.hasOwn(labels,area)||!available(area)) return false;
     if(typeof canAccessAdminMemberTab==='function'&&!canAccessAdminMemberTab('site'))return false;
     selected=area;
+    const bannerTools=document.querySelector('.mobile-banner-tools');if(bannerTools)bannerTools.hidden=area!=='hero';
     if(area!=='legal')lastHomeArea=area;
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!==(homeAreas.has(area)?area:'hero'));
     document.querySelectorAll('[data-home-select-area]').forEach(node=>node.setAttribute('aria-pressed',String(node.dataset.homeSelectArea===area)));
@@ -85,6 +86,10 @@
     const workspace=document.createElement('div'); workspace.id='site-home-visual-workspace';workspace.className='home-visual-workspace';
     const stage=document.createElement('div'); stage.className='home-visual-stage';
     stage.append(document.getElementById('site-home-preview-shell'));
+    // Device choice is presentation only; it must not mark the home draft dirty.
+    stage.querySelector('#site-home-preview-shell')?.classList.add('is-mobile');
+    toolbar.querySelector('#site-home-preview-mobile')?.classList.add('active');
+    toolbar.querySelector('#site-home-preview-desktop')?.classList.remove('active');
     const legalPreview=document.createElement('div');legalPreview.id='site-home-legal-preview';legalPreview.className='home-visual-legal-preview';legalPreview.hidden=true;stage.append(legalPreview);
     const inspector=document.createElement('div'); inspector.className='home-visual-inspector';
     const homeFields=document.createElement('div');homeFields.className='home-visual-home-fields';
