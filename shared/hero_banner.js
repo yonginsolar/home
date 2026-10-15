@@ -72,6 +72,8 @@
   hero.classList.toggle('is-caption-positioned',!slides.length&&['top','bottom'].includes(value.hero_text_position));
   if(slides.length)choose(current);else{transition.style.opacity='0';showPhoto(selectedImage({image_url:value.hero_image_url,mobile_image_url:value.hero_mobile_image_url}));hero.style.setProperty('--hero-content-align',{top:'flex-start',center:'center',bottom:'flex-end'}[value.hero_text_position]||'center');linked(value.hero_banner_link,value.hero_title||value.coop_name);}
  }
- root.CoopHeroBanner=Object.freeze({apply,version:'1.3.0'});
+ // Text-only descriptors: measuring a slide must never load its picture.
+ function captionLayouts(){return slides.length>1?slides.map((s,i)=>({title:String(s.title||''),subtitle:String(s.subtitle||''),button_label:String(s.button_label||''),button_url:safeLink(s.button_url),visible:settings.hero_content_visible!==false,display:settings.home_display_options?.slides?.[i]||{}})):[];}
+ root.CoopHeroBanner=Object.freeze({apply,captionLayouts,version:'1.4.0'});
  if(root.__COOP_HERO_PENDING__){const pending=root.__COOP_HERO_PENDING__;delete root.__COOP_HERO_PENDING__;apply(pending);}
 })(window);
