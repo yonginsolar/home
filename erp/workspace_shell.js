@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.7 — recognize prepared tasks; keep retained drafts through late loads and retry. */
+/* Persistent ERP workspace v1.2.8 — bounded access reads and setup-only menu refresh; retain drafts. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -10,6 +10,7 @@
   let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', userId = '', transition = 0;
   const retained = new Map(), attached = new WeakSet();
   const RETAIN_LIMIT = 6;
+  let accessPending = null, startupPending = null;
   let printableEntry = null, navigationPending = false;
   document.documentElement.setAttribute('data-erp-print-locked', '');
   const view = () => routes.route(new URLSearchParams(location.search).get('view') || '');
@@ -157,11 +158,25 @@
       && runtime.effective_permissions.includes('site.admin');
   }
   async function serverAccess() {
-    const [identity, access] = await Promise.all([client.auth.getUser(), client.rpc('get_my_erp_runtime')]);
-    if (identity.error || access.error) throw new Error('ERP_ACCESS_UNAVAILABLE');
-    const id = identity.data?.user?.id, runtime = access.data;
-    if (!id || !runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return null;
-    return {id,runtime,key:runtimeKey(runtime)};
+    const source = client;
+    if (accessPending?.client === source) return accessPending.promise;
+    const controller = new AbortController();
+    let deadline;
+    const work = Promise.resolve().then(async () => {
+      const request = source.rpc('get_my_erp_runtime');
+      const [identity, access] = await Promise.all([source.auth.getUser(),
+        request.abortSignal ? request.abortSignal(controller.signal) : request]);
+      if (identity.error || access.error) throw new Error('ERP_ACCESS_UNAVAILABLE');
+      const id = identity.data?.user?.id, runtime = access.data;
+      if (!id || !runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return null;
+      return {id,runtime,key:runtimeKey(runtime)};
+    });
+    const job = {client:source, promise:null};
+    job.promise = Promise.race([work, new Promise((_, reject) => {
+      deadline = setTimeout(() => { reject(new Error('ERP_ACCESS_TIMEOUT')); controller.abort(); }, 15000);
+    })]).finally(() => { clearTimeout(deadline); if (accessPending === job) accessPending = null; });
+    accessPending = job;
+    return job.promise; // Late getUser results cannot settle a timed-out attempt or unlock a task.
   }
   function cancelLoading() {
     clearTimeout(slowTimer); clearTimeout(timer); clearTimeout(probeTimer);
@@ -190,6 +205,8 @@
     probeTimer = setTimeout(inspect, 250);
   }
   function loading() {
+    const text = error.querySelector('p');
+    if (text) text.textContent = '화면을 불러오지 못했습니다.';
     error.hidden = true;
     cancelLoading();
     slowTimer = setTimeout(() => { status.textContent = '화면을 불러오고 있습니다…'; status.hidden = false; }, 300);
@@ -220,6 +237,7 @@
             document.getElementById('erpWorkspaceContent').append(activeEntry.frame); frame=activeEntry.frame;
             load(target,true); return;
           }
+          window.ErpWorkspace.updateSetupRuntime?.(client, access.runtime);
           if (!initialOverlayAllows(cached,access.runtime)) {
             // Keep this owner's held draft locked; other unchanged-authority tasks survive.
             status.textContent='초기 설정 권한이 종료되어 화면을 열 수 없습니다. 작성 내용은 보존됩니다.';
@@ -435,10 +453,14 @@
     } else void start(client);
   };
   async function start(configuredClient) {
+    if (startupPending) return startupPending;
     client = configuredClient;
     const target = view();
     if (!target) return home();
-    try {
+    const retry = document.getElementById('erpWorkspaceRetry');
+    error.hidden = true; status.textContent = '권한을 확인하고 있습니다…'; status.hidden = false;
+    retry.disabled = true;
+    const pending = (async () => { try {
       const access = await serverAccess();
       if (!access) return home(target);
       const runtime=access.runtime; userId=access.id; accessKey=access.key;
@@ -450,7 +472,14 @@
         }
       });
       load(target);
-    } catch (_) { status.hidden = true; error.hidden = false; }
+    } catch (_) {
+      const text = error.querySelector('p');
+      if (text) text.textContent = '접근 권한을 확인하지 못했습니다. 다시 시도해 주세요.';
+      status.hidden = true; error.hidden = false;
+    } })();
+    startupPending = pending;
+    try { await pending; }
+    finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261016.1'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261016.2'};
 })();

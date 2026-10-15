@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.5.5 — keep site/member workspaces to their three assigned menus. */
+/* ERP workspace navigation v1.5.6 — refresh setup-only menus without replacing held task editors. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261014.setup2';
+  const VERSION = '20261016.2';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -29,6 +29,7 @@
   let state = null, generation = 0, panel, list, brand, brandImage, brandSun, toggle, backdrop, returnFocus, orderButton, orderDialog, orderDraft, orderBusy=false;
   let connections = new WeakMap();
   const authBound = new WeakSet();
+  let setupExpiryTimer;
   const localRoots = '.erp-local-navigation .sidebar-menu,.nav-tabs,.nav-pills,[role="tablist"],.step-tabs,.doc-tabs,.tabs,.sub-tabs,[data-workspace-submenu]';
   let submenu, submenuOwner, submenuRows = [], localNavigationRoots = [], submenuFrame;
   // Layout only: new task groups start folded; permissions always come from the server.
@@ -86,6 +87,64 @@
     if (!narrow && runtime.initial_setup?.can_manage && !items.some(item=>item[0]==='btnAdmin')) items.push(['btnAdmin','직원 관리','admin_employee.html?section=initial_setup','',[],'♙']);
     if (!narrow && runtime.initial_setup?.active && !items.some(item=>item[0]==='btnCoopSettings')) items.push(['btnCoopSettings','조합 설정','initial_setup.html','',[],'⚙']);
     return items;
+  }
+
+  // UI comparison only, matching the shell's unchanged-base draft boundary.
+  // This never authorizes a task or replaces its server permission checks.
+  function setupBaseKey(runtime) {
+    const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])])) : value;
+    const value = {...runtime,effective_permissions:runtime.effective_permissions.slice().sort()};
+    if (Array.isArray(runtime.base_effective_permissions)) {
+      value.effective_permissions=runtime.base_effective_permissions.slice().sort();
+      delete value.initial_setup; delete value.base_effective_permissions;
+      if (runtime.runtime_profile==='site_member' && runtime.module_access) {
+        value.module_access={...runtime.module_access,site_admin:runtime.base_effective_permissions.includes('site.admin')};
+      }
+    }
+    return JSON.stringify(stable(value));
+  }
+  function setupMenuRuntime(runtime) {
+    const expires = Date.parse(runtime.initial_setup?.expires_at || '');
+    if (!Array.isArray(runtime.base_effective_permissions) || runtime.initial_setup?.active !== true
+      || !Number.isFinite(expires)) return runtime;
+    if (Date.now() < expires && state?.expiredSetupDeadline !== expires) return runtime;
+    if (state?.runtime === runtime) state.expiredSetupDeadline = expires;
+    // The known deadline can only remove temporary menu entries, never grant rights.
+    return {...runtime,effective_permissions:runtime.base_effective_permissions.slice(),
+      initial_setup:{...runtime.initial_setup,active:false,areas:{}}};
+  }
+  function refreshSetupMenus() {
+    clearTimeout(setupExpiryTimer);
+    if (!state) return;
+    const runtime=setupMenuRuntime(state.runtime);
+    const signature=JSON.stringify([runtime.initial_setup,runtime.effective_permissions]);
+    if (state.setupMenuSignature !== signature) {
+      const allowed=new Map(allowedItems(runtime).map(item=>[item[0],item]));
+      if (state.villageWorkspace) allowed.delete('btnCoopSettings');
+      const catalogIds=new Set(catalog.map(item=>item[0]));
+      state.items=state.items.filter(item=>!catalogIds.has(item[0]) || allowed.has(item[0]));
+      for (const [id,item] of allowed) if (!state.items.some(existing=>existing[0]===id)) state.items.push(item);
+      const rights=permissions(runtime);
+      state.canOrder=runtime.runtime_profile!=='site_member'
+        && (state.platformAdmin===true || rights.has('member.admin') || rights.has('site.admin'));
+      state.setupMenuSignature=signature; render();
+      if (orderDialog?.open && !state.canOrder) {
+        orderDialog.querySelector('.erp-order-status').textContent='현재 권한으로 메뉴 순서를 저장할 수 없습니다. 변경한 순서는 유지됩니다.';
+        renderOrder();
+      }
+    }
+    const expires=Date.parse(state.runtime.initial_setup?.expires_at || '');
+    if (state.runtime.initial_setup?.active===true && Array.isArray(state.runtime.base_effective_permissions)
+      && Number.isFinite(expires) && expires>Date.now()) {
+      setupExpiryTimer=setTimeout(refreshSetupMenus,Math.min(expires-Date.now()+1,2147483647));
+    }
+  }
+  function updateSetupRuntime(client, runtime) {
+    if (!state || state.client!==client || !runtime?.coop_id || runtime.coop_id!==state.runtime.coop_id
+      || runtime.is_active===false || !Array.isArray(runtime.effective_permissions)
+      || setupBaseKey(runtime)!==setupBaseKey(state.runtime)) return false;
+    state.runtime=runtime; refreshSetupMenus(); return true;
   }
 
   function link(item) {
@@ -308,6 +367,7 @@
       row.addEventListener('drop',event=>{event.preventDefault();move(event.dataTransfer.getData('text/plain'),id);});
     });
     orderDialog.querySelectorAll('.erp-order-actions button,.erp-order-close').forEach(button=>button.disabled=orderBusy);
+    orderDialog.querySelector('[data-action="save"]').disabled=orderBusy || !state?.canOrder;
   }
   function openOrder() {
     if(!state?.canOrder || !state.orderLoaded || orderBusy)return;
@@ -444,7 +504,7 @@
     document.querySelector('link[data-erp-brand-icon]')?.remove();
     if (document.readyState === 'loading') await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
     if (ticket !== generation) return;
-    mount(); render();
+    mount(); render(); refreshSetupMenus();
     refreshBrand(client,ticket,runtime.coop_id).catch(()=>{});
     const narrow = runtime.runtime_profile === 'site_member';
     const full = runtime.runtime_profile === 'legacy_full';
@@ -463,13 +523,16 @@
     const currentVillage = workspace?.current_coop_id === runtime.coop_id
       && workspace.workspaces?.some(item => item.is_current === true
         && item.coop_id === runtime.coop_id && item.is_management_coop === false);
+    state.villageWorkspace=!!currentVillage;
     if (currentVillage) {
       // Only relabel the already-authorized HR entry. Do not add staff or settings rights.
       state.items = state.items.filter(item => item[0] !== 'btnCoopSettings').map(item =>
         item[0] === 'btnAdmin' ? [item[0], '마을 기본정보', 'village_company_info.html', ...item.slice(3)] : item);
     }
     state.orderLoaded=order.ok;state.order=cleanOrder(order.data);
-    state.canOrder=!narrow && (platform?.is_platform_admin===true || set.has('member.admin') || set.has('site.admin'));
+    state.platformAdmin=platform?.is_platform_admin===true;
+    const currentRights=permissions(setupMenuRuntime(state.runtime));
+    state.canOrder=!narrow && (state.platformAdmin || currentRights.has('member.admin') || currentRights.has('site.admin'));
     if (election === true) state.items.push(['btnVoteHub', '선거·투표 관리', 'vote_hub.html', '', [], '☑']);
     if (service && (service.admin || service.platform || service.representative || service.draft_reviewer)) {
       state.items.push(['btnServiceContracts', '이용계약·청구서', 'service_contracts.html', '', [], '▢']);
@@ -485,10 +548,11 @@
     if (!narrow && enabled(runtime, 'accounting') && set.has('accounting.view') && /^village_/.test(path)) {
       state.items.push(['btnVillageEnergy', '발전·정산 현황', 'village_energy_monthly.html', '', [], '☀']);
     }
-    render();
+    render(); refreshSetupMenus();
   }
 
   function clear() {
+    clearTimeout(setupExpiryTimer);
     generation += 1; state = null; connections = new WeakMap();
     orderDialog?.close();orderDraft=null;
     if (list) list.replaceChildren();
@@ -512,7 +576,7 @@
     }
     if (runtime) {
       // A page may enforce several modules. One current-page client shares one menu fetch.
-      if (connections.has(client)) return connections.get(client);
+      if (connections.has(client)) { updateSetupRuntime(client,runtime); return connections.get(client); }
       const promise = hydrate(client, runtime).catch(() => { clear(); }); connections.set(client, promise); return promise;
     }
     if (connections.has(client)) return connections.get(client);
@@ -522,7 +586,8 @@
     return promise;
   }
 
-  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, refreshBrand:()=>state?refreshBrand(state.client,generation,state.runtime.coop_id):Promise.resolve(), closeDrawer:()=>setDrawer(false) };
+  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, updateSetupRuntime, refreshBrand:()=>state?refreshBrand(state.client,generation,state.runtime.coop_id):Promise.resolve(), closeDrawer:()=>setDrawer(false) };
+  window.addEventListener('focus', refreshSetupMenus);
   window.addEventListener('erp-workspace-runtime', event => { void connect(event.detail.client, event.detail.runtime); });
   // Used only by classic-script ERP pages with an already configured tenant-aware client.
   window.addEventListener('load', () => {
