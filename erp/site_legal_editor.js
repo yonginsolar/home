@@ -1,4 +1,4 @@
-/* v1.1.9 - Lock inline edits during requests and preserve newer draft input. */
+/* v1.1.10 - Finish inline editing without removing the clicked preview control. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -120,7 +120,13 @@
       article.onclick=()=>{if(!article.isConnected||!editable()||article.hasAttribute('contenteditable'))return;article.textContent=el(kind,'content').value;article.setAttribute('contenteditable','plaintext-only');article.focus();};
       article.onkeydown=event=>{if(event.key==='Enter'&&!article.hasAttribute('contenteditable')){event.preventDefault();article.click();}};
       article.oninput=()=>{if(!article.isConnected||!editable())return;const input=el(kind,'content'),value=article.innerText??article.textContent;if(value.length>input.maxLength){article.textContent=input.value;myAlert('입력할 수 있는 길이를 초과했습니다.','warning');return;}input.value=value;updateStatus(kind);};
-      article.onblur=()=>{article.removeAttribute('contenteditable');refreshPreview();};
+      article.onblur=()=>{
+        article.removeAttribute('contenteditable');
+        if(!article.isConnected||kind!==selectedKind||previewMode!=='draft')return;
+        // Keep the pointer/keyboard target connected until its own action runs.
+        // Only leave text-edit mode here; switching modes still rebuilds the preview.
+        article.textContent=renderText(el(kind,'content').value,kind)||'아직 등록하지 않았습니다.';
+      };
       article.onpaste=event=>{event.preventDefault();if(!article.isConnected||!editable())return;const selection=window.getSelection();if(!selection.rangeCount)return;const range=selection.getRangeAt(0);if(!article.contains(range.commonAncestorContainer))return;range.deleteContents();const node=document.createTextNode(event.clipboardData?.getData('text/plain')||'');range.insertNode(node);range.setStartAfter(node);range.collapse(true);selection.removeAllRanges();selection.addRange(range);article.dispatchEvent(new Event('input'));};
     }
     target.append(placement,heading,modes,date,article);
