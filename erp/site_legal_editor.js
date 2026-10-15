@@ -1,4 +1,4 @@
-/* v1.1.8 - Preview signup placement images in a shared modal. */
+/* v1.1.9 - Lock inline edits during requests and preserve newer draft input. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -44,6 +44,7 @@
   function syncEnabled() {
     for(const kind of Object.keys(labels))setEnabled(kind,loaded&&!loading&&!actionInFlight&&permitted());
     if(retryButton)retryButton.disabled=loading||actionInFlight;
+    refreshPreview();
   }
   function beginAction() {
     if(!loaded||loading||actionInFlight||!permitted())return false;
@@ -90,7 +91,8 @@
     const target=document.getElementById('site-home-legal-preview');if(!target)return;
     const doc=state.get(selectedKind)?.doc;
     const active=target.querySelector('article[contenteditable="plaintext-only"]');
-    if(active&&document.activeElement===active)return;
+    const kind=selectedKind,editable=()=>loaded&&previewMode==='draft'&&kind===selectedKind&&permitted()&&!actionInFlight&&!loading;
+    if(active&&document.activeElement===active&&editable())return;
     target.replaceChildren();
     const placement=document.createElement('div');placement.className='site-legal-placement';
     const locationTitle=document.createElement('strong');locationTitle.textContent='표시 위치';
@@ -113,13 +115,13 @@
     date.textContent=effective?`시행일 ${effective}`:'';
     const article=document.createElement('article');
     article.textContent=!loaded?'문서를 불러오는 중입니다.':previewMode==='published'?(doc?.is_published?String(doc.published_content||''):'등록된 내용이 없습니다.'):renderText(el(selectedKind,'content')?.value||'',selectedKind);
-    if(loaded&&previewMode==='draft'&&permitted()&&!actionInFlight&&!loading){
+    if(editable()){
       article.setAttribute('tabindex','0');article.setAttribute('aria-label','문서 초안 수정');
-      article.onclick=()=>{if(article.hasAttribute('contenteditable'))return;article.textContent=el(selectedKind,'content').value;article.setAttribute('contenteditable','plaintext-only');article.focus();};
+      article.onclick=()=>{if(!article.isConnected||!editable()||article.hasAttribute('contenteditable'))return;article.textContent=el(kind,'content').value;article.setAttribute('contenteditable','plaintext-only');article.focus();};
       article.onkeydown=event=>{if(event.key==='Enter'&&!article.hasAttribute('contenteditable')){event.preventDefault();article.click();}};
-      article.oninput=()=>{const input=el(selectedKind,'content'),value=article.innerText??article.textContent;if(value.length>input.maxLength){article.textContent=input.value;myAlert('입력할 수 있는 길이를 초과했습니다.','warning');return;}input.value=value;updateStatus(selectedKind);};
+      article.oninput=()=>{if(!article.isConnected||!editable())return;const input=el(kind,'content'),value=article.innerText??article.textContent;if(value.length>input.maxLength){article.textContent=input.value;myAlert('입력할 수 있는 길이를 초과했습니다.','warning');return;}input.value=value;updateStatus(kind);};
       article.onblur=()=>{article.removeAttribute('contenteditable');refreshPreview();};
-      article.onpaste=event=>{event.preventDefault();const selection=window.getSelection();if(!selection.rangeCount)return;const range=selection.getRangeAt(0);if(!article.contains(range.commonAncestorContainer))return;range.deleteContents();const node=document.createTextNode(event.clipboardData?.getData('text/plain')||'');range.insertNode(node);range.setStartAfter(node);range.collapse(true);selection.removeAllRanges();selection.addRange(range);article.dispatchEvent(new Event('input'));};
+      article.onpaste=event=>{event.preventDefault();if(!article.isConnected||!editable())return;const selection=window.getSelection();if(!selection.rangeCount)return;const range=selection.getRangeAt(0);if(!article.contains(range.commonAncestorContainer))return;range.deleteContents();const node=document.createTextNode(event.clipboardData?.getData('text/plain')||'');range.insertNode(node);range.setStartAfter(node);range.collapse(true);selection.removeAllRanges();selection.addRange(range);article.dispatchEvent(new Event('input'));};
     }
     target.append(placement,heading,modes,date,article);
   }
@@ -204,7 +206,14 @@
       if(!permitted())return;
       const request=action==='unpublish' ? _supabase.rpc('unpublish_site_legal_document',{p_document_type:kind,p_expected_revision:s.doc.revision||0}) : _supabase.rpc('save_site_legal_document_v2',{p_document_type:kind,p_content:input.content,p_effective_date:input.effective_date||null,p_publish:publish,p_expected_revision:s.doc.revision||0,p_contact_details:input.contact_details||null});
       const {data,error}=await request;if(error)throw error;
-      setForm(kind,data);myAlert(action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
+      // A late response must not erase a newer draft, even if an adapter changed
+      // the original fields while the request was pending. The revision remains
+      // the server-confirmed one; preserved edits still need an explicit save.
+      const newer=JSON.stringify(values(kind))!==JSON.stringify(input)||(action==='unpublish'&&dirty(kind));
+      const raw=newer?{content:el(kind,'content').value,date:el(kind,'effective-date').value,contacts:kind==='privacy'?Object.fromEntries(Object.keys(contacts).map(k=>[k,el(kind,k).value])):null}:null;
+      setForm(kind,data);
+      if(raw){el(kind,'content').value=raw.content;el(kind,'effective-date').value=raw.date;if(raw.contacts)for(const key of Object.keys(contacts))el(kind,key).value=raw.contacts[key];updateStatus(kind);}
+      myAlert(raw?'요청은 반영했습니다. 남아 있는 수정 내용은 아직 저장되지 않았습니다.':action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
     } catch(error) {const messages={LEGAL_DOCUMENT_CHANGED:'다른 사람이 수정했습니다. 편집 내용을 따로 보관한 뒤 다시 불러와 주세요.',LEGAL_CONTACT_REQUIRED:'이사장·주소와 개인정보 보호책임자의 성명·직책·전화번호·이메일을 모두 입력해 주세요.',LEGAL_CONTACT_INVALID:'개인정보 담당자 정보의 입력 형식을 확인해 주세요.',LEGAL_CONTACT_NOT_IN_CONTENT:'담당자 정보가 처리방침 본문에 반영되지 않았습니다. 본문과 등록 전 미리보기를 확인해 주세요.',LEGAL_DOCUMENT_NOT_READY:'시행일·내용과 아직 채우지 않은 샘플 항목을 확인해 주세요.'};myAlert(messages[error?.message]||'저장하지 못했습니다. 입력 내용은 유지됩니다.','warning');}
     finally {state.get(kind).busy=false;endAction();}
   }
