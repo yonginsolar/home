@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261015-4') return;
+    if (root.AdminMemberSite?.version === '20261015-5') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let homeSettingsBaseline=null;
@@ -605,7 +605,7 @@ status.classList.toggle('text-primary', state.loaded && state.dirty);
 status.classList.toggle('text-muted', !state.loaded || !state.dirty);
 }
 const button = document.getElementById(kind === 'home' ? 'btn-save-home-settings' : 'btn-save-about-settings');
-if (button) button.disabled = !state.loaded || state.loading || state.busy || !state.dirty;
+if (button) button.disabled = !state.loaded || state.loading || state.busy || !state.dirty || kind === 'about' && !canAccessAdminMemberTab('site');
 if (kind === 'home') {
 const pending = document.getElementById('site-home-pending-save');
 if (pending) { pending.hidden = !state.dirty; pending.disabled = !state.loaded || state.loading || state.busy; }
@@ -1455,10 +1455,12 @@ else { imgEl.style.display = 'none'; }
 }
 
 async function saveAboutSettings() {
-if (g_aboutSettingsSaving) return;
+if (g_aboutSettingsSaving || !canAccessAdminMemberTab('site')) return;
 const draft = getSiteEditorDraft('about');
 const state = draft.refresh();
 if (!state.loaded || state.loading || !state.dirty) return;
+const runtime = g_adminMemberRuntime;
+const current = () => g_adminMemberRuntime === runtime && canAccessAdminMemberTab('site');
 g_aboutSettingsSaving = true;
 draft.setBusy(true);
 const saveButton = document.getElementById('btn-save-about-settings');
@@ -1466,6 +1468,7 @@ const fileInput = document.getElementById('admin-about-img-file');
 const imageUrlInput = document.getElementById('admin-about-img');
 const file = fileInput?.files?.[0] || null;
 const previousImageUrl = g_aboutOriginalImageUrl;
+const previewObjectUrl = g_aboutPreviewObjectUrl;
 let newlyUploadedImageUrl = '';
 let aboutSaveConfirmed = false;
 if (saveButton) saveButton.disabled = true;
@@ -1474,50 +1477,78 @@ try {
 if (file && !file.type.startsWith('image/')) throw new Error('이미지 파일만 올릴 수 있습니다.');
 if (file && file.size > 10 * 1024 * 1024) throw new Error('사진은 10MB 이하로 올려 주세요.');
 
+// Take one payload before any await. Upload/save responses must not consume
+// edits or a replacement File selected after the user pressed Save.
+const fields = [
+['admin-about-title', 'p_title'], ['admin-about-subtitle', 'p_subtitle'],
+['admin-about-content', 'p_content'], ['admin-about-list', 'p_list_items']
+].map(([id, key]) => ({ id, key, input:document.getElementById(id), value:document.getElementById(id).value }));
+const imageUrl = String(imageUrlInput?.value || '');
+const updates = {
+p_title: fields[0].value.replace(/\r\n/g, '\n').trim(),
+p_subtitle: fields[1].value.replace(/\r\n/g, '\n').trim(),
+p_content: sanitizeAboutHtml(fields[2].value),
+p_list_items: fields[3].value,
+p_image_url: imageUrl.trim(),
+p_text_styles: JSON.parse(JSON.stringify(CoopSiteInlineHost.readStyles('about',true)))
+};
+const submitted = JSON.parse(siteEditorFormSnapshot('sub-about'));
 const coopId = String(await getAdminMemberCoopId() || '').trim();
+if (!current()) return;
 if (!coopId) throw new Error('조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.');
 if (file) {
 newlyUploadedImageUrl = await uploadFileToStorage(file, `site-home/${coopId}/about`);
-if (imageUrlInput) imageUrlInput.value = newlyUploadedImageUrl;
+if (!current()) return;
+updates.p_image_url = newlyUploadedImageUrl;
 }
 
-const updates = {
-p_title: String(document.getElementById('admin-about-title').value || '').replace(/\r\n/g, '\n').trim(),
-p_subtitle: String(document.getElementById('admin-about-subtitle').value || '').replace(/\r\n/g, '\n').trim(),
-p_content: sanitizeAboutHtml(document.getElementById('admin-about-content').value),
-p_list_items: document.getElementById('admin-about-list').value,
-p_image_url: String(imageUrlInput?.value || '').trim(),
-p_text_styles:CoopSiteInlineHost.readStyles('about',true)
-};
 const { error } = await _supabase.rpc('upsert_about_with_text_styles', updates);
 if (error) throw error;
 aboutSaveConfirmed = true;
+if (!current()) return;
 
 const savedImageUrl = updates.p_image_url;
 g_aboutOriginalImageUrl = savedImageUrl;
-if (previousImageUrl && previousImageUrl !== savedImageUrl) {
-await deleteManagedAboutImage(previousImageUrl, coopId);
+for (const field of fields) {
+if (document.getElementById(field.id) === field.input && field.input.value === field.value) field.input.value = updates[field.key];
 }
-document.getElementById('commonAlertText').innerText = '조합 소개를 저장했습니다.';
-bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
+const samePhoto = (fileInput?.files?.[0] || null) === file
+&& String(imageUrlInput?.value || '') === imageUrl && g_aboutPreviewObjectUrl === previewObjectUrl;
+if (samePhoto) {
+if (imageUrlInput) imageUrlInput.value = savedImageUrl;
 if (fileInput) fileInput.value = '';
 window.CoopHeroSlides?.resetPhotoSelection(fileInput);
 revokeAboutPreviewObjectUrl();
-document.getElementById('admin-about-title').value = updates.p_title;
-document.getElementById('admin-about-subtitle').value = updates.p_subtitle;
-document.getElementById('admin-about-content').value = updates.p_content;
-setAboutImageStatus(savedImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
+}
+// Accept the saved snapshot, not the current form. New text/styles, an image
+// removal or a new File remain dirty even when the first save succeeded.
+const savedValues = new Map(fields.map(field => [field.id, updates[field.key]]));
+savedValues.set('admin-about-img', savedImageUrl);
+savedValues.set('admin-about-img-file', []);
+draft.accept(JSON.stringify(submitted.map(row => savedValues.has(row[0]) ? [row[0], row[1], savedValues.get(row[0])] : row)));
+setAboutImageStatus(fileInput?.files?.length ? '새 사진은 아직 저장되지 않았습니다.'
+: String(imageUrlInput?.value || '').trim() !== savedImageUrl ? '사진 변경은 아직 저장되지 않았습니다.'
+: savedImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
 updateTotalPreview();
-draft.accept();
+// Keep a previously saved display while a newer draft still refers to it.
+if (previousImageUrl && previousImageUrl !== savedImageUrl && previousImageUrl !== String(imageUrlInput?.value || '').trim()) {
+await deleteManagedAboutImage(previousImageUrl, coopId);
+}
+if (!current() || root.frameElement?.hidden) return;
+document.getElementById('commonAlertText').innerText = draft.refresh().dirty
+? '조합 소개를 저장했습니다. 이후 수정한 내용과 사진은 아직 저장되지 않았습니다.' : '조합 소개를 저장했습니다.';
+bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
 } catch (error) {
 // Do not remove the new photo when a response is lost or a post-save UI refresh
 // fails. It may already be referenced by the committed introduction.
+if (!current() || root.frameElement?.hidden) return;
 document.getElementById('commonAlertText').innerText = aboutSaveConfirmed ? '조합 소개는 저장되었습니다. 화면을 다시 열어 확인해 주세요.' : '저장 실패: ' + (error?.message || error);
 bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
 } finally {
 showLoading(false);
 g_aboutSettingsSaving = false;
 draft.setBusy(false);
+queueHomePreviewUpdate();
 }
 }
 
@@ -3357,5 +3388,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
         initialized = true;
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
-    root.AdminMemberSite = Object.freeze({ version: '20261015-4', initialize, isInitialized: () => initialized });
+    root.AdminMemberSite = Object.freeze({ version: '20261015-5', initialize, isInitialized: () => initialized });
 })(window);
