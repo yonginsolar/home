@@ -1,12 +1,12 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.6 — preserve base-authorized drafts across setup-overlay expiry. */
+/* Persistent ERP workspace v1.2.7 — recognize prepared tasks; keep retained drafts through late loads and retry. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
   const status = document.getElementById('erpWorkspaceStatus');
   const error = document.getElementById('erpWorkspaceError');
   const routes = window.ErpWorkspaceRoute;
-  let current = '', requested = '', client, ready = false, leaving = false, timer, slowTimer;
+  let current = '', requested = '', client, ready = false, leaving = false, timer, slowTimer, probeTimer;
   let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', userId = '', transition = 0;
   const retained = new Map(), attached = new WeakSet();
   const RETAIN_LIMIT = 6;
@@ -102,6 +102,7 @@
     entry.frame.remove(); entry.fields.clear();
   }
   function purge() {
+    cancelLoading();
     lockPrint();
     window.CoopDialog.cancelAll();
     transition += 1;
@@ -162,15 +163,43 @@
     if (!id || !runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return null;
     return {id,runtime,key:runtimeKey(runtime)};
   }
+  function cancelLoading() {
+    clearTimeout(slowTimer); clearTimeout(timer); clearTimeout(probeTimer);
+  }
+  function preparedFrame(entry, ticket) {
+    if (ticket !== transition || entry !== activeEntry || !ready || leaving
+      || requested !== entry.route || !entry.frame.isConnected || entry.frame.hidden) return false;
+    try {
+      const doc = entry.frame.contentDocument;
+      // Ignore the initial empty browsing context and foreign/redirecting documents.
+      // Task registration is performed after that page's normal authorization/bootstrap.
+      if (!doc?.body || routes.route(entry.frame.contentWindow.location.href) !== entry.route) return false;
+      const adapter = task(entry);
+      if (doc.readyState !== 'complete'
+        && !(doc.readyState === 'interactive' && adapter?.ready === true && typeof adapter.refresh === 'function')) return false;
+      frameLoaded(entry);
+      return requested === '' && current === entry.route && error.hidden;
+    } catch (_) { return false; }
+  }
+  function watchFrame(entry, ticket) {
+    clearTimeout(probeTimer);
+    const inspect = () => {
+      if (ticket !== transition || entry !== activeEntry || !requested || !ready || leaving) return;
+      if (!preparedFrame(entry, ticket)) probeTimer = setTimeout(inspect, 250);
+    };
+    probeTimer = setTimeout(inspect, 250);
+  }
   function loading() {
     error.hidden = true;
-    clearTimeout(slowTimer); clearTimeout(timer);
+    cancelLoading();
     slowTimer = setTimeout(() => { status.textContent = '화면을 불러오고 있습니다…'; status.hidden = false; }, 300);
-    timer = setTimeout(() => { status.hidden = true; error.hidden = false; }, 25000);
+    timer = setTimeout(() => { clearTimeout(probeTimer); status.hidden = true; error.hidden = false; }, 25000);
   }
   function load(target, force = false) {
     const previous = activeEntry;
-    const cached = force ? null : retained.get(target);
+    // A retry of the visible prepared task must not manufacture a second context.
+    const cached = force ? null : target === activeEntry.route && canRetain(activeEntry)
+      ? activeEntry : retained.get(target);
     if (force && retained.has(target) && !changed(retained.get(target))) removeEntry(retained.get(target));
     park(); requested = target; loading();
     const ticket = ++transition;
@@ -218,11 +247,14 @@
     // Query/hash and the allowlisted route remain unchanged; no task or permission data is cached.
     taskUrl.pathname = taskUrl.pathname.replace(/\.html$/, '');
     nextFrame.id = 'erpWorkspaceFrame'; nextFrame.className='erp-workspace-task';
-    nextFrame.title = previous.frame.title; nextFrame.src = taskUrl.href;
+    nextFrame.title = previous.frame.title; nextFrame.loading = 'eager';
     activeEntry={frame:nextFrame,route:target,fields:new Map()};
     const entry=activeEntry;
     nextFrame.addEventListener('load',()=>frameLoaded(entry));
-    document.getElementById('erpWorkspaceContent').append(nextFrame); frame=nextFrame;
+    // Mount the browsing context and its listener before requesting navigation.
+    frame=nextFrame; document.getElementById('erpWorkspaceContent').append(nextFrame);
+    nextFrame.src = taskUrl.href;
+    watchFrame(entry,ticket);
   }
   function navigate(value) {
     let target;
@@ -313,12 +345,14 @@
       document.title = child.document.title;
       frame.title = child.document.title || 'ERP 업무 화면';
       window.ErpWorkspace.setDocument(child.document, href);
-      status.hidden = true; error.hidden = true; clearTimeout(timer); clearTimeout(slowTimer);
+      status.hidden = true; error.hidden = true; cancelLoading();
     } catch (_) { lockPrint(); status.hidden = true; error.hidden = false; }
   }
   function frameLoaded(entry = activeEntry) {
     if (!ready) return;
-    if (entry !== activeEntry) { removeEntry(entry); return; }
+    // An image/resource can finish after the user has parked this exact editor.
+    // It is still owned by the retained map, not a superseded disposable frame.
+    if (entry !== activeEntry) { if (retained.get(entry.route) !== entry) removeEntry(entry); return; }
     if (entry.frame.hidden) return;
     syncFrame();
     try { attachDocument(frame.contentDocument, entry); } catch (_) {}
@@ -390,8 +424,15 @@
     printCopy.append(...copy.childNodes); document.body.append(printCopy);
   });
   window.addEventListener('afterprint', restorePrint);
-  document.getElementById('erpWorkspaceRetry').onclick = () => {
-    if (requested || current) load(requested || current); else void start(client);
+  document.getElementById('erpWorkspaceRetry').onclick = async () => {
+    if (requested || current) {
+      // Never silently replace text/files on a page whose adapter is not ready yet.
+      if (!canRetain(activeEntry) && changed(activeEntry)) {
+        await window.CoopDialog.alert('작성 중인 내용은 유지했습니다. 화면이 준비된 후 다시 시도해 주세요.');
+        return;
+      }
+      load(requested || current);
+    } else void start(client);
   };
   async function start(configuredClient) {
     client = configuredClient;
@@ -411,5 +452,5 @@
       load(target);
     } catch (_) { status.hidden = true; error.hidden = false; }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261011.14'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261016.1'};
 })();
