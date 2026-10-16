@@ -1,4 +1,4 @@
-/* v1.1.0 — Scoped pending totals, signup approvals and incomplete setup only. */
+/* v1.1.1 — Keep task rows and status aligned with the latest scoped read. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -43,11 +43,14 @@
     keys.add(item.key);total+=item.count;
    }
    if(!Number.isSafeInteger(total))throw Error('COUNT_UNAVAILABLE');
-   if(ticket<lastTaskTicket)return;
+   if(ticket<lastTaskTicket)return false;
    lastTaskTicket=ticket;const badge=panels.get('tasks').badge;
+   const panel=panels.get('tasks'),snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
+   if(panel.snapshot&&panel.snapshot!==snapshot){panel.list.replaceChildren();panel.status.textContent='대기 건수가 바뀌었습니다. 최신 목록을 다시 확인해 주세요.';panel.snapshot=null;}
    badge.textContent=total?'대기 '+total.toLocaleString('ko-KR')+'건':'대기 업무 없음';
    badge.className=total?'badge text-bg-danger ms-2':'small text-muted ms-2';
    options.onTasks?.(data.items,'ready');
+   return true;
   }
   function setupVisibility(value,ticket){
    if(typeof value?.can_view!=='boolean'||typeof value.complete!=='boolean'||!Number.isSafeInteger(value.required_count)||!Number.isSafeInteger(value.pending_count)
@@ -67,8 +70,7 @@
     const {data,ticket}=await read('summary');
     setupVisibility(data.setup,ticket);counts(data,ticket);
    }catch(_){if(current()){
-    if(attemptTicket>=lastTaskTicket){panel.badge.textContent='확인 필요';panel.badge.className='badge text-bg-warning ms-2';options.onTasks?.(null,'failed');}
-    panel.status.textContent='대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.';
+    if(attemptTicket>=lastTaskTicket){panel.badge.textContent='확인 필요';panel.badge.className='badge text-bg-warning ms-2';options.onTasks?.(null,'failed');panel.status.textContent='대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.';}
     if(attemptTicket>=lastSetupTicket)panels.get('setup').root.hidden=true;
    }}})().finally(()=>{summaryPending=null;});
    return summaryPending;
@@ -90,14 +92,16 @@
    const body=el('div','pt-3'),status=el('p','small text-muted mb-2',''),list=el('div','d-grid gap-2');
    status.setAttribute('role','status');const retry=el('button','btn btn-sm btn-outline-secondary mt-2','다시 확인');retry.type='button';
    body.append(status,list,retry);root.append(heading,body);container.append(root);
-   let sequence=0,busy=false;
+   let sequence=0,busy=false,retrying=false;
    const isCurrent=serial=>serial===sequence&&current();
    const reset=()=>{++sequence;busy=false;retry.disabled=false;};panels.set(section,{root,status,list,badge,reset});
    async function load() {
     if(busy||!root.open)return;const serial=++sequence;busy=true;retry.disabled=true;list.replaceChildren();status.textContent='불러오는 중…';
     try {
      const {data,ticket}=await read(section);if(!isCurrent(serial))return;
-     if(section==='tasks')counts(data,ticket);
+     if(section==='tasks'){
+      if(!counts(data,ticket)){status.textContent='대기 건수가 갱신되었습니다. 최신 목록을 다시 확인해 주세요.';return;}
+     }
      else{
       const required=data.items.filter(item=>item.key!=='notifications');
       if(data.items.some(item=>!labels[item.state]))throw Error('STATE_UNAVAILABLE');
@@ -134,10 +138,14 @@
       list.append(row);
      }
      status.textContent=data.items.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';
+     if(section==='tasks')panels.get(section).snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
     }catch(_){if(isCurrent(serial)){list.replaceChildren();status.textContent='불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.';}}
     finally{if(serial===sequence){busy=false;retry.disabled=false;}}
    }
-   root.addEventListener('toggle',()=>{if(root.open)void load();});retry.onclick=()=>{void load();void refresh();};
+   root.addEventListener('toggle',()=>{if(root.open)void load();});retry.onclick=async()=>{
+    if(busy||retrying)return;retrying=true;retry.disabled=true;
+    try{await refresh();if(current())await load();}finally{retrying=false;if(!busy)retry.disabled=false;}
+   };
    sections.push(()=>{++sequence;busy=false;root.open=false;list.replaceChildren();status.textContent='';});
   }
   binding={refresh,invalidate:()=>{disposed=true;controllers.forEach(c=>c.abort());closeDialog();sections.forEach(fn=>fn());}};

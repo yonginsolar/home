@@ -6268,6 +6268,7 @@ async function fetchMembers() {
 
         renderMemberTable(g_members);
         renderMemberPagination();
+        void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:g_adminMemberRuntime?.coop_id,actor:adminCertificateAuthId}),current:()=>requestRevision===g_member_fetch_revision});
 
     } catch (err) {
         if (requestRevision !== g_member_fetch_revision) return;
@@ -6358,6 +6359,7 @@ function renderMemberTable(list) {
           <div class="small">${escapeHtml(joinDate)}</div>
           <span class="badge ${statusBadgeClass}">${escapeHtml(status)}</span>
           ${welcomeNotificationHtml}
+          ${status === '승인대기' ? `<div data-admission-member="${escapeHtml(m.id || m.member_uid || '')}" hidden></div>` : ''}
         </td>
         <td class="fw-bold">${totalCapital}</td>
         <td>
@@ -7256,6 +7258,7 @@ function bindAdminCertificateContext(authId) {
             adminCertificateAuthId = '';
             window.ContributionCertPreview?.clear();
             window.MemberNotificationAdmin?.clear();
+            window.MemberAdmissionAdmin?.clear();
         }
     });
     // A parked workspace retains editor input, not an open personal certificate.
