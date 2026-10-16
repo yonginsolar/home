@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.8 — bounded access reads and setup-only menu refresh; retain drafts. */
+/* Persistent ERP workspace v1.2.9 — keep definitive setup-expiry guidance and retained drafts. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -240,6 +240,7 @@
           window.ErpWorkspace.updateSetupRuntime?.(client, access.runtime);
           if (!initialOverlayAllows(cached,access.runtime)) {
             // Keep this owner's held draft locked; other unchanged-authority tasks survive.
+            cancelLoading(); // A definitive denial must not be overwritten by obsolete loading timers.
             status.textContent='초기 설정 권한이 종료되어 화면을 열 수 없습니다. 작성 내용은 보존됩니다.';
             status.hidden=false; error.hidden=false; return;
           }
@@ -481,5 +482,5 @@
     try { await pending; }
     finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261016.2'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261016.3'};
 })();

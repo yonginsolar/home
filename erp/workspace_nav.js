@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.5.6 — refresh setup-only menus without replacing held task editors. */
+/* ERP workspace navigation v1.5.7 — refresh open order controls on permission loss and recovery. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261016.2';
+  const VERSION = '20261016.3';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -125,12 +125,15 @@
       const catalogIds=new Set(catalog.map(item=>item[0]));
       state.items=state.items.filter(item=>!catalogIds.has(item[0]) || allowed.has(item[0]));
       for (const [id,item] of allowed) if (!state.items.some(existing=>existing[0]===id)) state.items.push(item);
-      const rights=permissions(runtime);
+      const couldOrder=state.canOrder,rights=permissions(runtime);
       state.canOrder=runtime.runtime_profile!=='site_member'
         && (state.platformAdmin===true || rights.has('member.admin') || rights.has('site.admin'));
       state.setupMenuSignature=signature; render();
-      if (orderDialog?.open && !state.canOrder) {
-        orderDialog.querySelector('.erp-order-status').textContent='현재 권한으로 메뉴 순서를 저장할 수 없습니다. 변경한 순서는 유지됩니다.';
+      if (orderDialog?.open) {
+        // Refresh both directions without replacing the draft or interrupting a pending save.
+        if (!orderBusy && couldOrder!==state.canOrder) orderDialog.querySelector('.erp-order-status').textContent=state.canOrder
+          ? '현재 권한을 확인했습니다. 변경한 순서는 유지됩니다.'
+          : '현재 권한으로 메뉴 순서를 저장할 수 없습니다. 변경한 순서는 유지됩니다.';
         renderOrder();
       }
     }
