@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.172
+Version: v1.0.173
 Change: 2026-10-12 - Display protected education and meeting photo copies before originals.
 -->
 <html lang="ko">
@@ -10,12 +10,12 @@ Change: 2026-10-12 - Display protected education and meeting photo copies before
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.172 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.173 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/application_retention_notice.js?v=1.0.0"></script>
-<script src="shared/child_direct_consent.js?v=1.0.1"></script>
+<script src="shared/child_direct_consent.js?v=1.0.2"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -2296,7 +2296,7 @@ oninput="autoHyphen(this)"> </div>
 </div>
 
 <div class="text-end mt-3 border-top pt-2">
-<button class="btn btn-link text-secondary text-decoration-none btn-sm" onclick="document.getElementById('familyModalOverlay').style.display='none'">닫기</button>
+<button class="btn btn-link text-secondary text-decoration-none btn-sm" onclick="closeFamilyRegistrationModal()">닫기</button>
 </div>
 </div>
 </div>
@@ -2494,6 +2494,9 @@ const SESSION_EXPIRED_NOTICE_KEY = 'member_session_expired_notice_v1';
 let _supabase = null;
 let curMem = null;
 let curAuth = null;
+let familyRegistrationOwner = '';
+let familyRegistrationRevision = 0;
+let tempChildData = null;
 let rootMemberProfileId = null;
 let pendingLoginOtpEmail = '';
 let currentBoardLimit = 20;
@@ -2666,6 +2669,7 @@ CoopSafeLog.error("Failed to clear Supabase auth cache:", e);
 
 async function signOutSilently(client = _supabase) {
 window.ContributionCertPreview?.clear();
+resetFamilyRegistrationDraft();
 suppressSessionExpiredHandling = true;
 try {
 if (client && client.auth) await client.auth.signOut();
@@ -3309,6 +3313,7 @@ _supabase.auth.onAuthStateChange(async (event, session) => {
 if (!session || (curAuth?.id && curAuth.id !== session.user?.id)) {
 window.ContributionCertPreview?.clear();
 window.MemberTelegramConnection?.clear();
+resetFamilyRegistrationDraft();
 }
 // 로딩바 끄기 (결정 났음)
 if (typeof showLoading === 'function') showLoading(false);
@@ -4310,7 +4315,8 @@ const { data: member, error: memErr } = await scopeMemberTenant(_supabase
 
 // 마스킹 계좌 적용
 const maskedAcc = await fetchMaskedBankInfo(uuid);
-if (maskedAcc) member.account_number = maskedAcc; 
+if (maskedAcc) member.account_number = maskedAcc;
+if (familyRegistrationOwner && familyRegistrationOwner !== getFamilyRegistrationOwner(member)) resetFamilyRegistrationDraft();
 curMem = member; 
 currentMemberCoopId = member.coop_id || await getCurrentMemberCoopId();
 await loadMembermanageBranding();
@@ -8539,21 +8545,41 @@ confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
 // [가족/단체 관리] 신규 생성 & 연결 신청 로직
 // ==========================================
 
-// [수정] 모달 열기: 역할별 탭 제어 + 연결 상태 DB 조회 추가
+// Draft ownership is an in-memory UI boundary, never an authorization source.
+function getFamilyRegistrationOwner(member = curMem) {
+const actor = String(curAuth?.id || '').trim();
+const coop = String(member?.coop_id || currentMemberCoopId || '').trim();
+const profile = String(member?.id || '').trim();
+return actor && coop && profile ? JSON.stringify([actor, coop, profile]) : '';
+}
+function closeFamilyRegistrationModal() {
+++familyRegistrationRevision;
+tempChildData = null;
+window.ChildDirectConsent?.clear();
+const overlay = document.getElementById('familyModalOverlay');
+if (overlay) overlay.style.display = 'none';
+}
+function resetFamilyRegistrationDraft() {
+closeFamilyRegistrationModal();
+familyRegistrationOwner = '';
+for (const id of ['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelInput','newFamCapital','newFamBank','newFamAcc']) {
+const input = document.getElementById(id); if (input) input.value = '';
+}
+const number = document.getElementById('newFamId'); if (number) number.value = '자동 생성 예정';
+const relation = document.getElementById('newFamRelSelect'); if (relation) relation.value = '부';
+document.getElementById('newFamRelInput')?.classList.add('hidden');
+}
+window.addEventListener('pagehide', resetFamilyRegistrationDraft);
+
+// Reopening the same owner's form keeps its original input nodes and values.
 async function openAddFamilyModal() {
-// 1. 기본 UI 초기화 (기존 유지)
-document.getElementById('familyModalOverlay').style.display = 'flex';
-document.getElementById('newFamName').value = '';
-document.getElementById('newFamId').value = '자동 생성 예정';
-document.getElementById('newFamRrn1').value = '';
-document.getElementById('newFamRrn2').value = '';
-document.getElementById('newFamEmail').value = '';
-document.getElementById('newFamRelSelect').value = '부';
-document.getElementById('newFamRelInput').value = '';
-document.getElementById('newFamRelInput').classList.add('hidden');
-document.getElementById('newFamCapital').value = '';
-document.getElementById('newFamBank').value = '';
-document.getElementById('newFamAcc').value = '';
+const draftOwner = getFamilyRegistrationOwner();
+if (!draftOwner) { resetFamilyRegistrationDraft(); return showModal('로그인 정보를 다시 확인해 주세요.'); }
+if (familyRegistrationOwner !== draftOwner) resetFamilyRegistrationDraft();
+familyRegistrationOwner = draftOwner;
+const draftRevision = ++familyRegistrationRevision;
+const overlay = document.getElementById('familyModalOverlay');
+overlay.style.display = 'flex';
 
 // 2. [수정] 탭 버튼 제어 (성인 개인만 자녀 신규등록 가능)
 const tabNewBtn = document.querySelectorAll('#famModalTabs .nav-item')[0]; // 자녀 탭
@@ -8594,9 +8620,11 @@ targetInfo = { name: parent ? parent.name : '알 수 없음', id: curMem.manager
 }
 
 // 4. 상태에 따라 화면 그리기 (다음 함수 호출)
+if (draftRevision !== familyRegistrationRevision || draftOwner !== getFamilyRegistrationOwner() || overlay.style.display === 'none') return;
 renderConnectTabUI(connArea, isConnected, targetInfo, activeIsManagedProfile);
 
 } catch (e) {
+if (draftRevision !== familyRegistrationRevision || draftOwner !== getFamilyRegistrationOwner() || overlay.style.display === 'none') return;
 CoopSafeLog.error("Connection Check Error:", e);
 connArea.innerHTML = '<div class="text-center text-danger py-3">정보 확인 실패<br>다시 시도해주세요.</div>';
 }
@@ -8758,6 +8786,8 @@ btns[1].classList.add('active');
 
 // [수정] 1차 검증 및 동의서 모달 호출
 async function submitNewChild() {
+const draftOwner = familyRegistrationOwner, draftRevision = familyRegistrationRevision;
+if (!draftOwner || draftOwner !== getFamilyRegistrationOwner()) return;
 // 1. 입력값 가져오기
 const name = document.getElementById('newFamName').value;
 const rrn1 = document.getElementById('newFamRrn1').value;
@@ -8788,7 +8818,8 @@ return showModal('가족(자녀) 신규 등록은\n미성년자만 가능합니�
 // Same cooperative-specific rules as self-registration.
 let rules;
 try { rules = await loadMemberCapitalRules(); }
-catch (_) { return showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); }
+catch (_) { if (draftOwner === familyRegistrationOwner && draftOwner === getFamilyRegistrationOwner() && draftRevision === familyRegistrationRevision) showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
+if (draftOwner !== familyRegistrationOwner || draftOwner !== getFamilyRegistrationOwner() || draftRevision !== familyRegistrationRevision) return;
 if (!CoopMemberCapital.valid(capital, rules)) return showModal(CoopMemberCapital.guidance(rules));
 
 // 5. 동의서 모달 띄우기 (데이터 전달)
@@ -9764,14 +9795,13 @@ return age < 19;
 }
 
 // [신규] 동의서 모달 열기 & 최종 가입 처리
-let tempChildData = null; // 데이터를 잠시 담아둘 변수
-
 function openConsentModal(data) {
+const draftOwner = familyRegistrationOwner, draftRevision = familyRegistrationRevision;
+if (!draftOwner || draftOwner !== getFamilyRegistrationOwner()) return;
 const directHost = String(window.CoopRouteGuard?.getPublicRuntimeHost?.() || window.location.hostname || '').toLowerCase();
 if (['www.yonginsolar.kr','yonginsolar.kr','localhost','127.0.0.1'].includes(directHost) && !isSiteMemberPortalProfile()) {
-return window.ChildDirectConsent.open({client:_supabase,data,applicationNotice:CoopApplicationNotice.text,onError:showModal,onSuccess:async()=>{
-document.getElementById('familyModalOverlay').style.display='none';
-tempChildData=null;
+return window.ChildDirectConsent.open({client:_supabase,data,applicationNotice:CoopApplicationNotice.text,isCurrent:()=>draftOwner===familyRegistrationOwner&&draftOwner===getFamilyRegistrationOwner()&&draftRevision===familyRegistrationRevision,onError:showModal,onSuccess:async()=>{
+resetFamilyRegistrationDraft();
 showModal('가입 신청이 접수되었습니다.\n\n'+CoopApplicationNotice.text+'\n\n신협 131-022-855516 (용인모두의햇빛협동조합)');
 await loadDashboardData(getPreferredDashboardProfileId());
 if(typeof loadManagedProfiles==='function') await loadManagedProfiles(getRootMemberProfileId() || curAuth?.id);
@@ -9840,7 +9870,8 @@ showModal('모든 필수 항목에 동의 체크해주세요.');
 return;
 }
 
-if (!tempChildData) return;
+if (!tempChildData || !familyRegistrationOwner || familyRegistrationOwner !== getFamilyRegistrationOwner()) return;
+const draftOwner = familyRegistrationOwner, draftRevision = familyRegistrationRevision;
 
 // 로딩 시작 (모달 닫고 로딩)
 document.getElementById('customModalOverlay').style.display = 'none';
@@ -9864,12 +9895,13 @@ p_account_holder: tempChildData.name
 const { data, error } = await _supabase.rpc('create_full_child_member', params);
 
 showLoading(false);
+if (draftOwner !== familyRegistrationOwner || draftOwner !== getFamilyRegistrationOwner() || draftRevision !== familyRegistrationRevision) return;
 
 if (error) {
 showModal('가입 실패: ' + error.message);
 } else {
 showModal('🎉 가입이 완료되었습니다!\n(출자금 입금 및 관리자 승인 후 정식 조합원이 됩니다.)');
-document.getElementById('familyModalOverlay').style.display = 'none';
+resetFamilyRegistrationDraft();
 
 // 목록 갱신
 loadDashboardData(getPreferredDashboardProfileId());

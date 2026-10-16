@@ -1,7 +1,9 @@
-/* v1.0.1 — Show the approved applicant notice within the existing consent review. */
+/* v1.0.2 — Preserve draft ownership across cancellation and late responses. */
 (function () {
   'use strict';
   let opening = false, submitting = false, current = null, dialog = null;
+  let revision = 0;
+  const valid = ctx => { try { return ctx?.isCurrent === undefined || (typeof ctx.isCurrent === 'function' && ctx.isCurrent() === true); } catch (_) { return false; } };
   const messages = {
     CHILD_GUARDIAN_REQUIRED: '법정대리인 본인의 정조합원 계정으로 신청해 주세요.',
     CHILD_GUARDIAN_PHONE_REQUIRED: '법정대리인 계정의 휴대전화번호를 먼저 확인해 주세요.',
@@ -18,18 +20,24 @@
   function errorText(error) { return messages[error?.message] || '접수 결과를 확인하지 못했습니다. 같은 화면에서 다시 확인하면 중복 접수되지 않습니다.'; }
   function close() {
     if (submitting) return;
-    dialog?.remove(); dialog = null; current = null;
+    clear();
     const family = document.getElementById('familyModalOverlay');
     if (family) family.style.display = 'flex';
+  }
+  function clear() {
+    ++revision; opening = false;
+    dialog?.remove(); dialog = null; current = null;
   }
   function node(tag, text, className) {
     const el = document.createElement(tag); if (text) el.textContent = text; if (className) el.className = className; return el;
   }
   async function open(options) {
-    if (opening || dialog) return;
+    if (opening || submitting || dialog || !valid(options)) return;
+    const serial = ++revision;
     opening = true;
     try {
       const { data, error } = await options.client.rpc('child_direct_registration', { p_action: 'prepare', p_data: {} });
+      if (serial !== revision || !valid(options)) return;
       if (error) throw error;
       if (!data?.request_id || !data.terms || !data.version) throw new Error('CHILD_REQUEST_UNAVAILABLE');
       // Only a masked display identifier is sent; the remaining RR number is never retained.
@@ -55,10 +63,11 @@
       const cancel=node('button','취소','btn btn-outline-secondary'); cancel.type='button'; cancel.onclick=close;
       const submit=node('button','동의하고 신청 접수','btn btn-primary flex-grow-1'); submit.type='button'; submit.id='childDirectSubmit'; submit.onclick=send;
       actions.append(cancel,submit); card.append(actions); dialog.append(card); document.body.append(dialog); submit.focus();
-    } catch(error) { options.onError(errorText(error)); } finally { opening=false; }
+    } catch(error) { if (serial === revision && valid(options)) options.onError(errorText(error)); } finally { if (serial === revision) opening=false; }
   }
   async function send() {
     if (submitting || !current) return;
+    if (!valid(current)) { clear(); return; }
     const consent = ['privacy','membership','guardian'].every(id=>document.getElementById(`childDirect-${id}`)?.checked);
     const errorEl=document.getElementById('childDirectError');
     if (!consent) { errorEl.textContent=messages.CHILD_CONSENT_REQUIRED; return; }
@@ -66,13 +75,14 @@
     const ctx=current, d=ctx.data;
     try {
       const {data,error}=await ctx.client.rpc('child_direct_registration',{p_action:'submit',p_data:{request_id:ctx.request.request_id,version:ctx.request.version,name:d.name,rrn_display:`${d.rrn1}-${d.rrn2}******`,email:d.email||'',capital:d.capital,relationship:d.relationship,bank:d.bank||'',acc:d.acc||'',privacy_agreed:true,membership_agreed:true,guardian_declared:true}});
+      if (current !== ctx || !valid(ctx)) return;
       if (error) throw error; if (!data?.ok) throw new Error('CHILD_REQUEST_UNAVAILABLE');
       dialog.remove(); dialog=null; current=null;
       ['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamAcc','newFamBank'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
       await ctx.onSuccess();
-    } catch(error) { if (dialog) errorEl.textContent=errorText(error); } finally {submitting=false;if(btn.isConnected)btn.disabled=false;}
+    } catch(error) { if (current === ctx && dialog && valid(ctx)) errorEl.textContent=errorText(error); } finally {submitting=false;if(btn.isConnected)btn.disabled=false;}
   }
-  window.ChildDirectConsent=Object.freeze({open});
+  window.ChildDirectConsent=Object.freeze({open,clear});
   document.addEventListener('DOMContentLoaded',()=>{
     const host=String(window.CoopRouteGuard?.getPublicRuntimeHost?.()||location.hostname||'').toLowerCase();
     if(!['www.yonginsolar.kr','yonginsolar.kr','localhost','127.0.0.1'].includes(host))return;
