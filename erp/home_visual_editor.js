@@ -1,7 +1,7 @@
 /* Actual homepage preview + the existing inputs, draft controller and secure save path. */
 (function(root){
   'use strict';
-  let mounted=false, selected='hero', lastHomeArea='hero', sectionRows=[], previewOrder=[];
+  let mounted=false, selected='hero', lastHomeArea='hero', selectionRevision=0, sectionRows=[], previewOrder=[];
   const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',documents:'문서 관리'};
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
   const homeAreas=new Set(['hero','impact','contact','design','fonts']);
@@ -50,7 +50,7 @@
     if(area==='portfolio') area='progress';
     if(!Object.hasOwn(labels,area)||!available(area)) return false;
     if(typeof canAccessAdminMemberTab==='function'&&!canAccessAdminMemberTab('site'))return false;
-    selected=area;
+    selected=area;selectionRevision++;
     const bannerTools=document.querySelector('.mobile-banner-tools');if(bannerTools)bannerTools.hidden=area!=='hero';
     if(area!=='legal')lastHomeArea=area;
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!==(homeAreas.has(area)?area:'hero'));
@@ -179,9 +179,16 @@
     window.CoopSiteInlineHost?.mount();
     // Do not change the active tab or run a data read while taking initial baselines.
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!=='hero');
+    const initialRevision=selectionRevision;
     const syncInitialSelection=()=>{
+      if(selectionRevision!==initialRevision)return; // A deliberate selection beats delayed initialization.
       const active=tabs.querySelector('a.active');
-      const area=Object.keys(panes).find(key=>`#${panes[key]}`===active?.getAttribute('href'))||'hero';select(area,false);
+      const area=Object.keys(panes).find(key=>`#${panes[key]}`===active?.getAttribute('href'))||'hero';
+      const deepLink=new URLSearchParams(location.search).get('sub');
+      // Existing deep-link owners select and load their own pane after lazy boot.
+      // Do not issue a banner (or duplicate target) read before that handoff.
+      if(['activities','legal','plants'].includes(deepLink)&&area==='sections')return;
+      select(area==='sections'?'hero':area,false);
     };
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',syncInitialSelection,{once:true});
     else queueMicrotask(syncInitialSelection); // Let the host take draft baselines before late initialization.
