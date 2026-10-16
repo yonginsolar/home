@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.150 | Change: 2026-10-14 - Keep account picker labels plain text. -->
+<!-- Version: v1.0.151 | Change: 2026-10-16 - Show annual non-operating income beside sales. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,7 +8,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.150 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.151 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
@@ -51,8 +51,12 @@
 
     .stat-card { flex: 1; padding: 15px; border-radius: 12px; text-align: center; color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     .bg-rev { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+    .bg-other-rev { background: linear-gradient(135deg, #0f766e, #115e59); }
     .bg-exp { background: linear-gradient(135deg, #e74c3c, #c0392b); }
     .bg-ast { background: linear-gradient(135deg, #3498db, #2980b9); }
+    .accounting-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .accounting-stat-grid .stat-card { min-width: 0; word-break: keep-all; overflow-wrap: break-word; }
+    @media (max-width: 767px) { .accounting-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
     .sub-card { flex: 1; padding: 10px; border-radius: 10px; text-align: center; border: 1px solid #eee; background-color: #fff; }
     .text-vat { color: #d63384; font-weight: bold; }
@@ -149,8 +153,9 @@
       <button class="btn btn-outline-secondary btn-sm" onclick="location.href='index.html'" data-erp-home-link>🏠 메뉴로</button>
     </div>
   </div>
-  <div class="d-flex gap-2 mb-2 no-print">
+  <div class="accounting-stat-grid mb-2 no-print">
     <div class="stat-card bg-rev"><div>매출</div><div class="fw-bold" id="valRev">0</div></div>
+    <div class="stat-card bg-other-rev" title="선택 연도의 영업외수익 합계입니다. 취소·감액을 차감하고 손익마감 전표는 제외합니다."><div>영업외수익</div><div class="fw-bold" id="valOtherRev" aria-live="polite">조회 중</div></div>
     <div class="stat-card bg-exp"><div>비용</div><div class="fw-bold" id="valExp">0</div></div>
     <div class="stat-card bg-ast"><div>오늘 기준 총자산</div><div class="fw-bold" id="valAst">0</div></div>
   </div>
@@ -6160,12 +6165,16 @@ async function refreshAccountingDashboardOnce() {
     const now = new Date();
     const todayKst = formatAccountingKstDate(now);
     const selectedYear = getDashboardYear();
+    const otherRevenueEl = document.getElementById("valOtherRev");
+    if (otherRevenueEl) otherRevenueEl.innerText = '조회 중';
     const { data, error } = await _supabase.rpc('get_accounting_dashboard_summary', {
         p_selected_year: selectedYear,
         p_as_of_date: todayKst
     });
 
+    if (selectedYear !== getDashboardYear()) return;
     if (error) {
+        if (otherRevenueEl) otherRevenueEl.innerText = '조회 실패';
         console.error('회계 대시보드 집계 조회 실패:', error);
         return;
     }
@@ -6192,6 +6201,12 @@ async function refreshAccountingDashboardOnce() {
 
     // UI 반영
     document.getElementById("valRev").innerText = Number(summary.revenue || 0).toLocaleString();
+    if (otherRevenueEl) {
+        const otherRevenue = summary.other_revenue;
+        otherRevenueEl.innerText = otherRevenue !== null && otherRevenue !== undefined && Number.isFinite(Number(otherRevenue))
+            ? Number(otherRevenue).toLocaleString()
+            : '조회 확인 필요';
+    }
     document.getElementById("valExp").innerText = Number(summary.expense || 0).toLocaleString();
     document.getElementById("valAst").innerText = Number(summary.assets || 0).toLocaleString();
     document.getElementById("valCash").innerText = Number(summary.bank_balance || 0).toLocaleString();
