@@ -1,4 +1,4 @@
-/* v1.0.0 — Explicit manual-bank application review; no timers or automatic writes. */
+/* v1.0.1 — Explicit manual-bank review with unchanged target-list validation. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,status=null,body=null,controls=null,bank=null,grace=null,opener=null,sequence=0,badgeSequence=0,busy=false,loaded=false,pending=null;
@@ -58,7 +58,7 @@
  }
  async function load(){
   const b=binding;if(!valid(b)||busy||pending)return;const serial=++sequence;busy=true;loaded=false;status.textContent='현재 상태를 확인하고 있습니다…';update();
-  try{const targetIds=ids(b),r=await call(b,'list',targetIds);if(!valid(b)||serial!==sequence)return;
+  try{const targetIds=ids(b),r=await call(b,'list',targetIds);if(!valid(b)||serial!==sequence)return;if(targetIds.join('|')!==ids(b).join('|'))throw Error('TARGET_CHANGED');
    if(!Array.isArray(r.items)||r.items.some(x=>!targetIds.includes(x.member_uid)||typeof x.eligible!=='boolean'||typeof x.revision!=='string'))throw Error('RESPONSE_INVALID');
    records.clear();r.items.forEach(x=>records.set(x.member_uid,x));for(const id of selected)if(!records.has(id))selected.delete(id);
    bank.checked=false;loaded=true;render();status.textContent='현재 조회한 목록의 신청만 표시합니다. 일부 입금·확인 중인 건은 파기할 수 없습니다.';
