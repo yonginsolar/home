@@ -1,8 +1,8 @@
-/* v1.0.1 — Permission-scoped destinations and explicit pending-event selection. */
+/* v1.1.0 — Scoped pending totals, signup approvals and incomplete setup only. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
-  approval:['내 결재 대기','approval.html?tab=todo'], member:['처리 대기 조합원 신청','admin_member.html?scope=member_admin&tab=applications&sub=pending-all'],
+  approval:['내 결재 대기','approval.html?tab=todo'], signup:['신규 가입 승인 대기','admin_member.html?scope=member_admin&tab=members&sub=signup-pending'], member:['처리 대기 조합원 신청','admin_member.html?scope=member_admin&tab=applications&sub=pending-all'],
   insurance:['준비 중인 입사·퇴사 서류','hr_insurance.html?work=pending'], receipts:['현금영수증 발급 대기','festival_receipts.html'],
   inventory:['입고 검수 대기','festival_receipts.html?work=inventory'], material:['아직 받지 않은 행사 재료비','festival_receipts.html'],
   company:['조합 기본정보','admin_employee.html?section=settings'], capital:['출자 기준','admin_member.html?scope=member_admin&sub=capital'],
@@ -18,10 +18,61 @@
  function mount(options) {
   if(binding) {binding.invalidate();binding=undefined;}
   const container=document.getElementById('workOverview');if(!container)return;
-  container.replaceChildren();const sections=[];
+  container.replaceChildren();const sections=[],controllers=new Set(),panels=new Map();
   const key=()=>{const c=options.context();return c?`${c.coop_id}|${c.actor}`:'';};
   const owner=key();
-  let dialog=null;
+  let dialog=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0;
+  const current=()=>!disposed&&key()===owner&&!!owner&&container.isConnected&&!container.closest('.hidden');
+  async function read(section){
+   const ticket=++readSequence,controller=new AbortController();controllers.add(controller);let timer;
+   try{
+    const requested=section==='tasks'?'tasks_v2':section;
+    const request=Promise.resolve().then(()=>{const q=options.client.rpc('erp_get_work_overview',{p_section:requested});return q.abortSignal?q.abortSignal(controller.signal):q;});
+    const response=await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('READ_TIMEOUT'));},15000);})]);
+    if(!current())throw Error('SCOPE_CHANGED');
+    if(response.error)throw Error('READ_FAILED');
+    const data=response.data;
+    if(data?.coop_id!==options.context().coop_id||data?.section!==requested||!Array.isArray(data.items))throw Error('SCOPE_CHANGED');
+    return {data,ticket};
+   }finally{clearTimeout(timer);controllers.delete(controller);}
+  }
+  function counts(data,ticket){
+   const keys=new Set();let total=0;
+   for(const item of data.items){
+    if(!['approval','signup','member','insurance','receipts','inventory','material'].includes(item.key)||keys.has(item.key)||!Number.isSafeInteger(item.count)||item.count<0)throw Error('COUNT_UNAVAILABLE');
+    keys.add(item.key);total+=item.count;
+   }
+   if(!Number.isSafeInteger(total))throw Error('COUNT_UNAVAILABLE');
+   if(ticket<lastTaskTicket)return;
+   lastTaskTicket=ticket;const badge=panels.get('tasks').badge;
+   badge.textContent=total?'대기 '+total.toLocaleString('ko-KR')+'건':'대기 업무 없음';
+   badge.className=total?'badge text-bg-danger ms-2':'small text-muted ms-2';
+   options.onTasks?.(data.items,'ready');
+  }
+  function setupVisibility(value,ticket){
+   if(typeof value?.can_view!=='boolean'||typeof value.complete!=='boolean'||!Number.isSafeInteger(value.required_count)||!Number.isSafeInteger(value.pending_count)
+    ||value.required_count<0||value.pending_count<0||value.pending_count>value.required_count||value.can_view!==(value.required_count>0)
+    ||value.complete!==(value.required_count>0&&value.pending_count===0))throw Error('STATE_UNAVAILABLE');
+   if(ticket<lastSetupTicket)return false;lastSetupTicket=ticket;
+   const panel=panels.get('setup');panel.root.hidden=!value.can_view||value.complete;
+   if(panel.root.hidden){panel.root.open=false;panel.list.replaceChildren();panel.reset();}
+   return true;
+  }
+  function refresh(){
+   if(!current())return null;
+   if(summaryPending)return summaryPending;
+   const panel=panels.get('tasks');panel.badge.textContent='확인 중…';panel.badge.className='small text-muted ms-2';options.onTasks?.(null,'loading');
+   const attemptTicket=readSequence+1;
+   summaryPending=(async()=>{try{
+    const {data,ticket}=await read('summary');
+    setupVisibility(data.setup,ticket);counts(data,ticket);
+   }catch(_){if(current()){
+    if(attemptTicket>=lastTaskTicket){panel.badge.textContent='확인 필요';panel.badge.className='badge text-bg-warning ms-2';options.onTasks?.(null,'failed');}
+    panel.status.textContent='대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.';
+    if(attemptTicket>=lastSetupTicket)panels.get('setup').root.hidden=true;
+   }}})().finally(()=>{summaryPending=null;});
+   return summaryPending;
+  }
   function closeDialog(){if(dialog){dialog.remove();dialog=null;}}
   function showList(title,entries){
    closeDialog();const opener=document.activeElement;
@@ -34,19 +85,25 @@
   }
   for(const [section,title] of [['tasks','📌 내 업무 모아보기'],['setup','✅ 조합 설정 점검표']]) {
    const root=el('details','border rounded p-3 mb-2 bg-white'),heading=el('summary','fw-bold',title);
+   root.dataset.overviewSection=section;root.hidden=section==='setup';
+   const badge=el('span','small text-muted ms-2',section==='tasks'?'확인 중…':'');badge.setAttribute('role','status');heading.append(badge);
    const body=el('div','pt-3'),status=el('p','small text-muted mb-2',''),list=el('div','d-grid gap-2');
    status.setAttribute('role','status');const retry=el('button','btn btn-sm btn-outline-secondary mt-2','다시 확인');retry.type='button';
    body.append(status,list,retry);root.append(heading,body);container.append(root);
-   let sequence=0,busy=false,loaded=false;
-   const current=serial=>serial===sequence && key()===owner && !!owner && container.isConnected && !container.closest('.hidden');
+   let sequence=0,busy=false;
+   const isCurrent=serial=>serial===sequence&&current();
+   const reset=()=>{++sequence;busy=false;retry.disabled=false;};panels.set(section,{root,status,list,badge,reset});
    async function load() {
     if(busy||!root.open)return;const serial=++sequence;busy=true;retry.disabled=true;list.replaceChildren();status.textContent='불러오는 중…';
     try {
-     const response=await options.client.rpc('erp_get_work_overview',{p_section:section});
-     if(!current(serial))return;
-     if(response.error)throw new Error('READ_FAILED');
-     const data=response.data,c=options.context();
-     if(data?.coop_id!==c.coop_id||data?.section!==section||!Array.isArray(data.items))throw new Error('SCOPE_CHANGED');
+     const {data,ticket}=await read(section);if(!isCurrent(serial))return;
+     if(section==='tasks')counts(data,ticket);
+     else{
+      const required=data.items.filter(item=>item.key!=='notifications');
+      if(data.items.some(item=>!labels[item.state]))throw Error('STATE_UNAVAILABLE');
+      if(!setupVisibility({can_view:required.length>0,complete:required.length>0&&required.every(item=>['ready','legacy'].includes(item.state)),required_count:required.length,pending_count:required.filter(item=>!['ready','legacy'].includes(item.state)).length},ticket))return;
+      if(root.hidden)return;
+     }
      for(const item of data.items) {
       const entry=links[item.key];if(!entry)throw new Error('UNKNOWN_ITEM');
       const row=el('div','d-flex align-items-center justify-content-between gap-3 border rounded p-2');
@@ -55,7 +112,7 @@
       const choose=['receipts','material','domain'].includes(item.key);
       const link=el(choose?'button':'a',choose?'btn btn-link text-start p-0 text-decoration-none':'text-decoration-none',entry[0]);
       if(choose){link.type='button';link.onclick=()=>{
-       if(!current(serial))return;
+       if(!isCurrent(serial))return;
        if(item.key==='domain'){
         const addresses=(item.domains||[]).filter(x=>/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(x));
         showList('등록된 홈페이지·ERP 주소',addresses.map(x=>({label:'https://'+x})));
@@ -76,14 +133,16 @@
       }
       list.append(row);
      }
-     status.textContent=data.items.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';loaded=true;
-    }catch(_){if(current(serial)){list.replaceChildren();status.textContent='불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.';loaded=false;}}
+     status.textContent=data.items.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';
+    }catch(_){if(isCurrent(serial)){list.replaceChildren();status.textContent='불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.';}}
     finally{if(serial===sequence){busy=false;retry.disabled=false;}}
    }
-   root.addEventListener('toggle',()=>{if(root.open&&!loaded)void load();});retry.onclick=()=>void load();
-   sections.push(()=>{++sequence;loaded=false;busy=false;root.open=false;list.replaceChildren();status.textContent='';});
+   root.addEventListener('toggle',()=>{if(root.open)void load();});retry.onclick=()=>{void load();void refresh();};
+   sections.push(()=>{++sequence;busy=false;root.open=false;list.replaceChildren();status.textContent='';});
   }
-  binding={invalidate:()=>{closeDialog();sections.forEach(fn=>fn());}};
+  binding={refresh,invalidate:()=>{disposed=true;controllers.forEach(c=>c.abort());closeDialog();sections.forEach(fn=>fn());}};
+  // A single scoped count/status read; detailed targets and configuration remain lazy.
+  Promise.resolve().then(()=>{if(!disposed)void refresh();});
  }
- host.ErpWorkOverview=Object.freeze({mount,clear:()=>{binding?.invalidate();binding=undefined;document.getElementById('workOverview')?.replaceChildren();}});
+ host.ErpWorkOverview=Object.freeze({mount,refresh:()=>binding?.refresh()||null,clear:()=>{binding?.invalidate();binding=undefined;document.getElementById('workOverview')?.replaceChildren();}});
 })(window);

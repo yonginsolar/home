@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.109 | Change: 2026-10-14 - Initial delegation in staff management. -->
+<!-- Version: v1.0.110 | Change: 2026-10-16 - Scoped task totals and incomplete setup. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,8 +8,8 @@
   <script src="/erp/workspace_boot.js?v=20261014-setup"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.109 | index.html');</script>
-  <script src="work_overview.js?v=1.0.1"></script>
+  <script>console.log('[Version] v1.0.110 | index.html');</script>
+  <script src="work_overview.js?v=1.1.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1959,6 +1959,8 @@ async function loadMemberAdminTaskAttention() {
 
 async function loadMainMenuTaskAttention() {
     if (!myInfo || retiredGraceAccess) return;
+    const summary = window.ErpWorkOverview?.refresh();
+    if (summary) return summary; // Share the scoped overview read with both menu badges.
     if (menuTaskRequest) return menuTaskRequest;
     const request = Promise.allSettled([
         loadApprovalTaskAttention(),
@@ -1967,6 +1969,18 @@ async function loadMainMenuTaskAttention() {
     menuTaskRequest = request;
     return request;
 } // End of loadMainMenuTaskAttention
+
+function updateWorkOverviewAttention(items, state) {
+    const values = new Map((items || []).map(item => [item.key, item.count]));
+    for (const [button, badge, keys, label] of [
+        ['btnApproval', 'approvalTaskBadge', ['approval'], '내 결재 대기'],
+        ['btnMemberAdmin', 'memberAdminTaskBadge', ['signup', 'member'], '가입 승인·업무 신청 대기']
+    ]) {
+        if (document.getElementById(button)?.classList.contains('hidden')) continue;
+        const complete = state === 'ready' && keys.every(key => Number.isSafeInteger(values.get(key)) && values.get(key) >= 0);
+        setMenuTaskAttention(button, badge, complete ? keys.reduce((sum, key) => sum + values.get(key), 0) : null, label, complete ? 'ready' : state === 'loading' ? 'loading' : 'failed');
+    }
+}
 
 function hasPermission(key) {
     if (!permissionSet || permissionSet.size === 0) return null; // fallback to legacy rules
@@ -2532,7 +2546,7 @@ function applyMenuPermissions(user, platformCtx, runtime) {
 }
 
 function showScreen(id) {
-    if(id==='menuArea' && !retiredGraceAccess) window.ErpWorkOverview?.mount({client:_supabase,context:()=>myInfo&&({coop_id:myInfo.coop_id,actor:String(myInfo.id||myInfo.auth_user_id||'')})});
+    if(id==='menuArea' && !retiredGraceAccess) window.ErpWorkOverview?.mount({client:_supabase,context:()=>myInfo&&({coop_id:myInfo.coop_id,actor:String(myInfo.id||myInfo.auth_user_id||'')}),onTasks:updateWorkOverviewAttention});
     else window.ErpWorkOverview?.clear();
     if (id === 'menuArea' && coopRuntime) void window.ErpWorkspace?.connect(_supabase, coopRuntime);
     if (id === 'loginForm') window.ErpWorkspace?.clear();

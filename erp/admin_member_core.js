@@ -9357,6 +9357,9 @@ window.onload = async function() {
     await openAdminMemberActivityDeepLink();
     await openAdminMemberSiteSubDeepLink();
     const workEntry = new URLSearchParams(window.location.search);
+    if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && canAccessAdminMemberTab('members') && hasAdminMemberScopePermission('member_admin') && isAdminMemberRuntimeModuleEnabled('member_admin') && workEntry.get('sub') === 'signup-pending') {
+        goToPendingMembers();
+    }
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && canAccessAdminMemberTab('applications') && workEntry.get('sub') === 'pending-all') {
         filterAppType('all'); filterAppList('pending');
     }
