@@ -1,9 +1,10 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261015-6') return;
+    if (root.AdminMemberSite?.version === '20261016-1') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
+let activityModalRead=null;
 let homeSettingsBaseline=null;
 const homeUploadedFiles=new WeakMap();
 async function readCurrentHomeSettings(runtime) {
@@ -1969,12 +1970,14 @@ if (type === 'DELEGATE_ASSEMBLY') return '대의원 총회';
 return '교육';
 }
 
-async function loadActivityParticipationEvents(selectedId = '') {
+async function loadActivityParticipationEvents(selectedId = '', {isCurrent=()=>true, onApplied=()=>{}} = {}) {
 const select = document.getElementById('activity-source-event-select');
 const help = document.getElementById('activity-source-event-help');
 if (!select) return [];
 try {
+if (!isCurrent()) return [];
 const { data, error } = await _supabase.rpc('participation_admin_get_dashboard');
+if (!isCurrent()) return [];
 if (error) throw error;
 activityParticipationEvents = Array.isArray(data?.events) ? data.events : [];
 const linkedByEvent = new Map((g_siteActivities || []).map((row) => [String(row.source_participation_event_id || ''), row]));
@@ -1989,11 +1992,14 @@ if (selectedId) select.value = String(selectedId);
 if (help) help.textContent = activityParticipationEvents.length
 ? '참여 관리의 사진을 선택하면 공개용 사진을 자동으로 준비하며, 원본 회의록의 상세 안건·참석자·결정 내용은 가져오지 않습니다.'
 : '연동할 회의·교육 기록이 없습니다.';
+onApplied();
 return activityParticipationEvents;
 } catch (error) {
+if (!isCurrent()) return [];
 activityParticipationEvents = [];
 select.innerHTML = '<option value="">회의·교육 기록을 불러오지 못했습니다</option>';
 if (help) help.textContent = error?.message || '회의·교육 기록을 불러오지 못했습니다.';
+onApplied();
 return [];
 }
 } // End of loadActivityParticipationEvents
@@ -2253,7 +2259,28 @@ const values = Array.from(modal?.querySelectorAll('input,textarea,select') || []
 .filter(el => !el.closest('#activity-content-toolbar'))
 .map(el => [el.id, el.type === 'file' ? Array.from(el.files || []).map(file => [file.name,file.size,file.lastModified]) : el.type === 'checkbox' ? el.checked : el.value]);
 const photos = activityGalleryItems.map(item => [item.kind,item.url || '',item.fileId || '',item.file ? [item.file.name,item.file.size,item.file.lastModified] : null]);
-return JSON.stringify([values, g_activityEditorBridge?.getRootHtml() || '', photos]);
+return JSON.stringify([values, g_activityEditorBridge?.getRootHtml() || '', photos, window.CoopSiteInlineHost?.readStyles?.('activities',true) || {}]);
+}
+
+function isActivityContextCurrent(context, active=true) {
+return g_adminMemberRuntime === context.runtime && canAccessAdminMemberTab('site')
+  && document.getElementById('activityModal') === context.modal
+  && document.getElementById('activity-id')?.value === context.id
+  && (!active || !root.frameElement?.hidden && root.CoopHomeVisualEditor?.current() === context.area);
+}
+
+function isActivityModalReadCurrent(read) {
+return activityModalRead === read && !read.controller.signal.aborted
+  && isActivityContextCurrent(read)
+  && (read.snapshot == null || getActivityDraftSnapshot() === read.snapshot);
+}
+
+function cancelActivityModalRead() {
+const read = activityModalRead;
+if (!read) return;
+read.controller.abort();window.clearTimeout(read.timer);
+activityModalRead = null;g_activityModalOpening = false;
+cancelActivitySourceRead();
 }
 
 function hasUnsavedActivityChanges() {
@@ -2270,6 +2297,8 @@ modal.addEventListener('hidden.bs.modal', () => { cancelActivitySourceRead();mod
 document.getElementById('activity-source-event-select')?.addEventListener('change',cancelActivitySourceRead);
 document.getElementById('activity-date')?.addEventListener('input', () => { g_activityDateUserEdited = true; });
 document.getElementById('activity-date')?.addEventListener('change', () => { g_activityDateUserEdited = true; });
+modal.addEventListener('input',updateActivitySaveLabel);
+modal.addEventListener('change',updateActivitySaveLabel);
 modal.addEventListener('hide.bs.modal', event => {
 if (g_activityAllowClose) { g_activityAllowClose = false; return; }
 if (isSavingActivity) { event.preventDefault(); return; }
@@ -2293,11 +2322,12 @@ confirmButtons.forEach(([button, disabled]) => { button.disabled = disabled; });
 });
 }
 
-function closeActivityAfterSave() {
+function closeActivityAfterSave(shouldClose=()=>true) {
 const modal = document.getElementById('activityModal');
 if (!modal?.classList.contains('show')) return Promise.resolve();
 return new Promise(resolve => {
 const close = () => {
+if (!shouldClose()) return resolve(false);
 g_activityAllowClose = true;
 modal.addEventListener('hidden.bs.modal', resolve, {once:true});
 bootstrap.Modal.getOrCreateInstance(modal).hide();
@@ -2332,21 +2362,34 @@ return g_activityEditorBridge;
 function updateActivitySaveLabel() {
 const button = document.getElementById('btn-save-site-activity');
 if (button) { button.textContent = document.getElementById('activity-visible')?.checked ? '공개로 저장' : '비공개로 저장'; button.disabled = isSavingActivity || !!activitySourceRead || !canAccessAdminMemberTab('site'); }
+const status = document.getElementById('activity-save-status');
+if (status) status.textContent = isSavingActivity ? '저장 중…' : hasUnsavedActivityChanges() ? '저장하지 않은 변경사항' : '';
 }
 
 async function openActivityModal(id, sourceEventId = '') {
 if (g_activityModalOpening || isSavingActivity) return;
 const modal = document.getElementById('activityModal');
-if (modal?.classList.contains('show')) return;
+if (!modal || modal.classList.contains('show') || !canAccessAdminMemberTab('site') || root.frameElement?.hidden) return;
 cancelActivitySourceRead();
 g_activityModalOpening = true;
+const read = {modal, runtime:g_adminMemberRuntime, area:root.CoopHomeVisualEditor?.current(),
+  id:document.getElementById('activity-id')?.value, controller:new AbortController(), snapshot:null};
+activityModalRead = read;
+read.timer = window.setTimeout(() => {
+const current = isActivityModalReadCurrent(read);
+if (activityModalRead !== read) return;
+cancelActivityModalRead();
+if (current) myAlert('조회가 지연되어 중단했습니다. 다시 열어 주세요.','warning');
+},15000);
 try {
 await ensureActivityRichEditor();
+if (!isActivityModalReadCurrent(read)) return;
 bindActivityDraftGuard();
 g_activityDraftBaseline = '';
 g_activityAllowClose = false;
 g_activityDateUserEdited = Boolean(id);
 document.getElementById('activity-id').value = id || '';
+read.id = id || '';
 document.getElementById('activity-cover-file').value = '';
 document.getElementById('activity-cover-removed').value = '0';
 document.getElementById('activity-cover-original').value = '';
@@ -2359,13 +2402,15 @@ document.getElementById('activity-history-milestone').checked = false;
 document.getElementById('activity-history-title').value = '';
 setActivitySourceEventId('');
 setActivityGalleryItemsFromUrls([]);
+read.snapshot = getActivityDraftSnapshot();
 let linkedSourceId = String(sourceEventId || '').trim();
 
 if (id) {
 const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*'))
   .eq('id', id)
   .eq('category', 'activity')
-  .maybeSingle();
+  .maybeSingle().abortSignal(read.controller.signal);
+if (!isActivityModalReadCurrent(read)) return;
 if (error) {
 myAlert('활동 내역을 불러오지 못했습니다: ' + error.message, 'error');
 return;
@@ -2386,16 +2431,21 @@ document.getElementById('activity-history-title').value = data.history_title || 
 document.getElementById('activity-cover-original').value = JSON.stringify(parsedActivity.galleryUrls);
 setActivityGalleryItemsFromUrls(parsedActivity.galleryUrls);
 linkedSourceId = String(data.source_participation_event_id || linkedSourceId || '').trim();
+read.snapshot = getActivityDraftSnapshot();
 }
 }
 
 syncActivityHistoryMilestoneUi();
-await loadActivityParticipationEvents(linkedSourceId);
+await loadActivityParticipationEvents(linkedSourceId, {isCurrent:()=>isActivityModalReadCurrent(read),onApplied:()=>{read.snapshot=getActivityDraftSnapshot();}});
+if (!isActivityModalReadCurrent(read)) return;
 setActivitySourceEventId(linkedSourceId);
 if (!id && linkedSourceId) {
 try {
+read.snapshot = null; // The source importer has its own exact draft/File owner guard.
 if (!(await applyActivitySourceEvent(linkedSourceId, { prefill:true }))) return;
+if (!isActivityModalReadCurrent(read)) return;
 } catch (error) {
+if (!isActivityModalReadCurrent(read)) return;
 myAlert('연동할 회의·교육 기록을 불러오지 못했습니다: ' + (error?.message || error), 'error');
 return;
 }
@@ -2408,8 +2458,12 @@ g_activityDraftBaseline = getActivityDraftSnapshot();
 updateActivitySaveLabel();
 bootstrap.Modal.getOrCreateInstance(modal).show();
 } catch (error) {
+if (!isActivityModalReadCurrent(read)) return;
 myAlert('우리 소식 작성 화면을 열지 못했습니다: ' + (error?.message || error), 'error');
-} finally { g_activityModalOpening = false; }
+} finally {
+window.clearTimeout(read.timer);
+if (activityModalRead === read) { activityModalRead=null;g_activityModalOpening=false; }
+}
 }
 
 function syncActivityHistoryMilestoneUi() {
@@ -2421,7 +2475,7 @@ if (input) input.disabled = !checked;
 }
 
 async function saveActivity() {
-if (isSavingActivity || activitySourceRead) return;
+if (isSavingActivity || activitySourceRead || !canAccessAdminMemberTab('site') || root.frameElement?.hidden) return;
 const bodyUnchanged = g_activityEditorBridge?.getRootHtml() === g_activityEditorLoadedHtml;
 if (!g_activityEditorBridge?.syncToSource()) return myAlert('편집기를 먼저 불러와 주세요.', 'warning');
 
@@ -2439,6 +2493,12 @@ if (historyTitle.length > 120) return myAlert('연혁용 제목은 120자 이내
 const originalUrls = normalizeActivityGalleryUrls(safeParseArray(document.getElementById('activity-cover-original').value));
 const isCurrent = document.getElementById('activity-visible').checked;
 const sourceEventId = getActivitySourceEventId() || null;
+const context = {runtime:g_adminMemberRuntime,modal:document.getElementById('activityModal'),area:root.CoopHomeVisualEditor?.current(),id:id || ''};
+const submittedSnapshot = JSON.parse(getActivityDraftSnapshot());
+const submittedGallery = activityGalleryItems.map(item=>({original:item,value:{...item}}));
+const submittedFiles = Array.from(document.getElementById('activity-cover-file').files || []);
+const submittedStyles = submittedSnapshot[3];
+const publishedItems = new Map();
 let recordSaved = false;
 let saveRequested = false;
 
@@ -2448,25 +2508,30 @@ showLoading(true);
 
 try {
 const finalGalleryUrls = [];
-for (const item of activityGalleryItems) {
+for (const submitted of submittedGallery) {
+if (!isActivityContextCurrent(context)) return;
+const item = submitted.value;
 if (item?.kind === 'url' && item.url) {
 finalGalleryUrls.push(item.url);
 } else if (item?.kind === 'file' && item.file) {
 const uploadedUrl = await uploadFileToStorage(item.file, 'site-activities');
 if (uploadedUrl) {
 finalGalleryUrls.push(uploadedUrl);
+publishedItems.set(submitted.original,uploadedUrl);
 }
 } else if (item?.kind === 'participation') {
 const published = await publishActivityParticipationPhoto(item);
 finalGalleryUrls.push(published.url);
+publishedItems.set(submitted.original,published.url);
 }
 }
+if (!isActivityContextCurrent(context)) return;
 const normalizedFinalGalleryUrls = normalizeActivityGalleryUrls(finalGalleryUrls);
 const finalCoverUrl = normalizedFinalGalleryUrls[0] || '';
 const finalContent = buildActivityContentWithGallery(content, normalizedFinalGalleryUrls);
 
 saveRequested = true;
-const { error } = await _supabase.rpc('site_activity_upsert_with_text_styles', {
+const { data, error } = await _supabase.rpc('site_activity_upsert_with_text_styles', {
 p_id: id,
 p_title: title,
 p_date: eventDate,
@@ -2476,32 +2541,56 @@ p_is_current: isCurrent,
 p_source_participation_event_id: sourceEventId,
 p_is_history_milestone: isHistoryMilestone,
 p_history_title: isHistoryMilestone ? (historyTitle || null) : null,
-p_text_styles:CoopSiteInlineHost.readStyles('activities',true)
+p_text_styles:submittedStyles
 });
 
 if (error) throw error;
 recordSaved = true;
-
-g_activityDraftBaseline = getActivityDraftSnapshot();
-await closeActivityAfterSave();
-releaseActivityCoverPreviewObjectUrl();
-activityGalleryItems = [];
+if (!isActivityContextCurrent(context,false)) return;
+const savedId = id || data?.activity_id;
+if (!savedId || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(savedId)) throw Error('ACTIVITY_SAVED_ID_UNAVAILABLE');
+document.getElementById('activity-id').value = savedId;context.id = savedId;
+document.getElementById('activity-cover-original').value = JSON.stringify(normalizedFinalGalleryUrls);
+// Settle only the submitted File objects still in this draft. Later files,
+// removals and photo ordering remain exactly as the user left them.
+activityGalleryItems = activityGalleryItems.map(item=>publishedItems.has(item)?{kind:'url',url:publishedItems.get(item)}:item);
+const keptObjectUrls = new Set(activityGalleryItems.map(item=>item.objectUrl).filter(Boolean));
+activityGalleryObjectUrls = activityGalleryObjectUrls.filter(url=>{
+if (keptObjectUrls.has(url)) return true;
+try { URL.revokeObjectURL(url); } catch (_) {}
+return false;
+});
+const fileInput = document.getElementById('activity-cover-file');
+if (Array.from(fileInput.files || []).length === submittedFiles.length && Array.from(fileInput.files || []).every((file,index)=>file === submittedFiles[index])) fileInput.value = '';
+renderActivityCoverPreview();
+const savedValues = new Map([['activity-id',savedId],['activity-cover-original',JSON.stringify(normalizedFinalGalleryUrls)],['activity-cover-file',[]],['activity-cover-url',finalCoverUrl],['activity-cover-removed',normalizedFinalGalleryUrls.length ? '0' : '1']]);
+submittedSnapshot[0] = submittedSnapshot[0].map(([key,value])=>[key,savedValues.has(key)?savedValues.get(key):value]);
+submittedSnapshot[2] = normalizedFinalGalleryUrls.map(url=>['url',url,'',null]);
+g_activityDraftBaseline = JSON.stringify(submittedSnapshot);
+g_activityOriginalBody = content;g_activityEditorLoadedHtml = submittedSnapshot[1];
+await closeActivityAfterSave(()=>isActivityContextCurrent(context) && !hasUnsavedActivityChanges());
 // Only a confirmed save permits old-photo cleanup. A failed refresh must
 // never delete the new photos already referenced by the saved article.
 const urlsToDelete = originalUrls.filter((url) => !normalizedFinalGalleryUrls.includes(url));
-for (const url of urlsToDelete) await deleteActivityPhotoIfUnreferenced(url);
+for (const url of urlsToDelete) {
+if (!isActivityContextCurrent(context) || hasUnsavedActivityChanges()) break;
+if (!activityGalleryItems.some(item=>item.url === url)) await deleteActivityPhotoIfUnreferenced(url);
+}
+if (!isActivityContextCurrent(context)) return;
 const refreshed = await Promise.all([fetchActivities(), fetchHistory()]);
+if (!isActivityContextCurrent(context)) return;
 if (refreshed.some((result) => result === false)) {
-myAlert('우리 소식은 저장되었습니다. 목록을 불러오지 못했으니 새로고침해 확인해주세요. 다시 저장할 필요는 없습니다.', 'warning');
+myAlert(hasUnsavedActivityChanges() ? '저장 중 추가한 내용은 아직 저장되지 않았습니다. 목록은 다시 불러와 주세요.' : '저장했습니다. 목록을 다시 불러와 확인해 주세요.', 'warning');
 return;
 }
-myAlert('우리 소식이 저장되었습니다.');
+myAlert(hasUnsavedActivityChanges() ? '저장했습니다. 저장 중 추가한 내용은 아직 저장되지 않았습니다.' : '저장했습니다.');
 } catch (e) {
 CoopSafeLog.error("[saveActivity] failed:", e);
+if (!isActivityContextCurrent(context)) return;
 // A lost save response is not proof that the server rolled back. Preserve
 // uploaded photos on all failures instead of deleting a possibly saved photo.
 if (recordSaved) {
-myAlert('우리 소식은 저장되었습니다. 화면 갱신 중 문제가 생겼으니 새로고침해 확인해주세요. 다시 저장할 필요는 없습니다.', 'warning');
+myAlert(hasUnsavedActivityChanges() ? '저장은 완료했지만 추가한 내용은 아직 저장되지 않았습니다.' : '저장은 완료했습니다. 목록에서 저장 내용을 확인해 주세요.', 'warning');
 } else if (saveRequested) {
 myAlert('저장 결과를 확인하지 못했습니다. 입력 내용과 사진은 유지했습니다. 목록을 새로고침해 저장 여부를 확인한 뒤 다시 시도해주세요.', 'warning');
 } else {
@@ -3353,12 +3442,13 @@ function askDeleteFaq(id) {
 CoopHomeVisualEditor.mount(); // Mount before taking the initial draft snapshot.
 getSiteEditorDraft('home');
 getSiteEditorDraft('about');
-window.addEventListener('pagehide',cancelActivitySourceRead);
+window.addEventListener('pagehide',() => {cancelActivityModalRead();cancelActivitySourceRead();});
 for (const eventName of ['hidden.bs.tab','shown.bs.tab']) document.getElementById('site-content-tabs')?.addEventListener(eventName,() => {
 if (activitySourceRead && root.CoopHomeVisualEditor?.current() !== activitySourceRead.area) cancelActivitySourceRead();
+if (activityModalRead && root.CoopHomeVisualEditor?.current() !== activityModalRead.area) cancelActivityModalRead();
 });
 if (root.frameElement) new MutationObserver(() => {
-if (root.frameElement?.hidden) cancelActivitySourceRead();
+if (root.frameElement?.hidden) {cancelActivityModalRead();cancelActivitySourceRead();}
 }).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
 
 window.addEventListener('beforeunload', (event) => {
@@ -3388,5 +3478,6 @@ window.setTimeout(sendHomePreviewSettings, 0);
         initialized = true;
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
-    root.AdminMemberSite = Object.freeze({ version: '20261015-6', initialize, isInitialized: () => initialized });
+    Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead});
+    root.AdminMemberSite = Object.freeze({ version: '20261016-1', initialize, isInitialized: () => initialized });
 })(window);
