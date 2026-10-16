@@ -1,9 +1,10 @@
-/* v1.2.0 — Distinguish unconfigured/unlimited/bylaw basis without widening erasure. */
+/* v1.2.1 — Distinguish unconfigured/unlimited/bylaw basis without widening erasure. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,status=null,body=null,controls=null,bank=null,grace=null,opener=null,all=null,sequence=0,badgeSequence=0,busy=false,loaded=false,pending=null,focusId=null,savedSelection=null;
  const selected=new Set(),records=new Map();
  const reasons={not_pending:'정리 대상 아님',payment:'일부 입금·납입 기록 확인 필요',checking:'입금 확인 중',consent:'신청·동의 완료 확인 필요',not_due:'납입·유예 기한 전',notice:'안내 발송 상태 확인 필요',family:'다른 가족의 관리 계정 · 제외',linked_records:'다른 업무 기록이 있어 제외'};
+ const reasonLabel=row=>row.blocker==='not_due'?({policy_unconfigured:'신청 당시 납입기한 미설정',no_deadline:'납입기한 없음',basis_pending:'가입 승낙 통지일 미입력'}[row.state]||reasons.not_due):reasons[row.blocker]||'확인 필요';
  const node=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
  const owner=o=>{const c=o?.context();return c?.actor&&c?.coop_id?c.actor+'|'+c.coop_id:'';};
  const valid=b=>b===binding&&b?.enabled&&owner(b)===b.owner&&b.current()&&!root.frameElement?.hidden;
@@ -56,11 +57,11 @@
   for(const id of viewIds(binding)){
    const row=records.get(id);if(!row)continue;const person=binding.rows.find(x=>(x.id||x.member_uid)===id),tr=node('tr'),cell=node('td'),check=node('input','form-check-input');check.type='checkbox';check.checked=selected.has(id);check.setAttribute('aria-label',(person?.name||'신청자')+' 선택');
    check.dataset.erpQueryControl='';check.dataset.reviewMember=id;check.onchange=()=>{if(!valid(binding)||!loaded||busy||pending||!selectable(row)){check.checked=selected.has(id);return;}if(check.checked)selected.add(id);else selected.delete(id);bank.checked=false;update();};cell.append(check);
-   const reason=node('td',row.eligible?'text-danger':'text-muted',row.eligible?'정리 가능':reasons[row.blocker]||'확인 필요');
+   const reason=node('td',row.eligible?'text-danger':'text-muted',row.eligible?'정리 가능':reasonLabel(row));
    const bankHistory=Array.isArray(row.blocker_details)?row.blocker_details.find(x=>x?.code==='bank_account_history'&&Number.isSafeInteger(x.count)&&x.count>0):null;
    const detail=node('button','btn btn-link btn-sm d-block p-0 mt-1','상세 사유');detail.type='button';detail.dataset.reviewDetail='';
    detail.onclick=()=>{if(!valid(binding)||!loaded||busy||pending||records.get(id)!==row)return;
-    const messages=[row.eligible?'정리 가능':reasons[row.blocker]||'확인 필요'];
+    const messages=[row.eligible?'정리 가능':reasonLabel(row)];
     if(bankHistory)messages.push('계좌정보 변경 이력 '+bankHistory.count+'건');
     void root.CoopDialog.alert(messages.join('\n\n'),{title:'상세 사유'});
    };reason.append(detail);
