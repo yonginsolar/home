@@ -1,4 +1,4 @@
-/* v1.1.2 — Distinguish organization managers from child consent. */
+/* v1.2.0 — Concise status detail with selected applicant review entry. */
 (function(root){
  'use strict';
  let binding=null,sequence=0,openSequence=0,dialog=null,opener=null;
@@ -52,9 +52,10 @@
   opener=document.activeElement;const d=node('dialog','border rounded-3 p-4 bg-white text-dark');dialog=d;d.style.cssText='width:min(560px,calc(100% - 32px));max-height:85vh;overflow:auto;word-break:keep-all;color-scheme:light';d.setAttribute('aria-labelledby','admission-heading');
   const target=b.rows.find(m=>(m.id||m.member_uid)===uid),title=node('h2','h5',(target?.name?target.name+' · ':'')+'가입 신청·납입기한');title.id='admission-heading';
   const info=node('div','my-3'),status=node('p','small mt-2','');status.setAttribute('role','status');
-  const render=()=>{info.replaceChildren();for(const text of ['신청 접수일: '+(r.submitted_on||'기록 확인 필요'),'신청 완료일: '+(r.completed_on||'완료 전 또는 기록 확인 필요'),'납입기한: '+(r.due_on||'신청 완료 후 계산'),labels[r.state],consentText(r,target),(r.delivery_kind==='guardian_request'?'자녀 가입·개인정보 동의 요청 · ':'')+deliveries[r.delivery_status]])info.append(node('p','mb-2',text));};render();
-  const hint=node('p','small text-muted','신청 완료일부터 10일로 계산합니다. 자녀의 보호자 동의는 자녀의 가입 신청·개인정보 수집 이용 동의와 보호자임의 확인입니다. 단체는 보호자가 아닌 관리자를 연결하며 별도 보호자 동의를 요구하지 않습니다. 기존 대리 신청의 기록 미확인은 동의 거부를 뜻하지 않습니다. 자동 철회·삭제·알림 발송은 하지 않습니다. 발송 접수는 실제 수신 완료와 다릅니다.');
-  const actions=node('div','d-flex gap-2 justify-content-end mt-3'),reload=node('button','btn btn-outline-secondary','다시 확인'),cancel=node('button','btn btn-secondary','닫기');reload.type=cancel.type='button';actions.append(reload,cancel);d.append(title,info,hint,status,actions);
+  const actions=node('div','d-flex gap-2 flex-wrap justify-content-end mt-3'),remove=node('button','btn btn-outline-danger','종결·파기'),reload=node('button','btn btn-outline-secondary','다시 확인'),cancel=node('button','btn btn-secondary','닫기');remove.type=reload.type=cancel.type='button';
+  const render=()=>{info.replaceChildren();const consent=r.application_kind==='organization'||r.consent_status==='not_required'?'':consentText(r,target);for(const text of ['신청 접수일: '+(r.submitted_on||'기록 확인 필요'),'신청 완료일: '+(r.completed_on||'완료 전 또는 기록 확인 필요'),'납입기한: '+(r.due_on||'신청 완료 후 계산'),labels[r.state],consent,(r.delivery_kind==='guardian_request'?'자녀 가입·개인정보 동의 요청 · ':'')+deliveries[r.delivery_status]])if(text)info.append(node('p','mb-2',text));remove.hidden=r.state!=='overdue'||!root.MemberApplicationManage?.canOpen(uid);};render();
+  remove.onclick=()=>{if(!valid(b)||dialog!==d||r.state!=='overdue'||!root.MemberApplicationManage?.canOpen(uid))return;close();void root.MemberApplicationManage.openSingle(uid);};
+  actions.append(remove,reload,cancel);d.append(title,info,status,actions);
   cancel.onclick=close;d.addEventListener('cancel',e=>{e.preventDefault();close();});
   reload.onclick=async()=>{if(reload.disabled||!valid(b))return;reload.disabled=true;status.textContent='확인 중입니다…';try{const result=await call(b,[uid]);if(dialog!==d||!valid(b))return;const fresh=result.items[0];if(!fresh)throw Error('TARGET_CHANGED');r=fresh;records.set(uid,r);paint(b);render();status.textContent='현재 상태를 확인했습니다.';}catch(_){if(dialog===d&&valid(b))status.textContent='현재 상태를 확인하지 못했습니다. 다시 확인해 주세요.';}finally{if(dialog===d)reload.disabled=false;}};
   document.body.append(d);d.showModal();cancel.focus();

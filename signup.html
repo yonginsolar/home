@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.54
+Version: v1.0.55
 Change: 2026-10-07 - Use registered tenant signup purpose and privacy consent.
 -->
 <html lang="ko"> 
@@ -8,7 +8,8 @@ Change: 2026-10-07 - Use registered tenant signup purpose and privacy consent.
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
-  <script>console.log('[Version] v1.0.54 | signup.html');</script>
+<script src="shared/application_retention_notice.js?v=1.0.0"></script>
+  <script>console.log('[Version] v1.0.55 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -421,6 +422,7 @@ oninput="clearFieldWarning(this)">
 <p class="small text-muted mt-2 mb-0">가입 신청 후 이 번호로 동의 요청 알림톡을 보냅니다. 동의와 사무국 확인이 끝난 뒤 가입 승인이 진행됩니다.</p>
 <p class="small mb-0 mt-2"><a href="tel:01025135736">사무국장 김민호(010-2513-5736)</a></p>
 </section>
+<p id="signupApplicationNotice" class="small text-muted mt-4 mb-0" hidden></p>
 <button type="submit" id="btnSubmit" class="btn btn-success w-100 py-3 mt-4 rounded-4 fw-bold fs-5">가입 신청하기 ☀️</button>
 </form>
 </div>
@@ -435,6 +437,7 @@ oninput="clearFieldWarning(this)">
 <button type="button" class="btn-close" onclick="closeSheet('sheet-terms')"></button>
 </div>
 <div id="termContent" style="white-space: pre-wrap; font-size: 13px; color: #555; line-height: 1.6;"></div>
+<p id="termApplicationNotice" class="small text-muted mt-3" hidden></p>
 </div>
 </div>
 
@@ -452,7 +455,7 @@ oninput="clearFieldWarning(this)">
 <div class="modal-content">
 <div style="font-size:50px;">🎉</div>
 <h3 class="fw-bold mt-3">가입 신청 완료</h3>
-<p id="successModalCopy" class="text-muted small">신청이 성공적으로 접수되었습니다.<br>10일 이내로 출자금 입금 부탁드립니다.</p>
+<p id="successModalCopy" class="text-muted small">신청이 성공적으로 접수되었습니다.</p>
 <div id="successAccountBox" class="p-3 bg-light rounded-3 text-start small mb-3" style="display:none;">
 🏦 <b id="successDepositAccount"></b><br><span id="successDepositHolder"></span>
 </div>
@@ -931,6 +934,7 @@ return true;
 }
 
 function applySignupTenantBranding() {
+CoopApplicationNotice.show(document.getElementById('signupApplicationNotice'),!!signupTenant?.coop_name&&signupTenant.coop_code === DEFAULT_SIGNUP_COOP_CODE);
 if (!signupTenant?.coop_name) return;
 
 const coopName = signupTenant.coop_name;
@@ -954,7 +958,7 @@ const successKakaoLink = document.getElementById('successKakaoLink');
 const hasPublicDepositAccount = applySignupPublicDepositAccount();
 
 if (signupTenant.coop_code === DEFAULT_SIGNUP_COOP_CODE) {
-if (successModalCopy) successModalCopy.innerHTML = '신청이 성공적으로 접수되었습니다.<br>10일 이내로 출자금 입금 부탁드립니다.';
+if (successModalCopy) successModalCopy.textContent = CoopApplicationNotice.text;
 if (successAccountBox) successAccountBox.style.display = hasPublicDepositAccount ? '' : 'none';
 if (successKakaoBox) successKakaoBox.style.display = '';
 if (successKakaoLink) successKakaoLink.href = DEFAULT_SIGNUP_KAKAO_URL;
@@ -1148,6 +1152,7 @@ currentTermType = null; // 초기화
 
 function openTermSheet(type) {
 if(['privacy','purpose'].includes(type)&&signupLegalDocuments?.ready!==true)return openResultModal('가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.',true);
+CoopApplicationNotice.show(document.getElementById('termApplicationNotice'),type==='privacy'&&signupTenant?.coop_code===DEFAULT_SIGNUP_COOP_CODE);
 currentTermType = type; // privacy, purpose, risk 중 하나
 document.getElementById('termTitle').innerText = termsData[type].title;
 const content=termsData[type].content;
