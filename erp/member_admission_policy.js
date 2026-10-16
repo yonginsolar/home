@@ -1,4 +1,4 @@
-/* v1.0.0 — Scoped, effective-dated admission policy; drafts remain in this page's memory only. */
+/* v1.1.0 — Capital-settings entry, with parent form and policy drafts retained. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,fields=null,baseline=null,revision=null,loaded=false,busy=false,pending=null,serial=0,opener=null,noticeTarget=null;
@@ -14,8 +14,9 @@
   fields.dirty.textContent=pending?'처리 결과 확인 필요':dirty()?'미저장 변경 있음':'';
  }
  function checkpoint(){if(!dialog)return;for(const e of dialog.querySelectorAll('input,textarea'))e.defaultValue=e.value;for(const e of dialog.querySelectorAll('select option'))e.defaultSelected=e.selected;root.ErpWorkspaceResume?.checkpoint(dialog);}
- function clear(){++serial;dialog?.remove();binding=null;dialog=fields=baseline=revision=pending=noticeTarget=null;loaded=busy=false;}
- function bind(options){const key=identity(options);if(!key)return;if(binding?.owner!==key)clear();if(binding)Object.assign(binding,options);else binding={...options,owner:key};update();}
+ function launchers(){for(const button of document.querySelectorAll('[data-admission-policy-launcher]'))button.hidden=!valid(binding);}
+ function clear(){++serial;dialog?.remove();binding=null;dialog=fields=baseline=revision=pending=noticeTarget=null;loaded=busy=false;launchers();}
+ function bind(options){const key=identity(options);if(!key)return;if(binding?.owner!==key)clear();if(binding)Object.assign(binding,options);else binding={...options,owner:key};update();launchers();}
  async function call(b,action,payload={},expected=null,id=null){let timer;const controller=new AbortController();
   try{let q=b.client.rpc('erp_member_admission_policy',{p_action:action,p_payload:payload,p_expected_revision:expected,p_request_id:id});
    const reading=action==='get'||action==='receipt';if(reading&&q.abortSignal)q=q.abortSignal(controller.signal);
@@ -67,10 +68,14 @@
   fields.discard.onclick=async()=>{const b=binding,captured=serial;if(busy||pending||!dirty())return;if(await root.CoopDialog.confirm('입력한 변경을 취소할까요?',{title:'입력 취소'})&&valid(b)&&captured===serial&&!busy&&!pending){fill({...baseline,revision});status('입력을 취소했습니다.');}};
   d.addEventListener('input',update);d.addEventListener('change',update);d.addEventListener('cancel',e=>{e.preventDefault();close();});d.append(actions);document.body.append(d);update();
  }
- async function open(){if(!valid(binding)||busy)return false;if(document.querySelector('.modal.show'))return root.CoopDialog.alert('열린 편집창을 먼저 닫아 주세요.');
-  if(noticeTarget&&(dirty()||pending)){opener=document.activeElement;if(!dialog.open)dialog.showModal();update();return true;}
+ function attachLauncher(parent){if(parent?.id!=='memberCapitalSettingsModal')return;let b=parent.querySelector('[data-admission-policy-launcher]');if(!b){b=node('button','btn btn-outline-primary mt-3','납입기한 설정');b.type='button';b.dataset.admissionPolicyLauncher='';b.onclick=()=>void open({parent});parent.querySelector('.modal-body')?.append(b);}launchers();}
+ async function open(options={}){if(!valid(binding)||busy)return false;
+  const parent=options.parent,allowed=parent?.isConnected&&['settingsModal','memberCapitalSettingsModal'].includes(parent.id);
+  if([...document.querySelectorAll('.modal.show')].some(m=>!allowed||m!==parent))return root.CoopDialog.alert('열린 편집창을 먼저 닫아 주세요.');
+  const mount=()=>{if(dialog&&dialog.parentElement!==(allowed?parent:document.body))(allowed?parent:document.body).append(dialog);};
+  if(noticeTarget&&(dirty()||pending)){opener=document.activeElement;mount();if(!dialog.open)dialog.showModal();update();return true;}
   if(noticeTarget){dialog?.remove();dialog=fields=baseline=null;noticeTarget=null;loaded=false;}
-  opener=document.activeElement;if(!dialog)build();if(!dialog.open)dialog.showModal();if(!loaded)await read();else update();return true;
+  opener=document.activeElement;if(!dialog)build();mount();if(!dialog.open)dialog.showModal();if(!loaded)await read();else update();return true;
  }
  async function openNotice(options,person,row){bind(options);if(!valid(binding)||busy||pending)return false;
   if(dialog&&(dirty()||pending)){if(!dialog.open)dialog.showModal();update();if(noticeTarget?.id===row.member_uid)return true;return root.CoopDialog.alert('작성 중인 변경을 먼저 저장하거나 입력 취소해 주세요.');}
@@ -80,5 +85,5 @@
  }
  document.addEventListener('click',e=>{if(!e.target.closest?.('#member-admission-policy-button'))return;e.preventDefault();void open();});
  root.addEventListener('beforeunload',e=>{if(dirty()||pending){e.preventDefault();e.returnValue='';}});
- root.addEventListener('pagehide',clear);root.MemberAdmissionPolicy=Object.freeze({bind,open,openNotice,clear,isDirty:dirty});
+ root.addEventListener('pagehide',clear);root.MemberAdmissionPolicy=Object.freeze({bind,open,openNotice,clear,attachLauncher,isDirty:dirty});
 })(window);

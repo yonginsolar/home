@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v1.0.2 — Confirmed save results update displays without a follow-up RPC. */
+/* v1.0.3 — Admission deadlines are reached inside the shared capital settings. */
 (function (global) {
   'use strict';
   let revision = '', busy = false, returnModal = null;
@@ -32,6 +32,7 @@
   global.openMemberCapitalSettings = async function () {
     const modal = ensureModal();
     if (!modal || busy) return;
+    global.MemberAdmissionPolicy?.attachLauncher(modal);
     global.ERPNumberInput?.refresh(modal);
     busy = true;
     try {

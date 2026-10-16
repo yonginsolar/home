@@ -1,4 +1,4 @@
-/* v1.0.2 — Retained settings drafts and scoped read recovery. */
+/* v1.0.3 — Retained settings drafts and scoped setting categories. */
 (function (global) {
   'use strict';
   const isPage = new URLSearchParams(global.location.search).get('section') === 'settings';
@@ -11,7 +11,7 @@
     // must not turn a simple tab/year change into an unsaved company-settings warning.
     return [...root.querySelectorAll('input,select,textarea')]
       .filter(node => !node.readOnly && !node.hasAttribute('data-erp-query-control')
-        && !node.closest('#setTax,#setAdvanced,#settingTargetYearRow')
+        && !node.closest('#setTax,#setAdvanced,#settingTargetYearRow,#memberAdmissionPolicyDialog')
         && !['button','submit','reset'].includes(node.type));
   }
   function key(node) {
@@ -77,6 +77,7 @@
       document.getElementById('settingsModal').classList.remove('hidden');
       if (!entryFocused && new URLSearchParams(global.location.search).get('focus') === 'capital') {
         entryFocused = true;
+        global.ERPCoopSettingsGroups?.select('basic');
         const heading=document.getElementById('companyCapitalHeading');
         heading?.scrollIntoView({block:'center',behavior:'auto'});
         heading?.closest('section')?.querySelector('button')?.focus({preventScroll:true});

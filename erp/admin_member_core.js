@@ -5771,7 +5771,6 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-members', memberAdminEnabled],
 ['nav-badges', memberAdminEnabled && hasAdminMemberBadgePermission()],
 ['member-capital-settings-button', memberAdminEnabled],
-['member-admission-policy-button', memberAdminEnabled],
 ['nav-org-settings', memberAdminEnabled && (isSiteMemberProfile || canOpenFullCoopSettings())],
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
