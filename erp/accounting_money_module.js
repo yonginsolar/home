@@ -6,6 +6,7 @@ window.AccountingMoney = (() => {
     // have no duplicate IDs in the document and never enter browser storage.
     const editors = new Map(), drafts = new Set();
     let activeEditor = null;
+    let draftDisplayKey = '', draftSequence = 0;
     const $ = id => document.getElementById(id);
     const esc = value => escapeHtml(String(value ?? ''));
     const won = value => Number(value || 0).toLocaleString('ko-KR') + '원';
@@ -55,11 +56,14 @@ window.AccountingMoney = (() => {
           <label class="form-label" for="moneyGuideSearch">업무 이름이나 계정과목 검색</label>
           <input class="form-control mb-3" id="moneyGuideSearch" type="search" placeholder="예: 착오입금, 잘못 들어온 돈, 카드 취소, 가수금">
           <div class="row g-3 mb-4" id="moneyGuides"></div>
+          <div class="money-drafts mb-3" aria-label="작성 중인 회계 작업"><strong id="moneyDraftCount" role="status">작성 중 0건</strong><div id="moneyDraftItems"></div></div>
           <div id="moneyEditor" class="money-panel mb-4" hidden></div>
           <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2"><h5 class="m-0">취소·환급 및 착오입금 등록 내역</h5><button class="btn btn-outline-secondary" type="button" id="moneyReload">새로고침</button></div>
           <div class="input-group mb-3"><input id="moneyCaseSearch" class="form-control" type="search" aria-label="등록 내역 검색" placeholder="입금자·취소 내용·카드 이름"><button class="btn btn-outline-secondary" id="moneyCaseFind" type="button">검색</button></div>
           <div id="moneyStatus" class="text-muted mb-2" role="status"></div><div id="moneyCases"></div><button class="btn btn-outline-secondary mt-2" type="button" id="moneyMore" hidden>이전 내역 더 보기</button>`;
         $('moneyGuideSearch').addEventListener('input', renderGuides);
+        $('accountingMoneyPanel').addEventListener('input', renderDraftState);
+        $('accountingMoneyPanel').addEventListener('change', renderDraftState);
         $('moneyReload').addEventListener('click', () => loadCases());
         $('moneyCaseFind').addEventListener('click', () => loadCases());
         $('moneyCaseSearch').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); loadCases(); } });
@@ -71,7 +75,7 @@ window.AccountingMoney = (() => {
         $('moneyGuides').replaceChildren();
         guides.filter(g => !query || (g.title + g.words).replace(/\s/g, '').toLowerCase().includes(query)).forEach(g => {
             const col = document.createElement('div'); col.className = 'col-md-6';
-            col.innerHTML = `<div class="money-panel h-100"><h6 class="fw-bold">${esc(g.title)}</h6><p>${esc(g.text)}</p></div>`;
+            col.innerHTML = `<div class="money-panel h-100"><h6 class="fw-bold d-inline">${esc(g.title)}</h6> <span class="badge bg-warning text-dark" data-money-draft-kind="${g.key}" hidden></span><p>${esc(g.text)}</p></div>`;
             col.firstChild.append(button(g.key === 'receive' || g.key === 'cancel' ? '입력하기' : '등록 내역 보기', () => {
                 if (g.key === 'receive') openReceive(); else if (g.key === 'cancel') openCancel(); else $('moneyCases').scrollIntoView({ block: 'start', behavior: 'smooth' });
             })); $('moneyGuides').append(col);
@@ -93,6 +97,7 @@ window.AccountingMoney = (() => {
             });
         }
         if (!$('moneyGuides').children.length) $('moneyGuides').textContent = '관련 업무나 계정과목을 찾지 못했습니다. 다른 표현으로 검색해 주세요.';
+        renderDraftState();
     }
     function snapshot(node) {
         return JSON.stringify(Array.from(node.querySelectorAll('input,select,textarea'))
@@ -100,13 +105,35 @@ window.AccountingMoney = (() => {
             .map(field => [field.id, field.type === 'checkbox' || field.type === 'radio' ? field.checked
                 : field.hasAttribute('data-number-group') ? String(field.value).replace(/,/g, '') : field.value]));
     }
-    function trackDraft(node) {
-        const draft = {node, baseline:snapshot(node)}; drafts.add(draft); return draft;
+    function trackDraft(node, kind, title, resume) {
+        const draft = {node, kind, title, resume, sequence:++draftSequence, baseline:snapshot(node)}; drafts.add(draft); return draft;
     }
     function releaseDraft(draft) {
         if (!draft) return;
         window.ErpWorkspaceResume?.checkpoint(draft.node);
         drafts.delete(draft);
+        renderDraftState();
+    }
+    function renderDraftState() {
+        if (!$('moneyDraftItems')) return;
+        const pending = Array.from(drafts).filter(draft => snapshot(draft.node) !== draft.baseline);
+        const allowed = canPerform('accounting.edit');
+        $('moneyDraftCount').textContent = `작성 중 ${pending.length}건`;
+        document.querySelectorAll('[data-money-draft-kind]').forEach(badge => {
+            const count = pending.filter(draft => draft.kind === badge.dataset.moneyDraftKind).length;
+            badge.hidden = !count; badge.textContent = `작성 중 ${count}건`;
+        });
+        const key = JSON.stringify([pending.map(draft => draft.sequence),allowed,saving]);
+        if (key === draftDisplayKey) return;
+        draftDisplayKey = key;
+        $('moneyDraftItems').replaceChildren();
+        pending.forEach(draft => {
+            const resume = button(`이어서 작성 · ${draft.title}`, () => {
+                if (!saving && canPerform('accounting.edit')) draft.resume();
+            }, 'btn btn-sm btn-outline-primary');
+            resume.disabled = saving || !allowed;
+            $('moneyDraftItems').append(resume);
+        });
     }
     function hasDraftChanges() {
         return saving || Array.from(drafts).some(draft => snapshot(draft.node) !== draft.baseline);
@@ -117,6 +144,7 @@ window.AccountingMoney = (() => {
     function editor(title, html, key) {
         if (!canPerform('accounting.edit')) { showAlert('안내', '회계 입력 권한이 필요합니다.'); return false; }
         if (saving) return false;
+        renderDraftState();
         const area = $('moneyEditor'); area.hidden = false;
         if (activeEditor?.key === key) {
             area.scrollIntoView({ block:'start', behavior:'smooth' }); return 'retained';
@@ -130,7 +158,7 @@ window.AccountingMoney = (() => {
             record = {key, node, sourceForms:new Map(), sourceKey:'', sources:[], sourceOffset:0, sourceLoaded:false};
             editors.set(key, record);
             node.querySelector('#moneyClose').onclick = () => {
-                if (!saving && activeEditor === record) { sourceSeq++; area.hidden = true; }
+                if (!saving && activeEditor === record) { sourceSeq++; area.hidden = true; renderDraftState(); }
             };
         }
         activeEditor = record; area.append(record.node);
@@ -139,7 +167,7 @@ window.AccountingMoney = (() => {
     const commonFields = () => `<div class="row g-3"><div class="col-md-6"><label for="moneyDate" class="form-label">실제 처리일</label><input id="moneyDate" type="date" class="form-control" value="${formatAccountingKstDate()}" max="${formatAccountingKstDate()}" required></div><div class="col-md-6"><label for="moneyAmount" class="form-label">금액</label><input id="moneyAmount" type="number" data-number-group class="form-control" min="1" step="1" required></div></div>`;
     function openReceive() {
         if (editor('착오입금 등록', `<form id="moneyForm">${commonFields()}<label for="moneyDescription" class="form-label mt-3">입금자명과 확인 내용</label><input id="moneyDescription" class="form-control" maxlength="300" placeholder="예: 홍길동 착오입금" required><p class="text-muted mt-3">통장에 실제 들어온 돈만 등록합니다. 보통예금 증가와 가수금 증가가 함께 기록됩니다. 아직 입금 이유를 모르는 돈도 이곳에 기록하고, 매출로 잡지 않습니다.</p><button class="btn btn-primary" id="moneySave">확인 후 장부에 등록</button></form>`, 'receive') !== 'new') return;
-        activeEditor.draft = trackDraft($('moneyForm'));
+        activeEditor.draft = trackDraft($('moneyForm'), 'receive', '착오입금 등록', openReceive);
         $('moneyForm').onsubmit = event => { event.preventDefault(); confirmSave('receive', { date: $('moneyDate').value, amount: Number(ERPNumberInput.raw($('moneyAmount').value)), description: $('moneyDescription').value.trim(), project: $('projectSelect').value || '본사' }, '실제 통장 입금 내역을 확인하셨나요? 이 금액을 가수금으로 기록합니다.'); };
     }
     async function openCancel() {
@@ -194,7 +222,9 @@ window.AccountingMoney = (() => {
             event.preventDefault();
             confirmSave('cancel', { original_trans_id: source.trans_id, date: $('moneyDate').value, amount: Number(ERPNumberInput.raw($('moneyAmount').value)), vat_amount: Number(ERPNumberInput.raw($('moneyVat').value)), description: $('moneyDescription').value.trim(), card_alias: $('moneyCard').value, card_path: $('moneyPath').value, payment_confirmed: $('moneyPaymentConfirmed').checked, approval_id: $('moneyAdjustment').value || null, reference: $('moneyReference').value.trim() }, '원거래와 취소 증빙을 확인하셨나요? 선택한 납부·환급 상태로 장부에 기록합니다.');
         };
-        record.sourceForms.set(key, trackDraft(node));
+        record.sourceForms.set(key, trackDraft(node, 'cancel', `카드 취소 · ${source.description}`, () => {
+            if (editor('카드 결제 취소', '', 'cancel')) chooseSource(source);
+        }));
         area.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
     function updatePaths() {
@@ -216,7 +246,7 @@ window.AccountingMoney = (() => {
         referenceWrap.innerHTML = '<label for="moneySettlementReference" class="form-label">이체·환급 확인번호 또는 구분 메모 (선택)</label><input id="moneySettlementReference" class="form-control" maxlength="100" placeholder="같은 날 같은 금액을 두 번 처리한 경우 구분할 내용">';
         $('moneyMethod').after(referenceWrap);
         $('moneyForm').onsubmit = event => { event.preventDefault(); confirmSave('settle', { case_id: item.id, date: $('moneyDate').value, amount: Number(ERPNumberInput.raw($('moneyAmount').value)), method: $('moneyMethod').value, reference: $('moneySettlementReference').value.trim() }, '실제 통장 거래 또는 카드사 차감 내역을 확인하셨나요? 장부와 남은 금액을 함께 갱신합니다.'); };
-        activeEditor.draft = trackDraft($('moneyForm'));
+        activeEditor.draft = trackDraft($('moneyForm'), mistaken ? 'return' : 'refund', `${mistaken ? '착오입금 반환' : '카드 환급'} · ${item.description}`, () => openSettlement(item));
     }
     function confirmSave(action, payload, text) {
         if (saving) return;
@@ -231,12 +261,15 @@ window.AccountingMoney = (() => {
     }
     async function save(action, payload, context) {
         if (saving || !canPerform('accounting.edit')) return; saving = true;
+        let committed = false;
         const form = action === 'void' ? null : context.form;
         const controls = form ? Array.from(form.elements).map(node => [node, node.disabled]) : [];
         controls.forEach(([node]) => node.disabled = true);
+        renderDraftState();
         try {
             const request = await api('prepare', { action, payload });
             const result = await api('commit', { request_id: request.request_id });
+            committed = true;
             if (action !== 'void' && activeEditor === context.record) {
                 const record = context.record;
                 if (record.key === 'cancel') {
@@ -247,10 +280,13 @@ window.AccountingMoney = (() => {
                 }
                 $('moneyEditor').hidden = true;
             }
-            await Promise.all([loadCases(), refreshDashboard(), loadHistory()]);
-            showAlert('완료', result.replayed ? '이미 반영한 내역입니다. 장부에 중복으로 기록하지 않았습니다.' : '장부와 처리 내역에 반영했습니다.');
-        } catch (error) { showAlert('처리 확인', errorText(error)); }
-        finally { saving = false; if (form?.isConnected) controls.forEach(([node, disabled]) => node.disabled = disabled || !canPerform('accounting.edit')); }
+            const refreshed = await Promise.allSettled([loadCases, refreshDashboard, loadHistory].map(read => Promise.resolve().then(read)));
+            const refreshFailed = refreshed.some(item => item.status === 'rejected' || item.value === false);
+            showAlert('완료', refreshFailed ? '장부에 저장했습니다. 화면을 갱신하지 못했으니 목록을 다시 조회해 주세요. 다시 저장할 필요는 없습니다.' : result.replayed ? '이미 반영한 내역입니다. 장부에 중복으로 기록하지 않았습니다.' : '장부와 처리 내역에 반영했습니다.');
+        } catch (error) {
+            showAlert(committed ? '완료' : '처리 확인', committed ? '장부에 저장했습니다. 화면을 갱신하지 못했으니 목록을 다시 조회해 주세요. 다시 저장할 필요는 없습니다.' : errorText(error));
+        }
+        finally { saving = false; if (form?.isConnected) controls.forEach(([node, disabled]) => node.disabled = disabled || !canPerform('accounting.edit')); renderDraftState(); }
     }
     async function loadCases(append = false) {
         const seq = ++listSeq;
@@ -275,7 +311,8 @@ window.AccountingMoney = (() => {
             });
             $('moneyStatus').textContent = cases.length ? `${cases.length}건 표시` : '이 화면에서 등록한 내역이 아직 없습니다. 기존 전표는 장부 조회에서 확인할 수 있습니다.';
             $('moneyMore').hidden = (data.items || []).length < 30;
-        } catch (error) { if (seq === listSeq) $('moneyStatus').textContent = errorText(error); }
+            return true;
+        } catch (error) { if (seq === listSeq) { $('moneyStatus').textContent = errorText(error); return false; } }
     }
     async function open(query = '') {
         mount(); $('moneyGuideSearch').value = query; renderGuides(); await loadCases();

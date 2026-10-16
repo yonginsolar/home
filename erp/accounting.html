@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.153 | Change: 2026-10-16 - Keep separate money-workflow drafts on close and task changes. -->
+<!-- Version: v1.0.154 | Change: 2026-10-17 - Distinguish committed saves from refresh failures and resume money drafts. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,11 +8,11 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.153 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.154 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
-  <link rel="stylesheet" href="accounting_money_module.css?v=20261002-3">
+  <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -6176,7 +6176,7 @@ async function refreshAccountingDashboardOnce() {
     if (error) {
         if (otherRevenueEl) otherRevenueEl.innerText = '조회 실패';
         console.error('회계 대시보드 집계 조회 실패:', error);
-        return;
+        return false;
     }
 
     const summary = data && typeof data === 'object' ? data : {};
@@ -6211,6 +6211,7 @@ async function refreshAccountingDashboardOnce() {
     document.getElementById("valAst").innerText = Number(summary.assets || 0).toLocaleString();
     document.getElementById("valCash").innerText = Number(summary.bank_balance || 0).toLocaleString();
     renderVatSummaryCard();
+    return true;
 } // End of refreshAccountingDashboardOnce
 
 async function refreshDashboard() {
@@ -6220,14 +6221,16 @@ async function refreshDashboard() {
     }
 
     accountingDashboardRefreshPromise = (async function runAccountingDashboardRefreshQueue() {
+        let refreshed = true;
         do {
             accountingDashboardRefreshQueued = false;
-            await refreshAccountingDashboardOnce();
+            if (await refreshAccountingDashboardOnce() === false) refreshed = false;
         } while (accountingDashboardRefreshQueued);
+        return refreshed;
     })();
 
     try {
-        await accountingDashboardRefreshPromise;
+        return await accountingDashboardRefreshPromise;
     } finally {
         accountingDashboardRefreshPromise = null;
     }
@@ -9356,9 +9359,10 @@ function loadHistory() {
         .then(({ data, error }) => {
             if (error) {
                 el.innerHTML = `<div class="list-group-item text-danger small">조회 실패: ${escapeHtml(error.message)}</div>`;
-                return;
+                return false;
             }
             renderHistoryDouble(data || []);
+            return true;
         });
 }
 
@@ -10608,7 +10612,7 @@ async function fetchLiabilitySum() {
     showAlert("조회 성공", `[${periodLabel}] 장부상 금액을 불러왔습니다.\n실제 고지서 금액과 다르다면 '금액' 란을 수정하세요.`);
 }
 </script>
-<script src="accounting_money_module.js?v=20261016-drafts-1"></script>
+<script src="accounting_money_module.js?v=20261017-1"></script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>
