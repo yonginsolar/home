@@ -1,4 +1,4 @@
-/* v1.0.2 — Explain linked profile records without widening erasure eligibility. */
+/* v1.0.3 — Approved profile-history scope and stable reason-modal layout. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,status=null,body=null,controls=null,bank=null,grace=null,opener=null,sequence=0,badgeSequence=0,busy=false,loaded=false,pending=null;
@@ -45,7 +45,7 @@
   const purge=dialog.querySelector('[data-review-purge]');if(purge)purge.disabled=busy||!loaded||!valid(binding)||!!pending||!chosen.length||!bank.checked||chosen.some(x=>!x?.eligible);
   const receipt=dialog.querySelector('[data-review-receipt]');if(receipt)receipt.disabled=busy||!valid(binding)||!pending;
   grace.disabled=bank.disabled=busy||!!pending||!valid(binding);
-  for(const box of body.querySelectorAll('input'))box.disabled=busy||!!pending||!valid(binding);
+  for(const box of body.querySelectorAll('input,[data-review-detail]'))box.disabled=busy||!!pending||!valid(binding);
  }
  function render(){
   body.replaceChildren();
@@ -54,7 +54,13 @@
    check.dataset.erpQueryControl='';check.onchange=()=>{if(check.checked)selected.add(id);else selected.delete(id);bank.checked=false;update();};cell.append(check);
    const reason=node('td',row.eligible?'text-danger':'text-muted',row.eligible?'정리 가능':reasons[row.blocker]||'확인 필요');
    const bankHistory=Array.isArray(row.blocker_details)?row.blocker_details.find(x=>x?.code==='bank_account_history'&&Number.isSafeInteger(x.count)&&x.count>0):null;
-   if(!row.eligible&&bankHistory){const detail=node('details','small mt-1'),summary=node('summary','text-primary','상세 사유 · 계좌정보 변경 이력 '+bankHistory.count+'건');detail.append(summary,node('p','mt-2 mb-0','해당 신청에 계좌정보 변경 이력이 연결돼 있습니다. 이는 출자금 입금 기록과는 다릅니다. 개인정보 이력을 함께 파기하는 범위가 아직 포함되지 않아 차단했습니다. 이력의 보존·파기 범위를 확인해야 하며, 입금·회계·서명 기록은 별도로 보호됩니다.'));reason.append(detail);}
+   const detail=node('button','btn btn-link btn-sm d-block p-0 mt-1','상세 사유');detail.type='button';detail.dataset.reviewDetail='';
+   detail.onclick=()=>{if(!valid(binding)||!loaded||busy||pending||records.get(id)!==row)return;
+    const messages=[row.eligible?'현재 신청은 통장 대조 후 선택해 종결·파기할 수 있습니다.':reasons[row.blocker]||'현재 상태를 다시 확인해야 합니다.'];
+    if(bankHistory)messages.push('계좌정보 변경 이력 '+bankHistory.count+'건이 연결돼 있습니다. 해당 신청자의 계좌정보 이력은 신청정보와 함께 파기합니다. 이는 실제 출자금 입금 기록과는 다릅니다.');
+    messages.push('일부 입금·입금 확인 중인 건과 실제 입금·회계·배당 지급·서명 등 다른 업무 기록이 연결된 건은 파기할 수 없습니다. 부모·형제와 공유 로그인 계정, 기존 직원·관리자 권한은 유지합니다.');
+    void root.CoopDialog.alert(messages.join('\n\n'),{title:'현재 상태와 파기 범위'});
+   };reason.append(detail);
    tr.append(cell,node('td','fw-bold',person?.name||'신청자'),node('td','',row.due_on||'완료 전'),node('td','',row.deferred_until||'—'),reason);body.append(tr);
   }
   update();
@@ -84,7 +90,7 @@
   const capture=JSON.stringify(chosen.map(id=>[id,revisions[id]]));busy=true;update();
   try{
    if(action==='purge'){
-    const yes=await root.CoopDialog.confirm(chosen.length+'건을 종결하고 이름·전화번호를 포함한 운영 신청정보와 연결된 가입 동의 사본을 삭제합니다. 되돌릴 수 없습니다.\n부모·형제·공유 로그인 계정은 유지합니다. 기존 암호화 백업과 외부 발송 기록까지 즉시 파기되는 것은 아니며 백업 정리는 별도 대기로 기록합니다.',{title:'미납 신청 종결·운영정보 파기',confirmText:'선택한 신청 파기',cancelText:'취소'});
+    const yes=await root.CoopDialog.confirm(chosen.length+'건을 종결하고 이름·전화번호·계좌정보 변경 이력을 포함한 운영 신청정보와 연결된 가입 동의 사본을 삭제합니다. 되돌릴 수 없습니다.\n실제 입금·회계·서명 기록이 연결된 건은 처리하지 않습니다. 부모·형제·공유 로그인 계정과 기존 권한은 유지합니다. 기존 암호화 백업과 외부 발송 기록까지 즉시 파기되는 것은 아니며 백업 정리는 별도 대기로 기록합니다.',{title:'미납 신청 종결·운영정보 파기',confirmText:'선택한 신청 파기',cancelText:'취소'});
     if(!yes||!valid(b)||capture!==JSON.stringify([...selected].map(id=>[id,records.get(id)?.revision])))return;
    }
    const request={id:root.crypto.randomUUID(),action,ids:chosen,payload:{...fields,revisions}};pending=request;status.textContent='처리 중입니다…';
@@ -113,7 +119,7 @@
   controls.append(refresh,gl,grace);add('선택 신청 유예',()=>({deferred_until:grace.value||'invalid'}));add('유예 해제',()=>({deferred_until:null}));add('입금 확인 중',()=>({checking:true}));add('확인 중 해제',()=>({checking:false}));
   bank=node('input','form-check-input me-2');bank.type='checkbox';bank.dataset.erpQueryControl='';bank.id='memberApplicationBankChecked';bank.onchange=update;const bl=node('label','small d-block');bl.htmlFor=bank.id;bl.append(bank,document.createTextNode('통장을 대조했고 선택한 신청에 입금이 없음을 확인했습니다.'));
   status=node('p','small my-3','');status.setAttribute('role','status');
-  const actions=node('div','d-flex flex-wrap gap-2 justify-content-end'),result=node('button','btn btn-outline-secondary','처리 결과 확인'),purge=node('button','btn btn-danger','선택한 신청 종결·파기'),cancel=node('button','btn btn-secondary','닫기');result.type=purge.type=cancel.type='button';result.dataset.reviewReceipt='';purge.dataset.reviewPurge='';result.onclick=()=>void receipt();purge.onclick=()=>void mutate('purge',{bank_checked:true});cancel.onclick=close;actions.append(result,purge,cancel);
+  const actions=node('div','d-flex flex-wrap gap-2 justify-content-end'),result=node('button','btn btn-outline-secondary','처리 결과 확인'),purge=node('button','btn btn-danger','선택한 신청 종결·파기'),cancel=node('button','btn btn-secondary','닫기');result.type=purge.type=cancel.type='button';result.dataset.reviewReceipt='';purge.dataset.reviewPurge='';result.onclick=()=>void receipt();purge.onclick=()=>void mutate('purge',{bank_checked:true,include_bank_history:true});cancel.onclick=close;actions.append(result,purge,cancel);
   d.addEventListener('cancel',e=>{e.preventDefault();close();});d.append(title,hint,wrap,controls,bl,status,actions);document.body.append(d);d.showModal();cancel.focus();await load();
  }
  root.MemberApplicationManage=Object.freeze({bind,clear});root.addEventListener('pagehide',clear);
