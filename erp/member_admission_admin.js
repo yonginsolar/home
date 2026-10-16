@@ -1,4 +1,4 @@
-/* v1.1.0 — Read-only application-completion deadline, consent and notice status. */
+/* v1.1.1 — Read-only dates plus authorized manual-review entry. */
 (function(root){
  'use strict';
  let binding=null,sequence=0,openSequence=0,dialog=null,opener=null;
@@ -38,12 +38,12 @@
   if(dialog){binding.current=options.current;return;}
   const b={...options,owner:nextOwner};binding=b;const serial=++sequence;
   const ids=options.rows.filter(m=>m.status==='승인대기').map(m=>m.id||m.member_uid).filter(Boolean);
-  if(!ids.length){records.clear();return;}
-  try{const r=await call(b,ids);if(!valid(b)||serial!==sequence)return;records.clear();if(r.enabled)r.items.forEach(x=>records.set(x.member_uid,x));paint(b);}
-  catch(_){if(valid(b)&&serial===sequence){records.clear();paint(b,true);}}
+ if(!ids.length)records.clear();
+  try{const r=await call(b,ids);if(!valid(b)||serial!==sequence)return;records.clear();if(r.enabled)r.items.forEach(x=>records.set(x.member_uid,x));paint(b);root.MemberApplicationManage?.bind(options,r.enabled);}
+  catch(_){if(valid(b)&&serial===sequence){records.clear();paint(b,true);root.MemberApplicationManage?.bind(options,false);}}
  }
  function close(){if(!dialog)return;dialog.remove();dialog=null;if(opener?.isConnected)opener.focus({preventScroll:true});opener=null;}
- function clear(){++sequence;++openSequence;binding=null;records.clear();close();}
+ function clear(){++sequence;++openSequence;binding=null;records.clear();close();root.MemberApplicationManage?.clear();}
  async function open(uid){
   const b=binding;if(!valid(b)||dialog)return;const serial=++openSequence;let r=records.get(uid);
   if(!r){try{const result=await call(b,[uid]);if(!valid(b)||serial!==openSequence||dialog)return;r=result.items[0];if(!result.enabled||!r)return;records.set(uid,r);paint(b);}catch(_){if(valid(b)&&serial===openSequence)return root.CoopDialog.alert('납입기한을 확인하지 못했습니다. 다시 확인해 주세요.');return;}}

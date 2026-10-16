@@ -6257,6 +6257,7 @@ async function fetchMembers() {
 
         // 3. 화면 렌더링
         if (!g_members.length) {
+             void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:g_adminMemberRuntime?.coop_id,actor:adminCertificateAuthId}),current:()=>requestRevision===g_member_fetch_revision,refresh:()=>fetchMembers()});
              if (!keyword && status === 'all' && type === 'all') {
                  renderNoMembersState();
              } else if (typeof renderMemberTable === 'function') {
@@ -6268,7 +6269,7 @@ async function fetchMembers() {
 
         renderMemberTable(g_members);
         renderMemberPagination();
-        void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:g_adminMemberRuntime?.coop_id,actor:adminCertificateAuthId}),current:()=>requestRevision===g_member_fetch_revision});
+        void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:g_adminMemberRuntime?.coop_id,actor:adminCertificateAuthId}),current:()=>requestRevision===g_member_fetch_revision,refresh:()=>fetchMembers()});
 
     } catch (err) {
         if (requestRevision !== g_member_fetch_revision) return;
