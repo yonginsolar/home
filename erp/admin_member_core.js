@@ -5771,6 +5771,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-members', memberAdminEnabled],
 ['nav-badges', memberAdminEnabled && hasAdminMemberBadgePermission()],
 ['member-capital-settings-button', memberAdminEnabled],
+['member-admission-policy-button', memberAdminEnabled],
 ['nav-org-settings', memberAdminEnabled && (isSiteMemberProfile || canOpenFullCoopSettings())],
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
@@ -9372,6 +9373,9 @@ window.onload = async function() {
     }
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && hasAdminMemberScopePermission('member_admin') && isAdminMemberRuntimeModuleEnabled('member_admin') && workEntry.get('sub') === 'capital') {
         await openMemberCapitalSettings();
+    }
+    if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && hasAdminMemberScopePermission('member_admin') && isAdminMemberRuntimeModuleEnabled('member_admin') && workEntry.get('sub') === 'payment-policy') {
+        await window.MemberAdmissionPolicy?.open();
     }
 
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {

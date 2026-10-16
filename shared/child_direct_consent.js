@@ -1,4 +1,4 @@
-/* v1.0.2 — Preserve draft ownership across cancellation and late responses. */
+/* v1.0.3 — Read the registered cooperative's bylaw notice without losing child input. */
 (function () {
   'use strict';
   let opening = false, submitting = false, current = null, dialog = null;
@@ -40,6 +40,8 @@
       if (serial !== revision || !valid(options)) return;
       if (error) throw error;
       if (!data?.request_id || !data.terms || !data.version) throw new Error('CHILD_REQUEST_UNAVAILABLE');
+      const applicationNotice=options.loadApplicationNotice?await options.loadApplicationNotice():options.applicationNotice;
+      if (serial !== revision || !valid(options)) return;
       // Only a masked display identifier is sent; the remaining RR number is never retained.
       current = { ...options, data: Object.freeze({ ...options.data, rrn2: String(options.data.rrn2).charAt(0) }), request: data };
       const family = document.getElementById('familyModalOverlay'); if (family) family.style.display = 'none';
@@ -51,7 +53,7 @@
       card.append(node('p',`${current.data.name} · 신청 출자금 ${Number(current.data.capital).toLocaleString('ko-KR')}원 · 관계: ${current.data.relationship}`,'fw-bold'));
       const labels = {privacy:'개인정보 수집·이용',membership:'가입·출자 동의',guardian:'법정대리인 확인',notice:'동의 접수 안내'};
       for (const [key, label] of Object.entries(labels)) { card.append(node('h3',label,'h6 fw-bold mt-3'),node('p',data.terms[key],'small')); }
-      if(typeof options.applicationNotice==='string'&&options.applicationNotice){const notice=node('p',options.applicationNotice,'small mt-3');notice.dataset.applicationNotice='';card.append(notice);}
+      if(typeof applicationNotice==='string'&&applicationNotice){const notice=node('p',applicationNotice,'small mt-3');notice.dataset.applicationNotice='';card.append(notice);}
       card.append(node('p',`안내받을 법정대리인 휴대전화번호 끝 4자리: ${data.phone_tail}`,'small'));
       for (const [id,label] of [['privacy','신청자의 개인정보 수집·이용에 동의합니다.'],['membership','위 신청 내용과 출자금액을 확인하고 가입·출자에 동의합니다.'],['guardian','본인은 적법한 법정대리인이며 위 확인 내용에 동의합니다.']]) {
         const wrap = node('label',null,'d-flex gap-2 my-3 small');

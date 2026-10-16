@@ -1,4 +1,4 @@
-/* v1.1.0 — Scoped single review, bulk selection, and concise operational copy. */
+/* v1.2.0 — Distinguish unconfigured/unlimited/bylaw basis without widening erasure. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,status=null,body=null,controls=null,bank=null,grace=null,opener=null,all=null,sequence=0,badgeSequence=0,busy=false,loaded=false,pending=null,focusId=null,savedSelection=null;
@@ -64,7 +64,7 @@
     if(bankHistory)messages.push('계좌정보 변경 이력 '+bankHistory.count+'건');
     void root.CoopDialog.alert(messages.join('\n\n'),{title:'상세 사유'});
    };reason.append(detail);
-   tr.append(cell,node('td','fw-bold',person?.name||'신청자'),node('td','',row.due_on||'완료 전'),node('td','',row.deferred_until||'—'),reason);body.append(tr);
+   tr.append(cell,node('td','fw-bold',person?.name||'신청자'),node('td','',row.due_on||({policy_unconfigured:'미설정',no_deadline:'기한 없음',basis_pending:'승낙 통지일 미입력'}[row.state]||'완료 전')),node('td','',row.deferred_until||'—'),reason);body.append(tr);
   }
   update();
  }
