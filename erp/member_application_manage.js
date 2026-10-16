@@ -1,4 +1,4 @@
-/* v1.0.1 — Explicit manual-bank review with unchanged target-list validation. */
+/* v1.0.2 — Explain linked profile records without widening erasure eligibility. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,status=null,body=null,controls=null,bank=null,grace=null,opener=null,sequence=0,badgeSequence=0,busy=false,loaded=false,pending=null;
@@ -52,7 +52,10 @@
   for(const id of ids(binding)){
    const row=records.get(id);if(!row)continue;const person=binding.rows.find(x=>(x.id||x.member_uid)===id),tr=node('tr'),cell=node('td'),check=node('input','form-check-input');check.type='checkbox';check.checked=selected.has(id);check.setAttribute('aria-label',(person?.name||'신청자')+' 선택');
    check.dataset.erpQueryControl='';check.onchange=()=>{if(check.checked)selected.add(id);else selected.delete(id);bank.checked=false;update();};cell.append(check);
-   tr.append(cell,node('td','fw-bold',person?.name||'신청자'),node('td','',row.due_on||'완료 전'),node('td','',row.deferred_until||'—'),node('td',row.eligible?'text-danger':'text-muted',row.eligible?'정리 가능':reasons[row.blocker]||'확인 필요'));body.append(tr);
+   const reason=node('td',row.eligible?'text-danger':'text-muted',row.eligible?'정리 가능':reasons[row.blocker]||'확인 필요');
+   const bankHistory=Array.isArray(row.blocker_details)?row.blocker_details.find(x=>x?.code==='bank_account_history'&&Number.isSafeInteger(x.count)&&x.count>0):null;
+   if(!row.eligible&&bankHistory){const detail=node('details','small mt-1'),summary=node('summary','text-primary','상세 사유 · 계좌정보 변경 이력 '+bankHistory.count+'건');detail.append(summary,node('p','mt-2 mb-0','해당 신청에 계좌정보 변경 이력이 연결돼 있습니다. 이는 출자금 입금 기록과는 다릅니다. 개인정보 이력을 함께 파기하는 범위가 아직 포함되지 않아 차단했습니다. 이력의 보존·파기 범위를 확인해야 하며, 입금·회계·서명 기록은 별도로 보호됩니다.'));reason.append(detail);}
+   tr.append(cell,node('td','fw-bold',person?.name||'신청자'),node('td','',row.due_on||'완료 전'),node('td','',row.deferred_until||'—'),reason);body.append(tr);
   }
   update();
  }

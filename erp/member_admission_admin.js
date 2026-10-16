@@ -1,4 +1,4 @@
-/* v1.1.1 — Read-only dates plus authorized manual-review entry. */
+/* v1.1.2 — Distinguish organization managers from child consent. */
 (function(root){
  'use strict';
  let binding=null,sequence=0,openSequence=0,dialog=null,opener=null;
@@ -7,7 +7,8 @@
  const identity=o=>{const c=o?.context();return c?.actor&&c?.coop_id?c.actor+'|'+c.coop_id:'';};
  const valid=b=>b===binding&&identity(b)===b.owner&&!!b.owner&&b.current()&&!root.frameElement?.hidden;
  const labels={completion_pending:'신청 완료 확인 필요',waiting:'납입기한 내',overdue:'납입기한 경과 · 관리자 확인',payment_check:'납입 상태·기록 확인'};
- const consents={confirmed:'보호자 동의 완료',pending:'보호자 동의 미완료',declined:'보호자 동의 거부 · 확인 필요',unverified:'기존 보호자 동의 기록 확인 필요',not_required:'별도 보호자 동의 대상 아님'};
+ const consents={confirmed:'자녀 가입·개인정보 동의 완료',pending:'자녀 가입·개인정보 동의 미완료',declined:'자녀 가입·개인정보 동의 거부 · 확인 필요',unverified:'기존 대리 신청 기록 확인 필요',not_required:'별도 보호자 동의 대상 아님'};
+ const consentText=(r,person)=>r.application_kind==='organization'||person?.member_type==='단체'?'단체 관리자 등록 · 보호자 동의 대상 아님':consents[r.consent_status];
  const deliveries={accepted:'안내 발송 접수',failed:'안내 발송 실패',unknown:'안내 발송 결과 확인 필요',queued:'안내 발송 대기',processing:'안내 발송 처리 중',skipped:'안내 발송 안 함',legacy_recorded:'이전 안내 발송 기록 있음',not_recorded:'안내 발송 기록 없음'};
  async function call(b,ids){
   let timer;const controller=new AbortController();
@@ -29,7 +30,8 @@
    if(r?.state==='overdue')button.classList.add('text-danger');box.append(button);
    if(failed)return;
    if(r.due_on)box.append(node('div','small text-muted','납입기한 '+r.due_on));
-   if(['pending','declined','unverified'].includes(r.consent_status))box.append(node('div','small text-warning-emphasis',consents[r.consent_status]));
+   const person=b.rows.find(m=>(m.id||m.member_uid)===uid);
+   if(r.application_kind!=='organization'&&person?.member_type!=='단체'&&['pending','declined','unverified'].includes(r.consent_status))box.append(node('div','small text-warning-emphasis',consentText(r,person)));
    if(['failed','unknown'].includes(r.delivery_status))box.append(node('div','small text-danger',deliveries[r.delivery_status]));
   });
  }
@@ -50,8 +52,8 @@
   opener=document.activeElement;const d=node('dialog','border rounded-3 p-4 bg-white text-dark');dialog=d;d.style.cssText='width:min(560px,calc(100% - 32px));max-height:85vh;overflow:auto;word-break:keep-all;color-scheme:light';d.setAttribute('aria-labelledby','admission-heading');
   const target=b.rows.find(m=>(m.id||m.member_uid)===uid),title=node('h2','h5',(target?.name?target.name+' · ':'')+'가입 신청·납입기한');title.id='admission-heading';
   const info=node('div','my-3'),status=node('p','small mt-2','');status.setAttribute('role','status');
-  const render=()=>{info.replaceChildren();for(const text of ['신청 접수일: '+(r.submitted_on||'기록 확인 필요'),'신청 완료일: '+(r.completed_on||'완료 전 또는 기록 확인 필요'),'납입기한: '+(r.due_on||'신청 완료 후 계산'),labels[r.state],consents[r.consent_status],(r.delivery_kind==='guardian_request'?'보호자 동의 요청 · ':'')+deliveries[r.delivery_status]])info.append(node('p','mb-2',text));};render();
-  const hint=node('p','small text-muted','신청 완료일부터 10일로 자동 계산합니다. 자녀는 해당 자녀의 신청·동의 완료 기록을 사용하며 부모나 다른 자녀의 날짜·입금은 대신 쓰지 않습니다. 자동 철회·개인정보 삭제·알림 발송은 하지 않습니다. 발송 접수는 실제 수신 완료와 다릅니다.');
+  const render=()=>{info.replaceChildren();for(const text of ['신청 접수일: '+(r.submitted_on||'기록 확인 필요'),'신청 완료일: '+(r.completed_on||'완료 전 또는 기록 확인 필요'),'납입기한: '+(r.due_on||'신청 완료 후 계산'),labels[r.state],consentText(r,target),(r.delivery_kind==='guardian_request'?'자녀 가입·개인정보 동의 요청 · ':'')+deliveries[r.delivery_status]])info.append(node('p','mb-2',text));};render();
+  const hint=node('p','small text-muted','신청 완료일부터 10일로 계산합니다. 자녀의 보호자 동의는 자녀의 가입 신청·개인정보 수집 이용 동의와 보호자임의 확인입니다. 단체는 보호자가 아닌 관리자를 연결하며 별도 보호자 동의를 요구하지 않습니다. 기존 대리 신청의 기록 미확인은 동의 거부를 뜻하지 않습니다. 자동 철회·삭제·알림 발송은 하지 않습니다. 발송 접수는 실제 수신 완료와 다릅니다.');
   const actions=node('div','d-flex gap-2 justify-content-end mt-3'),reload=node('button','btn btn-outline-secondary','다시 확인'),cancel=node('button','btn btn-secondary','닫기');reload.type=cancel.type='button';actions.append(reload,cancel);d.append(title,info,hint,status,actions);
   cancel.onclick=close;d.addEventListener('cancel',e=>{e.preventDefault();close();});
   reload.onclick=async()=>{if(reload.disabled||!valid(b))return;reload.disabled=true;status.textContent='확인 중입니다…';try{const result=await call(b,[uid]);if(dialog!==d||!valid(b))return;const fresh=result.items[0];if(!fresh)throw Error('TARGET_CHANGED');r=fresh;records.set(uid,r);paint(b);render();status.textContent='현재 상태를 확인했습니다.';}catch(_){if(dialog===d&&valid(b))status.textContent='현재 상태를 확인하지 못했습니다. 다시 확인해 주세요.';}finally{if(dialog===d)reload.disabled=false;}};
