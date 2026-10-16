@@ -5845,13 +5845,13 @@ if (faqFinanceCategory) faqFinanceCategory.textContent = isSiteMemberProfile ? '
 const detailBadgesGroup = document.getElementById('member-detail-badges-group');
 if (detailBadgesGroup) detailBadgesGroup.classList.toggle('hidden', !canManageAdminMemberIndividualBadges());
 const preferredNameInput = document.getElementById('md-preferred-name');
-if (preferredNameInput) preferredNameInput.placeholder = isSiteMemberProfile ? '' : '예: 나무와나';
+if (preferredNameInput) preferredNameInput.placeholder = '';
 const preferredNamePosition = document.getElementById('md-preferred-name-position');
 if (preferredNamePosition) {
   const beforeOption = preferredNamePosition.querySelector('option[value="before"]');
   const afterOption = preferredNamePosition.querySelector('option[value="after"]');
-  if (beforeOption) beforeOption.textContent = isSiteMemberProfile ? '이름 앞' : '이름 앞 (나무와나 이정희)';
-  if (afterOption) afterOption.textContent = isSiteMemberProfile ? '이름 뒤' : '이름 뒤 (이정희 나무와나)';
+  if (beforeOption) beforeOption.textContent = '이름 앞';
+  if (afterOption) afterOption.textContent = '이름 뒤';
 }
 const certificateSettingsButton = document.getElementById('member-certificate-settings-button');
 if (certificateSettingsButton) certificateSettingsButton.classList.toggle('hidden', !isSiteMemberProfile);
