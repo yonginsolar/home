@@ -6,6 +6,14 @@
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
   const homeAreas=new Set(['hero','impact','contact','design','fonts']);
   const utilities=['sections','legal','design','fonts','documents'];
+  const tasks=[['edit','hero','배너 바꾸기'],['about','about','소개 수정하기'],['activities','activities','소식 관리하기'],['legal','legal','가입 안내·약관'],['settings','sections','다른 설정']];
+  const taskFor=area=>tasks.find(row=>row[1]===area)?.[0]||'settings';
+  const help={hero:'사진을 누르면 사진 설정, 글자를 누르면 문구 편집, 가입 버튼을 누르면 연결 설정이 열립니다.\nPC·모바일 미리보기로 확인한 뒤 ‘변경사항 저장’을 누르세요.',about:'미리보기의 글이나 사진을 눌러 수정하세요.\n수정한 뒤 ‘변경사항 저장’을 누르면 홈페이지에 반영됩니다.',activities:'목록에서 소식을 선택하거나 ‘우리 소식 등록’을 누르세요.\n사진·내용과 공개 여부를 확인한 뒤 저장하세요.',legal:'등록할 문서를 위의 네 탭에서 선택하세요.\n‘초안 저장’은 준비 중인 내용만 보관하고, ‘등록·적용’은 실제 가입 화면이나 홈페이지에 반영합니다.'};
+  function syncTasks(){
+    const areaTask=taskFor(selected),allowed=typeof canAccessAdminMemberTab==='function'&&canAccessAdminMemberTab('site');
+    for(const [mode,area]of tasks){const button=document.getElementById('site-home-mode-'+mode);if(!button)continue;const shown=mode==='settings'?Object.keys(labels).some(a=>taskFor(a)==='settings'&&available(a)):available(area);button.hidden=!shown;button.disabled=!allowed;const active=mode===areaTask;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;}
+    for(const node of document.querySelectorAll('.home-visual-area-label,#site-home-area-picker'))node.hidden=areaTask!=='settings';
+  }
   function mountZoom(stage,shell){
     const controls=document.createElement('div');controls.className='home-preview-zoom';controls.setAttribute('role','group');controls.setAttribute('aria-label','미리보기 확대·축소');
     const viewport=document.createElement('div');viewport.className='home-preview-viewport';const canvas=document.createElement('div');canvas.className='home-preview-canvas';viewport.append(canvas);canvas.append(shell);
@@ -30,13 +38,13 @@
       if(button){button.hidden=!available(area);strip.append(button);}
     }
     if(picker)picker.value=selected;
-    const legalTab=document.getElementById('site-home-mode-legal');if(legalTab)legalTab.hidden=!available('legal');
+    syncTasks();
   }
   function available(area){
     const link=document.querySelector(`#site-content-tabs a[href="#${panes[area]||'sub-home-settings'}"]`);
     // Scope rules hide individual nav items. The whole ERP is hidden during Auth
     // boot, which must not erase the menu choices before initialization finishes.
-    return !!link && !link.classList.contains('hidden') && !link.parentElement.classList.contains('hidden') && !link.hidden && !link.parentElement.hidden;
+    return !!link && !link.classList.contains('hidden') && !link.parentElement.classList.contains('hidden') && !link.hidden && !link.parentElement.hidden && !link.disabled && !link.classList.contains('disabled') && link.getAttribute('aria-disabled')!=='true';
   }
   function select(area, navigate=true){
     if(area==='portfolio') area='progress';
@@ -54,7 +62,7 @@
     const legal=area==='legal';
     document.querySelector('.home-visual-toolbar').hidden=legal;
     document.getElementById('site-home-visual-workspace').classList.toggle('is-legal-edit',legal);
-    for(const mode of document.querySelectorAll('[data-home-mode]')){const active=(mode.dataset.homeMode==='legal')===legal;mode.setAttribute('aria-selected',String(active));mode.tabIndex=active?0:-1;}
+    syncTasks();
     const legalTabs=document.getElementById('site-legal-document-tabs');if(legalTabs)legalTabs.hidden=!legal;
     document.getElementById('site-home-preview-shell').hidden=legal;
     document.getElementById('site-home-legal-preview').hidden=!legal;
@@ -91,6 +99,7 @@
       button.textContent=labels[area]; button.dataset.homeSelectArea=area; button.onclick=()=>select(area); strip.append(button);
     }
     const devices=document.querySelector('.home-preview-device-group'); if(devices) { devices.classList.add('ms-auto'); toolbar.append(devices); }
+    const guide=document.createElement('button');guide.type='button';guide.className='btn btn-sm btn-outline-secondary';guide.id='site-home-task-help';guide.textContent='사용 방법';guide.onclick=()=>{if(typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site'))return;myAlert(help[selected]||'편집할 영역을 선택해 설정하세요.\n화면에서 수정한 뒤 해당 저장 버튼을 눌러야 반영됩니다.','info');};toolbar.append(guide);
     const pending=document.createElement('button');pending.type='button';pending.className='btn btn-sm btn-primary';pending.id='site-home-pending-save';pending.hidden=true;pending.textContent='메인 화면 변경 저장';pending.onclick=async()=>{if(await (window.CoopSiteInlineHost?.flush()??Promise.resolve(true)))saveHomeSettings();else myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');};toolbar.append(pending);
     const workspace=document.createElement('div'); workspace.id='site-home-visual-workspace';workspace.className='home-visual-workspace';
     const stage=document.createElement('div'); stage.className='home-visual-stage';
@@ -111,9 +120,9 @@
     const tabs=document.getElementById('site-content-tabs');
     const tabContent=pane.parentElement;
     const modes=document.createElement('div');modes.id='site-home-mode-tabs';modes.className='site-home-mode-tabs';modes.setAttribute('role','tablist');modes.setAttribute('aria-label','홈페이지 관리 업무');
-    for(const [mode,label] of [['edit','홈페이지 편집'],['legal','가입 안내·약관']]){
-      const button=document.createElement('button');button.type='button';button.id=`site-home-mode-${mode}`;button.dataset.homeMode=mode;button.textContent=label;button.setAttribute('role','tab');button.setAttribute('aria-controls','site-home-visual-workspace');button.onclick=()=>select(mode==='legal'?'legal':lastHomeArea);
-      button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const list=[...modes.children].filter(x=>!x.hidden);const next=event.key==='Home'?0:event.key==='End'?list.length-1:(list.indexOf(button)+1)%list.length;list[next]?.click();list[next]?.focus({preventScroll:true});};modes.append(button);
+    for(const [mode,area,label] of tasks){
+      const button=document.createElement('button');button.type='button';button.id=`site-home-mode-${mode}`;button.dataset.homeMode=mode;button.textContent=label;button.setAttribute('role','tab');button.setAttribute('aria-controls','site-home-visual-workspace');button.onclick=()=>{const target=mode==='settings'?(taskFor(selected)==='settings'?selected:available(area)?area:Object.keys(labels).find(a=>taskFor(a)==='settings'&&available(a))):area;if(target)select(target);};
+      button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const list=[...modes.children].filter(x=>!x.hidden&&!x.disabled);if(!list.length)return;const next=event.key==='Home'?0:event.key==='End'?list.length-1:(list.indexOf(button)+(event.key==='ArrowLeft'?-1:1)+list.length)%list.length;list[next]?.click();list[next]?.focus({preventScroll:true});};modes.append(button);
     }
     tabContent.before(modes,toolbar,workspace);inspector.append(tabContent);workspace.append(stage,inspector);
     // Keep the original tab nodes and Bootstrap handlers as the single navigation path.

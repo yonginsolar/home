@@ -141,7 +141,7 @@
    if(['hero','impact','contact','design','fonts','about'].includes(area)&&retry&&!retry.hidden){const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';button.textContent='다시 불러오기';button.disabled=retry.disabled||!allowed;button.onclick=()=>{if(permitted()&&!retry.disabled)retry.click();};actions.append(button);}
    publicLink.hidden=true;publicLink.removeAttribute('href');
    try{const url=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(url&&url.protocol==='https:'&&!url.username&&!url.password){url.search='';url.hash='';publicLink.href=url.href;publicLink.hidden=false;}}catch(_){}
-   if(!['hero','impact','about','activities','contact','legal'].includes(area))workspace.classList.add('show-settings');else if(!explicitSettings)workspace.classList.remove('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
+   if(!['hero','impact','about','contact','legal'].includes(area))workspace.classList.add('show-settings');else if(!explicitSettings)workspace.classList.remove('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
   }
   new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class','src']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
  }
