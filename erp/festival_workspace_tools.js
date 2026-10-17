@@ -55,7 +55,7 @@
         guide_settings:{activity_name:$('guideActivity').value.trim(),unit_price:noCash?0:Number(ERPNumberInput.raw($('guidePrice').value)),coupon_enabled:!noCash&&$('guideCoupon').checked,
           coupon_value:Number(ERPNumberInput.raw($('guideCouponValue').value||3000)),show_date:$('guideShowDate').checked,time_text:$('guideTime').value.trim(),capacity:$('guideCapacity').value?Number(ERPNumberInput.raw($('guideCapacity').value)):null}};
       if(data.guide_settings.coupon_enabled&&data.guide_settings.coupon_value>data.guide_settings.unit_price){$('eventSettingsStatus').textContent='쿠폰 금액은 체험비보다 클 수 없습니다.';return;}
-      run(async()=>{await rpc('update_event',data);dialog.close();await onChanged(settingsEvent.id);status('축제명과 체험·인쇄 안내를 저장했습니다. 기존 거래 날짜와 회계 전표는 변경하지 않았습니다.');});
+      run(async()=>{await rpc('update_event',data);dialog.close();await onChanged(settingsEvent.id);status('축제명과 체험·인쇄 안내를 저장했습니다.');});
     });
     function dates() {
       const current=today(),year=current.slice(0,4),month=current.slice(0,7);

@@ -39,7 +39,7 @@
  async function save(kind){if(busy||!snapshot)return;if(year<currentYear()&&!pastEdit)return status('과거 기준 수정 버튼을 먼저 눌러 주세요.',true);
   const scope=kind==='tenant'?'tenant':'common';if(!snapshot[scope==='common'?'can_edit_common':'can_edit_tenant'])return;
   let values;try{values=collect(scope);}catch(error){return status(message(error),true);}
-  if(kind==='common'&&!await api.confirm(`${year}년 ${period.slice(5,7)}월부터 적용할 공통 기준을 저장할까요? 이미 저장된 급여는 변경하지 않습니다.`))return;
+  if(kind==='common'&&!await api.confirm(`${year}년 ${period.slice(5,7)}월부터 적용할 공통 기준을 저장할까요?`))return;
   busy=true;lock();status('저장 중입니다.');try{const {data,error}=await api.rpc({p_action:scope==='common'?'save_common':'save_tenant',p_year:year,p_effective_on:period,p_values:values,p_expected_revision:snapshot[scope]?.revision||0,p_publish:kind==='common',p_source_note:document.getElementById('annualSource').value});if(error)throw error;
    // Preserve edits in the other section after a successful partial save.
    const other=scope==='common'?'tenant':'common',otherFields=[...document.querySelectorAll(`[data-annual-value][data-scope="${other}"]`)].map(el=>[el.id,el.value]),otherSource=document.getElementById('annualSource').value;

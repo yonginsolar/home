@@ -36,7 +36,7 @@
    }else{
     const admins=kind==='admins';
     if(admins&&data.can_admins!==true){body.append(node('p','alert alert-info','전체 관리자 지정은 같은 조합의 전체 관리자만 할 수 있습니다.'));lock();return;}
-    body.append(node('p',admins?'alert alert-warning':'text-secondary',admins?'선택한 사람을 이 조합의 전체 관리자로 지정합니다. 조합 전체 업무와 권한 설정을 관리할 수 있으므로 필요한 사람만 선택하세요. 기존 개별 설정·결재선·초기 설정 권한 기록은 변경하지 않습니다. 한 명이라도 처리할 수 없으면 모두 취소됩니다.':'변경할 사람과 업무만 선택하세요. 선택하지 않은 업무와 기존 개별 설정은 바뀌지 않습니다. 한 명이라도 저장할 수 없으면 모두 취소됩니다.'));
+    body.append(node('p',admins?'alert alert-warning':'text-secondary',admins?'선택한 사람을 이 조합의 전체 관리자로 지정합니다. 조합 전체 업무와 권한 설정을 관리할 수 있으므로 필요한 사람만 선택하세요. 한 명이라도 처리할 수 없으면 모두 취소됩니다.':'변경할 사람과 업무만 선택하세요. 한 명이라도 저장할 수 없으면 모두 취소됩니다.'));
     const people=node('fieldset','permission-people'),legend=node('legend','h6','권한 받을 사람');people.append(legend);
     const eligible=data.employees.filter(e=>!admins||e.can_admin_target===true);
     for(const e of eligible){const l=node('label','form-check border rounded p-2'),check=node('input','form-check-input ms-0 me-2');check.type='checkbox';check.dataset.permissionTarget=e.id;check.checked=chosen.has(e.id);check.onchange=()=>{check.checked?chosen.add(e.id):chosen.delete(e.id);lock();};l.append(check,document.createTextNode(e.name+(e.position?' · '+e.position:'')+' · '+roleLabel(e.role)));people.append(l);}body.append(people);
@@ -57,10 +57,10 @@
    }else if(kind==='admins'){
     if(!chosen.size||[...chosen].some(id=>!data.employees.some(e=>e.id===id&&e.can_admin_target===true)))return;
     args={p_action:'admins',p_targets:[...chosen],p_revision:data.revision};
-    message=[...chosen].map(id=>{const e=data.employees.find(x=>x.id===id);return e.name+(e.position?' · '+e.position:'')+': '+roleLabel(e.role)+' → 전체 관리자';}).join('\n')+'\n\n선택한 사람에게 이 조합의 전체 관리자 권한을 부여할까요? 다른 조합·통합관리자 권한은 부여하지 않습니다.';
+    message=[...chosen].map(id=>{const e=data.employees.find(x=>x.id===id);return e.name+(e.position?' · '+e.position:'')+': '+roleLabel(e.role)+' → 전체 관리자';}).join('\n')+'\n\n선택한 사람에게 이 조합의 전체 관리자 권한을 부여할까요?';
    }else{if(!chosen.size)return root.CoopDialog.alert('권한 받을 사람을 선택해 주세요.');args={p_action:'bulk',p_targets:[...chosen],p_access:{...access},p_revision:data.revision};message=[...chosen].map(id=>{const e=data.employees.find(x=>x.id===id);return e.name+'\n'+Object.entries(access).map(([k,v])=>'  '+(data.modules.find(m=>m.key===k)?.label||'업무')+': '+setting(data.overrides.find(o=>o.id===id&&o.module===k)?.enabled??null)+' → '+setting(v)).join('\n');}).join('\n\n')+'\n\n선택한 업무만 변경할까요?';}
    if(!await root.CoopDialog.confirm(message)||!current(ticket)||snapshot()!==initial)return;
-   busy=true;lock();try{const next=await rpc(args);if(!current(ticket))return;data=next;if(kind==='defaults')delete pending[groupKey()];else{access={};chosen.clear();}status.textContent=kind==='admins'?'전체 관리자로 지정했습니다.':'업무 권한을 저장했습니다.';paint();await root.CoopDialog.alert(status.textContent+' 다른 설정은 유지됩니다.');}
+   busy=true;lock();try{const next=await rpc(args);if(!current(ticket))return;data=next;if(kind==='defaults')delete pending[groupKey()];else{access={};chosen.clear();}status.textContent=kind==='admins'?'전체 관리자로 지정했습니다.':'업무 권한을 저장했습니다.';paint();await root.CoopDialog.alert(status.textContent);}
    catch(e){if(current(ticket))status.textContent=e?.code==='PT409'?'다른 담당자가 권한을 변경했습니다. 입력 내용은 유지됩니다. 최신 권한 확인 후 다시 검토하세요.':'저장 결과를 확인하지 못했습니다. 입력 내용은 유지됩니다. 최신 권한 확인으로 상태를 확인해 주세요.';}
    finally{if(current(ticket)){busy=false;lock();}}
   }

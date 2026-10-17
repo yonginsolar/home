@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261017-6') return;
+    if (root.AdminMemberSite?.version === '20261017-7') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -3488,6 +3488,8 @@ if(!shown)buttons.forEach(([button])=>{button.disabled=true;});
 
 async function discardFaqDraft(key=faqActiveDraft?.key) {
 if(!isFaqContextCurrent()||g_faqSaving||g_faqModalOpening||faqDiscardConfirmation)return;
+const trigger=document.activeElement;
+const listOrigin=trigger?.dataset.faqDraftAction==='discard'&&trigger.dataset.faqDraftKey===key?key:null;
 captureFaqDraft();
 const owner=getFaqOwner(),area=root.CoopHomeVisualEditor?.current(),draft=faqDrafts.get(key),snapshot=draft?.snapshot;
 if(!draft||draft.owner!==owner)return;
@@ -3495,7 +3497,7 @@ const modal=document.getElementById('faqModal'),editor=faqActiveDraft;
 const wasOpen=modal?.classList.contains('show');
 const input=document.getElementById(editor?.focusId)||document.getElementById('faq-question');
 const body=modal?.querySelector('.modal-body');
-const flow={owner,area,runtime:g_adminMemberRuntime,draft,key,snapshot,editor,modal,wasOpen,
+const flow={owner,area,runtime:g_adminMemberRuntime,draft,key,snapshot,editor,modal,wasOpen,listOrigin,
 input,start:input?.selectionStart,end:input?.selectionEnd,direction:input?.selectionDirection,
 inputTop:input?.scrollTop,inputLeft:input?.scrollLeft,modalTop:modal?.scrollTop,bodyTop:body?.scrollTop,
 message:'이 초안을 버릴까요?'};
@@ -3505,6 +3507,7 @@ if(wasOpen)await closeFaqAfterSave();
 if(!isFaqDiscardCurrent(flow))return;
 const accepted=await confirmFaqDraftDiscard(flow);
 if(!isFaqDiscardCurrent(flow))return;
+flow.restoreListFocus=!accepted&&!wasOpen&&listOrigin!==null;
 captureFaqDraft();
 // The pending confirmation never authorizes discarding later edits.
 if(accepted&&faqDrafts.get(key)===draft&&draft.snapshot===snapshot){
@@ -3534,8 +3537,16 @@ bootstrap.Modal.getOrCreateInstance(modal).show();
 CoopSafeLog.error('FAQ draft confirmation unavailable:',error);
 if(isFaqDiscardCurrent(flow))myAlert('확인창을 열지 못했습니다. 작성 내용은 유지됩니다. 초안에서 다시 열어 주세요.','warning');
 }finally{
+const restoreList=flow.restoreListFocus&&isFaqDiscardCurrent(flow)&&faqDrafts.get(key)===draft
+&&!document.querySelector('.modal.show,dialog[open]')&&flow.confirm?.querySelector('#btnConfirmYes')===flow.button
+&&document.getElementById('confirmText')?.textContent===flow.message;
 if(faqDiscardConfirmation===flow)faqDiscardConfirmation=null;
 renderFaqDrafts();
+if(restoreList){
+const button=Array.from(document.querySelectorAll('#faq-drafts-list [data-faq-draft-action="discard"]'))
+.find(node=>node.dataset.faqDraftKey===flow.listOrigin&&!node.disabled);
+button?.focus({preventScroll:true});
+}
 }
 }
 
@@ -3874,5 +3885,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead});
-    root.AdminMemberSite = Object.freeze({ version: '20261017-6', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261017-7', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);

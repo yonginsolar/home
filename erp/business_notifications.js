@@ -13,7 +13,7 @@
    const body={kind,source_id:String(sourceId),event_key:eventKey};
    const check=await client.functions.invoke('business-notification',{body});
    if(check.error||!check.data?.available)throw Error('현재 상태 또는 업무 권한으로 이 안내를 보낼 수 없습니다.');
-   if(!(await window.CoopDialog.confirm(label[eventKey]+' 안내를 발송할까요? 이미 처리한 대상에게는 중복 발송하지 않습니다.')))return;
+   if(!(await window.CoopDialog.confirm(label[eventKey]+' 안내를 발송할까요?')))return;
    const totals={accepted:0,failed:0,unknown:0,skipped:0};let remaining;
    do{
     const result=await client.functions.invoke('business-notification',{body:{...body,confirm:true}});

@@ -612,7 +612,7 @@ function renderEditor(preserveBaseline = false) {
     ${amendment ? `<div class="section-card"><h3 class="section-title">변경 사유 및 참고</h3><textarea class="form-control" id="changeReason" rows="3" maxlength="1500" placeholder="예: 임금 인상에 따라 2026년 10월 1일부터 급여 조건을 변경함">${escapeHtml(terms.change_reason)}</textarea></div>` : ''}
     <div class="section-card">
       <h3 class="section-title">확인</h3>
-      <div class="alert alert-light border mb-0 small">전자 확인을 요청하면 문서 내용이 고정됩니다. 직원과 사용자 측 관리자가 모두 확인한 뒤 완료 문서가 됩니다. 급여대장에 쓰는 연봉 정보는 이 문서만으로 자동 변경하지 않으므로, 실제 급여가 바뀌면 직원관리의 연봉 적용일도 함께 확인해 주세요.</div>
+      <div class="alert alert-light border mb-0 small">전자 확인을 요청하면 문서 내용이 고정됩니다. 직원과 사용자 측 관리자가 모두 확인한 뒤 완료 문서가 됩니다. 완료된 계약의 적용일부터 새 급여 계산에 계약 조건을 불러옵니다. 월 중간에 조건이 바뀌면 기간별 조건을 확인하고 지급액과 근로시간을 입력해 주세요.</div>
     </div>`;
   bindEditorEvents();
   if (!preserveBaseline) {
