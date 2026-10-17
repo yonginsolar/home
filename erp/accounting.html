@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.155 | Change: 2026-10-17 - Keep chosen prepayment and receivable accounts during refresh. -->
+<!-- Version: v1.0.156 | Change: 2026-10-17 - Preserve card and cashback drafts during close and refresh. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,7 +8,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.155 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.156 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
@@ -1967,19 +1967,8 @@ window.onload = async function() {
         const sourceEl = document.getElementById('approvalSplitReclassSourceAmount');
         if (sourceEl) sourceEl.textContent = '0원';
     });
-    document.getElementById('cardCashbackModal').addEventListener('hidden.bs.modal', () => {
-        const amountEl = document.getElementById('cashbackAmount');
-        const descEl = document.getElementById('cashbackDesc');
-        const cardEl = document.getElementById('cashbackCardSelect');
-        const saveBtn = document.getElementById('cashbackSaveBtn');
-        if (amountEl) amountEl.value = '';
-        if (descEl) descEl.value = '';
-        if (cardEl) cardEl.value = '';
-        if (saveBtn) saveBtn.disabled = false;
-    });
-    document.getElementById('cardManageModal').addEventListener('hidden.bs.modal', () => {
-        resetCardManageForm();
-    });
+    bindAccountingCardDraft('cardManageModal');
+    bindAccountingCardDraft('cardCashbackModal');
     document.getElementById("btnYearModalYes").onclick = function() {
         const yearVal = Number(document.getElementById("yearModalInput").value);
         if (!yearVal) return showAlert("알림", "연도를 입력하세요.");
@@ -2074,7 +2063,7 @@ window.onload = async function() {
     });
 
     // Independent reads needed for the visible entry form; keep the complete summary RPC.
-    await Promise.all([ loadProjects(accountingRuntimeGate.runtime.coop_id), loadMasterData(), loadCards(), refreshDashboard() ]);
+    await Promise.all([ loadProjects(accountingRuntimeGate.runtime.coop_id), loadMasterData(), loadCards().catch(() => { if (!window.frameElement?.hidden) showAlert('조회 실패','카드 목록을 불러오지 못했습니다. 카드관리를 다시 열어 주세요.'); }), refreshDashboard() ]);
     loadPrepayExpenseAccounts();
     loadReceivableIncomeAccounts();
     renderPrepayVendorSelect();
@@ -5702,10 +5691,21 @@ async function loadMasterData() {
 }
 
 async function loadCards() {
-    const { data } = await _supabase.from('ref_cards').select('*');
+    const owner = myInfo;
+    const sequence = ++accountingCardsReadSequence, controller = new AbortController(); let timer;
+    let result;
+    try {
+        const query = _supabase.from('ref_cards').select('*');
+        result = await Promise.race([typeof query.abortSignal === 'function' ? query.abortSignal(controller.signal) : query,
+            new Promise((_,reject) => {timer = setTimeout(() => {controller.abort();reject(new Error('CARD_READ_TIMEOUT'));},15000);})]);
+    } finally {clearTimeout(timer);}
+    const { data, error } = result;
+    if (error) throw error;
+    if (myInfo !== owner || sequence !== accountingCardsReadSequence) return;
     cardData = Array.isArray(data) ? data : [];
     const sel = document.getElementById("cardSelect");
     if (sel) {
+        const selected = sel.value;
         sel.innerHTML = "<option value=''>카드선택</option>";
         cardData.forEach((c) => {
             const alias = normalizeCardManageText(c?.card_alias);
@@ -5717,6 +5717,8 @@ async function loadCards() {
             if (typeLabel) labelParts.push(typeLabel);
             sel.add(new Option(labelParts.join(' · '), alias));
         });
+        if (selected && !Array.from(sel.options).some(option => option.value === selected)) sel.add(new Option(selected + ' (기존 선택)', selected));
+        sel.value = selected;
     }
     populateCashbackCardOptions();
     renderCardManageList();
@@ -5736,6 +5738,7 @@ function populateCashbackCardOptions() {
         const label = company ? `${alias} (${company} · 체크카드)` : `${alias} (체크카드)`;
         selectEl.add(new Option(label, alias));
     });
+    if (currentValue && !Array.from(selectEl.options).some(option => option.value === currentValue)) selectEl.add(new Option(currentValue + ' (기존 선택)', currentValue));
     if (currentValue) selectEl.value = currentValue;
 } // End of populateCashbackCardOptions
 
@@ -5822,7 +5825,54 @@ function getNextCardId() {
     }
 } // End of getNextCardId
 
-function resetCardManageForm() {
+const accountingCardDrafts = new Map();
+let accountingCardsReadSequence = 0;
+function accountingCardOwner() {
+    const actor = myInfo?.auth_user_id || myInfo?.emp_id || myInfo?.id;
+    return actor && myInfo?.coop_id ? JSON.stringify([actor, myInfo.coop_id]) : '';
+}
+function accountingCardSnapshot(modal) {
+    return JSON.stringify(Array.from(modal.querySelectorAll('input,select,textarea')).map(el => [el.id, el.type === 'checkbox' ? el.checked : el.value]));
+}
+function bindAccountingCardDraft(id) {
+    if (accountingCardDrafts.has(id)) return accountingCardDrafts.get(id);
+    const modal = document.getElementById(id), store = {modal, owner:'', baseline:accountingCardSnapshot(modal), blank:null, busy:false, uncertain:false};
+    store.blank = store.baseline;
+    const capture = () => { const badge = modal.querySelector('[data-card-dirty]'); if (badge) badge.hidden = accountingCardSnapshot(modal) === store.baseline; };
+    const badge = document.createElement('span'); badge.dataset.cardDirty = ''; badge.className = 'badge bg-warning text-dark ms-2'; badge.textContent = '작성 중'; badge.hidden = true;
+    modal.querySelector('.modal-title').append(badge);
+    for (const event of ['input','change','hidden.bs.modal']) modal.addEventListener(event,capture);
+    modal.addEventListener('hide.bs.modal',event => { if (store.busy) event.preventDefault(); });
+    window.addEventListener('beforeunload',event => { if (store.owner === accountingCardOwner() && accountingCardSnapshot(modal) !== store.baseline) {event.preventDefault();event.returnValue='';} });
+    store.capture = capture; accountingCardDrafts.set(id,store); return store;
+}
+function prepareAccountingCardDraft(id) {
+    const owner = accountingCardOwner(); if (!owner || !canPerform('accounting.edit')) return null;
+    const store = bindAccountingCardDraft(id);
+    if (store.owner && store.owner !== owner) return null;
+    if (store.locks && !store.busy) {store.locks.forEach(([el,disabled]) => {el.disabled = disabled;});store.locks = null;}
+    store.owner = owner; store.capture(); return store;
+}
+function beginAccountingCardSave(id) {
+    const store = prepareAccountingCardDraft(id);
+    if (!store || store.busy) return null;
+    if (store.uncertain) { showAlert('확인 필요','저장 결과를 확인하지 못했습니다. 목록을 확인해 주세요.'); return null; }
+    const context = {store, owner:store.owner, user:myInfo, snapshot:accountingCardSnapshot(store.modal)};
+    store.busy = true; context.controls = Array.from(store.modal.querySelectorAll('input,select,textarea,button'),el => [el,el.disabled]);
+    context.controls.forEach(([el]) => {el.disabled = true;}); return context;
+}
+function isAccountingCardSaveCurrent(context) {
+    return context.owner === accountingCardOwner() && context.user === myInfo && canPerform('accounting.edit');
+}
+function endAccountingCardSave(context) {
+    context.store.busy = false;
+    context.controls.forEach(([el,disabled]) => {el.disabled = disabled || !isAccountingCardSaveCurrent(context);});
+    context.store.locks = isAccountingCardSaveCurrent(context) ? null : context.controls;
+    if (isAccountingCardSaveCurrent(context) && context.store.modal.id === 'cardManageModal') syncCardManagePaymentDayUi();
+    context.store.capture();
+}
+function resetCardManageForm(afterSave = false) {
+    if (accountingCardDrafts.get('cardManageModal')?.busy && !afterSave) return;
     const fields = ['cardManageOriginalId', 'cardManageOriginalAlias', 'cardManageOriginalCompany', 'cardManageOriginalType', 'cardManageOriginalPaymentDay', 'cardManageAlias', 'cardManageCompany', 'cardManagePaymentDay'];
     fields.forEach((id) => {
         const el = document.getElementById(id);
@@ -5838,6 +5888,8 @@ function resetCardManageForm() {
         saveBtn.textContent = '저장';
         saveBtn.disabled = false;
     }
+    const store = accountingCardDrafts.get('cardManageModal');
+    if (store) {store.baseline = accountingCardSnapshot(store.modal);store.uncertain = false;store.capture();}
 } // End of resetCardManageForm
 
 function renderCardManageList() {
@@ -5904,13 +5956,18 @@ function renderCardManageList() {
 
 async function openCardManageModal() {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
-    await loadCards();
-    resetCardManageForm();
-    renderCardManageList();
-    cardManageModal.show();
+    const store = prepareAccountingCardDraft('cardManageModal'); if (!store || store.busy || store.reading) return;
+    const owner = myInfo; store.reading = true;
+    try {
+        await loadCards();
+        if (myInfo !== owner || !canPerform('accounting.edit') || window.frameElement?.hidden) return;
+        renderCardManageList(); cardManageModal.show();
+    } catch (_) { if (myInfo === owner && !window.frameElement?.hidden) showAlert('조회 실패','카드 목록을 불러오지 못했습니다. 다시 열어 주세요.'); }
+    finally {store.reading = false;}
 } // End of openCardManageModal
 
 function startEditCard(card) {
+    if (!prepareAccountingCardDraft('cardManageModal') || accountingCardDrafts.get('cardManageModal').busy) return;
     if (!card) return;
     const cardId = normalizeCardManageText(card.card_id);
     const alias = normalizeCardManageText(card.card_alias);
@@ -5933,6 +5990,7 @@ function startEditCard(card) {
     if (titleEl) titleEl.textContent = '카드 수정';
     const saveBtn = document.getElementById('cardManageSaveBtn');
     if (saveBtn) saveBtn.textContent = '수정 저장';
+    const store = accountingCardDrafts.get('cardManageModal'); store.baseline = accountingCardSnapshot(store.modal);store.uncertain = false;store.capture();
 } // End of startEditCard
 
 function buildCardManageScopedMutation(query, original) {
@@ -5979,9 +6037,8 @@ async function submitCardManage() {
         return showAlert('오류', `이미 등록된 카드 별칭입니다: ${alias}`);
     }
 
-    const saveBtn = document.getElementById('cardManageSaveBtn');
-    if (saveBtn) saveBtn.disabled = true;
-
+    const context = beginAccountingCardSave('cardManageModal'); if (!context) return;
+    let answered = false, confirmed = false;
     try {
         if (original.id || original.alias) {
             const payload = {
@@ -5992,17 +6049,12 @@ async function submitCardManage() {
             };
             const query = buildCardManageScopedMutation(_supabase.from('ref_cards').update(payload), original).select('*');
             const { data, error } = await query;
+            answered = true;
             if (error) throw error;
             if (!Array.isArray(data) || data.length === 0) {
                 throw new Error('수정할 카드 정보를 찾지 못했습니다.');
             }
-            await loadCards();
-            renderCardManageList();
-            resetCardManageForm();
-            showAlert('완료', `${alias} 카드를 수정했습니다.`);
-            return;
-        }
-
+        } else {
         const payload = {
             card_id: getNextCardId(),
             card_alias: alias,
@@ -6012,20 +6064,29 @@ async function submitCardManage() {
             coop_id: coopId
         };
         const { error } = await _supabase.from('ref_cards').insert(payload);
+        answered = true;
         if (error) throw error;
+        }
+        confirmed = true;
+        if (!isAccountingCardSaveCurrent(context)) return;
+        if (accountingCardSnapshot(context.store.modal) === context.snapshot) resetCardManageForm(true);
+        else context.store.baseline = context.snapshot;
+        context.controls.forEach(([el]) => {el.disabled = true;});
         await loadCards();
+        if (!isAccountingCardSaveCurrent(context)) return;
         renderCardManageList();
-        resetCardManageForm();
-        showAlert('완료', `${alias} 카드를 등록했습니다.`);
+        showAlert('완료', '저장했습니다.');
     } catch (error) {
-        showAlert('오류', `카드 저장 실패: ${error?.message || error}`);
+        if (!answered) context.store.uncertain = true;
+        if (isAccountingCardSaveCurrent(context)) showAlert(confirmed ? '저장 완료' : '확인 필요', confirmed ? '저장했습니다. 목록을 다시 불러와 주세요.' : answered ? `카드 저장 실패: ${error?.message || error}` : '저장 결과를 확인하지 못했습니다. 목록을 확인해 주세요.');
     } finally {
-        if (saveBtn) saveBtn.disabled = false;
+        endAccountingCardSave(context);
     }
 } // End of submitCardManage
 
 function requestDeleteCard(card) {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
+    if (accountingCardDrafts.get('cardManageModal')?.busy) return;
     if (!card) return;
     const alias = normalizeCardManageText(card.card_alias) || '(별칭 없음)';
     const runConfirm = () => {
@@ -6088,6 +6149,7 @@ function resolveCashbackIncomeAccount() {
 
 function openCardCashbackModal() {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
+    const store = prepareAccountingCardDraft('cardCashbackModal'); if (!store || store.busy) return;
     const incomeAccount = resolveCashbackIncomeAccount();
     if (!incomeAccount.item) {
         return showAlert('오류', '캐시백 잡이익 계정을 찾지 못했습니다. ac_master에 영업외수익/잡이익 계정을 확인하세요.');
@@ -6101,7 +6163,8 @@ function openCardCashbackModal() {
     const accountEl = document.getElementById('cashbackIncomeAccount');
     if (dateEl && !dateEl.value) dateEl.value = formatAccountingKstDate();
     if (accountEl) accountEl.value = incomeAccount.item;
-    cashbackModal.show();
+    if (!store.opened) {store.baseline = accountingCardSnapshot(store.modal);store.opened = true;}
+    cashbackModal.show(); store.capture();
 } // End of openCardCashbackModal
 
 async function submitCardCashback() {
@@ -6127,18 +6190,27 @@ async function submitCardCashback() {
     ];
     applyTransId(entries);
 
-    const saveBtn = document.getElementById('cashbackSaveBtn');
-    if (saveBtn) saveBtn.disabled = true;
+    const context = beginAccountingCardSave('cardCashbackModal'); if (!context) return;
+    let answered = false, confirmed = false;
+    try {
     const { error } = await _supabase.from('ac_journal').insert(entries);
-    if (error) {
-        if (saveBtn) saveBtn.disabled = false;
-        return showAlert('오류', '캐시백 저장 실패: ' + error.message);
-    }
+    answered = true;
+    if (error) throw error;
+    confirmed = true;
+    if (!isAccountingCardSaveCurrent(context)) return;
+    if (accountingCardSnapshot(context.store.modal) === context.snapshot) {
+        for (const id of ['cashbackAmount','cashbackDesc','cashbackCardSelect']) document.getElementById(id).value = '';
+        context.store.baseline = accountingCardSnapshot(context.store.modal);
+    } else context.store.baseline = context.snapshot;
     await logAudit('accounting.card_cashback', null, '체크카드 캐시백 저장', { amount, card_alias: cardAlias, income_account: incomeAccount.item });
-    cashbackModal.hide();
+    if (!isAccountingCardSaveCurrent(context)) return;
+    context.store.busy = false; cashbackModal.hide();
     showAlert('완료', `${cardAlias} 캐시백 ${amount.toLocaleString()}원을 반영했습니다.`);
-    refreshDashboard();
-    loadHistory();
+    await Promise.all([refreshDashboard(),loadHistory()]);
+    } catch (error) {
+        if (!answered) context.store.uncertain = true;
+        if (isAccountingCardSaveCurrent(context)) showAlert(confirmed ? '저장 완료' : '확인 필요', confirmed ? '저장했습니다. 화면을 다시 불러와 주세요.' : answered ? '캐시백 저장 실패: ' + (error?.message || error) : '저장 결과를 확인하지 못했습니다. 장부를 확인해 주세요.');
+    } finally {endAccountingCardSave(context);}
 } // End of submitCardCashback
 
 // 3. 대시보드 새로고침

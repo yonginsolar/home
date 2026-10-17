@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261017-9') return;
+    if (root.AdminMemberSite?.version === '20261017-10') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -1689,6 +1689,43 @@ if (current()) queueHomePreviewUpdate();
 }
 }
 
+let certificationDraftStore=null,certificationReadSequence=0;
+function getCertificationDraftStore() {
+if(certificationDraftStore)return certificationDraftStore;
+const pane=document.getElementById('sub-certifications');
+const body=pane.querySelector('#site-certification-form-title').closest('.card-body');
+const owner=siteModalOwner(),draft={id:'',body,baseline:siteModalSnapshot(body),uncertain:false};
+const store={pane,template:body.cloneNode(true),owner,active:draft,drafts:new Map()};
+certificationDraftStore=store;
+for(const type of ['input','change'])pane.addEventListener(type,()=>captureCertificationDraft());
+window.addEventListener('beforeunload',event=>{captureCertificationDraft();if(store.owner===siteModalOwner()&&store.drafts.size){event.preventDefault();event.returnValue='';}});
+return store;
+}
+function captureCertificationDraft() {
+const store=getCertificationDraftStore(),draft=store.active;if(!draft)return;
+const dirty=siteModalSnapshot(draft.body)!==draft.baseline;
+if(dirty||draft.uncertain)store.drafts.set(draft.id,draft);else store.drafts.delete(draft.id);
+draft.body.querySelector('[data-certification-dirty]').hidden=!dirty;
+}
+function mountCertificationDraft(id,force=false) {
+const owner=siteModalOwner(),store=getCertificationDraftStore();
+if(!owner||store.owner!==owner||!canAccessAdminMemberTab('site')||root.frameElement?.hidden||g_siteCertificationSaving&&!force)return null;
+if(store.locks&&!g_siteCertificationSaving){store.locks.forEach(([el,disabled])=>{el.disabled=disabled;});store.locks=null;}
+captureCertificationDraft();
+const key=String(id||''),cached=store.drafts.get(key);
+const draft=cached||{id:key,body:store.template.cloneNode(true),baseline:null,uncertain:false};
+const body=store.pane.querySelector('#site-certification-form-title').closest('.card-body');
+if(body!==draft.body)body.replaceWith(draft.body);store.active=draft;
+return {store,draft,cached:!!cached,owner,runtime:g_adminMemberRuntime};
+}
+function openNewSiteCertificationDraft() {
+const context=mountCertificationDraft('');if(!context)return;
+if(!context.cached)context.draft.baseline=siteModalSnapshot(context.draft.body);
+captureCertificationDraft();queueHomePreviewUpdate();
+}
+function isCertificationSaveCurrent(context) {
+return context.owner===siteModalOwner()&&context.runtime===g_adminMemberRuntime&&context.store.active===context.draft&&canAccessAdminMemberTab('site');
+}
 function formatCertificationDate(value) {
 const safe = String(value || '').slice(0, 10);
 return safe || '—';
@@ -1718,6 +1755,7 @@ queueHomePreviewUpdate();
 }
 
 function clearSiteCertificationImage() {
+if(g_siteCertificationSaving||!canAccessAdminMemberTab('site'))return;
 const file = document.getElementById('site-certification-image-file');
 const url = document.getElementById('site-certification-image-url');
 if (file) file.value = '';
@@ -1730,6 +1768,8 @@ queueHomePreviewUpdate();
 function editSiteCertification(id) {
 const item = g_siteCertifications.find((row) => String(row.id) === String(id));
 if (!item) return;
+const context=mountCertificationDraft(id);if(!context)return;
+if(context.cached){captureCertificationDraft();queueHomePreviewUpdate();return;}
 const set = (fieldId, value) => { const el = document.getElementById(fieldId); if (el) el.value = value == null ? '' : String(value); };
 set('site-certification-id', item.id);
 set('site-certification-name', item.name);
@@ -1752,6 +1792,7 @@ const title = document.getElementById('site-certification-form-title');
 if (title) title.textContent = '✏️ 인증·지정 수정';
 const status = document.getElementById('site-certification-image-status');
 if (status) status.textContent = item.image_url ? '현재 등록된 이미지가 있습니다.' : '등록된 이미지가 없습니다.';
+context.draft.baseline=siteModalSnapshot(context.draft.body);captureCertificationDraft();
 document.getElementById('site-certification-name')?.focus();
 queueHomePreviewUpdate();
 }
@@ -1810,17 +1851,21 @@ tbody.appendChild(row);
 });
 }
 
-async function fetchSiteCertifications() {
+async function fetchSiteCertifications(options={}) {
+const owner=siteModalOwner(),runtime=g_adminMemberRuntime,sequence=++certificationReadSequence;
+if(!owner||!canAccessAdminMemberTab('site'))return false;
 try {
 const { data, error } = await _supabase.rpc('get_my_site_certifications');
 if (error) throw error;
+if(sequence!==certificationReadSequence||owner!==siteModalOwner()||runtime!==g_adminMemberRuntime||!canAccessAdminMemberTab('site'))return false;
 g_siteCertifications = Array.isArray(data) ? data : [];
 g_siteCertificationsLoaded = true;
 renderSiteCertifications();
 queueHomePreviewUpdate();
+return true;
 } catch (error) {
-CoopSafeLog.error("[fetchSiteCertifications] failed:", error);
-myAlert('공식 인증·지정 정보를 불러오지 못했습니다: ' + (error?.message || error), 'warning');
+if(!options.quiet&&owner===siteModalOwner()&&runtime===g_adminMemberRuntime){CoopSafeLog.error("[fetchSiteCertifications] failed:", error);myAlert('공식 인증·지정 정보를 불러오지 못했습니다. 다시 눌러 주세요.','warning');}
+return false;
 }
 }
 
@@ -1840,7 +1885,10 @@ CoopSafeLog.warn("[deleteManagedCertificationImage] cleanup failed:", error);
 }
 
 async function saveSiteCertification() {
-if (g_siteCertificationSaving) return;
+if (g_siteCertificationSaving||!canAccessAdminMemberTab('site')) return;
+const store=getCertificationDraftStore();captureCertificationDraft();
+if(store.owner!==siteModalOwner()||!store.active||root.frameElement?.hidden)return;
+if(store.active.uncertain)return myAlert('저장 결과를 확인하지 못했습니다. 목록을 확인해 주세요.','warning');
 const read = (id) => String(document.getElementById(id)?.value || '').trim();
 const name = read('site-certification-name');
 if (!name) return myAlert('인증·지정 명칭을 입력해 주세요.', 'warning');
@@ -1849,51 +1897,53 @@ const validUntil = read('site-certification-valid-until');
 if (issuedOn && validUntil && validUntil < issuedOn) return myAlert('유효기간 종료일은 지정일보다 앞설 수 없습니다.', 'warning');
 const publicUrl = read('site-certification-public-url');
 if (publicUrl && !/^https:\/\//i.test(publicUrl)) return myAlert('공식 안내 링크는 https:// 주소로 입력해 주세요.', 'warning');
-
+const context={store,draft:store.active,owner:siteModalOwner(),runtime:g_adminMemberRuntime,snapshot:siteModalSnapshot(store.active.body)};
+const file=document.getElementById('site-certification-image-file')?.files?.[0]||null;
+const payload={p_id:read('site-certification-id')||null,p_name:name,p_issuer:read('site-certification-issuer'),p_certificate_no:read('site-certification-number'),p_issued_on:issuedOn||null,p_valid_until:validUntil||null,p_image_url:read('site-certification-image-url')||null,p_public_url:publicUrl||null,p_is_featured:document.getElementById('site-certification-featured').checked,p_is_visible:document.getElementById('site-certification-visible').checked,p_display_order:Number(read('site-certification-order')||100)};
 g_siteCertificationSaving = true;
+const controls=Array.from(store.pane.querySelectorAll('input,textarea,select,button'),el=>[el,el.disabled]);controls.forEach(([el])=>{el.disabled=true;});
 const button = document.getElementById('site-certification-save');
 if (button) button.disabled = true;
 showLoading(true);
 let uploadedUrl = '';
+let answered=false,confirmed=false,mutationStarted=false;
 const imageUrlInput = document.getElementById('site-certification-image-url');
 const previousImageUrl = String(imageUrlInput?.dataset.originalUrl || '');
 try {
 const coopId = String(await getAdminMemberCoopId() || '').trim();
 if (!coopId) throw new Error('조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.');
-const file = document.getElementById('site-certification-image-file')?.files?.[0] || null;
+if(!isCertificationSaveCurrent(context))return;
 if (file) {
 if (!file.type.startsWith('image/')) throw new Error('이미지 파일만 올릴 수 있습니다.');
 if (file.size > 10 * 1024 * 1024) throw new Error('이미지는 10MB 이하로 올려 주세요.');
 uploadedUrl = await uploadFileToStorage(file, `site-home/${coopId}/certifications`);
-if (imageUrlInput) imageUrlInput.value = uploadedUrl;
+payload.p_image_url=uploadedUrl;
 }
-const { error } = await _supabase.rpc('upsert_my_site_certification', {
-p_id: read('site-certification-id') || null,
-p_name: name,
-p_issuer: read('site-certification-issuer'),
-p_certificate_no: read('site-certification-number'),
-p_issued_on: issuedOn || null,
-p_valid_until: validUntil || null,
-p_image_url: read('site-certification-image-url') || null,
-p_public_url: publicUrl || null,
-p_is_featured: document.getElementById('site-certification-featured')?.checked === true,
-p_is_visible: document.getElementById('site-certification-visible')?.checked === true,
-p_display_order: Number(read('site-certification-order') || 100)
-});
+if(!isCertificationSaveCurrent(context))return;
+mutationStarted=true;
+const { error } = await _supabase.rpc('upsert_my_site_certification', payload);
+answered=true;
 if (error) throw error;
-const savedImageUrl = read('site-certification-image-url');
-if (previousImageUrl && previousImageUrl !== savedImageUrl) await deleteManagedCertificationImage(previousImageUrl, coopId);
-resetSiteCertificationForm();
-await fetchSiteCertifications();
-myAlert('공식 인증·지정 정보를 저장했습니다.');
+confirmed=true;
+if(!isCertificationSaveCurrent(context))return;
+if(siteModalSnapshot(context.draft.body)===context.snapshot){
+store.drafts.delete(context.draft.id);store.active=null;
+const next=mountCertificationDraft('',true);if(next&&!next.cached)next.draft.baseline=siteModalSnapshot(next.draft.body);
+}else {context.draft.baseline=context.snapshot;if(!payload.p_id)context.draft.uncertain=true;}
+captureCertificationDraft();
+// A newer draft may still reference the preceding display image.
+if(previousImageUrl&&previousImageUrl!==payload.p_image_url&&imageUrlInput?.value!==previousImageUrl)await deleteManagedCertificationImage(previousImageUrl,coopId);
+const refreshed=await fetchSiteCertifications({quiet:true});
+if(context.owner===siteModalOwner()&&context.runtime===g_adminMemberRuntime&&canAccessAdminMemberTab('site')&&!root.frameElement?.hidden)myAlert(refreshed?'저장했습니다.':'저장했습니다. 목록을 다시 불러와 주세요.');
 } catch (error) {
-if (uploadedUrl) await deleteManagedCertificationImage(uploadedUrl, String(g_adminMemberRuntime?.coop_id || ''));
-CoopSafeLog.error("[saveSiteCertification] failed:", error);
-myAlert('공식 인증·지정 저장 실패: ' + (error?.message || error), 'error');
+if(!answered&&mutationStarted)context.draft.uncertain=true;
+if(isCertificationSaveCurrent(context)&&!root.frameElement?.hidden)myAlert(confirmed?'저장했습니다. 목록을 다시 불러와 주세요.':answered?'공식 인증·지정 저장 실패: '+(error?.message||error):'저장 결과를 확인하지 못했습니다. 목록을 확인해 주세요.','warning');
 } finally {
 showLoading(false);
 g_siteCertificationSaving = false;
-if (button) button.disabled = false;
+controls.forEach(([el,disabled])=>{el.disabled=disabled||context.owner!==siteModalOwner()||!canAccessAdminMemberTab('site');});
+store.locks=context.owner===siteModalOwner()&&canAccessAdminMemberTab('site')?null:controls;
+captureCertificationDraft();
 }
 }
 
@@ -1906,7 +1956,7 @@ try {
 const { error } = await _supabase.rpc('delete_my_site_certification', { p_id: id });
 if (error) throw error;
 await deleteManagedCertificationImage(item.image_url, String(g_adminMemberRuntime?.coop_id || ''));
-resetSiteCertificationForm();
+const store=getCertificationDraftStore();store.drafts.delete(String(id));if(store.active?.id===String(id)){store.active=null;const next=mountCertificationDraft('');if(next&&!next.cached)next.draft.baseline=siteModalSnapshot(next.draft.body);}
 await fetchSiteCertifications();
 myAlert('공식 인증·지정 정보를 삭제했습니다.');
 } catch (error) {
@@ -4007,6 +4057,7 @@ function askDeleteFaq(id) {
 CoopHomeVisualEditor.mount(); // Mount before taking the initial draft snapshot.
 getSiteEditorDraft('home');
 getSiteEditorDraft('about');
+getCertificationDraftStore();
 window.addEventListener('pagehide',() => {cancelActivityModalRead();cancelActivitySourceRead();});
 for (const eventName of ['hidden.bs.tab','shown.bs.tab']) document.getElementById('site-content-tabs')?.addEventListener(eventName,() => {
 if (activitySourceRead && root.CoopHomeVisualEditor?.current() !== activitySourceRead.area) cancelActivitySourceRead();
@@ -4043,6 +4094,6 @@ window.setTimeout(sendHomePreviewSettings, 0);
         initialized = true;
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
-    Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead});
-    root.AdminMemberSite = Object.freeze({ version: '20261017-9', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,openNewSiteCertificationDraft});
+    root.AdminMemberSite = Object.freeze({ version: '20261017-10', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);
