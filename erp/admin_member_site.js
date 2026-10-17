@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261017-4') return;
+    if (root.AdminMemberSite?.version === '20261017-5') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -10,6 +10,7 @@ let faqListRead=null, faqActiveDraft=null;
 const faqDrafts=new Map(); // Screen memory only; never persist FAQ business data in browser storage.
 const faqDeleteContexts=new WeakSet();
 let faqNewDraftSequence=0;
+let faqDiscardConfirmation=null;
 let homeSettingsBaseline=null;
 const homeUploadedFiles=new WeakMap();
 async function readCurrentHomeSettings(runtime) {
@@ -3388,7 +3389,7 @@ renderFaqDrafts();
 }
 
 function renderFaqDrafts() {
-const owner=getFaqOwner(),allowed=isFaqContextCurrent(),busy=g_faqSaving||g_faqModalOpening;
+const owner=getFaqOwner(),allowed=isFaqContextCurrent(),busy=g_faqSaving||g_faqModalOpening||!!faqDiscardConfirmation;
 const drafts=Array.from(faqDrafts.values()).filter(draft=>draft.owner===owner);
 const panel=document.getElementById('faq-drafts-panel'),list=document.getElementById('faq-drafts-list');
 const count=document.getElementById('faq-drafts-count');
@@ -3427,7 +3428,7 @@ const status=document.getElementById('faq-target-status');if(status)status.hidde
 }
 
 function continueFaqDraftAsNew() {
-if(!isFaqContextCurrent()||g_faqSaving||g_faqModalOpening)return;
+if(!isFaqContextCurrent()||g_faqSaving||g_faqModalOpening||faqDiscardConfirmation)return;
 captureFaqDraft();
 const old=faqActiveDraft;
 if(!old||old.owner!==getFaqOwner()||!old.targetId||faqDrafts.get(old.key)!==old)return;
@@ -3442,28 +3443,100 @@ window.ErpWorkspaceResume?.checkpoint(document.getElementById('faqModal'));
 document.getElementById('faq-question')?.focus({preventScroll:true});
 }
 
-function discardFaqDraft(key=faqActiveDraft?.key) {
-if(!isFaqContextCurrent()||g_faqSaving||g_faqModalOpening)return;
+function isFaqDiscardCurrent(flow) {
+return faqDiscardConfirmation===flow&&!flow.cancelled&&isFaqContextCurrent()
+&&getFaqOwner()===flow.owner&&g_adminMemberRuntime===flow.runtime
+&&root.CoopHomeVisualEditor?.current()===flow.area&&!g_faqSaving&&!g_faqModalOpening;
+}
+
+function cancelStaleFaqDiscard() {
+const flow=faqDiscardConfirmation;
+if(!flow||isFaqDiscardCurrent(flow))return;
+flow.cancelled=true;
+if(flow.confirm&&flow.confirm.querySelector('#btnConfirmYes')===flow.button
+&&document.getElementById('confirmText')?.textContent===flow.message){
+bootstrap.Modal.getOrCreateInstance(flow.confirm).hide();
+}
+}
+
+function confirmFaqDraftDiscard(flow) {
+const confirm=document.getElementById('customConfirmModal');
+// Do not take over another workflow's confirmation or stack Bootstrap modals.
+if(!confirm||confirm.classList.contains('show')||confirm.style.display==='block'
+||document.querySelector('.modal.show'))return Promise.resolve(false);
+flow.confirm=confirm;
+return new Promise((resolve,reject)=>{
+let accepted=false,shown=false,buttons=[];
+const owned=()=>confirm.querySelector('#btnConfirmYes')===flow.button
+&&document.getElementById('confirmText')?.textContent===flow.message;
+const unlock=()=>buttons.forEach(([button,disabled])=>{if(button.isConnected)button.disabled=disabled;});
+const onShown=()=>{shown=true;unlock();if(!isFaqDiscardCurrent(flow)&&owned())bootstrap.Modal.getOrCreateInstance(confirm).hide();};
+const onClick=event=>{if(shown&&owned()&&isFaqDiscardCurrent(flow)&&event.target.closest('#btnConfirmYes')===flow.button&&!flow.button.disabled)accepted=true;};
+const clean=()=>{confirm.removeEventListener('shown.bs.modal',onShown);confirm.removeEventListener('click',onClick,true);confirm.removeEventListener('hidden.bs.modal',onHidden);unlock();};
+const onHidden=()=>{const result=accepted&&owned();clean();resolve(result);};
+confirm.addEventListener('shown.bs.modal',onShown,{once:true});
+confirm.addEventListener('click',onClick,true);
+confirm.addEventListener('hidden.bs.modal',onHidden,{once:true});
+try{
+myConfirm(flow.message,()=>{});
+flow.button=confirm.querySelector('#btnConfirmYes');
+buttons=Array.from(confirm.querySelectorAll('button')).map(button=>[button,button.disabled]);
+if(!shown)buttons.forEach(([button])=>{button.disabled=true;});
+}catch(error){clean();reject(error);}
+});
+}
+
+async function discardFaqDraft(key=faqActiveDraft?.key) {
+if(!isFaqContextCurrent()||g_faqSaving||g_faqModalOpening||faqDiscardConfirmation)return;
 captureFaqDraft();
 const owner=getFaqOwner(),area=root.CoopHomeVisualEditor?.current(),draft=faqDrafts.get(key),snapshot=draft?.snapshot;
 if(!draft||draft.owner!==owner)return;
-let consumed=false;
-myConfirm('이 초안의 저장하지 않은 내용을 버릴까요? 등록된 질문은 삭제하지 않습니다.',async()=>{
-if(consumed)return;consumed=true;
-if(!isFaqContextCurrent()||getFaqOwner()!==owner||root.CoopHomeVisualEditor?.current()!==area||g_faqSaving||g_faqModalOpening)return;
+const modal=document.getElementById('faqModal'),editor=faqActiveDraft;
+const wasOpen=modal?.classList.contains('show');
+const input=document.getElementById(editor?.focusId)||document.getElementById('faq-question');
+const body=modal?.querySelector('.modal-body');
+const flow={owner,area,runtime:g_adminMemberRuntime,draft,key,snapshot,editor,modal,wasOpen,
+input,start:input?.selectionStart,end:input?.selectionEnd,direction:input?.selectionDirection,
+inputTop:input?.scrollTop,inputLeft:input?.scrollLeft,modalTop:modal?.scrollTop,bodyTop:body?.scrollTop,
+message:'이 초안의 저장하지 않은 내용을 버릴까요? 등록된 질문은 삭제하지 않습니다.'};
+faqDiscardConfirmation=flow;renderFaqDrafts();
+try{
+if(wasOpen)await closeFaqAfterSave();
+if(!isFaqDiscardCurrent(flow))return;
+const accepted=await confirmFaqDraftDiscard(flow);
+if(!isFaqDiscardCurrent(flow))return;
 captureFaqDraft();
-if(faqDrafts.get(key)!==draft||draft.snapshot!==snapshot){
-return myAlert('작성 내용이 바뀌어 초안을 버리지 않았습니다. 다시 확인해 주세요.','warning');
-}
+// The pending confirmation never authorizes discarding later edits.
+if(accepted&&faqDrafts.get(key)===draft&&draft.snapshot===snapshot){
 faqDrafts.delete(key);
 if(faqActiveDraft===draft){
 faqActiveDraft=null;
 const badge=document.getElementById('faq-draft-status');if(badge)badge.hidden=true;
 window.ErpWorkspaceResume?.checkpoint(document.getElementById('faqModal'));
-await closeFaqAfterSave();
 }
-renderFaqDrafts();
+}
+if(wasOpen&&faqActiveDraft===editor&&!document.querySelector('.modal.show')){
+// Reopen through Bootstrap's public API so its own focus trap is activated.
+await new Promise(resolve=>{
+modal.addEventListener('shown.bs.modal',()=>{
+if(isFaqDiscardCurrent(flow)&&faqActiveDraft===editor){
+input?.focus({preventScroll:true});
+if(typeof input?.setSelectionRange==='function'&&Number.isInteger(flow.start)&&Number.isInteger(flow.end))input.setSelectionRange(flow.start,flow.end,flow.direction);
+if(input){input.scrollTop=flow.inputTop;input.scrollLeft=flow.inputLeft;}
+modal.scrollTop=flow.modalTop;if(body)body.scrollTop=flow.bodyTop;
+}else bootstrap.Modal.getOrCreateInstance(modal).hide();
+resolve();
+},{once:true});
+bootstrap.Modal.getOrCreateInstance(modal).show();
 });
+}
+}catch(error){
+CoopSafeLog.error('FAQ draft confirmation unavailable:',error);
+if(isFaqDiscardCurrent(flow))myAlert('확인창을 열지 못했습니다. 작성 내용은 유지됩니다. 초안에서 다시 열어 주세요.','warning');
+}finally{
+if(faqDiscardConfirmation===flow)faqDiscardConfirmation=null;
+renderFaqDrafts();
+}
 }
 
 function hasUnsavedFaqChanges() {
@@ -3554,8 +3627,8 @@ renderFaqDrafts();
 function bindFaqReadGuard() {
 if(faqReadGuardBound)return;faqReadGuardBound=true;
 const check=()=>{if(faqModalRead&&!isFaqModalReadCurrent(faqModalRead))cancelFaqModalRead();
-if(faqListRead&&!isFaqListReadCurrent(faqListRead))cancelFaqListRead();renderFaqDrafts();};
-root.addEventListener('pagehide',()=>{cancelFaqModalRead();cancelFaqListRead();});
+if(faqListRead&&!isFaqListReadCurrent(faqListRead))cancelFaqListRead();cancelStaleFaqDiscard();renderFaqDrafts();};
+root.addEventListener('pagehide',()=>{cancelFaqModalRead();cancelFaqListRead();if(faqDiscardConfirmation)faqDiscardConfirmation.cancelled=true;cancelStaleFaqDiscard();});
 for(const event of ['hide.bs.tab','hidden.bs.tab','shown.bs.tab'])document.addEventListener(event,check);
 const pane=document.getElementById('tab-site');
 if(pane)new MutationObserver(check).observe(pane,{attributes:true,attributeFilter:['class','hidden']});
@@ -3564,6 +3637,18 @@ const modal=document.getElementById('faqModal');
 modal?.addEventListener('hide.bs.modal',()=>{if(!g_faqSaving||g_faqSaveConfirmed)modal.dataset.faqClosing='1';});
 modal?.addEventListener('hidden.bs.modal',()=>{modal.dataset.faqClosing='0';captureFaqDraft();if(!faqModalRead?.closing)cancelFaqModalRead();});
 for(const event of ['input','change'])modal?.addEventListener(event,captureFaqDraft);
+modal?.addEventListener('focusin',event=>{if(faqActiveDraft?.owner===getFaqOwner()&&event.target.matches('input:not([type="hidden"]),textarea,select'))faqActiveDraft.focusId=event.target.id;});
+modal?.addEventListener('keydown',event=>{
+if(event.key!=='Tab'||event.altKey||event.ctrlKey||event.metaKey||!modal.classList.contains('show')
+||document.querySelector('.modal.show:not(#faqModal)'))return;
+const controls=Array.from(modal.querySelectorAll('a[href],button,input,textarea,select,[tabindex]'))
+.filter(node=>node.tabIndex>=0&&!node.matches(':disabled')&&!node.closest('[hidden],[inert]')
+&&node.getClientRects().length&&getComputedStyle(node).visibility!=='hidden');
+const first=controls[0],last=controls[controls.length-1],active=document.activeElement;
+if(!first){event.preventDefault();modal.focus({preventScroll:true});}
+else if(event.shiftKey&&(active===first||!controls.includes(active))){event.preventDefault();last.focus({preventScroll:true});}
+else if(!event.shiftKey&&(active===last||!controls.includes(active))){event.preventDefault();first.focus({preventScroll:true});}
+});
 document.getElementById('faq-copy-new')?.addEventListener('click',continueFaqDraftAsNew);
 document.getElementById('faq-discard-draft')?.addEventListener('click',()=>discardFaqDraft());
 document.getElementById('search-faq')?.addEventListener('input',()=>{if(faqListRead&&faqListRead.search.value!==faqListRead.keyword)cancelFaqListRead();});
@@ -3593,7 +3678,7 @@ if(faqModalRead===read){faqModalRead=null;g_faqModalOpening=false;renderFaqDraft
 async function openFaqModal(id, draftKey) {
 const modal = document.getElementById('faqModal');
 if(faqModalRead&&!isFaqModalReadCurrent(faqModalRead))cancelFaqModalRead();
-if (!modal || g_faqModalOpening || g_faqSaving || modal.classList.contains('show') || !isFaqContextCurrent()) return;
+if (!modal || g_faqModalOpening || g_faqSaving || faqDiscardConfirmation || modal.classList.contains('show') || !isFaqContextCurrent()) return;
 const sitePane=document.getElementById('tab-site');
 if(sitePane&&(!sitePane.classList.contains('active')||sitePane.hidden))return;
 bindFaqReadGuard();
@@ -3662,7 +3747,7 @@ if(faqModalRead===read){faqModalRead=null;g_faqModalOpening=false;renderFaqDraft
 }
 
 async function saveFaq() {
-if (g_faqSaving) return;
+if (g_faqSaving||faqDiscardConfirmation) return;
 if(!isFaqContextCurrent()||!faqActiveDraft||faqActiveDraft.owner!==getFaqOwner()
 ||faqActiveDraft.targetId!==(document.getElementById('faq-id').value||'')){
 return myAlert('현재 홈페이지 관리 권한과 편집할 질문을 다시 확인해 주세요. 입력 내용은 유지됩니다.','warning');
@@ -3789,5 +3874,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead});
-    root.AdminMemberSite = Object.freeze({ version: '20261017-4', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261017-5', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);
