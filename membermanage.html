@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.183
+Version: v1.0.184
 Change: 2026-10-17 - Keep separate authorized profile drafts during profile changes.
 -->
 <html lang="ko">
@@ -10,7 +10,7 @@ Change: 2026-10-17 - Keep separate authorized profile drafts during profile chan
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.183 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.184 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2594,6 +2594,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+clearPortalApplicationDrafts();
 portalProfileDrafts.clear();
 portalProfileEditor = null;
 portalProfileDraftOwner = '';
@@ -2651,6 +2652,97 @@ if (portalProfileOwner() && (portalProfileSaving || portalProfileDrafts.size)) {
 }
 });
 window.addEventListener('pagehide', clearPortalProfileEdits);
+
+// Application drafts are memory-only, separate from personal-information editing.
+const portalApplicationDrafts = new Map();
+let portalApplicationState = null;
+let portalApplicationGeneration = 0;
+let portalApplicationRequest = 0;
+let portalApplicationWritePending = false;
+function portalApplicationFields() {
+return ['exAmount','redAmount','checkRedAgree','wdReason','checkWdAgree']
+    .map(id => document.getElementById(id)).filter(Boolean);
+}
+function portalApplicationSnapshot() {
+return portalApplicationFields().map(n => [n.id,n.type === 'checkbox' ? n.checked : n.value]);
+}
+function portalApplicationOwner(member = curMem) {
+const actor = String(curAuth?.id || ''), coop = String(currentMemberCoopId || member?.coop_id || '');
+return actor && coop ? JSON.stringify([actor,coop]) : '';
+}
+function currentPortalApplicationState(state = portalApplicationState) {
+return !!state && state === portalApplicationState && state.owner === portalApplicationOwner()
+    && state.member === String(curMem?.id || '') && state.generation === portalApplicationGeneration;
+}
+function retainPortalApplicationDraft() {
+const state = portalApplicationState;
+if (!state || state.owner !== portalApplicationOwner() || state.member !== String(curMem?.id || '')) return;
+const tab = ['extra','reduction','withdraw','cert'].find(type => !document.getElementById('tab'+type[0].toUpperCase()+type.slice(1))?.classList.contains('hidden')) || '';
+portalApplicationDrafts.set(state.key,{values:portalApplicationSnapshot(),tab});
+}
+function clearPortalApplicationDrafts() {
+portalApplicationDrafts.clear();portalApplicationState = null;
+++portalApplicationGeneration;++portalApplicationRequest;
+portalApplicationFields().forEach(n => { if(n.type === 'checkbox') n.checked = false; else n.value = ''; });
+}
+function initializePortalApplicationDraft(member) {
+const owner = portalApplicationOwner(member);
+if (portalApplicationState && portalApplicationState.owner !== owner) clearPortalApplicationDrafts();
+const key = JSON.stringify([owner,String(member?.id || '')]);
+const draft = portalApplicationDrafts.get(key),values = new Map(draft?.values || []);
+portalApplicationFields().forEach(n => { if(n.type === 'checkbox') n.checked = values.get(n.id) === true; else n.value = values.get(n.id) || ''; });
+const reduction = document.getElementById('redAmount');
+if (reduction) { reduction.disabled = false; reduction.oninput = null; reduction.placeholder = '금액 입력'; }
+const limit = document.getElementById('redLimitDisplay');if (limit) limit.textContent = '';
+portalApplicationState = {owner,key,member:String(member?.id || ''),generation:portalApplicationGeneration};
+const tab = draft?.tab || '';
+['extra','reduction','withdraw','cert','partner'].forEach(type => document.getElementById('tab'+type[0].toUpperCase()+type.slice(1))?.classList.toggle('hidden',type !== tab));
+document.getElementById('tabPlaceholder')?.classList.toggle('hidden',!!tab);
+document.querySelectorAll('.menu-btn').forEach(n => n.classList.toggle('active',!!tab && n.getAttribute('onclick')?.includes("toggleTab('"+tab+"'")));
+}
+function capturePortalApplication(type) {
+if (!currentPortalApplicationState() || !['extra','reduction','withdraw'].includes(type) || portalApplicationWritePending) return null;
+return {state:portalApplicationState,revision:++portalApplicationRequest,type,
+    values:JSON.stringify(portalApplicationSnapshot()),member:{id:curMem.id,member_id:curMem.member_id,name:curMem.name,total_capital:curMem.total_capital},coop:String(currentMemberCoopId)};
+}
+function currentPortalApplicationRequest(request,checkInput = true) {
+return !!request && currentPortalApplicationState(request.state) && request.revision === portalApplicationRequest
+    && (!checkInput || request.values === JSON.stringify(portalApplicationSnapshot()));
+}
+function finishPortalApplicationDraft(request) {
+if (!request || !currentPortalApplicationState(request.state)) return;
+const submitted = new Map(JSON.parse(request.values));
+const ids = request.type === 'extra' ? ['exAmount'] : request.type === 'reduction' ? ['redAmount','checkRedAgree'] : ['wdReason','checkWdAgree'];
+portalApplicationFields().filter(n => ids.includes(n.id)).forEach(n => {
+const value = n.type === 'checkbox' ? n.checked : n.value;
+if(value === submitted.get(n.id)) { if(n.type === 'checkbox') n.checked = false; else n.value = ''; }
+});
+retainPortalApplicationDraft();
+}
+function canLinkActivePortalProfile() {
+if (!curMem || !curAuth?.id || isSiteMemberPortalProfile()) return false;
+const owner = String(curMem.auth_user_id || '');
+return owner ? owner === String(curAuth.id) : String(curMem.id) === String(getRootMemberProfileId() || curAuth.id);
+}
+function hasActiveProfileSocialLink(provider,marker) {
+const raw = String(marker || '').trim();
+if (!raw) return false;
+// Old auth-user references are not proof that an OAuth identity is connected.
+if (raw !== String(curMem?.auth_user_id || '') && raw !== String(curMem?.id || '')) return true;
+if (!canLinkActivePortalProfile()) return false;
+return (Array.isArray(curAuth?.identities) ? curAuth.identities : []).some(identity => {
+const candidate = String(identity?.provider || '').toLowerCase();
+return window.AuthBrokerHelper?.providerMatches ? window.AuthBrokerHelper.providerMatches(candidate,provider)
+    : candidate === provider || (provider === 'custom:naver' && candidate === 'naver');
+});
+}
+window.addEventListener('beforeunload',event => {
+retainPortalApplicationDraft();
+const owner = portalApplicationOwner();
+if (portalApplicationWritePending || (owner && [...portalApplicationDrafts].some(([key,draft]) => JSON.parse(key)[0] === owner && draft.values.some(([,value]) => value !== '' && value !== false)))) {
+event.preventDefault();event.returnValue = '';
+}
+});
 let familyRegistrationOwner = '';
 let familyRegistrationRevision = 0;
 let tempChildData = null;
@@ -3636,17 +3728,18 @@ const kakaoBtn = document.getElementById('btnLinkKakao');
 const naverBtn = document.getElementById('btnLinkNaver');
 const kakaoBadge = document.getElementById('badgeKakaoLinked');
 const naverBadge = document.getElementById('badgeNaverLinked');
-const isKakaoLinked = !!(curMem && curMem.kakao_id);
-const isNaverLinked = !!(curMem && curMem.naver_id);
+const isKakaoLinked = hasActiveProfileSocialLink('kakao',curMem?.kakao_id);
+const isNaverLinked = hasActiveProfileSocialLink('custom:naver',curMem?.naver_id);
 const canShowSocialLinks = !isSiteMemberPortalProfile();
+const canLinkProfile = canLinkActivePortalProfile();
 
 if (kakaoBtn) {
-if (canShowSocialLinks && curMem && !isKakaoLinked) kakaoBtn.classList.remove('hidden');
+if (canShowSocialLinks && canLinkProfile && !isKakaoLinked) kakaoBtn.classList.remove('hidden');
 else kakaoBtn.classList.add('hidden');
 }
 
 if (naverBtn) {
-if (canShowSocialLinks && curMem && !isNaverLinked) naverBtn.classList.remove('hidden');
+if (canShowSocialLinks && canLinkProfile && !isNaverLinked) naverBtn.classList.remove('hidden');
 else naverBtn.classList.add('hidden');
 }
 
@@ -3680,6 +3773,7 @@ return `${providerLabel} 연동 오류: ${msg}`;
 
 // [수정] 카카오톡 계정 연동 시작 (기존 세션에 OAuth identity를 정식 링크)
 async function startKakaoLinking() {
+if (!canLinkActivePortalProfile()) return showModal('본인 프로필에서 계정을 연결해 주세요.');
 showLoading(true, '카카오 연동을 시작합니다...');
 
 if (isFilePortalRuntime()) {
@@ -3725,6 +3819,7 @@ showLoading(false);
 }
 
 async function startNaverLinking() {
+if (!canLinkActivePortalProfile()) return showModal('본인 프로필에서 계정을 연결해 주세요.');
 showLoading(true, '네이버 연동을 시작합니다...');
 
 if (isFilePortalRuntime()) {
@@ -4446,8 +4541,10 @@ return memberInformationPortal.refresh(member);
 }
 
 async function loadDashboardData(uuid, options = {}) {
-if (portalProfileSaving) return false;
+if (portalProfileSaving || portalApplicationWritePending) return false;
 retainPortalProfileEdit();
+retainPortalApplicationDraft();
+++portalApplicationGeneration;++portalApplicationRequest;
 const profileLoadRevision = ++portalProfileLoadRevision;
 const profileLoadActor = String(curAuth?.id || '');
 const currentProfileLoad = () => profileLoadRevision === portalProfileLoadRevision && profileLoadActor === String(curAuth?.id || '');
@@ -4494,6 +4591,7 @@ member.account_number = MemberInformation.bankAccountDisplay(member);
 if (familyRegistrationOwner && familyRegistrationOwner !== getFamilyRegistrationOwner(member)) resetFamilyRegistrationDraft();
 curMem = member; 
 currentMemberCoopId = member.coop_id || await getCurrentMemberCoopId();
+initializePortalApplicationDraft(member);
 await loadMembermanageBranding();
 if (!currentProfileLoad()) return;
 applyMembermanageBranding();
@@ -4555,6 +4653,8 @@ if (!currentProfileLoad()) return;
 
 // 5. 렌더링 호출
 renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta);
+const restoredApplicationTab = ['extra','reduction','withdraw','cert'].find(type => !document.getElementById('tab'+type[0].toUpperCase()+type.slice(1))?.classList.contains('hidden'));
+if (restoredApplicationTab && typeof toggleTab === 'function') void toggleTab(restoredApplicationTab);
 void refreshMemberInformation(curMem);
 
 // [부가 기능 로드]
@@ -7880,13 +7980,16 @@ CoopSafeLog.warn("[extra-capital-kakao] applicant notice skipped:", error?.messa
 } // End of notifyExtraCapitalApplicantKakao
 
 async function submitApplication(type) {
+const request = capturePortalApplication(type);
+if (!request) return;
 let amount = 0, reason = '';
-const totalCap = Number(curMem.total_capital || 0);
+const totalCap = Number(request.member.total_capital || 0);
 let rules;
 if (type === 'extra' || type === 'reduction') {
 try { rules = await loadMemberCapitalRules(); }
-catch (_) { return showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); }
+catch (_) { if(currentPortalApplicationRequest(request)) showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
 }
+if (!currentPortalApplicationRequest(request)) return;
 
 if(type === 'extra') {
 amount = Number(document.getElementById('exAmount').value);
@@ -7906,6 +8009,7 @@ if(!document.getElementById('checkWdAgree').checked) return showModal('동의 �
 }
 
 showConfirmModal('신청서를 제출하시겠습니까?', async function() {
+if (!currentPortalApplicationRequest(request)) return;
 if (window.__memberAppLocks.submitApplication) {
 showModal('이미 신청 처리 중입니다. 잠시만 기다려주세요.');
 return;
@@ -7914,8 +8018,8 @@ window.__memberAppLocks.submitApplication = true;
 showLoading(true);
 
 try {
-const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
-const activeProfileId = getActiveMemberProfileId();
+const coopId = request.coop;
+const activeProfileId = request.member.id;
 if (!coopId) {
 throw new Error('조합 정보를 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
 }
@@ -7925,6 +8029,8 @@ throw new Error('현재 조합원 프로필을 확인하지 못했습니다. 다
 
 let createdApplication = null;
 if (type === 'withdraw') {
+if (!currentPortalApplicationRequest(request)) return;
+portalApplicationWritePending = true;
 const { data, error } = await _supabase.rpc('request_member_withdrawal', { p_reason: reason });
 if (error) throw error;
 createdApplication = { id: data?.application_id };
@@ -7942,6 +8048,7 @@ const { data: existingPending, error: pendingErr } = await scopeMemberTenant(_su
 .limit(1)
 .maybeSingle();
 
+if (!currentPortalApplicationRequest(request)) return;
 if (pendingErr && String(pendingErr.code || '') !== 'PGRST116') {
 throw pendingErr;
 }
@@ -7950,10 +8057,11 @@ showModal('이미 동일한 신청이 접수되어 있습니다.\n처리 결과�
 return;
 }
 
+portalApplicationWritePending = true;
 const { data, error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
 member_uid: activeProfileId,
-member_id: curMem.member_id,
-name: curMem.name,
+member_id: request.member.member_id,
+name: request.member.name,
 type: type,
 amount: amount,
 reason: reason,
@@ -7973,21 +8081,18 @@ CoopSafeLog.warn("[extra-capital-kakao] applicant notice skipped:", notifyError?
 });
 }
 
-showModal('신청되었습니다.');
+if (currentPortalApplicationState(request.state)) showModal('신청되었습니다.');
 
-// 초기화
-document.getElementById('exAmount').value = '';
-document.getElementById('redAmount').value = '';
-document.getElementById('wdReason').value = '';
-if(document.getElementById('checkRedAgree')) document.getElementById('checkRedAgree').checked = false;
-if(document.getElementById('checkWdAgree')) document.getElementById('checkWdAgree').checked = false;
+finishPortalApplicationDraft(request);
 
 // ★ 핵심: 스마트 새로고침
-reloadDashboard();
+portalApplicationWritePending = false;
+if (currentPortalApplicationState(request.state)) reloadDashboard();
 } catch (error) {
-showModal('오류: ' + (error?.hint || error?.message || error));
+if (currentPortalApplicationRequest(request,false)) showModal('오류: ' + (error?.hint || error?.message || error));
 } finally {
-showLoading(false);
+portalApplicationWritePending = false;
+if (currentPortalApplicationState(request.state)) showLoading(false);
 window.__memberAppLocks.submitApplication = false;
 }
 });
@@ -8283,6 +8388,8 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 async function toggleTab(type, btn) {
+const tabRevision = ++portalApplicationRequest;
+const applicationState = portalApplicationState,applicationGeneration = portalApplicationGeneration;
 if (type === 'partner' && isSiteMemberPortalProfile()) return;
 if (type === 'partner' && !isCoopRuntimeModuleEnabled('site_admin')) {
 showModal('현재 조합에서 홈페이지 관리 모듈 사용이 중지되었습니다.');
@@ -8314,7 +8421,10 @@ syncWithdrawRefundAccountUi();
 if(type === 'reduction') {
 let rules;
 try { rules = await loadMemberCapitalRules(); }
-catch (_) { showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
+catch (_) { if(applicationGeneration === portalApplicationGeneration && tabRevision === portalApplicationRequest) showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
+if(applicationState !== portalApplicationState || applicationGeneration !== portalApplicationGeneration
+    || (applicationState && !currentPortalApplicationState(applicationState)) || tabRevision !== portalApplicationRequest
+    || document.getElementById('tabReduction')?.classList.contains('hidden')) return;
 const total = Number(curMem.total_capital || 0);
 const limit = Math.floor((total - rules.minimum) / rules.unit) * rules.unit;
 const display = document.getElementById('redLimitDisplay');
@@ -9781,7 +9891,7 @@ return request.promise;
 
 // 2. 프로필 전환 실행
 async function switchProfile(targetUuid, targetName) {
-if (portalProfileSaving) return;
+if (portalProfileSaving || portalApplicationWritePending) return;
 if(curMem && curMem.id === targetUuid && getPortalProfileReadFailure()?.member !== String(targetUuid)) return;
 const profileActor = String(curAuth?.id || '');
 

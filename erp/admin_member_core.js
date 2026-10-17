@@ -5665,6 +5665,19 @@ async function confirmDelete() {
 // ================================================================
 
 
+// Reuse the roster's existing permission check and scoped search; no new role is granted.
+function goToRegularMembers() {
+  if (!canAccessAdminMemberTab('members')) { switchTab('members'); return; }
+  const status = document.getElementById('filter-status');
+  const type = document.getElementById('filter-type');
+  const keyword = document.getElementById('search-keyword');
+  if (status) status.value = '정상';
+  if (type) type.value = 'all';
+  if (keyword) keyword.value = '';
+  switchTab('members');
+  resetMemberPageAndFetch();
+}
+
 // 승인 대기 카드 클릭 시 조합원 탭으로 이동
 function goToPendingMembers() {
   // 이 페이지는 Bootstrap Tab이 아니라 switchTab 기반
