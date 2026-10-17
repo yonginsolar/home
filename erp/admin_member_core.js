@@ -6538,6 +6538,7 @@ function cancelMemberBasicEdit() {
 function acceptMemberBasicSave(state, submitted, updates, includeBadges = false) {
     if (!isCurrentMemberDetailEditor(state)) return;
     const old = new Map(state.baseline);
+    const savedEmail = updates.p_email || old.get('md-email-original') || '';
     const account = String(updates.p_bank_account || '').replace(/[\s-]/g, '');
     const mask = updates.p_bank_account
         ? (/^[0-9]{8,30}$/.test(account) ? '****' + account.slice(-4) : '****')
@@ -6545,11 +6546,11 @@ function acceptMemberBasicSave(state, submitted, updates, includeBadges = false)
     const badgeIds = new Set(Array.from(document.querySelectorAll('#member-badge-checkboxes input')).map(n => n.id || 'badge:' + n.value));
     state.baseline = submitted.map(([key,value]) => [key,
         key === 'md-bank-account' ? mask : key === 'md-rrn' ? ''
-        : key === 'md-email-original' ? (updates.p_email || '')
+        : (key === 'md-email' || key === 'md-email-original') ? savedEmail
         : (!includeBadges && badgeIds.has(key) ? old.get(key) : value)]);
     const current = memberDetailSnapshot().map(([key,value]) => [key,
         key === 'md-bank-account' ? mask : key === 'md-rrn' ? ''
-        : key === 'md-email-original' ? (updates.p_email || '') : value]);
+        : (key === 'md-email' || key === 'md-email-original') ? savedEmail : value]);
     applyMemberDetailSnapshot(current);
     MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'), {account_num_display:mask});
     // Keep the authorized local row consistent until its usual list refresh completes.
@@ -6558,7 +6559,7 @@ function acceptMemberBasicSave(state, submitted, updates, includeBadges = false)
         corp_number:'p_corp_number',business_number:'p_business_number',representative_name:'p_representative_name',
         contact_name:'p_contact_name',contact_position:'p_contact_position',preferred_name:'p_preferred_name',preferred_name_position:'p_preferred_name_position'};
     if (g_current_member_row) {
-        for (const [key,param] of Object.entries(fields)) g_current_member_row[key] = updates[param];
+        for (const [key,param] of Object.entries(fields)) g_current_member_row[key] = key === 'email' ? (savedEmail || null) : updates[param];
         g_current_member_row.account_number = mask || null;
         g_current_member_row.account_num_display = mask || null;
     }

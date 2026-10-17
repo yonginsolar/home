@@ -17,7 +17,7 @@
     if (!node) return;
     const value = bankAccountDisplay(member);
     node.hidden = !value;
-    node.textContent = value === '****' ? '입력함 · 끝자리 확인 필요' : value ? '입력함' : '';
+    node.textContent = value === '****' ? '입력됨 · 끝자리 확인 필요' : value ? '입력됨' : '';
   }
   function fieldNames(fields) {
     const result = [];
