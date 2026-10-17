@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.179
+Version: v1.0.180
 Change: 2026-10-17 - Keep separate authorized profile drafts during profile changes.
 -->
 <html lang="ko">
@@ -10,7 +10,7 @@ Change: 2026-10-17 - Keep separate authorized profile drafts during profile chan
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.179 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.180 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -1700,6 +1700,11 @@ NO. <span id="infoMemberId">-</span>
 </div>
 </div>
 
+<div id="profileDirectoryStatus" class="hidden border rounded p-2 mb-3 small d-flex align-items-center justify-content-between gap-2" role="status" aria-live="polite">
+<span id="profileDirectoryMessage"></span>
+<button type="button" id="btnRetryManagedProfiles" class="btn btn-sm btn-outline-primary flex-shrink-0" onclick="retryManagedProfiles()">다시 시도</button>
+</div>
+
 <div class="row g-2 mb-3" id="profileSummaryRow">
 <div class="col-md-6">
 <div class="profile-summary-card">
@@ -2503,6 +2508,46 @@ let portalProfileSaving = false;
 let portalProfileLoadRevision = 0;
 let portalProfileValidationRevision = 0;
 let portalProfileReadFailure = null;
+let portalProfileRetryRevision = 0;
+let portalProfileDirectoryRevision = 0;
+let portalProfileDirectoryPending = null;
+let portalProfileDirectoryFailure = null;
+
+function setPortalProfileDirectoryStatus(message, busy = false) {
+const panel = document.getElementById('profileDirectoryStatus');
+const text = document.getElementById('profileDirectoryMessage');
+const button = document.getElementById('btnRetryManagedProfiles');
+if (text) text.textContent = message || '';
+if (panel) panel.classList.toggle('hidden', !message);
+if (button) {
+button.disabled = busy;
+button.textContent = busy ? '조회 중...' : '다시 시도';
+}
+}
+
+function invalidatePortalProfileDirectoryRead(clear = false) {
+++portalProfileDirectoryRevision;
+portalProfileDirectoryPending = null;
+if (clear) {
+portalProfileDirectoryFailure = null;
+setPortalProfileDirectoryStatus('');
+document.getElementById('profileSwitcher')?.classList.add('hidden');
+document.getElementById('profileListMenu')?.replaceChildren();
+} else {
+const failed = portalProfileDirectoryFailure;
+const owned = failed && failed.actor === String(curAuth?.id || '') && failed.coop === String(currentMemberCoopId || '')
+    && failed.rootContext === String(getRootMemberProfileId() || '');
+if (!owned) portalProfileDirectoryFailure = null;
+setPortalProfileDirectoryStatus(owned ? '프로필 목록을 불러오지 못했습니다.' : '');
+}
+}
+
+async function retryManagedProfiles() {
+const failed = portalProfileDirectoryFailure;
+if (portalProfileSaving || !failed || failed.actor !== String(curAuth?.id || '')
+    || failed.coop !== String(currentMemberCoopId || '') || failed.rootContext !== String(getRootMemberProfileId() || '')) return;
+return loadManagedProfiles(failed.root);
+}
 
 function getPortalProfileReadFailure() {
 const failed = portalProfileReadFailure;
@@ -2548,6 +2593,10 @@ portalProfileEditor = null;
 portalProfileDraftOwner = '';
 ++portalProfileLoadRevision;
 portalProfileReadFailure = null;
+++portalProfileRetryRevision;
+invalidatePortalProfileDirectoryRead(true);
+const retryButton = document.getElementById('btnRetryPortalBoot');
+if (retryButton) { retryButton.disabled = false; retryButton.textContent = '다시 시도'; }
 portalProfileFields().forEach(node => { node.value = ''; node.readOnly = true; });
 }
 function portalProfileOwner(member = curMem) {
@@ -4023,6 +4072,16 @@ return dest.href;
 		}
 
 		async function retryPortalBoot() {
+if (portalProfileSaving) return;
+const retryRevision = ++portalProfileRetryRevision;
+const retryActor = String(curAuth?.id || '');
+const retryCoop = String(currentMemberCoopId || '');
+const retryValidation = portalProfileValidationRevision;
+let retryLoadRevision = portalProfileLoadRevision;
+let ownsLoading = true;
+const currentRetry = () => retryRevision === portalProfileRetryRevision && retryActor === String(curAuth?.id || '')
+    && retryCoop === String(currentMemberCoopId || '') && retryLoadRevision === portalProfileLoadRevision
+    && retryValidation === portalProfileValidationRevision;
 		const retryButton = document.getElementById('btnRetryPortalBoot');
 		if (retryButton) {
 		retryButton.disabled = true;
@@ -4039,22 +4098,27 @@ return dest.href;
 		}
 const failedProfile = getPortalProfileReadFailure();
 if (failedProfile) {
-const loaded = await loadDashboardData(failedProfile.member);
-if (loaded?.ok && loaded.revision === portalProfileLoadRevision && loaded.actor === String(curAuth?.id || '')) {
+const reading = loadDashboardData(failedProfile.member);
+retryLoadRevision = portalProfileLoadRevision;
+ownsLoading = false; // The scoped dashboard read owns its loader; directory reads never own it.
+const loaded = await reading;
+if (currentRetry() && loaded?.ok && loaded.revision === portalProfileLoadRevision && loaded.actor === String(curAuth?.id || '')) {
 await loadManagedProfiles(getRootMemberProfileId() || user.id);
 }
 return;
 }
+ownsLoading = false; // Normal boot handles its own loading.
 		await handleLoginSuccess(user);
 		} catch (error) {
+if (!currentRetry()) return;
 		CoopSafeLog.error("retryPortalBoot failed:", error);
 		showPortalRetryState('조합원 정보를 다시 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
 		} finally {
-		if (retryButton) {
+		if (retryButton && retryRevision === portalProfileRetryRevision) {
 		retryButton.disabled = false;
 		retryButton.textContent = '다시 시도';
 		}
-		showLoading(false);
+		if (ownsLoading && currentRetry()) showLoading(false);
 		}
 		}
 // [신규] 사업자등록번호 자동 하이픈 (000-00-00000)
@@ -4380,6 +4444,7 @@ retainPortalProfileEdit();
 const profileLoadRevision = ++portalProfileLoadRevision;
 const profileLoadActor = String(curAuth?.id || '');
 const currentProfileLoad = () => profileLoadRevision === portalProfileLoadRevision && profileLoadActor === String(curAuth?.id || '');
+invalidatePortalProfileDirectoryRead();
 portalProfileReadFailure = null;
 hidePortalRetryState();
 if (curMem?.id && String(curMem.id) !== String(uuid)) window.ContributionCertPreview?.clear();
@@ -9606,30 +9671,52 @@ document.getElementById('boardViewModal').style.display = 'flex';
 async function loadManagedProfiles(managerProfileId) {
 const switcher = document.getElementById('profileSwitcher');
 const menu = document.getElementById('profileListMenu');
-const rootProfileId = managerProfileId || getRootMemberProfileId();
-updateCurrentProfileSwitcherLabel(curMem);
-if (!rootProfileId) {
-switcher.classList.add('hidden');
-return;
+const rootProfileId = String(managerProfileId || getRootMemberProfileId() || '');
+const actor = String(curAuth?.id || '');
+const coop = String(currentMemberCoopId || '');
+const profileRevision = portalProfileLoadRevision;
+const rootContext = String(getRootMemberProfileId() || '');
+if (!switcher || !menu || !actor || !coop || !rootProfileId) {
+invalidatePortalProfileDirectoryRead(true);
+return {ok:false};
 }
-
+const pending = portalProfileDirectoryPending;
+if (pending && pending.actor === actor && pending.coop === coop && pending.root === rootProfileId
+    && pending.rootContext === rootContext && pending.profileRevision === profileRevision) return pending.promise;
+const request = {actor,coop,root:rootProfileId,rootContext,profileRevision,revision:++portalProfileDirectoryRevision};
+const currentDirectory = () => portalProfileDirectoryPending === request && request.revision === portalProfileDirectoryRevision
+    && actor === String(curAuth?.id || '') && coop === String(currentMemberCoopId || '')
+    && profileRevision === portalProfileLoadRevision && rootContext === String(getRootMemberProfileId() || '');
+const retrying = !!portalProfileDirectoryFailure;
+portalProfileDirectoryFailure = null;
+portalProfileDirectoryPending = request;
+updateCurrentProfileSwitcherLabel(curMem);
+switcher.classList.add('hidden');
+menu.replaceChildren();
+setPortalProfileDirectoryStatus(retrying ? '프로필 목록 확인 중...' : '', true);
+request.promise = (async () => {
+try {
 // (1) 본인 계정 정보
 const { data: me, error: errMe } = await scopeMemberTenant(_supabase.from('coop_members').select('id, name, member_type, join_category, rrn_display, birth_date')).eq('id', rootProfileId).single();
-if(errMe) CoopSafeLog.error("❌ 내 정보 조회 실패:", errMe);
+if (!currentDirectory()) return {ok:false,stale:true};
+if (errMe) throw errMe;
+if (!me || String(me.id) !== rootProfileId) throw new Error('PROFILE_DIRECTORY_UNAVAILABLE');
 
 // (2) 내가 관리자인 계정들 가져오기 (manager_id가 나인 경우)
 const { data: subProfiles, error: errSub } = await _supabase
 .from('coop_members')
 .select('id, name, member_type, join_category, rrn_display, birth_date')
-.eq('coop_id', currentMemberCoopId || await getCurrentMemberCoopId())
+.eq('coop_id', coop)
 .eq('manager_id', rootProfileId); // ★ 여기가 핵심
-
-if(errSub) CoopSafeLog.error("❌ 서브 계정 조회 에러:", errSub);
+if (!currentDirectory()) return {ok:false,stale:true};
+if (errSub) throw errSub;
+if (!Array.isArray(subProfiles)) throw new Error('PROFILE_DIRECTORY_UNAVAILABLE');
 
 // 관리할 계정이 없으면 스위처 숨김 (여기에 걸리는지 확인 필요)
-if (!subProfiles || subProfiles.length === 0) {
+if (subProfiles.length === 0) {
 switcher.classList.add('hidden');
-return;
+setPortalProfileDirectoryStatus('');
+return {ok:true};
 }
 
 // (3) 리스트 만들기
@@ -9658,6 +9745,21 @@ menu.innerHTML += `
 
 // 스위처 노출 (hidden 클래스 제거)
 switcher.classList.remove('hidden');
+setPortalProfileDirectoryStatus('');
+return {ok:true};
+} catch (error) {
+if (!currentDirectory()) return {ok:false,stale:true};
+CoopSafeLog.error('Profile directory read failed:', error);
+switcher.classList.add('hidden');
+menu.replaceChildren();
+portalProfileDirectoryFailure = {actor,coop,root:rootProfileId,rootContext};
+setPortalProfileDirectoryStatus('프로필 목록을 불러오지 못했습니다.');
+return {ok:false};
+} finally {
+if (currentDirectory()) portalProfileDirectoryPending = null;
+}
+})();
+return request.promise;
 }
 
 // 2. 프로필 전환 실행
