@@ -1,4 +1,4 @@
-/* v1.1.10 - Finish inline editing without removing the clicked preview control. */
+/* v1.1.11 - Show a loaded sample in its draft preview without changing registered text. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -183,15 +183,23 @@
   }
   async function loadSample(kind) {
     if(!beginAction())return;
+    const input=el(kind,'content'),area=window.CoopHomeVisualEditor?.current();
+    const signature=()=>JSON.stringify([...el(kind,'card').querySelectorAll('input,textarea')].map(node=>[node.id,node.value]));
+    const original=signature();
+    const current=()=>selectedKind===kind&&el(kind,'content')===input&&input.isConnected&&!window.frameElement?.hidden&&window.CoopHomeVisualEditor?.current()===area;
+    let focusDraft=false;
     try {
       if(el(kind,'content').value.trim() && !(await confirmAction('현재 편집 내용 대신 샘플을 불러올까요? 저장·등록된 문서는 바뀌지 않습니다.')))return;
-      if(!permitted())return;
+      if(!permitted()||!current()||signature()!==original)return;
       const sample=window.CoopSiteLegalSamples?.[kind];if(!sample)return myAlert('샘플을 불러오지 못했습니다. 새로고침해 주세요.','warning');
       // Only organization fields are automatic. Never copy a staff member's private contact details.
       el(kind,'content').value=sample.replace(/\{\{(조합명|대표자|주소)\}\}/g,(token,label)=>kind==='privacy'&&label!=='조합명'?token:String(context?.[{'조합명':'coop_name','대표자':'representative','주소':'address'}[label]]||token));
       if(kind==='privacy')for(const key of ['representative','address'])el(kind,key).value=String(context?.[key]||'');
-      el(kind,'effective-date').value='';updateStatus(kind);
-    } finally {endAction();}
+      el(kind,'effective-date').value='';previewMode='draft';updateStatus(kind);focusDraft=true;
+    } finally {
+      endAction();
+      if(focusDraft&&current()&&permitted())document.querySelector('#site-home-legal-preview article[tabindex="0"]')?.focus({preventScroll:true});
+    }
   }
   async function save(kind, action) {
     const s=state.get(kind);if(!loaded||loading||actionInFlight||!s||s.busy||!permitted())return;

@@ -99,7 +99,7 @@
       button.textContent=labels[area]; button.dataset.homeSelectArea=area; button.onclick=()=>select(area); strip.append(button);
     }
     const devices=document.querySelector('.home-preview-device-group'); if(devices) { devices.classList.add('ms-auto'); toolbar.append(devices); }
-    const guide=document.createElement('button');guide.type='button';guide.className='btn btn-sm btn-outline-secondary';guide.id='site-home-task-help';guide.textContent='사용 방법';guide.onclick=()=>{if(typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site'))return;myAlert(help[selected]||'편집할 영역을 선택해 설정하세요.\n화면에서 수정한 뒤 해당 저장 버튼을 눌러야 반영됩니다.','info');};toolbar.append(guide);
+    const guide=document.createElement('button');guide.type='button';guide.className='btn btn-sm btn-outline-secondary';guide.id='site-home-task-help';guide.textContent='사용 방법';guide.onclick=()=>{if(typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site'))return;guide.focus({preventScroll:true});void root.CoopDialog.alert(help[selected]||'편집할 영역을 선택해 설정하세요.\n화면에서 수정한 뒤 해당 저장 버튼을 눌러야 반영됩니다.',{title:'사용 방법'});};toolbar.append(guide);
     const pending=document.createElement('button');pending.type='button';pending.className='btn btn-sm btn-primary';pending.id='site-home-pending-save';pending.hidden=true;pending.textContent='메인 화면 변경 저장';pending.onclick=async()=>{if(await (window.CoopSiteInlineHost?.flush()??Promise.resolve(true)))saveHomeSettings();else myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');};toolbar.append(pending);
     const workspace=document.createElement('div'); workspace.id='site-home-visual-workspace';workspace.className='home-visual-workspace';
     const stage=document.createElement('div'); stage.className='home-visual-stage';

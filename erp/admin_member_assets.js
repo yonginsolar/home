@@ -28,10 +28,10 @@
 Object.freeze({src: new URL('admin_member_site.js?v=20261017-12', document.baseURI).href, integrity: 'sha384-FdiyLHndm5EPodiAeKchnBeN6vbnZayC2a8pMMQuwcnOuEF1GeosfU6uNA6XwnnT', ready: () => root.AdminMemberSite?.version === '20261017-12'}),
         Object.freeze({src: new URL('site_legal_samples.js?v=20261008-1', document.baseURI).href, integrity: 'sha384-8En93aFZlH8BEdzebQ4j4kJzZycfI/wI+t+wVTm3KyhVwDb/9SHzDV9cBcC3s2oq', ready: () => !!root.CoopSiteLegalSamples}),
 Object.freeze({src: new URL('site_inline_editor.js?v=20261016-tasks-1', document.baseURI).href, integrity: 'sha384-cDfFUyBxP6TSzdg4rZjLtuZII4qsNVaRqvzxKHUN4haimVmzsdFRZYDFVwshVOuw', ready: () => typeof root.CoopSiteInlineHost?.mount === 'function'}),
-        Object.freeze({src: new URL('home_visual_editor.js?v=20261016-resume-1', document.baseURI).href, integrity: 'sha384-4OTFVaLjGAU8boitG06+u3Q5MHW32BPbdZAlUoQefvX8/nrj/zmSnuAcnAl8b38c', ready: () => typeof root.CoopHomeVisualEditor?.mount === 'function'}),
+        Object.freeze({src: new URL('home_visual_editor.js?v=20261017-help-focus-1', document.baseURI).href, integrity: 'sha384-WPvGY0trQUe6c0KaWUIUjftVABJaTA2ojUrvmS9Bn0Yar0Yk2NsEbO8QRlPSaVR8', ready: () => typeof root.CoopHomeVisualEditor?.mount === 'function'}),
         Object.freeze({src: new URL('hero_slides_editor.js?v=1.4.0', document.baseURI).href, integrity: 'sha384-6S0Xgjztn7kR9Kgh/YhGpEUtXUJV/ARQI9rJrgSBgq7RsMbTYObLecpkOVnKxrsA', ready: () => typeof root.CoopHeroSlides?.mount === 'function'}),
         Object.freeze({src: new URL('hero_slides_visual.js?v=2.2.0', document.baseURI).href, integrity: 'sha384-rAn53Mj3E1C9wfuAo343fwEEUwvoxef3e411WLvEMDKyp7w9L161FdCgNycwzG9s', ready: () => root.CoopHeroVisual?.version === '2.2.0'}),
-        Object.freeze({src: new URL('site_legal_editor.js?v=20261015-2', document.baseURI).href, integrity: 'sha384-01nqEgDh4hE1A2FQzxj7jYYVt9dB8zOSR7zXTvxrdEHDwA6D/iAw/8IfN5rjTyxU', ready: () => typeof root.CoopSiteLegalEditor?.refreshPreview === 'function'})
+        Object.freeze({src: new URL('site_legal_editor.js?v=20261017-sample-draft-1', document.baseURI).href, integrity: 'sha384-DcXgkwK+JSLogH1/7MsmYgoLDdld57M+zsnT2hWfI1ue/IoPCIco8DReZvISUnLs', ready: () => typeof root.CoopSiteLegalEditor?.refreshPreview === 'function'})
     ]);
     const pending = new Map();
     function ready() { return root.XLSX?.version === '0.20.3' && typeof root.XLSX?.read === 'function' && typeof root.XLSX?.writeFile === 'function'; }
