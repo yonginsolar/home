@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.156 | Change: 2026-10-17 - Preserve card and cashback drafts during close and refresh. -->
+<!-- Version: v1.0.157 | Change: 2026-10-17 - Preserve separate card drafts across selection. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,7 +8,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.156 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.157 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
@@ -5836,15 +5836,40 @@ function accountingCardSnapshot(modal) {
 }
 function bindAccountingCardDraft(id) {
     if (accountingCardDrafts.has(id)) return accountingCardDrafts.get(id);
-    const modal = document.getElementById(id), store = {modal, owner:'', baseline:accountingCardSnapshot(modal), blank:null, busy:false, uncertain:false};
+    const modal = document.getElementById(id), store = {modal, owner:'', baseline:accountingCardSnapshot(modal), blank:null, busy:false, uncertain:false, activeKey:'', entries:new Map()};
     store.blank = store.baseline;
-    const capture = () => { const badge = modal.querySelector('[data-card-dirty]'); if (badge) badge.hidden = accountingCardSnapshot(modal) === store.baseline; };
+    const capture = () => {
+        const snapshot = accountingCardSnapshot(modal), dirty = snapshot !== store.baseline;
+        if (id === 'cardManageModal' && store.activeKey !== null) {
+            if (dirty || store.uncertain) store.entries.set(store.activeKey,{snapshot,baseline:store.baseline,uncertain:store.uncertain});
+            else store.entries.delete(store.activeKey);
+        }
+        const badge = modal.querySelector('[data-card-dirty]'); if (badge) badge.hidden = !dirty;
+    };
     const badge = document.createElement('span'); badge.dataset.cardDirty = ''; badge.className = 'badge bg-warning text-dark ms-2'; badge.textContent = '작성 중'; badge.hidden = true;
     modal.querySelector('.modal-title').append(badge);
     for (const event of ['input','change','hidden.bs.modal']) modal.addEventListener(event,capture);
     modal.addEventListener('hide.bs.modal',event => { if (store.busy) event.preventDefault(); });
-    window.addEventListener('beforeunload',event => { if (store.owner === accountingCardOwner() && accountingCardSnapshot(modal) !== store.baseline) {event.preventDefault();event.returnValue='';} });
+    window.addEventListener('beforeunload',event => { capture(); if (store.owner === accountingCardOwner() && (accountingCardSnapshot(modal) !== store.baseline || store.entries.size)) {event.preventDefault();event.returnValue='';} });
     store.capture = capture; accountingCardDrafts.set(id,store); return store;
+}
+function accountingCardDraftKey(card) {
+    const id = normalizeCardManageText(card?.card_id);
+    return JSON.stringify(id ? ['id',id] : ['record',normalizeCardManageText(card?.card_alias),normalizeCardManageText(card?.card_company),normalizeCardManageTypeValue(card?.card_type),normalizeCardManagePaymentDayValue(card?.payment_day)]);
+}
+function restoreAccountingCardEntry(store,key) {
+    store.capture();
+    if (store.activeKey === key) return true;
+    store.activeKey = key;
+    const draft = store.entries.get(key); if (!draft) return false;
+    for (const [id,value] of JSON.parse(draft.snapshot)) {
+        const el = store.modal.querySelector('#'+id); if (el) el.value = value;
+    }
+    store.baseline = draft.baseline; store.uncertain = draft.uncertain;
+    syncCardManagePaymentDayUi();
+    document.getElementById('cardManageFormTitle').textContent = key ? '카드 수정' : '카드 등록';
+    document.getElementById('cardManageSaveBtn').textContent = key ? '수정 저장' : '저장';
+    store.capture(); return true;
 }
 function prepareAccountingCardDraft(id) {
     const owner = accountingCardOwner(); if (!owner || !canPerform('accounting.edit')) return null;
@@ -5872,7 +5897,13 @@ function endAccountingCardSave(context) {
     context.store.capture();
 }
 function resetCardManageForm(afterSave = false) {
-    if (accountingCardDrafts.get('cardManageModal')?.busy && !afterSave) return;
+    const store = afterSave ? accountingCardDrafts.get('cardManageModal') : prepareAccountingCardDraft('cardManageModal');
+    if (!store || store.busy && !afterSave) return;
+    if (afterSave) {
+        store.entries.delete(store.activeKey); store.activeKey = null;
+        store.baseline = accountingCardSnapshot(store.modal); store.uncertain = false;
+    }
+    if (restoreAccountingCardEntry(store,'')) return;
     const fields = ['cardManageOriginalId', 'cardManageOriginalAlias', 'cardManageOriginalCompany', 'cardManageOriginalType', 'cardManageOriginalPaymentDay', 'cardManageAlias', 'cardManageCompany', 'cardManagePaymentDay'];
     fields.forEach((id) => {
         const el = document.getElementById(id);
@@ -5888,7 +5919,6 @@ function resetCardManageForm(afterSave = false) {
         saveBtn.textContent = '저장';
         saveBtn.disabled = false;
     }
-    const store = accountingCardDrafts.get('cardManageModal');
     if (store) {store.baseline = accountingCardSnapshot(store.modal);store.uncertain = false;store.capture();}
 } // End of resetCardManageForm
 
@@ -5967,8 +5997,9 @@ async function openCardManageModal() {
 } // End of openCardManageModal
 
 function startEditCard(card) {
-    if (!prepareAccountingCardDraft('cardManageModal') || accountingCardDrafts.get('cardManageModal').busy) return;
+    const store = prepareAccountingCardDraft('cardManageModal'); if (!store || store.busy) return;
     if (!card) return;
+    if (restoreAccountingCardEntry(store,accountingCardDraftKey(card))) return;
     const cardId = normalizeCardManageText(card.card_id);
     const alias = normalizeCardManageText(card.card_alias);
     const company = normalizeCardManageText(card.card_company);
@@ -5990,7 +6021,7 @@ function startEditCard(card) {
     if (titleEl) titleEl.textContent = '카드 수정';
     const saveBtn = document.getElementById('cardManageSaveBtn');
     if (saveBtn) saveBtn.textContent = '수정 저장';
-    const store = accountingCardDrafts.get('cardManageModal'); store.baseline = accountingCardSnapshot(store.modal);store.uncertain = false;store.capture();
+    store.baseline = accountingCardSnapshot(store.modal);store.uncertain = false;store.capture();
 } // End of startEditCard
 
 function buildCardManageScopedMutation(query, original) {
@@ -6105,7 +6136,11 @@ function requestDeleteCard(card) {
                 }
                 await loadCards();
                 renderCardManageList();
-                resetCardManageForm();
+                const store = accountingCardDrafts.get('cardManageModal'), key = accountingCardDraftKey(card);
+                if (store?.owner === accountingCardOwner() && canPerform('accounting.edit')) {
+                    if (store.activeKey === key) resetCardManageForm(true);
+                    else store.entries.delete(key);
+                }
                 cardManageModal.show();
                 showAlert('완료', `${alias} 카드를 삭제했습니다.`);
             } catch (error) {
