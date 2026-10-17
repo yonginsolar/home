@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.177
+Version: v1.0.178
 Change: 2026-10-17 - Keep separate authorized profile drafts during profile changes.
 -->
 <html lang="ko">
@@ -10,7 +10,7 @@ Change: 2026-10-17 - Keep separate authorized profile drafts during profile chan
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.177 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.178 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2501,6 +2501,7 @@ let portalProfileEditor = null;
 let portalProfileDraftOwner = '';
 let portalProfileSaving = false;
 let portalProfileLoadRevision = 0;
+let portalProfileValidationRevision = 0;
 
 function portalProfileFields() {
 return ['editPhone','editAddrMain','editAddrDetail','editBankName','editAccountNo','editHolder',
@@ -4357,7 +4358,7 @@ return memberInformationPortal.refresh(member);
 }
 
 async function loadDashboardData(uuid, options = {}) {
-if (portalProfileSaving) return;
+if (portalProfileSaving) return false;
 retainPortalProfileEdit();
 const profileLoadRevision = ++portalProfileLoadRevision;
 const profileLoadActor = String(curAuth?.id || '');
@@ -4491,6 +4492,9 @@ if (!isSiteMemberPortalProfile()) loadBoard('free', null, 20);
 	await handlePendingHumanitiesAccountLink();
 	}
 
+if (!currentProfileLoad()) return false;
+return {ok:true,revision:profileLoadRevision,actor:profileLoadActor,member:String(uuid)};
+
 	} catch (e) {
 if (!currentProfileLoad()) return;
 CoopSafeLog.error("Dashboard Load Error:", e);
@@ -4504,6 +4508,7 @@ throw (e instanceof Error ? e : new Error(String(e)));
 }
 showModal('데이터 로드 오류: ' + (e?.message || e));
 showOnly('loginSection');
+return false;
 } finally {
 if (currentProfileLoad()) showLoading(false);
 }
@@ -7896,6 +7901,12 @@ const editState = portalProfileEditor;
 if (portalProfileSaving || !isCurrentPortalProfileEditor(editState) || !editState.editing) return;
 const targetUuid = curMem.id; 
 const submitted = portalProfileSnapshot();
+const validationRevision = ++portalProfileValidationRevision;
+const validationLoadRevision = portalProfileLoadRevision;
+const ownsValidationFeedback = () => validationRevision === portalProfileValidationRevision
+    && validationLoadRevision === portalProfileLoadRevision
+    && isCurrentPortalProfileEditor(editState);
+const currentValidation = () => ownsValidationFeedback() && editState.editing;
 
 const phone = document.getElementById('editPhone').value.trim();
 const mainAddr = document.getElementById('editAddrMain').value;
@@ -7960,7 +7971,8 @@ const { data: existing, error: checkErr } = await _supabase
 .neq('id', targetUuid)
 .maybeSingle();
 
-showLoading(false);
+if (!currentValidation()) return;
+if (JSON.stringify(portalProfileSnapshot()) !== JSON.stringify(submitted)) return showModal('입력 내용이 바뀌었습니다. 다시 저장해 주세요.');
 if (checkErr) throw checkErr;
 
 if (existing) {
@@ -7977,15 +7989,17 @@ return showModal('이미 등록된 전화번호입니다.');
 // 가족이면 통과 (아무 일도 안 하고 진행)
 }
 } catch (e) {
-showLoading(false);
+if (!currentValidation()) return;
 return showModal('오류 발생: ' + e.message);
+} finally {
+if (ownsValidationFeedback()) showLoading(false);
 }
 }
 // [중복 검사 로직 수정 끝]
 
-if (!isCurrentPortalProfileEditor(editState)) return;
+if (!currentValidation()) return;
 showConfirmModal('정보를 수정하시겠습니까?', async function() {
-if (portalProfileSaving || !isCurrentPortalProfileEditor(editState) || !editState.editing) return;
+if (portalProfileSaving || !currentValidation()) return;
 if (JSON.stringify(portalProfileSnapshot()) !== JSON.stringify(submitted)) return showModal('입력 내용이 바뀌었습니다. 다시 저장해 주세요.');
 const controls = [...portalProfileFields(), ...document.querySelectorAll('#profileSwitcher button,#btnEditProfile,#btnSaveProfile,#btnCancelEdit')]
     .map(node => [node,node.disabled]);
@@ -9622,12 +9636,16 @@ showLoading(true, `${targetName} 님으로 전환 중...`);
 
 // ★ 핵심: 로그아웃 없이, 데이터 로드 함수만 대상 UUID로 다시 호출
 // curAuth(로그인된 정보)는 유지되고, curMem(화면 데이터)만 교체됨
-await loadDashboardData(targetUuid);
-if (String(curMem?.id || '') !== String(targetUuid) || profileActor !== String(curAuth?.id || '')) return;
+const loaded = await loadDashboardData(targetUuid);
+const currentSwitch = () => loaded?.ok === true && loaded.revision === portalProfileLoadRevision
+    && loaded.actor === profileActor && profileActor === String(curAuth?.id || '')
+    && loaded.member === String(targetUuid) && String(curMem?.id || '') === String(targetUuid);
+if (!currentSwitch()) return;
 
 // 스위처 UI 다시 그리기 (Active 상태 변경을 위해)
 await loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
 
+if (!currentSwitch()) return;
 showModal(`'${targetName}' 계정으로 전환되었습니다.\n이제 이 명의로 활동합니다.`);
 }
 // [추가] 삭제 함수
