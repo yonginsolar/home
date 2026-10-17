@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.157 | Change: 2026-10-17 - Preserve separate card drafts across selection. -->
+<!-- Version: v1.0.158 | Change: 2026-10-17 - Refresh unchanged cards while preserving drafts. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,7 +8,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.157 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.158 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
@@ -5859,7 +5859,7 @@ function accountingCardDraftKey(card) {
 }
 function restoreAccountingCardEntry(store,key) {
     store.capture();
-    if (store.activeKey === key) return true;
+    if (store.activeKey === key) return store.entries.has(key);
     store.activeKey = key;
     const draft = store.entries.get(key); if (!draft) return false;
     for (const [id,value] of JSON.parse(draft.snapshot)) {
@@ -5991,6 +5991,8 @@ async function openCardManageModal() {
     try {
         await loadCards();
         if (myInfo !== owner || !canPerform('accounting.edit') || window.frameElement?.hidden) return;
+        const selectedCard = (cardData || []).find(card => accountingCardDraftKey(card) === store.activeKey);
+        if (selectedCard) startEditCard(selectedCard);
         renderCardManageList(); cardManageModal.show();
     } catch (_) { if (myInfo === owner && !window.frameElement?.hidden) showAlert('조회 실패','카드 목록을 불러오지 못했습니다. 다시 열어 주세요.'); }
     finally {store.reading = false;}
