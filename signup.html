@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.57
-Change: 2026-10-07 - Use registered tenant signup purpose and privacy consent.
+Version: v1.0.58
+Change: 2026-10-18 - Keep corporate number optional for non-corporate organization signup.
 -->
 <html lang="ko"> 
 <head>
@@ -300,10 +300,10 @@ oninput="onlyNum(this); resetMsg('rrnMsg'); clearFieldWarning(this);"
 onblur="checkRRNFinal()">
 </div>
 <div id="box-corp" class="d-flex gap-2 align-items-center mb-2" style="display:none;">
-<input type="text" id="corp1" maxlength="6" class="form-control text-center" placeholder="법인번호 앞 6자리" required 
+<input type="text" id="corp1" maxlength="6" class="form-control text-center" placeholder="법인번호 앞 6자리 (법인인 경우)"
 oninput="onlyNum(this); autoMove(this,'corp2',6); resetSignupCorpValidationState(); clearFieldWarning(this);">
 <span>-</span>
-<input type="text" id="corp2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" required 
+<input type="text" id="corp2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리"
 oninput="onlyNum(this); resetSignupCorpValidationState(); clearFieldWarning(this);"
 onblur="validateCorpNo()">
 </div>
@@ -1187,7 +1187,9 @@ width: '100%', height: '100%'
 }
 
 // [4] 로직: 개인/단체 토글
+let signupCorpValidationRevision = 0;
 function toggleType(type) {
+++signupCorpValidationRevision;
 const isInd = (type === '개인');
 document.getElementById('lbl-name').innerText = isInd ? "이름 (실명)" : "단체명 (법인/고유명)";
 document.getElementById('lbl-id').innerText = isInd ? "주민등록번호" : "사업자(고유)번호";
@@ -1237,7 +1239,7 @@ corpMsg.style.display = 'block'; // ★ 보임
 bizMsg.style.display = 'block';
 
 document.getElementById('rrn1').required = false; document.getElementById('rrn2').required = false;
-document.getElementById('corp1').required = true; document.getElementById('corp2').required = true;
+document.getElementById('corp1').required = false; document.getElementById('corp2').required = false;
 document.getElementById('biz1').required = true; document.getElementById('biz3').required = true;
 representativeName.required = true;
 contactName.required = true;
@@ -2123,7 +2125,7 @@ setError(document.getElementById('biz3'));
 
 // 법인번호 체크
 const finalCorp = document.getElementById('finalCorpNo').value;
-if (!finalCorp || finalCorp.length < 13) {
+if ((document.getElementById('corp1').value + document.getElementById('corp2').value).trim() && (!finalCorp || finalCorp.replace(/\D/g,'').length !== 13)) {
 setError(document.getElementById('corp1'));
 setError(document.getElementById('corp2'));
 }
@@ -2570,6 +2572,7 @@ resetMsg('bizMsg');
 } // End of resetSignupBizValidationState
 
 function resetSignupCorpValidationState() {
+++signupCorpValidationRevision;
 document.getElementById('finalCorpNo').value = '';
 resetMsg('corpMsg');
 } // End of resetSignupCorpValidationState
@@ -2677,17 +2680,23 @@ async function validateCorpNo() {
 const c1 = document.getElementById('corp1').value;
 const c2 = document.getElementById('corp2').value;
 const formattedCorpNo = normalizeSignupCorpNo(c1, c2);
+const revision = ++signupCorpValidationRevision;
+const coopCode = signupTenant?.coop_code || '';
+const isCurrent = () => revision === signupCorpValidationRevision
+&& document.getElementById('corp1').value === c1 && document.getElementById('corp2').value === c2
+&& (signupTenant?.coop_code || '') === coopCode;
 
 if (!formattedCorpNo) {
 document.getElementById('finalCorpNo').value = "";
 if ((c1 + c2).length > 0) {
 setMsg('corpMsg', "❌ 법인등록번호는 숫자 13자리로 입력해 주세요.", true);
-}
+} else resetMsg('corpMsg');
 return;
 }
 
 try {
 const exists = await runSignupDuplicateCheck('corp_no', formattedCorpNo);
+if (!isCurrent()) return;
 if(exists === true) {
 setMsg('corpMsg', "❌ 이미 가입된 법인등록번호입니다.", true);
 document.getElementById('finalCorpNo').value = ""; // 저장 못하게 비움
@@ -2696,6 +2705,7 @@ setMsg('corpMsg', "✅ 사용 가능한 법인등록번호입니다.", false);
 document.getElementById('finalCorpNo').value = formattedCorpNo; // 값 저장
 }
 } catch (error) {
+if (!isCurrent()) return;
 setMsg('corpMsg', "⚠️ 법인등록번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
 document.getElementById('finalCorpNo').value = "";
 }

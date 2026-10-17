@@ -2060,9 +2060,9 @@ try {
 async function downloadMemberImportTemplate() {
     if (!(await ensureAdminMemberSpreadsheetReady())) return;
 const wsData = [
-  ['유형', '이름', '단체명', '주민등록번호', '이메일', '연락처', '사업자번호', '법인번호', '상태', '주소', '조합원번호', '가입구분', '가입일', '관리메모'],
-  ['개인', '홍길동', '', '800101-1234567', 'hong@example.com', '01012345678', '', '', '정상', '경기도 용인시 처인구 예시로 1', 'M-2026-0001', '일반', '2026-03-15', '회원가입 대행 입력'],
-  ['단체', '', '햇빛상회', '', 'corp@example.com', '01023456789', '123-45-67890', '110111-1234567', '승인대기', '경기도 용인시 수지구 예시로 2', '', '일반', '', '회원가입 대행 입력']
+  ['유형', '이름', '단체명', '주민등록번호', '이메일', '연락처', '사업자번호', '법인번호', '상태', '주소', '조합원번호', '가입구분', '가입일', '관리메모', '대표자명', '담당자명', '담당자 직함'],
+  ['개인', '홍길동', '', '800101-1234567', 'hong@example.com', '01012345678', '', '', '정상', '경기도 용인시 처인구 예시로 1', 'M-2026-0001', '일반', '2026-03-15', '회원가입 대행 입력', '', '', ''],
+  ['단체', '', '햇빛상회', '', 'corp@example.com', '01023456789', '123-45-67890', '', '승인대기', '경기도 용인시 수지구 예시로 2', '', '일반', '', '회원가입 대행 입력', '예시 대표', '예시 담당', '담당자']
 ];
 const ws = XLSX.utils.aoa_to_sheet(wsData);
 const wb = XLSX.utils.book_new();
@@ -2119,7 +2119,7 @@ const memberType = String(pick('유형', 'member_type') || '개인').trim() || '
 const status = String(pick('상태', 'status') || '정상').trim() || '정상';
 const isGroup = memberType === '단체';
 const rrnRaw = pick('주민등록번호', '주민번호', 'rrn');
-const businessRaw = pick('사업자번호', '사업자등록번호', 'business_number');
+const businessRaw = pick('사업자번호', '사업자등록번호', '고유번호', '사업자·고유번호', 'business_number');
 const corpRaw = pick('법인번호', '법인등록번호', 'corp_number');
 const name = isGroup
   ? String(pick('단체명', '법인명', '상호', '이름', 'name')).trim()
@@ -2147,6 +2147,9 @@ const normalized = {
   rrn,
   business_number: businessNumber,
   corp_number: corpNumber,
+  representative_name: isGroup ? String(pick('대표자명', '대표자', 'representative_name')).trim() : '',
+  contact_name: isGroup ? String(pick('담당자명', '담당자', 'contact_name')).trim() : '',
+  contact_position: isGroup ? String(pick('담당자 직함', '담당자 직함/역할', '담당자 역할', 'contact_position')).trim() : '',
   identifier_display: identifierDisplay
 };
 
@@ -2161,6 +2164,9 @@ if (!isGroup && /[0-9]/.test(normalized.name)) errors.push('이름 형식 오류
 if (!isGroup && !normalized.rrn) errors.push('주민번호 형식 오류');
 if (isGroup && !normalized.business_number) errors.push('사업자번호 형식 오류');
 if (corpRaw && !normalized.corp_number) errors.push('법인번호 형식 오류');
+if (isGroup && !normalized.representative_name) errors.push('대표자명 누락');
+if (isGroup && !normalized.contact_name) errors.push('담당자명 누락');
+if (isGroup && !normalized.contact_position) errors.push('담당자 직함/역할 누락');
 
 normalized.errors = errors;
 normalized.valid = errors.length === 0;
@@ -2299,6 +2305,7 @@ filteredRows.slice(0, 10).forEach((row) => {
     <td>${escapeHtml(row.email || '-')}</td>
     <td>${escapeHtml(row.member_type || '-')}</td>
     <td>${escapeHtml(row.identifier_display || '-')}</td>
+    <td>${row.member_type === '단체' ? `${escapeHtml(row.representative_name || '-')}<br><span class="small text-muted">${escapeHtml(row.contact_name || '-')} · ${escapeHtml(row.contact_position || '-')}</span>` : '-'}</td>
     <td>${escapeHtml(row.status || '-')}</td>
     <td>${escapeHtml(row.join_date || '-')}</td>
     <td>${row.valid ? '<span class="badge bg-success">정상</span>' : errorBadges}</td>
@@ -2339,6 +2346,9 @@ const rows = failedRows.map((row) => ({
   가입구분: row.source_row?.['가입구분'] ?? row.join_category ?? '',
   가입일: row.source_row?.['가입일'] ?? row.join_date ?? '',
   관리메모: row.source_row?.['관리메모'] ?? row.admin_memo ?? '',
+  대표자명: row.source_row?.['대표자명'] ?? row.representative_name ?? '',
+  담당자명: row.source_row?.['담당자명'] ?? row.contact_name ?? '',
+  '담당자 직함': row.source_row?.['담당자 직함'] ?? row.contact_position ?? '',
   오류사유: row.errors.join(', ')
 }));
 
@@ -2421,6 +2431,9 @@ myConfirm(`총 ${g_member_import_rows.length}건 중 ${validRows.length}건을 �
     rrn: row.member_type === '개인' ? row.rrn || null : null,
     business_number: row.member_type === '단체' ? row.business_number || null : null,
     corp_number: row.member_type === '단체' ? row.corp_number || null : null,
+    representative_name: row.member_type === '단체' ? row.representative_name || null : null,
+    contact_name: row.member_type === '단체' ? row.contact_name || null : null,
+    contact_position: row.member_type === '단체' ? row.contact_position || null : null,
     join_date: row.join_date || null
   }));
   const requestKey = g_member_import_request_key || createAdminBatchRequestKey('member-import');
@@ -7662,9 +7675,7 @@ async function submitIssueDoc() {
             if (!memberData.member_id || memberData.member_id === 'ID없음' || memberData.member_id === '-') {
                 throw new Error('출자증명서 발급에는 조합원 번호(member_id)가 필요합니다.');
             }
-            if (String(memberData.member_type || '').includes('단체') && !String(memberData.corp_number || '').trim()) {
-                throw new Error("단체의 '법인등록번호'가 확인되지 않습니다. 회원 정보를 수정해주세요.");
-            }
+            if (String(memberData.member_type || '').includes('단체')) getContributionCertificateOrganizationIdentity(memberData);
             if (typeof generateContributionCert !== 'function' || typeof prepareContributionCertCompanyProfile !== 'function') {
                 throw new Error('cert_generator.js 최신본이 로드되지 않았습니다. 배포/캐시를 확인해주세요.');
             }

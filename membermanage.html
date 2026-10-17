@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.188
-Change: 2026-10-17 - Keep separate authorized profile drafts during profile changes.
+Version: v1.0.189
+Change: 2026-10-18 - Preserve scoped connection searches and verify registered group certificate access.
 -->
 <html lang="ko">
 <head>
@@ -10,7 +10,7 @@ Change: 2026-10-17 - Keep separate authorized profile drafts during profile chan
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.188 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.189 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -52,7 +52,7 @@ allowKakaoApp: true
 <script src="/shared/image_display.js?v=20261012-2"></script>
 <script src="/shared/participation_image_display.js?v=20261012-2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
-<script src="cert_generator.js?v=20261010_01"></script>
+<script src="cert_generator.js?v=20261018-organization-1"></script>
 <script src="shared/contribution_cert_preview.js?v=20261010-1"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" integrity="sha384-xgNdoEQu0JeBEAN3/f7mrS+EPOsrmARCvhS7PEpk7QI2wvo4YOF3xY3EjQGKHAY9" crossorigin="anonymous"></script>
@@ -2598,6 +2598,7 @@ return portalProfileFields().some(node => {
 function clearPortalProfileEdits() {
 clearPortalApplicationDrafts();
 clearPortalPartnerDrafts();
+clearPortalConnectDrafts();
 portalProfileDrafts.clear();
 portalProfileEditor = null;
 portalProfileDraftOwner = '';
@@ -2788,7 +2789,7 @@ if (portalPartnerState && portalPartnerState.owner !== owner) clearPortalPartner
 const key = JSON.stringify([owner,String(member?.id || '')]), old = portalPartnerDrafts.get(key);
 const blank = {values:portalPartnerFields().map(n => [n.id,'']),file:null};
 const state = {...(old || {}),owner,key,member:String(member?.id || ''),memberId:String(member?.member_id || ''),
-    current:old?.current || blank,baseline:old?.baseline || blank,pending:null};
+    current:old?.current || blank,baseline:old?.baseline || blank,pending:null,badgeRead:null,badgeRetry:false};
 portalPartnerState = state;portalPartnerDrafts.set(key,state);state.file = state.current.file;
 document.getElementById('ptBadgePreview').textContent = '';
 applyPortalPartnerSnapshot(state.current);renderPortalPartnerState(state);
@@ -2833,6 +2834,37 @@ retainPortalPartnerDraft();const owner = portalApplicationOwner();
 if(portalPartnerWritePending || (owner && [...portalPartnerDrafts.values()].some(s => s.owner === owner && !samePortalPartnerSnapshot(s.current,s.baseline)))) {
 event.preventDefault();event.returnValue = '';
 }
+});
+// Connection search input is memory-only and belongs to one actor/cooperative/profile.
+const portalConnectDrafts = new Map();
+let portalConnectDraftOwner = '', portalConnectSearchRevision = 0, portalFamilyListRevision = 0;
+let portalConnectPending = null, portalFamilyListPending = null;
+function retainPortalConnectDraft() {
+const owner = getFamilyRegistrationOwner();
+if(!owner || familyRegistrationOwner !== owner) return;
+const keyword = document.getElementById('searchConnectInput'), identity = document.getElementById('searchConnectIdentityInput');
+if(keyword && identity) portalConnectDrafts.set(owner,{keyword:keyword.value,identity:identity.value});
+}
+function clearPortalConnectDrafts() {
+portalConnectDrafts.clear();portalConnectDraftOwner = '';
+++portalConnectSearchRevision;++portalFamilyListRevision;
+portalConnectPending = null;portalFamilyListPending = null;
+for(const id of ['searchConnectInput','searchConnectIdentityInput']) { const n = document.getElementById(id);if(n) n.value = ''; }
+}
+function restorePortalConnectDraft() {
+const owner = getFamilyRegistrationOwner(), actor = portalProfileOwner();
+if(portalConnectDraftOwner && portalConnectDraftOwner !== actor) clearPortalConnectDrafts();
+portalConnectDraftOwner = actor;
+const draft = portalConnectDrafts.get(owner);
+if(!draft) return;
+for(const [id,value] of [['searchConnectInput',draft.keyword],['searchConnectIdentityInput',draft.identity]]) {
+const n = document.getElementById(id);if(n) n.value = value;
+}
+}
+document.addEventListener('input',event => {
+if(!['searchConnectInput','searchConnectIdentityInput'].includes(event.target?.id)) return;
+retainPortalConnectDraft();++portalConnectSearchRevision;portalConnectPending = null;
+const result = document.getElementById('connectResultArea');if(result) result.textContent = '검색 버튼을 눌러주세요.';
 });
 let familyRegistrationOwner = '';
 let familyRegistrationRevision = 0;
@@ -4636,6 +4668,8 @@ if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePe
 retainPortalProfileEdit();
 retainPortalApplicationDraft();
 retainPortalPartnerDraft();++portalPartnerReadRevision;++portalPartnerRequestRevision;
+retainPortalConnectDraft();++portalConnectSearchRevision;++portalFamilyListRevision;
+portalConnectPending = null;portalFamilyListPending = null;
 ++portalApplicationGeneration;++portalApplicationRequest;
 const profileLoadRevision = ++portalProfileLoadRevision;
 const profileLoadActor = String(curAuth?.id || '');
@@ -8520,6 +8554,7 @@ syncWithdrawRefundAccountUi();
 if(type === 'partner' && currentPortalPartnerState()) {
 renderPortalPartnerState(portalPartnerState);
 if(!portalPartnerState.loaded || portalPartnerState.readError) loadPartnerInfo(portalPartnerState.memberId);
+else if(portalPartnerState.badgeRetry) retryPortalPartnerBadges();
 }
 
 if(type === 'reduction') {
@@ -8567,9 +8602,14 @@ const authId = curAuth.id;
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
 const sameContext = () => curAuth?.id === authId && curMem?.id === member.id && currentMemberCoopId === coopId;
 const authorize = async () => {
-const { data, error } = await _supabase.auth.getUser();
-if (!error && data?.user?.id !== authId) window.ContributionCertPreview.clear();
-if (error || data?.user?.id !== authId || !sameContext()) throw new Error('로그인 정보가 변경되었습니다. 다시 로그인해 주세요.');
+const [identity,access] = await Promise.all([
+_supabase.auth.getUser(),_supabase.rpc('can_issue_contribution_certificate',{p_member_id:member.member_id})
+]);
+if(identity.error || identity.data?.user?.id !== authId || !sameContext()) {
+window.ContributionCertPreview.clear();throw new Error('로그인 정보가 변경되었습니다. 다시 로그인해 주세요.');
+}
+if(access.error) throw new Error('증명서 발급 권한을 확인하지 못했습니다. 다시 시도해주세요.');
+if(access.data !== true) { window.ContributionCertPreview.clear();throw new Error('본인 또는 등록된 단체 관리자의 발급 권한이 필요합니다.'); }
 };
 preview = window.ContributionCertPreview.start({ isCurrent: sameContext, authorize });
 await authorize();
@@ -8586,6 +8626,7 @@ return preview.fail('납입된 출자금이 없어 증명서를 발급할 수 �
 if (typeof prepareContributionCertCompanyProfile !== 'function' || typeof generateContributionCert !== 'function') {
 throw new Error('출자증서 생성기를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
 }
+if (isMemberGroupRecord(member)) getContributionCertificateOrganizationIdentity(member);
 const companyProfile = await prepareContributionCertCompanyProfile(_supabase, { coopId });
 if (typeof getCertPretendardFontBase64 === 'function') await getCertPretendardFontBase64();
 await authorize();
@@ -9024,6 +9065,7 @@ const profile = String(member?.id || '').trim();
 return actor && coop && profile ? JSON.stringify([actor, coop, profile]) : '';
 }
 function closeFamilyRegistrationModal() {
+retainPortalConnectDraft();++portalConnectSearchRevision;portalConnectPending = null;
 ++familyRegistrationRevision;
 tempChildData = null;
 window.ChildDirectConsent?.clear();
@@ -9054,6 +9096,7 @@ async function openAddFamilyModal() {
 const draftOwner = getFamilyRegistrationOwner();
 if (!draftOwner) { resetFamilyRegistrationDraft(); return showModal('로그인 정보를 다시 확인해 주세요.'); }
 if (familyRegistrationOwner !== draftOwner) resetFamilyRegistrationDraft();
+else retainPortalConnectDraft();
 familyRegistrationOwner = draftOwner;
 const draftRevision = ++familyRegistrationRevision;
 const overlay = document.getElementById('familyModalOverlay');
@@ -9087,10 +9130,11 @@ const activeIsManagedProfile = isGroup || isMinorProfile;
 // [단체/미성년 프로필 입장] 이미 나를 관리하는 보호자/대표자가 있는가?
 if (activeIsManagedProfile) {
 if (curMem.manager_id) {
-const { data: parent } = await scopeMemberTenant(_supabase.from('coop_members')
+const { data: parent, error: parentError } = await scopeMemberTenant(_supabase.from('coop_members')
 .select('name'))
 .eq('id', curMem.manager_id)
 .single();
+if (parentError) throw parentError;
 
 isConnected = true;
 targetInfo = { name: parent ? parent.name : '알 수 없음', id: curMem.manager_id };
@@ -9100,11 +9144,12 @@ targetInfo = { name: parent ? parent.name : '알 수 없음', id: curMem.manager
 // 4. 상태에 따라 화면 그리기 (다음 함수 호출)
 if (draftRevision !== familyRegistrationRevision || draftOwner !== getFamilyRegistrationOwner() || overlay.style.display === 'none') return;
 renderConnectTabUI(connArea, isConnected, targetInfo, activeIsManagedProfile);
+restorePortalConnectDraft();
 
 } catch (e) {
 if (draftRevision !== familyRegistrationRevision || draftOwner !== getFamilyRegistrationOwner() || overlay.style.display === 'none') return;
 CoopSafeLog.error("Connection Check Error:", e);
-connArea.innerHTML = '<div class="text-center text-danger py-3">정보 확인 실패<br>다시 시도해주세요.</div>';
+connArea.innerHTML = '<div class="text-center text-danger py-3">연결 정보를 불러오지 못했습니다.<br><button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="openAddFamilyModal()">다시 시도</button></div>';
 }
 }
 
@@ -9151,7 +9196,7 @@ container.innerHTML = `
 // [Case B] 연결 안 됨: 기존 검색창 UI 복원
 let guideMsg = '관리할 <b>단체 계정</b>은 이름/조합원번호로, <b>미성년 자녀 계정</b>은 이름과 생년월일로 검색하세요.';
 if (isMemberGroupRecord(curMem)) {
-guideMsg = '이 단체 계정을 관리할 <b>성인 대표자(개인)</b>를 검색하세요.';
+guideMsg = '이 단체 계정을 관리할 <b>성인 개인 조합원</b>을 검색하세요.';
 } else if (isMemberMinorRecord(curMem)) {
 guideMsg = '이 미성년 자녀 계정을 관리할 <b>보호자(성인 개인)</b>를 검색하세요.';
 }
@@ -9181,6 +9226,7 @@ container.innerHTML = `
 // [신규] 연결 해제 로직 (개인/단체 공용)
 async function disconnectRelation(targetId, amIGroup, targetName = '') {
 const activeProfileId = getActiveMemberProfileId();
+const owner = getFamilyRegistrationOwner(), relationRevision = portalFamilyListRevision;
 const managedId = amIGroup ? activeProfileId : targetId;
 const managerId = amIGroup ? targetId : activeProfileId;
 const displayName = String(targetName || '').trim() || (amIGroup ? '관리자' : '선택한 계정');
@@ -9195,6 +9241,7 @@ const confirmMsg = amIGroup
 : `'${displayName}' 계정과의 관리 연결을 해제하시겠습니까?\n계정은 삭제되지 않고 관리 연결만 해제됩니다.`;
 
 showConfirmModal(confirmMsg, async () => {
+if(!owner || owner !== getFamilyRegistrationOwner() || relationRevision !== portalFamilyListRevision) return;
 if (window.__memberAppLocks.disconnectRelation) {
 showModal('이미 연결 해제를 처리 중입니다. 잠시만 기다려주세요.');
 return;
@@ -9210,6 +9257,7 @@ manager_uuid: managerId
 });
 if (error) throw error;
 
+if (owner !== getFamilyRegistrationOwner()) return;
 if (amIGroup && curMem) {
 curMem.manager_id = null;
 if (String(curMem.member_type || '').includes('단체')) curMem.rep_uuid = null;
@@ -9236,7 +9284,7 @@ CoopSafeLog.warn("Managed profile refresh failed after disconnect:", refreshErro
 }
 } catch (error) {
 showLoading(false);
-showModal('해제 실패: ' + getManagedLinkErrorMessage(error));
+if (owner === getFamilyRegistrationOwner()) showModal('해제 실패: ' + getManagedLinkErrorMessage(error));
 } finally {
 window.__memberAppLocks.disconnectRelation = false;
 }
@@ -9319,15 +9367,29 @@ const identityInput = document.getElementById('searchConnectIdentityInput');
 const identityHint = identityInput ? identityInput.value.trim() : '';
 const activeProfileId = getActiveMemberProfileId();
 if (!activeProfileId) return showModal('현재 조합원 프로필을 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
+const owner = getFamilyRegistrationOwner(), modalRevision = familyRegistrationRevision;
+if(!owner || familyRegistrationOwner !== owner || document.getElementById('familyModalOverlay').style.display === 'none') return;
+if(portalConnectPending?.owner === owner && portalConnectPending.keyword === keyword && portalConnectPending.identityHint === identityHint) return portalConnectPending.promise;
+const request = {owner,keyword,identityHint,revision:++portalConnectSearchRevision};
+const currentSearch = () => portalConnectPending === request && request.revision === portalConnectSearchRevision
+    && owner === getFamilyRegistrationOwner() && modalRevision === familyRegistrationRevision
+    && document.getElementById('familyModalOverlay').style.display !== 'none'
+    && keyword === document.getElementById('searchConnectInput')?.value.trim()
+    && identityHint === document.getElementById('searchConnectIdentityInput')?.value.trim();
+portalConnectPending = request;retainPortalConnectDraft();
 
 area.innerHTML = '<p class="text-center text-muted small py-3">검색 중...</p>';
 
+request.promise = Promise.resolve().then(async () => {
+try {
+if(!currentSearch()) return;
 // 1. RPC 호출 (체이닝 없이 단독 실행)
 const { data: list, error } = await _supabase.rpc('search_profiles_for_connect', {
 keyword: keyword,
 requester_uuid: activeProfileId,
 identity_hint: identityHint
 });
+if(!currentSearch()) return;
 
 if (error) {
 CoopSafeLog.error("[membermanage] operation failed", error);
@@ -9369,14 +9431,28 @@ html += `
 });
 html += '</ul>';
 area.innerHTML = html;
+} catch(error) {
+if(currentSearch()) {
+CoopSafeLog.warn('연결 대상 조회 실패',error?.code || 'CONNECT_SEARCH_FAILED');
+area.textContent = '검색하지 못했습니다. 다시 시도해주세요.';
+}
+} finally { if(portalConnectPending === request) portalConnectPending = null; }
+});
+return request.promise;
 }
 
 // 5. [탭2] 연결 신청 (Propose) -> coop_applications 테이블 활용
 // [수정] 연결 신청 함수 (모달 닫기 -> 화면 스크롤 -> 인라인 메시지 표시)
 async function requestConnect(targetUuid, targetName) {
+const owner = getFamilyRegistrationOwner(), activeProfileId = getActiveMemberProfileId();
+const modalRevision = familyRegistrationRevision, searchRevision = portalConnectSearchRevision;
+const current = () => owner && owner === getFamilyRegistrationOwner() && modalRevision === familyRegistrationRevision
+    && searchRevision === portalConnectSearchRevision && document.getElementById('familyModalOverlay').style.display !== 'none';
+if(!current()) return;
 
 // confirm 모달은 유지 (사용자 실수 방지)
 showConfirmModal(`'${targetName}' 님과 연결을 신청하시겠습니까?`, async () => {
+if(!current()) return;
 if (window.__memberAppLocks.requestConnect) {
 showModal('이미 연결 신청 처리 중입니다. 잠시만 기다려주세요.');
 return;
@@ -9385,7 +9461,6 @@ window.__memberAppLocks.requestConnect = true;
 showLoading(true);
 
 try {
-const activeProfileId = getActiveMemberProfileId();
 if (!activeProfileId) {
 throw new Error('현재 조합원 프로필을 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
 }
@@ -9396,6 +9471,7 @@ target_uuid: targetUuid
 });
 
 if(error) throw error;
+if(owner !== getFamilyRegistrationOwner()) return;
 if (data?.duplicate) {
 showModal('이미 해당 대상에게 연결 신청이 접수되어 있습니다.');
 return;
@@ -9414,9 +9490,9 @@ actionArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
 // 4. [UX] 신청서 상단에 성공 메시지 꽂기 (Alert 아님)
 showInlineFeedback(`✅ '${targetName}' 님에게 연결 신청을 보냈습니다.`);
 } catch (error) {
-showModal('신청 실패: ' + getManagedLinkErrorMessage(error));
+if(owner === getFamilyRegistrationOwner()) showModal('신청 실패: ' + getManagedLinkErrorMessage(error));
 } finally {
-showLoading(false);
+if(owner === getFamilyRegistrationOwner()) showLoading(false);
 window.__memberAppLocks.requestConnect = false;
 }
 });
@@ -9483,8 +9559,16 @@ if (!profileId) {
 area.innerHTML = '<p class="text-muted small text-center py-3">현재 계정 정보를 확인하지 못했습니다.</p>';
 return;
 }
+const owner = getFamilyRegistrationOwner();
+if(!owner || String(profileId) !== String(getActiveMemberProfileId())) return;
+if(portalFamilyListPending?.owner === owner) return portalFamilyListPending.promise;
+const request = {owner,revision:++portalFamilyListRevision};
+const current = () => portalFamilyListPending === request && request.revision === portalFamilyListRevision && owner === getFamilyRegistrationOwner();
+portalFamilyListPending = request;
+request.promise = Promise.resolve().then(async () => {
 
 try {
+if(!current()) return;
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
 const activeMember = (curMem && String(curMem.id || '') === String(profileId))
 ? curMem
@@ -9493,6 +9577,7 @@ const activeMember = (curMem && String(curMem.id || '') === String(profileId))
     .select('id, name, preferred_name, preferred_name_position, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status, created_at'))
     .eq('id', profileId)
     .maybeSingle()).data;
+if(!current()) return;
 
 if (!activeMember) {
 area.innerHTML = '<p class="text-muted small text-center py-3">현재 계정 정보를 확인하지 못했습니다.</p>';
@@ -9508,6 +9593,7 @@ const { data: managerRow, error: managerError } = await scopeMemberTenant(_supab
     .select('id, name, preferred_name, preferred_name_position, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status'))
     .eq('id', familyRootId)
     .maybeSingle();
+if(!current()) return;
 if (managerError) throw managerError;
 if (managerRow) {
 relationRows.push({
@@ -9526,6 +9612,7 @@ const { data: managedRows, error: managedError } = await _supabase
 .eq('coop_id', coopId)
 .eq('manager_id', familyRootId)
 .order('created_at', { ascending: true });
+if(!current()) return;
 if (managedError) throw managedError;
 
 (managedRows || []).forEach((row) => {
@@ -9575,9 +9662,12 @@ html += `
 html += '</ul>';
 area.innerHTML = html;
 } catch (error) {
+if(!current()) return;
 CoopSafeLog.error("가족/단체 목록 로드 실패:", error);
 area.innerHTML = '<p class="text-danger small text-center py-3">가족/단체 목록을 불러오지 못했습니다.</p>';
-}
+} finally { if(portalFamilyListPending === request) portalFamilyListPending = null; }
+});
+return request.promise;
 } // End of loadFamilyList
 
 async function submitFamily() {
@@ -9996,6 +10086,7 @@ return request.promise;
 // 2. 프로필 전환 실행
 async function switchProfile(targetUuid, targetName) {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending) return;
+if(window.__memberAppLocks?.requestConnect || window.__memberAppLocks?.disconnectRelation) return;
 if(curMem && curMem.id === targetUuid && getPortalProfileReadFailure()?.member !== String(targetUuid)) return;
 const profileActor = String(curAuth?.id || '');
 
@@ -10496,25 +10587,30 @@ showModal('오류가 발생했습니다: ' + e.message);
 // [신규] 파트너(협력단체) 신청 관련 함수
 // ==========================================
 
-async function renderPartnerBadgePreview(badgeCodes, isCurrent = () => true) {
+async function renderPartnerBadgePreview(badgeCodes, isCurrent = () => true, isOwned = isCurrent) {
 const box = document.getElementById('ptBadgePreview');
 if (!box || !isCurrent()) return;
 
 const codes = Array.isArray(badgeCodes) ? badgeCodes.filter(Boolean) : [];
+const state = portalPartnerState, request = {pending:true};
+if(currentPortalPartnerState(state)) { state.badgeRead = request;state.badgeCodes = codes;state.badgeRetry = false; }
+const owned = () => currentPortalPartnerState(state) && state.badgeRead === request && isOwned();
 if (!codes.length) {
 box.innerHTML = '<span class="text-muted">현재 적용된 뱃지가 없습니다.</span>';
+request.pending = false;
 return;
 }
 
 if (typeof Badges === 'undefined') {
 box.innerHTML = '<span class="text-muted">뱃지 정보를 불러올 수 없습니다.</span>';
+request.pending = false;
 return;
 }
 
 try {
 box.innerHTML = '<span class="text-muted">뱃지 불러오는 중...</span>';
 const allBadges = await Badges.getAll(_supabase);
-if (!isCurrent()) return;
+if (!owned() || !isCurrent()) return;
 let pills = '';
 codes.forEach(code => {
 const badge = allBadges.find(b => b.code === code);
@@ -10528,10 +10624,21 @@ return;
 
 box.innerHTML = `<div class="small text-muted mb-1">승인된 뱃지</div><div>${pills}</div>`;
 } catch (e) {
-if (!isCurrent()) return;
+if (!owned() || !isCurrent()) return;
 CoopSafeLog.warn("renderPartnerBadgePreview failed:", e);
-box.innerHTML = '<span class="text-muted">뱃지 정보를 불러올 수 없습니다.</span>';
+state.badgeRetry = true;
+box.innerHTML = '<span class="text-muted">뱃지 정보를 불러올 수 없습니다.</span> <button type="button" class="btn btn-sm btn-outline-secondary" onclick="retryPortalPartnerBadges()">다시 시도</button>';
+} finally {
+request.pending = false;
+if(owned() && !isCurrent()) state.badgeRetry = true;
 }
+}
+function retryPortalPartnerBadges() {
+const state = portalPartnerState;
+if(!currentPortalPartnerState(state) || !canUsePortalPartner() || !state.loaded || state.pending || state.badgeRead?.pending) return;
+const revision = portalPartnerReadRevision;
+const owned = () => currentPortalPartnerState(state) && revision === portalPartnerReadRevision;
+return renderPartnerBadgePreview(state.badgeCodes || [],() => owned() && canUsePortalPartner(),owned);
 }
 
 // 1. 기존 파트너 정보 로드 (수정 시 편의성)
@@ -10540,7 +10647,8 @@ const state = portalPartnerState;
 if (!currentPortalPartnerState(state) || !canUsePortalPartner() || String(memberId || '') !== state.memberId || portalPartnerWritePending) return;
 if (state.pending) return state.pending;
 const revision = ++portalPartnerReadRevision;
-const current = () => currentPortalPartnerState(state) && revision === portalPartnerReadRevision && canUsePortalPartner();
+const owned = () => currentPortalPartnerState(state) && revision === portalPartnerReadRevision;
+const current = () => owned() && canUsePortalPartner();
 state.readError = false;
 state.loaded = false;
 const pending = Promise.resolve().then(async () => {
@@ -10557,7 +10665,7 @@ state.status = data?.member_eligible === false ? '정조합원 상태가 아니�
     : data?.status === 'pending' ? '최초 공개 승인 대기 중 (수정 가능)' : data?.status === 'active' ? '승인됨 (수정 시 재심사)' : '';
 state.current = changed ? snapshot : baseline;state.file = state.current.file;
 if(!changed) applyPortalPartnerSnapshot(state.current);
-void renderPartnerBadgePreview(data?.badges || [],current);
+void renderPartnerBadgePreview(data?.badges || [],current,owned);
 } catch(error) {
 if(current()) { state.readError = true;CoopSafeLog.warn('파트너 정보 조회 실패',error?.code || 'PARTNER_READ_FAILED'); }
 } finally {

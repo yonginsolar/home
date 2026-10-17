@@ -1,6 +1,6 @@
 /*
-Version: v1.0.18
-Change: Return the same issued PDF for member preview, printing and saving without automatic download.
+Version: v1.0.19
+Change: Use the registered corporate number or business/organization number for group contribution certificates.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -307,6 +307,18 @@ function ensureCertCompanyPrintProfile(profile, contextLabel) {
  * - 도장 위치 상향 조정
  * - [UPDATE] 개인/단체 구분 및 유효성 검사 추가
  */
+function getContributionCertificateOrganizationIdentity(memberData) {
+    const corporate = String(memberData?.corp_number || '').trim();
+    const business = String(memberData?.business_number || '').trim();
+    if (corporate) {
+        const digits = corporate.replace(/\D/g, '');
+        if (digits.length !== 13) throw new Error('법인등록번호를 확인해주세요.');
+        return {label:'법인등록번호',value:digits.slice(0,6)+'-'+digits.slice(6)};
+    }
+    const digits = business.replace(/\D/g, '');
+    if (digits.length !== 10) throw new Error('단체의 사업자·고유번호를 확인해주세요.');
+    return {label:'사업자·고유번호',value:digits.slice(0,3)+'-'+digits.slice(3,5)+'-'+digits.slice(5)};
+}
 async function generateContributionCert(memberData, totalAmount, certNumber, chairmanName, supabaseClient, options = {}) {
     if (!window.jspdf) {
         throw new Error('PDF 라이브러리 로드 실패');
@@ -334,11 +346,8 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             throw new Error("출자금이 확인되지 않습니다. 출자 내역을 다시 확인해주세요.");
         }
 
-        // 2) 단체일 경우 법인등록번호 확인
-        // DB에 '단체'라고 저장되어 있다면 반드시 번호가 있어야 함
-        if (memberData.member_type === '단체' && !memberData.corp_number) {
-            throw new Error("단체의 '법인등록번호'가 확인되지 않습니다. 회원 정보를 수정해주세요.");
-        }
+        const organizationIdentity = memberData.member_type === '단체'
+            ? getContributionCertificateOrganizationIdentity(memberData) : null;
 
 
         const { jsPDF } = window.jspdf;
@@ -393,9 +402,8 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         let displayValue = "";          // 표시될 값
 
         if (memberData.member_type === '단체') {
-            // [CASE] 단체: 법인등록번호 사용
-            displayLabel = "법인등록번호";
-            displayValue = memberData.corp_number; // 위에서 유효성 검사 완료됨
+            displayLabel = organizationIdentity.label;
+            displayValue = organizationIdentity.value;
         } else {
             // [CASE] 개인 (또는 기타): 기존 생년월일 로직 유지
             displayLabel = "생 년 월 일";
