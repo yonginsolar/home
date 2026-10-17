@@ -5586,6 +5586,7 @@ async function runSiteDelete(type, id) {
     };
     const route = routes[type];
     if (!route || !id) return myAlert('삭제할 항목을 다시 선택해주세요.', 'warning');
+    const faqContext = type === 'faq' ? window.AdminMemberSite?.captureFaqDelete?.(id) : null;
     g_siteDeleting = true;
     const unlock = lockSiteMutationModal('deleteConfirmModal', 'btn-real-delete', '삭제 중…');
     showLoading(true);
@@ -5594,6 +5595,7 @@ async function runSiteDelete(type, id) {
         const {error} = await _supabase.rpc(route[0], {p_id:id});
         if (error) throw error;
         confirmed = true;
+        if (type === 'faq') window.AdminMemberSite?.completeFaqDelete?.(faqContext);
         if (type === 'badge') Badges._allBadgesCache = null;
         await closeSiteMutationModal('deleteConfirmModal');
         try {
