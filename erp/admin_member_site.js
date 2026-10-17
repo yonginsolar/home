@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261017-3') return;
+    if (root.AdminMemberSite?.version === '20261017-4') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -9,6 +9,7 @@ let faqModalRead=null, faqReadGuardBound=false;
 let faqListRead=null, faqActiveDraft=null;
 const faqDrafts=new Map(); // Screen memory only; never persist FAQ business data in browser storage.
 const faqDeleteContexts=new WeakSet();
+let faqNewDraftSequence=0;
 let homeSettingsBaseline=null;
 const homeUploadedFiles=new WeakMap();
 async function readCurrentHomeSettings(runtime) {
@@ -3378,10 +3379,91 @@ const draft=faqActiveDraft,snapshot=getFaqDraftSnapshot();
 if(draft.owner!==getFaqOwner())return;
 draft.snapshot=snapshot;
 draft.selection=['faq-question','faq-answer'].map(id=>{const n=document.getElementById(id);return [id,n?.selectionStart,n?.selectionEnd];});
-if(snapshot!==draft.baseline)faqDrafts.set(draft.key,draft);
+const dirty=snapshot!==draft.baseline||draft.missing===true;
+if(dirty)faqDrafts.set(draft.key,draft);
 else faqDrafts.delete(draft.key);
 const badge=document.getElementById('faq-draft-status');
-if(badge){badge.hidden=snapshot===draft.baseline;badge.textContent='작성 중';}
+if(badge){badge.hidden=!dirty;badge.textContent='작성 중';}
+renderFaqDrafts();
+}
+
+function renderFaqDrafts() {
+const owner=getFaqOwner(),allowed=isFaqContextCurrent(),busy=g_faqSaving||g_faqModalOpening;
+const drafts=Array.from(faqDrafts.values()).filter(draft=>draft.owner===owner);
+const panel=document.getElementById('faq-drafts-panel'),list=document.getElementById('faq-drafts-list');
+const count=document.getElementById('faq-drafts-count');
+if(count)count.textContent=`(${drafts.length}건)`;
+if(panel)panel.hidden=!drafts.length;
+if(list){
+const focused=document.activeElement,focusKey=focused?.dataset.faqDraftKey,focusAction=focused?.dataset.faqDraftAction;
+const hadFocus=list.contains(focused);
+list.replaceChildren();
+for(const draft of drafts){
+const fields=new Map(JSON.parse(draft.snapshot)),row=document.createElement('div');
+row.className='d-flex align-items-center gap-2 py-1';
+const title=document.createElement('span');title.className='small flex-grow-1 text-truncate';title.style.minWidth='0';
+title.textContent=fields.get('faq-question')||'제목 없는 질문';title.title=title.textContent;
+const kind=document.createElement('span');kind.className='badge bg-white text-dark border';
+kind.textContent=draft.missing?'대상 없음':draft.targetId?'수정 중':'새 질문';
+row.append(title,kind);
+for(const [action,label,handler]of [['resume','이어서 작성',()=>openFaqModal(undefined,draft.key)],['discard','버리기',()=>discardFaqDraft(draft.key)]]){
+const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary text-nowrap';
+button.textContent=label;button.setAttribute('aria-label',`${title.textContent} ${label}`);
+button.dataset.faqDraftKey=draft.key;button.dataset.faqDraftAction=action;button.disabled=!allowed||busy;
+button.addEventListener('click',handler);row.append(button);
+}
+list.append(row);
+}
+if(hadFocus){
+const replacement=Array.from(list.querySelectorAll('button')).find(button=>button.dataset.faqDraftKey===focusKey&&button.dataset.faqDraftAction===focusAction);
+(replacement||document.getElementById('faq-add-new'))?.focus({preventScroll:true});
+}
+}
+const active=faqActiveDraft?.owner===owner?faqActiveDraft:null,dirty=active&&faqDrafts.get(active.key)===active;
+for(const [id,visible]of [['faq-copy-new',dirty&&!!active.targetId],['faq-discard-draft',!!dirty]]){
+const button=document.getElementById(id);if(button){button.hidden=!visible;button.disabled=!allowed||busy;}
+}
+const status=document.getElementById('faq-target-status');if(status)status.hidden=!active?.missing;
+}
+
+function continueFaqDraftAsNew() {
+if(!isFaqContextCurrent()||g_faqSaving||g_faqModalOpening)return;
+captureFaqDraft();
+const old=faqActiveDraft;
+if(!old||old.owner!==getFaqOwner()||!old.targetId||faqDrafts.get(old.key)!==old)return;
+// A distinct memory-only key keeps any other unfinished new question intact.
+let key;do{key=JSON.stringify([old.owner,`new:${++faqNewDraftSequence}`]);}while(faqDrafts.has(key));
+document.getElementById('faq-id').value='';
+faqActiveDraft={key,owner:old.owner,targetId:'',snapshot:getFaqDraftSnapshot(),selection:old.selection,
+baseline:JSON.stringify([['faq-id',''],['faq-category','가입/탈퇴'],['faq-order','0'],['faq-visible',true],['faq-question',''],['faq-answer','']])};
+faqDrafts.delete(old.key);
+captureFaqDraft();
+window.ErpWorkspaceResume?.checkpoint(document.getElementById('faqModal'));
+document.getElementById('faq-question')?.focus({preventScroll:true});
+}
+
+function discardFaqDraft(key=faqActiveDraft?.key) {
+if(!isFaqContextCurrent()||g_faqSaving||g_faqModalOpening)return;
+captureFaqDraft();
+const owner=getFaqOwner(),area=root.CoopHomeVisualEditor?.current(),draft=faqDrafts.get(key),snapshot=draft?.snapshot;
+if(!draft||draft.owner!==owner)return;
+let consumed=false;
+myConfirm('이 초안의 저장하지 않은 내용을 버릴까요? 등록된 질문은 삭제하지 않습니다.',async()=>{
+if(consumed)return;consumed=true;
+if(!isFaqContextCurrent()||getFaqOwner()!==owner||root.CoopHomeVisualEditor?.current()!==area||g_faqSaving||g_faqModalOpening)return;
+captureFaqDraft();
+if(faqDrafts.get(key)!==draft||draft.snapshot!==snapshot){
+return myAlert('작성 내용이 바뀌어 초안을 버리지 않았습니다. 다시 확인해 주세요.','warning');
+}
+faqDrafts.delete(key);
+if(faqActiveDraft===draft){
+faqActiveDraft=null;
+const badge=document.getElementById('faq-draft-status');if(badge)badge.hidden=true;
+window.ErpWorkspaceResume?.checkpoint(document.getElementById('faqModal'));
+await closeFaqAfterSave();
+}
+renderFaqDrafts();
+});
 }
 
 function hasUnsavedFaqChanges() {
@@ -3414,6 +3496,7 @@ faqActiveDraft=null;
 const badge=document.getElementById('faq-draft-status');if(badge)badge.hidden=true;
 window.ErpWorkspaceResume?.checkpoint(document.getElementById('faqModal'));
 }
+renderFaqDrafts();
 return true;
 }
 
@@ -3425,7 +3508,7 @@ if(input.type==='checkbox')input.checked=value;else input.value=value;
 }
 faqActiveDraft=saved;
 for(const [id,start,end] of saved.selection||[])document.getElementById(id)?.setSelectionRange(start,end);
-}else faqActiveDraft={key,owner:getFaqOwner(),baseline:getFaqDraftSnapshot(),snapshot:getFaqDraftSnapshot()};
+}else faqActiveDraft={key,owner:getFaqOwner(),targetId:document.getElementById('faq-id').value||'',baseline:getFaqDraftSnapshot(),snapshot:getFaqDraftSnapshot()};
 captureFaqDraft();
 // Reused fields now belong to this FAQ. The FAQ guard above protects every
 // retained dirty record instead of comparing one question with another.
@@ -3465,30 +3548,59 @@ function cancelFaqModalRead() {
 const read=faqModalRead;if(!read)return;
 read.controller.abort();window.clearTimeout(read.timer);
 faqModalRead=null;g_faqModalOpening=false;
+renderFaqDrafts();
 }
 
 function bindFaqReadGuard() {
 if(faqReadGuardBound)return;faqReadGuardBound=true;
 const check=()=>{if(faqModalRead&&!isFaqModalReadCurrent(faqModalRead))cancelFaqModalRead();
-if(faqListRead&&!isFaqListReadCurrent(faqListRead))cancelFaqListRead();};
+if(faqListRead&&!isFaqListReadCurrent(faqListRead))cancelFaqListRead();renderFaqDrafts();};
 root.addEventListener('pagehide',()=>{cancelFaqModalRead();cancelFaqListRead();});
 for(const event of ['hide.bs.tab','hidden.bs.tab','shown.bs.tab'])document.addEventListener(event,check);
 const pane=document.getElementById('tab-site');
 if(pane)new MutationObserver(check).observe(pane,{attributes:true,attributeFilter:['class','hidden']});
 if(root.frameElement)new MutationObserver(check).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
 const modal=document.getElementById('faqModal');
-modal?.addEventListener('hidden.bs.modal',()=>{captureFaqDraft();cancelFaqModalRead();});
+modal?.addEventListener('hide.bs.modal',()=>{if(!g_faqSaving||g_faqSaveConfirmed)modal.dataset.faqClosing='1';});
+modal?.addEventListener('hidden.bs.modal',()=>{modal.dataset.faqClosing='0';captureFaqDraft();if(!faqModalRead?.closing)cancelFaqModalRead();});
 for(const event of ['input','change'])modal?.addEventListener(event,captureFaqDraft);
+document.getElementById('faq-copy-new')?.addEventListener('click',continueFaqDraftAsNew);
+document.getElementById('faq-discard-draft')?.addEventListener('click',()=>discardFaqDraft());
 document.getElementById('search-faq')?.addEventListener('input',()=>{if(faqListRead&&faqListRead.search.value!==faqListRead.keyword)cancelFaqListRead();});
 }
 
-async function openFaqModal(id) {
+async function waitForFaqModalClose(modal,sitePane) {
+// Bootstrap ignores show() while the preceding hide animation is finishing.
+// Wait only for this owned close; an obsolete request must not reopen a modal.
+const read={modal,sitePane,closing:true,runtime:g_adminMemberRuntime,owner:getFaqOwner(),
+area:root.CoopHomeVisualEditor?.current(),controller:new AbortController(),snapshot:getFaqDraftSnapshot()};
+faqModalRead=read;g_faqModalOpening=true;renderFaqDrafts();
+try{
+const closed=await new Promise(resolve=>{
+const finish=value=>{modal.removeEventListener('hidden.bs.modal',onHidden);read.controller.signal.removeEventListener('abort',onAbort);resolve(value);};
+const onHidden=()=>finish(true),onAbort=()=>finish(false);
+modal.addEventListener('hidden.bs.modal',onHidden,{once:true});
+read.controller.signal.addEventListener('abort',onAbort,{once:true});
+read.timer=window.setTimeout(()=>cancelFaqModalRead(),15000);
+});
+return closed&&isFaqModalReadCurrent(read);
+}finally{
+window.clearTimeout(read.timer);
+if(faqModalRead===read){faqModalRead=null;g_faqModalOpening=false;renderFaqDrafts();}
+}
+}
+
+async function openFaqModal(id, draftKey) {
 const modal = document.getElementById('faqModal');
 if(faqModalRead&&!isFaqModalReadCurrent(faqModalRead))cancelFaqModalRead();
 if (!modal || g_faqModalOpening || g_faqSaving || modal.classList.contains('show') || !isFaqContextCurrent()) return;
 const sitePane=document.getElementById('tab-site');
 if(sitePane&&(!sitePane.classList.contains('active')||sitePane.hidden))return;
 bindFaqReadGuard();
+if(modal.dataset.faqClosing==='1'){
+if(await waitForFaqModalClose(modal,sitePane))return openFaqModal(id,draftKey);
+return;
+}
 if (modal.dataset.faqSaveGuardBound !== '1') {
 modal.addEventListener('show.bs.modal', () => { modal.dataset.faqShown = '0'; });
 modal.addEventListener('shown.bs.modal', () => { modal.dataset.faqShown = '1'; });
@@ -3499,9 +3611,11 @@ if (g_faqSaving && !g_faqSaveConfirmed) event.preventDefault();
 modal.dataset.faqSaveGuardBound = '1';
 }
 captureFaqDraft();
-const key=JSON.stringify([getFaqOwner(),String(id||'')]),saved=faqDrafts.get(key);
-if(saved){activateFaqDraft(key,saved);bootstrap.Modal.getOrCreateInstance(modal).show();return;}
+const key=draftKey===undefined?JSON.stringify([getFaqOwner(),String(id||'')]):draftKey,saved=faqDrafts.get(key);
+if(draftKey!==undefined&&(!saved||saved.owner!==getFaqOwner()))return;
+if(saved&&saved.owner===getFaqOwner()){activateFaqDraft(key,saved);bootstrap.Modal.getOrCreateInstance(modal).show();return;}
 g_faqModalOpening = true;
+renderFaqDrafts();
 const read={modal,runtime:g_adminMemberRuntime,owner:getFaqOwner(),area:root.CoopHomeVisualEditor?.current(),sitePane,
 controller:new AbortController(),snapshot:getFaqDraftSnapshot()};
 faqModalRead=read;
@@ -3543,14 +3657,14 @@ CoopSafeLog.error('FAQ detail load failed:', error);
 myAlert('질문과 답변을 불러오지 못했습니다. 잠시 후 해당 질문의 수정을 다시 눌러주세요.', 'error');
 } finally {
 window.clearTimeout(read.timer);
-if(faqModalRead===read){faqModalRead=null;g_faqModalOpening=false;}
+if(faqModalRead===read){faqModalRead=null;g_faqModalOpening=false;renderFaqDrafts();}
 }
 }
 
 async function saveFaq() {
 if (g_faqSaving) return;
 if(!isFaqContextCurrent()||!faqActiveDraft||faqActiveDraft.owner!==getFaqOwner()
-||faqActiveDraft.key!==JSON.stringify([getFaqOwner(),document.getElementById('faq-id').value||''])){
+||faqActiveDraft.targetId!==(document.getElementById('faq-id').value||'')){
 return myAlert('현재 홈페이지 관리 권한과 편집할 질문을 다시 확인해 주세요. 입력 내용은 유지됩니다.','warning');
 }
 captureFaqDraft();
@@ -3579,6 +3693,7 @@ const controls = Array.from(modal.querySelectorAll('input,textarea,select,button
 const buttonLabel = button.textContent;
 g_faqSaving = true;
 g_faqSaveConfirmed = false;
+renderFaqDrafts();
 controls.forEach(([control]) => { control.disabled = true; });
 button.textContent = '저장 중…';
 button.setAttribute('aria-busy', 'true');
@@ -3594,6 +3709,7 @@ g_faqSaveConfirmed = true;
 // Only a confirmed save clears this draft; failed/unknown replies never do.
 faqDrafts.delete(savedDraft.key);
 savedDraft.baseline=savedSnapshot;
+savedDraft.missing=false;
 if(faqActiveDraft===savedDraft)captureFaqDraft();
 window.ErpWorkspaceResume?.checkpoint(modal);
 await closeFaqAfterSave();
@@ -3605,6 +3721,8 @@ myAlert('질문은 저장되었습니다. 목록을 갱신하지 못했으니 �
 }
 } catch (error) {
 if(error?.code==='P0002'&&error?.message==='FAQ_NOT_FOUND'){
+savedDraft.missing=true;
+if(faqActiveDraft===savedDraft)captureFaqDraft();else renderFaqDrafts();
 myAlert('이 질문을 찾을 수 없어 저장하지 못했습니다. 작성 내용은 그대로 유지됩니다.','warning');
 return;
 }
@@ -3617,6 +3735,7 @@ button.textContent = buttonLabel;
 button.removeAttribute('aria-busy');
 g_faqSaving = false;
 g_faqSaveConfirmed = false;
+renderFaqDrafts();
 }
 }
 
@@ -3670,5 +3789,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead});
-    root.AdminMemberSite = Object.freeze({ version: '20261017-3', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261017-4', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);
