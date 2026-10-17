@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.178
+Version: v1.0.179
 Change: 2026-10-17 - Keep separate authorized profile drafts during profile changes.
 -->
 <html lang="ko">
@@ -10,7 +10,7 @@ Change: 2026-10-17 - Keep separate authorized profile drafts during profile chan
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.178 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.179 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2502,6 +2502,14 @@ let portalProfileDraftOwner = '';
 let portalProfileSaving = false;
 let portalProfileLoadRevision = 0;
 let portalProfileValidationRevision = 0;
+let portalProfileReadFailure = null;
+
+function getPortalProfileReadFailure() {
+const failed = portalProfileReadFailure;
+return failed && failed.actor === String(curAuth?.id || '')
+    && failed.coop === String(currentMemberCoopId || '')
+    && failed.revision === portalProfileLoadRevision ? failed : null;
+}
 
 function portalProfileFields() {
 return ['editPhone','editAddrMain','editAddrDetail','editBankName','editAccountNo','editHolder',
@@ -2539,6 +2547,7 @@ portalProfileDrafts.clear();
 portalProfileEditor = null;
 portalProfileDraftOwner = '';
 ++portalProfileLoadRevision;
+portalProfileReadFailure = null;
 portalProfileFields().forEach(node => { node.value = ''; node.readOnly = true; });
 }
 function portalProfileOwner(member = curMem) {
@@ -4028,6 +4037,14 @@ return dest.href;
 		await recoverFromExpiredSession();
 		return;
 		}
+const failedProfile = getPortalProfileReadFailure();
+if (failedProfile) {
+const loaded = await loadDashboardData(failedProfile.member);
+if (loaded?.ok && loaded.revision === portalProfileLoadRevision && loaded.actor === String(curAuth?.id || '')) {
+await loadManagedProfiles(getRootMemberProfileId() || user.id);
+}
+return;
+}
 		await handleLoginSuccess(user);
 		} catch (error) {
 		CoopSafeLog.error("retryPortalBoot failed:", error);
@@ -4363,6 +4380,8 @@ retainPortalProfileEdit();
 const profileLoadRevision = ++portalProfileLoadRevision;
 const profileLoadActor = String(curAuth?.id || '');
 const currentProfileLoad = () => profileLoadRevision === portalProfileLoadRevision && profileLoadActor === String(curAuth?.id || '');
+portalProfileReadFailure = null;
+hidePortalRetryState();
 if (curMem?.id && String(curMem.id) !== String(uuid)) window.ContributionCertPreview?.clear();
 try {
 // [핵심 변경] 현재 로드하는 프로필 ID를 브라우저에 기억시킴 (새로고침 대비)
@@ -4507,7 +4526,13 @@ throw authError;
 throw (e instanceof Error ? e : new Error(String(e)));
 }
 showModal('데이터 로드 오류: ' + (e?.message || e));
+if (!['PGRST301','PORTAL_AUTH_EXPIRED','401','403','42501'].includes(String(e?.code || ''))
+    && ![401,403].includes(Number(e?.status)) && profileLoadActor && currentMemberCoopId) {
+portalProfileReadFailure = {actor:profileLoadActor,coop:String(currentMemberCoopId),member:String(uuid),revision:profileLoadRevision};
+showPortalRetryState('프로필 정보를 불러오지 못했습니다. 다시 시도해 주세요.');
+} else {
 showOnly('loginSection');
+}
 return false;
 } finally {
 if (currentProfileLoad()) showLoading(false);
@@ -7960,6 +7985,8 @@ if (phone.length < 12) return showModal('전화번호를 올바르게 입력해�
 
 // [중복 검사 로직 수정 시작]
 if (phone !== curMem.phone) {
+const phoneRead = {revision:validationRevision,loadRevision:validationLoadRevision};
+editState.phoneRead = phoneRead;
 showLoading(true, '중복 검사 중...');
 try {
 // manager_id도 함께 조회해서 가족 관계 확인
@@ -7992,6 +8019,7 @@ return showModal('이미 등록된 전화번호입니다.');
 if (!currentValidation()) return;
 return showModal('오류 발생: ' + e.message);
 } finally {
+if (editState.phoneRead === phoneRead) editState.phoneRead = null;
 if (ownsValidationFeedback()) showLoading(false);
 }
 }
@@ -8485,6 +8513,12 @@ if (isEdit) {
     state.editing = true;
     setPortalProfileEditMode(true);
 } else {
+const phoneRead = state.phoneRead;
+const ownsPhoneRead = phoneRead?.revision === portalProfileValidationRevision
+    && phoneRead?.loadRevision === portalProfileLoadRevision;
+++portalProfileValidationRevision;
+state.phoneRead = null;
+if (ownsPhoneRead) showLoading(false);
     applyPortalProfileSnapshot(state.baseline);
     portalProfileDrafts.delete(state.key);
     state.editing = false;
@@ -9629,7 +9663,7 @@ switcher.classList.remove('hidden');
 // 2. 프로필 전환 실행
 async function switchProfile(targetUuid, targetName) {
 if (portalProfileSaving) return;
-if(curMem && curMem.id === targetUuid) return; // 이미 선택된 프로필이면 무시
+if(curMem && curMem.id === targetUuid && getPortalProfileReadFailure()?.member !== String(targetUuid)) return;
 const profileActor = String(curAuth?.id || '');
 
 showLoading(true, `${targetName} 님으로 전환 중...`);
