@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261017-7') return;
+    if (root.AdminMemberSite?.version === '20261017-8') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -13,6 +13,112 @@ let faqNewDraftSequence=0;
 let faqDiscardConfirmation=null;
 let homeSettingsBaseline=null;
 const homeUploadedFiles=new WeakMap();
+// These two editors retain their original controls/File nodes in page memory.
+const siteModalDraftStores=new Map(),siteModalFileIds=new WeakMap();
+let siteModalFileSequence=0;
+function siteModalOwner() {
+const actor=typeof adminCertificateAuthId==='string'?adminCertificateAuthId:'';
+return actor&&g_adminMemberRuntime?.coop_id?JSON.stringify([actor,g_adminMemberRuntime.coop_id]):'';
+}
+function siteModalScopeCurrent(context) {
+const pane=document.getElementById('tab-site');
+return !!context.owner&&context.owner===siteModalOwner()&&context.runtime===g_adminMemberRuntime
+&&canAccessAdminMemberTab('site')&&!root.frameElement?.hidden
+&&(!pane||pane.classList.contains('active')&&!pane.hidden)
+&&context.area===root.CoopHomeVisualEditor?.current();
+}
+function siteModalSnapshot(body) {
+return JSON.stringify(Array.from(body.querySelectorAll('input,textarea,select')).map(el=>[el.id,el.type==='file'
+?Array.from(el.files||[]).map(file=>{if(!siteModalFileIds.has(file))siteModalFileIds.set(file,++siteModalFileSequence);return siteModalFileIds.get(file);})
+:el.type==='checkbox'||el.type==='radio'?el.checked:el.value]));
+}
+function captureSiteModalDraft(store) {
+const draft=store.active;if(!draft)return false;
+const dirty=draft.baseline!==null&&siteModalSnapshot(draft.body)!==draft.baseline;
+if(dirty)store.drafts.set(draft.key,draft);else store.drafts.delete(draft.key);
+const badge=store.modal.querySelector('[data-site-modal-dirty]');if(badge)badge.hidden=!dirty;
+return dirty;
+}
+function cancelSiteModalRead(store) {
+const read=store.pending;if(!read)return;
+read.controller.abort();window.clearTimeout(read.timer);store.pending=null;
+if(store.kind==='partner')g_partnerModalOpening=false;
+}
+function getSiteModalDraftStore(kind) {
+if(siteModalDraftStores.has(kind))return siteModalDraftStores.get(kind);
+const modal=document.getElementById(kind==='history'?'historyModal':'partnerModal');
+const store={kind,modal,template:modal.querySelector('.modal-body').cloneNode(true),drafts:new Map(),active:null,pending:null};
+siteModalDraftStores.set(kind,store);bindSiteMutationModal(modal);
+const heading=modal.querySelector('.modal-header h5');
+const badge=document.createElement('span');badge.dataset.siteModalDirty='';badge.className='badge bg-warning text-dark ms-2';badge.textContent='작성 중';badge.hidden=true;
+heading.after(badge);
+for(const name of ['input','change'])modal.addEventListener(name,()=>captureSiteModalDraft(store));
+modal.addEventListener('hidden.bs.modal',()=>{captureSiteModalDraft(store);});
+window.addEventListener('beforeunload',event=>{
+captureSiteModalDraft(store);
+if(Array.from(store.drafts.values()).some(draft=>draft.owner===siteModalOwner()&&siteModalSnapshot(draft.body)!==draft.baseline)){
+event.preventDefault();event.returnValue='';}
+});
+const cancelStale=()=>{if(store.pending&&!isSiteModalReadCurrent(store.pending))cancelSiteModalRead(store);};
+for(const name of ['shown.bs.tab','hidden.bs.tab'])document.addEventListener(name,cancelStale);
+if(root.frameElement)new MutationObserver(cancelStale).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
+window.addEventListener('pagehide',()=>cancelSiteModalRead(store));
+return store;
+}
+function isSiteModalReadCurrent(read) {
+return read.store.pending===read&&!read.controller.signal.aborted&&siteModalScopeCurrent(read)
+&&(!read.prior||siteModalSnapshot(read.prior.body)===read.snapshot);
+}
+function beginSiteModalOpen(kind,id) {
+const context={owner:siteModalOwner(),runtime:g_adminMemberRuntime,area:root.CoopHomeVisualEditor?.current()};
+if(!siteModalScopeCurrent(context))return null;
+const store=getSiteModalDraftStore(kind);
+if(store.pending||store.modal.dataset.siteBusy==='1'||store.modal.classList.contains('show')||store.modal.style.display==='block')return null;
+captureSiteModalDraft(store);
+const key=JSON.stringify([context.owner,String(id||'')]);
+const read={...context,store,key,targetId:String(id||''),cached:store.drafts.get(key),prior:store.active,
+snapshot:store.active?siteModalSnapshot(store.active.body):'',controller:new AbortController()};
+store.pending=read;if(kind==='partner')g_partnerModalOpening=true;
+read.timer=window.setTimeout(()=>{const current=isSiteModalReadCurrent(read);if(store.pending!==read)return;cancelSiteModalRead(store);if(current)myAlert('조회가 지연되었습니다. 다시 눌러 주세요.','warning');},15000);
+return read;
+}
+function mountSiteModalDraft(read) {
+if(!isSiteModalReadCurrent(read))return false;
+const {store}=read;captureSiteModalDraft(store);
+if(store.kind==='partner'){clearTimeout(g_partnerBadgeSyncTimer);g_partnerBadgePreviewRequestSeq++;}
+const draft=read.cached||{key:read.key,owner:read.owner,targetId:read.targetId,body:store.template.cloneNode(true),baseline:null};
+const previous=store.modal.querySelector('.modal-body');if(previous!==draft.body)previous.replaceWith(draft.body);
+store.active=draft;read.prior=draft;read.snapshot=siteModalSnapshot(draft.body);
+if(read.cached)store.modal.querySelector('.modal-header h5').innerHTML=draft.heading;
+return true;
+}
+function showSiteModalDraft(read) {
+if(!isSiteModalReadCurrent(read))return false;
+const {store}=read,draft=store.active;
+draft.heading=store.modal.querySelector('.modal-header h5').innerHTML;
+if(draft.baseline===null)draft.baseline=siteModalSnapshot(draft.body);
+captureSiteModalDraft(store);bootstrap.Modal.getOrCreateInstance(store.modal).show();return true;
+}
+function finishSiteModalRead(read) {
+if(read.store.pending===read)cancelSiteModalRead(read.store);
+}
+function beginSiteModalSave(kind) {
+const store=siteModalDraftStores.get(kind),draft=store?.active;
+const context={store,draft,owner:siteModalOwner(),runtime:g_adminMemberRuntime,area:root.CoopHomeVisualEditor?.current()};
+if(!draft||draft.owner!==context.owner||store.pending||!siteModalScopeCurrent(context))return null;
+if(draft.writeUncertain){myAlert('저장 결과를 확인하지 못했습니다. 목록을 확인해 주세요.','warning');return null;}
+if(!captureSiteModalDraft(store))return null;
+context.snapshot=siteModalSnapshot(draft.body);return context;
+}
+function isSiteModalSaveCurrent(context) {
+return context.store.active===context.draft&&siteModalScopeCurrent(context)
+&&siteModalSnapshot(context.draft.body)===context.snapshot;
+}
+function acceptSiteModalSave(context) {
+context.draft.baseline=context.snapshot;captureSiteModalDraft(context.store);
+if(!context.draft.targetId&&siteModalSnapshot(context.draft.body)!==context.snapshot)context.draft.writeUncertain=true;
+window.ErpWorkspaceResume?.checkpoint(context.store.modal);
+}
 async function readCurrentHomeSettings(runtime) {
  const controller=new AbortController(),timer=window.setTimeout(()=>controller.abort(),15000);
  try {
@@ -81,11 +187,21 @@ function updateSiteHistoryContentCounter() {
 }
 
 async function openSiteHistoryModal(id) {
-    currentHistoryEditId = id || null;
+    const read=beginSiteModalOpen('history',id);if(!read)return;
+    try {
+    if(read.cached){if(!mountSiteModalDraft(read))return;currentHistoryEditId=read.targetId||null;showSiteModalDraft(read);return;}
+    let data=null;
+    if(read.targetId){
+        const result=await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id',read.targetId).single().abortSignal(read.controller.signal);
+        if(!isSiteModalReadCurrent(read))return;
+        if(result.error||!result.data)throw result.error||new Error('HISTORY_NOT_FOUND');
+        data=result.data;
+    }
+    if(!mountSiteModalDraft(read))return;
+    currentHistoryEditId = read.targetId || null;
     document.getElementById('hist-id').value = currentHistoryEditId || '';
 
     if (currentHistoryEditId) {
-        const { data } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id', currentHistoryEditId).single();
         if (data) {
             document.getElementById('hist-date').value = data.event_date;
             document.getElementById('hist-title').value = data.title;
@@ -111,13 +227,16 @@ async function openSiteHistoryModal(id) {
     }
 
     updateSiteHistoryContentCounter();
-
-    // HTML 모달 ID는 기존 그대로 'historyModal' 사용
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('historyModal')).show();
+    read.snapshot=siteModalSnapshot(read.store.active.body);
+    showSiteModalDraft(read);
+    }catch(error){
+        if(isSiteModalReadCurrent(read))myAlert('연혁을 불러오지 못했습니다. 다시 눌러 주세요.','error');
+    }finally{finishSiteModalRead(read);}
 }
 
 async function saveSiteHistory() {
     if (isSavingSiteHistory) return;
+    const context=beginSiteModalSave('history');if(!context)return;
 
     const idFromInput = (document.getElementById('hist-id').value || '').trim();
     const effectiveId = currentHistoryEditId || idFromInput || null;
@@ -136,11 +255,16 @@ async function saveSiteHistory() {
     };
 
     isSavingSiteHistory = true;
+    const unlock=lockSiteMutationModal('historyModal','site-history-save','저장 중…');
     showLoading(true);
 
     try {
         // 연혁은 전용 RPC 사용 (문서 RPC보다 권한 조건 영향이 적음)
+        context.submitted=true;
         const { error } = await _supabase.rpc('upsert_history_secure', updates);
+        context.resolved=true;
+        if(!error){context.confirmed=true;acceptSiteModalSave(context);}
+        if(!siteModalScopeCurrent(context))return;
         if (error) {
             CoopSafeLog.error("[saveSiteHistory] RPC error:", error);
             const msg = [error.message, error.code ? `(code: ${error.code})` : '', error.hint ? `힌트: ${error.hint}` : '']
@@ -163,6 +287,7 @@ async function saveSiteHistory() {
                     .maybeSingle();
                 saved = result.data || null;
                 verifyError = result.error || null;
+                if(!siteModalScopeCurrent(context))return;
 
                 if (!verifyError && isHistoryRowMatched(saved, { date: dateValue, title: titleValue, content: contentValue })) {
                     break;
@@ -182,13 +307,18 @@ async function saveSiteHistory() {
             }
         }
 
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('historyModal')).hide();
+        if(!isSiteModalSaveCurrent(context)){myAlert('저장했습니다. 추가로 작성한 내용은 아직 저장되지 않았습니다.','warning');return;}
+        await closeSiteMutationModal('historyModal');
         currentHistoryEditId = null;
-        await fetchHistory(); // 목록 새로고침
-        myAlert('저장되었습니다.');
+        if(siteModalScopeCurrent(context)){await fetchHistory();myAlert('저장했습니다.');}
+    } catch(error) {
+        if(context.submitted&&!context.resolved)context.draft.writeUncertain=true;
+        if(siteModalScopeCurrent(context))myAlert('저장 결과를 확인하지 못했습니다. 목록을 확인해 주세요.','warning');
     } finally {
         isSavingSiteHistory = false;
         showLoading(false);
+        unlock();
+        document.getElementById('site-history-save').disabled=!canAccessAdminMemberTab('site');
     }
 }
 
@@ -2865,8 +2995,9 @@ function bindPartnerBadgeSyncInput() {
 
     const queueRefresh = () => {
         clearTimeout(g_partnerBadgeSyncTimer);
-        const nextMemberId = input.value;
+        const nextMemberId = input.value,owner=siteModalOwner();
         g_partnerBadgeSyncTimer = setTimeout(() => {
+            if(!input.isConnected||document.getElementById('pt-member-id')!==input||siteModalOwner()!==owner||!canAccessAdminMemberTab('site'))return;
             refreshPartnerBadgeSyncPreview(nextMemberId, []);
         }, 180);
     };
@@ -3075,20 +3206,25 @@ async function fetchPartners() {
 
 async function openPartnerModal(id) {
     const modal = document.getElementById('partnerModal');
-    if (g_partnerModalOpening || g_partnerSaving || modal.classList.contains('show')) return;
-    g_partnerModalOpening = true;
+    if(g_partnerSaving)return;
+    const read=beginSiteModalOpen('partner',id);if(!read)return;
     try {
+    if(read.cached){if(!mountSiteModalDraft(read))return;bindPartnerBadgeSyncInput();showSiteModalDraft(read);return;}
     await ensureBadgesReady();
+    if(!isSiteModalReadCurrent(read))return;
 
     // 1. 뱃지 데이터 로드
     if (!g_badges || g_badges.length === 0) {
         g_badges = await Badges.getAll(_supabase);
+        if(!isSiteModalReadCurrent(read))return;
     }
 
     // 2. 수정 모드
     if(id) {
-        const { data, error } = await scopeAdminTenant(_supabase.from('site_partners').select('*')).eq('id', id).single();
+        const { data, error } = await scopeAdminTenant(_supabase.from('site_partners').select('*')).eq('id', id).single().abortSignal(read.controller.signal);
+        if(!isSiteModalReadCurrent(read))return;
         if (error || !data) throw error || new Error('PARTNER_NOT_FOUND');
+        if(!mountSiteModalDraft(read))return;
 
         if(data) {
             // 수정 요청은 active 상태에서도 pending_changes에 저장되므로 요청본을 우선 로드합니다.
@@ -3107,7 +3243,7 @@ async function openPartnerModal(id) {
             document.getElementById('pt-desc').value = displayData.description || '';
             document.getElementById('pt-link').value = displayData.link_url || '';
             document.getElementById('pt-status').value = displayData.status || 'active';
-            document.getElementById('pt-order').value = displayData.display_order || 99;
+            document.getElementById('pt-order').value = displayData.display_order ?? 99;
             document.getElementById('pt-member-eligible').value = data.member_id ? String(data.member_eligible !== false) : '';
 
             const memberLinkStatus = document.getElementById('pt-member-link-status');
@@ -3136,7 +3272,9 @@ async function openPartnerModal(id) {
 
             // 뱃지 체크박스
             bindPartnerBadgeSyncInput();
+            read.snapshot=siteModalSnapshot(read.store.active.body);
             await refreshPartnerBadgeSyncPreview(displayData.member_id || '', displayData.badges || []);
+            if(!isSiteModalReadCurrent(read))return;
 
             // 이미지 프리뷰
             handleImagePreview('pt', displayData.logo_url);
@@ -3144,6 +3282,7 @@ async function openPartnerModal(id) {
     }
     // 3. 신규 모드
     else {
+        if(!mountSiteModalDraft(read))return;
         document.getElementById('pt-name').value = '';
         document.getElementById('pt-member-id').value = '';
         document.getElementById('pt-desc').value = '';
@@ -3157,23 +3296,29 @@ async function openPartnerModal(id) {
 
         document.querySelector('#partnerModal .modal-header h5').innerText = '🤝 협력 단체 등록';
         bindPartnerBadgeSyncInput();
+        read.snapshot=siteModalSnapshot(read.store.active.body);
         await refreshPartnerBadgeSyncPreview('', []);
+        if(!isSiteModalReadCurrent(read))return;
         handleImagePreview('pt', null);
     }
 
     document.getElementById('pt-id').value = id || '';
     document.getElementById('pt-file').value = '';
-    bootstrap.Modal.getOrCreateInstance(modal).show();
+    read.snapshot=siteModalSnapshot(read.store.active.body);
+    showSiteModalDraft(read);
     } catch (error) {
-        CoopSafeLog.error('Partner detail load failed:', error);
-        myAlert('단체 정보를 불러오지 못했습니다. 잠시 후 다시 눌러주세요. 문제가 계속되면 새로고침한 뒤 다시 확인해주세요.', 'error');
+        if(isSiteModalReadCurrent(read)){
+            CoopSafeLog.error('Partner detail load failed:', error);
+            myAlert('단체 정보를 불러오지 못했습니다. 다시 눌러 주세요.', 'error');
+        }
     } finally {
-        g_partnerModalOpening = false;
+        finishSiteModalRead(read);
     }
 }
 
 async function savePartner() {
 if (g_partnerSaving) return;
+const context=beginSiteModalSave('partner');if(!context)return;
 const name = document.getElementById('pt-name').value;
 if(!name) return myAlert('단체명을 입력하세요.', 'warning');
 const requestedStatus = document.getElementById('pt-status').value;
@@ -3204,21 +3349,32 @@ p_badges: []
 };
 
 g_partnerSaving = true;
+const unlock=lockSiteMutationModal('partnerModal','site-partner-save','저장 중…');
 showLoading(true);
 try {
 if (newFile) updates.p_logo_url = await uploadFileToStorage(newFile, 'partners');
+if(!isSiteModalSaveCurrent(context))return;
+context.submitted=true;
 const { error } = await _supabase.rpc('upsert_partner_secure', updates);
+context.resolved=true;
 if (error) throw error;
+context.confirmed=true;
+acceptSiteModalSave(context);
+if(!siteModalScopeCurrent(context))return;
 // On a failed or uncertain save retain both files: the server may have committed
 // before its response was lost. Never remove the photo still used by the record.
 if (originalUrl && originalUrl !== updates.p_logo_url) await deleteOldFile(originalUrl);
-bootstrap.Modal.getInstance(document.getElementById('partnerModal')).hide();
-await fetchPartners();
+if(!isSiteModalSaveCurrent(context)){myAlert('저장했습니다. 추가로 작성한 내용은 아직 저장되지 않았습니다.','warning');return;}
+await closeSiteMutationModal('partnerModal');
+if(siteModalScopeCurrent(context))await fetchPartners();
 } catch (error) {
-myAlert('저장 실패: ' + (error?.hint || error?.message || error), 'error');
+if(context.submitted&&!context.resolved)context.draft.writeUncertain=true;
+if(siteModalScopeCurrent(context))myAlert(context.confirmed?'저장했습니다. 목록을 다시 불러와 주세요.':context.draft.writeUncertain?'저장 결과를 확인하지 못했습니다. 목록을 확인해 주세요.':'저장 실패: '+(error?.hint||error?.message||error),'warning');
 } finally {
 showLoading(false);
 g_partnerSaving = false;
+unlock();
+document.getElementById('site-partner-save').disabled=!canAccessAdminMemberTab('site');
 }
 }
 
@@ -3244,13 +3400,16 @@ preview.src = ''; preview.style.display = 'none'; placeholder.style.display = 'b
 
 function previewPartnerImage(input) {
 if(input.files && input.files[0]) {
+const file=input.files[0],owner=siteModalOwner();
+const body=input.closest('.modal-body'),preview=body.querySelector('#pt-img-preview'),placeholder=body.querySelector('#pt-img-placeholder');
 const reader = new FileReader();
 reader.onload = function(e) {
-document.getElementById('pt-img-preview').src = e.target.result;
-document.getElementById('pt-img-preview').style.display = 'block';
-document.getElementById('pt-img-placeholder').style.display = 'none';
+if(owner!==siteModalOwner()||!canAccessAdminMemberTab('site')||input.files[0]!==file)return;
+preview.src = e.target.result;
+preview.style.display = 'block';
+placeholder.style.display = 'none';
 };
-reader.readAsDataURL(input.files[0]);
+reader.readAsDataURL(file);
 }
 }
 
@@ -3885,5 +4044,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead});
-    root.AdminMemberSite = Object.freeze({ version: '20261017-7', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261017-8', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);

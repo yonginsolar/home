@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.154 | Change: 2026-10-17 - Distinguish committed saves from refresh failures and resume money drafts. -->
+<!-- Version: v1.0.155 | Change: 2026-10-17 - Keep chosen prepayment and receivable accounts during refresh. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -8,7 +8,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.154 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.155 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
@@ -6732,10 +6732,12 @@ function renderPrepayVendorSelect() {
         });
     }
     sel.add(new Option("직접 입력", "__custom__"));
-    if (current && Array.from(sel.options).some(o => o.value === current)) {
+    if (current) {
+        if (!Array.from(sel.options).some(o => o.value === current)) sel.add(new Option(`${current} (기존 선택)`, current));
         sel.value = current;
     }
-    onPrepayVendorChange();
+    // Rebuilding a list is not an explicit change of the selected vendor.
+    onPrepayVendorChange({ preserveAccount: Boolean(current) });
 }
 
 async function refreshPrepayTab() {
@@ -6781,7 +6783,7 @@ function openPrepayExpenseAddModal() {
     addModal.show();
 }
 
-function onPrepayVendorChange() {
+function onPrepayVendorChange({ preserveAccount = false } = {}) {
     const sel = document.getElementById("prepayVendorSelect");
     const input = document.getElementById("prepayVendorInput");
     const balanceEl = document.getElementById("prepayBalanceText");
@@ -6795,13 +6797,13 @@ function onPrepayVendorChange() {
     balanceEl.innerText = vendor ? `현재 잔액: ${bal.toLocaleString()}원` : "거래처를 선택하세요.";
 
     const mapped = prepayCache.costMap[vendor];
-    if (mapped) {
+    if (!preserveAccount && mapped) {
         setPrepayExpenseAccount(mapped);
-    } else if (!getPrepayExpenseAccount()) {
+    } else if (!preserveAccount && !getPrepayExpenseAccount()) {
         loadPrepayExpenseAccounts();
     }
 
-    calcPrepayTotals();
+    if (!preserveAccount) calcPrepayTotals();
 }
 
 function onPrepaySupplyChange() {
@@ -7064,10 +7066,11 @@ function renderReceivableVendorSelect() {
     }
     sel.add(new Option('직접 입력', '__custom__'));
 
-    if (current && Array.from(sel.options).some(o => o.value === current)) {
+    if (current) {
+        if (!Array.from(sel.options).some(o => o.value === current)) sel.add(new Option(current === '__all__' ? '전체 미수 (기존 선택)' : `${current} (기존 선택)`, current));
         sel.value = current;
     }
-    onReceivableVendorChange();
+    onReceivableVendorChange({ preserveAccount: Boolean(current) });
 }
 
 function getReceivableIncomeAccount() {
@@ -7121,7 +7124,7 @@ function openReceivableIncomeAddModal() {
     addModal.show();
 }
 
-function onReceivableVendorChange() {
+function onReceivableVendorChange({ preserveAccount = false } = {}) {
     const sel = document.getElementById('receivableVendorSelect');
     const input = document.getElementById('receivableVendorInput');
     const balanceEl = document.getElementById('receivableBalanceText');
@@ -7149,14 +7152,14 @@ function onReceivableVendorChange() {
     }
 
     const mapped = vendor ? receivableCache.incomeMap[vendor] : null;
-    if (mapped && !isAll) {
+    if (!preserveAccount && mapped && !isAll) {
         const typeSel = document.getElementById('receivableIncomeType');
         if (typeSel && mapped.type) typeSel.value = mapped.type;
         setReceivableIncomeAccount(mapped.account || '');
     }
 
-    if (!getReceivableIncomeAccount()) onReceivableIncomeTypeChange();
-    calcReceivableTotals();
+    if (!preserveAccount && !getReceivableIncomeAccount()) onReceivableIncomeTypeChange();
+    if (!preserveAccount) calcReceivableTotals();
 }
 
 function onReceivableSupplyChange() {
