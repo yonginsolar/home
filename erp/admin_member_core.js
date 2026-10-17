@@ -5826,7 +5826,7 @@ if (fundsTitle) fundsTitle.textContent = isSiteMemberProfile ? '💰 운영자�
 const detailFundsTab = document.getElementById('member-detail-funds-tab');
 if (detailFundsTab) detailFundsTab.textContent = isSiteMemberProfile ? '💰 출자금' : '💰 출자/배당/자금';
 const detailBankHeading = document.getElementById('member-detail-bank-heading');
-if (detailBankHeading) detailBankHeading.textContent = isSiteMemberProfile ? '🏦 환급 계좌 정보' : '🏦 환급/배당 계좌 정보';
+if (detailBankHeading) detailBankHeading.textContent = '🏦 조합원 계좌 정보';
 const faqFinanceCategory = document.getElementById('faq-finance-category');
 if (faqFinanceCategory) faqFinanceCategory.textContent = isSiteMemberProfile ? '출자/자금' : '출자/배당';
 [
@@ -6495,7 +6495,7 @@ function normalizeAdminMemberRow(row, totalCapital) {
     return {
         ...row,
         total_capital: Number(totalCapital || row.total_capital || 0),
-        account_number: row.account_num_display || row.account_number || null,
+        account_number: MemberInformation.bankAccountDisplay(row) || null,
         birth_date: row.birth_date || null
     };
 }
@@ -7014,7 +7014,8 @@ async function openMemberDetail(id) {
     document.getElementById('md-memo').value = m.admin_memo || '';
     document.getElementById('md-bank-name').value = m.bank_name || '';
     document.getElementById('md-bank-owner').value = m.account_holder || '';
-    document.getElementById('md-bank-account').value = m.account_number || '';
+    document.getElementById('md-bank-account').value = MemberInformation.bankAccountDisplay(m);
+    MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'), m);
 
     // 3. 개인/단체 구분 표시 및 단체 대표·담당자 정보
     syncMemberDetailTypeLayout();

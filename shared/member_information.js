@@ -8,6 +8,17 @@
   const accountFields = ['bank_name', 'account_number', 'account_holder'];
   const editable = Object.keys(labels).filter(key => !['name', 'rrn'].includes(key));
   const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  // Only the stored projection is displayable, never a full account or ciphertext.
+  function bankAccountDisplay(member) {
+    const value = String(member?.account_num_display ?? member?.account_number ?? '').trim();
+    return /^\*{4}(?:[0-9]{4})?$/.test(value) ? value : '';
+  }
+  function renderBankAccountStatus(node, member) {
+    if (!node) return;
+    const value = bankAccountDisplay(member);
+    node.hidden = !value;
+    node.textContent = value === '****' ? '입력함 · 끝자리 확인 필요' : value ? '입력함' : '';
+  }
   function fieldNames(fields) {
     const result = [];
     for (const field of fields || []) {
@@ -21,7 +32,7 @@
     return {
       fields, names: fieldNames(fields), editable: fields.filter(key => editable.includes(key)),
       accountMessage: fields.some(key => accountFields.includes(key))
-        ? (siteMember ? '출자금 환급을 위해 은행명·계좌번호·예금주를 등록해 주세요.' : '배당금 수령을 위해 은행명·계좌번호·예금주를 등록해 주세요.') : '',
+        ? '은행명·계좌번호·예금주를 등록해 주세요.' : '',
       officeMessage: fields.some(key => ['name', 'rrn'].includes(key))
         ? `${fields.filter(key => ['name', 'rrn'].includes(key)).map(key => labels[key]).join('·')} 보완은 사무국에 문의해 주세요.` : ''
     };
@@ -143,5 +154,5 @@
     });
     return { refresh, invalidate(member) { cache.delete(key(member)); }, open };
   }
-  global.MemberInformation = Object.freeze({ fieldLabels: labels, fieldNames, noticeModel, createPortal });
+  global.MemberInformation = Object.freeze({ fieldLabels: labels, fieldNames, noticeModel, createPortal, bankAccountDisplay, renderBankAccountStatus });
 })(window);

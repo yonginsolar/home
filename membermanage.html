@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.174
-Change: 2026-10-12 - Display protected education and meeting photo copies before originals.
+Version: v1.0.175
+Change: 2026-10-17 - Show stored account suffixes without per-visit decryption.
 -->
 <html lang="ko">
 <head>
@@ -10,10 +10,10 @@ Change: 2026-10-12 - Display protected education and meeting photo copies before
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.174 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.175 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
-<script src="shared/member_information.js?v=20261002-1"></script>
+<script src="shared/member_information.js?v=20261017-bank-display-1" integrity="sha384-Sv2MNCPrzsu9DJgB3HtQXCrDoffIVLvGpMBOkBZJiBayAgaMHVkDPoDPRanq6ncN" crossorigin="anonymous"></script>
 <script src="shared/application_retention_notice.js?v=1.1.0"></script>
 <script src="shared/child_direct_consent.js?v=1.0.3"></script>
 <meta charset="utf-8">
@@ -1803,7 +1803,8 @@ NO. <span id="infoMemberId">-</span>
 </div>
 
 <div class="col-12 border-top pt-2 mt-2">
-<label class="small text-success fw-bold" id="profileBankLabel">환급/배당 계좌</label>
+<label class="small text-success fw-bold" id="profileBankLabel">본인 계좌</label>
+<small class="text-success ms-2" id="profileBankEntered" hidden></small>
 <div id="viewBankBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
 <div id="editBankBox" class="row g-2" style="display:none;">
 <div class="col-4">
@@ -4250,22 +4251,6 @@ resetDuplicateEmailCandidates();
 showModal("가입 정보를 찾을 수 없습니다.\n사무국으로 문의해 주시기 바랍니다.");
 }
 
-// [신규] 뷰(view_member_list)에서 마스킹 된 계좌 정보만 조회하는 함수
-async function fetchMaskedBankInfo(uuid) {
-try {
-// Step 1에서 뷰를 재정의했으므로 'id' 컬럼(UUID) 사용 가능
-const { data, error } = await _supabase
-.from('view_member_list')
-.select('account_number')
-.eq('id', uuid)
-.maybeSingle();
-
-if (error) {
-return null;
-}
-return data ? data.account_number : null;
-} catch (e) { return null; }
-}
 // [수정] 대시보드 데이터 로드 (세션 스토리지 저장 기능 추가)
 let memberInformationPortal = null;
 function refreshMemberInformation(member) {
@@ -4313,9 +4298,8 @@ const { data: member, error: memErr } = await scopeMemberTenant(_supabase
 	throw profileError;
 	}
 
-// 마스킹 계좌 적용
-const maskedAcc = await fetchMaskedBankInfo(uuid);
-if (maskedAcc) member.account_number = maskedAcc;
+// Use only the persisted projection; no extra read or ciphertext fallback.
+member.account_number = MemberInformation.bankAccountDisplay(member);
 if (familyRegistrationOwner && familyRegistrationOwner !== getFamilyRegistrationOwner(member)) resetFamilyRegistrationDraft();
 curMem = member; 
 currentMemberCoopId = member.coop_id || await getCurrentMemberCoopId();
@@ -5387,12 +5371,10 @@ return coopRuntimeProfile === 'site_member';
 function applyMemberPortalRuntimeUi() {
 const siteMemberProfile = isSiteMemberPortalProfile();
 const profileBankLabel = document.getElementById('profileBankLabel');
-if (profileBankLabel) profileBankLabel.textContent = siteMemberProfile ? '환급 계좌' : '환급/배당 계좌';
+if (profileBankLabel) profileBankLabel.textContent = curMem?.member_type === '단체' ? '단체 명의 계좌' : '본인 계좌';
 const childBankLabel = document.getElementById('childBankLabel');
 if (childBankLabel) {
-childBankLabel.innerHTML = siteMemberProfile
-? '<i class="bi bi-bank me-1"></i>자녀 계좌 정보 (미성년 자녀 본인 명의)'
-: '<i class="bi bi-bank me-1"></i>배당금 수령 계좌 (미성년 자녀 본인 명의)';
+childBankLabel.innerHTML = '<i class="bi bi-bank me-1"></i>자녀 계좌 정보 (미성년 자녀 본인 명의)';
 }
 const certificateTitle = document.getElementById('memberContributionCertificateTitle');
 if (certificateTitle) certificateTitle.textContent = siteMemberProfile ? '출자증서' : '출자 증명서';
@@ -5827,13 +5809,14 @@ setText('summaryEmail', member.email || (isGroup ? '-' : (curAuth?.email || '-')
 // 공통 필드들
 setVal('editPhone', member.phone);
 setVal('editBankName', member.bank_name);
-setVal('editAccountNo', member.account_number);
+setVal('editAccountNo', MemberInformation.bankAccountDisplay(member));
+MemberInformation.renderBankAccountStatus(document.getElementById('profileBankEntered'), member);
 setVal('editHolder', member.account_holder);
 setText('viewPhoneBox', member.phone);
 setText('viewAddressBox', member.address);
 setVal('editAddrMain', member.address);
 setVal('editAddrDetail', '');
-const bankText = (member.bank_name || '') + ' ' + (member.account_number || '') + ' (' + (member.account_holder || '') + ')';
+const bankText = (member.bank_name || '') + ' ' + MemberInformation.bankAccountDisplay(member) + ' (' + (member.account_holder || '') + ')';
 setText('viewBankBox', bankText.trim() === '()' ? '-' : bankText);
 
 // 게시판 탭 권한 처리
