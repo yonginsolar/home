@@ -32,8 +32,8 @@
    hero.append(probe);
    for(const item of items){
     if(!item.visible||![item.title,item.subtitle,item.button_label&&item.button_url].some(v=>v.trim()))continue;
-    const fields={},copy=copyCaption(caption,fields),p=item.display||{},overlay=width>=768||p.mobile_fit==='cover';
-    copy.hidden=false;copy.removeAttribute('hidden');copy.style.cssText='position:relative;inset:auto;display:'+(!overlay?'block':'flex')+';align-items:center;justify-content:center;height:auto;min-height:0;max-height:none;margin:0 auto;overflow:visible;padding:'+(!overlay?'28px 20px':'20px')+'!important';
+    const fields={},copy=copyCaption(caption,fields),p=item.display||{},overlay=width>=768||p.mobile_fit==='cover',padding=!overlay?'28px 20px':width<768?'10px 20px':'20px';
+    copy.hidden=false;copy.removeAttribute('hidden');copy.style.cssText='position:relative;inset:auto;display:'+(!overlay?'block':'flex')+';align-items:center;justify-content:center;height:auto;min-height:0;max-height:none;margin:0 auto;overflow:visible;padding:'+padding+'!important';
     const row=copy.firstElementChild;if(row){row.style.maxHeight='none';if(overlay){row.style.flex='1 1 0';row.style.minWidth='0';}}
     for(const [k,field,visible]of [['heroTitle','title','title_visible'],['heroSubtitle','subtitle','subtitle_visible'],['heroButton','button_label','button_visible']]){
      const n=fields[k];if(!n)continue;n.hidden=p[visible]===false||!item[field].trim()||(k==='heroButton'&&!item.button_url);
@@ -89,6 +89,6 @@
   const fontsChanged=()=>{fontEpoch++;cache=null;queue();};document.fonts?.ready?.then(fontsChanged);document.fonts?.addEventListener?.('loadingdone',fontsChanged);
   queue();
  }
- root.CoopHeroLayout=Object.freeze({refresh:queue,version:'1.1.0'});
+ root.CoopHeroLayout=Object.freeze({refresh:queue,version:'1.1.1'});
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
 })(window);
