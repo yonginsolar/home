@@ -642,6 +642,7 @@ function moveFocusOutsideModal(modalEl) {
 }
 
 function closeMemberDetailModal() {
+    if (memberDetailSaving) return;
     const modalEl = document.getElementById('memberDetailModal');
     if (!modalEl) return;
     moveFocusOutsideModal(modalEl);
@@ -6450,6 +6451,126 @@ function renderEmptyState() {
 
 let g_current_member_id = null; // 현재 보고 있는 조합원 UUID
 let g_current_member_row = null; // 현재 상세 모달의 조합원 원본 데이터
+// Personal edit buffers live only in this authorized page, never browser storage.
+const memberDetailDrafts = new Map();
+let memberDetailEditState = null;
+let memberDetailDraftOwner = '';
+let memberDetailSaving = false;
+
+function clearMemberDetailEdits() {
+    memberDetailDrafts.clear();
+    memberDetailEditState = null;
+    memberDetailDraftOwner = '';
+}
+
+function memberDetailOwner() {
+    const auth = String(adminCertificateAuthId || '');
+    const coop = String(g_adminMemberRuntime?.coop_id || '');
+    const allowed = auth && coop && g_adminMemberRuntime?.is_active !== false
+        && canAccessAdminMemberTab('members');
+    const owner = allowed ? JSON.stringify([auth, coop]) : '';
+    if (owner !== memberDetailDraftOwner) {
+        clearMemberDetailEdits();
+        memberDetailDraftOwner = owner;
+    }
+    return owner;
+}
+
+function memberDetailFields() {
+    return Array.from(document.querySelectorAll('#md-tab-basic input,#md-tab-basic select,#md-tab-basic textarea'))
+        .filter(node => node.type !== 'file' && (node.id || node.type === 'checkbox')
+            && !node.closest('#md-notification-status,#md-child-direct,#md-guardian'));
+}
+
+function memberDetailSnapshot() {
+    return memberDetailFields().map(node => [node.id || 'badge:' + node.value,
+        node.type === 'checkbox' ? node.checked : node.value]);
+}
+
+function applyMemberDetailSnapshot(values) {
+    const snapshot = new Map(values);
+    for (const node of memberDetailFields()) {
+        const key = node.id || 'badge:' + node.value;
+        if (!snapshot.has(key)) continue;
+        if (node.type === 'checkbox') node.checked = snapshot.get(key) === true;
+        else node.value = snapshot.get(key);
+    }
+}
+
+function isCurrentMemberDetailEditor(state = memberDetailEditState) {
+    const owner = memberDetailOwner();
+    return !!state && memberDetailEditState === state && !!owner
+        && state.owner === owner && state.member === String(g_current_member_id || '');
+}
+
+function retainMemberDetailEdit() {
+    const state = memberDetailEditState;
+    if (!isCurrentMemberDetailEditor(state) || memberDetailSaving) return;
+    const current = memberDetailSnapshot();
+    if (state.editing && JSON.stringify(current) !== JSON.stringify(state.baseline)) {
+        memberDetailDrafts.set(state.key, {current});
+    } else memberDetailDrafts.delete(state.key);
+}
+
+function initializeMemberDetailEdit(owner, member) {
+    if (!owner || owner !== memberDetailOwner()) return;
+    const key = JSON.stringify([owner, String(member)]);
+    const state = {key, owner, member:String(member), baseline:memberDetailSnapshot(), editing:false};
+    memberDetailEditState = state;
+    const draft = memberDetailDrafts.get(key);
+    if (draft) {
+        applyMemberDetailSnapshot(draft.current);
+        toggleEditMode(true);
+    }
+}
+
+function cancelMemberBasicEdit() {
+    const state = memberDetailEditState;
+    if (memberDetailSaving || !isCurrentMemberDetailEditor(state)) return;
+    applyMemberDetailSnapshot(state.baseline);
+    MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'),
+        {account_num_display:new Map(state.baseline).get('md-bank-account') || ''});
+    memberDetailDrafts.delete(state.key);
+    toggleEditMode(false);
+    memberDetailFields().forEach(node => window.ErpWorkspaceResume?.checkpoint(node));
+}
+
+function acceptMemberBasicSave(state, submitted, updates, includeBadges = false) {
+    if (!isCurrentMemberDetailEditor(state)) return;
+    const old = new Map(state.baseline);
+    const account = String(updates.p_bank_account || '').replace(/[\s-]/g, '');
+    const mask = updates.p_bank_account
+        ? (/^[0-9]{8,30}$/.test(account) ? '****' + account.slice(-4) : '****')
+        : (old.get('md-bank-account') || '');
+    const badgeIds = new Set(Array.from(document.querySelectorAll('#member-badge-checkboxes input')).map(n => n.id || 'badge:' + n.value));
+    state.baseline = submitted.map(([key,value]) => [key,
+        key === 'md-bank-account' ? mask : key === 'md-rrn' ? ''
+        : key === 'md-email-original' ? (updates.p_email || '')
+        : (!includeBadges && badgeIds.has(key) ? old.get(key) : value)]);
+    const current = memberDetailSnapshot().map(([key,value]) => [key,
+        key === 'md-bank-account' ? mask : key === 'md-rrn' ? ''
+        : key === 'md-email-original' ? (updates.p_email || '') : value]);
+    applyMemberDetailSnapshot(current);
+    MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'), {account_num_display:mask});
+    // Keep the authorized local row consistent until its usual list refresh completes.
+    const fields = {name:'p_name',phone:'p_phone',email:'p_email',address:'p_address',bank_name:'p_bank_name',
+        account_holder:'p_bank_owner',status:'p_status',member_type:'p_member_type',admin_memo:'p_admin_memo',
+        corp_number:'p_corp_number',business_number:'p_business_number',representative_name:'p_representative_name',
+        contact_name:'p_contact_name',contact_position:'p_contact_position',preferred_name:'p_preferred_name',preferred_name_position:'p_preferred_name_position'};
+    if (g_current_member_row) {
+        for (const [key,param] of Object.entries(fields)) g_current_member_row[key] = updates[param];
+        g_current_member_row.account_number = mask || null;
+        g_current_member_row.account_num_display = mask || null;
+    }
+}
+
+window.addEventListener('beforeunload', event => {
+    retainMemberDetailEdit();
+    if (memberDetailOwner() && (memberDetailSaving || memberDetailDrafts.size)) {
+        event.preventDefault();
+        event.returnValue = '';
+    }
+});
 let g_member_detail_revision = 0;
 let g_member_detail_loading = false;
 const g_member_detail_requests = {};
@@ -6478,7 +6599,9 @@ function setMemberDetailReadBusy(busy) {
     modal.querySelectorAll('.modal-body,.modal-footer').forEach(el => { el.inert = busy; });
 }
 
-document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', () => {
+document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', event => {
+    if (memberDetailSaving) { event.preventDefault(); return; }
+    retainMemberDetailEdit();
     window.MemberNotificationAdmin?.clearDetail();
     window.ContributionCertPreview?.clear();
     ++g_member_detail_revision;
@@ -6918,6 +7041,10 @@ async function loadAdminMemberQuizHistory(forceReload = false) {
 } // End of loadAdminMemberQuizHistory
 
 async function openMemberDetail(id) {
+    if (memberDetailSaving) return;
+    const editorOwner = memberDetailOwner();
+    if (!editorOwner) return;
+    retainMemberDetailEdit();
     window.ContributionCertPreview?.clear();
     const requestRevision = ++g_member_detail_revision;
     setMemberDetailReadBusy(true);
@@ -6930,7 +7057,7 @@ async function openMemberDetail(id) {
             g_member_detail_loading = true;
             if (typeof showLoading === 'function') showLoading(true);
             m = await fetchAdminMemberDetailRow(id);
-            if (requestRevision !== g_member_detail_revision) return;
+            if (requestRevision !== g_member_detail_revision || editorOwner !== memberDetailOwner()) return;
             if (m) m = upsertCachedAdminMember(m);
         } catch (err) {
             if (requestRevision !== g_member_detail_revision) return;
@@ -6941,7 +7068,9 @@ async function openMemberDetail(id) {
         }
     }
 
+    if (editorOwner !== memberDetailOwner()) return;
     if (!m) return myAlert("데이터를 찾을 수 없습니다.", 'error');
+    if (m.coop_id && String(m.coop_id) !== String(g_adminMemberRuntime?.coop_id)) return;
 
     const memberUid = m.id || m.member_uid || m.uid || null;
     if (!memberUid) return myAlert("조합원 UUID를 찾을 수 없습니다.", 'error');
@@ -6971,6 +7100,7 @@ async function openMemberDetail(id) {
         }
     }
 
+    if (editorOwner !== memberDetailOwner()) return;
     g_current_member_id = memberUid;
     g_current_member_row = m;
     adminMemberParticipationLoadedFor = null;
@@ -7069,6 +7199,7 @@ async function openMemberDetail(id) {
 
     // 5. 모달 설정 및 하위 데이터 로드 (기존 유지)
     toggleEditMode(false);
+    initializeMemberDetailEdit(editorOwner, memberUid);
     loadMemberFunds(memberUid, m.member_id, true);
     loadConsultLogs(memberUid);
     void window.MemberNotificationAdmin?.detail(memberUid);
@@ -7260,6 +7391,7 @@ function bindAdminCertificateContext(authId) {
     _supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== adminCertificateAuthId)) {
             adminCertificateAuthId = '';
+            clearMemberDetailEdits();
             window.ContributionCertPreview?.clear();
             window.MemberNotificationAdmin?.clear();
             window.MemberAdmissionAdmin?.clear();
@@ -7489,6 +7621,7 @@ function markAutoManagedBadgeControls() {
 } // End of markAutoManagedBadgeControls
 
 function toggleEditMode(isEdit) {
+    if (isCurrentMemberDetailEditor()) memberDetailEditState.editing = !!isEdit;
     // 1. 일반 입력창 제어 (기존 로직)
     const inputs = document.querySelectorAll('#md-tab-basic input:not([type=checkbox]), #md-tab-basic select, #md-tab-basic textarea');
     inputs.forEach(el => {
@@ -7563,7 +7696,14 @@ document.getElementById('md-addr-detail').focus();
 }
 
 async function saveMemberBasic() {
+    const editState = memberDetailEditState;
+    if (memberDetailSaving || !isCurrentMemberDetailEditor(editState) || !editState.editing) return;
     myConfirm("수정된 정보를 저장하시겠습니까?", async () => {
+        if (memberDetailSaving || !isCurrentMemberDetailEditor(editState) || !editState.editing
+            || !document.getElementById('memberDetailModal')?.classList.contains('show')
+            || window.frameElement?.hidden) return;
+        memberDetailSaving = true;
+        let lockedControls = [], basicSaved = false, completed = false;
         // 1. 주소 및 기본값 처리
         const memberUid = document.getElementById('md-uid').value;
         const basicAddr = document.getElementById('md-addr').value;
@@ -7628,10 +7768,16 @@ async function saveMemberBasic() {
                 p_preferred_name: preferredName,
                 p_preferred_name_position: preferredNamePosition
             };
+            const submitted = memberDetailSnapshot();
+            lockedControls = Array.from(document.querySelectorAll('#memberDetailModal input,#memberDetailModal select,#memberDetailModal textarea,#memberDetailModal button'))
+                .map(node => [node,node.disabled]);
+            lockedControls.forEach(([node]) => { node.disabled = true; });
 
             const { error: basicError } = await _supabase.rpc('update_member_details_secure_v3', updates);
             if (basicError) throw basicError;
-            document.getElementById('md-email-original').value = emailInput;
+            if (!isCurrentMemberDetailEditor(editState)) return;
+            basicSaved = true;
+            acceptMemberBasicSave(editState, submitted, updates);
 
             if (canManageAdminMemberIndividualBadges()) {
                 const selectedCodes = [];
@@ -7651,10 +7797,13 @@ async function saveMemberBasic() {
 
                 if (badgeError) throw new Error('뱃지 동기화 실패: ' + badgeError.message);
             }
+            if (!isCurrentMemberDetailEditor(editState)) return;
+            acceptMemberBasicSave(editState, submitted, updates, true);
+            completed = true;
+            memberDetailDrafts.delete(editState.key);
 
             showLoading(false);
             myAlert('저장되었습니다.');
-            toggleEditMode(false);
             void loadMemberInformationSummary();
             void loadMemberDemographicCharts();
             if (!document.getElementById('member-information-list-panel').hidden) void loadMemberInformationList(true);
@@ -7664,8 +7813,21 @@ async function saveMemberBasic() {
 
         } catch (err) {
             showLoading(false);
+            if (!isCurrentMemberDetailEditor(editState)) return;
             CoopSafeLog.error("[erp/admin_member] operation failed", err);
-            myAlert('오류 발생: ' + err.message, 'error');
+            myAlert((basicSaved ? '기본 정보는 저장됐지만 나머지 처리를 완료하지 못했습니다. ' : '오류 발생: ') + err.message, 'error');
+        } finally {
+            const current = isCurrentMemberDetailEditor(editState);
+            lockedControls.forEach(([node,disabled]) => { if (node.isConnected) node.disabled = current ? disabled : true; });
+            memberDetailSaving = false;
+            if (current) {
+                if (completed) {
+                    toggleEditMode(false);
+                    memberDetailFields().forEach(node => window.ErpWorkspaceResume?.checkpoint(node));
+                }
+                retainMemberDetailEdit();
+            }
+            showLoading(false);
         }
     });
 }
