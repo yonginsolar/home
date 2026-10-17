@@ -1027,6 +1027,7 @@ async function ensureBadgesReady() {
 let g_members = [];
 let g_member_import_rows = [];
 let g_member_import_request_key = null;
+let g_member_import_state = null;
 let g_member_page = 0;
 let g_member_page_size = 25;
 let g_member_total_count = 0;
@@ -1928,21 +1929,92 @@ return `${normalized.slice(0, 8)}******`;
 }
 
 function openMemberImportModal() {
+const owner = memberDetailOwner();
+if (!owner) return;
+if (!g_member_import_state || g_member_import_state.owner !== owner) {
+    resetMemberImportDraft();
+    g_member_import_state = {owner, revision:0, file:null, phase:'ready', message:'', attempt:null, confirmation:null};
+}
+const modal = document.getElementById('memberImportModal');
+if (!modal) return;
+if (modal.dataset.importGuardBound !== '1') {
+    modal.dataset.importGuardBound = '1';
+    modal.addEventListener('hide.bs.modal', event => {
+        if (g_member_import_state?.phase === 'saving') event.preventDefault();
+        else pauseMemberImportRead();
+    });
+}
+syncMemberImportUi();
+bootstrap.Modal.getOrCreateInstance(modal).show();
+if (g_member_import_state.phase === 'file_pending') {
+    void readMemberImportExcel(document.getElementById('member-import-file'));
+}
+}
+
+function resetMemberImportDraft() {
+if (g_member_import_state) g_member_import_state.revision++;
+g_member_import_state = null;
 g_member_import_rows = [];
 g_member_import_request_key = null;
-const fileInput = document.getElementById('member-import-file');
-if (fileInput) fileInput.value = '';
+const input = document.getElementById('member-import-file');
+if (input) { input.value = ''; input.disabled = true; }
 const filter = document.getElementById('member-import-filter');
 if (filter) filter.value = 'all';
+for (const id of ['member-import-tbody','member-import-count','member-import-summary','member-import-status']) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '';
+}
 const preview = document.getElementById('member-import-preview');
 if (preview) preview.style.display = 'none';
-const tbody = document.getElementById('member-import-tbody');
-if (tbody) tbody.innerHTML = '';
-const count = document.getElementById('member-import-count');
-if (count) count.textContent = '';
-const summary = document.getElementById('member-import-summary');
-if (summary) summary.textContent = '';
-new bootstrap.Modal(document.getElementById('memberImportModal')).show();
+syncMemberImportUi();
+}
+
+function isCurrentMemberImport(state, revision = state?.revision, visible = false) {
+return !!state && g_member_import_state === state && state.revision === revision
+    && state.owner === memberDetailOwner()
+    && (!visible || (document.getElementById('memberImportModal')?.classList.contains('show')
+        && (!window.frameElement || !window.frameElement.hidden)));
+}
+
+function hasMemberImportDraft() {
+const state = g_member_import_state;
+return !!state && isCurrentMemberImport(state) && !!(state.file || g_member_import_rows.length || state.attempt);
+}
+
+function pauseMemberImportRead() {
+const state = g_member_import_state;
+if (!state || state.phase === 'saving') return;
+state.revision++;
+state.confirmation = null;
+if (['reading','checking','preparing'].includes(state.phase)) {
+    state.phase = g_member_import_rows.length ? 'check_failed' : 'file_pending';
+    state.message = g_member_import_rows.length ? '검사를 다시 진행해 주세요.' : '파일을 다시 읽을 준비가 됐습니다.';
+} else if (state.phase === 'confirming') state.phase = state.attempt ? 'unknown' : 'ready';
+syncMemberImportUi();
+}
+
+function syncMemberImportUi() {
+const state = g_member_import_state;
+const busy = !!state && ['reading','checking','preparing','confirming','saving'].includes(state.phase);
+const locked = !state || ['preparing','confirming','saving','unknown'].includes(state.phase);
+const file = document.getElementById('member-import-file');
+if (file) file.disabled = locked;
+const button = document.getElementById('member-import-submit');
+if (button) {
+    button.textContent = state?.phase === 'unknown' ? '결과 다시 확인'
+        : g_member_import_rows.some(row => row.server_error) ? '실패 행 다시 등록' : '업로드 적용';
+    button.disabled = !state || busy || state.phase === 'check_failed' || !g_member_import_rows.some(row => row.valid);
+}
+const retry = document.getElementById('member-import-recheck');
+if (retry) {
+    retry.hidden = !state || !['check_failed','file_pending'].includes(state.phase);
+    retry.disabled = busy;
+}
+const status = document.getElementById('member-import-status');
+if (status) status.textContent = state?.message || (state?.file ? '작성 중' : '');
+document.querySelectorAll('#memberImportModal [data-bs-dismiss="modal"]').forEach(node => {
+    node.disabled = state?.phase === 'saving';
+});
 }
 
 async function saveNewMember() {
@@ -2173,7 +2245,8 @@ normalized.valid = errors.length === 0;
 return normalized;
 }
 
-async function applyMemberImportDuplicateChecks(rows) {
+async function applyMemberImportDuplicateChecks(rows, current = () => true) {
+if (!current()) return false;
 rows.forEach((row) => {
   row.errors = Array.isArray(row.errors) ? row.errors.filter((msg) => !String(msg).startsWith('중복')) : [];
   row.valid = row.errors.length === 0;
@@ -2222,6 +2295,7 @@ if (emails.length > 0) {
   const { data, error } = await scopeAdminTenant(
     _supabase.from('coop_members').select('email').in('email', emails)
   );
+  if (!current()) return false;
   if (error) throw error;
   const existingEmails = new Set((data || []).map((item) => String(item.email || '').trim().toLowerCase()).filter(Boolean));
   rows.forEach((row) => {
@@ -2235,6 +2309,7 @@ if (memberIds.length > 0) {
   const { data, error } = await scopeAdminTenant(
     _supabase.from('coop_members').select('member_id').in('member_id', memberIds)
   );
+  if (!current()) return false;
   if (error) throw error;
   const existingMemberIds = new Set((data || []).map((item) => String(item.member_id || '').trim()).filter(Boolean));
   rows.forEach((row) => {
@@ -2248,6 +2323,7 @@ if (businessNumbers.length > 0) {
   const { data, error } = await scopeAdminTenant(
     _supabase.from('coop_members').select('business_number').in('business_number', businessNumbers)
   );
+  if (!current()) return false;
   if (error) throw error;
   const existingBusinessNumbers = new Set((data || []).map((item) => String(item.business_number || '').trim()).filter(Boolean));
   rows.forEach((row) => {
@@ -2261,6 +2337,7 @@ if (corpNumbers.length > 0) {
   const { data, error } = await scopeAdminTenant(
     _supabase.from('coop_members').select('corp_number').in('corp_number', corpNumbers)
   );
+  if (!current()) return false;
   if (error) throw error;
   const existingCorpNumbers = new Set((data || []).map((item) => String(item.corp_number || '').trim()).filter(Boolean));
   rows.forEach((row) => {
@@ -2269,6 +2346,7 @@ if (corpNumbers.length > 0) {
     row.valid = row.errors.length === 0;
   });
 }
+return current();
 }
 
 function renderMemberImportPreview() {
@@ -2281,7 +2359,7 @@ if (!tbody || !preview || !count || !summary || !filter) return;
 
 const filteredRows = g_member_import_rows.filter((row) => {
   if (filter.value === 'valid') return row.valid;
-  if (filter.value === 'invalid') return !row.valid;
+  if (filter.value === 'invalid') return !row.valid || !!row.server_error;
   return true;
 });
 
@@ -2297,7 +2375,7 @@ const getMemberImportErrorBadgeClass = (message) => {
 
 tbody.innerHTML = '';
 filteredRows.slice(0, 10).forEach((row) => {
-  const errorBadges = row.errors.map((message) => `<span class="badge ${getMemberImportErrorBadgeClass(message)} me-1 mb-1">${escapeHtml(message)}</span>`).join('');
+  const errorBadges = [...row.errors, ...(row.server_error ? [row.server_error] : [])].map((message) => `<span class="badge ${getMemberImportErrorBadgeClass(message)} me-1 mb-1">${escapeHtml(message)}</span>`).join('');
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td>${row.rowNo}</td>
@@ -2308,13 +2386,13 @@ filteredRows.slice(0, 10).forEach((row) => {
     <td>${row.member_type === '단체' ? `${escapeHtml(row.representative_name || '-')}<br><span class="small text-muted">${escapeHtml(row.contact_name || '-')} · ${escapeHtml(row.contact_position || '-')}</span>` : '-'}</td>
     <td>${escapeHtml(row.status || '-')}</td>
     <td>${escapeHtml(row.join_date || '-')}</td>
-    <td>${row.valid ? '<span class="badge bg-success">정상</span>' : errorBadges}</td>
+    <td>${row.valid && !row.server_error ? '<span class="badge bg-success">정상</span>' : errorBadges}</td>
   `;
   tbody.appendChild(tr);
 });
 
 const validCount = g_member_import_rows.filter((row) => row.valid).length;
-const invalidCount = g_member_import_rows.filter((row) => !row.valid).length;
+const invalidCount = g_member_import_rows.filter((row) => !row.valid || row.server_error).length;
 const requiredMissingCount = g_member_import_rows.filter((row) => row.errors.some((msg) => String(msg).includes('누락'))).length;
 const formatErrorCount = g_member_import_rows.filter((row) => row.errors.some((msg) => String(msg).includes('형식 오류') || String(msg).includes('유형 오류') || String(msg).includes('상태 오류'))).length;
 const fileDupCount = g_member_import_rows.filter((row) => row.errors.some((msg) => String(msg).includes('(파일)'))).length;
@@ -2322,11 +2400,16 @@ const dbDupCount = g_member_import_rows.filter((row) => row.errors.some((msg) =>
 count.textContent = `총 ${g_member_import_rows.length}건 / 등록 가능 ${validCount}건`;
 summary.textContent = `검사 요약: 필수 누락 ${requiredMissingCount}건 / 형식 오류 ${formatErrorCount}건 / 파일 중복 ${fileDupCount}건 / 기존 조합원 ${dbDupCount}건 / 오류·중복 ${invalidCount}건`;
 preview.style.display = 'block';
+syncMemberImportUi();
 }
 
 async function downloadMemberImportFailedRows() {
+const state = g_member_import_state;
+if (!isCurrentMemberImport(state, state?.revision, true)) return;
+const revision = state.revision;
     if (!(await ensureAdminMemberSpreadsheetReady())) return;
-const failedRows = g_member_import_rows.filter((row) => !row.valid);
+if (!isCurrentMemberImport(state, revision, true)) return;
+const failedRows = g_member_import_rows.filter((row) => !row.valid || !!row.server_error);
 if (failedRows.length === 0) {
   return myAlert('내려받을 실패 행이 없습니다.', 'warning');
 }
@@ -2349,7 +2432,7 @@ const rows = failedRows.map((row) => ({
   대표자명: row.source_row?.['대표자명'] ?? row.representative_name ?? '',
   담당자명: row.source_row?.['담당자명'] ?? row.contact_name ?? '',
   '담당자 직함': row.source_row?.['담당자 직함'] ?? row.contact_position ?? '',
-  오류사유: row.errors.join(', ')
+  오류사유: [...row.errors, ...(row.server_error ? [row.server_error] : [])].join(', ')
 }));
 
 const ws = XLSX.utils.json_to_sheet(rows);
@@ -2359,116 +2442,192 @@ XLSX.writeFile(wb, '조합원_등록_실패행.xlsx');
 }
 
 async function readMemberImportExcel(input) {
-    const selectedFile = input.files?.[0];
-    if (!selectedFile || !(await ensureAdminMemberSpreadsheetReady())) return;
-    if (input.files?.[0] !== selectedFile || !input.isConnected) return;
-const file = input.files[0];
-if (!file) return;
-
+const state = g_member_import_state;
+const file = input?.files?.[0];
+if (!file || !isCurrentMemberImport(state, state?.revision, true)
+    || ['preparing','confirming','saving','unknown'].includes(state.phase)) return;
+const revision = ++state.revision;
+state.file = file;
+state.phase = 'reading';
+state.message = '파일을 읽고 있습니다.';
+state.attempt = null;
+g_member_import_rows = [];
+g_member_import_request_key = null;
+document.getElementById('member-import-preview').style.display = 'none';
+syncMemberImportUi();
+const current = () => isCurrentMemberImport(state, revision, true) && state.file === file
+    && input.isConnected && input.files?.[0] === file;
+const failed = message => {
+    if (!current()) return;
+    state.phase = g_member_import_rows.length ? 'check_failed' : 'file_pending';
+    state.message = message;
+    syncMemberImportUi();
+};
+try {
+if (!(await ensureAdminMemberSpreadsheetReady())) return failed('파일 도구를 불러오지 못했습니다. 다시 시도해 주세요.');
+if (!current()) return;
 const reader = new FileReader();
 reader.onload = async function(e) {
+  if (!current()) return;
+  try {
   const data = new Uint8Array(e.target.result);
   const workbook = XLSX.read(data, { type: 'array' });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
   if (!json.length) {
-    myAlert('데이터가 없는 엑셀입니다.', 'warning');
-    return;
+    return failed('데이터가 없는 엑셀입니다. 다른 파일을 선택해 주세요.');
   }
-
+  if (!current()) return;
   g_member_import_rows = json.map((row, index) => normalizeMemberImportRow(row, index));
-  g_member_import_request_key = createAdminBatchRequestKey('member-import');
-  try {
-    await applyMemberImportDuplicateChecks(g_member_import_rows);
-  } catch (error) {
-    CoopSafeLog.error("member import precheck failed", error);
-    myAlert(`업로드 사전 검증에 실패했습니다.\n${error.message || error}`, 'warning');
-    g_member_import_rows = [];
-    return;
+  await recheckMemberImportRows(state, revision);
+  } catch (_) {
+    failed('엑셀 파일을 읽지 못했습니다. 파일을 확인한 뒤 다시 시도해 주세요.');
   }
-  renderMemberImportPreview();
 };
+reader.onerror = () => failed('파일을 읽지 못했습니다. 다시 시도해 주세요.');
+reader.onabort = () => failed('파일 읽기가 중단됐습니다. 다시 시도해 주세요.');
 reader.readAsArrayBuffer(file);
+} catch (_) { failed('파일을 읽지 못했습니다. 다시 시도해 주세요.'); }
+}
+
+async function recheckMemberImportRows(state, revision, preparing = false) {
+const current = () => isCurrentMemberImport(state, revision, true);
+if (!current()) return false;
+const rows = g_member_import_rows.map(row => ({...row, errors:[...row.errors]}));
+state.phase = preparing ? 'preparing' : 'checking';
+state.message = '등록 내용을 확인하고 있습니다.';
+syncMemberImportUi();
+try {
+    const checked = await applyMemberImportDuplicateChecks(rows, current);
+    if (!current() || checked === false) return false;
+    g_member_import_rows = rows;
+    state.phase = 'ready';
+    state.message = '작성 중';
+    renderMemberImportPreview();
+    return true;
+} catch (_) {
+    if (!current()) return false;
+    state.phase = 'check_failed';
+    state.message = '중복 검사를 완료하지 못했습니다. 다시 검사해 주세요.';
+    renderMemberImportPreview();
+    return false;
+}
+}
+
+async function retryMemberImportCheck() {
+const state = g_member_import_state;
+if (!isCurrentMemberImport(state, state?.revision, true)
+    || !['check_failed','file_pending'].includes(state.phase)) return;
+if (!g_member_import_rows.length) return readMemberImportExcel(document.getElementById('member-import-file'));
+return recheckMemberImportRows(state, ++state.revision);
+}
+
+function memberImportPayload(rows) {
+return rows.map(row => ({
+    row_no:row.rowNo, name:row.name, email:row.email, phone:row.phone || null,
+    birth_date:row.birth_date || null, member_type:row.member_type, status:row.status,
+    address:row.address || null, member_id:row.member_id || null, join_category:row.join_category || '일반',
+    admin_memo:row.admin_memo || null, rrn:row.member_type === '개인' ? row.rrn || null : null,
+    business_number:row.member_type === '단체' ? row.business_number || null : null,
+    corp_number:row.member_type === '단체' ? row.corp_number || null : null,
+    representative_name:row.member_type === '단체' ? row.representative_name || null : null,
+    contact_name:row.member_type === '단체' ? row.contact_name || null : null,
+    contact_position:row.member_type === '단체' ? row.contact_position || null : null,
+    join_date:row.join_date || null
+}));
 }
 
 async function submitMemberImportBatch() {
-if (g_member_import_rows.length === 0) {
-  return myAlert('업로드된 데이터가 없습니다.', 'warning');
-}
-
-try {
-  await applyMemberImportDuplicateChecks(g_member_import_rows);
-  renderMemberImportPreview();
-} catch (error) {
-  CoopSafeLog.error("member import pre-submit check failed", error);
-  return myAlert(`저장 전 중복 검사에 실패했습니다.\n${error.message || error}`, 'warning');
-}
-
+const state = g_member_import_state;
+if (!isCurrentMemberImport(state, state?.revision, true)
+    || !['ready','unknown'].includes(state.phase)) return;
+const revision = state.revision;
+if (!g_member_import_rows.length) return myAlert('업로드된 데이터가 없습니다.', 'warning');
+if (!state.attempt && !(await recheckMemberImportRows(state, revision, true))) return;
+if (!isCurrentMemberImport(state, revision, true)) return;
 const validRows = g_member_import_rows.filter((row) => row.valid);
-if (validRows.length === 0) {
-  return myAlert('등록 가능한 행이 없습니다.', 'warning');
-}
-if (validRows.length > 500) {
-  return myAlert('한 번에 등록할 수 있는 최대 건수는 500건입니다.', 'warning');
-}
-
-myConfirm(`총 ${g_member_import_rows.length}건 중 ${validRows.length}건을 등록하시겠습니까?`, async () => {
-  showLoading(true);
-  const invalidRows = g_member_import_rows.filter((row) => !row.valid);
-  const payload = validRows.map((row) => ({
-    row_no: row.rowNo,
-    name: row.name,
-    email: row.email,
-    phone: row.phone || null,
-    birth_date: row.birth_date || null,
-    member_type: row.member_type,
-    status: row.status,
-    address: row.address || null,
-    member_id: row.member_id || null,
-    join_category: row.join_category || '일반',
-    admin_memo: row.admin_memo || null,
-    rrn: row.member_type === '개인' ? row.rrn || null : null,
-    business_number: row.member_type === '단체' ? row.business_number || null : null,
-    corp_number: row.member_type === '단체' ? row.corp_number || null : null,
-    representative_name: row.member_type === '단체' ? row.representative_name || null : null,
-    contact_name: row.member_type === '단체' ? row.contact_name || null : null,
-    contact_position: row.member_type === '단체' ? row.contact_position || null : null,
-    join_date: row.join_date || null
-  }));
-  const requestKey = g_member_import_request_key || createAdminBatchRequestKey('member-import');
-  g_member_import_request_key = requestKey;
-  const { data: result, error } = await _supabase.rpc('create_members_secure_batch', {
-    p_request_key: requestKey,
-    p_rows: payload
-  });
-
-  if (error) {
-    showLoading(false);
-    CoopSafeLog.error("member import batch failed", error);
-    myAlert(`일괄 등록 요청에 실패했습니다.\n${error.hint || error.message}`, 'error');
-    return;
+if (!validRows.length) return myAlert('등록 가능한 행이 없습니다.', 'warning');
+if (validRows.length > 500) return myAlert('한 번에 등록할 수 있는 최대 건수는 500건입니다.', 'warning');
+const attempt = state.attempt || {key:createAdminBatchRequestKey('member-import'), payload:memberImportPayload(validRows)};
+const token = {accepted:false};
+state.confirmation = token;
+state.phase = 'confirming';
+syncMemberImportUi();
+myConfirm(state.attempt ? '이전 등록 요청의 결과를 다시 확인할까요?' : `${validRows.length}건을 등록할까요?`, async () => {
+  token.accepted = true;
+  if (!isCurrentMemberImport(state, revision, true) || state.confirmation !== token || state.phase !== 'confirming') return;
+  state.phase = 'saving';
+  syncMemberImportUi();
+  let sent = false;
+  try {
+    const identity = await _supabase.auth.getUser();
+    if (identity.error || identity.data?.user?.id !== adminCertificateAuthId) throw new Error('IMPORT_AUTH_CHECK_FAILED');
+    const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+    if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')
+        || !isCurrentMemberImport(state, revision, true) || state.confirmation !== token) throw new Error('IMPORT_ACCESS_CHECK_FAILED');
+    state.attempt = attempt;
+    g_member_import_request_key = attempt.key;
+    sent = true;
+    const {data:result, error} = await _supabase.rpc('create_members_secure_batch', {
+        p_request_key:attempt.key, p_rows:attempt.payload
+    });
+    if (!isCurrentMemberImport(state, revision)) return;
+    const expected = new Set(attempt.payload.map(row => row.row_no));
+    const items = Array.isArray(result?.items) ? result.items : [];
+    if (error || items.length !== expected.size || new Set(items.map(item => item?.row_no)).size !== expected.size
+        || items.some(item => !expected.has(item?.row_no) || typeof item.ok !== 'boolean')
+        || Number(result?.success_count) !== items.filter(item => item.ok).length
+        || Number(result?.failure_count) !== items.filter(item => !item.ok).length
+        || (result.request_key && result.request_key !== attempt.key)) throw new Error('IMPORT_RESULT_UNCONFIRMED');
+    const successful = new Set(items.filter(item => item.ok).map(item => item.row_no));
+    const failed = new Map(items.filter(item => !item.ok).map(item => [item.row_no, item.hint || item.message || '등록에 실패했습니다. 다시 시도해 주세요.']));
+    g_member_import_rows = g_member_import_rows.filter(row => !successful.has(row.rowNo));
+    g_member_import_rows.forEach(row => { if (failed.has(row.rowNo)) row.server_error = String(failed.get(row.rowNo)); });
+    state.attempt = null;
+    g_member_import_request_key = null;
+    state.phase = 'ready';
+    state.message = `등록 완료 ${successful.size}건 · 남은 ${g_member_import_rows.length}건`;
+    renderMemberImportPreview();
+    if (!g_member_import_rows.length) {
+        state.file = null;
+        const input = document.getElementById('member-import-file');
+        input.value = '';
+        window.ErpWorkspaceResume?.checkpoint(input);
+    }
+    if (isCurrentMemberImport(state, revision, true)) myAlert(`등록 완료: ${successful.size}건\n실패·검토 필요: ${g_member_import_rows.length}건`);
+    if (successful.size) {
+        // A list refresh failure must not turn a confirmed registration into an unknown write.
+        void Promise.resolve().then(() => fetchMembers()).catch(() => {
+            if (isCurrentMemberImport(state, revision)) {
+                state.message += ' · 목록은 새로고침해 주세요.';
+                syncMemberImportUi();
+            }
+        });
+    }
+  } catch (_) {
+    if (!isCurrentMemberImport(state, revision)) return;
+    state.phase = sent || state.attempt ? 'unknown' : 'ready';
+    state.message = state.phase === 'unknown'
+        ? '등록 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.'
+        : '로그인과 등록 권한을 확인하지 못했습니다. 다시 시도해 주세요.';
+    if (isCurrentMemberImport(state, revision, true)) myAlert(state.message, 'warning');
+  } finally {
+    if (g_member_import_state === state) {
+        state.confirmation = null;
+        syncMemberImportUi();
+    }
   }
-
-  const successCnt = Number(result?.success_count || 0);
-  const serverFailureItems = Array.isArray(result?.items) ? result.items.filter((item) => !item?.ok) : [];
-  const failCnt = invalidRows.length + Number(result?.failure_count || 0);
-  const failLogs = [
-    ...invalidRows.map((row) => `${row.rowNo}행: ${row.errors.join(', ')}`),
-    ...serverFailureItems.map((item) => `${item.row_no || '-'}행: ${item.hint || item.message || '등록 실패'}`)
-  ];
-  showLoading(false);
-  const summary = [`등록 완료`, `성공: ${successCnt}건`, `실패: ${failCnt}건`];
-  if (failLogs.length) summary.push('', failLogs.slice(0, 5).join('\n'));
-  myAlert(summary.join('\n'));
-
-  if (successCnt > 0) {
-    bootstrap.Modal.getInstance(document.getElementById('memberImportModal'))?.hide();
-    fetchMembers();
-  }
-  g_member_import_rows = [];
-  g_member_import_request_key = null;
 });
+document.getElementById('customConfirmModal')?.addEventListener('hidden.bs.modal', () => {
+    queueMicrotask(() => {
+        if (!token.accepted && g_member_import_state === state && state.confirmation === token) {
+            state.confirmation = null;
+            state.phase = state.attempt ? 'unknown' : 'ready';
+            syncMemberImportUi();
+        }
+    });
+}, {once:true});
 }
 
 // [수정] 엑셀 다운로드 (보안 모드 RPC 연동 및 로그 기록)
@@ -6526,6 +6685,7 @@ let memberCreateState = null;
 let memberCreateSaving = false;
 
 function clearMemberDetailEdits() {
+    if (typeof resetMemberImportDraft === 'function') resetMemberImportDraft();
     memberDetailDrafts.clear();
     memberDetailEditState = null;
     memberDetailDraftOwner = '';
@@ -6702,7 +6862,8 @@ window.addEventListener('beforeunload', event => {
     retainMemberDetailEdit();
     retainMemberConsultEdit();
     if (memberDetailOwner() && (memberDetailSaving || memberDetailDrafts.size || memberConsultDrafts.size
-        || memberConsultPending.size || memberCreateSaving || hasMemberCreateDraft())) {
+        || memberConsultPending.size || memberCreateSaving || hasMemberCreateDraft()
+        || (typeof hasMemberImportDraft === 'function' && hasMemberImportDraft()))) {
         event.preventDefault();
         event.returnValue = '';
     }
@@ -7540,7 +7701,10 @@ function bindAdminCertificateContext(authId) {
     const frame = window.frameElement;
     if (frame) {
         const observer = new MutationObserver(() => {
-            if (frame.hidden) window.ContributionCertPreview?.clear();
+            if (frame.hidden) {
+                window.ContributionCertPreview?.clear();
+                if (typeof pauseMemberImportRead === 'function') pauseMemberImportRead();
+            }
         });
         observer.observe(frame, { attributes: true, attributeFilter: ['hidden'] });
         window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
