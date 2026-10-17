@@ -1828,7 +1828,7 @@ function buildMemberExportRows(records, options = {}) {
     return { rows, overLimitMembers, totalCapital };
 } // End of buildMemberExportRows
 
-function openCreateMemberModal() {
+function resetMemberCreateForm() {
 const defaults = {
     'create-member-type': '개인',
     'create-personal-name': '',
@@ -1858,7 +1858,21 @@ const sameContact = document.getElementById('create-group-contact-same');
 if (sameContact) sameContact.checked = false;
 syncCreateGroupContactFromRepresentative();
 syncCreateMemberTypeFields();
-new bootstrap.Modal(document.getElementById('memberCreateModal')).show();
+}
+
+function openCreateMemberModal() {
+const owner = memberDetailOwner();
+if (!owner || memberCreateSaving) return;
+if (memberCreateState?.owner !== owner) {
+    resetMemberCreateForm();
+    memberCreateState = {owner, baseline:memberCreateSnapshot()};
+}
+document.querySelectorAll('#memberCreateModal input,#memberCreateModal select,#memberCreateModal textarea,#memberCreateModal button')
+    .forEach(node => { node.disabled = false; });
+syncCreateGroupContactFromRepresentative();
+syncCreateMemberTypeFields();
+syncMemberCreateDraftButton();
+bootstrap.Modal.getOrCreateInstance(document.getElementById('memberCreateModal')).show();
 }
 
 function getCreateMemberType() {
@@ -1932,6 +1946,8 @@ new bootstrap.Modal(document.getElementById('memberImportModal')).show();
 }
 
 async function saveNewMember() {
+const state = memberCreateState;
+if (memberCreateSaving || !state || state.owner !== memberDetailOwner()) return;
 const memberType = getCreateMemberType();
 const isGroup = memberType === '단체';
 const name = isGroup
@@ -1981,7 +1997,7 @@ const payload = {
 
 if (!payload.p_name) return myAlert(isGroup ? '단체명을 입력하세요.' : '이름을 입력하세요.', 'warning');
 if (!payload.p_email) return myAlert('이메일을 입력하세요.', 'warning');
-if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(payload.p_email)) {
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.p_email)) {
     return myAlert('올바른 이메일 형식을 입력하세요.', 'warning');
 }
 if (!isGroup && /[0-9]/.test(payload.p_name)) {
@@ -2006,18 +2022,39 @@ if (isGroup && document.getElementById('create-group-corp-num')?.value && !paylo
     return myAlert('법인번호는 숫자 13자리로 입력해주세요.', 'warning');
 }
 
+const submitted = memberCreateSnapshot();
+const controls = Array.from(document.querySelectorAll('#memberCreateModal input,#memberCreateModal select,#memberCreateModal textarea,#memberCreateModal button'))
+    .map(node => [node,node.disabled]);
+memberCreateSaving = true;
+controls.forEach(([node]) => { node.disabled = true; });
 showLoading(true);
-const { error } = await _supabase.rpc('create_member_secure_v3', payload);
-showLoading(false);
-
-if (error) {
-    CoopSafeLog.error("[erp/admin_member] operation failed", error);
-    return myAlert('조합원 등록 실패: ' + (error.hint || error.message), 'error');
+try {
+    const { error } = await _supabase.rpc('create_member_secure_v3', payload);
+    if (error) throw error;
+    if (memberCreateState !== state || state.owner !== memberDetailOwner()) return;
+    // Normally inputs are locked. Preserve any later programmatic input as a new draft.
+    const unchanged = memberCreateSnapshot() === submitted;
+    if (unchanged) resetMemberCreateForm();
+    state.baseline = unchanged ? memberCreateSnapshot() : submitted;
+    if (unchanged) memberCreateFields().forEach(node => window.ErpWorkspaceResume?.checkpoint(node));
+    myAlert('조합원이 등록되었습니다.');
+    if (unchanged) {
+        memberCreateSaving = false;
+        bootstrap.Modal.getInstance(document.getElementById('memberCreateModal'))?.hide();
+    }
+    void fetchMembers();
+} catch (error) {
+    if (memberCreateState === state && state.owner === memberDetailOwner()) {
+        CoopSafeLog.error('[erp/admin_member] operation failed', error);
+        myAlert('조합원 등록 실패: ' + (error.hint || error.message), 'error');
+    }
+} finally {
+    const current = memberCreateState === state && state.owner === memberDetailOwner();
+    controls.forEach(([node,disabled]) => { if (node.isConnected) node.disabled = current ? disabled : true; });
+    memberCreateSaving = false;
+    syncMemberCreateDraftButton();
+    showLoading(false);
 }
-
-myAlert('조합원이 등록되었습니다.');
-bootstrap.Modal.getInstance(document.getElementById('memberCreateModal'))?.hide();
-fetchMembers();
 }
 
 async function downloadMemberImportTemplate() {
@@ -6456,12 +6493,82 @@ const memberDetailDrafts = new Map();
 let memberDetailEditState = null;
 let memberDetailDraftOwner = '';
 let memberDetailSaving = false;
+const memberConsultDrafts = new Map();
+const memberConsultPending = new Set();
+let memberConsultState = null;
+let memberCreateState = null;
+let memberCreateSaving = false;
 
 function clearMemberDetailEdits() {
     memberDetailDrafts.clear();
     memberDetailEditState = null;
     memberDetailDraftOwner = '';
+    memberConsultDrafts.clear();
+    memberConsultState = null;
+    const consultation = document.getElementById('md-consult-input');
+    if (consultation) consultation.value = '';
+    memberCreateState = null;
+    resetMemberCreateForm();
+    document.querySelectorAll('#memberCreateModal input,#memberCreateModal select,#memberCreateModal textarea,#memberCreateModal button')
+        .forEach(node => { node.disabled = true; });
+    syncMemberCreateDraftButton();
 }
+
+function memberCreateFields() {
+    return Array.from(document.querySelectorAll('#memberCreateModal input,#memberCreateModal select,#memberCreateModal textarea'));
+}
+
+function memberCreateSnapshot() {
+    return JSON.stringify(memberCreateFields().map(node => [node.id,node.type === 'checkbox' ? node.checked : node.value]));
+}
+
+function hasMemberCreateDraft() {
+    const owner = memberDetailOwner();
+    return !!owner && memberCreateState?.owner === owner && memberCreateSnapshot() !== memberCreateState.baseline;
+}
+
+function syncMemberCreateDraftButton() {
+    const button = document.getElementById('member-create-discard');
+    if (button) button.disabled = memberCreateSaving || !memberCreateState
+        || memberCreateSnapshot() === memberCreateState.baseline;
+}
+
+function discardMemberCreateDraft() {
+    const state = memberCreateState;
+    if (memberCreateSaving || !state || state.owner !== memberDetailOwner()) return;
+    const submitted = memberCreateSnapshot();
+    myConfirm('이 초안을 버릴까요?', () => {
+        if (memberCreateSaving || memberCreateState !== state || state.owner !== memberDetailOwner()) return;
+        if (memberCreateSnapshot() !== submitted) return myAlert('입력 내용이 바뀌었습니다. 다시 확인해 주세요.', 'warning');
+        resetMemberCreateForm();
+        state.baseline = memberCreateSnapshot();
+        memberCreateFields().forEach(node => window.ErpWorkspaceResume?.checkpoint(node));
+        syncMemberCreateDraftButton();
+    });
+}
+
+function retainMemberConsultEdit() {
+    const state = memberConsultState;
+    if (!state || state.owner !== memberDetailOwner() || state.member !== String(g_current_member_id || '')) return;
+    const value = document.getElementById('md-consult-input')?.value || '';
+    if (value) memberConsultDrafts.set(state.key, value);
+    else memberConsultDrafts.delete(state.key);
+}
+
+function initializeMemberConsultEdit(owner, member) {
+    const key = JSON.stringify([owner,String(member)]);
+    memberConsultState = {key,owner,member:String(member)};
+    document.getElementById('md-consult-input').value = memberConsultDrafts.get(key) || '';
+    const button = document.getElementById('member-consult-submit');
+    if (button) button.disabled = memberConsultPending.has(key);
+}
+
+document.getElementById('md-consult-input')?.addEventListener('input', retainMemberConsultEdit);
+document.getElementById('memberCreateModal')?.addEventListener('input', syncMemberCreateDraftButton);
+document.getElementById('memberCreateModal')?.addEventListener('change', syncMemberCreateDraftButton);
+document.getElementById('memberCreateModal')?.addEventListener('hide.bs.modal', event => {
+    if (memberCreateSaving) event.preventDefault();
+});
 
 function memberDetailOwner() {
     const auth = String(adminCertificateAuthId || '');
@@ -6567,7 +6674,9 @@ function acceptMemberBasicSave(state, submitted, updates, includeBadges = false)
 
 window.addEventListener('beforeunload', event => {
     retainMemberDetailEdit();
-    if (memberDetailOwner() && (memberDetailSaving || memberDetailDrafts.size)) {
+    retainMemberConsultEdit();
+    if (memberDetailOwner() && (memberDetailSaving || memberDetailDrafts.size || memberConsultDrafts.size
+        || memberConsultPending.size || memberCreateSaving || hasMemberCreateDraft())) {
         event.preventDefault();
         event.returnValue = '';
     }
@@ -6603,6 +6712,7 @@ function setMemberDetailReadBusy(busy) {
 document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', event => {
     if (memberDetailSaving) { event.preventDefault(); return; }
     retainMemberDetailEdit();
+    retainMemberConsultEdit();
     window.MemberNotificationAdmin?.clearDetail();
     window.ContributionCertPreview?.clear();
     ++g_member_detail_revision;
@@ -7046,6 +7156,7 @@ async function openMemberDetail(id) {
     const editorOwner = memberDetailOwner();
     if (!editorOwner) return;
     retainMemberDetailEdit();
+    retainMemberConsultEdit();
     window.ContributionCertPreview?.clear();
     const requestRevision = ++g_member_detail_revision;
     setMemberDetailReadBusy(true);
@@ -7201,6 +7312,7 @@ async function openMemberDetail(id) {
     // 5. 모달 설정 및 하위 데이터 로드 (기존 유지)
     toggleEditMode(false);
     initializeMemberDetailEdit(editorOwner, memberUid);
+    initializeMemberConsultEdit(editorOwner, memberUid);
     loadMemberFunds(memberUid, m.member_id, true);
     loadConsultLogs(memberUid);
     void window.MemberNotificationAdmin?.detail(memberUid);
@@ -7893,6 +8005,9 @@ async function loadConsultLogs(uuid) { // uuid는 유지(호출부 호환), 내�
 
 // [수정] 상담 등록 (UUID 대신 텍스트 ID 사용)
 async function addConsultLog() {
+const state = memberConsultState;
+if (!state || state.owner !== memberDetailOwner() || state.member !== String(g_current_member_id || '')
+    || memberConsultPending.has(state.key) || window.frameElement?.hidden) return;
 const inputEl = document.getElementById('md-consult-input');
 const content = inputEl.value;
 
@@ -7903,23 +8018,38 @@ const textId = document.getElementById('md-id-text').innerText; // 화면에 있
 
 if(!textId || textId === '-') return myAlert('조합원 번호가 없는 사용자입니다.', 'warning');
 
+retainMemberConsultEdit();
+memberConsultPending.add(state.key);
+const button = document.getElementById('member-consult-submit');
+if (button) button.disabled = true;
 showLoading(true);
-
-// ★ 핵심 수정: 텍스트 ID만 보냅니다. (UUID는 DB가 알아서 찾음)
+try {
 const { error } = await _supabase.rpc('add_consultation', {
 p_member_id: textId,
 p_author_email: userEmail,
 p_content: content
 });
-showLoading(false);
-
-if(error) {
-CoopSafeLog.error("[erp/admin_member] operation failed", error);
-myAlert('등록 실패: ' + error.message, 'error');
-} else {
-inputEl.value = '';
-// 등록 후 목록 갱신할 때도 원래 함수 호출 (내부에서 textId 다시 찾음)
-loadConsultLogs(null);
+if (error) throw error;
+if (state.owner !== memberDetailOwner()) return;
+if (memberConsultState?.key === state.key) {
+    if (inputEl.value === content) {
+        inputEl.value = '';
+        window.ErpWorkspaceResume?.checkpoint(inputEl);
+    }
+    retainMemberConsultEdit();
+    if (!window.frameElement?.hidden) void loadConsultLogs(state.member);
+} else if (memberConsultDrafts.get(state.key) === content) {
+    memberConsultDrafts.delete(state.key);
+}
+} catch (error) {
+    if (state.owner === memberDetailOwner() && memberConsultState?.key === state.key) {
+        CoopSafeLog.error('[erp/admin_member] operation failed', error);
+        myAlert('등록 실패: ' + error.message, 'error');
+    }
+} finally {
+    memberConsultPending.delete(state.key);
+    if (memberConsultState?.key === state.key && state.owner === memberDetailOwner() && button) button.disabled = false;
+    showLoading(false);
 }
 }
 

@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.176
-Change: 2026-10-17 - Clarify the persisted account entry status label.
+Version: v1.0.177
+Change: 2026-10-17 - Keep separate authorized profile drafts during profile changes.
 -->
 <html lang="ko">
 <head>
@@ -10,7 +10,7 @@ Change: 2026-10-17 - Clarify the persisted account entry status label.
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.176 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.177 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2495,6 +2495,97 @@ const SESSION_EXPIRED_NOTICE_KEY = 'member_session_expired_notice_v1';
 let _supabase = null;
 let curMem = null;
 let curAuth = null;
+// Personal drafts stay in this page's memory, keyed by authenticated owner/coop/profile.
+const portalProfileDrafts = new Map();
+let portalProfileEditor = null;
+let portalProfileDraftOwner = '';
+let portalProfileSaving = false;
+let portalProfileLoadRevision = 0;
+
+function portalProfileFields() {
+return ['editPhone','editAddrMain','editAddrDetail','editBankName','editAccountNo','editHolder',
+    'editBizNo','editCorpNo','editRepresentativeName','editContactName','editContactPosition']
+    .map(id => document.getElementById(id)).filter(Boolean);
+}
+function portalProfileSnapshot() {
+return portalProfileFields().map(node => [node.id,node.value]).concat([
+    ['detailDisplay',document.getElementById('editAddrDetail').style.display],
+    ['bizErrorHidden',document.getElementById('bizNoError').classList.contains('hidden')],
+    ['corpErrorHidden',document.getElementById('corpNoError').classList.contains('hidden')],
+    ['bizErrorDisplay',document.getElementById('bizNoError').style.display],
+    ['corpErrorDisplay',document.getElementById('corpNoError').style.display]
+]);
+}
+function applyPortalProfileSnapshot(values) {
+const snapshot = new Map(values);
+portalProfileFields().forEach(node => { if (snapshot.has(node.id)) node.value = snapshot.get(node.id); });
+document.getElementById('editAddrDetail').style.display = snapshot.get('detailDisplay') || 'none';
+document.getElementById('bizNoError').classList.toggle('hidden',snapshot.get('bizErrorHidden') !== false);
+document.getElementById('corpNoError').classList.toggle('hidden',snapshot.get('corpErrorHidden') !== false);
+document.getElementById('bizNoError').style.display = snapshot.get('bizErrorDisplay') || '';
+document.getElementById('corpNoError').style.display = snapshot.get('corpErrorDisplay') || '';
+}
+function portalProfileChanged(current, baseline) {
+const saved = new Map(baseline), values = new Map(current);
+return portalProfileFields().some(node => {
+    const value = values.get(node.id);
+    if (node.id === 'editAccountNo' && (!String(value || '').trim() || String(value).includes('*'))) return false;
+    return value !== saved.get(node.id);
+});
+}
+function clearPortalProfileEdits() {
+portalProfileDrafts.clear();
+portalProfileEditor = null;
+portalProfileDraftOwner = '';
+++portalProfileLoadRevision;
+portalProfileFields().forEach(node => { node.value = ''; node.readOnly = true; });
+}
+function portalProfileOwner(member = curMem) {
+const actor = String(curAuth?.id || '');
+const coop = String(member?.coop_id || currentMemberCoopId || '');
+const owner = actor && coop ? JSON.stringify([actor,coop]) : '';
+if (portalProfileDraftOwner !== owner) {
+    portalProfileDrafts.clear();
+    portalProfileEditor = null;
+    portalProfileDraftOwner = owner;
+}
+return owner;
+}
+function retainPortalProfileEdit() {
+const state = portalProfileEditor;
+if (!state || state.owner !== portalProfileOwner() || portalProfileSaving) return;
+const current = portalProfileSnapshot();
+if (state.editing && portalProfileChanged(current,state.baseline)) {
+    portalProfileDrafts.set(state.key,{current});
+} else portalProfileDrafts.delete(state.key);
+}
+function isCurrentPortalProfileEditor(state) {
+return !!state && portalProfileEditor === state && state.owner === portalProfileOwner()
+    && state.member === String(curMem?.id || '');
+}
+function initializePortalProfileEdit(member) {
+const owner = portalProfileOwner(member);
+if (!owner || !member?.id) return;
+const key = JSON.stringify([owner,String(member.id)]);
+setPortalProfileEditMode(false);
+document.getElementById('editAddrDetail').style.display = 'none';
+['bizNoError','corpNoError'].forEach(id => document.getElementById(id).classList.add('hidden'));
+const state = {key,owner,member:String(member.id),baseline:portalProfileSnapshot(),editing:false};
+portalProfileEditor = state;
+const draft = portalProfileDrafts.get(key);
+if (draft) {
+    state.editing = true;
+    setPortalProfileEditMode(true);
+    applyPortalProfileSnapshot(draft.current);
+}
+}
+window.addEventListener('beforeunload', event => {
+retainPortalProfileEdit();
+if (portalProfileOwner() && (portalProfileSaving || portalProfileDrafts.size)) {
+    event.preventDefault(); event.returnValue = '';
+}
+});
+window.addEventListener('pagehide', clearPortalProfileEdits);
 let familyRegistrationOwner = '';
 let familyRegistrationRevision = 0;
 let tempChildData = null;
@@ -2670,6 +2761,7 @@ CoopSafeLog.error("Failed to clear Supabase auth cache:", e);
 
 async function signOutSilently(client = _supabase) {
 window.ContributionCertPreview?.clear();
+clearPortalProfileEdits();
 resetFamilyRegistrationDraft();
 suppressSessionExpiredHandling = true;
 try {
@@ -3314,6 +3406,7 @@ _supabase.auth.onAuthStateChange(async (event, session) => {
 if (!session || (curAuth?.id && curAuth.id !== session.user?.id)) {
 window.ContributionCertPreview?.clear();
 window.MemberTelegramConnection?.clear();
+clearPortalProfileEdits();
 resetFamilyRegistrationDraft();
 }
 // 로딩바 끄기 (결정 났음)
@@ -4264,6 +4357,11 @@ return memberInformationPortal.refresh(member);
 }
 
 async function loadDashboardData(uuid, options = {}) {
+if (portalProfileSaving) return;
+retainPortalProfileEdit();
+const profileLoadRevision = ++portalProfileLoadRevision;
+const profileLoadActor = String(curAuth?.id || '');
+const currentProfileLoad = () => profileLoadRevision === portalProfileLoadRevision && profileLoadActor === String(curAuth?.id || '');
 if (curMem?.id && String(curMem.id) !== String(uuid)) window.ContributionCertPreview?.clear();
 try {
 // [핵심 변경] 현재 로드하는 프로필 ID를 브라우저에 기억시킴 (새로고침 대비)
@@ -4279,6 +4377,7 @@ const { data: member, error: memErr } = await scopeMemberTenant(_supabase
 .eq('id', uuid)
 .single();
 
+if (!currentProfileLoad()) return;
 	if (memErr || !member) {
 	CoopSafeLog.error("멤버 조회 실패:", memErr);
 	if (memErr && (memErr.code === 'PGRST301' || memErr.status === 403)) {
@@ -4304,6 +4403,7 @@ if (familyRegistrationOwner && familyRegistrationOwner !== getFamilyRegistration
 curMem = member; 
 currentMemberCoopId = member.coop_id || await getCurrentMemberCoopId();
 await loadMembermanageBranding();
+if (!currentProfileLoad()) return;
 applyMembermanageBranding();
 // [신규] 현재 로드하는 프로필 유형도 저장 (타 페이지 연동용)
 sessionStorage.setItem('activeMemberType', curMem.member_type);
@@ -4315,6 +4415,7 @@ const { data: dashboardData, error: dashboardError } = await _supabase.rpc('get_
 p_member_uuid: uuid,
 p_history_limit: MEMBER_DASHBOARD_HISTORY_LIMIT
 });
+if (!currentProfileLoad()) return;
 if (dashboardError) throw dashboardError;
 
 const recent = dashboardData?.recent || {};
@@ -4350,6 +4451,7 @@ const { data: officials } = await scopeMemberTenant(_supabase
 .select('id, category, status'))
 .eq('member_id', curMem.member_id)
 .eq('status', 'active');
+if (!currentProfileLoad()) return;
 
 // 결과 예시: ['election_comm', 'auditor'] 등
 const myRoles = officials ? officials.map(r => r.category) : [];
@@ -4357,6 +4459,7 @@ const isOfficial = officials && officials.length > 0;
 const officialIds = officials ? officials.map(r => r.id).filter(Boolean) : [];
 
 await loadCoopRuntimeModules();
+if (!currentProfileLoad()) return;
 
 // 5. 렌더링 호출
 renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta);
@@ -4389,6 +4492,7 @@ if (!isSiteMemberPortalProfile()) loadBoard('free', null, 20);
 	}
 
 	} catch (e) {
+if (!currentProfileLoad()) return;
 CoopSafeLog.error("Dashboard Load Error:", e);
 if (options && options.rethrowOnError) {
 if (e && (e.code === 'PGRST301' || e.status === 403)) {
@@ -4401,7 +4505,7 @@ throw (e instanceof Error ? e : new Error(String(e)));
 showModal('데이터 로드 오류: ' + (e?.message || e));
 showOnly('loginSection');
 } finally {
-showLoading(false);
+if (currentProfileLoad()) showLoading(false);
 }
 }
 
@@ -5730,6 +5834,7 @@ setVoteQuickCardContent({
 
 // [수정] 대시보드 렌더링: 자산 카드 동적 생성 및 타임라인 통합 + 단체 정보 처리
 function renderDashboard(member, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta) {
+retainPortalProfileEdit();
 window.MemberTelegramConnection?.setContext(_supabase, {authUserId:curAuth?.id,coopId:currentMemberCoopId,
   profileId:member?.id,isOwn:!!member?.id && member.id===getRootMemberProfileId()});
 // 1. 기본 정보 매핑 (기존 유지)
@@ -5897,6 +6002,7 @@ void loadQuizPilotEntry();
 // [3] 타임라인 렌더링 (통합)
 // ----------------------------------------------------
 renderTimeline(ledger, apps, visibleDonations, visiblePoints, visibleDividends);
+initializePortalProfileEdit(member);
 }
 
 // [신규] 전자서명 요청 존재 여부 확인 (임원용)
@@ -7786,7 +7892,10 @@ window.__memberAppLocks.submitApplication = false;
 
 // [수정] 프로필 저장 (가족 간 전화번호 중복 허용 로직 추가)
 async function saveProfile() {
+const editState = portalProfileEditor;
+if (portalProfileSaving || !isCurrentPortalProfileEditor(editState) || !editState.editing) return;
 const targetUuid = curMem.id; 
+const submitted = portalProfileSnapshot();
 
 const phone = document.getElementById('editPhone').value.trim();
 const mainAddr = document.getElementById('editAddrMain').value;
@@ -7874,9 +7983,18 @@ return showModal('오류 발생: ' + e.message);
 }
 // [중복 검사 로직 수정 끝]
 
+if (!isCurrentPortalProfileEditor(editState)) return;
 showConfirmModal('정보를 수정하시겠습니까?', async function() {
+if (portalProfileSaving || !isCurrentPortalProfileEditor(editState) || !editState.editing) return;
+if (JSON.stringify(portalProfileSnapshot()) !== JSON.stringify(submitted)) return showModal('입력 내용이 바뀌었습니다. 다시 저장해 주세요.');
+const controls = [...portalProfileFields(), ...document.querySelectorAll('#profileSwitcher button,#btnEditProfile,#btnSaveProfile,#btnCancelEdit')]
+    .map(node => [node,node.disabled]);
+portalProfileSaving = true;
+controls.forEach(([node]) => { node.disabled = true; });
 showLoading(true, '저장 중...');
 
+let saved = false;
+try {
 const { error } = await _supabase.rpc('update_my_profile_v2', {
 p_target_id: targetUuid, 
 p_phone: phone,
@@ -7891,19 +8009,31 @@ p_contact_name: contactName,
 p_contact_position: contactPosition
 });
 
-showLoading(false);
-
-if (error) {
-showModal('수정 실패: ' + (error.hint || error.message));
-} else {
+if (error) throw error;
+if (!isCurrentPortalProfileEditor(editState)) return;
 showModal('수정되었습니다.');
 curMem.bank_name = bank || curMem.bank_name;
-curMem.account_number = accNo || curMem.account_number;
+if (accNo.trim() && !accNo.includes('*')) {
+    const digits = accNo.replace(/[\s-]/g,'');
+    curMem.account_number = /^[0-9]{8,30}$/.test(digits) ? '****' + digits.slice(-4) : '****';
+    curMem.account_num_display = curMem.account_number;
+}
 curMem.account_holder = holder || curMem.account_holder;
 memberInformationPortal?.invalidate(curMem);
-toggleEditMode(false);
-reloadDashboard(); 
+portalProfileDrafts.delete(editState.key);
+portalProfileEditor = null;
+setPortalProfileEditMode(false);
+saved = true;
+} catch (error) {
+if (isCurrentPortalProfileEditor(editState)) showModal('수정 실패: ' + (error.hint || error.message));
+} finally {
+const current = editState.owner === portalProfileOwner() && editState.member === String(curMem?.id || '');
+controls.forEach(([node,disabled]) => { if (node.isConnected) node.disabled = current ? disabled : true; });
+portalProfileSaving = false;
+if (!saved) retainPortalProfileEdit();
+showLoading(false);
 }
+if (saved && editState.owner === portalProfileOwner() && editState.member === String(curMem?.id || '')) await reloadDashboard();
 });
 }
 
@@ -8334,6 +8464,21 @@ setModalDepth(false);
 
 // [수정] 수정 모드 토글 (주소 상세창 숨김 처리 및 스마트 새로고침 유지)
 function toggleEditMode(isEdit) {
+const state = portalProfileEditor;
+if (portalProfileSaving || !isCurrentPortalProfileEditor(state)) return;
+if (isEdit) {
+    if (state.editing) return;
+    state.editing = true;
+    setPortalProfileEditMode(true);
+} else {
+    applyPortalProfileSnapshot(state.baseline);
+    portalProfileDrafts.delete(state.key);
+    state.editing = false;
+    setPortalProfileEditMode(false);
+}
+}
+
+function setPortalProfileEditMode(isEdit) {
 const inputs = document.querySelectorAll('.readonly-text, .editable-input');
 const viewAddr = document.getElementById('viewAddressBox');
 const editAddr = document.getElementById('editAddressBox');
@@ -8395,7 +8540,6 @@ document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'b
 
 } else {
 // [취소 버튼]
-reloadDashboard(); 
 
 document.getElementById('btnEditProfile').classList.remove('hidden');
 document.getElementById('btnSaveProfile').classList.add('hidden');
@@ -9470,13 +9614,16 @@ switcher.classList.remove('hidden');
 
 // 2. 프로필 전환 실행
 async function switchProfile(targetUuid, targetName) {
+if (portalProfileSaving) return;
 if(curMem && curMem.id === targetUuid) return; // 이미 선택된 프로필이면 무시
+const profileActor = String(curAuth?.id || '');
 
 showLoading(true, `${targetName} 님으로 전환 중...`);
 
 // ★ 핵심: 로그아웃 없이, 데이터 로드 함수만 대상 UUID로 다시 호출
 // curAuth(로그인된 정보)는 유지되고, curMem(화면 데이터)만 교체됨
 await loadDashboardData(targetUuid);
+if (String(curMem?.id || '') !== String(targetUuid) || profileActor !== String(curAuth?.id || '')) return;
 
 // 스위처 UI 다시 그리기 (Active 상태 변경을 위해)
 await loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
