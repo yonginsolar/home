@@ -7711,7 +7711,7 @@ async function saveMemberBasic() {
         const finalAddr = detailAddr ? `${basicAddr} ${detailAddr}` : basicAddr;
 
         let bankAcc = document.getElementById('md-bank-account').value;
-        if (bankAcc && bankAcc.includes('*')) bankAcc = null;
+        if (bankAcc && (!bankAcc.trim() || bankAcc.includes('*'))) bankAcc = null;
 
         showLoading(true);
 
