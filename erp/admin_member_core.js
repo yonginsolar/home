@@ -6239,7 +6239,7 @@ function switchTab(tabName) {
         invalidateMemberReturnSummaryRead();
         invalidateAdminDashboardRead();
     }
-    if (tabName !== 'applications') invalidateApplicationListRead();
+    if (tabName !== 'applications' && !document.getElementById('tab-' + tabName)?.classList.contains('active')) invalidateApplicationListRead();
     memberFundListResume = null;
     // 1. 모든 탭 숨김 처리
     const panes = document.querySelectorAll('.main-content > .tab-pane');
