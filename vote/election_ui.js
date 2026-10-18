@@ -1,4 +1,4 @@
-/* Election UI 1.0.0. Static contextual help only: no Auth/data requests, voting, storage of drafts or edits. */
+/* Election UI 1.0.1. Static contextual help only: no Auth/data requests, voting, storage of drafts or edits. */
 (function(root){
  'use strict';
  if(root.CoopElectionUI)return;
@@ -14,7 +14,7 @@
   vote_login:[['#election-title','선거 안내','선거구를 선택해 후보의 경력·공약을 확인합니다. 투표 기간과 본인의 참여 자격을 확인한 뒤 투표소에 입장합니다.']],
   candidate_apply:[['#page-title','후보자 등록 신청','출마할 선거와 선거구를 확인하고 이력·증빙·공약과 동의 항목을 작성합니다. 공개할 정보와 비공개 증빙을 구분해 확인하세요.']],
   vote:[['#vote-container #election-title','투표 방법','현재 선거구와 화면에 표시된 선택 규칙을 확인한 뒤 후보 또는 찬반을 선택합니다. 마지막 확인창에서 기표 내용을 다시 확인하고 제출하세요.']],
-  poll_vote:[['#pollTitle','선호도 투표 방법','화면에 표시된 최소·최대 선택 수와 기간에 맞춰 선택한 뒤 제출합니다. 선호도 투표는 기간 내 재제출할 수 있으며 마지막 제출 내용이 반영됩니다.']],
+  poll_vote:[['#pollTitle','선호도 투표 방법','화면에 표시된 최소·최대 선택 수와 기간에 맞춰 선택한 뒤 제출합니다. 다시 제출할 수 있는 투표는 마지막 제출 내용이 반영됩니다.']],
   monitor:[['header h1','투표·개표 현황','투표율과 개표 결과를 구분해 표시합니다. 표시 중인 선거·회차·상태를 먼저 확인하세요. 공개 여부는 해당 선거의 기존 권한과 진행 상태를 따릅니다.']]
  };
  if(!context[page]||!['admin','member'].includes(role))return;
@@ -95,9 +95,9 @@
    queued=true;root.queueMicrotask(()=>{queued=false;decorate();});
   }).observe(doc.body,{childList:true,subtree:true});
  }
- root.CoopElectionUI=Object.freeze({version:'1.0.0',refresh,decorate});
+ root.CoopElectionUI=Object.freeze({version:'1.0.1',refresh,decorate});
  // Member pages share the existing display preference without loading ERP-specific page help.
- if(!root.CoopWorkflowHelp)root.CoopWorkflowHelp=Object.freeze({version:'election-1.0.0',visible:storedVisible,refresh});
+ if(!root.CoopWorkflowHelp)root.CoopWorkflowHelp=Object.freeze({version:'election-1.0.1',visible:storedVisible,refresh});
  root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)refresh(e.newValue!=='0');});
  root.addEventListener('pageshow',()=>refresh());
  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',start,{once:true});else start();
