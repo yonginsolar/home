@@ -6710,6 +6710,51 @@ let memberCreateState = null;
 let memberCreateSaving = false;
 const memberFundDrafts = new Map();
 let memberFundState = null;
+let donationGrantState = null;
+
+function donationGrantFields() {
+    return ['dn-member-id','dn-member-name','dn-date','dn-amount','dn-method','dn-note'].map(id=>document.getElementById(id)).filter(Boolean);
+}
+function donationGrantSnapshot() {
+    return JSON.stringify(donationGrantFields().map(node=>[node.id,node.id==='dn-amount'?String(node.value).replace(/,/g,''):node.value]));
+}
+function isCurrentDonationGrant(state=donationGrantState) {
+    return !!state && state===donationGrantState && state.owner===memberDetailOwner()
+        && !isAdminMemberSiteProfile() && canAccessAdminMemberTab('funds-manage');
+}
+function hasDonationGrantDraft() {
+    return isCurrentDonationGrant() && !donationGrantState.completed
+        && (donationGrantState.busy || donationGrantState.uncertain || donationGrantSnapshot()!==donationGrantState.baseline);
+}
+function syncDonationGrantState() {
+    const state=donationGrantState,current=isCurrentDonationGrant(state);
+    const status=document.getElementById('donation-grant-status');
+    if(status){status.hidden=!current || !hasDonationGrantDraft();status.textContent=state?.busy?'등록 중':state?.uncertain?'결과 확인 필요':'작성 중';}
+    document.querySelectorAll('#tab-don-single input,#tab-don-single select,#tab-don-single button').forEach(node=>{
+        node.disabled=!current || state.busy || state.uncertain || state.completed;
+    });
+}
+function clearDonationGrantDraft(clearBatch=true) {
+    donationGrantState=null;
+    for(const node of donationGrantFields())node.value=node.id==='dn-method'?'transfer':'';
+    if(clearBatch){
+        if(typeof g_donation_excel_data!=='undefined')g_donation_excel_data=[];
+        if(typeof g_donation_batch_request_key!=='undefined')g_donation_batch_request_key=null;
+        const file=document.getElementById('don-excel-file');if(file)file.value='';
+        const preview=document.getElementById('don-excel-preview');if(preview)preview.style.display='none';
+        const rows=document.getElementById('don-excel-tbody');if(rows)rows.textContent='';
+        const count=document.getElementById('don-excel-count');if(count)count.textContent='';
+    }
+    document.querySelectorAll('#tab-don-single input,#tab-don-single select,#tab-don-single button').forEach(node=>{node.disabled=true;});
+    const status=document.getElementById('donation-grant-status');if(status)status.hidden=true;
+}
+document.getElementById('tab-don-single')?.addEventListener('input',syncDonationGrantState);
+document.getElementById('tab-don-single')?.addEventListener('change',syncDonationGrantState);
+document.getElementById('donationModal')?.addEventListener('hide.bs.modal',event=>{
+    if(donationGrantState?.busy && !donationGrantState.completed){event.preventDefault();return;}
+    if(donationGrantState)donationGrantState.confirmation=null;
+});
+document.getElementById('donationTab')?.addEventListener('shown.bs.tab',()=>{if(donationGrantState)donationGrantState.confirmation=null;});
 
 function memberFundFields() {
     return ['fund-date','fund-amount','fund-note','fund-depositor','fund-method'].map(id => document.getElementById(id)).filter(Boolean);
@@ -6818,6 +6863,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 
 function clearMemberDetailEdits() {
     clearMemberFundDrafts();
+    clearDonationGrantDraft();
     if (typeof resetMemberImportDraft === 'function') resetMemberImportDraft();
     memberDetailDrafts.clear();
     memberDetailEditState = null;
@@ -7005,7 +7051,7 @@ window.addEventListener('beforeunload', event => {
     captureMemberFundDraft();
     if (memberDetailOwner() && (memberFundDrafts.size || memberFundState?.busy || memberFundState?.uncertain || memberDetailSaving || memberDetailDrafts.size || memberConsultDrafts.size
         || memberConsultPending.size || memberCreateSaving || hasMemberCreateDraft()
-        || (typeof hasMemberImportDraft === 'function' && hasMemberImportDraft()))) {
+        || hasDonationGrantDraft() || (typeof hasMemberImportDraft === 'function' && hasMemberImportDraft()))) {
         event.preventDefault();
         event.returnValue = '';
     }
@@ -12162,27 +12208,21 @@ function normalizeDonationBatchRow(row) {
 }
 
 function openDonationModal() {
-    document.getElementById('dn-member-id').value = '';
-    document.getElementById('dn-member-name').value = '';
-    document.getElementById('dn-date').value = getAdminMemberKstDateString();
-    document.getElementById('dn-amount').value = '';
-    document.getElementById('dn-method').value = 'transfer';
-    document.getElementById('dn-note').value = '';
-
-    g_donation_excel_data = [];
-    g_donation_batch_request_key = null;
-    document.getElementById('don-excel-file').value = '';
-    document.getElementById('don-excel-preview').style.display = 'none';
-    document.getElementById('don-excel-tbody').innerHTML = '';
-    document.getElementById('don-excel-count').innerText = '';
-
-    const firstTab = new bootstrap.Tab(document.querySelector('#donationTab button[data-bs-target="#tab-don-single"]'));
-    firstTab.show();
-
+    const owner=memberDetailOwner();
+    if(!owner || isAdminMemberSiteProfile() || !canAccessAdminMemberTab('funds-manage') || window.frameElement?.hidden)return;
+    if(donationGrantState?.busy || donationGrantState?.completed)return;
+    if(!donationGrantState){
+        document.getElementById('dn-date').value=getAdminMemberKstDateString();
+        donationGrantState={owner,baseline:donationGrantSnapshot(),busy:false,uncertain:false,completed:false,attempt:null,confirmation:null};
+    }
+    syncDonationGrantState();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('donationModal')).show();
 }
 
 async function submitDonationGrant() {
+    const state=donationGrantState,modal=document.getElementById('donationModal');
+    if(!isCurrentDonationGrant(state) || state.busy || state.uncertain || state.completed || window.frameElement?.hidden
+        || !modal?.classList.contains('show') || !document.getElementById('tab-don-single')?.classList.contains('active'))return;
     const memberId = document.getElementById('dn-member-id').value.trim();
     const memberName = document.getElementById('dn-member-name').value.trim();
     const amount = Number(ERPNumberInput.raw(document.getElementById('dn-amount').value));
@@ -12194,30 +12234,49 @@ async function submitDonationGrant() {
     if (!Number.isSafeInteger(amount) || amount <= 0) return myAlert('정확한 금액을 입력해주세요.', 'warning');
     if (!donationDate) return myAlert('기부일을 선택해주세요.', 'warning');
 
+    const snapshot=donationGrantSnapshot(),confirmation={};state.confirmation=confirmation;
+    const args={p_member_text_id:memberId,p_values:{amount, date:donationDate,method,note}};
     const memberLabel = memberName ? `[${memberId}] ${memberName}` : `[${memberId}]`;
     myConfirm(`${memberLabel} 조합원에게\n자산수증이익 ${amount.toLocaleString()}원을 등록하시겠습니까?`, async () => {
-        showLoading(true);
-
-        const { error } = await _supabase.rpc('manage_donation_secure', {
-            p_id: null,
-            p_member_uid: null,
-            p_member_text_id: memberId,
-            p_amount: Math.trunc(amount),
-            p_date: donationDate,
-            p_method: method,
-            p_note: note
-        });
-
-        showLoading(false);
-
-        if (error) {
-            myAlert('등록 실패: ' + error.message, 'error');
-            return;
+        if(!isCurrentDonationGrant(state) || state.confirmation!==confirmation || state.busy || state.uncertain || state.completed
+            || window.frameElement?.hidden || !modal.classList.contains('show') || !document.getElementById('tab-don-single').classList.contains('active'))return;
+        if(snapshot!==donationGrantSnapshot())return myAlert('작성 내용이 바뀌었습니다. 다시 확인해 주세요.','warning');
+        const signature=JSON.stringify(args);
+        if(state.attempt?.signature!==signature)state.attempt={signature,key:crypto.randomUUID()};
+        const locked=Array.from(modal.querySelectorAll('input,select,button')).map(node=>[node,node.disabled]);
+        state.busy=true;syncDonationGrantState();
+        locked.forEach(([node])=>{node.disabled=true;});showLoading(true);
+        try{
+            const {data,error}=await _supabase.rpc('admin_create_member_donation_secure',{...args,p_request_key:state.attempt.key});
+            if(!isCurrentDonationGrant(state))return;
+            if(error){
+                state.uncertain=!/^(?:22[A-Z0-9]{3}|23[A-Z0-9]{3}|42[A-Z0-9]{3}|P000[0-9]|PT4[0-9]{2}|PGRST202)$/.test(String(error.code||''));
+                myAlert(state.uncertain?'등록 결과를 확인하지 못했습니다. 목록에서 등록 여부를 확인해 주세요.':'등록하지 못했습니다. '+error.message,'warning');return;
+            }
+            if(data?.outcome!=='saved')throw Error('DONATION_RESULT_UNCONFIRMED');
+            state.completed=true;
+            donationGrantFields().forEach(node=>window.ErpWorkspaceResume?.checkpoint(node));
+            modal.addEventListener('hidden.bs.modal',()=>{
+                if(!isCurrentDonationGrant(state))return;
+                clearDonationGrantDraft(false);
+                donationGrantFields().forEach(node=>window.ErpWorkspaceResume?.checkpoint(node));
+                if(!window.frameElement?.hidden)myAlert('등록했습니다.');
+            },{once:true});
+            bootstrap.Modal.getOrCreateInstance(modal).hide();
+            void Promise.resolve(fetchGlobalDonations()).catch(()=>{
+                if(!donationGrantState && state.owner===memberDetailOwner() && !window.frameElement?.hidden)myAlert('등록했습니다. 목록을 다시 불러와 주세요.','warning');
+            });
+        }catch(_){
+            if(isCurrentDonationGrant(state)){
+                if(state.completed)myAlert('등록했습니다. 목록을 다시 불러와 주세요.','warning');
+                else{state.uncertain=true;myAlert('등록 결과를 확인하지 못했습니다. 목록에서 등록 여부를 확인해 주세요.','warning');}
+            }
+        }finally{
+            state.busy=false;
+            const allowed=state.owner===memberDetailOwner() && !isAdminMemberSiteProfile() && canAccessAdminMemberTab('funds-manage');
+            locked.forEach(([node,disabled])=>{if(node.isConnected)node.disabled=allowed?disabled:true;});
+            if(isCurrentDonationGrant(state))syncDonationGrantState();showLoading(false);
         }
-
-        myAlert('자산수증이익이 등록되었습니다.');
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('donationModal')).hide();
-        fetchGlobalDonations();
     });
 } // End of submitDonationGrant
 
@@ -12341,7 +12400,7 @@ async function submitDonationBatch() {
         const failCnt = invalidCount + Number(result?.failure_count || 0);
         myAlert(`완료되었습니다.<br>성공: ${successCnt}건, 실패: ${failCnt}건`);
 
-        g_donation_batch_request_key = null;
+        // Retain the receipt key while the same reviewed file remains open.
         bootstrap.Modal.getOrCreateInstance(document.getElementById('donationModal')).hide();
         fetchGlobalDonations();
     });
@@ -12646,6 +12705,7 @@ function clearDonationMemberSelection() {
     const idEl = document.getElementById('dn-member-id');
     if (!idEl) return;
     idEl.value = '';
+    syncDonationGrantState();
 } // End of clearDonationMemberSelection
 
 // 조합원 검색 실행 (메모리상 데이터 g_members 활용)
@@ -12716,8 +12776,11 @@ function selectMemberForModal(id, name) {
         document.getElementById('dv-member-name').value = name;
         refreshDividendCurrentBalance(id);
     } else if (g_search_target === 'donation') {
+        if(!isCurrentDonationGrant() || donationGrantState.busy || donationGrantState.uncertain || donationGrantState.completed
+            || window.frameElement?.hidden || !document.getElementById('donationModal')?.classList.contains('show'))return;
         document.getElementById('dn-member-id').value = id;
         document.getElementById('dn-member-name').value = name;
+        syncDonationGrantState();
     }
     // 다른 곳에서 쓸 경우 else if 추가
 
