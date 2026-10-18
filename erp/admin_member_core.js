@@ -6233,6 +6233,7 @@ function switchTab(tabName) {
         return;
     }
 
+    invalidateDonationListRead();
     // 1. 모든 탭 숨김 처리
     const panes = document.querySelectorAll('.main-content > .tab-pane');
     panes.forEach(el => {
@@ -6298,8 +6299,8 @@ function switchTab(tabName) {
             startEl.value = `${yyyy}-01-01`; // 1월 1일
             endEl.value = `${yyyy}-${mm}-${dd}`; // 오늘
 
-            fetchGlobalDonations();
         }
+        if (document.getElementById('sub-tab-donations')?.classList.contains('active')) void fetchGlobalDonations();
     }
     // ★ [신규 추가됨] 업무 신청 관리 탭 연결
     else if (tabName === 'applications') {
@@ -6712,6 +6713,31 @@ const memberFundDrafts = new Map();
 let memberFundState = null;
 let donationGrantState = null;
 let donationBatchState = null;
+let donationListRevision = 0;
+let donationListRequest = null;
+
+function invalidateDonationListRead() {
+    donationListRevision++;
+    donationListRequest = null;
+}
+function isCurrentDonationListRead(request) {
+    const owner = memberDetailOwner();
+    const pane = document.getElementById('tab-funds-manage');
+    return !!request && donationListRequest === request && request.revision === donationListRevision
+        && request.owner === owner && !!owner && !isAdminMemberSiteProfile()
+        && canAccessAdminMemberTab('funds-manage') && !window.frameElement?.hidden
+        && (pane?.classList.contains('active') || pane?.style.display === 'block')
+        && document.getElementById('sub-tab-donations')?.classList.contains('active')
+        && document.getElementById('don-date-start')?.value === request.startDate
+        && document.getElementById('don-date-end')?.value === request.endDate;
+}
+for (const id of ['don-date-start','don-date-end']) {
+    document.getElementById(id)?.addEventListener('input', invalidateDonationListRead);
+    document.getElementById(id)?.addEventListener('change', invalidateDonationListRead);
+}
+document.getElementById('tab-funds-manage')?.addEventListener('hidden.bs.tab', event => {
+    if (event.target?.getAttribute('data-bs-target') === '#sub-tab-donations') invalidateDonationListRead();
+});
 
 function isCurrentDonationBatch(state=donationBatchState, revision=state?.revision, visible=false) {
     return !!state && state===donationBatchState && state.revision===revision && state.owner===memberDetailOwner()
@@ -6926,6 +6952,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 });
 
 function clearMemberDetailEdits() {
+    invalidateDonationListRead();
     clearMemberFundDrafts();
     clearDonationGrantDraft();
     if (typeof resetMemberImportDraft === 'function') resetMemberImportDraft();
@@ -7960,6 +7987,7 @@ function bindAdminCertificateContext(authId) {
     if (frame) {
         const observer = new MutationObserver(() => {
             if (frame.hidden) {
+                invalidateDonationListRead();
                 window.ContributionCertPreview?.clear();
                 if (typeof pauseMemberImportRead === 'function') pauseMemberImportRead();
             }
@@ -10300,12 +10328,22 @@ function changeLogPage(direction) {
     fetchAdminLogs();
 }
 // [수정] 자산수증이익(기부금) 전체 조회 (Member ID 기준 매핑으로 변경)
-async function fetchGlobalDonations() {
+function fetchGlobalDonations() {
+    const owner = memberDetailOwner();
+    const pane = document.getElementById('tab-funds-manage');
+    if (!owner || isAdminMemberSiteProfile() || !canAccessAdminMemberTab('funds-manage') || window.frameElement?.hidden
+        || !(pane?.classList.contains('active') || pane?.style.display === 'block')) return Promise.resolve();
     const startDate = document.getElementById('don-date-start').value;
     const endDate = document.getElementById('don-date-end').value;
     const tbody = document.getElementById('donationGlobalBody');
+    if (donationListRequest?.pending && isCurrentDonationListRead(donationListRequest)) return donationListRequest.promise;
+    const request = {owner,startDate,endDate,revision:++donationListRevision,pending:true,promise:null};
+    donationListRequest = request;
 
     tbody.innerHTML = '<tr><td colspan="6" class="py-5"><div class="spinner-border text-primary"></div></td></tr>';
+    document.getElementById('don-total-sum').innerText = '—';
+    request.promise = (async () => {
+    try {
 
     // 1. 기부금 내역 조회
     const { data: donations, error } = await scopeAdminTenant(_supabase
@@ -10316,6 +10354,7 @@ async function fetchGlobalDonations() {
         .order('donation_date', { ascending: false })
         .order('created_at', { ascending: false, nullsFirst: false })
         .order('id', { ascending: false });
+    if (!isCurrentDonationListRead(request)) return;
 
     if (error) {
         CoopSafeLog.error("[erp/admin_member] operation failed", error);
@@ -10339,6 +10378,7 @@ async function fetchGlobalDonations() {
             .from('coop_members')
             .select('member_id, name')) // 이름과 ID만 필요
             .in('member_id', memberIds);
+        if (!isCurrentDonationListRead(request)) return;
 
         if (!memberError && members) {
             members.forEach(m => {
@@ -10382,6 +10422,16 @@ async function fetchGlobalDonations() {
 
     // 총액 업데이트
     document.getElementById('don-total-sum').innerText = totalSum.toLocaleString();
+    } catch (error) {
+        if (!isCurrentDonationListRead(request)) return;
+        CoopSafeLog.error('[erp/admin_member] donation list failed', error);
+        tbody.innerHTML = '<tr><td colspan="6" class="text-danger py-4">목록을 불러오지 못했습니다. 다시 조회해 주세요.</td></tr>';
+        document.getElementById('don-total-sum').innerText = '—';
+    } finally {
+        request.pending = false;
+    }
+    })();
+    return request.promise;
 }
 
 // [수정] 이용고배당(포인트) 전체 조회 (Member ID 기준 매핑으로 변경)
@@ -12263,12 +12313,16 @@ function normalizeDonationBatchRow(row) {
 
     const memberId = String(pick('조합원ID', 'ID', '아이디', 'member_id', 'memberId') || '').trim();
     const amountRaw = pick('금액', 'amount', 'Amount');
-    const amount = Number(String(amountRaw ?? '').replace(/,/g, '').trim());
+    const amountText = String(amountRaw ?? '').trim();
+    const amount = Number(amountText.replace(/,/g, ''));
+    const amountError = !/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.0+)?$/.test(amountText) || !Number.isFinite(amount) || amount <= 0
+        ? '금액은 1원 이상의 정수로 입력해 주세요.'
+        : !Number.isSafeInteger(amount) ? '금액이 입력 가능한 범위를 넘었습니다.' : '';
     const donationDate = normalizeMemberImportDate(pick('날짜', '기부일', '입금일', 'donation_date', 'date')) || '';
     const method = normalizeDonationMethod(pick('수단', '입금방식', '방식', 'method', 'type'));
     const note = String(pick('비고', '메모', '사유', 'note', 'remark') || '').trim();
 
-    return { memberId, amount, donationDate, method, note };
+    return { memberId, amount, amountText, amountError, donationDate, method, note };
 }
 
 function openDonationModal() {
@@ -12425,7 +12479,8 @@ function renderDonationBatchPreview() {
 
             tdId.textContent = parsed.memberId || '-';
             tdDate.textContent = parsed.donationDate || '-';
-            tdAmt.textContent = Number.isFinite(parsed.amount) ? parsed.amount.toLocaleString() : '-';
+            tdAmt.textContent = parsed.amountError ? `${parsed.amountText || '빈칸'} (잘못된 금액)` : parsed.amount.toLocaleString();
+            if (parsed.amountError) {tdAmt.classList.add('text-danger');tdAmt.title=parsed.amountError;}
             tdMethod.textContent = getDonationMethodLabel(parsed.method);
             tdNote.textContent = parsed.note || '-';
 
@@ -12437,7 +12492,9 @@ function renderDonationBatchPreview() {
             tbody.appendChild(tr);
         });
 
-    document.getElementById('don-excel-count').textContent=`총 ${state.rows.length}건`;
+    const invalidAmounts = state.rows.flatMap((row,index) => normalizeDonationBatchRow(row).amountError ? [index+2] : []);
+    document.getElementById('don-excel-count').textContent=`총 ${state.rows.length}건` + (invalidAmounts.length
+        ? ` · 잘못된 금액 ${invalidAmounts.length}건: 엑셀 ${invalidAmounts.slice(0,10).join(', ')}행${invalidAmounts.length>10?' 외':''}` : '');
     document.getElementById('don-excel-preview').style.display=state.rows.length?'block':'none';
     syncDonationBatchUi();
 }
@@ -12453,14 +12510,14 @@ async function submitDonationBatch() {
         const payload = [];
         state.rows.forEach((row, index) => {
             const parsed = normalizeDonationBatchRow(row);
-            if (!parsed.memberId || !parsed.donationDate || !Number.isFinite(parsed.amount) || parsed.amount <= 0) {
+            if (!parsed.memberId || !parsed.donationDate || parsed.amountError) {
                 invalidCount++;
                 return;
             }
             payload.push({
                 row_no: index + 2,
                 member_id: parsed.memberId,
-                amount: Math.trunc(parsed.amount),
+                amount: parsed.amount,
                 donation_date: parsed.donationDate,
                 method: parsed.method,
                 note: parsed.note
@@ -12473,7 +12530,7 @@ async function submitDonationBatch() {
     }
     const snapshot=JSON.stringify(state.rows),token={accepted:false};
     state.confirmation=token;state.phase='confirming';syncDonationBatchUi();
-    myConfirm(state.attempt?'이전 등록 요청의 결과를 다시 확인할까요?':`${attempt.payload.length}건을 등록할까요?`,async()=>{
+    myConfirm(state.attempt?'이전 등록 요청의 결과를 다시 확인할까요?':`${attempt.payload.length}건을 등록할까요?${attempt.invalidCount?` 확인이 필요한 ${attempt.invalidCount}건은 제외됩니다.`:''}`,async()=>{
         token.accepted=true;
         if(!isCurrentDonationBatch(state,revision,true) || state.confirmation!==token || state.phase!=='confirming' || donationGrantState?.busy){
             if(isCurrentDonationBatch(state,revision) && state.confirmation===token && state.phase==='confirming'){
