@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.194
-Change: 2026-10-18 - Retain child registration drafts per profile and protect unsaved input on refresh.
+Version: v1.0.195
+Change: 2026-10-18 - Prepare child consent from one current input snapshot and ignore superseded preparation.
 -->
 <html lang="ko">
 <head>
@@ -10,7 +10,7 @@ Change: 2026-10-18 - Retain child registration drafts per profile and protect un
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.194 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.195 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2620,6 +2620,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+window.PortalChildPreparation?.invalidate();
 window.PortalChildDrafts?.clear();
 window.PortalBoardDetail?.close(false);
 window.PortalBoardEditor?.clear();
@@ -4693,6 +4694,7 @@ return memberInformationPortal.refresh(member);
 
 async function loadDashboardData(uuid, options = {}) {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
+window.PortalChildPreparation?.invalidate();
 window.PortalBoardDetail?.close(false);
 window.PortalBoardEditor?.suspend();
 retainPortalProfileEdit();
@@ -8568,6 +8570,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 async function toggleTab(type, btn) {
+window.PortalChildPreparation?.invalidate();
 window.PortalBoardDetail?.close(false);
 retainPortalPartnerDraft();++portalPartnerRequestRevision;
 if (!btn) btn = [...document.querySelectorAll('.menu-btn')].find(node => node.getAttribute('onclick')?.includes("toggleTab('"+type+"'"));
@@ -9115,6 +9118,7 @@ const profile = String(member?.id || '').trim();
 return actor && coop && profile ? JSON.stringify([actor, coop, profile]) : '';
 }
 function closeFamilyRegistrationModal() {
+window.PortalChildPreparation?.invalidate();
 window.PortalChildDrafts?.retain();
 retainPortalConnectDraft();++portalConnectSearchRevision;portalConnectPending = null;
 ++familyRegistrationRevision;
@@ -9209,6 +9213,59 @@ if (drafts.size) { event.preventDefault();event.returnValue = ''; }
 return Object.freeze({enter,retain,suspend,dropCurrent,clear});
 })();
 /* CHILD_PROFILE_DRAFTS_END */
+
+/* CHILD_CONSENT_PREPARATION_START */
+window.PortalChildPreparation = (() => {
+const ids = ['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelSelect','newFamRelInput','newFamCapital','newFamBank','newFamAcc'];
+let active = null, revision = 0;
+const snapshot = () => JSON.stringify(ids.map(id => [id,document.getElementById(id).value]));
+function invalidate() {
+const previous = active;
+active = null;++revision;tempChildData = null;
+// Clear only a superseded preparation, not an already submitted request.
+if (previous?.pending && previous.stage === 'consent') window.ChildDirectConsent?.clear();
+if (document.querySelector('#customModalMsg #consentCheck1')
+    && document.getElementById('btnModalYes')?.onclick === executeChildJoin) {
+document.getElementById('customModalOverlay').style.display = 'none';
+document.getElementById('customModalMsg').replaceChildren();
+document.getElementById('btnModalYes').onclick = null;
+document.getElementById('btnModalNo').onclick = null;
+}
+}
+function current(request) {
+return !!request && active === request && request.revision === revision
+    && request.owner === getFamilyRegistrationOwner() && request.owner === familyRegistrationOwner
+    && request.coop === String(currentMemberCoopId || curMem?.coop_id || '')
+    && (!curMem?.coop_id || String(curMem.coop_id) === request.coop)
+    && request.modalRevision === familyRegistrationRevision && request.values === snapshot()
+    && !document.getElementById('famTabNew').classList.contains('hidden')
+    && (document.getElementById('familyModalOverlay').style.display === 'flex'
+        || !!document.getElementById('childDirectConsentDialog'));
+}
+function run(prepare) {
+if (active?.pending && current(active)) return active.promise;
+if (!getFamilyRegistrationOwner() || familyRegistrationOwner !== getFamilyRegistrationOwner()
+    || (curMem?.coop_id && currentMemberCoopId && String(curMem.coop_id) !== String(currentMemberCoopId))
+    || document.getElementById('familyModalOverlay').style.display !== 'flex'
+    || document.getElementById('famTabNew').classList.contains('hidden')) return;
+invalidate();
+const values = snapshot(), fields = new Map(JSON.parse(values));
+const request = {owner:familyRegistrationOwner,coop:String(currentMemberCoopId || curMem?.coop_id || ''),modalRevision:familyRegistrationRevision,revision,values,pending:true,stage:'rules',promise:null,
+    data:Object.freeze({name:fields.get('newFamName'),rrn1:fields.get('newFamRrn1'),rrn2:fields.get('newFamRrn2'),
+        email:fields.get('newFamEmail').trim().toLowerCase(),capital:Number(fields.get('newFamCapital')),
+        relationship:fields.get('newFamRelSelect') === '직접입력' ? fields.get('newFamRelInput').trim() : fields.get('newFamRelSelect'),
+        bank:fields.get('newFamBank'),acc:fields.get('newFamAcc')})};
+active = request;
+request.promise = Promise.resolve().then(() => current(request) ? prepare(request) : undefined)
+    .finally(() => { request.pending = false; });
+return request.promise;
+}
+for (const type of ['input','change']) document.addEventListener(type,event => {
+if (ids.includes(event.target?.id)) invalidate();
+});
+return Object.freeze({run,current,invalidate,forData:data => active?.data === data && current(active) ? active : null});
+})();
+/* CHILD_CONSENT_PREPARATION_END */
 
 // Reopening the same owner's form keeps its original input nodes and values.
 async function openAddFamilyModal() {
@@ -9417,6 +9474,7 @@ function switchFamTab(tabName) {
 const tabNew = document.getElementById('famTabNew');
 const tabConn = document.getElementById('famTabConnect');
 const btns = document.querySelectorAll('#famModalTabs .nav-link');
+if (!tabNew.classList.contains('hidden') !== (tabName === 'new')) window.PortalChildPreparation?.invalidate();
 
 if(tabName === 'new') {
 tabNew.classList.remove('hidden');
@@ -9433,20 +9491,20 @@ btns[1].classList.add('active');
 
 // [수정] 1차 검증 및 동의서 모달 호출
 async function submitNewChild() {
+const prepare = async request => {
 const draftOwner = familyRegistrationOwner, draftRevision = familyRegistrationRevision;
 if (!draftOwner || draftOwner !== getFamilyRegistrationOwner()) return;
-// 1. 입력값 가져오기
-const name = document.getElementById('newFamName').value;
-const rrn1 = document.getElementById('newFamRrn1').value;
-const rrn2 = document.getElementById('newFamRrn2').value;
-const capitalStr = document.getElementById('newFamCapital').value;
-const capital = Number(capitalStr);
-const email = document.getElementById('newFamEmail').value.trim().toLowerCase();
-
-// 관계 값 결정
-const relSelect = document.getElementById('newFamRelSelect').value;
-const relInput = document.getElementById('newFamRelInput').value.trim();
-const relationship = (relSelect === '직접입력') ? relInput : relSelect;
+const data = request?.data || {
+name:document.getElementById('newFamName').value,rrn1:document.getElementById('newFamRrn1').value,
+rrn2:document.getElementById('newFamRrn2').value,capital:Number(document.getElementById('newFamCapital').value),
+email:document.getElementById('newFamEmail').value.trim().toLowerCase(),
+relationship:document.getElementById('newFamRelSelect').value === '직접입력'
+    ? document.getElementById('newFamRelInput').value.trim() : document.getElementById('newFamRelSelect').value,
+bank:document.getElementById('newFamBank').value,acc:document.getElementById('newFamAcc').value
+};
+const {name,rrn1,rrn2,email,capital,relationship} = data;
+const current = () => draftOwner === familyRegistrationOwner && draftOwner === getFamilyRegistrationOwner()
+    && draftRevision === familyRegistrationRevision && (!request || window.PortalChildPreparation.current(request));
 
 // 2. [검증] 필수 입력
 if(!name || rrn1.length !== 6 || rrn2.length < 1 || !relationship) {
@@ -9465,16 +9523,14 @@ return showModal('가족(자녀) 신규 등록은\n미성년자만 가능합니�
 // Same cooperative-specific rules as self-registration.
 let rules;
 try { rules = await loadMemberCapitalRules(); }
-catch (_) { if (draftOwner === familyRegistrationOwner && draftOwner === getFamilyRegistrationOwner() && draftRevision === familyRegistrationRevision) showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
-if (draftOwner !== familyRegistrationOwner || draftOwner !== getFamilyRegistrationOwner() || draftRevision !== familyRegistrationRevision) return;
+catch (_) { if (current()) showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
+if (!current()) return;
 if (!CoopMemberCapital.valid(capital, rules)) return showModal(CoopMemberCapital.guidance(rules));
 
 // 5. 동의서 모달 띄우기 (데이터 전달)
-openConsentModal({
-name, rrn1, rrn2, email, capital, relationship,
-bank: document.getElementById('newFamBank').value,
-acc: document.getElementById('newFamAcc').value
-});
+return openConsentModal(data,request);
+};
+return window.PortalChildPreparation ? window.PortalChildPreparation.run(prepare) : prepare(null);
 }
 
 // 4. [탭2] 연결 대상 검색
@@ -10809,12 +10865,17 @@ return age < 19;
 }
 
 // [신규] 동의서 모달 열기 & 최종 가입 처리
-function openConsentModal(data) {
+function openConsentModal(data, preparation = null) {
+if (window.PortalChildPreparation && !preparation) {
+return window.PortalChildPreparation.run(request => openConsentModal(request.data,request));
+}
 const draftOwner = familyRegistrationOwner, draftRevision = familyRegistrationRevision;
 if (!draftOwner || draftOwner !== getFamilyRegistrationOwner()) return;
+if (preparation && !window.PortalChildPreparation.current(preparation)) return;
+if (preparation) { data = preparation.data;preparation.stage = 'consent'; }
 const directHost = String(window.CoopRouteGuard?.getPublicRuntimeHost?.() || window.location.hostname || '').toLowerCase();
 if (['www.yonginsolar.kr','yonginsolar.kr','localhost','127.0.0.1'].includes(directHost) && !isSiteMemberPortalProfile()) {
-return window.ChildDirectConsent.open({client:_supabase,data,loadApplicationNotice:()=>CoopApplicationNotice.load(_supabase),applicationNotice:CoopApplicationNotice.text,isCurrent:()=>draftOwner===familyRegistrationOwner&&draftOwner===getFamilyRegistrationOwner()&&draftRevision===familyRegistrationRevision,onError:showModal,onSuccess:async()=>{
+return window.ChildDirectConsent.open({client:_supabase,data,loadApplicationNotice:()=>CoopApplicationNotice.load(_supabase),applicationNotice:CoopApplicationNotice.text,isCurrent:()=>draftOwner===familyRegistrationOwner&&draftOwner===getFamilyRegistrationOwner()&&draftRevision===familyRegistrationRevision&&(!preparation||window.PortalChildPreparation.current(preparation)),onError:showModal,onSuccess:async()=>{
 resetFamilyRegistrationDraft();
 showModal('가입 신청이 접수되었습니다.\n\n'+CoopApplicationNotice.text+'\n\n신협 131-022-855516 (용인모두의햇빛협동조합)');
 await loadDashboardData(getPreferredDashboardProfileId());
@@ -10864,7 +10925,7 @@ const btnNo = document.getElementById('btnModalNo');
 
 btnNo.style.display = 'inline-block';
 btnNo.innerText = '취소';
-btnNo.onclick = () => { overlay.style.display = 'none'; };
+btnNo.onclick = () => { overlay.style.display = 'none';window.PortalChildPreparation?.invalidate(); };
 
 btnYes.innerText = '동의 및 가입완료';
 btnYes.onclick = executeChildJoin; // 클릭 시 실행할 함수 연결
@@ -10874,18 +10935,19 @@ overlay.style.display = 'flex';
 
 // [신규] 최종 DB 저장 함수
 async function executeChildJoin() {
+if (!tempChildData || !familyRegistrationOwner || familyRegistrationOwner !== getFamilyRegistrationOwner()) return;
+const draftOwner = familyRegistrationOwner, draftRevision = familyRegistrationRevision;
+const preparation = window.PortalChildPreparation?.forData(tempChildData);
+if (window.PortalChildPreparation && !preparation) return;
 const chk1 = document.getElementById('consentCheck1');
 const chk2 = document.getElementById('consentCheck2');
 
-if (!chk1.checked || !chk2.checked) {
+if (!chk1?.checked || !chk2?.checked) {
 // 여기서 alert 대신 기존 텍스트나 스타일로 경고를 줄 수도 있지만,
 // 간단히 브라우저 알림으로 막습니다. (모달 위에 모달 띄우기 복잡함 방지)
 showModal('모든 필수 항목에 동의 체크해주세요.'); 
 return;
 }
-
-if (!tempChildData || !familyRegistrationOwner || familyRegistrationOwner !== getFamilyRegistrationOwner()) return;
-const draftOwner = familyRegistrationOwner, draftRevision = familyRegistrationRevision;
 
 // 로딩 시작 (모달 닫고 로딩)
 document.getElementById('customModalOverlay').style.display = 'none';
@@ -10909,7 +10971,8 @@ p_account_holder: tempChildData.name
 const { data, error } = await _supabase.rpc('create_full_child_member', params);
 
 showLoading(false);
-if (draftOwner !== familyRegistrationOwner || draftOwner !== getFamilyRegistrationOwner() || draftRevision !== familyRegistrationRevision) return;
+if (draftOwner !== familyRegistrationOwner || draftOwner !== getFamilyRegistrationOwner() || draftRevision !== familyRegistrationRevision
+    || (preparation && !window.PortalChildPreparation.current(preparation))) return;
 
 if (error) {
 showModal('가입 실패: ' + error.message);
