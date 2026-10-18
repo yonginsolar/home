@@ -1,10 +1,9 @@
-/* Workflow help 1.0.0. Presentation only: one local display preference, no business reads/writes. */
+/* Workflow help 1.0.1. Presentation only: one local display preference, no business reads/writes. */
 (function(root){
  'use strict';
  if(root.CoopWorkflowHelp)return;
  const doc=root.document,KEY='coop_workflow_help_visible_v1',CLASS='coop-workflow-help',seen=new WeakMap();
  const pages={
-  index:['ERP 업무 선택','담당 권한이 있는 업무로 이동합니다. 내 업무 모아보기에서 대기 건수와 바로가기를 확인하고, 조합 설정 점검표에서 아직 필요한 설정을 확인할 수 있습니다.'],
   admin_member:['조합원·홈페이지 관리','조합원 정보와 신청 처리는 조합원 관리에서, 공개 홈페이지의 글·사진은 홈페이지 관리에서 다룹니다. 홈페이지는 미리보기로 확인한 뒤 변경사항을 저장합니다. 가입 안내·약관은 초안 저장과 등록·적용을 구분합니다.'],
   admin_employee:['직원 관리·조합 설정','직원 관리에서는 직원·급여·휴가를, 조합 설정에서는 조합 기본정보와 업무 운영 기준을 다룹니다. 권한 설정은 권한 담당자가, 기본 업무 권한은 조합 전체 관리자가 변경합니다.'],
   accounting:['회계 관리','실제 거래에 맞는 업무별 입력을 먼저 선택하세요. 날짜·금액·계정과 증빙을 확인한 뒤 저장합니다. 자동 연동한 거래는 원래 업무의 처리 상태와 전표를 함께 확인하면 중복 입력을 줄일 수 있습니다.'],
@@ -26,7 +25,7 @@
   poll_admin:['일반 투표 관리','투표 대상과 진행 상태를 확인합니다. 결과 공개 범위와 마감 상태를 확인한 뒤 공개·안내 절차를 진행하세요.'],
   poll_setup:['일반 투표 설정','질문·선택지·최소/최대 선택 수와 기간을 정합니다. 선택할 수 있는 수를 명확히 하면 참여자가 응답 방법을 이해하기 쉽습니다.'],
   quiz_admin:['퀴즈 관리','문제·선택지·정답·해설과 공개 상태를 관리합니다. 선택지를 바꿀 때 정답 연결도 함께 확인하고 참고 자료의 확인일을 남기면 이후 내용 검토에 도움이 됩니다.'],
-  festival_receipts:['매출·재고 관리','먼저 관리할 축제를 선택합니다. 판매·무료 사용·폐기·실사 조정을 구분해서 기록하면 축제별 매출과 남은 수량을 맞춰 볼 수 있습니다.'],
+  festival_receipts:['매출·재고 관리','전체 축제 매출에서는 보고 싶은 기간을 골라 조회해 보세요. 아래에서 축제를 선택하면 해당 축제의 판매·재고·현금영수증을 관리할 수 있어요. 판매·무료 사용·폐기·실사 조정을 구분하면 남은 수량을 맞추기 쉬워요.'],
   service_contracts:['이용계약·청구서','내부 초안을 준비한 뒤 검토 요청·내부 결재·대표자 서명 순서로 진행합니다. 청구서 발행과 실제 입금 확인은 다른 단계이므로 현재 상태를 확인하세요.'],
   permissions:['업무 권한 관리','조합의 기본 업무 권한과 직원별 사용 설정을 구분합니다. 기본 권한 따름은 조합의 역할·직급 기준을 사용하고, 개별 사용·사용 안 함은 해당 직원의 별도 설정입니다.'],
   initial_setup:['조합 초기 설정','한시적으로 위임받은 범위에서 홈페이지·기본정보·출자 기준·납입계좌·직인을 준비합니다. 유효기간이 끝나면 임시 설정 권한을 사용할 수 없습니다.'],
@@ -42,6 +41,7 @@
  };
  // Explanations describe usage, not the field name or a guessed value.
  const fields={
+  'dashboardPeriod':'보고 싶은 매출 기간을 골라 [조회]를 눌러 주세요. 누적 전체는 저장된 전체 기간을 합산하고, 기간 지정은 입력한 시작일·종료일로 조회해요.',
   'profileBankLabel':'출자금 반환·배당 등 본인에게 지급할 때 확인하는 계좌입니다. 계좌번호를 비워 다른 정보만 수정하면 기존 계좌를 유지하며, 저장된 번호는 끝 네 자리로 확인합니다.',
   'profilePhoneLabel':'본인 확인과 조합의 연락에 사용하는 번호입니다. 프로필을 바꿨다면 현재 명의의 연락처인지 확인하세요.',
   'childBankLabel':'배당 등을 자녀에게 지급할 때 확인할 자녀 본인 명의 계좌입니다. 부모 계좌와 구분해서 입력하세요.',
@@ -228,7 +228,8 @@
  function children(){return [...doc.querySelectorAll('iframe')].flatMap(f=>{try{return f.contentWindow.location.origin===location.origin&&f.contentWindow.CoopWorkflowHelp?[f.contentWindow.CoopWorkflowHelp]:[];}catch(_){return [];}});}
  function sync(value){apply(value);children().forEach(api=>api.refresh(value));}
  function setVisible(value){const v=value===true;try{root.localStorage.setItem(KEY,v?'1':'0');}catch(_){void root.CoopDialog?.alert('표시 설정을 저장하지 못했습니다. 이 화면에만 적용합니다.');}sync(v);try{if(root.parent!==root&&root.parent.location.origin===location.origin)root.parent.CoopWorkflowHelp?.refresh(v);}catch(_){}root.dispatchEvent(new CustomEvent('coop-workflow-help-change',{detail:{enabled:v}}));}
- function button(title,text){const b=doc.createElement('button');b.type='button';b.className=CLASS;b.textContent='?';b.setAttribute('aria-label',title+' 도움말');b.setAttribute('title',title+' 도움말');b.setAttribute('aria-haspopup','dialog');b.dataset.workflowHelpOptional='';b.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(!enabled)return;b.focus({preventScroll:true});void root.CoopDialog?.alert(text,{title:title+' 도움말'});});return b;}
+ function format(text){return String(text??'').trim().split(/(?<=[.!?])\s+(?=\S)/u).filter(Boolean).map((line,i)=>(i===0?'💡 ':'• ')+line).join('\n\n');}
+ function button(title,text){const b=doc.createElement('button');b.type='button';b.className=CLASS;b.textContent='?';b.setAttribute('aria-label',title+' 도움말');b.setAttribute('title',title+' 도움말');b.setAttribute('aria-haspopup','dialog');b.dataset.workflowHelpOptional='';b.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(!enabled)return;b.focus({preventScroll:true});void root.CoopDialog?.alert(format(text),{title:title+' 도움말'});});return b;}
  function decorateLabel(label){
   if(!label.isConnected||label.matches('.visually-hidden,.sr-only')||label.closest(excluded)||label.closest('a,button')||label.dataset.workflowHelpToggleLabel!==undefined)return;
   const control=label.htmlFor?doc.getElementById(label.htmlFor):label.querySelector('input,select,textarea')||(['INPUT','SELECT','TEXTAREA'].includes(label.nextElementSibling?.tagName)?label.nextElementSibling:label.nextElementSibling?.querySelector('input,select,textarea'));
@@ -249,6 +250,8 @@
   if(pageKey()==='membermanage'){const heading=target.querySelector('.profile-action-bar');const row=heading?.closest('.d-flex.flex-column');if(row)row.after(section);else target.append(section);}else target.prepend(section);
  }
  function decorate(container=doc){
+  // The full-menu landing page is intentionally help-free; child task pages keep their help.
+  if(pageKey()==='index')return;
   if(running)return;running=true;
   try{
    if(container.matches?.('label'))decorateLabel(container);
@@ -262,7 +265,7 @@
  }
  function start(){
   const style=doc.createElement('style');style.id='workflow-help-style';style.textContent=`
-   .${CLASS}{display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 24px;box-sizing:border-box;width:24px;height:24px;padding:0!important;margin:0 0 0 6px!important;border:1px solid #64748b!important;border-radius:50%;background:#fff!important;color:#334155!important;font:700 14px/1 sans-serif!important;vertical-align:middle;cursor:pointer;text-decoration:none!important;box-shadow:none!important}
+   .${CLASS}{display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 24px;box-sizing:border-box;width:24px;height:24px;min-width:24px!important;max-width:24px!important;min-height:24px!important;max-height:24px!important;padding:0!important;margin:0 0 0 6px!important;border:1px solid #64748b!important;border-radius:50%;background:#fff!important;color:#334155!important;font:700 14px/1 sans-serif!important;vertical-align:middle;cursor:pointer;text-decoration:none!important;box-shadow:none!important}
    .${CLASS}:hover{background:#e2e8f0!important;color:#0f172a!important}.${CLASS}:focus-visible{outline:3px solid #2563eb!important;outline-offset:3px}
    label:has(+.${CLASS}){display:inline-flex!important;align-items:center;max-width:calc(100% - 32px);vertical-align:middle;margin-bottom:0!important}h1>.${CLASS},h2>.${CLASS},h3>.${CLASS}{font-size:14px!important}
    .coop-help-preference{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:100%;padding:14px 16px;margin:0 0 20px;border:1px solid #94a3b8;border-radius:10px;background:#f8fafc;color:#172033;font-size:14px;word-break:keep-all}.coop-help-preference p{margin:4px 0 0;color:#475569}.coop-help-preference button{flex-shrink:0;min-width:68px;min-height:36px;border:1px solid #64748b;border-radius:8px;background:#fff;color:#334155;font:inherit;cursor:pointer}.coop-help-preference button[aria-pressed=true]{background:#166534;border-color:#166534;color:#fff}.coop-help-preference button:focus-visible{outline:3px solid #2563eb;outline-offset:3px}
@@ -273,7 +276,7 @@
   const pending=new Set();let queued=false;
   new MutationObserver(records=>{for(const r of records){if(r.target.closest?.('.'+CLASS+',.coop-help-preference,.coop-dialog'))continue;for(const n of r.addedNodes)if(n.nodeType===1&&!n.matches('.'+CLASS+',.coop-help-preference,.coop-dialog')&&!n.closest('.'+CLASS+',.coop-help-preference,.coop-dialog'))pending.add(n);if(r.target.matches?.('label'))pending.add(r.target);}if(!pending.size||queued)return;queued=true;queueMicrotask(()=>{queued=false;const nodes=[...pending];pending.clear();nodes.forEach(decorate);});}).observe(doc.body,{subtree:true,childList:true});
  }
- root.CoopWorkflowHelp=Object.freeze({version:'1.0.0',setVisible,refresh:sync,visible:()=>enabled,decorate});
+ root.CoopWorkflowHelp=Object.freeze({version:'1.0.1',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
  root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)sync(read());});root.addEventListener('pageshow',()=>sync(read()));
  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })(window);

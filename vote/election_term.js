@@ -1,4 +1,4 @@
-/* Election term v1.0.0. Dates only; never infer from voting dates or modify officials/votes. */
+/* Election term v1.0.1. Dates only; never infer from voting dates or modify officials/votes. */
 export function isElectionTermDate(value) {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const [y,m,d] = value.split('-').map(Number);
@@ -21,7 +21,7 @@ export function formatElectionTerm(row) {
 }
 export function showElectionTermHelp(event) {
     event.preventDefault(); event.stopPropagation();
-    return window.CoopDialog?.alert('선거 공고에 정한 당선인의 임기입니다. 두 날짜를 함께 입력하면 후보 신청 화면에 표시됩니다. 비워두면 임기 미설정으로 표시됩니다.', {title:'당선인 임기'});
+    return window.CoopDialog?.alert('💡 선거 공고에 정한 당선인의 임기를 입력해 주세요.\n\n• 시작일·종료일을 함께 입력하면 후보 신청 화면에도 표시돼요.\n\n• 아직 정하지 않았다면 비워두세요. 임기 미설정으로 표시돼요.', {title:'당선인 임기'});
 }
 
 // RLS remains the authority. Each save rechecks runtime/Auth and compares both previously read dates.
