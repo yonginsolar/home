@@ -6711,6 +6711,71 @@ let memberCreateSaving = false;
 const memberFundDrafts = new Map();
 let memberFundState = null;
 let donationGrantState = null;
+let donationBatchState = null;
+
+function isCurrentDonationBatch(state=donationBatchState, revision=state?.revision, visible=false) {
+    return !!state && state===donationBatchState && state.revision===revision && state.owner===memberDetailOwner()
+        && !isAdminMemberSiteProfile() && canAccessAdminMemberTab('funds-manage')
+        && (!visible || (!window.frameElement?.hidden && document.getElementById('donationModal')?.classList.contains('show')
+            && document.getElementById('tab-don-batch')?.classList.contains('active')));
+}
+function donationBatchBusy() {
+    return !!donationBatchState && ['preparing','saving'].includes(donationBatchState.phase);
+}
+function hasDonationBatchDraft() {
+    const state=donationBatchState;
+    return isCurrentDonationBatch(state) && state.phase!=='complete' && !!(state.file || state.rows.length || state.attempt);
+}
+function pauseDonationBatchRead() {
+    const state=donationBatchState;
+    if(!state || donationBatchBusy())return;
+    state.revision++;
+    state.confirmation=null;
+    try{state.reader?.abort();}catch(_){}
+    state.reader=null;
+    if(state.phase==='reading')state.phase='file_pending';
+    else if(state.phase==='confirming')state.phase=state.attempt?'unknown':'ready';
+    syncDonationBatchUi();
+}
+function syncDonationBatchUi() {
+    const state=donationBatchState, current=isCurrentDonationBatch(state);
+    const busy=current && ['confirming','preparing','saving'].includes(state.phase);
+    const file=document.getElementById('don-excel-file');
+    if(file)file.disabled=!current || busy || state.phase==='unknown' || !!donationGrantState?.busy;
+    const submit=document.getElementById('don-excel-submit');
+    if(submit){
+        submit.textContent=state?.phase==='unknown'?'결과 다시 확인':state?.phase==='complete'?'등록 완료':'일괄 등록하기';
+        submit.disabled=!current || !!donationGrantState?.busy || !['ready','unknown'].includes(state.phase) || !state.rows.length;
+    }
+    const retry=document.getElementById('don-excel-retry');
+    if(retry){retry.hidden=!current || !['file_pending','read_failed'].includes(state.phase);retry.disabled=busy || !!donationGrantState?.busy;}
+    const status=document.getElementById('don-excel-status');
+    if(status)status.textContent=!current?'':state.phase==='saving'?'등록 중':state.phase==='preparing'?'권한 확인 중'
+        :state.phase==='confirming'?'등록 확인 중':state.phase==='reading'?'파일을 읽고 있습니다.'
+        :state.phase==='unknown'?'등록 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.'
+        :state.message || (state.file?'작성 중':'');
+    document.querySelectorAll('#donationTab button,#donationModal [data-bs-dismiss="modal"]').forEach(node=>{
+        node.disabled=!!donationGrantState?.busy || donationBatchBusy();
+    });
+}
+function restoreDonationBatchFile(state) {
+    const input=document.getElementById('don-excel-file');
+    if(input && state?.file && input.files?.[0]!==state.file){
+        try{const files=new DataTransfer();files.items.add(state.file);input.files=files.files;}catch(_){}
+    }
+}
+function resetDonationBatchDraft() {
+    const state=donationBatchState;
+    donationBatchState=null;
+    try{state?.reader?.abort();}catch(_){}
+    if(typeof g_donation_excel_data!=='undefined')g_donation_excel_data=[];
+    if(typeof g_donation_batch_request_key!=='undefined')g_donation_batch_request_key=null;
+    const file=document.getElementById('don-excel-file');if(file)file.value='';
+    const preview=document.getElementById('don-excel-preview');if(preview)preview.style.display='none';
+    const rows=document.getElementById('don-excel-tbody');if(rows)rows.textContent='';
+    const count=document.getElementById('don-excel-count');if(count)count.textContent='';
+    syncDonationBatchUi();
+}
 
 function donationGrantFields() {
     return ['dn-member-id','dn-member-name','dn-date','dn-amount','dn-method','dn-note'].map(id=>document.getElementById(id)).filter(Boolean);
@@ -6731,30 +6796,29 @@ function syncDonationGrantState() {
     const status=document.getElementById('donation-grant-status');
     if(status){status.hidden=!current || !hasDonationGrantDraft();status.textContent=state?.busy?'등록 중':state?.uncertain?'결과 확인 필요':'작성 중';}
     document.querySelectorAll('#tab-don-single input,#tab-don-single select,#tab-don-single button').forEach(node=>{
-        node.disabled=!current || state.busy || state.uncertain || state.completed;
+        node.disabled=!current || state.busy || state.uncertain || state.completed || donationBatchBusy();
     });
+    syncDonationBatchUi();
 }
 function clearDonationGrantDraft(clearBatch=true) {
     donationGrantState=null;
     for(const node of donationGrantFields())node.value=node.id==='dn-method'?'transfer':'';
-    if(clearBatch){
-        if(typeof g_donation_excel_data!=='undefined')g_donation_excel_data=[];
-        if(typeof g_donation_batch_request_key!=='undefined')g_donation_batch_request_key=null;
-        const file=document.getElementById('don-excel-file');if(file)file.value='';
-        const preview=document.getElementById('don-excel-preview');if(preview)preview.style.display='none';
-        const rows=document.getElementById('don-excel-tbody');if(rows)rows.textContent='';
-        const count=document.getElementById('don-excel-count');if(count)count.textContent='';
-    }
+    if(clearBatch)resetDonationBatchDraft();
     document.querySelectorAll('#tab-don-single input,#tab-don-single select,#tab-don-single button').forEach(node=>{node.disabled=true;});
     const status=document.getElementById('donation-grant-status');if(status)status.hidden=true;
 }
 document.getElementById('tab-don-single')?.addEventListener('input',syncDonationGrantState);
 document.getElementById('tab-don-single')?.addEventListener('change',syncDonationGrantState);
 document.getElementById('donationModal')?.addEventListener('hide.bs.modal',event=>{
-    if(donationGrantState?.busy && !donationGrantState.completed){event.preventDefault();return;}
+    if((donationGrantState?.busy && !donationGrantState.completed) || donationBatchBusy()){event.preventDefault();return;}
     if(donationGrantState)donationGrantState.confirmation=null;
+    pauseDonationBatchRead();
 });
-document.getElementById('donationTab')?.addEventListener('shown.bs.tab',()=>{if(donationGrantState)donationGrantState.confirmation=null;});
+document.getElementById('donationTab')?.addEventListener('shown.bs.tab',()=>{
+    if(donationGrantState)donationGrantState.confirmation=null;
+    pauseDonationBatchRead();
+    if(donationBatchState?.phase==='file_pending')void retryDonationBatchRead();
+});
 
 function memberFundFields() {
     return ['fund-date','fund-amount','fund-note','fund-depositor','fund-method'].map(id => document.getElementById(id)).filter(Boolean);
@@ -7051,7 +7115,7 @@ window.addEventListener('beforeunload', event => {
     captureMemberFundDraft();
     if (memberDetailOwner() && (memberFundDrafts.size || memberFundState?.busy || memberFundState?.uncertain || memberDetailSaving || memberDetailDrafts.size || memberConsultDrafts.size
         || memberConsultPending.size || memberCreateSaving || hasMemberCreateDraft()
-        || hasDonationGrantDraft() || (typeof hasMemberImportDraft === 'function' && hasMemberImportDraft()))) {
+        || hasDonationGrantDraft() || hasDonationBatchDraft() || (typeof hasMemberImportDraft === 'function' && hasMemberImportDraft()))) {
         event.preventDefault();
         event.returnValue = '';
     }
@@ -12215,13 +12279,16 @@ function openDonationModal() {
         document.getElementById('dn-date').value=getAdminMemberKstDateString();
         donationGrantState={owner,baseline:donationGrantSnapshot(),busy:false,uncertain:false,completed:false,attempt:null,confirmation:null};
     }
+    if(!donationBatchState)donationBatchState={owner,revision:0,phase:'ready',file:null,rows:[],key:null,attempt:null,confirmation:null,reader:null,result:null,message:''};
+    if(['reading','confirming'].includes(donationBatchState.phase))pauseDonationBatchRead();
     syncDonationGrantState();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('donationModal')).show();
+    if(donationBatchState.phase==='file_pending')void retryDonationBatchRead();
 }
 
 async function submitDonationGrant() {
     const state=donationGrantState,modal=document.getElementById('donationModal');
-    if(!isCurrentDonationGrant(state) || state.busy || state.uncertain || state.completed || window.frameElement?.hidden
+    if(!isCurrentDonationGrant(state) || state.busy || state.uncertain || state.completed || donationBatchBusy() || window.frameElement?.hidden
         || !modal?.classList.contains('show') || !document.getElementById('tab-don-single')?.classList.contains('active'))return;
     const memberId = document.getElementById('dn-member-id').value.trim();
     const memberName = document.getElementById('dn-member-name').value.trim();
@@ -12238,7 +12305,7 @@ async function submitDonationGrant() {
     const args={p_member_text_id:memberId,p_values:{amount, date:donationDate,method,note}};
     const memberLabel = memberName ? `[${memberId}] ${memberName}` : `[${memberId}]`;
     myConfirm(`${memberLabel} 조합원에게\n자산수증이익 ${amount.toLocaleString()}원을 등록하시겠습니까?`, async () => {
-        if(!isCurrentDonationGrant(state) || state.confirmation!==confirmation || state.busy || state.uncertain || state.completed
+        if(!isCurrentDonationGrant(state) || state.confirmation!==confirmation || state.busy || state.uncertain || state.completed || donationBatchBusy()
             || window.frameElement?.hidden || !modal.classList.contains('show') || !document.getElementById('tab-don-single').classList.contains('active'))return;
         if(snapshot!==donationGrantSnapshot())return myAlert('작성 내용이 바뀌었습니다. 다시 확인해 주세요.','warning');
         const signature=JSON.stringify(args);
@@ -12275,7 +12342,7 @@ async function submitDonationGrant() {
             state.busy=false;
             const allowed=state.owner===memberDetailOwner() && !isAdminMemberSiteProfile() && canAccessAdminMemberTab('funds-manage');
             locked.forEach(([node,disabled])=>{if(node.isConnected)node.disabled=allowed?disabled:true;});
-            if(isCurrentDonationGrant(state))syncDonationGrantState();showLoading(false);
+            if(isCurrentDonationGrant(state))syncDonationGrantState();syncDonationBatchUi();showLoading(false);
         }
     });
 } // End of submitDonationGrant
@@ -12294,31 +12361,55 @@ async function downloadDonationTemplate() {
 }
 
 async function readDonationExcel(input) {
-    const selectedFile = input.files?.[0];
-    if (!selectedFile || !(await ensureAdminMemberSpreadsheetReady())) return;
-    if (input.files?.[0] !== selectedFile || !input.isConnected) return;
-    const file = input.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function (e) {
+    const state=donationBatchState,file=input?.files?.[0];
+    if(!file || !isCurrentDonationBatch(state,state?.revision,true))return;
+    if(['confirming','preparing','saving','unknown'].includes(state.phase) || donationGrantState?.busy){restoreDonationBatchFile(state);return;}
+    const revision=++state.revision;
+    try{state.reader?.abort();}catch(_){}
+    state.reader=null;state.confirmation=null;state.file=file;state.rows=[];state.key=null;state.attempt=null;state.result=null;state.phase='reading';state.message='';
+    g_donation_excel_data=[];g_donation_batch_request_key=null;
+    document.getElementById('don-excel-preview').style.display='none';
+    syncDonationBatchUi();
+    const current=()=>isCurrentDonationBatch(state,revision,true) && state.file===file && input.isConnected && input.files?.[0]===file;
+    const failed=message=>{if(!current())return;state.phase='read_failed';state.reader=null;state.message=message;syncDonationBatchUi();};
+    try{
+    if(!(await ensureAdminMemberSpreadsheetReady()))return failed('파일 도구를 불러오지 못했습니다. 다시 시도해 주세요.');
+    if(!current())return;
+    const reader=state.reader=new FileReader();
+    reader.onload=function(e){
+        if(!current())return;
+        try{
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
         if (json.length === 0) {
-            myAlert('데이터가 없는 엑셀입니다.', 'warning');
-            return;
+            return failed('데이터가 없는 엑셀입니다. 다른 파일을 선택해 주세요.');
         }
+        if(!current())return;
+        state.rows=json;state.key=createAdminBatchRequestKey('donation-import');state.phase='ready';state.reader=null;state.message='작성 중';
+        g_donation_excel_data=state.rows;g_donation_batch_request_key=state.key;
+        renderDonationBatchPreview();
+        }catch(_){failed('엑셀 파일을 읽지 못했습니다. 다시 시도해 주세요.');}
+    };
+    reader.onerror=()=>failed('파일을 읽지 못했습니다. 다시 시도해 주세요.');
+    reader.readAsArrayBuffer(file);
+    }catch(_){failed('파일을 읽지 못했습니다. 다시 시도해 주세요.');}
+}
 
-        g_donation_excel_data = json;
-        g_donation_batch_request_key = createAdminBatchRequestKey('donation-import');
+async function retryDonationBatchRead() {
+    const state=donationBatchState,input=document.getElementById('don-excel-file');
+    if(!isCurrentDonationBatch(state,state?.revision,true) || !['file_pending','read_failed'].includes(state.phase) || !state.file)return;
+    restoreDonationBatchFile(state);
+    if(input?.files?.[0]===state.file)await readDonationExcel(input);
+}
 
-        const tbody = document.getElementById('don-excel-tbody');
-        tbody.innerHTML = '';
-
-        json.slice(0, 5).forEach((row) => {
+function renderDonationBatchPreview() {
+    const state=donationBatchState;
+    if(!isCurrentDonationBatch(state))return;
+    const tbody=document.getElementById('don-excel-tbody');tbody.textContent='';
+    state.rows.slice(0,5).forEach(row=>{
             const parsed = normalizeDonationBatchRow(row);
             const tr = document.createElement('tr');
 
@@ -12342,22 +12433,21 @@ async function readDonationExcel(input) {
             tbody.appendChild(tr);
         });
 
-        document.getElementById('don-excel-count').innerText = `총 ${json.length}건 대기 중`;
-        document.getElementById('don-excel-preview').style.display = 'block';
-    };
-
-    reader.readAsArrayBuffer(file);
+    document.getElementById('don-excel-count').textContent=`총 ${state.rows.length}건`;
+    document.getElementById('don-excel-preview').style.display=state.rows.length?'block':'none';
+    syncDonationBatchUi();
 }
 
 async function submitDonationBatch() {
-    if (g_donation_excel_data.length === 0) return myAlert('데이터가 없습니다.', 'warning');
-
-    myConfirm(`총 ${g_donation_excel_data.length}건의 자산수증이익을 등록하시겠습니까?\n시간이 조금 걸릴 수 있습니다.`, async () => {
-        showLoading(true);
-
+    const state=donationBatchState;
+    if(!isCurrentDonationBatch(state,state?.revision,true) || !['ready','unknown'].includes(state.phase) || donationGrantState?.busy)return;
+    const revision=state.revision;
+    if(!state.rows.length)return myAlert('데이터가 없습니다.','warning');
+    let attempt=state.attempt;
+    if(!attempt){
         let invalidCount = 0;
         const payload = [];
-        g_donation_excel_data.forEach((row, index) => {
+        state.rows.forEach((row, index) => {
             const parsed = normalizeDonationBatchRow(row);
             if (!parsed.memberId || !parsed.donationDate || !Number.isFinite(parsed.amount) || parsed.amount <= 0) {
                 invalidCount++;
@@ -12373,37 +12463,63 @@ async function submitDonationBatch() {
             });
         });
 
-        if (payload.length === 0) {
-            showLoading(false);
-            return myAlert('등록 가능한 행이 없습니다.', 'warning');
+        if(!payload.length)return myAlert('등록 가능한 행이 없습니다.','warning');
+        if(payload.length>500)return myAlert('한 번에 등록할 수 있는 최대 건수는 500건입니다.','warning');
+        attempt={key:state.key || createAdminBatchRequestKey('donation-import'),payload,invalidCount};
+    }
+    const snapshot=JSON.stringify(state.rows),token={accepted:false};
+    state.confirmation=token;state.phase='confirming';syncDonationBatchUi();
+    myConfirm(state.attempt?'이전 등록 요청의 결과를 다시 확인할까요?':`${attempt.payload.length}건을 등록할까요?`,async()=>{
+        token.accepted=true;
+        if(!isCurrentDonationBatch(state,revision,true) || state.confirmation!==token || state.phase!=='confirming' || donationGrantState?.busy)return;
+        if(snapshot!==JSON.stringify(state.rows)){
+            state.confirmation=null;state.phase=state.attempt?'unknown':'ready';syncDonationBatchUi();
+            return myAlert('검토 내용이 바뀌었습니다. 다시 확인해 주세요.','warning');
         }
-        if (payload.length > 500) {
-            showLoading(false);
-            return myAlert('한 번에 등록할 수 있는 최대 건수는 500건입니다.', 'warning');
+        state.phase='preparing';syncDonationGrantState();
+        let sent=false;
+        try{
+            const identity=await _supabase.auth.getUser();
+            if(identity.error || identity.data?.user?.id!==adminCertificateAuthId)throw Error('DONATION_AUTH_UNCONFIRMED');
+            const gate=await window.ErpRuntimeGuard.enforce(_supabase,{moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+            if(!gate.ok || String(gate.runtime?.coop_id || '')!==String(g_adminMemberRuntime?.coop_id || '')
+                || gate.runtime?.runtime_profile==='site_member' || !isCurrentDonationBatch(state,revision,true)
+                || state.confirmation!==token || snapshot!==JSON.stringify(state.rows))throw Error('DONATION_ACCESS_UNCONFIRMED');
+            state.attempt=attempt;state.key=attempt.key;g_donation_batch_request_key=attempt.key;
+            state.phase='saving';syncDonationGrantState();sent=true;
+            const {data:result,error}=await _supabase.rpc('create_donations_secure_batch',{p_request_key:attempt.key,p_rows:attempt.payload});
+            if(!isCurrentDonationBatch(state,revision))return;
+            const expected=new Set(attempt.payload.map(row=>row.row_no)),items=Array.isArray(result?.items)?result.items:[];
+            if(error || result?.request_key!==attempt.key || result?.operation_type!=='DONATION_CREATE'
+                || items.length!==expected.size || new Set(items.map(item=>item?.row_no)).size!==expected.size
+                || items.some(item=>!expected.has(item?.row_no) || typeof item.ok!=='boolean')
+                || result.success_count!==items.filter(item=>item.ok).length || result.failure_count!==items.filter(item=>!item.ok).length)throw Error('DONATION_RESULT_UNCONFIRMED');
+            state.result={success:result.success_count,failed:result.failure_count+attempt.invalidCount};
+            state.phase='complete';state.message=`등록 완료: ${state.result.success}건 · 실패·검토 필요: ${state.result.failed}건`;
+            window.ErpWorkspaceResume?.checkpoint(document.getElementById('don-excel-file'));
+            syncDonationGrantState();
+            if(isCurrentDonationBatch(state,revision,true))myAlert(state.message);
+            if(state.result.success)void Promise.resolve().then(()=>fetchGlobalDonations()).catch(()=>{
+                if(!isCurrentDonationBatch(state,revision) || state.phase!=='complete')return;
+                state.message='등록했습니다. 목록을 다시 불러와 주세요.';syncDonationBatchUi();
+            });
+        }catch(_){
+            if(!isCurrentDonationBatch(state,revision))return;
+            state.phase=state.result?'complete':sent || state.attempt?'unknown':'ready';
+            state.message=state.phase==='complete'?'등록했습니다. 목록을 다시 불러와 주세요.':state.phase==='unknown'?'등록 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.'
+                :'로그인과 등록 권한을 확인하지 못했습니다. 다시 시도해 주세요.';
+            if(isCurrentDonationBatch(state,revision,true))myAlert(state.message,'warning');
+        }finally{
+            if(isCurrentDonationBatch(state,revision)){state.confirmation=null;syncDonationGrantState();}
         }
-
-        const requestKey = g_donation_batch_request_key || createAdminBatchRequestKey('donation-import');
-        g_donation_batch_request_key = requestKey;
-        const { data: result, error } = await _supabase.rpc('create_donations_secure_batch', {
-            p_request_key: requestKey,
-            p_rows: payload
-        });
-
-        showLoading(false);
-        if (error) {
-            CoopSafeLog.error("자산수증이익 일괄 등록 실패:", error);
-            myAlert(`일괄 등록 요청에 실패했습니다.<br>${escapeHtml(error.message || error)}`, 'error');
-            return;
-        }
-
-        const successCnt = Number(result?.success_count || 0);
-        const failCnt = invalidCount + Number(result?.failure_count || 0);
-        myAlert(`완료되었습니다.<br>성공: ${successCnt}건, 실패: ${failCnt}건`);
-
-        // Retain the receipt key while the same reviewed file remains open.
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('donationModal')).hide();
-        fetchGlobalDonations();
     });
+    document.getElementById('customConfirmModal')?.addEventListener('hidden.bs.modal',()=>{
+        queueMicrotask(()=>{
+            if(!token.accepted && donationBatchState===state && state.confirmation===token){
+                state.confirmation=null;state.phase=state.attempt?'unknown':'ready';syncDonationBatchUi();
+            }
+        });
+    },{once:true});
 }
 
 let g_dividend_current_balance = null;
