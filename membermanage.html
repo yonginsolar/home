@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.192
-Change: 2026-10-18 - Preserve profile-scoped board drafts and keyboard focus after loading more posts.
+Version: v1.0.193
+Change: 2026-10-18 - Guard board detail reads and support accessible cards and modal focus return.
 -->
 <html lang="ko">
 <head>
@@ -10,7 +10,7 @@ Change: 2026-10-18 - Preserve profile-scoped board drafts and keyboard focus aft
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.192 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.193 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -223,6 +223,20 @@ scrollbar-width: thin;
 outline: 3px solid #60a5fa;
 outline-offset: 4px;
 }
+#boardList .board-post-action {
+display: block; width: 100%; text-align: left; border: 0;
+background: transparent; color: inherit; font: inherit;
+}
+#boardList .board-post-action:hover { background: var(--bs-tertiary-bg, #f1f5f9); }
+#boardList .board-post-action:focus-visible,
+#boardViewModal :focus-visible { outline: 3px solid #60a5fa; outline-offset: -3px; }
+#boardViewModal .custom-modal-box {
+display: flex; flex-direction: column;
+height: min(76vh, 640px); max-height: calc(100dvh - 32px);
+overflow: auto;
+}
+#boardViewModal #viewContent { flex: 1; min-height: 0; overflow: auto; }
+#boardViewModal #viewFiles { flex: none; max-height: 20vh; overflow: auto; }
 
 /* [대시보드] 카드 스타일 (style.css에 없는 전용 디자인) */
 .dashboard-card {
@@ -2372,27 +2386,29 @@ oninput="autoHyphen(this)"> </div>
 <button type="button" class="participation-image-lightbox-nav next" id="participationImageLightboxNext" aria-label="다음 사진" hidden>&rsaquo;</button>
 </div>
 
-<div id="boardViewModal" class="custom-modal-overlay">
+<div id="boardViewModal" class="custom-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="viewTitle" aria-hidden="true">
 <div class="custom-modal-box" style="width: 90%; max-width: 600px; text-align: left;">
 
 <div class="post-view-header">
-<h5 id="viewTitle" class="fw-bold m-0 text-break">제목 로딩중...</h5>
+<h5 id="viewTitle" class="fw-bold m-0 text-break" tabindex="-1">게시글</h5>
 <div class="post-view-meta mt-2">
 <span><i class="bi bi-person-circle me-1"></i><span id="viewAuthor">작성자</span></span>
 <span id="viewDate">0000.00.00</span>
 </div>
 </div>
 
+<p id="boardViewStatus" class="small text-muted mt-2" role="status" hidden></p>
 <div id="viewContent" class="post-view-content mb-3">
 내용 로딩중...
 </div>
 
 <div id="viewFiles" class="mb-3 border-top pt-3"></div>
 
-<div class="d-flex justify-content-end border-top pt-3">
+<div class="d-flex gap-2 justify-content-end border-top pt-3">
+<button type="button" id="boardViewRetry" class="btn btn-outline-secondary btn-sm" onclick="retryBoardPost()" hidden>다시 불러오기</button>
 
 <div id="viewBtnGroup">
-<button class="btn btn-dark btn-sm" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>
+<button type="button" class="btn btn-dark btn-sm" onclick="closeBoardPost()">닫기</button>
 </div>
 </div>
 </div>
@@ -2604,6 +2620,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+window.PortalBoardDetail?.close(false);
 window.PortalBoardEditor?.clear();
 clearPortalApplicationDrafts();
 clearPortalPartnerDrafts();
@@ -4675,6 +4692,7 @@ return memberInformationPortal.refresh(member);
 
 async function loadDashboardData(uuid, options = {}) {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
+window.PortalBoardDetail?.close(false);
 window.PortalBoardEditor?.suspend();
 retainPortalProfileEdit();
 retainPortalApplicationDraft();
@@ -8545,6 +8563,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 async function toggleTab(type, btn) {
+window.PortalBoardDetail?.close(false);
 retainPortalPartnerDraft();++portalPartnerRequestRevision;
 if (!btn) btn = [...document.querySelectorAll('.menu-btn')].find(node => node.getAttribute('onclick')?.includes("toggleTab('"+type+"'"));
 const tabRevision = ++portalApplicationRequest;
@@ -9788,6 +9807,7 @@ function renderPortalBoardPosts(posts, hasMore, continuing = false) {
 const listArea = document.getElementById('boardList');
 const previousMore = listArea.querySelector('button[onclick="loadMoreBoard()"],button[data-board-more-retry]');
 const continueFocus = continuing && previousMore && document.activeElement === previousMore;
+const focusedPostId = continuing && listArea.contains(document.activeElement) ? document.activeElement.closest('[data-board-post-id]')?.dataset.boardPostId : null;
 if (!posts.length) {
 listArea.innerHTML = '<div class="text-center py-5 text-muted" role="status">등록된 글이 없습니다.</div>';
 return;
@@ -9803,13 +9823,13 @@ const date = formatMemberKstDate(p.created_at);
     const safeCategory = escapeJsString(currentBoardCat || '');
 
     html += `
-       <div class="board-list-item p-3 border-bottom" onclick="viewPost(${p.id}, '${safeCategory}')" style="cursor:pointer;">
-           <div class="d-flex justify-content-between">
+       <button type="button" class="board-list-item board-post-action p-3 border-bottom" data-board-post-id="${escapeHtml(String(p.id))}" aria-haspopup="dialog" aria-controls="boardViewModal" onclick="viewPost(this.dataset.boardPostId, '${safeCategory}', this)">
+           <span class="d-flex justify-content-between">
                 <span class="fw-bold text-dark text-truncate">${safeTitle}</span>
                 <small class="text-muted">${date}</small>
-            </div>
-            <div class="small text-secondary text-truncate mt-1">${safeContent}</div>
-        </div>`;
+            </span>
+            <span class="d-block small text-secondary text-truncate mt-1">${safeContent}</span>
+        </button>`;
 });
 
 html += `<div class="text-center py-3" id="boardListStatus" role="status">
@@ -9818,11 +9838,13 @@ html += `<div class="text-center py-3" id="boardListStatus" role="status">
 listArea.innerHTML = html;
 if (hasMore && previousMore?.getAttribute('onclick') === 'loadMoreBoard()') listArea.querySelector('button[onclick="loadMoreBoard()"]').replaceWith(previousMore);
 if (continueFocus) (hasMore ? listArea.querySelector('button[onclick="loadMoreBoard()"]') : listArea.querySelector('#boardListStatus span'))?.focus({preventScroll:true});
+else if (focusedPostId) [...listArea.querySelectorAll('[data-board-post-id]')].find(n => n.dataset.boardPostId === focusedPostId)?.focus({preventScroll:true});
 }
 
 function loadBoard(category, btn, limit = 20) {
 const state = portalBoardListState;
 if (category === 'notice') {
+window.PortalBoardDetail?.close(false);
 state.revision++;
 state.pending?.controller.abort();
 state.pending = null;
@@ -9838,6 +9860,7 @@ const key = JSON.stringify([owner, category, cursor]);
 if (state.pending?.key === key) return state.pending.promise;
 state.pending?.controller.abort();
 const request = { key, revision:++state.revision, controller:new AbortController(), promise:null };
+if (!more) window.PortalBoardDetail?.close(false);
 state.pending = request;
 currentBoardCat = category;
 isBoardLoading = true;
@@ -9912,6 +9935,83 @@ return loadBoard(currentBoardCat, null, currentBoardLimit + 20);
 
 
 
+/* BOARD_DETAIL_START — read lifecycle and focus only; no independent Auth or writes. */
+;(function() {
+let active = null;
+const modal = () => document.getElementById('boardViewModal');
+const owner = () => curAuth?.id && currentMemberCoopId && curMem?.id && (!curMem.coop_id || String(curMem.coop_id) === String(currentMemberCoopId)) ? getPortalBoardOwner() : '';
+const otherDialog = () => !!document.querySelector('.modal.show,dialog[open]') ||
+    [...document.querySelectorAll('.custom-modal-overlay')].some(n => n !== modal() && n.style.display === 'flex');
+const card = id => [...document.querySelectorAll('#boardList [data-board-post-id]')].find(n => n.dataset.boardPostId === String(id));
+function close(restoreFocus = true) {
+const previous = active; active = null;
+previous?.controller.abort();
+const box = modal();
+if (box) { box.style.display = 'none'; box.setAttribute('aria-hidden','true'); box.removeAttribute('aria-busy'); }
+for (const id of ['viewTitle','viewAuthor','viewDate','viewContent','viewFiles','boardViewStatus']) document.getElementById(id)?.replaceChildren();
+const retry = document.getElementById('boardViewRetry'); if (retry) retry.hidden = true;
+document.getElementById('viewBtnGroup')?.replaceChildren();
+window.currentPostId = null;
+if (!restoreFocus || !previous || previous.owner !== owner() || previous.category !== currentBoardCat || otherDialog()) return;
+const target = previous.trigger?.isConnected ? previous.trigger : card(previous.id) || document.getElementById('btnWritePost');
+target?.focus({preventScroll:true});
+}
+function current(request) {
+if (active !== request) return false;
+if (request.owner !== owner() || request.category !== currentBoardCat || modal()?.style.display !== 'flex' || otherDialog()) { close(false); return false; }
+return true;
+}
+function begin(id, category, trigger) {
+const scope = owner();
+if (!scope || category !== currentBoardCat || (typeof id === 'number' && !Number.isSafeInteger(id)) || !/^-?\d{1,19}$/.test(String(id)) ||
+    window.PortalBoardEditor?.busy() || otherDialog() || (typeof isSiteMemberPortalProfile === 'function' && isSiteMemberPortalProfile())) return null;
+if (active?.id === String(id) && active.owner === scope && active.category === category && active.pending) return active;
+close(false);
+const request = {id:String(id),category,owner:scope,trigger:trigger || card(id) || document.activeElement,controller:new AbortController(),pending:true,promise:null};
+active = request;
+document.getElementById('viewTitle').textContent = '글 불러오는 중…';
+document.getElementById('boardViewStatus').textContent = '불러오는 중…';
+document.getElementById('boardViewStatus').hidden = false;
+document.getElementById('viewBtnGroup').innerHTML = '<button type="button" class="btn btn-dark btn-sm" onclick="closeBoardPost()">닫기</button>';
+modal().style.display = 'flex'; modal().setAttribute('aria-hidden','false'); modal().setAttribute('aria-busy','true');
+document.getElementById('viewTitle').focus({preventScroll:true});
+return request;
+}
+window.PortalBoardDetail = {
+begin,current,close,
+loaded(request) { if (!current(request)) return; modal().removeAttribute('aria-busy'); document.getElementById('boardViewStatus').hidden = true; },
+failed(request) {
+if (!current(request)) return;
+modal().removeAttribute('aria-busy');
+document.getElementById('viewTitle').textContent = '글 조회 실패';
+document.getElementById('boardViewStatus').textContent = '글을 불러오지 못했습니다. 다시 시도해 주세요.';
+document.getElementById('boardViewStatus').hidden = false;
+document.getElementById('boardViewRetry').hidden = false;
+},
+retry() { if (active && current(active) && !active.pending) return viewPost(active.id,active.category,active.trigger); }
+};
+document.addEventListener('click', event => {
+if (!active || modal()?.contains(event.target) || event.target.closest?.('#boardList [data-board-post-id]')) return;
+if (event.target.closest?.('button,a,input,select,textarea,[role="button"]')) close(false);
+},true);
+document.addEventListener('keydown', event => {
+if (!active || window.CoopDialog?.hasPending() || document.getElementById('customModalOverlay')?.style.display === 'flex') return;
+if (!current(active)) { close(false); return; }
+if (event.key === 'Escape') { event.preventDefault(); close(); }
+else if (event.key === 'Tab') {
+const nodes = [...modal().querySelectorAll('a[href],button:not([disabled]),[tabindex="0"]')].filter(n => !n.hidden && !n.closest('[hidden]'));
+if (!nodes.length) return;
+const first = nodes[0], last = nodes[nodes.length-1], focused = document.activeElement;
+if (!nodes.includes(focused) || (event.shiftKey && focused === first)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
+else if (!event.shiftKey && focused === last) { event.preventDefault(); first.focus(); }
+}
+});
+window.addEventListener('pagehide', () => close(false));
+})();
+/* BOARD_DETAIL_END */
+function closeBoardPost(restoreFocus = true) { window.PortalBoardDetail?.close(restoreFocus); }
+function retryBoardPost() { return window.PortalBoardDetail?.retry(); }
+
 /* BOARD_EDITOR_START — memory only; no independent Auth, network or storage. */
 ;(function() {
 const drafts = new Map(), ids = ['writeTitle','writeContent','writeFile'];
@@ -9950,6 +10050,7 @@ if (restoreFocus && editor?.key === context()?.key && editor.trigger?.isConnecte
 function open() {
 if (writing || !ready || (typeof isSiteMemberPortalProfile === 'function' && isSiteMemberPortalProfile())) return;
 const current = context(); if (!current) return;
+window.PortalBoardDetail?.close(false);
 retain(); ++revision;
 editor = {...current,trigger:document.activeElement}; apply(drafts.get(current.key)); sync();
 modal().classList.remove('modal-depth-back');
@@ -10099,16 +10200,25 @@ window.PortalBoardEditor.setBusy(false);
 // [글보기] 상세 조회 및 버튼 권한 처리
 // [수정] 게시글 상세 보기 함수 (오류 방지 및 권한 처리 강화)
 // [수정] 게시글 상세 보기 함수 (공지사항 file_url 칼럼 연동 추가)
-async function viewPost(id, category) {
+function viewPost(id, category, trigger = null) {
 if (category === 'notice') {
+window.PortalBoardDetail?.close(false);
 return openDocumentBox('ANNOUNCEMENTS', id);
 }
+const request = window.PortalBoardDetail?.begin(id,category,trigger);
+if (!request) return Promise.resolve(false);
+if (request.promise) return request.promise;
+request.promise = Promise.resolve().then(async () => {
+const timer = setTimeout(() => request.controller.abort(),15000);
+try {
+if (!window.PortalBoardDetail.current(request)) return false;
 const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
 
 // 1. 조회
 const basePostQuery = _supabase.from(tableName).select('*');
-const { data: post, error } = await scopeMemberTenant(basePostQuery).eq('id', id).single();
-if(error || !post) return showModal('글을 불러오지 못했습니다.');
+const { data: post, error } = await scopeMemberTenant(basePostQuery).eq('id', request.id).abortSignal(request.controller.signal).single();
+if (!window.PortalBoardDetail.current(request)) return false;
+if(error || !post) throw error || new Error('BOARD_POST_NOT_FOUND');
 
 // 2. 바인딩 (안전하게 ID 확인)
 setText('viewTitle', post.title);
@@ -10172,7 +10282,8 @@ window.currentPostId = id;
 
 const btnGroup = document.getElementById('viewBtnGroup');
 if(btnGroup) {
-let html = `<button class="btn btn-dark btn-sm" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>`;
+const focusedClose = btnGroup.contains(document.activeElement) && document.activeElement.getAttribute('onclick') === 'closeBoardPost()';
+let html = `<button type="button" class="btn btn-dark btn-sm" onclick="closeBoardPost()">닫기</button>`;
 
 // 공지사항 아니고 내 글이면 수정/삭제 노출
 if(category !== 'notice' && isMine) {
@@ -10183,10 +10294,17 @@ html = `
            `;
 }
 btnGroup.innerHTML = html;
+if (focusedClose) btnGroup.querySelector('[onclick="closeBoardPost()"]')?.focus({preventScroll:true});
 }
 
-// 5. 모달 열기
-document.getElementById('boardViewModal').style.display = 'flex';
+window.PortalBoardDetail.loaded(request);
+return true;
+} catch (_) {
+window.PortalBoardDetail.failed(request);
+return false;
+} finally { clearTimeout(timer); request.pending = false; }
+});
+return request.promise;
 }
 // End of viewPost
 
