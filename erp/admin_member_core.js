@@ -12370,7 +12370,11 @@ async function readDonationExcel(input) {
     g_donation_excel_data=[];g_donation_batch_request_key=null;
     document.getElementById('don-excel-preview').style.display='none';
     syncDonationBatchUi();
-    const current=()=>isCurrentDonationBatch(state,revision,true) && state.file===file && input.isConnected && input.files?.[0]===file;
+    const current=()=>{
+        if(!isCurrentDonationBatch(state,revision) || state.file!==file || !input.isConnected || input.files?.[0]!==file)return false;
+        if(isCurrentDonationBatch(state,revision,true))return true;
+        state.phase='file_pending';state.reader=null;state.message='파일을 다시 읽어 주세요.';syncDonationBatchUi();return false;
+    };
     const failed=message=>{if(!current())return;state.phase='read_failed';state.reader=null;state.message=message;syncDonationBatchUi();};
     try{
     if(!(await ensureAdminMemberSpreadsheetReady()))return failed('파일 도구를 불러오지 못했습니다. 다시 시도해 주세요.');
@@ -12471,7 +12475,12 @@ async function submitDonationBatch() {
     state.confirmation=token;state.phase='confirming';syncDonationBatchUi();
     myConfirm(state.attempt?'이전 등록 요청의 결과를 다시 확인할까요?':`${attempt.payload.length}건을 등록할까요?`,async()=>{
         token.accepted=true;
-        if(!isCurrentDonationBatch(state,revision,true) || state.confirmation!==token || state.phase!=='confirming' || donationGrantState?.busy)return;
+        if(!isCurrentDonationBatch(state,revision,true) || state.confirmation!==token || state.phase!=='confirming' || donationGrantState?.busy){
+            if(isCurrentDonationBatch(state,revision) && state.confirmation===token && state.phase==='confirming'){
+                state.confirmation=null;state.phase=state.attempt?'unknown':'ready';syncDonationBatchUi();
+            }
+            return;
+        }
         if(snapshot!==JSON.stringify(state.rows)){
             state.confirmation=null;state.phase=state.attempt?'unknown':'ready';syncDonationBatchUi();
             return myAlert('검토 내용이 바뀌었습니다. 다시 확인해 주세요.','warning');
