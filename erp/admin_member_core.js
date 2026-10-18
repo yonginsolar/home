@@ -6235,6 +6235,7 @@ function switchTab(tabName) {
 
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
+    if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) invalidateMemberReturnSummaryRead();
     if (tabName !== 'applications') invalidateApplicationListRead();
     memberFundListResume = null;
     // 1. 모든 탭 숨김 처리
@@ -6365,17 +6366,35 @@ function markMemberReturnSummaryUnavailable() {
     if (sidebarBadge) sidebarBadge.classList.add('hidden');
 }
 
-async function fetchMemberReturnSummary() {
-    try {
-        const { data, error } = await _supabase.rpc('admin_get_member_return_summary');
-        if (error) throw error;
-        updateMemberReturnSummary(data || {});
-        return data || {};
-    } catch (error) {
-        CoopSafeLog.error("감자·탈퇴 반환 현황 조회 실패:", error);
-        markMemberReturnSummaryUnavailable();
-        return null;
+function fetchMemberReturnSummary() {
+    const owner = memberDetailOwner();
+    if (!owner || !canAccessAdminMemberTab('applications')
+        || document.getElementById('main-system')?.classList.contains('hidden')) return Promise.resolve(null);
+    if (window.frameElement?.hidden) {
+        memberReturnSummaryResume = {owner,revision:memberReturnSummaryRevision};
+        return Promise.resolve(null);
     }
+    if (memberReturnSummaryRequest?.pending && isCurrentMemberReturnSummaryRead(memberReturnSummaryRequest)) return memberReturnSummaryRequest.promise;
+    const request = {owner,revision:++memberReturnSummaryRevision,pending:true,promise:null};
+    memberReturnSummaryRequest = request;
+    request.promise = (async () => {
+        try {
+            const { data, error } = await _supabase.rpc('admin_get_member_return_summary');
+            if (!isCurrentMemberReturnSummaryRead(request)) return null;
+            if (error) throw error;
+            if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('INVALID_MEMBER_RETURN_SUMMARY');
+            updateMemberReturnSummary(data);
+            return data;
+        } catch (error) {
+            if (!isCurrentMemberReturnSummaryRead(request)) return null;
+            CoopSafeLog.error("감자·탈퇴 반환 현황 조회 실패:", error);
+            markMemberReturnSummaryUnavailable();
+            return null;
+        } finally {
+            request.pending = false;
+        }
+    })();
+    return request.promise;
 }
 
 
@@ -6726,6 +6745,22 @@ let memberFundRefreshSequence = 0;
 let applicationListRevision = 0;
 let applicationListRequest = null;
 let applicationListResume = null;
+let memberReturnSummaryRevision = 0;
+let memberReturnSummaryRequest = null;
+let memberReturnSummaryResume = null;
+
+function invalidateMemberReturnSummaryRead() {
+    memberReturnSummaryRevision++;
+    memberReturnSummaryRequest = null;
+    memberReturnSummaryResume = null;
+}
+function isCurrentMemberReturnSummaryRead(request) {
+    const owner = memberDetailOwner();
+    return !!request && memberReturnSummaryRequest === request && request.revision === memberReturnSummaryRevision
+        && !!owner && request.owner === owner && canAccessAdminMemberTab('applications')
+        && !window.frameElement?.hidden && !document.getElementById('main-system')?.classList.contains('hidden');
+}
+window.addEventListener('pagehide', invalidateMemberReturnSummaryRead);
 
 function invalidateDonationListRead(event) {
     const dateEvent = ['don-date-start','don-date-end'].includes(event?.target?.id);
@@ -7085,6 +7120,7 @@ function clearMemberDetailEdits() {
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
     invalidateApplicationListRead();
+    invalidateMemberReturnSummaryRead();
     memberFundListResume = null;
     usageLedgerPage = null;
     syncUsageLedgerUi();
@@ -8125,10 +8161,16 @@ function bindAdminCertificateContext(authId) {
                 invalidateDonationListRead();
                 invalidateUsageLedgerRead();
                 invalidateApplicationListRead();
+                invalidateMemberReturnSummaryRead();
                 memberFundListResume = null;
                 window.ContributionCertPreview?.clear();
                 if (typeof pauseMemberImportRead === 'function') pauseMemberImportRead();
             } else {
+                const summary = memberReturnSummaryResume;
+                memberReturnSummaryResume = null;
+                if (summary && summary.revision === memberReturnSummaryRevision && summary.owner === memberDetailOwner()) {
+                    void fetchMemberReturnSummary();
+                }
                 const queued = memberFundListResume;
                 memberFundListResume = null;
                 if (queued && queued.sequence === memberFundRefreshSequence && queued.owner === memberDetailOwner()) {
@@ -10322,12 +10364,16 @@ window.onload = async function() {
             try {
                 gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
             } catch (error) {
-                if (sequence === memberFundRefreshSequence) invalidateApplicationListRead();
+                if (sequence === memberFundRefreshSequence) {
+                    invalidateApplicationListRead();
+                    invalidateMemberReturnSummaryRead();
+                }
                 throw error;
             }
             if (sequence !== memberFundRefreshSequence) return;
             if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) {
                 invalidateApplicationListRead();
+                invalidateMemberReturnSummaryRead();
                 throw new Error('ERP_TASK_ACCESS_DENIED');
             }
             window.MemberNotificationAdmin?.configure(_supabase,gate.runtime,adminCertificateAuthId);
@@ -13122,6 +13168,11 @@ function fetchApplications() {
     tbody.innerHTML = '<tr><td colspan="7" class="py-5"><div class="spinner-border spinner-border-sm text-primary"></div> 로딩중...</td></tr>';
     request.promise = (async () => {
         try {
+            // Start together so workspace/list callers share one in-flight summary,
+            // even when that read completes before the application sources do.
+            void Promise.resolve(fetchMemberReturnSummary()).catch(error => {
+                if (isCurrentApplicationListRead(request)) CoopSafeLog.error('[erp/admin_member] application summary failed', error);
+            });
             const [applicationsResult, withdrawalResult] = await Promise.all([
                 scopeAdminTenant(_supabase.from('coop_applications').select('*'))
                     .order('created_at', { ascending: false }).limit(100),
@@ -13136,12 +13187,6 @@ function fetchApplications() {
             g_withdrawal_workflows = workflows;
             renderAppList();
             updateAppBadges();
-            // Summary failure must not relabel a successfully refreshed list as failed.
-            void Promise.resolve().then(() => {
-                if (isCurrentApplicationListRead(request)) return fetchMemberReturnSummary();
-            }).catch(error => {
-                if (isCurrentApplicationListRead(request)) CoopSafeLog.error('[erp/admin_member] application summary failed', error);
-            });
         } catch (error) {
             if (!isCurrentApplicationListRead(request)) return;
             CoopSafeLog.error('[erp/admin_member] application list failed', error);
