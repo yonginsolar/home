@@ -6235,6 +6235,7 @@ function switchTab(tabName) {
 
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
+    if (tabName !== 'applications') invalidateApplicationListRead();
     memberFundListResume = null;
     // 1. 모든 탭 숨김 처리
     const panes = document.querySelectorAll('.main-content > .tab-pane');
@@ -6722,10 +6723,22 @@ let usageLedgerRequest = null;
 let usageLedgerPage = null;
 let memberFundListResume = null;
 let memberFundRefreshSequence = 0;
+let applicationListRevision = 0;
+let applicationListRequest = null;
+let applicationListResume = null;
 
-function invalidateDonationListRead() {
+function invalidateDonationListRead(event) {
+    const dateEvent = ['don-date-start','don-date-end'].includes(event?.target?.id);
+    if (dateEvent && donationListRequest?.pending && isCurrentDonationListRead(donationListRequest)) return;
+    const pending = donationListRequest?.pending;
     donationListRevision++;
     donationListRequest = null;
+    if (dateEvent && pending) {
+        const body = document.getElementById('donationGlobalBody');
+        if (body) body.innerHTML = '<tr><td colspan="6" class="py-5 text-muted">조회 조건을 확인하고 조회를 눌러 주세요.</td></tr>';
+        const total = document.getElementById('don-total-sum');
+        if (total) total.innerText = '—';
+    }
 }
 function isCurrentDonationListRead(request) {
     const owner = memberDetailOwner();
@@ -6802,6 +6815,30 @@ function isCurrentUsageLedgerRead(request) {
         && document.getElementById('sub-tab-dividends')?.classList.contains('active')
         && document.getElementById('div-search-keyword')?.value.trim() === request.keyword;
 }
+function invalidateApplicationListRead() {
+    applicationListRevision++;
+    applicationListRequest = null;
+    applicationListResume = null;
+}
+function isCurrentApplicationListRead(request) {
+    const owner = memberDetailOwner();
+    const pane = document.getElementById('tab-applications');
+    return !!request && applicationListRequest === request && request.revision === applicationListRevision
+        && !!owner && request.owner === owner && canAccessAdminMemberTab('applications')
+        && !window.frameElement?.hidden && (pane?.classList.contains('active') || pane?.style.display === 'block');
+}
+function requestApplicationListRefresh(sequence) {
+    const owner = memberDetailOwner();
+    const pane = document.getElementById('tab-applications');
+    if (!owner || !canAccessAdminMemberTab('applications')
+        || !(pane?.classList.contains('active') || pane?.style.display === 'block')) return Promise.resolve();
+    if (window.frameElement?.hidden) {
+        applicationListResume = {owner,sequence};
+        return Promise.resolve();
+    }
+    return fetchApplications();
+}
+window.addEventListener('pagehide', invalidateApplicationListRead);
 function refreshVisibleMemberFundList() {
     const pane = document.getElementById('tab-funds-manage');
     if (!memberDetailOwner() || isAdminMemberSiteProfile() || !canAccessAdminMemberTab('funds-manage')
@@ -7047,6 +7084,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 function clearMemberDetailEdits() {
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
+    invalidateApplicationListRead();
     memberFundListResume = null;
     usageLedgerPage = null;
     syncUsageLedgerUi();
@@ -8086,6 +8124,7 @@ function bindAdminCertificateContext(authId) {
             if (frame.hidden) {
                 invalidateDonationListRead();
                 invalidateUsageLedgerRead();
+                invalidateApplicationListRead();
                 memberFundListResume = null;
                 window.ContributionCertPreview?.clear();
                 if (typeof pauseMemberImportRead === 'function') pauseMemberImportRead();
@@ -8094,6 +8133,11 @@ function bindAdminCertificateContext(authId) {
                 memberFundListResume = null;
                 if (queued && queued.sequence === memberFundRefreshSequence && queued.owner === memberDetailOwner()) {
                     void refreshVisibleMemberFundList().catch(error => CoopSafeLog.error('[erp/admin_member] fund list resume failed', error));
+                }
+                const application = applicationListResume;
+                applicationListResume = null;
+                if (application && application.sequence === memberFundRefreshSequence && application.owner === memberDetailOwner()) {
+                    void fetchApplications().catch(error => CoopSafeLog.error('[erp/admin_member] application list resume failed', error));
                 }
             }
         });
@@ -10273,19 +10317,29 @@ window.onload = async function() {
         window.ErpWorkspaceTask = {ready:true, refresh:async function(options = {}) {
             const sequence = ++memberFundRefreshSequence;
             memberFundListResume = null;
-            const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+            applicationListResume = null;
+            let gate;
+            try {
+                gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+            } catch (error) {
+                if (sequence === memberFundRefreshSequence) invalidateApplicationListRead();
+                throw error;
+            }
             if (sequence !== memberFundRefreshSequence) return;
-            if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) throw new Error('ERP_TASK_ACCESS_DENIED');
+            if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) {
+                invalidateApplicationListRead();
+                throw new Error('ERP_TASK_ACCESS_DENIED');
+            }
             window.MemberNotificationAdmin?.configure(_supabase,gate.runtime,adminCertificateAuthId);
             // Do not repopulate an open member editor or overwrite unfinished input.
             if (options.dirty || document.querySelector('.modal.show,dialog[open]')) {
-                await Promise.all([fetchMemberReturnSummary(), requestMemberFundListRefresh(sequence)]); return;
+                await Promise.all([fetchMemberReturnSummary(), requestMemberFundListRefresh(sequence), requestApplicationListRefresh(sequence)]); return;
             }
             const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
             if (pane === 'tab-dashboard') await loadDashboard();
             else if (pane === 'tab-notifications') await window.MemberNotificationAdmin?.refresh();
             else if (pane === 'tab-members' && g_member_fetch_revision > 0) await fetchMembers();
-            else if (pane === 'tab-applications') await fetchApplications();
+            else if (pane === 'tab-applications') await requestApplicationListRefresh(sequence);
             else if (pane === 'tab-funds-manage') await requestMemberFundListRefresh(sequence);
             else await fetchMemberReturnSummary();
         }};
@@ -13056,49 +13110,47 @@ let g_application_rejection_in_flight = false;
 
 // 1. 신청 목록 불러오기
 // [디버깅용] fetchApplications 함수
-async function fetchApplications() {
-
+function fetchApplications() {
+    const owner = memberDetailOwner();
+    const pane = document.getElementById('tab-applications');
     const tbody = document.getElementById('appListBody');
-    if (!tbody) {
-        CoopSafeLog.error("❌ 에러: HTML에 id='appListBody'인 <tbody> 태그가 없습니다.");
-        return;
-    }
-
+    if (!tbody || !owner || !canAccessAdminMemberTab('applications') || window.frameElement?.hidden
+        || !(pane?.classList.contains('active') || pane?.style.display === 'block')) return Promise.resolve();
+    if (applicationListRequest?.pending && isCurrentApplicationListRead(applicationListRequest)) return applicationListRequest.promise;
+    const request = {owner,revision:++applicationListRevision,pending:true,promise:null};
+    applicationListRequest = request;
     tbody.innerHTML = '<tr><td colspan="7" class="py-5"><div class="spinner-border spinner-border-sm text-primary"></div> 로딩중...</td></tr>';
-
-    const [applicationsResult, withdrawalResult] = await Promise.all([
-        scopeAdminTenant(_supabase
-            .from('coop_applications')
-            .select('*'))
-            .order('created_at', { ascending: false })
-            .limit(100),
-        _supabase.rpc('admin_list_member_exit_workflows')
-    ]);
-    const { data, error } = applicationsResult;
-
-    // 2. DB 응답 확인
-    if (error) {
-        CoopSafeLog.error("❌ DB 에러 발생:", error);
-        tbody.innerHTML = `<tr><td colspan="7" class="text-danger py-4">로딩 실패: ${escapeHtml(error.message)}</td></tr>`;
-        return;
-    }
-
-
-    g_apps = data || [];
-    if (withdrawalResult.error) {
-        CoopSafeLog.error("탈퇴 처리 현황 조회 실패:", withdrawalResult.error);
-        g_withdrawal_workflows = new Map();
-    } else {
-        g_withdrawal_workflows = new Map((Array.isArray(withdrawalResult.data) ? withdrawalResult.data : []).map(function (row) {
-            return [String(row.application_id), row];
-        }));
-    }
-
-    // 3. 렌더링 직전 데이터 확인
-
-    renderAppList();
-    updateAppBadges();
-    fetchMemberReturnSummary();
+    request.promise = (async () => {
+        try {
+            const [applicationsResult, withdrawalResult] = await Promise.all([
+                scopeAdminTenant(_supabase.from('coop_applications').select('*'))
+                    .order('created_at', { ascending: false }).limit(100),
+                _supabase.rpc('admin_list_member_exit_workflows')
+            ]);
+            if (!isCurrentApplicationListRead(request)) return;
+            if (applicationsResult.error) throw applicationsResult.error;
+            if (withdrawalResult.error) throw withdrawalResult.error;
+            if (!Array.isArray(applicationsResult.data) || !Array.isArray(withdrawalResult.data)) throw new Error('INVALID_APPLICATION_LIST');
+            const workflows = new Map(withdrawalResult.data.map(row => [String(row.application_id),row]));
+            g_apps = applicationsResult.data;
+            g_withdrawal_workflows = workflows;
+            renderAppList();
+            updateAppBadges();
+            // Summary failure must not relabel a successfully refreshed list as failed.
+            void Promise.resolve().then(() => {
+                if (isCurrentApplicationListRead(request)) return fetchMemberReturnSummary();
+            }).catch(error => {
+                if (isCurrentApplicationListRead(request)) CoopSafeLog.error('[erp/admin_member] application summary failed', error);
+            });
+        } catch (error) {
+            if (!isCurrentApplicationListRead(request)) return;
+            CoopSafeLog.error('[erp/admin_member] application list failed', error);
+            tbody.innerHTML = '<tr><td colspan="7" class="text-danger py-4">신청 내역을 불러오지 못했습니다. <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="fetchApplications()">다시 조회</button></td></tr>';
+        } finally {
+            request.pending = false;
+        }
+    })();
+    return request.promise;
 }
 
 function isApplicationWorkPending(app) {
