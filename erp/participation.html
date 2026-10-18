@@ -9,7 +9,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.27 | participation.html');</script>
+  <script>console.log('[Version] v1.3.28 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -228,13 +228,13 @@
 
     <section class="panel">
       <div class="toolbar">
-        <select class="form-select" id="eventTypeFilter" aria-label="유형 필터">
+        <select data-erp-query-control class="form-select" id="eventTypeFilter" aria-label="유형 필터">
           <option value="ALL">전체 유형</option>
           <option value="BOARD">이사회</option>
           <option value="DELEGATE_ASSEMBLY">대의원 총회</option>
           <option value="EDUCATION" selected>교육</option>
         </select>
-        <input type="search" class="form-control" id="eventSearch" placeholder="교육명·장소·외부 참가자 검색">
+        <input data-erp-query-control type="search" class="form-control" id="eventSearch" placeholder="교육명·장소·외부 참가자 검색">
         <button type="button" class="btn btn-outline-secondary" id="refreshBtn">새로고침</button>
         <button type="button" class="btn btn-primary" id="newEventBtn">신규 교육 입력</button>
       </div>
@@ -1224,7 +1224,11 @@
         return `${row.title || ''} ${row.location || ''} ${eventTypeLabel(row.event_type)} ${row.attendee_search_text || ''}`.toLowerCase().includes(query);
       });
       if (rows.length === 0) {
-        list.innerHTML = `<div class="empty-state">등록된 ${PARTICIPATION_EDUCATION_VIEW ? '교육' : '회의'}이 없습니다.</div>`;
+        const filtered = !!query || type !== (PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'ALL');
+        const label = filtered
+          ? `검색 조건에 맞는 ${PARTICIPATION_EDUCATION_VIEW ? '교육이' : '회의가'} 없습니다.`
+          : `등록된 ${PARTICIPATION_EDUCATION_VIEW ? '교육이' : '회의가'} 없습니다.`;
+        list.innerHTML = `<div class="empty-state">${label}</div>`;
         return;
       }
       list.innerHTML = rows.map(function(row) {
@@ -3236,6 +3240,7 @@
 
     async function loadDashboard(showCover = true) {
       if (showCover) showLoading(true, '참여 현황을 불러오는 중...');
+      if (showCover) document.getElementById('eventList').innerHTML = '<div class="empty-state" role="status">목록을 불러오는 중…</div>';
       showAlert('pageAlert', '');
       try {
         const owner = { ...participationReadOwner };

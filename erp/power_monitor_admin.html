@@ -9,7 +9,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.4 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.3.5 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -520,6 +520,7 @@
     }
 
     function formatPower(value) {
+      if (value === null || value === undefined || value === '') return '—';
       const number = Number(value);
       if (!Number.isFinite(number)) return '-';
       if (number >= 1000) return `${formatNumber(number / 1000, 2)} MW`;
@@ -527,6 +528,7 @@
     }
 
     function formatEnergy(value) {
+      if (value === null || value === undefined || value === '') return '—';
       const number = Number(value);
       if (!Number.isFinite(number)) return '-';
       if (number >= 1000000) return `${formatNumber(number / 1000000, 2)} GWh`;
@@ -585,17 +587,36 @@
       if (!select.value && scopes[0]) select.value = scopes[0].key;
     }
 
+    function hasMonitorReading(plant, field) {
+      return !!plant && ['live', 'stale'].includes(plant.data_state)
+        && Number.isFinite(new Date(plant.fetched_at || plant.observed_at || '').getTime())
+        && plant[field] !== null && plant[field] !== undefined && plant[field] !== ''
+        && Number.isFinite(Number(plant[field])) && Number(plant[field]) >= 0;
+    }
+
+    function formatMonitorReading(plant, field) {
+      if (!hasMonitorReading(plant, field)) return '—';
+      return field === 'current_kw' ? formatPower(plant[field]) : formatEnergy(plant[field]);
+    }
+
     function renderSummary() {
       const summary = monitorData?.summary || {};
       const monitorCount = Number(summary.monitor_plant_count || 0);
       const completedCount = Number(summary.completed_plant_count || 0);
       const mappedCount = Number(summary.mapped_plant_count || 0);
-      document.getElementById('metricMonitorCount').textContent = `${completedCount}곳`;
-      document.getElementById('metricMappedCount').textContent = `전체 ${monitorCount}곳 · 홈페이지 연결 ${mappedCount}곳`;
-      document.getElementById('metricCapacity').textContent = formatPower(summary.completed_capacity_kw || 0);
-      document.getElementById('metricCurrent').textContent = formatPower(summary.completed_current_kw || 0);
-      document.getElementById('metricToday').textContent = formatEnergy(summary.completed_today_kwh || 0);
-      document.getElementById('metricUpdated').textContent = `완공 발전소 최종 수집 ${formatDateTime(summary.completed_last_fetched_at)}`;
+      const connected = !!monitorData?.dashboard?.id;
+      const completed = (monitorData?.monitor_plants || []).filter(plant => plant.is_active !== false && plant.is_completed === true);
+      const collected = field => connected && completedCount > 0 && completed.length === completedCount
+        && completed.every(plant => hasMonitorReading(plant, field));
+      document.getElementById('metricMonitorCount').textContent = connected ? `${completedCount}곳` : '—';
+      document.getElementById('metricMappedCount').textContent = connected ? `전체 ${monitorCount}곳 · 홈페이지 연결 ${mappedCount}곳` : '모니터 미연결';
+      document.getElementById('metricCapacity').textContent = connected ? formatPower(summary.completed_capacity_kw) : '—';
+      document.getElementById('metricCurrent').textContent = collected('current_kw') ? formatPower(summary.completed_current_kw) : '—';
+      document.getElementById('metricToday').textContent = collected('today_kwh') ? formatEnergy(summary.completed_today_kwh) : '—';
+      document.getElementById('metricUpdated').textContent = !connected ? '모니터 미연결'
+        : !summary.completed_last_fetched_at ? '수집 전'
+        : !collected('current_kw') || !collected('today_kwh') ? '일부 발전소 수집 확인 필요'
+        : `완공 발전소 최종 수집 ${formatDateTime(summary.completed_last_fetched_at)}`;
     }
 
     function renderSources() {
@@ -879,9 +900,9 @@
           <td><span class="state-badge">${escapeHtml(plant.provider)}</span></td>
           <td data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="state">${stateBadge(plant)}</td>
           <td><div class="form-check form-switch m-0"><input class="form-check-input plant-completion-checkbox" type="checkbox" role="switch" data-monitor-id="${escapeHtml(plant.id)}" aria-label="${escapeHtml(plant.short_name || name)} 완공 공개" ${plant.is_completed === true ? 'checked' : ''}></div></td>
-          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="current_kw">${escapeHtml(formatPower(plant.current_kw))}</td>
-          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="today_kwh">${escapeHtml(formatEnergy(plant.today_kwh))}</td>
-          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="lifetime_kwh">${escapeHtml(formatEnergy(plant.lifetime_kwh))}</td>
+          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="current_kw">${escapeHtml(formatMonitorReading(plant, 'current_kw'))}</td>
+          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="today_kwh">${escapeHtml(formatMonitorReading(plant, 'today_kwh'))}</td>
+          <td class="live-number" data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="lifetime_kwh">${escapeHtml(formatMonitorReading(plant, 'lifetime_kwh'))}</td>
           <td style="min-width:220px"><select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select></td>
           <td><button type="button" class="btn btn-outline-primary btn-sm plant-info-editor" data-monitor-id="${escapeHtml(plant.id)}" data-site-id="${escapeHtml(plant.site_power_plant_id || '')}" ${editorReady ? '' : 'disabled'}>${editorReady ? editorLabel : '조합 연결 후 등록'}</button></td>
         </tr>`;
@@ -894,7 +915,7 @@
         return `<article class="mobile-plant-card">
           <div class="d-flex justify-content-between align-items-start gap-2"><div><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(plant.provider)} · ${escapeHtml(plant.homepage_location || plant.location_label || '주소 미등록')}</div></div><span data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="state">${stateBadge(plant)}</span></div>
           <div class="form-check form-switch mt-3"><input class="form-check-input plant-completion-checkbox" type="checkbox" role="switch" data-monitor-id="${escapeHtml(plant.id)}" aria-label="${escapeHtml(plant.short_name || name)} 완공 공개" ${plant.is_completed === true ? 'checked' : ''}><label class="form-check-label">완공 · 공개 모니터에 표시</label></div>
-          <div class="mobile-metrics"><div><small>현재</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="current_kw">${escapeHtml(formatPower(plant.current_kw))}</strong></div><div><small>오늘</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="today_kwh">${escapeHtml(formatEnergy(plant.today_kwh))}</strong></div><div><small>누적</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="lifetime_kwh">${escapeHtml(formatEnergy(plant.lifetime_kwh))}</strong></div></div>
+          <div class="mobile-metrics"><div><small>현재</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="current_kw">${escapeHtml(formatMonitorReading(plant, 'current_kw'))}</strong></div><div><small>오늘</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="today_kwh">${escapeHtml(formatMonitorReading(plant, 'today_kwh'))}</strong></div><div><small>누적</small><strong data-live-monitor-id="${escapeHtml(plant.id)}" data-live-field="lifetime_kwh">${escapeHtml(formatMonitorReading(plant, 'lifetime_kwh'))}</strong></div></div>
           <label class="form-label small fw-bold mb-1">홈페이지 발전소 연결</label>
           <select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select>
           <button type="button" class="btn btn-outline-primary btn-sm w-100 mt-2 plant-info-editor" data-monitor-id="${escapeHtml(plant.id)}" data-site-id="${escapeHtml(plant.site_power_plant_id || '')}" ${editorReady ? '' : 'disabled'}>${editorReady ? editorLabel : '조합 연결 저장 후 등록'}</button>
@@ -935,22 +956,22 @@
       const plants = new Map((data.monitor_plants || []).map(plant => [String(plant.id), plant]));
       monitorData.summary = data.summary;
       monitorData.sources = data.sources;
-      renderSummary(); renderSources();
       document.querySelectorAll('[data-live-monitor-id]').forEach(el => {
         const plant = plants.get(el.dataset.liveMonitorId);
         if (!plant) return;
         const field = el.dataset.liveField;
         if (field === 'state') el.innerHTML = stateBadge(plant);
-        else el.textContent = field === 'current_kw' ? formatPower(plant[field]) : formatEnergy(plant[field]);
+        else el.textContent = formatMonitorReading(plant, field);
       });
       // Keep mappings, completion selections and editable metadata from the held screen.
       monitorData.monitor_plants = (monitorData.monitor_plants || []).map(plant => {
         const fresh = plants.get(String(plant.id));
         if (!fresh) return plant;
         const next = { ...plant };
-        ['current_kw','today_kwh','lifetime_kwh','data_state','communication_state','operational_state'].forEach(key => { next[key] = fresh[key]; });
+        ['current_kw','today_kwh','lifetime_kwh','data_state','communication_state','operational_state','observed_at','fetched_at'].forEach(key => { next[key] = fresh[key]; });
         return next;
       });
+      renderSummary(); renderSources();
     }
 
     function updateMonitorLink() {
