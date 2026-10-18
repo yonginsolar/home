@@ -6234,6 +6234,7 @@ function switchTab(tabName) {
     }
 
     invalidateDonationListRead();
+    invalidateUsageLedgerRead();
     // 1. 모든 탭 숨김 처리
     const panes = document.querySelectorAll('.main-content > .tab-pane');
     panes.forEach(el => {
@@ -6300,7 +6301,7 @@ function switchTab(tabName) {
             endEl.value = `${yyyy}-${mm}-${dd}`; // 오늘
 
         }
-        if (document.getElementById('sub-tab-donations')?.classList.contains('active')) void fetchGlobalDonations();
+        void refreshVisibleMemberFundList();
     }
     // ★ [신규 추가됨] 업무 신청 관리 탭 연결
     else if (tabName === 'applications') {
@@ -6715,6 +6716,8 @@ let donationGrantState = null;
 let donationBatchState = null;
 let donationListRevision = 0;
 let donationListRequest = null;
+let usageLedgerRevision = 0;
+let usageLedgerRequest = null;
 
 function invalidateDonationListRead() {
     donationListRevision++;
@@ -6731,13 +6734,38 @@ function isCurrentDonationListRead(request) {
         && document.getElementById('don-date-start')?.value === request.startDate
         && document.getElementById('don-date-end')?.value === request.endDate;
 }
+function invalidateUsageLedgerRead() {
+    usageLedgerRevision++;
+    usageLedgerRequest = null;
+}
+function isCurrentUsageLedgerRead(request) {
+    const owner = memberDetailOwner();
+    const pane = document.getElementById('tab-funds-manage');
+    return !!request && usageLedgerRequest === request && request.revision === usageLedgerRevision
+        && request.owner === owner && !!owner && !isAdminMemberSiteProfile()
+        && canAccessAdminMemberTab('funds-manage') && !window.frameElement?.hidden
+        && (pane?.classList.contains('active') || pane?.style.display === 'block')
+        && document.getElementById('sub-tab-dividends')?.classList.contains('active')
+        && document.getElementById('div-search-keyword')?.value.trim() === request.keyword;
+}
+function refreshVisibleMemberFundList() {
+    const pane = document.getElementById('tab-funds-manage');
+    if (!memberDetailOwner() || isAdminMemberSiteProfile() || !canAccessAdminMemberTab('funds-manage')
+        || window.frameElement?.hidden || !(pane?.classList.contains('active') || pane?.style.display === 'block')) return Promise.resolve();
+    if (document.getElementById('sub-tab-donations')?.classList.contains('active')) return fetchGlobalDonations();
+    if (document.getElementById('sub-tab-dividends')?.classList.contains('active')) return fetchGlobalDividends();
+    return Promise.resolve();
+}
 for (const id of ['don-date-start','don-date-end']) {
     document.getElementById(id)?.addEventListener('input', invalidateDonationListRead);
     document.getElementById(id)?.addEventListener('change', invalidateDonationListRead);
 }
 document.getElementById('tab-funds-manage')?.addEventListener('hidden.bs.tab', event => {
     if (event.target?.getAttribute('data-bs-target') === '#sub-tab-donations') invalidateDonationListRead();
+    if (event.target?.getAttribute('data-bs-target') === '#sub-tab-dividends') invalidateUsageLedgerRead();
 });
+document.getElementById('div-search-keyword')?.addEventListener('input', invalidateUsageLedgerRead);
+document.getElementById('div-search-keyword')?.addEventListener('change', invalidateUsageLedgerRead);
 
 function isCurrentDonationBatch(state=donationBatchState, revision=state?.revision, visible=false) {
     return !!state && state===donationBatchState && state.revision===revision && state.owner===memberDetailOwner()
@@ -6953,6 +6981,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 
 function clearMemberDetailEdits() {
     invalidateDonationListRead();
+    invalidateUsageLedgerRead();
     clearMemberFundDrafts();
     clearDonationGrantDraft();
     if (typeof resetMemberImportDraft === 'function') resetMemberImportDraft();
@@ -7988,6 +8017,7 @@ function bindAdminCertificateContext(authId) {
         const observer = new MutationObserver(() => {
             if (frame.hidden) {
                 invalidateDonationListRead();
+                invalidateUsageLedgerRead();
                 window.ContributionCertPreview?.clear();
                 if (typeof pauseMemberImportRead === 'function') pauseMemberImportRead();
             }
@@ -10167,18 +10197,18 @@ window.onload = async function() {
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {
         window.ErpWorkspaceTask = {ready:true, refresh:async function(options = {}) {
             const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
-            if (!gate.ok) throw new Error('ERP_TASK_ACCESS_DENIED');
+            if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) throw new Error('ERP_TASK_ACCESS_DENIED');
             window.MemberNotificationAdmin?.configure(_supabase,gate.runtime,adminCertificateAuthId);
             // Do not repopulate an open member editor or overwrite unfinished input.
             if (options.dirty || document.querySelector('.modal.show,dialog[open]')) {
-                await fetchMemberReturnSummary(); return;
+                await Promise.all([fetchMemberReturnSummary(), refreshVisibleMemberFundList()]); return;
             }
             const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
             if (pane === 'tab-dashboard') await loadDashboard();
             else if (pane === 'tab-notifications') await window.MemberNotificationAdmin?.refresh();
             else if (pane === 'tab-members' && g_member_fetch_revision > 0) await fetchMembers();
             else if (pane === 'tab-applications') await fetchApplications();
-            else if (pane === 'tab-funds-manage' && document.getElementById('sub-tab-donations')?.classList.contains('active')) await fetchGlobalDonations();
+            else if (pane === 'tab-funds-manage') await refreshVisibleMemberFundList();
             else await fetchMemberReturnSummary();
         }};
     } else {
@@ -10435,18 +10465,28 @@ function fetchGlobalDonations() {
 }
 
 // [수정] 이용고배당(포인트) 전체 조회 (Member ID 기준 매핑으로 변경)
-async function fetchGlobalDividends() {
+function fetchGlobalDividends() {
+    const owner = memberDetailOwner();
+    const pane = document.getElementById('tab-funds-manage');
+    if (!owner || isAdminMemberSiteProfile() || !canAccessAdminMemberTab('funds-manage') || window.frameElement?.hidden
+        || !(pane?.classList.contains('active') || pane?.style.display === 'block')) return Promise.resolve();
     const keyword = document.getElementById('div-search-keyword').value.trim();
     const tbody = document.getElementById('dividendGlobalBody');
+    if (usageLedgerRequest?.pending && isCurrentUsageLedgerRead(usageLedgerRequest)) return usageLedgerRequest.promise;
+    const request = {owner,keyword,revision:++usageLedgerRevision,pending:true,promise:null};
+    usageLedgerRequest = request;
 
     tbody.innerHTML = '<tr><td colspan="5" class="py-5"><div class="spinner-border text-info"></div></td></tr>';
+    request.promise = (async () => {
+    try {
 
     // 1. coop_points 테이블 조회
-    const { data: points, error } = await _supabase
+    const { data: points, error } = await scopeAdminTenant(_supabase
         .from('coop_points')
-        .select('*')
+        .select('*'))
         .order('created_at', { ascending: false })
         .limit(100);
+    if (!isCurrentUsageLedgerRead(request)) return;
 
     if (error) {
         CoopSafeLog.error("이용고배당 조회 실패:", error);
@@ -10468,6 +10508,7 @@ async function fetchGlobalDividends() {
             .from('coop_members')
             .select('member_id, name'))
             .in('member_id', memberIds);
+        if (!isCurrentUsageLedgerRead(request)) return;
 
         if (!mErr && members) {
             members.forEach(m => memberMap[m.member_id] = m.name);
@@ -10532,6 +10573,15 @@ async function fetchGlobalDividends() {
             </tr>
         `;
     });
+    } catch (error) {
+        if (!isCurrentUsageLedgerRead(request)) return;
+        CoopSafeLog.error('[erp/admin_member] usage ledger failed', error);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-danger py-4">목록을 불러오지 못했습니다. 다시 조회해 주세요.</td></tr>';
+    } finally {
+        request.pending = false;
+    }
+    })();
+    return request.promise;
 }
 
 const DIVIDEND_CAPITAL_STATUSES = Object.freeze(['완료', '전표완료']);
