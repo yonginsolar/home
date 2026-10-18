@@ -715,6 +715,7 @@ bindIssueDocModalFocusGuard();
 
 const ADMIN_MEMBER_MODAL_Z_INDEX = {
     excelModal: 1055,
+    memberCreateModal: 1055,
     memberCertificateSettingsModal: 1055,
     memberCapitalSettingsModal: 1065,
     applicationMemberModal: 1055,
@@ -7202,6 +7203,20 @@ function discardMemberCreateDraft() {
     const state = memberCreateState;
     if (memberCreateSaving || !state || state.owner !== memberDetailOwner()) return;
     const submitted = memberCreateSnapshot();
+    const editor = document.getElementById('memberCreateModal');
+    const origin = document.activeElement;
+    document.getElementById('customConfirmModal')?.addEventListener('hidden.bs.modal', () => {
+        requestAnimationFrame(() => {
+            if (memberCreateSaving || memberCreateState !== state || state.owner !== memberDetailOwner()
+                || window.frameElement?.hidden || document.getElementById('main-system')?.classList.contains('hidden')
+                || !editor?.classList.contains('show') || editor.hasAttribute('inert')
+                || getOpenAdminMemberModals().at(-1) !== editor) return;
+            const visible = node => node?.isConnected && !node.disabled && node.getClientRects().length;
+            const target = editor.contains(origin) && visible(origin) ? origin
+                : Array.from(editor.querySelectorAll('input:not([type="hidden"]),select,textarea,button')).find(visible);
+            (target || editor).focus({preventScroll:true});
+        });
+    }, {once:true});
     myConfirm('이 초안을 버릴까요?', () => {
         if (memberCreateSaving || memberCreateState !== state || state.owner !== memberDetailOwner()) return;
         if (memberCreateSnapshot() !== submitted) return myAlert('입력 내용이 바뀌었습니다. 다시 확인해 주세요.', 'warning');
@@ -7211,6 +7226,24 @@ function discardMemberCreateDraft() {
         syncMemberCreateDraftButton();
     });
 }
+
+function bindMemberCreateModalKeyboard() {
+    const editor = document.getElementById('memberCreateModal');
+    if (!editor || editor.dataset.keyboardBound === '1') return;
+    editor.dataset.keyboardBound = '1';
+    editor.addEventListener('keydown', event => {
+        if (event.key !== 'Tab' || !editor.classList.contains('show') || editor.hasAttribute('inert')
+            || getOpenAdminMemberModals().at(-1) !== editor) return;
+        const controls = Array.from(editor.querySelectorAll('button,input:not([type="hidden"]),select,textarea,a[href],[tabindex]'))
+            .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length);
+        const first = controls[0], last = controls.at(-1), active = document.activeElement;
+        if (!first || (event.shiftKey ? active === first || active === editor : active === last || active === editor)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first)?.focus({preventScroll:true});
+        }
+    });
+}
+bindMemberCreateModalKeyboard();
 
 function retainMemberConsultEdit() {
     const state = memberConsultState;
@@ -10423,11 +10456,12 @@ window.onload = async function() {
                 throw new Error('ERP_TASK_ACCESS_DENIED');
             }
             window.MemberNotificationAdmin?.configure(_supabase,gate.runtime,adminCertificateAuthId);
+            const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
             // Do not repopulate an open member editor or overwrite unfinished input.
             if (options.dirty || document.querySelector('.modal.show,dialog[open]')) {
-                await Promise.all([fetchMemberReturnSummary(), requestMemberFundListRefresh(sequence), requestApplicationListRefresh(sequence)]); return;
+                await Promise.all([fetchMemberReturnSummary(), requestMemberFundListRefresh(sequence), requestApplicationListRefresh(sequence),
+                    pane === 'tab-dashboard' ? loadDashboard() : null]); return;
             }
-            const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
             if (pane === 'tab-dashboard') await loadDashboard();
             else if (pane === 'tab-notifications') await window.MemberNotificationAdmin?.refresh();
             else if (pane === 'tab-members' && g_member_fetch_revision > 0) await fetchMembers();
