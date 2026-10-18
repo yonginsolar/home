@@ -6235,7 +6235,10 @@ function switchTab(tabName) {
 
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
-    if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) invalidateMemberReturnSummaryRead();
+    if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) {
+        invalidateMemberReturnSummaryRead();
+        invalidateAdminDashboardRead();
+    }
     if (tabName !== 'applications') invalidateApplicationListRead();
     memberFundListResume = null;
     // 1. 모든 탭 숨김 처리
@@ -6413,25 +6416,29 @@ function fetchMemberReturnSummary() {
 
 // [수정] 대시보드 데이터 로드 (통계 차트 연동)
 /* ADMIN_DASHBOARD_LAZY_START */
-let g_adminDashboardLoadPromise = null;
 async function loadDashboard() {
-    if (!canAccessAdminMemberTab('dashboard') || !isAdminMemberRuntimeModuleEnabled('member_admin')) return;
-    if (g_adminDashboardLoadPromise) return g_adminDashboardLoadPromise;
-    const runtime = g_adminMemberRuntime;
-    const identity = adminCertificateAuthId;
-    g_adminDashboardLoadPromise = (async () => { try {
+    const owner = memberDetailOwner();
+    if (!owner || !canAccessAdminMemberTab('dashboard') || !isAdminMemberRuntimeModuleEnabled('member_admin')
+        || document.getElementById('main-system')?.classList.contains('hidden')) return;
+    if (window.frameElement?.hidden) {
+        adminDashboardResume = {owner,revision:adminDashboardRevision};
+        return;
+    }
+    if (adminDashboardRequest?.pending && isCurrentAdminDashboardRead(adminDashboardRequest)) return adminDashboardRequest.promise;
+    const request = {owner,runtime:g_adminMemberRuntime,identity:adminCertificateAuthId,revision:++adminDashboardRevision,applicationRevision:applicationListRevision,pending:true,promise:null};
+    adminDashboardRequest = request;
+    request.promise = (async () => { try {
         const dashboard = await window.AdminMemberAssets.ensureDashboard();
-        if (runtime !== g_adminMemberRuntime || identity !== adminCertificateAuthId
-            || !canAccessAdminMemberTab('dashboard')
-            || !isAdminMemberRuntimeModuleEnabled('member_admin')
-            || document.getElementById('main-system')?.classList.contains('hidden')) return;
-        return await dashboard.load();
+        if (!isCurrentAdminDashboardRead(request)) return;
+        return await dashboard.load({
+            isCurrent: () => isCurrentAdminDashboardRead(request),
+            isPendingCountCurrent: () => isCurrentAdminDashboardRead(request) && request.applicationRevision === applicationListRevision
+        });
     } catch (_) {
-        if (runtime !== g_adminMemberRuntime || identity !== adminCertificateAuthId
-            || document.getElementById('main-system')?.classList.contains('hidden')) return;
+        if (!isCurrentAdminDashboardRead(request)) return;
         myAlert('대시보드를 불러오지 못했습니다. 입력한 내용은 유지됩니다. 잠시 후 다시 시도해 주세요.', 'error');
-    } finally { g_adminDashboardLoadPromise = null; } })();
-    return g_adminDashboardLoadPromise;
+    } finally { request.pending = false; } })();
+    return request.promise;
 }
 /* ADMIN_DASHBOARD_LAZY_END */
 
@@ -6748,6 +6755,24 @@ let applicationListResume = null;
 let memberReturnSummaryRevision = 0;
 let memberReturnSummaryRequest = null;
 let memberReturnSummaryResume = null;
+let adminDashboardRevision = 0;
+let adminDashboardRequest = null;
+let adminDashboardResume = null;
+
+function invalidateAdminDashboardRead() {
+    adminDashboardRevision++;
+    adminDashboardRequest = null;
+    adminDashboardResume = null;
+}
+function isCurrentAdminDashboardRead(request) {
+    const owner = memberDetailOwner();
+    return !!request && adminDashboardRequest === request && request.revision === adminDashboardRevision
+        && request.runtime === g_adminMemberRuntime && request.identity === adminCertificateAuthId
+        && !!owner && request.owner === owner && canAccessAdminMemberTab('dashboard')
+        && isAdminMemberRuntimeModuleEnabled('member_admin') && !window.frameElement?.hidden
+        && !document.getElementById('main-system')?.classList.contains('hidden');
+}
+window.addEventListener('pagehide', invalidateAdminDashboardRead);
 
 function invalidateMemberReturnSummaryRead() {
     memberReturnSummaryRevision++;
@@ -6878,6 +6903,7 @@ function refreshApplicationsAfterConfirmedChange(owner) {
         || document.getElementById('main-system')?.classList.contains('hidden')) return Promise.resolve();
     invalidateApplicationListRead();
     invalidateMemberReturnSummaryRead();
+    invalidateAdminDashboardRead();
     const pane = document.getElementById('tab-applications');
     if (pane?.classList.contains('active') || pane?.style.display === 'block') {
         return requestApplicationListRefresh(memberFundRefreshSequence);
@@ -7132,6 +7158,7 @@ function clearMemberDetailEdits() {
     invalidateUsageLedgerRead();
     invalidateApplicationListRead();
     invalidateMemberReturnSummaryRead();
+    invalidateAdminDashboardRead();
     memberFundListResume = null;
     usageLedgerPage = null;
     syncUsageLedgerUi();
@@ -8173,10 +8200,16 @@ function bindAdminCertificateContext(authId) {
                 invalidateUsageLedgerRead();
                 invalidateApplicationListRead();
                 invalidateMemberReturnSummaryRead();
+                invalidateAdminDashboardRead();
                 memberFundListResume = null;
                 window.ContributionCertPreview?.clear();
                 if (typeof pauseMemberImportRead === 'function') pauseMemberImportRead();
             } else {
+                const dashboard = adminDashboardResume;
+                adminDashboardResume = null;
+                if (dashboard && dashboard.revision === adminDashboardRevision && dashboard.owner === memberDetailOwner()) {
+                    void loadDashboard();
+                }
                 const summary = memberReturnSummaryResume;
                 memberReturnSummaryResume = null;
                 if (summary && summary.revision === memberReturnSummaryRevision && summary.owner === memberDetailOwner()) {
@@ -10378,6 +10411,7 @@ window.onload = async function() {
                 if (sequence === memberFundRefreshSequence) {
                     invalidateApplicationListRead();
                     invalidateMemberReturnSummaryRead();
+                    invalidateAdminDashboardRead();
                 }
                 throw error;
             }
@@ -10385,6 +10419,7 @@ window.onload = async function() {
             if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) {
                 invalidateApplicationListRead();
                 invalidateMemberReturnSummaryRead();
+                invalidateAdminDashboardRead();
                 throw new Error('ERP_TASK_ACCESS_DENIED');
             }
             window.MemberNotificationAdmin?.configure(_supabase,gate.runtime,adminCertificateAuthId);

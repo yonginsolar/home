@@ -283,14 +283,17 @@ function buildFallbackDashboardLocationStats(statsLocation) {
     return { yongin, gyeonggi };
 }
 
-async function loadDashboard() {
+async function loadDashboard(context = {}) {
+    const isCurrent = typeof context.isCurrent === 'function' ? context.isCurrent : () => false;
+    if (!isCurrent()) return;
     void loadMemberInformationSummary();
     void loadMemberDemographicCharts();
     // PostgREST builders are lazy thenables. Start this request now rather
     // than only after the independent count requests have finished.
-    const statsPromise = Promise.resolve(_supabase.rpc('get_dashboard_stats'));
+    const observe = promise => Promise.resolve(promise).then(value => ({value}), error => ({error}));
+    const statsPromise = observe(_supabase.rpc('get_dashboard_stats'));
     const monthlyPromise = fetchMonthlyCapitalInflow(12);
-    const pendingAppPromise = fetchPendingApplicationCount();
+    const pendingAppPromise = observe(fetchPendingApplicationCount());
     const returnSummaryPromise = fetchMemberReturnSummary();
     const weekAgoISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const countQuery = () => scopeAdminTenant(_supabase.from('coop_members')
@@ -301,6 +304,7 @@ async function loadDashboard() {
         countQuery().eq('status', '승인대기').gte('created_at', weekAgoISO),
         _supabase.rpc('get_total_capital_secure')
     ]);
+    if (!isCurrent()) return;
     const pendingCount = pendingResult.count;
     const countText = result => result.error ? '확인 필요' : (result.count || 0) + '명';
 
@@ -317,10 +321,15 @@ async function loadDashboard() {
     }
 
     // 1. [신규] 업무 신청 대기 건수 즉시 표시 (탭 클릭 없이)
-    const [pendingAppCount, , statsResponse, monthly] = await Promise.all([
+    const [pendingAppResult, , statsResult, monthly] = await Promise.all([
         pendingAppPromise, returnSummaryPromise, statsPromise, monthlyPromise
     ]);
-    if (typeof pendingAppCount === 'number') updateAppBadges(pendingAppCount);
+    if (!isCurrent()) return;
+    if (pendingAppResult.error) throw pendingAppResult.error;
+    if (statsResult.error) throw statsResult.error;
+    const pendingAppCount = pendingAppResult.value;
+    const statsResponse = statsResult.value;
+    if (typeof pendingAppCount === 'number' && context.isPendingCountCurrent?.()) updateAppBadges(pendingAppCount);
 
     // 2. [신규] 통계 차트 데이터 로드
     const { data: stats, error: statError } = statsResponse;

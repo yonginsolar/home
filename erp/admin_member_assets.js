@@ -11,8 +11,8 @@
         integrity: 'sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ'
     });
     const dashboard = Object.freeze({
-        src: new URL('admin_member_dashboard.js?v=20261013-1', document.baseURI).href,
-        integrity: 'sha384-uqG+szn7X3G7S0x3Y5za0IJT6TLH7AlYIux3fIvZRuKj1RdBMcXFikJamr2FOstz'
+        src: new URL('admin_member_dashboard.js?v=20261018-application-badge-1', document.baseURI).href,
+        integrity: 'sha384-xhjz2AjVzdDO+xgdSFUXKJwF7ruDunW5XRGCdh/fgA9Bu84+NdavvWi/5FCdfPk2'
     });
     const pdf = Object.freeze({
         src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
