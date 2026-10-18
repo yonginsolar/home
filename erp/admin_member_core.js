@@ -6739,6 +6739,11 @@ function isCurrentDonationListRead(request) {
         && document.getElementById('don-date-end')?.value === request.endDate;
 }
 function invalidateUsageLedgerRead(event) {
+    // A commit/blur or whitespace-only edit is not a new effective search.
+    // Non-field invalidations (menu, frame, auth/authority) always continue below.
+    if (event?.target?.id === 'div-search-keyword' && usageLedgerRequest?.pending
+        && event.target.value.trim() === usageLedgerRequest.keyword
+        && isCurrentUsageLedgerRead(usageLedgerRequest)) return;
     usageLedgerRevision++;
     const pending = usageLedgerRequest?.pending;
     usageLedgerRequest?.controller?.abort();
