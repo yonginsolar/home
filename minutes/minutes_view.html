@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-		    Version: v1.0.74
-		    Change: 2026-10-06 - General notices share the document box, not official approval workflows.
+		    Version: v1.0.75
+		    Change: 2026-10-18 - Keyboard-accessible document cards and retained return focus.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://www.yonginsolar.kr/minutes/minutes_view">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <meta name="description" content="용인모두의햇빛협동조합의 공개 문서와 공문, 의사록을 확인하는 동적 문서함 페이지입니다.">
-    <script>console.log('[Version] v1.0.74 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.75 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -145,6 +145,13 @@
         .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
         .list-summary { font-size: 0.86rem; color: #475569; margin-top: 6px; line-height: 1.5; white-space: pre-wrap; word-break: keep-all; }
         .list-item a { color: #2563eb; text-decoration: none; font-weight: 700; }
+        button.list-item, a.list-item { width:100%; text-align:left; font:inherit; color:inherit; text-decoration:none; }
+        .document-card-action { flex:1; border:0; padding:0; background:transparent; color:inherit; text-align:left; font:inherit; cursor:pointer; }
+        button.revision-history-item { width:100%; text-align:left; font:inherit; }
+        .document-card-action span, button.list-item .list-title, button.list-item .list-sub,
+        button.revision-history-item .list-title, button.revision-history-item .list-sub { display:block; }
+        button.list-item:focus-visible, a.list-item:focus-visible, .document-card-action:focus-visible,
+        button.revision-history-item:focus-visible { outline:3px solid #2563eb; outline-offset:3px; }
         .revision-history-toggle {
             border: 1px solid #cbd5e1;
             background: #f8fafc;
@@ -1121,6 +1128,20 @@
         const detailTitle = document.getElementById('detail-title');
         const detailMeta = document.getElementById('detail-meta');
         const detailContent = document.getElementById('detail-content');
+        let documentListReturnFocus = null;
+
+        function bindDocumentCardAction(button, action) {
+            button.addEventListener('click', () => {
+                documentListReturnFocus = button;
+                action();
+            });
+        }
+
+        function showDocumentDetail() {
+            listPanel.style.display = 'none';
+            detailPanel.classList.remove('hidden');
+            detailPanel.querySelector('.btn-back')?.focus();
+        }
 
         function showList() {
             detailRequestVersion += 1;
@@ -1128,6 +1149,7 @@
             listPanel.style.display = 'block';
             delete detailContent.dataset.documentType;
             document.body.style.backgroundColor = '#f1f5f9';
+            if (documentListReturnFocus?.isConnected) documentListReturnFocus.focus();
         }
         window.showList = showList;
 
@@ -1581,8 +1603,9 @@
             if (currentDocumentListTab === 'RULES') {
                 const visibleRuleGroups = getVisibleLibraryRuleGroups();
 
-                const shortcutItem = document.createElement('div');
+                const shortcutItem = document.createElement('a');
                 shortcutItem.className = 'list-item';
+                shortcutItem.href = '../rules.html';
                 const shortcutWrap = document.createElement('div');
                 const shortcutTitle = document.createElement('div');
                 shortcutTitle.className = 'list-title';
@@ -1593,9 +1616,6 @@
                 shortcutWrap.appendChild(shortcutTitle);
                 shortcutWrap.appendChild(shortcutSub);
                 shortcutItem.appendChild(shortcutWrap);
-                shortcutItem.addEventListener('click', () => {
-                    window.location.href = '../rules.html';
-                });
                 listPanel.appendChild(shortcutItem);
 
                 if (!visibleRuleGroups.length) {
@@ -1615,12 +1635,14 @@
                     const item = document.createElement('div');
                     item.className = 'list-item';
 
-                    const textWrap = document.createElement('div');
-                    const titleEl = document.createElement('div');
+                    const textWrap = document.createElement('button');
+                    textWrap.type = 'button';
+                    textWrap.className = 'document-card-action';
+                    const titleEl = document.createElement('span');
                     titleEl.className = 'list-title';
                     titleEl.textContent = doc.title || '문서';
 
-                    const subEl = document.createElement('div');
+                    const subEl = document.createElement('span');
                     subEl.className = 'list-sub';
                     subEl.textContent = getLibraryDocMetaText(doc);
 
@@ -1628,7 +1650,7 @@
                     textWrap.appendChild(subEl);
                     const summaryText = getLibraryDocRevisionSummary(doc);
                     if (summaryText) {
-                        const summaryEl = document.createElement('div');
+                        const summaryEl = document.createElement('span');
                         summaryEl.className = 'list-summary';
                         summaryEl.textContent = summaryText;
                         textWrap.appendChild(summaryEl);
@@ -1648,7 +1670,7 @@
                         });
                         item.appendChild(toggleBtn);
                     }
-                    item.addEventListener('click', () => openLibraryDocumentById(doc.id));
+                    bindDocumentCardAction(textWrap, () => openLibraryDocumentById(doc.id));
                     listPanel.appendChild(item);
 
                     if (historyDocs.length > 0) {
@@ -1656,12 +1678,13 @@
                         historyPanel.id = panelId;
                         historyPanel.className = 'revision-history-panel hidden';
                         historyDocs.forEach((historyDoc) => {
-                            const historyItem = document.createElement('div');
+                            const historyItem = document.createElement('button');
+                            historyItem.type = 'button';
                             historyItem.className = 'revision-history-item';
-                            const historyTitle = document.createElement('div');
+                            const historyTitle = document.createElement('span');
                             historyTitle.className = 'list-title';
                             historyTitle.innerHTML = `<span class="revision-history-label">구판</span>${escapeHtml(historyDoc.title || '문서')}`;
-                            const historySub = document.createElement('div');
+                            const historySub = document.createElement('span');
                             historySub.className = 'list-sub';
                             historySub.textContent = getLibraryDocMetaText(historyDoc);
                             historyItem.appendChild(historyTitle);
@@ -1669,12 +1692,12 @@
 
                             const historySummary = getLibraryDocRevisionSummary(historyDoc);
                             if (historySummary) {
-                                const historySummaryEl = document.createElement('div');
+                                const historySummaryEl = document.createElement('span');
                                 historySummaryEl.className = 'list-summary';
                                 historySummaryEl.textContent = historySummary;
                                 historyItem.appendChild(historySummaryEl);
                             }
-                            historyItem.addEventListener('click', () => openLibraryDocumentById(historyDoc.id));
+                            bindDocumentCardAction(historyItem, () => openLibraryDocumentById(historyDoc.id));
                             historyPanel.appendChild(historyItem);
                         });
                         listPanel.appendChild(historyPanel);
@@ -1696,16 +1719,17 @@
             }
 
             filtered.forEach((d) => {
-                const item = document.createElement('div');
+                const item = document.createElement('button');
+                item.type = 'button';
                 item.className = 'list-item';
 
-                const textWrap = document.createElement('div');
-                const titleEl = document.createElement('div');
+                const textWrap = document.createElement('span');
+                const titleEl = document.createElement('span');
                 titleEl.className = 'list-title';
                 const label = getDocTypeLabel(d.doc_type);
                 titleEl.textContent = d.title ? `${label} · ${d.title}` : label;
 
-                const dateEl = document.createElement('div');
+                const dateEl = document.createElement('span');
                 dateEl.className = 'list-sub';
                 dateEl.textContent = formatMinutesViewKstDate(d.created_at);
 
@@ -1713,7 +1737,7 @@
                 textWrap.appendChild(dateEl);
 
                 item.appendChild(textWrap);
-                item.addEventListener('click', () => d.doc_type === 'ANNOUNCEMENT'
+                bindDocumentCardAction(item, () => d.doc_type === 'ANNOUNCEMENT'
                     ? openPublishedNoticeById(d.notice_id) : openDocumentById(d.id));
                 listPanel.appendChild(item);
             });
@@ -1758,8 +1782,7 @@
             detailTitle.textContent = summaryDoc.title ? `문서 · ${summaryDoc.title}` : '문서';
             detailMeta.textContent = getLibraryDocDetailMetaText(summaryDoc);
             detailContent.innerHTML = '<div style="color:#64748b;">문서 내용을 불러오는 중입니다...</div>';
-            listPanel.style.display = 'none';
-            detailPanel.classList.remove('hidden');
+            showDocumentDetail();
             document.body.style.backgroundColor = '#f1f5f9';
 
             const { data: fullDoc, error } = await MinutesService.getLibraryDocumentById(targetId);
@@ -1794,8 +1817,7 @@
             detailTitle.textContent = '공지';
             detailMeta.textContent = '';
             detailContent.innerHTML = '<p>공지를 불러오는 중입니다…</p>';
-            listPanel.style.display = 'none';
-            detailPanel.classList.remove('hidden');
+            showDocumentDetail();
             const { data: notice, error } = await MinutesService.getPublishedNoticeById(targetId);
             if (requestVersion !== detailRequestVersion) return;
             if (error || !notice) {
@@ -1847,8 +1869,7 @@
                 detailContent.innerHTML = '<div style="color:#94a3b8;">내용이 없습니다.</div>';
             }
 
-            listPanel.style.display = 'none';
-            detailPanel.classList.remove('hidden');
+            showDocumentDetail();
             document.body.style.backgroundColor = '#f1f5f9';
 
             const signaturesTask = (async () => {

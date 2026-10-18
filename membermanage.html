@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.189
-Change: 2026-10-18 - Preserve scoped connection searches and verify registered group certificate access.
+Version: v1.0.190
+Change: 2026-10-18 - Readable connection history, personal record guidance and bounded board pagination.
 -->
 <html lang="ko">
 <head>
@@ -10,7 +10,7 @@ Change: 2026-10-18 - Preserve scoped connection searches and verify registered g
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.189 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.190 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2056,6 +2056,7 @@ NO. <span id="infoMemberId">-</span>
 <div id="hallOfFameList" class="hof-list">
 <p class="text-muted small mb-0">랭킹을 불러오는 중...</p>
 </div>
+<p class="hof-meta small mt-2 mb-0" id="hofProfileNotice">퀴즈·게임 참여와 ‘내 기록’은 로그인한 본인 기준입니다.</p>
 </div>
 
 <div class="dashboard-card mb-4" id="memberFreeBoardCard">
@@ -2873,6 +2874,7 @@ let rootMemberProfileId = null;
 let pendingLoginOtpEmail = '';
 let currentBoardLimit = 20;
 let isBoardLoading = false;
+const portalBoardListState = { revision:0, pending:null, rows:[], offset:0, hasMore:false, owner:'', category:'' };
 let suppressSessionExpiredHandling = false;
 let portalBootInProgress = false;
 let portalBootReadyUserId = '';
@@ -7846,6 +7848,20 @@ document.getElementById('historyModalOverlay').style.display = 'flex';
 }
 
 // [수정된 버전] 통합 타임라인 렌더링 (수정/취소 버튼 로직 포함)
+function getApplicationReasonText(app, member = curMem) {
+const reason = String(app?.reason || '').trim();
+if (app?.type !== 'connect') return reason;
+const uuidPattern = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const target = reason.match(new RegExp('\\bTarget\\s*:\\s*\\[?(' + uuidPattern + ')\\]?', 'i'));
+const namedTarget = target && String(member?.id || '').toLowerCase() === target[1].toLowerCase()
+    ? String(member?.name || '').trim() : '';
+if (namedTarget) return `${namedTarget} 계정 연결 신청`;
+const readable = reason.replace(new RegExp('\\bTarget\\s*:\\s*\\[?' + uuidPattern + '\\]?', 'ig'), '')
+    .replace(new RegExp(uuidPattern, 'ig'), '').replace(/^[\s\[\]:;,|\-]+|[\s\[\]:;,|\-]+$/g, '').trim();
+if (readable && !/^Target\s*:/i.test(readable)) return readable;
+return '계정 연결 신청(이전 기록)';
+}
+
 function renderTimeline(ledger, apps, donations, points, dividends) {
 const list = document.getElementById('timelineList');
 const items = [];
@@ -7884,7 +7900,7 @@ const appTypeMap = { 'extra': '추가출자', 'reduction': '감자신청', 'with
 apps.forEach(app => {
 let statusBadge = '';
 let actionBtns = '';
-const safeApplicationReason = escapeHtml(app.reason || '');
+const safeApplicationReason = escapeHtml(getApplicationReasonText(app));
 const safeRejectionReason = escapeHtml(app.rejection_reason || '');
 const isBusinessApplication = ['extra', 'reduction', 'withdraw'].includes(app.type);
 
@@ -7930,7 +7946,7 @@ html: `
                        </div>
                        <p class="small text-muted mb-0 mt-1">
                            ${app.amount > 0 ? Number(app.amount).toLocaleString()+'원' : ''} 
-                           ${safeApplicationReason ? '<br>신청 사유: '+safeApplicationReason : ''}
+                           ${safeApplicationReason ? '<br>'+(app.type === 'connect' ? '신청 내용: ' : '신청 사유: ')+safeApplicationReason : ''}
                            ${app.status === 'rejected' && isBusinessApplication ? '<br><span class="text-danger">미승인 사유: '+(safeRejectionReason || '기존 처리 건으로 사유 기록 없음')+'</span>' : ''}
                        </p>
                        ${actionBtns}
@@ -9742,39 +9758,16 @@ window.__memberAppLocks.submitFamily = false;
 let currentBoardCat = 'notice';
 
 // [수정 4] 게시판 로드: 없는 칼럼(status) 참조 제거로 400 에러 해결
-async function loadBoard(category, btn, limit = 20) {
-if (category === 'notice') return openDocumentBox('ANNOUNCEMENTS');
-if (limit === 20) currentBoardLimit = 20;
-
-currentBoardCat = category;
-if(btn) {
-document.querySelectorAll('.board-tab-btn').forEach(b => b.classList.remove('active'));
-btn.classList.add('active');
+function getPortalBoardOwner() {
+return JSON.stringify([curAuth?.id || '', currentMemberCoopId || '', getActiveMemberProfileId() || '', portalProfileLoadRevision]);
 }
 
-const btnWrite = document.getElementById('btnWritePost');
-if(btnWrite) btnWrite.classList.toggle('hidden', category === 'notice');
-
+function renderPortalBoardPosts(posts, hasMore) {
 const listArea = document.getElementById('boardList');
-if(limit === 20) listArea.innerHTML = '<div class="text-center py-5 text-muted">로딩중...</div>';
-
-// 데이터 조회
-const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
-
-// [핵심 수정] .eq('status', 'published') 삭제됨 -> 모든 글 조회
-const baseListQuery = _supabase
-.from(tableName)
-.select('*');
-const { data: posts, error } = await scopeMemberTenant(baseListQuery)
-.order('created_at', { ascending: false })
-.range(0, limit - 1);
-
-if(error || !posts || posts.length === 0) {
-if (error) CoopSafeLog.error("게시판 로드 실패:", error); // 디버깅용 로그
-if(limit === 20) listArea.innerHTML = '<div class="text-center py-5 text-muted">등록된 글이 없습니다.</div>';
+if (!posts.length) {
+listArea.innerHTML = '<div class="text-center py-5 text-muted" role="status">등록된 글이 없습니다.</div>';
 return;
 }
-
 let html = '';
 posts.forEach(p => {
 const date = formatMemberKstDate(p.created_at);
@@ -9783,7 +9776,7 @@ const date = formatMemberKstDate(p.created_at);
     const strippedContent = rawContent.replace(/<[^>]*>?/gm, '');
     const safeContent = escapeHtml(strippedContent);
     const safeTitle = escapeHtml(p.title || '');
-    const safeCategory = escapeJsString(category || '');
+    const safeCategory = escapeJsString(currentBoardCat || '');
 
     html += `
        <div class="board-list-item p-3 border-bottom" onclick="viewPost(${p.id}, '${safeCategory}')" style="cursor:pointer;">
@@ -9795,18 +9788,88 @@ const date = formatMemberKstDate(p.created_at);
         </div>`;
 });
 
-html += `<div class="text-center py-3">
-               <button class="btn btn-sm btn-outline-secondary rounded-pill px-4" onclick="loadMoreBoard()">더 보기 (+20)</button>
+html += `<div class="text-center py-3" id="boardListStatus" role="status">
+               ${hasMore ? '<button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-4" onclick="loadMoreBoard()">더 보기 (+20)</button>' : '<span class="small text-muted">마지막 글입니다.</span>'}
             </div>`;
-
 listArea.innerHTML = html;
 }
 
-// [신규] 더보기 실행 함수
+function loadBoard(category, btn, limit = 20) {
+const state = portalBoardListState;
+if (category === 'notice') {
+state.revision++;
+state.pending?.controller.abort();
+state.pending = null;
+isBoardLoading = false;
+return openDocumentBox('ANNOUNCEMENTS');
+}
+const owner = getPortalBoardOwner();
+if (!curAuth?.id || !currentMemberCoopId) return Promise.resolve();
+const more = limit > 20 && state.owner === owner && state.category === category && state.rows.length > 0;
+const offset = more ? state.offset : 0;
+const key = JSON.stringify([owner, category, offset]);
+if (state.pending?.key === key) return state.pending.promise;
+state.pending?.controller.abort();
+const request = { key, revision:++state.revision, controller:new AbortController(), promise:null };
+state.pending = request;
+currentBoardCat = category;
+isBoardLoading = true;
+if(btn) {
+document.querySelectorAll('.board-tab-btn').forEach(b => b.classList.remove('active'));
+btn.classList.add('active');
+}
+document.getElementById('btnWritePost')?.classList.remove('hidden');
+const listArea = document.getElementById('boardList');
+if (!more) listArea.innerHTML = '<div class="text-center py-5 text-muted" role="status">불러오는 중...</div>';
+const trigger = listArea.querySelector('button[onclick="loadMoreBoard()"]');
+if (trigger) trigger.disabled = true;
+const current = () => state.pending === request && request.revision === state.revision
+    && owner === getPortalBoardOwner() && currentBoardCat === category;
+request.promise = Promise.resolve().then(async () => {
+const timer = setTimeout(() => request.controller.abort(), 15000);
+try {
+const { data, error } = await scopeMemberTenant(_supabase.from('coop_boards').select('*'))
+.order('created_at', { ascending:false }).order('id', { ascending:false })
+.range(offset, offset + 20).abortSignal(request.controller.signal);
+if (!current()) return;
+if (error) throw error;
+const page = Array.isArray(data) ? data : [];
+const rows = more ? state.rows.slice() : [];
+const seen = new Set(rows.map(row => String(row.id)));
+page.slice(0, 20).forEach(row => { if (!seen.has(String(row.id))) { rows.push(row); seen.add(String(row.id)); } });
+state.rows = rows;
+state.offset = offset + Math.min(page.length, 20);
+state.hasMore = page.length > 20;
+state.owner = owner;
+state.category = category;
+currentBoardLimit = Math.max(20, state.offset);
+renderPortalBoardPosts(rows, state.hasMore);
+} catch (error) {
+if (!current()) return;
+const status = more ? document.getElementById('boardListStatus') : listArea;
+if (status) {
+status.textContent = '게시글을 불러오지 못했습니다. ';
+const retry = document.createElement('button');
+retry.type = 'button';retry.className = 'btn btn-sm btn-outline-secondary';retry.textContent = '다시 불러오기';
+retry.addEventListener('click', () => loadBoard(category, null, more ? currentBoardLimit + 20 : 20));
+status.appendChild(retry);
+}
+} finally {
+clearTimeout(timer);
+if (state.pending === request) {
+state.pending = null;
+isBoardLoading = false;
+if (trigger?.isConnected) trigger.disabled = false;
+}
+}
+});
+return request.promise;
+}
+
 function loadMoreBoard() {
-currentBoardLimit += 20;
-// 현재 카테고리 유지하며 갯수만 늘림
-loadBoard(currentBoardCat, null, currentBoardLimit);
+if (portalBoardListState.pending) return portalBoardListState.pending.promise;
+if (!portalBoardListState.hasMore) return Promise.resolve();
+return loadBoard(currentBoardCat, null, currentBoardLimit + 20);
 }
 
 
