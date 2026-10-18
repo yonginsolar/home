@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.193
-Change: 2026-10-18 - Guard board detail reads and support accessible cards and modal focus return.
+Version: v1.0.194
+Change: 2026-10-18 - Retain child registration drafts per profile and protect unsaved input on refresh.
 -->
 <html lang="ko">
 <head>
@@ -10,7 +10,7 @@ Change: 2026-10-18 - Guard board detail reads and support accessible cards and m
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.193 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.194 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2620,6 +2620,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+window.PortalChildDrafts?.clear();
 window.PortalBoardDetail?.close(false);
 window.PortalBoardEditor?.clear();
 clearPortalApplicationDrafts();
@@ -4697,6 +4698,7 @@ window.PortalBoardEditor?.suspend();
 retainPortalProfileEdit();
 retainPortalApplicationDraft();
 retainPortalPartnerDraft();++portalPartnerReadRevision;++portalPartnerRequestRevision;
+window.PortalChildDrafts?.retain();
 retainPortalConnectDraft();++portalConnectSearchRevision;++portalFamilyListRevision;
 portalConnectPending = null;portalFamilyListPending = null;
 ++portalApplicationGeneration;++portalApplicationRequest;
@@ -4743,7 +4745,10 @@ if (!currentProfileLoad()) return;
 
 // Use only the persisted projection; no extra read or ciphertext fallback.
 member.account_number = MemberInformation.bankAccountDisplay(member);
-if (familyRegistrationOwner && familyRegistrationOwner !== getFamilyRegistrationOwner(member)) resetFamilyRegistrationDraft();
+if (familyRegistrationOwner && familyRegistrationOwner !== getFamilyRegistrationOwner(member)) {
+if (window.PortalChildDrafts) window.PortalChildDrafts.suspend();
+else resetFamilyRegistrationDraft();
+}
 curMem = member; 
 currentMemberCoopId = member.coop_id || await getCurrentMemberCoopId();
 initializePortalApplicationDraft(member);
@@ -9110,6 +9115,7 @@ const profile = String(member?.id || '').trim();
 return actor && coop && profile ? JSON.stringify([actor, coop, profile]) : '';
 }
 function closeFamilyRegistrationModal() {
+window.PortalChildDrafts?.retain();
 retainPortalConnectDraft();++portalConnectSearchRevision;portalConnectPending = null;
 ++familyRegistrationRevision;
 tempChildData = null;
@@ -9126,7 +9132,11 @@ if (overlay) overlay.style.display = 'none';
 }
 function resetFamilyRegistrationDraft() {
 closeFamilyRegistrationModal();
+window.PortalChildDrafts?.dropCurrent();
 familyRegistrationOwner = '';
+clearFamilyRegistrationInputs();
+}
+function clearFamilyRegistrationInputs() {
 for (const id of ['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelInput','newFamCapital','newFamBank','newFamAcc']) {
 const input = document.getElementById(id); if (input) input.value = '';
 }
@@ -9136,12 +9146,78 @@ document.getElementById('newFamRelInput')?.classList.add('hidden');
 }
 window.addEventListener('pagehide', resetFamilyRegistrationDraft);
 
+/* CHILD_PROFILE_DRAFTS_START */
+// Memory-only drafts are not an authorization source. Consent/request state is never restored.
+window.PortalChildDrafts = (() => {
+const ids = ['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelSelect','newFamRelInput','newFamCapital','newFamBank','newFamAcc'];
+const drafts = new Map();
+let scope = '', active = null;
+const snapshot = () => ids.map(id => [id,document.getElementById(id).value]);
+const currentScope = () => {
+const actor = String(curAuth?.id || ''), coop = String(currentMemberCoopId || curMem?.coop_id || '');
+return actor && coop && (!curMem?.coop_id || String(curMem.coop_id) === coop) ? JSON.stringify([actor,coop]) : '';
+};
+const current = () => active && scope && scope === currentScope()
+    && active.owner === getFamilyRegistrationOwner() && familyRegistrationOwner === active.owner;
+function clear() {
+drafts.clear();active = null;scope = '';
+resetFamilyRegistrationDraft();
+}
+function syncScope() {
+const next = currentScope();
+if (scope !== next) { clear();scope = next; }
+return next;
+}
+function retain() {
+if (!active) return;
+if (scope !== currentScope()) { clear();return; }
+if (!current()) return;
+const values = snapshot();
+if (JSON.stringify(values) === JSON.stringify(active.baseline)) drafts.delete(active.owner);
+else drafts.set(active.owner,{values,baseline:active.baseline});
+}
+function enter(owner) {
+if (!syncScope() || owner !== getFamilyRegistrationOwner()) return false;
+retain();
+if (!current() || active.owner !== owner) {
+const saved = drafts.get(owner);
+clearFamilyRegistrationInputs();
+const baseline = saved?.baseline || snapshot();
+if (saved) for (const [id,value] of saved.values) document.getElementById(id).value = value;
+document.getElementById('newFamRelInput').classList.toggle('hidden',document.getElementById('newFamRelSelect').value !== '직접입력');
+active = {owner,baseline};
+}
+familyRegistrationOwner = owner;
+return true;
+}
+function suspend() {
+closeFamilyRegistrationModal();active = null;familyRegistrationOwner = '';
+clearFamilyRegistrationInputs();
+}
+function dropCurrent() {
+if (active) drafts.delete(active.owner);
+active = null;
+}
+for (const type of ['input','change']) document.addEventListener(type,event => {
+if (ids.includes(event.target?.id)) retain();
+});
+window.addEventListener('beforeunload',event => {
+if (!syncScope()) return;
+retain();
+if (drafts.size) { event.preventDefault();event.returnValue = ''; }
+});
+return Object.freeze({enter,retain,suspend,dropCurrent,clear});
+})();
+/* CHILD_PROFILE_DRAFTS_END */
+
 // Reopening the same owner's form keeps its original input nodes and values.
 async function openAddFamilyModal() {
 const draftOwner = getFamilyRegistrationOwner();
 if (!draftOwner) { resetFamilyRegistrationDraft(); return showModal('로그인 정보를 다시 확인해 주세요.'); }
-if (familyRegistrationOwner !== draftOwner) resetFamilyRegistrationDraft();
-else retainPortalConnectDraft();
+if (window.PortalChildDrafts) {
+if (!window.PortalChildDrafts.enter(draftOwner)) return;
+} else if (familyRegistrationOwner !== draftOwner) resetFamilyRegistrationDraft();
+retainPortalConnectDraft();
 familyRegistrationOwner = draftOwner;
 const draftRevision = ++familyRegistrationRevision;
 const overlay = document.getElementById('familyModalOverlay');
