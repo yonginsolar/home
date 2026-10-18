@@ -6,6 +6,7 @@ Change: 2026-10-05 - Server-verified election authority and election-scoped rost
 -->
 <html lang="ko" data-election-ui="admin_setup" data-election-role="admin">
 <head>
+  <script data-election-term-boot>window.__COOP_ROUTE_APP__='erp';</script>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
   <script src="/shared/workflow_help.js?v=20261019-3" integrity="sha384-eCVfarY73F9jq+o/UJ5LY7GJz9DHUFjFEOLbs4gfmjhlG3YLMK8oyVQ3JL6PrNA1" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | admin_setup.html');</script>
@@ -15,8 +16,9 @@ Change: 2026-10-05 - Server-verified election authority and election-scoped rost
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선거 관리 대시보드</title>
-    <meta name="election-term-version" content="1.0.1">
-    <link rel="modulepreload" href="/vote/election_term.js?v=1.0.1" integrity="sha384-KTlVVImKwnBY1tI2mon69slZoOFXkCyg79k+HQjfiHD0WQOvaUne/Dw7Fe5BGuAV" crossorigin="anonymous">
+    <meta name="election-term-version" content="1.1.0">
+    <link rel="modulepreload" href="/vote/election_term.js?v=1.1.0" integrity="sha384-jO+llWE0vA0SmVki/uznt+LVFTYVYgDRHfP3nSN1GkYUnlgE39tn58cAsw58jLNt" crossorigin="anonymous">
+    <link rel="modulepreload" href="/vote/election_term_planner.js?v=1.0.0" integrity="sha384-tTz/HT76yKtqMym0uhaBdkJbIOl1awn87S6LZ3xhxFONeGLCoQ70fYPzZ6zBZAIz" crossorigin="anonymous">
     <script>console.log('[Version] v1.0.18 | admin_setup.html');</script>
 
 <style>
@@ -174,8 +176,9 @@ Change: 2026-10-05 - Server-verified election authority and election-scoped rost
 
 
         <div id="dashboard-section" style="display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:space-between; align-items:center; margin-bottom:20px;">
                 <h2 style="margin:0;">📊 선거 현황</h2>
+                <button type="button" id="term-policy-open" class="btn-control">📜 정관상 임기 기준</button>
                 <button onclick="showCreateForm()" style="background:var(--color-primary); color:white; border:none; padding:10px 20px; border-radius:6px; font-weight:bold; cursor:pointer;">
                     + 새 선거 생성
                 </button>
@@ -236,6 +239,7 @@ Change: 2026-10-05 - Server-verified election authority and election-scoped rost
             <span class="form-label" style="margin:0;">당선인 임기</span>
             <button type="button" class="coop-workflow-help election-help" data-erp-query-control aria-label="당선인 임기 도움말" aria-haspopup="dialog" onclick="showElectionTermHelp(event)">?</button>
         </div>
+        <div id="new-term-planner"></div>
         <div class="form-row">
             <div style="min-width:0;flex:1;"><label for="election-term-start" data-workflow-help-ignore>임기 시작일</label><input type="date" id="election-term-start" data-election-term-control class="form-input" min="0001-01-01" max="9999-12-31"></div>
             <div style="min-width:0;flex:1;"><label for="election-term-end" data-workflow-help-ignore>임기 종료일</label><input type="date" id="election-term-end" data-election-term-control class="form-input" min="0001-01-01" max="9999-12-31"></div>
@@ -386,6 +390,7 @@ Change: 2026-10-05 - Server-verified election authority and election-scoped rost
 <dialog id="election-term-dialog" aria-labelledby="election-term-heading" style="width:min(520px,calc(100vw - 32px));box-sizing:border-box;border:1px solid #cbd5e1;border-radius:16px;padding:24px;color:#172033;background:#fff;max-height:calc(100dvh - 40px);overflow:auto;">
     <div style="display:flex;align-items:center;gap:8px;"><h2 id="election-term-heading" style="margin:0;">당선인 임기 설정</h2><button type="button" class="coop-workflow-help election-help" data-erp-query-control aria-label="당선인 임기 도움말" aria-haspopup="dialog" onclick="showElectionTermHelp(event)">?</button></div>
     <p id="election-term-name" style="overflow-wrap:anywhere;"></p>
+    <div id="edit-term-planner"></div>
     <label for="edit-election-term-start" data-workflow-help-ignore>임기 시작일</label>
     <input type="date" id="edit-election-term-start" data-election-term-control data-erp-query-control class="form-input" min="0001-01-01" max="9999-12-31">
     <label for="edit-election-term-end" data-workflow-help-ignore style="display:block;margin-top:12px;">임기 종료일</label>
@@ -420,7 +425,8 @@ function escapeJsString(value) {
     import { AdminService } from './AdminService.js?v=20261005-2';
     import { supabase } from './ElectionService.js';
     /* election-term:start */
-    import { readElectionTerm, showElectionTermHelp, createElectionTermEditor } from './election_term.js?v=1.0.1';
+    import { readElectionTerm, showElectionTermHelp, createElectionTermEditor, sameElectionTermPlan } from './election_term.js?v=1.1.0';
+    import { createTermPlanning } from './election_term_planner.js?v=1.0.0';
     window.showElectionTermHelp = showElectionTermHelp;
     /* election-term:end */
 
@@ -478,7 +484,9 @@ function escapeJsString(value) {
         const values=['election-term-start','election-term-end'].map(id=>document.getElementById(id).value);
         if(values.some((value,index)=>value!==savedElectionTermFields[index])){event.preventDefault();event.returnValue='';}
     });
+    let termPlanningInstance=null,newTermPlanner=null;
     const termEditor = createElectionTermEditor({
+        planning:createTermPlanningProxy(),
         client:supabase,scope:query=>scopeByTenant(query),context:()=>currentCoopId,
         authorize:async()=>{
             const checked=await window.ErpRuntimeGuard.enforce(supabase,{moduleKey:'vote',moduleLabel:'선거/투표',redirectUrl:getErpIndexUrl(window.location.href),alertFn:msg=>showAlert(msg)});
@@ -487,6 +495,19 @@ function escapeJsString(value) {
         },
         onSaved:row=>{if(row.id===newElectionId&&document.getElementById('election-term-start').disabled)bindElectionTermFields(row,true);}
     });
+    function createTermPlanningProxy(){return {planner:options=>{
+        const planner=getTermPlanning().planner(options);return planner;
+    }};}
+    function getTermPlanning(){
+        if(!termPlanningInstance)termPlanningInstance=createTermPlanning({client:supabase,context:()=>currentCoopId,authorize:async()=>{
+            const checked=await window.ErpRuntimeGuard.enforce(supabase,{moduleKey:'vote',moduleLabel:'선거/투표',redirectUrl:getErpIndexUrl(window.location.href),alertFn:msg=>showAlert(msg)});
+            if(!checked.ok||checked.runtime?.coop_id!==currentCoopId||checked.runtime?.modules?.member_admin===false)return false;
+            const result=await supabase.rpc('is_election_admin');return !result.error&&result.data===true;
+        }});return termPlanningInstance;
+    }
+    function getNewTermPlanner(){if(!newTermPlanner){newTermPlanner=getTermPlanning().planner({container:document.getElementById('new-term-planner'),start:document.getElementById('election-term-start'),end:document.getElementById('election-term-end')});newTermPlanner.bind(null);}return newTermPlanner;}
+    document.getElementById('term-policy-open').addEventListener('click',event=>getTermPlanning().openPolicy(event.currentTarget));
+    window.addEventListener('beforeunload',event=>{if(newTermPlanner?.dirty()){event.preventDefault();event.returnValue='';}});
     function bindElectionTermFields(row,existing=false){
         document.getElementById('election-term-start').value=row?.term_start_date||'';
         document.getElementById('election-term-end').value=row?.term_end_date||'';
@@ -497,12 +518,14 @@ function escapeJsString(value) {
         document.getElementById('election-term-end').dataset.termLocked=String(existing);
         const button=document.getElementById('edit-draft-election-term');button.hidden=!existing;
         button.onclick=()=>termEditor.open(row,button);
+        getNewTermPlanner().bind(row,{isLocked:existing});
     }
     function addElectionTermButton(container,row){
         const button=document.createElement('button');button.type='button';button.textContent='임기 설정';
         button.addEventListener('click',event=>{event.stopPropagation();termEditor.open(row,button);});
         (container.querySelector('.card-actions')||container).append(button);
     }
+    getNewTermPlanner();
     /* election-term:end */
     const voteAdminSetupMode = (() => {
         try {
@@ -569,6 +592,7 @@ function escapeJsString(value) {
     function setCreateElectionBusy(isBusy) {
         /* election-term:start */
         for(const id of ['election-term-start','election-term-end']){const field=document.getElementById(id);field.disabled=!!isBusy||field.dataset.termLocked==='true';}
+        newTermPlanner?.setBusy(!!isBusy||document.getElementById('election-term-start').dataset.termLocked==='true');
         /* election-term:end */
         const btn = document.getElementById('btnCreateElection');
         if (!btn) return;
@@ -1704,7 +1728,7 @@ window.createElection = async () => {
     const vEUTC = toUtcIsoFromKstInput(vE);
     /* election-term:start */
     let electionTerm;
-    try { electionTerm=readElectionTerm(document.getElementById('election-term-start').value,document.getElementById('election-term-end').value); }
+    try { electionTerm={...readElectionTerm(document.getElementById('election-term-start').value,document.getElementById('election-term-end').value),term_plan:getNewTermPlanner().read()}; }
     catch(error){return window.showAlert(error.message);}
     /* election-term:end */
 
@@ -1721,7 +1745,7 @@ window.createElection = async () => {
     setCreateElectionBusy(true);
     try {
         const { data: existingRows, error: existingError } = await scopeByTenant(
-            supabase.from('elections').select('id,term_start_date,term_end_date')
+            supabase.from('elections').select('id,term_start_date,term_end_date,term_plan')
         )
             .eq('title', title)
             .eq('announcement_date', announceDate)
@@ -1735,7 +1759,7 @@ window.createElection = async () => {
         if (Array.isArray(existingRows) && existingRows.length > 0) {
             /* election-term:start */
             const existing=existingRows[0];
-            if((existing.term_start_date||null)!==electionTerm.term_start_date||(existing.term_end_date||null)!==electionTerm.term_end_date){
+            if((existing.term_start_date||null)!==electionTerm.term_start_date||(existing.term_end_date||null)!==electionTerm.term_end_date||!sameElectionTermPlan(existing.term_plan,electionTerm.term_plan)){
                 return window.showAlert('같은 일정의 선거가 이미 있습니다. 목록의 임기 설정에서 저장된 임기를 확인해 주세요.');
             }
             bindElectionTermFields(existing,true);
