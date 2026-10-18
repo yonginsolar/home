@@ -52,14 +52,17 @@
         if(url){const img=document.createElement('img');img.src=window.CoopDisplayImages?.display(url)||url;img.alt='';img.style.cssText='max-width:100%;max-height:320px;object-fit:contain;margin-bottom:20px';article.append(img);}
         article.append(content);container.after(article);
         CoopTextStyles.adapt(article);
-        if(previousId!==draft.activity.id)article.scrollIntoView?.({block:'start'});
+        if(previousId!==draft.activity.id)window.scrollTo({top:window.scrollY+article.getBoundingClientRect().top,behavior:'instant'});
       }
     }
   }
   function navigate(area){
     const target=area==='certifications'?'public-site-certifications':area==='design'||area==='fonts'?'hero':area==='external-news'?'activities':area;
     if(!areas.includes(target)&&target!=='public-site-certifications')return;
-    document.getElementById(target)?.scrollIntoView({block:'start'});
+    const node=document.getElementById(target);
+    // scrollIntoView also scrolls the editor's ancestor viewport. Navigate only
+    // inside this preview so the task tabs and settings stay where the user left them.
+    if(node)window.scrollTo({top:window.scrollY+node.getBoundingClientRect().top,behavior:'instant'});
   }
   window.CoopSitePreview=Object.freeze({
     get:key=>draft[key],apply(value){draft=value&&typeof value==='object'?value:{};return refresh(false);},refresh,finishActivities,invalidate(key){delete rendered[key];},

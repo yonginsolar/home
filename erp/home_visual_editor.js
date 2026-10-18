@@ -10,7 +10,7 @@
   const tasks=[['edit','hero','홈페이지 꾸미기'],['materials','activities','홈페이지에 보여줄 자료'],['legal','legal','가입 안내·약관']];
   const taskFor=area=>area==='legal'?'legal':materialAreas.includes(area)?'materials':'edit';
   const lastAreas={edit:'hero',materials:'activities',legal:'legal'};
-  const quickTasks=[['hero','첫 화면 사진·문구'],['about','조합 소개'],['design','전체 디자인'],['sections','표시 영역·순서']];
+  const quickTasks=[['design','전체 디자인'],['hero','첫 화면 사진·문구'],['about','조합 소개'],['sections','표시 영역·순서']];
   // Describe the actual owner and publication contract. These are navigation
   // labels, not new data sources, publication flags or cached authority.
   const context={
@@ -149,7 +149,7 @@
     const devices=document.querySelector('.home-preview-device-group'); if(devices) { devices.classList.add('ms-auto'); toolbar.append(devices); }
     const taskContext=document.createElement('section');taskContext.className='home-task-context';taskContext.setAttribute('aria-labelledby','site-home-task-title');
     const taskHeading=document.createElement('div');taskHeading.className='home-task-heading';const title=document.createElement('h4');title.id='site-home-task-title';taskHeading.append(title);
-    const guide=document.createElement('button');guide.type='button';guide.className='btn btn-sm btn-outline-secondary';guide.id='site-home-task-help';guide.textContent='?';guide.onclick=()=>{if(!available(selected)||typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site'))return;guide.focus({preventScroll:true});void root.CoopDialog.alert(help[selected]||context[selected][1]+'\n'+context[selected][2],{title:context[selected][0]+' 도움말'});};taskHeading.append(guide);taskContext.append(taskHeading);
+    const guide=document.createElement('button');guide.type='button';guide.className='btn btn-sm btn-outline-secondary';guide.id='site-home-task-help';guide.hidden=true;guide.textContent='?';guide.onclick=()=>{if(!available(selected)||typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site'))return;guide.focus({preventScroll:true});void root.CoopDialog.alert(help[selected]||context[selected][1]+'\n'+context[selected][2],{title:context[selected][0]+' 도움말'});};taskHeading.append(guide);taskContext.append(taskHeading);
     for(const id of ['source','publication']){const text=document.createElement('p');text.id='site-home-task-'+id;taskContext.append(text);}
     const state=document.createElement('span');state.id='site-home-section-state';state.hidden=true;taskContext.append(state);
     const showSections=document.createElement('button');showSections.type='button';showSections.className='btn btn-sm btn-outline-secondary';showSections.id='site-home-show-sections';showSections.textContent='표시 영역·순서 확인';showSections.onclick=()=>select('sections');taskContext.append(showSections);
@@ -235,6 +235,7 @@
     window.CoopHeroVisual?.mount();
     window.CoopSiteLegalEditor?.mount(); // Legal definitions can arrive before this lazy workspace mounts.
     window.CoopSiteInlineHost?.mount();
+    window.CoopHomeEditorTools?.mount();
     // Do not change the active tab or run a data read while taking initial baselines.
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!=='hero');
     const initialRevision=selectionRevision;
@@ -284,5 +285,5 @@
       if(event.data.area==='legal')window.CoopSiteLegalEditor?.select(event.data.legalKind);
     }
   });
-  root.CoopHomeVisualEditor=Object.freeze({version:'20261019-roles-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
+  root.CoopHomeVisualEditor=Object.freeze({version:'20261019-controls-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
 })(window);

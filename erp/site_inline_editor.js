@@ -72,12 +72,12 @@
   dialog.replaceChildren();const heading=document.createElement('h2');heading.id='home-element-dialog-title';heading.textContent=title;dialog.append(heading);
   dialog.classList.toggle('home-banner-gui',ids.some(([id])=>id==='site-home-slide-config'));
   for(const [id,label] of ids){const input=document.getElementById(id);if(!input||input.disabled)continue;const marker=document.createComment('inline field return');input.before(marker);input.dataset.inlineOriginalRoot=form.id;moved.push([input,marker]);if(label){const lab=document.createElement('label');lab.htmlFor=id;lab.className='form-label';lab.textContent=label;dialog.append(lab);}dialog.append(input);}
-  if(!moved.length)return;const done=document.createElement('button');done.type='button';done.className='btn btn-primary mt-3';done.textContent='확인';done.onclick=closeDialog;dialog.append(done);dialog.showModal();
+  if(!moved.length)return;const done=document.createElement('button');done.type='button';done.className='btn btn-primary mt-3';done.textContent='확인';done.onclick=closeDialog;dialog.append(done);root.CoopHomeEditorTools?.decorate(dialog);dialog.showModal();
  }
  function elementControls(area,kind){
   if(!CoopHomeVisualEditor.select(area,false))return;
   const key=area==='about'?'aboutTitle':area==='impact'?'impactTitle':'heroTitle';if(!ready(key))return;
-  if(kind==='button'&&['hero','impact'].includes(area)){const id=area==='hero'?root.CoopHeroVisual?.editor().slideId:'';controls('버튼 바로가기',id?[[id+'-button_label','버튼 문구'],[id+'-button-url','연결 위치'],[id+'-button-url-custom','직접 입력 주소']]:[[`site-home-${area}-cta-label`,'버튼 문구'],[`site-home-${area}-cta-target`,'연결 위치'],[`site-home-${area}-cta-custom`,'직접 입력 주소']]);}
+  if(kind==='button'&&['hero','impact'].includes(area)){const id=area==='hero'?root.CoopHeroVisual?.editor().slideId:'';controls('버튼 바로가기',id?[[id+'-button-url','바로가기 설정'],[id+'-button-url-custom','직접 입력 주소'],[id+'-button_label','버튼 문구']]:[[`site-home-${area}-cta-target`,'바로가기 설정'],[`site-home-${area}-cta-custom`,'직접 입력 주소'],[`site-home-${area}-cta-label`,'버튼 문구']]);}
   else if(kind==='image'){
    if(area==='about')controls('조합 소개 사진',[['admin-about-img-file','사진 교체']]);
    else if(area==='hero'&&root.CoopHeroVisual)bannerPhoto(root.CoopHeroVisual.editor().slideId);
@@ -85,7 +85,7 @@
   }
  }
  function bannerPhoto(id){if(!ready('heroTitle')||(id||'')!==(root.CoopHeroVisual?.editor().slideId||''))return;controls('PC·모바일 배너 사진',id?[[id+'-device-images',''],[id+'-image','PC용 · 권장 1920 × 720px · 최대 10MB'],[id+'-pc-preview',''],[id+'-desktop-display',''],[id+'-mobile-files',''],[id+'-mobile-display','']]:[['site-home-single-device-images',''],['site-home-hero-image-file','PC용 · 권장 1920 × 720px · 최대 10MB'],['site-home-hero-image-preview',''],['site-home-single-mobile-files',''],['site-home-single-display','']]);}
- function bannerLinks(id){if(!permitted())return;const prefix=id?id+'-':'';controls('배너 연결',id?[[prefix+'button-url','버튼 연결'],[prefix+'button-url-custom','직접 입력 주소'],[prefix+'link-url','배너 클릭 연결'],[prefix+'link-url-custom','직접 입력 주소']]:[['site-home-hero-cta-target','버튼 연결'],['site-home-hero-cta-custom','직접 입력 주소'],['site-home-banner-click','배너 클릭 연결'],['site-home-banner-click-custom','직접 입력 주소']]);}
+ function bannerLinks(id){if(!permitted())return;const prefix=id?id+'-':'';controls('배너 바로가기',id?[[prefix+'button-url','바로가기 설정'],[prefix+'button-url-custom','직접 입력 주소'],[prefix+'button_label','버튼 문구'],[prefix+'link-url','배너 클릭 바로가기'],[prefix+'link-url-custom','직접 입력 주소']]:[['site-home-hero-cta-target','바로가기 설정'],['site-home-hero-cta-custom','직접 입력 주소'],['site-home-hero-cta-label','버튼 문구'],['site-home-banner-click','배너 클릭 바로가기'],['site-home-banner-click-custom','직접 입력 주소']]);}
  function sectionAction(id,action){
   if(!permitted()||typeof g_sectionSaving==='undefined'||g_sectionSaving)return false;
   const row=g_sectionDrafts.find(x=>x.id===id);if(!row)return false;
@@ -111,6 +111,7 @@
   const actions=document.createElement('div');actions.className='home-inline-save-actions';toolbar.append(actions);
   const zone=document.createElement('div');zone.className='home-inline-save-zone';toolbar.append(zone);
   const status=document.createElement('span');status.id='home-inline-save-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');zone.append(status,actions);
+  const undo=document.createElement('button');undo.type='button';undo.id='home-inline-undo';undo.className='btn btn-sm btn-outline-secondary home-undo-button';undo.textContent='↶';undo.title='마지막 수정 되돌리기';undo.setAttribute('aria-label',undo.title);undo.disabled=true;undo.onclick=()=>{if(permitted())void root.CoopHomeEditorTools?.undo();};zone.insertBefore(undo,actions);
   const publicLink=document.createElement('a');publicLink.className='btn btn-sm btn-outline-secondary';publicLink.id='home-inline-public-link';publicLink.textContent='홈페이지 보기 ↗';publicLink.target='_blank';publicLink.rel='noopener noreferrer';publicLink.hidden=true;toolbar.insertBefore(publicLink,zone);
   workspace.classList.add('has-unified-save');
   let signature='',flushing=false;const phases=new Map();
@@ -128,6 +129,7 @@
   }
   function sync(){
    const area=CoopHomeVisualEditor.current(),sources=saveButtons(area),state=saveStatus(area),allowed=permitted();
+   const undoState=root.CoopHomeEditorTools?.undoState(area)||{supported:false,enabled:false};if(undo.hidden===undoState.supported)undo.hidden=!undoState.supported;const undoDisabled=!allowed||flushing||!undoState.enabled;if(undo.disabled!==undoDisabled)undo.disabled=undoDisabled;
    const next=JSON.stringify([area,allowed,flushing,state,sources.map(x=>[x.id,x.disabled,x.hidden,x.textContent]),document.getElementById(`btn-retry-${area==='about'?'about':'home'}-settings`)?.hidden]);
    if(next===signature)return;signature=next;actions.replaceChildren();
    status.textContent=!allowed?'편집 권한이 없습니다.':flushing?'편집 내용을 확인하는 중입니다…':state.text;status.dataset.phase=state.phase;status.hidden=!status.textContent;
@@ -143,7 +145,7 @@
    try{const url=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(url&&url.protocol==='https:'&&!url.username&&!url.password){url.search='';url.hash='';publicLink.href=url.href;publicLink.hidden=false;}}catch(_){}
    if(!['hero','impact','about','contact','legal'].includes(area))workspace.classList.add('show-settings');else if(!explicitSettings)workspace.classList.remove('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
   }
-  new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class','src']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
+  document.addEventListener('coop-home-undo-change',sync);new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class','src']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
  }
  root.addEventListener('message',event=>{
   const f=frame();if(!f?.src||event.source!==f.contentWindow||event.origin!==new URL(f.src).origin)return;

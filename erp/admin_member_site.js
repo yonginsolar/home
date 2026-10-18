@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261018-device-images-1') return;
+    if (root.AdminMemberSite?.version === '20261019-controls-1') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -404,6 +404,7 @@ return String(a.id || '').localeCompare(String(b.id || ''));
 }
 
 function renderSectionRows() {
+window.CoopHomeEditorTools?.observe('sections');
 const tbody = document.getElementById('sectionListBody');
 if (!tbody) return;
 const sortedSections = getSortedSectionDrafts();
@@ -538,6 +539,7 @@ tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3">섹션 정보가
 renderSectionSeedButton(requiredSections);
 renderSectionSeedHint('등록된 홈페이지 섹션이 없습니다. 먼저 누락 섹션 등록을 눌러 주세요.', true);
 g_siteInitialSectionsRequested = true;
+window.CoopHomeEditorTools?.accepted('sections');
 return true;
 }
 
@@ -561,6 +563,7 @@ renderSectionSeedHint(`${missingNames} 섹션이 아직 등록되지 않았습�
 }
 renderSectionRows();
 g_siteInitialSectionsRequested = true;
+window.CoopHomeEditorTools?.accepted('sections');
 if (ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin') void fetchHomeSettings();
 return true;
 }
@@ -735,6 +738,7 @@ if (g_siteEditorDrafts.has(kind)) return g_siteEditorDrafts.get(kind);
 const rootId = kind === 'home' ? 'sub-home-settings' : 'sub-about';
 const root = document.getElementById(rootId);
 const controller = SiteEditorDrafts.create(() => siteEditorFormSnapshot(rootId), (state) => {
+window.CoopHomeEditorTools?.observe(kind,state);
 const status = document.getElementById(`site-${kind}-save-status`);
 if (status) {
 status.textContent = state.busy ? '저장 중입니다…' : state.loading ? '설정을 불러오는 중입니다…' : !state.loaded ? '설정을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.' : state.dirty ? '저장하지 않은 변경사항이 있습니다.' : '저장된 내용입니다.';
@@ -764,10 +768,11 @@ g_siteEditorFieldLocks.delete(kind);
 }
 if (kind === 'home' && state.loaded) window.CoopHeroSlides?.refresh();
 });
-g_siteEditorDrafts.set(kind, controller);
+const acceptedController=Object.freeze({...controller,accept(snapshot){const state=controller.accept(snapshot);window.CoopHomeEditorTools?.accepted(kind,snapshot);return state;}});
+g_siteEditorDrafts.set(kind, acceptedController);
 ['input','change','click'].forEach(type => root?.addEventListener(type, () => Promise.resolve().then(() => controller.refresh())));
 controller.refresh();
-return controller;
+return acceptedController;
 }
 
 function setHomeImagePreview(kind, url) {
@@ -1158,6 +1163,7 @@ let payload = collectHomeSettingsPayload();
 if (Object.keys(payload.p_home_external_fonts).length && !payload.p_external_font_rights_confirmed) throw new Error('외부 글꼴의 사용 권한과 이용 조건을 확인해 주세요.');
 let styles=CoopSiteInlineHost.readStyles('home',true);
 let submitted=siteEditorFormSnapshot('sub-home-settings');
+root.CoopHomeEditorTools?.submitted('home');
 let response=await _supabase.rpc('upsert_site_home_settings_v6', {p_settings:payload,p_text_styles:styles});
 if(response.error?.message==='HOME_SETTINGS_STALE'){
  if(siteEditorFormSnapshot('sub-home-settings')!==submitted)throw Error('저장 중에 추가로 작성한 내용이 있습니다. 모두 그대로 유지됩니다. 다시 저장을 눌러 최신 설정과 비교해 주세요.');
@@ -1171,6 +1177,7 @@ if(response.error?.message==='HOME_SETTINGS_STALE'){
  if(Object.keys(payload.p_home_external_fonts).length&&!payload.p_external_font_rights_confirmed)throw Error('최신 설정의 외부 글꼴 사용 권한을 확인한 뒤 다시 저장해 주세요. 작성 내용은 유지됩니다.');
  showLoading(true);
  submitted=siteEditorFormSnapshot('sub-home-settings');
+root.CoopHomeEditorTools?.submitted('home');
  response=await _supabase.rpc('upsert_site_home_settings_v6',{p_settings:payload,p_text_styles:styles});
 }
 if(response.error)throw response.error;
@@ -1631,6 +1638,7 @@ p_image_url: imageUrl.trim(),
 p_text_styles: JSON.parse(JSON.stringify(CoopSiteInlineHost.readStyles('about',true)))
 };
 const submitted = JSON.parse(siteEditorFormSnapshot('sub-about'));
+root.CoopHomeEditorTools?.submitted('about');
 const coopId = String(await getAdminMemberCoopId() || '').trim();
 if (!current()) return;
 if (!coopId) throw new Error('조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.');
@@ -4097,5 +4105,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,openNewSiteCertificationDraft});
-    root.AdminMemberSite = Object.freeze({ version: '20261018-device-images-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261019-controls-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);
