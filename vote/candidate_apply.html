@@ -9,6 +9,8 @@ Change: 2026-10-05 - Upload candidate attachments under the authenticated accoun
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>후보자 등록 신청</title>
+    <meta name="election-term-version" content="1.0.0">
+    <link rel="modulepreload" href="/vote/election_term.js?v=1.0.0" integrity="sha384-2a9Cg9qizPNWN0rxi3z9GAQvMn0HKl31rRYXFBW6KbDJDkLxwQPiQ9aqp2f4VtKO" crossorigin="anonymous">
     <script>console.log('[Version] v1.0.21 | candidate_apply.html');</script>
     <script src="../telegram_bot.js"></script>
     <link rel="stylesheet" href="style.css">
@@ -368,7 +370,7 @@ Change: 2026-10-05 - Upload candidate attachments under the authenticated accoun
                 </div>
                 <div style="display:flex; justify-content:space-between;">
                     <span style="color:#64748b; font-weight:600;">당선인 임기:</span>
-                    <span style="color:#2563eb;">2026.02.23 ~ 2028.02.22 (2년)</span>
+                    <span id="display-election-term" style="color:#2563eb;">임기 미설정</span>
                 </div>
             </div>
 
@@ -644,6 +646,9 @@ Change: 2026-10-05 - Upload candidate attachments under the authenticated accoun
             return '';
         }
     import { ElectionService, supabase, resolveCurrentMemberProfileId } from './ElectionService.js?v=20261005-1';
+    /* election-term:start */
+    import { formatElectionTerm } from './election_term.js?v=1.0.0';
+    /* election-term:end */
 
     const service = new ElectionService();
     const CANDIDATE_PRIVACY_CONSENT_VERSION = 'candidate-privacy-2026.08.24';
@@ -940,6 +945,10 @@ Change: 2026-10-05 - Upload candidate attachments under the authenticated accoun
                 option.innerText = el.title;
                 option.dataset.start = el.candidacy_start_at || '-';
                 option.dataset.end = el.candidacy_end_at || '-';
+                /* election-term:start */
+                option.dataset.termStart = el.term_start_date || '';
+                option.dataset.termEnd = el.term_end_date || '';
+                /* election-term:end */
                 selectEl.appendChild(option);
 
                 // URL의 ID와 일치하는 선거가 있는지 확인
@@ -976,6 +985,9 @@ Change: 2026-10-05 - Upload candidate attachments under the authenticated accoun
         
         const periodEl = document.getElementById('display-period');
         if(periodEl) periodEl.innerText = `${sDate} ~ ${eDate}`;
+        /* election-term:start */
+        document.getElementById('display-election-term').textContent = formatElectionTerm({term_start_date:option.dataset.termStart,term_end_date:option.dataset.termEnd});
+        /* election-term:end */
 
         const btn = document.getElementById('btn-check-qual');
         btn.disabled = true; btn.innerText = '자격 확인 및 데이터 로딩 중...';
