@@ -6717,6 +6717,71 @@ function memberFundFields() {
 function memberFundSnapshot() {
     return memberFundFields().map(node => [node.id,node.value]);
 }
+function memberFundSource(type, row) {
+    if (!row) return null;
+    const value = {amount:Number(row.amount),date:String(row.deposit_date || row.donation_date || '').slice(0,10),note:row.note ?? null};
+    if (type === 'capital') Object.assign(value,{depositor:row.depositor ?? null,status:row.status ?? null});
+    else value.method = Object.prototype.hasOwnProperty.call(row,'type') ? row.type : row.payment_method ?? null;
+    return value;
+}
+function setMemberFundMethod(value) {
+    const select = document.getElementById('fund-method'), method = String(value ?? '');
+    select.querySelectorAll('[data-fund-legacy-method]').forEach(node=>node.remove());
+    if (!Array.from(select.options).some(node=>node.value===method)) {
+        const option=document.createElement('option');option.value=method;option.textContent=method ? `기존 값: ${method}` : '미설정';
+        option.dataset.fundLegacyMethod='';select.append(option);
+    }
+    select.value=method;
+}
+function memberFundRequest(state, action, values) {
+    const args={p_member_uuid:state.member,p_kind:state.type,p_action:action,p_row_id:state.id===null?null:Number(state.id),p_values:values,p_expected:state.source};
+    const signature=JSON.stringify(args);
+    if (!state.request || state.request.signature!==signature) state.request={signature,key:crypto.randomUUID()};
+    return {...args,p_request_key:state.request.key};
+}
+function resolveMemberFundConflict(state, current) {
+    if (!isCurrentMemberFund(state) || !current || typeof current!=='object') return;
+    const before=memberFundSnapshot(), old=new Map(state.baseline), mine=new Map(before);
+    const parts=getDonationNoteParts(current.note);
+    const fresh=new Map([['fund-date',String(current.date || '')],['fund-amount',String(current.amount ?? '')],
+        ['fund-note',state.type==='capital'?String(current.note || ''):parts.memo],
+        ['fund-depositor',state.type==='capital'?String(current.depositor || ''):mine.get('fund-depositor')],
+        ['fund-method',state.type==='donation'?String(current.method ?? ''):mine.get('fund-method')]]);
+    const equal=(id,a,b)=>id==='fund-amount'?String(a??'').replace(/,/g,'')===String(b??'').replace(/,/g,''):a===b;
+    const names={'fund-date':'날짜','fund-amount':'금액','fund-note':'메모','fund-depositor':'입금자명','fund-method':'입금 방식'};
+    const both=Array.from(fresh).filter(([id,value])=>!equal(id,mine.get(id),old.get(id))&&!equal(id,value,old.get(id))&&!equal(id,mine.get(id),value)).map(([id])=>names[id]);
+    const message='저장된 내역이 변경되었습니다.\n작성한 항목은 유지하고, 수정하지 않은 항목은 최신 값으로 맞출까요?'
+        +(both.length?'\n\n함께 수정된 항목은 작성 중인 값을 사용합니다: '+both.join(', '):'');
+    myConfirm(message,()=>{
+        if (!isCurrentMemberFund(state) || state.busy || state.uncertain || window.frameElement?.hidden
+            || !document.getElementById('fundEditorModal')?.classList.contains('show')) return;
+        if (JSON.stringify(memberFundSnapshot())!==JSON.stringify(before)) return myAlert('작성 내용이 바뀌었습니다. 다시 확인해 주세요.','warning');
+        if (state.type==='donation') {
+            setMemberFundMethod(equal('fund-method',mine.get('fund-method'),old.get('fund-method'))?current.method:mine.get('fund-method'));
+            g_fundDonationJournalCompleted=parts.completed;g_fundDonationOriginalNote=String(current.note || '');g_fundDonationInitialMemo=parts.memo;
+            state.journalCompleted=parts.completed;state.journalOriginal=g_fundDonationOriginalNote;state.journalMemo=parts.memo;
+            document.getElementById('fund-journal-status').innerHTML=renderDonationJournalStatus(parts.completed);
+        }
+        for (const [id,value] of fresh) if (id!=='fund-method' && equal(id,mine.get(id),old.get(id))) document.getElementById(id).value=value;
+        state.baseline=Array.from(fresh);state.source=current;state.request=null;
+        captureMemberFundDraft();syncMemberFundDraftStatus();
+    });
+}
+function acceptMemberFundJoinDate(state, nextJoinDate) {
+    const date=String(nextJoinDate || '').slice(0,10);
+    if (!isCurrentMemberFund(state) || !isAdminMemberSiteProfile() || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    if (g_current_member_row) g_current_member_row.join_date=date;
+    const cached=findCachedAdminMember(state.member) || findCachedAdminMember(state.memberTextId);
+    if (cached) cached.join_date=date;
+    const edit=memberDetailEditState, input=document.getElementById('md-join-date');
+    if (input && isCurrentMemberDetailEditor(edit)) {
+        if (input.value===(new Map(edit.baseline).get('md-join-date') || '')) input.value=date;
+        edit.baseline=edit.baseline.map(([id,value])=>[id,id==='md-join-date'?date:value]);
+        if(input.value===date)window.ErpWorkspaceResume?.checkpoint(input);
+        retainMemberDetailEdit();
+    }
+    if (typeof g_members!=='undefined') renderMemberTable(g_members);
+}
 function isCurrentMemberFund(state = memberFundState) {
     return !!state && state === memberFundState && state.owner === memberDetailOwner()
         && state.member === String(g_current_member_id || '');
@@ -6737,6 +6802,8 @@ function syncMemberFundDraftStatus() {
     label.textContent = state?.busy ? '저장 중' : state?.uncertain ? '결과 확인 필요' : '작성 중';
     const button=document.getElementById('fund-save-button');
     if (button) button.disabled = !state || state.busy || state.uncertain || !isCurrentMemberFund(state);
+    const remove=document.getElementById('btn-fund-delete');
+    if (remove) remove.disabled = !state || !state.id || state.busy || state.uncertain || !isCurrentMemberFund(state);
 }
 function clearMemberFundDrafts() {
     memberFundDrafts.clear(); memberFundState=null;
@@ -8626,7 +8693,7 @@ function openFundEditor(type, rowDataStr) {
         titleEl.className = 'modal-title fw-bold text-primary';
         document.getElementById('fund-method-group').style.display = 'block';
         document.getElementById('fund-depositor-group').style.display = 'none';
-        document.getElementById('fund-method').value = 'transfer';
+        setMemberFundMethod('transfer');
     }
 
     // ★ [핵심] 수정 모드 vs 신규 모드
@@ -8649,7 +8716,7 @@ function openFundEditor(type, rowDataStr) {
             }
 
             if(type === 'capital') document.getElementById('fund-depositor').value = data.depositor || '';
-            else document.getElementById('fund-method').value = data.payment_method || 'transfer';
+            else setMemberFundMethod(Object.prototype.hasOwnProperty.call(data,'type') ? data.type : data.payment_method ?? null);
 
             // 삭제 버튼 노출
             delBtn.style.display = 'block';
@@ -8659,11 +8726,12 @@ function openFundEditor(type, rowDataStr) {
         delBtn.style.display = 'none';
     }
 
-    const state={key,owner,member,type,id:record?.id || null,memberTextId:document.getElementById('md-id-text').innerText,
+    const state={key,owner,member,type,id:record?.id || null,source:memberFundSource(type,record),request:null,memberTextId:document.getElementById('md-id-text').innerText,
         baseline:memberFundSnapshot(),busy:false,uncertain:false,completed:false,
         journalCompleted:g_fundDonationJournalCompleted,journalOriginal:g_fundDonationOriginalNote,journalMemo:g_fundDonationInitialMemo};
     memberFundState=held ? {...held,busy:false,completed:false} : state;
     if (held) {
+        if (type==='donation') setMemberFundMethod(new Map(held.values).get('fund-method'));
         for (const [id,value] of held.values) {const node=document.getElementById(id);if(node)node.value=value;}
         g_fundDonationJournalCompleted=held.journalCompleted;
         g_fundDonationOriginalNote=held.journalOriginal;g_fundDonationInitialMemo=held.journalMemo;
@@ -8948,55 +9016,37 @@ async function loadMemberFunds(uuid, textId, reset=false) {
 
 // [최종] 자금 내역 삭제 함수
 async function deleteFundData() {
-    // 1. HTML에서 hidden input 값 읽기
-    const modal = document.getElementById('fundEditorModal');
-    // querySelector로 모달 안의 요소를 정확히 찾습니다
-    const typeInput = modal.querySelector('#fund-edit-type');
-    const idInput = modal.querySelector('#fund-edit-id');
-
-    const type = typeInput ? typeInput.value : '';
-    const idVal = idInput ? idInput.value : '';
-
-    // 2. 값 검증 (없으면 모달 경고)
-    if (!idVal) return myAlert("삭제할 내역 정보(ID)가 없습니다.", 'error');
-    if (!type) return myAlert("데이터 타입(출자/기부)을 확인할 수 없습니다.", 'error');
-
-    // 3. 삭제 확인 모달
-    myConfirm("정말 이 내역을 삭제하시겠습니까?\n잘못 입력된 내역을 지울 때 사용하세요.", async () => {
-        showLoading(true);
-
-        // 4. 타입에 따라 RPC 함수 선택
-        let rpcName = '';
-        if (type === 'capital') {
-            rpcName = 'delete_capital_secure';
-        } else if (type === 'donation') {
-            rpcName = 'delete_donation_secure';
-        } else {
-            showLoading(false);
-            return myAlert(`오류: 알 수 없는 데이터 타입입니다 (${type})`, 'error');
-        }
-
-        // 5. RPC 호출 (ID를 숫자로 변환하여 전송)
-        const { error } = await _supabase.rpc(rpcName, { p_id: Number(idVal) });
-
-        showLoading(false);
-
-        if (error) {
-            CoopSafeLog.error("RPC Error:", error);
-            // 에러 메시지도 모달로 표시
-            myAlert(`삭제 실패: ${error.message}`, 'error');
-        } else {
-            // 성공 모달
-            myAlert("삭제되었습니다.");
-
-            // 모달 닫기
-            bootstrap.Modal.getInstance(document.getElementById('fundEditorModal')).hide();
-
-            // 목록 및 통계 갱신
-            const memberUid = document.getElementById('md-uid').value;
-            const memberTextId = document.getElementById('md-id-text').innerText;
-            loadMemberFunds(memberUid, memberTextId, true);
-            loadDashboard();
+    const state=memberFundState, modal=document.getElementById('fundEditorModal');
+    if (!isCurrentMemberFund(state) || !state.id || state.busy || state.uncertain || window.frameElement?.hidden || !modal?.classList.contains('show')) return;
+    const before=JSON.stringify(memberFundSnapshot());
+    myConfirm('이 내역을 삭제할까요?',async()=>{
+        if (!isCurrentMemberFund(state) || state.busy || state.uncertain || window.frameElement?.hidden || !modal.classList.contains('show')) return;
+        if (before!==JSON.stringify(memberFundSnapshot())) return myAlert('작성 내용이 바뀌었습니다. 다시 확인해 주세요.','warning');
+        captureMemberFundDraft();state.busy=true;syncMemberFundDraftStatus();
+        const locked=Array.from(modal.querySelectorAll('input,select,button')).map(node=>[node,node.disabled]);
+        locked.forEach(([node])=>{node.disabled=true;});showLoading(true);
+        try {
+            const {data,error}=await _supabase.rpc('admin_apply_member_fund_secure',memberFundRequest(state,'delete',{}));
+            if (!isCurrentMemberFund(state)) return;
+            if (error) {
+                if (!error.code || /fetch|network|timeout/i.test(String(error.code))) state.uncertain=true;
+                myAlert('삭제하지 못했습니다. '+error.message,'error');return;
+            }
+            if (data?.outcome==='conflict') {resolveMemberFundConflict(state,data.current);return;}
+            if (data?.outcome!=='deleted' || Number(data.deleted_id)!==Number(state.id)) throw Error('FUND_RESULT_UNCONFIRMED');
+            state.completed=true;memberFundDrafts.delete(state.key);
+            memberFundFields().forEach(node=>window.ErpWorkspaceResume?.checkpoint(node));
+            void loadMemberFunds(state.member,state.memberTextId,true);void loadDashboard();
+            runAfterFundEditorClosed(()=>{if(isCurrentMemberFund(state))myAlert('삭제했습니다.');});
+        } catch (_) {
+            if (isCurrentMemberFund(state)) {
+                if(!state.completed)state.uncertain=true;
+                myAlert(state.completed?'삭제했습니다. 목록을 다시 불러와 주세요.':'삭제 결과를 확인하지 못했습니다. 내역을 확인해 주세요.','warning');
+            }
+        } finally {
+            state.busy=false;
+            locked.forEach(([node,disabled])=>{if(node.isConnected)node.disabled=isCurrentMemberFund(state)?disabled:true;});
+            if(isCurrentMemberFund(state)){captureMemberFundDraft();syncMemberFundDraftStatus();}showLoading(false);
         }
     });
 }
@@ -9500,42 +9550,15 @@ async function saveFundData() {
 
     showLoading(true);
 
-    let rpcName = '';
-    let params = {};
-
-    // 2. 타입별 파라미터 구성 (RPC 명세 준수)
-    if (type === 'capital') {
-        rpcName = isAdminMemberSiteProfile()
-            ? 'admin_manage_capital_without_notification_secure'
-            : 'admin_manage_capital_with_notification_secure';
-        params = {
-            p_id: idVal === null ? null : Number(idVal),
-            p_member_text_id: memberTextId,  // 출자금은 text id 기준
-            p_amount: Number(amount),
-            p_date: date,
-            p_note: note,
-            p_depositor: document.getElementById('fund-depositor').value
-        };
-    } else {
-        rpcName = 'manage_donation_secure';
-        params = {
-            p_id: idVal,
-
-            // ★ [핵심 수정] FK 에러 방지:
-            // 현재 memberUid가 auth.users에 없는 가짜/과거 값이면 에러가 납니다.
-            // 관리자 수동 입력 시에는 안전하게 NULL로 보내고, member_id(Text ID)로 연결합니다.
-            p_member_uid: null,
-
-            p_member_text_id: memberTextId,  // text id가 식별자 역할을 함
-            p_amount: Number(amount),
-            p_date: date,
-            p_method: document.getElementById('fund-method').value, // payment_method
-            p_note: note
-        };
+    const values={amount,date,note};
+    if(type==='capital') values.depositor=document.getElementById('fund-depositor').value;
+    else {
+        const method=document.getElementById('fund-method').value;
+        values.method=method==='' && state.source?.method==null ? null : method;
     }
 
     // 3. RPC 호출
-    const { data, error } = await _supabase.rpc(rpcName, params);
+    const { data, error } = await _supabase.rpc('admin_apply_member_fund_secure',memberFundRequest(state,'save',values));
     if (!isCurrentMemberFund(state)) return;
 
     showLoading(false);
@@ -9544,17 +9567,11 @@ async function saveFundData() {
         if (!error.code || /fetch|network|timeout/i.test(String(error.code))) state.uncertain=true;
         myAlert('저장 실패: ' + error.message, 'error');
     } else {
+        if(data?.outcome==='conflict'){resolveMemberFundConflict(state,data.current);return;}
+        if(data?.outcome!=='saved')throw Error('FUND_RESULT_UNCONFIRMED');
         state.completed=true;memberFundDrafts.delete(state.key);
         memberFundFields().forEach(node=>window.ErpWorkspaceResume?.checkpoint(node));
-        if (type === 'capital' && isAdminMemberSiteProfile() && data?.member_join_date) {
-            const nextJoinDate = String(data.member_join_date).slice(0, 10);
-            if (/^\d{4}-\d{2}-\d{2}$/.test(nextJoinDate)) {
-                if (g_current_member_row) g_current_member_row.join_date = nextJoinDate;
-                const cachedMember = findCachedAdminMember(memberUid) || findCachedAdminMember(memberTextId);
-                if (cachedMember) cachedMember.join_date = nextJoinDate;
-                renderMemberTable(g_members);
-            }
-        }
+        if(type==='capital' && data?.member_join_date) acceptMemberFundJoinDate(state,data.member_join_date);
         const requiresActivation = isNewCapital && data?.requires_activation === true;
         const hasCapitalNotificationPrompt = !isAdminMemberSiteProfile()
             && isNewCapital
