@@ -1,4 +1,4 @@
-/* Election UI 1.0.2. Static contextual help only: no Auth/data requests, voting, storage of drafts or edits. */
+/* Election UI 1.0.3. Static contextual help only: no Auth/data requests, voting, storage of drafts or edits. */
 (function(root){
  'use strict';
  if(root.CoopElectionUI)return;
@@ -58,7 +58,7 @@
  function storedVisible(){try{return root.localStorage.getItem(KEY)!=='0';}catch{return true;}}
  function read(){try{return root.CoopWorkflowHelp?root.CoopWorkflowHelp.visible():storedVisible();}catch{return true;}}
  function refresh(value){doc.documentElement.toggleAttribute('data-workflow-help-off',typeof value==='boolean'?!value:!read());}
- function format(text){return root.CoopWorkflowHelp?.format?root.CoopWorkflowHelp.format(text):String(text??'').trim().split(/(?<=[.!?])\s+(?=\S)/u).filter(Boolean).map((line,i)=>(i===0?'💡 ':'• ')+line).join('\n\n');}
+ function format(text){return root.CoopWorkflowHelp?.format?root.CoopWorkflowHelp.format(text):String(text??'').trim().replace(/([.!?])\s+(?=\S)/gu,'$1\n\n').split(/\n{2,}/u).filter(Boolean).map((line,i)=>(i===0?'💡 ':'• ')+line).join('\n\n');}
  function help(key,title,text){
   const b=doc.createElement('button');b.type='button';b.className='coop-workflow-help election-help';b.textContent='?';
   b.dataset.electionHelp=key;b.dataset.workflowHelpOptional='';b.dataset.erpQueryControl='';
@@ -96,9 +96,9 @@
    queued=true;root.queueMicrotask(()=>{queued=false;decorate();});
   }).observe(doc.body,{childList:true,subtree:true});
  }
- root.CoopElectionUI=Object.freeze({version:'1.0.2',refresh,decorate});
+ root.CoopElectionUI=Object.freeze({version:'1.0.3',refresh,decorate});
  // Member pages share the existing display preference without loading ERP-specific page help.
- if(!root.CoopWorkflowHelp)root.CoopWorkflowHelp=Object.freeze({version:'election-1.0.2',visible:storedVisible,refresh});
+ if(!root.CoopWorkflowHelp)root.CoopWorkflowHelp=Object.freeze({version:'election-1.0.3',visible:storedVisible,refresh});
  root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)refresh(e.newValue!=='0');});
  root.addEventListener('pageshow',()=>refresh());
  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',start,{once:true});else start();

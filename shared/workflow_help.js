@@ -1,4 +1,4 @@
-/* Workflow help 1.0.1. Presentation only: one local display preference, no business reads/writes. */
+/* Workflow help 1.0.2. Presentation only: one local display preference, no business reads/writes. */
 (function(root){
  'use strict';
  if(root.CoopWorkflowHelp)return;
@@ -228,7 +228,7 @@
  function children(){return [...doc.querySelectorAll('iframe')].flatMap(f=>{try{return f.contentWindow.location.origin===location.origin&&f.contentWindow.CoopWorkflowHelp?[f.contentWindow.CoopWorkflowHelp]:[];}catch(_){return [];}});}
  function sync(value){apply(value);children().forEach(api=>api.refresh(value));}
  function setVisible(value){const v=value===true;try{root.localStorage.setItem(KEY,v?'1':'0');}catch(_){void root.CoopDialog?.alert('표시 설정을 저장하지 못했습니다. 이 화면에만 적용합니다.');}sync(v);try{if(root.parent!==root&&root.parent.location.origin===location.origin)root.parent.CoopWorkflowHelp?.refresh(v);}catch(_){}root.dispatchEvent(new CustomEvent('coop-workflow-help-change',{detail:{enabled:v}}));}
- function format(text){return String(text??'').trim().split(/(?<=[.!?])\s+(?=\S)/u).filter(Boolean).map((line,i)=>(i===0?'💡 ':'• ')+line).join('\n\n');}
+ function format(text){return String(text??'').trim().replace(/([.!?])\s+(?=\S)/gu,'$1\n\n').split(/\n{2,}/u).filter(Boolean).map((line,i)=>(i===0?'💡 ':'• ')+line).join('\n\n');}
  function button(title,text){const b=doc.createElement('button');b.type='button';b.className=CLASS;b.textContent='?';b.setAttribute('aria-label',title+' 도움말');b.setAttribute('title',title+' 도움말');b.setAttribute('aria-haspopup','dialog');b.dataset.workflowHelpOptional='';b.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(!enabled)return;b.focus({preventScroll:true});void root.CoopDialog?.alert(format(text),{title:title+' 도움말'});});return b;}
  function decorateLabel(label){
   if(!label.isConnected||label.matches('.visually-hidden,.sr-only')||label.closest(excluded)||label.closest('a,button')||label.dataset.workflowHelpToggleLabel!==undefined)return;
@@ -276,7 +276,7 @@
   const pending=new Set();let queued=false;
   new MutationObserver(records=>{for(const r of records){if(r.target.closest?.('.'+CLASS+',.coop-help-preference,.coop-dialog'))continue;for(const n of r.addedNodes)if(n.nodeType===1&&!n.matches('.'+CLASS+',.coop-help-preference,.coop-dialog')&&!n.closest('.'+CLASS+',.coop-help-preference,.coop-dialog'))pending.add(n);if(r.target.matches?.('label'))pending.add(r.target);}if(!pending.size||queued)return;queued=true;queueMicrotask(()=>{queued=false;const nodes=[...pending];pending.clear();nodes.forEach(decorate);});}).observe(doc.body,{subtree:true,childList:true});
  }
- root.CoopWorkflowHelp=Object.freeze({version:'1.0.1',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
+ root.CoopWorkflowHelp=Object.freeze({version:'1.0.2',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
  root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)sync(read());});root.addEventListener('pageshow',()=>sync(read()));
  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })(window);
