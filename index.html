@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.160
-Change: 2026-10-18 - Accessible closing navigation and clear pre-tax calculator guidance.
+Version: v1.0.161
+Change: 2026-10-18 - Natural keyboard focus into and out of the expanded homepage menu.
 -->
 <html lang="ko">
 
@@ -11,7 +11,7 @@ Change: 2026-10-18 - Accessible closing navigation and clear pre-tax calculator 
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.160 | index.html');</script>
+<script>console.log('[Version] v1.0.161 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -2503,6 +2503,10 @@ Change: 2026-10-18 - Accessible closing navigation and clear pre-tax calculator 
       onscroll = document, headerScrolled;
     }
 
+  function getHomeMenuLinks() {
+    return Array.from(document.querySelectorAll('#navbar a[href]')).filter(link => link.getClientRects().length > 0);
+  }
+
   function setHomeMenuOpen(open, restoreFocus = false) {
     const navbar = document.getElementById('navbar');
     const button = document.querySelector('.mobile-nav-toggle');
@@ -2513,7 +2517,8 @@ Change: 2026-10-18 - Accessible closing navigation and clear pre-tax calculator 
     const icon = button.querySelector('i');
     icon?.classList.toggle('bi-list', !open);
     icon?.classList.toggle('bi-x', open);
-    if (restoreFocus) button.focus();
+    if (open) getHomeMenuLinks()[0]?.focus({ preventScroll:true });
+    else if (restoreFocus && button.getClientRects().length) button.focus({ preventScroll:true });
   }
 
   function toggleMobileMenu() {
@@ -2524,9 +2529,17 @@ Change: 2026-10-18 - Accessible closing navigation and clear pre-tax calculator 
     if (e.target.closest('a[href]')) setHomeMenuOpen(false, true);
   });
   document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && document.getElementById('navbar')?.classList.contains('active')) {
+    if (!document.getElementById('navbar')?.classList.contains('active')) return;
+    if (e.key === 'Escape' || (e.key === 'Tab' && e.shiftKey && e.target === getHomeMenuLinks()[0])) {
       e.preventDefault();
       setHomeMenuOpen(false, true);
+    }
+  });
+  document.addEventListener('focusin', function(e) {
+    const navbar = document.getElementById('navbar');
+    const button = document.querySelector('.mobile-nav-toggle');
+    if (navbar?.classList.contains('active') && !navbar.contains(e.target) && !button?.contains(e.target)) {
+      setHomeMenuOpen(false);
     }
   });
   document.addEventListener('click', function(e) {
