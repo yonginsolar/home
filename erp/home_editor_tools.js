@@ -2,7 +2,7 @@
 (function(root){
  'use strict';
  let mounted=false,restoring=false,inspecting=false,queued=false,reason='',sequence=0;
- const journals=new Map(),states=new Map(),fileIds=new WeakMap(),labelsDone=new WeakSet(),controlsDone=new WeakSet(),ctaDone=new WeakSet();let fileSequence=0;
+ const journals=new Map(),states=new Map(),fileIds=new WeakMap(),nodeIds=new WeakMap(),labelsDone=new WeakSet(),controlsDone=new WeakSet(),ctaDone=new WeakSet();let fileSequence=0,nodeSequence=0;
  const groups={home:'sub-home-settings',about:'sub-about',sections:'sub-sections'};
  const copy=v=>JSON.parse(JSON.stringify(v));
  const permitted=()=>typeof canAccessAdminMemberTab==='function'&&canAccessAdminMemberTab('site');
@@ -11,12 +11,14 @@
  function status(kind){inspecting=true;try{const state=kind==='sections'?{loaded:typeof g_siteInitialSectionsRequested!=='undefined'&&g_siteInitialSectionsRequested,busy:typeof g_sectionSaving!=='undefined'&&g_sectionSaving}:typeof getSiteEditorDraft==='function'?getSiteEditorDraft(kind).refresh():{loaded:false};states.set(kind,state);return state;}finally{inspecting=false;}}
  function nodes(kind){const host=document.getElementById(groups[kind]),borrowed=[...document.querySelectorAll(`[data-inline-original-root="${groups[kind]}"]`)];return [...new Set([...(host?.querySelectorAll('input,textarea,select')||[]),...borrowed.flatMap(n=>n.matches('input,textarea,select')?[n]:[...n.querySelectorAll('input,textarea,select')])])].filter(n=>!n.closest('.about-editor-toolbar')&&!n.closest('[data-slide-card]'));}
  function capture(kind){
-  const fields=nodes(kind).map(n=>({node:n,value:n.value,checked:n.checked,files:n.type==='file'?[...n.files]:null,list:n.type==='file'?n.files:null}));
+  const keyNode=n=>{if(!nodeIds.has(n))nodeIds.set(n,++nodeSequence);return nodeIds.get(n);};
+  // Borrowing original controls into a dialog is navigation, not an edit.
+  const fields=nodes(kind).map(n=>({node:n,value:n.value,checked:n.checked,files:n.type==='file'?[...n.files]:null,list:n.type==='file'?n.files:null})).sort((a,b)=>keyNode(a.node)-keyNode(b.node));
   const slides=kind==='home'?root.CoopHeroSlides?.checkpoint():null;
   const sections=kind==='sections'&&typeof g_sectionDrafts!=='undefined'?copy(g_sectionDrafts):null;
   const rows=kind==='home'?[...document.querySelectorAll('#site-home-impact-region-list .home-region-row')]:null;
   const keyFile=f=>{if(!fileIds.has(f))fileIds.set(f,++fileSequence);return fileIds.get(f);};
-  return {fields,slides,sections,rows,signature:JSON.stringify([fields.map(f=>[f.node.id||f.node.name,f.files?f.files.map(keyFile):f.node.type==='checkbox'||f.node.type==='radio'?f.checked:f.value]),slides?.rows.map(r=>[r.item.id,r.value,r.presentation,r.file&&keyFile(r.file),r.mobileFile&&keyFile(r.mobileFile)]),sections])};
+  return {fields,slides,sections,rows,signature:JSON.stringify([fields.map(f=>[keyNode(f.node),f.files?f.files.map(keyFile):f.node.type==='checkbox'||f.node.type==='radio'?f.checked:f.value]),slides?.rows.map(r=>[r.item.id,r.value,r.presentation,r.file&&keyFile(r.file),r.mobileFile&&keyFile(r.mobileFile)]),sections,rows?.map(keyNode)])};
  }
  function emit(){document.dispatchEvent(new Event('coop-home-undo-change'));}
  function journal(kind){let j=journals.get(kind);const key=owner();if(!j||j.owner!==key){j={owner:key,last:null,stack:[],mark:null};journals.set(kind,j);}return j;}
@@ -103,5 +105,5 @@
   for(const name of ['input','change','click'])document.addEventListener(name,event=>{if(event.target.closest('.home-field-help,#home-inline-undo'))return;if(event.target.closest('#tab-site,[data-inline-original-root],.home-element-dialog')){if(name!=='input')reason='!'+name;else if(event.target.type==='hidden'){if(!reason)reason='!model';}else if(!reason.startsWith('!'))reason=event.target.matches('input:not([type=file]):not([type=checkbox]):not([type=radio]),textarea')?event.target.id:'';observe('home');}},true);
   for(const kind of Object.keys(groups))observe(kind);
  }
- root.CoopHomeEditorTools=Object.freeze({mount,decorate,observe,accepted,submitted,undo,undoState,restoreFiles,version:'1.0.0'});
+ root.CoopHomeEditorTools=Object.freeze({mount,decorate,observe,accepted,submitted,undo,undoState,restoreFiles,version:'1.0.1'});
 })(window);
