@@ -2133,8 +2133,8 @@ async function downloadMemberImportTemplate() {
     if (!(await ensureAdminMemberSpreadsheetReady())) return;
 const wsData = [
   ['유형', '이름', '단체명', '주민등록번호', '이메일', '연락처', '사업자번호', '법인번호', '상태', '주소', '조합원번호', '가입구분', '가입일', '관리메모', '대표자명', '담당자명', '담당자 직함'],
-  ['개인', '홍길동', '', '800101-1234567', 'hong@example.com', '01012345678', '', '', '정상', '경기도 용인시 처인구 예시로 1', 'M-2026-0001', '일반', '2026-03-15', '회원가입 대행 입력', '', '', ''],
-  ['단체', '', '햇빛상회', '', 'corp@example.com', '01023456789', '123-45-67890', '', '승인대기', '경기도 용인시 수지구 예시로 2', '', '일반', '', '회원가입 대행 입력', '예시 대표', '예시 담당', '담당자']
+  ['개인', '예시 개인', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+  ['단체', '', '예시 단체', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
 ];
 const ws = XLSX.utils.aoa_to_sheet(wsData);
 const wb = XLSX.utils.book_new();
@@ -2148,7 +2148,7 @@ if (value === null || value === undefined || value === '') return null;
 if (typeof value === 'number' && window.XLSX?.SSF?.parse_date_code) {
   const parsed = XLSX.SSF.parse_date_code(value);
   if (parsed && parsed.y && parsed.m && parsed.d) {
-    return `${String(parsed.y).padStart(4, '0')}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
+    return normalizeMemberImportDate(`${String(parsed.y).padStart(4, '0')}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`);
   }
 }
 
@@ -2159,10 +2159,14 @@ if (value instanceof Date && !isNaN(value.getTime())) {
 const raw = String(value).trim();
 if (!raw) return null;
 const normalized = raw.replace(/\./g, '-').replace(/\//g, '-');
-if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
-const parsed = new Date(normalized);
-if (!isNaN(parsed.getTime())) {
-  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+if (match) {
+  const [, year, month, day] = match.map(Number);
+  const parsed = new Date(0);
+  parsed.setUTCFullYear(year, month - 1, day); parsed.setUTCHours(0,0,0,0);
+  if (year >= 1 && parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day) {
+    return `${String(year).padStart(4,'0')}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
 }
 return null;
 }
@@ -2187,12 +2191,13 @@ const pick = (...keys) => {
 };
 
 const joinDateRaw = pick('가입일', 'join_date');
-const memberType = String(pick('유형', 'member_type') || '개인').trim() || '개인';
-const status = String(pick('상태', 'status') || '정상').trim() || '정상';
+const memberType = String(pick('유형', 'member_type')).trim();
+const status = String(pick('상태', 'status')).trim();
 const isGroup = memberType === '단체';
 const rrnRaw = pick('주민등록번호', '주민번호', 'rrn');
 const businessRaw = pick('사업자번호', '사업자등록번호', '고유번호', '사업자·고유번호', 'business_number');
 const corpRaw = pick('법인번호', '법인등록번호', 'corp_number');
+const phoneRaw = String(pick('연락처', '전화번호', 'phone')).trim();
 const name = isGroup
   ? String(pick('단체명', '법인명', '상호', '이름', 'name')).trim()
   : String(pick('이름', '성명', 'name', '단체명')).trim();
@@ -2203,17 +2208,17 @@ const identifierDisplay = isGroup
   ? (businessNumber || corpNumber || '-')
   : maskRrnDisplay(rrn);
 const normalized = {
-  rowNo: index + 2,
+  rowNo: Number.isInteger(row.__rowNum__) ? row.__rowNum__ + 1 : index + 2,
   source_row: { ...row },
   name,
   email: String(pick('이메일', 'email')).trim(),
-  phone: normalizeMemberImportPhone(pick('연락처', '전화번호', 'phone')),
+  phone: normalizeMemberImportPhone(phoneRaw),
   birth_date: null,
   member_type: memberType,
   status,
   address: String(pick('주소', 'address')).trim(),
   member_id: String(pick('조합원번호', 'member_id')).trim(),
-  join_category: String(pick('가입구분', 'join_category') || '일반').trim() || '일반',
+  join_category: String(pick('가입구분', 'join_category')).trim(),
   join_date: normalizeMemberImportDate(joinDateRaw),
   admin_memo: String(pick('관리메모', '비고', 'admin_memo')).trim(),
   rrn,
@@ -2227,18 +2232,20 @@ const normalized = {
 
 const errors = [];
 if (!normalized.name) errors.push(isGroup ? '단체명 누락' : '이름 누락');
-if (!normalized.email) errors.push('이메일 누락');
-if (normalized.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.email)) errors.push('이메일 형식 오류');
-if (!['개인', '단체'].includes(normalized.member_type)) errors.push('유형 오류');
-if (!['정상', '승인대기', '탈퇴', '제명'].includes(normalized.status)) errors.push('상태 오류');
-if (joinDateRaw && !normalized.join_date) errors.push('가입일 형식 오류');
+if (normalized.email && (normalized.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.email))) errors.push('이메일 형식 오류');
+if (!normalized.member_type) errors.push('유형 누락');
+else if (!['개인', '단체'].includes(normalized.member_type)) errors.push('유형 오류');
+if (normalized.status && !['정상', '승인대기', '탈퇴', '제명'].includes(normalized.status)) errors.push('상태 오류');
+if (String(joinDateRaw).trim() && !normalized.join_date) errors.push('가입일 형식 오류');
+if (normalized.name.length > 100 || /[\x00-\x1f\x7f]/.test(normalized.name)) errors.push('이름·단체명 형식 오류');
 if (!isGroup && /[0-9]/.test(normalized.name)) errors.push('이름 형식 오류');
-if (!isGroup && !normalized.rrn) errors.push('주민번호 형식 오류');
-if (isGroup && !normalized.business_number) errors.push('사업자번호 형식 오류');
-if (corpRaw && !normalized.corp_number) errors.push('법인번호 형식 오류');
-if (isGroup && !normalized.representative_name) errors.push('대표자명 누락');
-if (isGroup && !normalized.contact_name) errors.push('담당자명 누락');
-if (isGroup && !normalized.contact_position) errors.push('담당자 직함/역할 누락');
+if (String(rrnRaw).trim() && (isGroup || !/^[0-9 -]+$/.test(String(rrnRaw)) || !normalized.rrn)) errors.push('주민번호 형식 오류');
+if (String(businessRaw).trim() && (!isGroup || !/^[0-9 -]+$/.test(String(businessRaw)) || !normalized.business_number)) errors.push('사업자번호 형식 오류');
+if (String(corpRaw).trim() && (!isGroup || !/^[0-9 -]+$/.test(String(corpRaw)) || !normalized.corp_number)) errors.push('법인번호 형식 오류');
+if (phoneRaw && (!/^[0-9 ()+.-]+$/.test(phoneRaw) || !/^0[0-9]{8,10}$/.test(normalized.phone.replace(/\D/g,'')))) errors.push('연락처 형식 오류');
+for (const field of ['representative_name','contact_name','contact_position']) {
+  if (normalized[field].length > 100 || /[\x00-\x1f\x7f]/.test(normalized[field])) errors.push('담당 정보 형식 오류');
+}
 
 normalized.errors = errors;
 normalized.valid = errors.length === 0;
@@ -2258,8 +2265,12 @@ const memberIdCounts = new Map();
 const rrnCounts = new Map();
 const businessCounts = new Map();
 const corpCounts = new Map();
+const nameCounts = new Map();
+const lacksIdentifier = row => ![row.email,row.member_id,row.rrn,row.business_number,row.corp_number].some(Boolean);
+const nameKey = row => `${row.member_type}:${row.name}`;
 
 baseValidRows.forEach((row) => {
+  nameCounts.set(nameKey(row), (nameCounts.get(nameKey(row)) || 0) + 1);
   const emailKey = String(row.email || '').trim().toLowerCase();
   const memberIdKey = String(row.member_id || '').trim();
   const rrnKey = String(row.rrn || '').trim();
@@ -2283,6 +2294,7 @@ baseValidRows.forEach((row) => {
   if (rrnKey && (rrnCounts.get(rrnKey) || 0) > 1) row.errors.push('중복 주민번호(파일)');
   if (businessKey && (businessCounts.get(businessKey) || 0) > 1) row.errors.push('중복 사업자번호(파일)');
   if (corpKey && (corpCounts.get(corpKey) || 0) > 1) row.errors.push('중복 법인번호(파일)');
+  if (lacksIdentifier(row) && nameCounts.get(nameKey(row)) > 1) row.errors.push('중복 이름·유형 확인 필요(파일)');
   row.valid = row.errors.length === 0;
 });
 
@@ -2290,6 +2302,17 @@ const emails = [...new Set(baseValidRows.map((row) => String(row.email || '').tr
 const memberIds = [...new Set(baseValidRows.map((row) => String(row.member_id || '').trim()).filter(Boolean))];
 const businessNumbers = [...new Set(baseValidRows.map((row) => String(row.business_number || '').trim()).filter(Boolean))];
 const corpNumbers = [...new Set(baseValidRows.map((row) => String(row.corp_number || '').trim()).filter(Boolean))];
+const names = [...new Set(baseValidRows.filter(lacksIdentifier).map(row => row.name))];
+if (names.length) {
+  const {data,error} = await scopeAdminTenant(_supabase.from('coop_members').select('name,member_type').in('name', names));
+  if (!current()) return false;
+  if (error) throw error;
+  const existing = new Set((data || []).map(nameKey));
+  rows.forEach(row => {
+    if (lacksIdentifier(row) && existing.has(nameKey(row))) row.errors.push('중복 이름·유형 확인 필요(DB)');
+    row.valid = row.errors.length === 0;
+  });
+}
 
 if (emails.length > 0) {
   const { data, error } = await scopeAdminTenant(
@@ -2479,7 +2502,9 @@ reader.onload = async function(e) {
     return failed('데이터가 없는 엑셀입니다. 다른 파일을 선택해 주세요.');
   }
   if (!current()) return;
-  g_member_import_rows = json.map((row, index) => normalizeMemberImportRow(row, index));
+  g_member_import_rows = json.map((row, index) => normalizeMemberImportRow(row, index))
+    .filter(row => Object.values(row.source_row).some(value => String(value ?? '').trim() !== ''));
+  if (!g_member_import_rows.length) return failed('데이터가 없는 엑셀입니다. 다른 파일을 선택해 주세요.');
   await recheckMemberImportRows(state, revision);
   } catch (_) {
     failed('엑셀 파일을 읽지 못했습니다. 파일을 확인한 뒤 다시 시도해 주세요.');
@@ -2526,8 +2551,8 @@ return recheckMemberImportRows(state, ++state.revision);
 function memberImportPayload(rows) {
 return rows.map(row => ({
     row_no:row.rowNo, name:row.name, email:row.email, phone:row.phone || null,
-    birth_date:row.birth_date || null, member_type:row.member_type, status:row.status,
-    address:row.address || null, member_id:row.member_id || null, join_category:row.join_category || '일반',
+    birth_date:row.birth_date || null, member_type:row.member_type, status:row.status || null,
+    address:row.address || null, member_id:row.member_id || null, join_category:row.join_category || null,
     admin_memo:row.admin_memo || null, rrn:row.member_type === '개인' ? row.rrn || null : null,
     business_number:row.member_type === '단체' ? row.business_number || null : null,
     corp_number:row.member_type === '단체' ? row.corp_number || null : null,
