@@ -6235,6 +6235,7 @@ function switchTab(tabName) {
 
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
+    memberFundListResume = null;
     // 1. 모든 탭 숨김 처리
     const panes = document.querySelectorAll('.main-content > .tab-pane');
     panes.forEach(el => {
@@ -6718,6 +6719,8 @@ let donationListRevision = 0;
 let donationListRequest = null;
 let usageLedgerRevision = 0;
 let usageLedgerRequest = null;
+let memberFundListResume = null;
+let memberFundRefreshSequence = 0;
 
 function invalidateDonationListRead() {
     donationListRevision++;
@@ -6755,6 +6758,17 @@ function refreshVisibleMemberFundList() {
     if (document.getElementById('sub-tab-donations')?.classList.contains('active')) return fetchGlobalDonations();
     if (document.getElementById('sub-tab-dividends')?.classList.contains('active')) return fetchGlobalDividends();
     return Promise.resolve();
+}
+function requestMemberFundListRefresh(sequence) {
+    const owner = memberDetailOwner();
+    const pane = document.getElementById('tab-funds-manage');
+    if (!owner || isAdminMemberSiteProfile() || !canAccessAdminMemberTab('funds-manage')
+        || !(pane?.classList.contains('active') || pane?.style.display === 'block')) return Promise.resolve();
+    if (window.frameElement?.hidden) {
+        memberFundListResume = {owner,sequence};
+        return Promise.resolve();
+    }
+    return refreshVisibleMemberFundList();
 }
 for (const id of ['don-date-start','don-date-end']) {
     document.getElementById(id)?.addEventListener('input', invalidateDonationListRead);
@@ -6982,6 +6996,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 function clearMemberDetailEdits() {
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
+    memberFundListResume = null;
     clearMemberFundDrafts();
     clearDonationGrantDraft();
     if (typeof resetMemberImportDraft === 'function') resetMemberImportDraft();
@@ -8018,12 +8033,19 @@ function bindAdminCertificateContext(authId) {
             if (frame.hidden) {
                 invalidateDonationListRead();
                 invalidateUsageLedgerRead();
+                memberFundListResume = null;
                 window.ContributionCertPreview?.clear();
                 if (typeof pauseMemberImportRead === 'function') pauseMemberImportRead();
+            } else {
+                const queued = memberFundListResume;
+                memberFundListResume = null;
+                if (queued && queued.sequence === memberFundRefreshSequence && queued.owner === memberDetailOwner()) {
+                    void refreshVisibleMemberFundList().catch(error => CoopSafeLog.error('[erp/admin_member] fund list resume failed', error));
+                }
             }
         });
         observer.observe(frame, { attributes: true, attributeFilter: ['hidden'] });
-        window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+        window.addEventListener('pagehide', () => {observer.disconnect();memberFundListResume=null;memberFundRefreshSequence++;}, { once: true });
     }
 }
 
@@ -10196,19 +10218,22 @@ window.onload = async function() {
 
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {
         window.ErpWorkspaceTask = {ready:true, refresh:async function(options = {}) {
+            const sequence = ++memberFundRefreshSequence;
+            memberFundListResume = null;
             const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+            if (sequence !== memberFundRefreshSequence) return;
             if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) throw new Error('ERP_TASK_ACCESS_DENIED');
             window.MemberNotificationAdmin?.configure(_supabase,gate.runtime,adminCertificateAuthId);
             // Do not repopulate an open member editor or overwrite unfinished input.
             if (options.dirty || document.querySelector('.modal.show,dialog[open]')) {
-                await Promise.all([fetchMemberReturnSummary(), refreshVisibleMemberFundList()]); return;
+                await Promise.all([fetchMemberReturnSummary(), requestMemberFundListRefresh(sequence)]); return;
             }
             const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
             if (pane === 'tab-dashboard') await loadDashboard();
             else if (pane === 'tab-notifications') await window.MemberNotificationAdmin?.refresh();
             else if (pane === 'tab-members' && g_member_fetch_revision > 0) await fetchMembers();
             else if (pane === 'tab-applications') await fetchApplications();
-            else if (pane === 'tab-funds-manage') await refreshVisibleMemberFundList();
+            else if (pane === 'tab-funds-manage') await requestMemberFundListRefresh(sequence);
             else await fetchMemberReturnSummary();
         }};
     } else {
