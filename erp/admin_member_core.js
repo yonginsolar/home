@@ -6247,7 +6247,7 @@ function switchTab(tabName) {
     const target = document.getElementById('tab-' + tabName);
     if (target) {
         target.style.display = 'block';
-        setTimeout(() => target.classList.add('show', 'active'), 10);
+        target.classList.add('show', 'active');
     }
     if (tabName !== 'site') {
         const siteStatus = document.getElementById('admin-site-code-status');
@@ -6719,6 +6719,7 @@ let donationListRevision = 0;
 let donationListRequest = null;
 let usageLedgerRevision = 0;
 let usageLedgerRequest = null;
+let usageLedgerPage = null;
 let memberFundListResume = null;
 let memberFundRefreshSequence = 0;
 
@@ -6737,9 +6738,54 @@ function isCurrentDonationListRead(request) {
         && document.getElementById('don-date-start')?.value === request.startDate
         && document.getElementById('don-date-end')?.value === request.endDate;
 }
-function invalidateUsageLedgerRead() {
+function invalidateUsageLedgerRead(event) {
     usageLedgerRevision++;
+    const pending = usageLedgerRequest?.pending;
+    usageLedgerRequest?.controller?.abort();
     usageLedgerRequest = null;
+    if (pending && event?.target?.id === 'div-search-keyword') {
+        const status = document.getElementById('usage-ledger-status');
+        if (status) status.textContent = '검색을 눌러 새 조건을 조회해 주세요.';
+        if (!usageLedgerPage) document.getElementById('dividendGlobalBody').innerHTML = '<tr><td colspan="5" class="py-5 text-muted">검색 조건을 확인하고 검색을 눌러 주세요.</td></tr>';
+    }
+    syncUsageLedgerUi();
+}
+function syncUsageLedgerUi() {
+    const more = document.getElementById('usage-ledger-more');
+    if (!more) return;
+    const owner = JSON.stringify([String(adminCertificateAuthId || ''),String(g_adminMemberRuntime?.coop_id || '')]);
+    more.hidden = !usageLedgerPage?.hasMore;
+    more.disabled = !!usageLedgerRequest?.pending || !usageLedgerPage
+        || usageLedgerPage.owner !== owner
+        || usageLedgerPage.keyword !== document.getElementById('div-search-keyword')?.value.trim()
+        || !canAccessAdminMemberTab('funds-manage') || isAdminMemberSiteProfile() || !!window.frameElement?.hidden;
+    more.textContent = usageLedgerRequest?.pending && usageLedgerRequest.append ? '불러오는 중' : '더 보기';
+}
+function renderUsageLedgerRows(rows) {
+    const tbody = document.getElementById('dividendGlobalBody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-muted py-5">검색 결과가 없습니다.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(p => {
+        const amt = Number(p.change_amount || 0);
+        let typeBadge = `<span class="badge bg-light text-dark border">${escapeHtml(p.transaction_type || '')}</span>`;
+        let colorClass = 'text-dark', sign = '';
+        if (p.transaction_type === 'earn') {
+            typeBadge = '<span class="badge bg-primary bg-opacity-10 text-primary">지급(Earn)</span>';
+            colorClass = 'text-primary fw-bold'; sign = '+';
+        } else if (p.transaction_type === 'use') {
+            typeBadge = '<span class="badge bg-danger bg-opacity-10 text-danger">차감(Use)</span>';
+            colorClass = 'text-danger fw-bold'; if (amt > 0) sign = '-';
+        } else if (p.transaction_type === 'withdraw') typeBadge = '<span class="badge bg-secondary">출금</span>';
+        else if (p.transaction_type === 'refund') typeBadge = '<span class="badge bg-success">환불</span>';
+        return `<tr>
+            <td class="small text-secondary">${escapeHtml(formatAdminMemberKstDateTime(p.created_at, '-'))}</td>
+            <td class="fw-bold text-start ps-4">${escapeHtml(p.member_name || '미확인')} <span class="small text-muted ms-1">(${escapeHtml(p.member_id || '-')})</span></td>
+            <td>${typeBadge}</td><td class="text-end pe-4 ${colorClass}">${sign}${Math.abs(amt).toLocaleString()}</td>
+            <td class="text-start small text-truncate" style="max-width:250px;" title="${escapeHtml(p.reason || '')}">${escapeHtml(p.reason || '-')}</td>
+        </tr>`;
+    }).join('');
 }
 function isCurrentUsageLedgerRead(request) {
     const owner = memberDetailOwner();
@@ -6997,6 +7043,8 @@ function clearMemberDetailEdits() {
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
     memberFundListResume = null;
+    usageLedgerPage = null;
+    syncUsageLedgerUi();
     clearMemberFundDrafts();
     clearDonationGrantDraft();
     if (typeof resetMemberImportDraft === 'function') resetMemberImportDraft();
@@ -10490,121 +10538,54 @@ function fetchGlobalDonations() {
 }
 
 // [수정] 이용고배당(포인트) 전체 조회 (Member ID 기준 매핑으로 변경)
-function fetchGlobalDividends() {
+function fetchGlobalDividends(append = false) {
     const owner = memberDetailOwner();
     const pane = document.getElementById('tab-funds-manage');
     if (!owner || isAdminMemberSiteProfile() || !canAccessAdminMemberTab('funds-manage') || window.frameElement?.hidden
         || !(pane?.classList.contains('active') || pane?.style.display === 'block')) return Promise.resolve();
     const keyword = document.getElementById('div-search-keyword').value.trim();
-    const tbody = document.getElementById('dividendGlobalBody');
-    if (usageLedgerRequest?.pending && isCurrentUsageLedgerRead(usageLedgerRequest)) return usageLedgerRequest.promise;
-    const request = {owner,keyword,revision:++usageLedgerRevision,pending:true,promise:null};
+    const tbody = document.getElementById('dividendGlobalBody'), status = document.getElementById('usage-ledger-status');
+    append = append === true;
+    if (append && (!usageLedgerPage?.hasMore || usageLedgerPage.owner !== owner || usageLedgerPage.keyword !== keyword)) return Promise.resolve();
+    if (usageLedgerRequest?.pending && usageLedgerRequest.append === append && isCurrentUsageLedgerRead(usageLedgerRequest)) return usageLedgerRequest.promise;
+    usageLedgerRequest?.controller?.abort();
+    const page = append ? usageLedgerPage : null;
+    const request = {owner,keyword,append,page,revision:++usageLedgerRevision,pending:true,promise:null,controller:new AbortController()};
     usageLedgerRequest = request;
-
-    tbody.innerHTML = '<tr><td colspan="5" class="py-5"><div class="spinner-border text-info"></div></td></tr>';
+    if (!append) {
+        usageLedgerPage = null;
+        tbody.innerHTML = '<tr><td colspan="5" class="py-5"><div class="spinner-border text-info"></div></td></tr>';
+    }
+    if (status) status.textContent = append ? '추가 내역을 불러오고 있습니다.' : '조회 중';
+    syncUsageLedgerUi();
+    const timer = setTimeout(() => request.controller.abort(), 15000);
     request.promise = (async () => {
-    try {
-
-    // 1. coop_points 테이블 조회
-    const { data: points, error } = await scopeAdminTenant(_supabase
-        .from('coop_points')
-        .select('*'))
-        .order('created_at', { ascending: false })
-        .limit(100);
-    if (!isCurrentUsageLedgerRead(request)) return;
-
-    if (error) {
-        CoopSafeLog.error("이용고배당 조회 실패:", error);
-        tbody.innerHTML = `<tr><td colspan="5" class="text-danger py-4">조회 실패: ${escapeHtml(error.message)}</td></tr>`;
-        return;
-    }
-
-    if (!points || points.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-muted py-5">이용고배당 내역이 없습니다.</td></tr>';
-        return;
-    }
-
-    // 2. ★ [핵심 수정] UUID가 아닌 member_id로 이름 조회
-    const memberIds = [...new Set(points.map(p => p.member_id).filter(Boolean))];
-    let memberMap = {};
-
-    if (memberIds.length > 0) {
-        const { data: members, error: mErr } = await scopeAdminTenant(_supabase
-            .from('coop_members')
-            .select('member_id, name'))
-            .in('member_id', memberIds);
-        if (!isCurrentUsageLedgerRead(request)) return;
-
-        if (!mErr && members) {
-            members.forEach(m => memberMap[m.member_id] = m.name);
+        try {
+            const { data, error } = await _supabase.rpc('admin_usage_ledger_page', {
+                p_keyword:keyword,p_before_created_at:page?.cursor?.created_at ?? null,p_before_id:page?.cursor?.id ?? null
+            }).abortSignal(request.controller.signal);
+            if (!isCurrentUsageLedgerRead(request)) return;
+            if (error) throw error;
+            if (!data || !Array.isArray(data.rows) || data.rows.length > 100 || typeof data.has_more !== 'boolean'
+                || data.rows.some(row => !row || typeof row.id !== 'string' || !/^\d+$/.test(row.id))
+                || (data.has_more && (!data.rows.length || !data.next_cursor || !/^\d+$/.test(data.next_cursor.id)
+                    || data.next_cursor.id !== data.rows.at(-1).id))) throw new Error('INVALID_USAGE_LEDGER_PAGE');
+            if (append && usageLedgerPage !== page) return;
+            const rows = append ? [...page.rows,...data.rows] : data.rows;
+            if (new Set(rows.map(row => row.id)).size !== rows.length) throw new Error('DUPLICATE_USAGE_LEDGER_PAGE');
+            usageLedgerPage = {owner,keyword,rows,hasMore:data.has_more,cursor:data.next_cursor};
+            renderUsageLedgerRows(rows);
+            if (status) status.textContent = `${rows.length.toLocaleString()}건 표시`;
+        } catch (error) {
+            if (!isCurrentUsageLedgerRead(request)) return;
+            CoopSafeLog.error('[erp/admin_member] usage ledger failed', error);
+            if (!append) tbody.innerHTML = '<tr><td colspan="5" class="text-danger py-4">원장을 불러오지 못했습니다. 다시 조회해 주세요.</td></tr>';
+            if (status) status.textContent = append ? '추가 내역을 불러오지 못했습니다. 더 보기를 눌러 다시 조회해 주세요.' : '조회 실패';
+        } finally {
+            clearTimeout(timer);
+            request.pending = false;
+            if (usageLedgerRequest === request) syncUsageLedgerUi();
         }
-    }
-
-    // 3. 필터링 및 렌더링
-    tbody.innerHTML = '';
-
-    const filtered = points.filter(p => {
-        if(!keyword) return true;
-        // 검색 시 맵에 있는 이름이나, ID 텍스트로 검색
-        const name = memberMap[p.member_id] || '';
-        const idText = p.member_id || '';
-        return name.includes(keyword) || idText.includes(keyword);
-    });
-
-    if(filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-muted py-5">검색 결과가 없습니다.</td></tr>';
-        return;
-    }
-
-    filtered.forEach(p => {
-        const dateStr = formatAdminMemberKstDateTime(p.created_at, '-');
-        const amt = Number(p.change_amount || 0);
-
-        // 뱃지 처리
-        let typeBadge = `<span class="badge bg-light text-dark border">${escapeHtml(p.transaction_type || '')}</span>`;
-        let colorClass = 'text-dark';
-        let sign = '';
-
-        if (p.transaction_type === 'earn') {
-            typeBadge = '<span class="badge bg-primary bg-opacity-10 text-primary">지급(Earn)</span>';
-            colorClass = 'text-primary fw-bold';
-            sign = '+';
-        } else if (p.transaction_type === 'use') {
-            typeBadge = '<span class="badge bg-danger bg-opacity-10 text-danger">차감(Use)</span>';
-            colorClass = 'text-danger fw-bold';
-            if (amt > 0) sign = '-';
-        } else if (p.transaction_type === 'withdraw') {
-            typeBadge = '<span class="badge bg-secondary">출금</span>';
-        } else if (p.transaction_type === 'refund') {
-            typeBadge = '<span class="badge bg-success">환불</span>';
-        }
-
-        // ★ 수정됨: 이름 매핑 (member_id 기준)
-        const memberName = memberMap[p.member_id] || '미확인';
-        const memberTextId = p.member_id || '-';
-
-        tbody.innerHTML += `
-            <tr>
-                <td class="small text-secondary">${dateStr}</td>
-                <td class="fw-bold text-start ps-4">
-                    ${escapeHtml(memberName)}
-                    <span class="small text-muted ms-1">(${escapeHtml(memberTextId)})</span>
-                </td>
-                <td>${typeBadge}</td>
-                <td class="text-end pe-4 ${colorClass}">${sign}${Math.abs(amt).toLocaleString()}</td>
-                <td class="text-start small text-truncate" style="max-width: 250px;" title="${escapeHtml(p.reason || '')}">
-                    ${escapeHtml(p.reason || '-')}
-                </td>
-            </tr>
-        `;
-    });
-    } catch (error) {
-        if (!isCurrentUsageLedgerRead(request)) return;
-        CoopSafeLog.error('[erp/admin_member] usage ledger failed', error);
-        tbody.innerHTML = '<tr><td colspan="5" class="text-danger py-4">목록을 불러오지 못했습니다. 다시 조회해 주세요.</td></tr>';
-    } finally {
-        request.pending = false;
-    }
     })();
     return request.promise;
 }
