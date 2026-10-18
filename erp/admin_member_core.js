@@ -6575,7 +6575,7 @@ function renderMemberTable(list) {
       : '<span class="text-muted">-</span>';
 
     // 날짜 포맷팅
-    const joinRaw = m.join_date || m.created_at || '';
+    const joinRaw = m.join_date || '';
     const joinDate = joinRaw ? formatAdminMemberKstDate(joinRaw) : '-';
 
     const status = m.status || '-';
@@ -7458,7 +7458,7 @@ async function openMemberDetail(id) {
     document.getElementById('md-phone').value = m.phone || '';
     document.getElementById('md-email').value = m.email || '';
     document.getElementById('md-email-original').value = m.email || '';
-    document.getElementById('md-status').value = m.status || '승인대기';
+    document.getElementById('md-status').value = m.status || '';
     const currentTarget = () => requestRevision === g_member_detail_revision ? g_current_member_id : null;
     void window.GuardianAdmin?.load(_supabase,memberUid,currentTarget);
     void window.ChildDirectAdmin?.load(_supabase,{...m,id:memberUid},currentTarget);
@@ -8068,9 +8068,11 @@ async function saveMemberBasic() {
             if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
                 throw new Error('이메일 형식이 올바르지 않습니다.');
             }
-            if (isGroup && !representativeName) throw new Error('단체 대표자명을 입력해주세요.');
-            if (isGroup && !contactName) throw new Error('단체 담당자명을 입력해주세요.');
-            if (isGroup && !contactPosition) throw new Error('담당자 직함 또는 역할을 입력해주세요.');
+            for (const [label, value] of [['대표자명', representativeName], ['담당자명', contactName], ['담당자 직함 또는 역할', contactPosition]]) {
+                if (value && (value.length > 100 || /[\u0000-\u001f\u007f]/.test(value))) {
+                    throw new Error(`${label}은 제어 문자 없이 100자 이내로 입력해주세요.`);
+                }
+            }
 
             // 2. 기본 정보와 단체 담당자 정보를 하나의 보안 RPC로 업데이트
             const updates = {
@@ -8082,7 +8084,7 @@ async function saveMemberBasic() {
                 p_bank_name: document.getElementById('md-bank-name').value,
                 p_bank_owner: document.getElementById('md-bank-owner').value,
                 p_bank_account: bankAcc,
-                p_status: document.getElementById('md-status').value,
+                p_status: document.getElementById('md-status').value || null,
                 p_member_type: memberType,
                 p_admin_memo: document.getElementById('md-memo').value,
                 p_rrn: (document.getElementById('md-rrn').value || '').trim() || null,
