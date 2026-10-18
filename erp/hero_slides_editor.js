@@ -29,7 +29,7 @@
  function deviceImages(container,id,read,hasMobile,change,files){
   const choice=select(container,'PC·모바일 이미지',id,[['desktop','같은 이미지 사용'],['separate','기기별 다른 이미지']]);
   const sync=()=>{const saved=read()?.mobile_image_source;choice.value=['desktop','separate'].includes(saved)?saved:hasMobile()?'separate':'desktop';if(files)files.hidden=choice.value!=='separate';};
-  choice.onchange=()=>{const selected=choice.value;if(allowed()&&['desktop','separate'].includes(selected))change(selected,hasMobile()?'separate':'desktop');sync();};sync();return {sync,choice};
+  const apply=()=>{const selected=choice.value;if(allowed()&&['desktop','separate'].includes(selected))change(selected,hasMobile()?'separate':'desktop');sync();};choice.oninput=apply;choice.onchange=apply;sync();return {sync,choice};
  }
  function linkField(container,text,id,onChange){
   const choice=select(container,text,id,targets),custom=input(container,'이동할 주소',id+'-custom','url',500);custom.placeholder='https:// 또는 /로 시작하는 주소';
