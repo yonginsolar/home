@@ -6873,6 +6873,17 @@ function requestApplicationListRefresh(sequence) {
     }
     return fetchApplications();
 }
+function refreshApplicationsAfterConfirmedChange(owner) {
+    if (!owner || owner !== memberDetailOwner() || !canAccessAdminMemberTab('applications')
+        || document.getElementById('main-system')?.classList.contains('hidden')) return Promise.resolve();
+    invalidateApplicationListRead();
+    invalidateMemberReturnSummaryRead();
+    const pane = document.getElementById('tab-applications');
+    if (pane?.classList.contains('active') || pane?.style.display === 'block') {
+        return requestApplicationListRefresh(memberFundRefreshSequence);
+    }
+    return fetchMemberReturnSummary();
+}
 window.addEventListener('pagehide', invalidateApplicationListRead);
 function refreshVisibleMemberFundList() {
     const pane = document.getElementById('tab-funds-manage');
@@ -11589,6 +11600,7 @@ async function openWithdrawalDeemedDividendTaxFromApplication(withdrawalId) {
 }
 
 async function submitWithdrawalDeemedDividendTaxReview() {
+    const refreshOwner = memberDetailOwner();
     const withdrawalId = Number(document.getElementById('withdrawalDeemedDividendTaxId')?.value || 0);
     const note = String(document.getElementById('withdrawalDeemedDividendTaxNote')?.value || '').trim();
     const amounts = syncWithdrawalDeemedDividendTaxNet();
@@ -11608,7 +11620,7 @@ async function submitWithdrawalDeemedDividendTaxReview() {
         });
         if (error) throw error;
         bootstrap.Modal.getOrCreateInstance(document.getElementById('withdrawalDeemedDividendTaxModal')).hide();
-        await Promise.all([fetchWithdrawalDeemedDividendReviews(false), fetchApplications()]);
+        await Promise.all([fetchWithdrawalDeemedDividendReviews(false), refreshApplicationsAfterConfirmedChange(refreshOwner)]);
         await loadDashboard();
         myAlert(data?.message || '의제배당 세무 검토를 확정했습니다.', 'success');
     } catch (error) {
@@ -13833,6 +13845,7 @@ function openWithdrawalWorkflowModal(action, applicationId) {
 }
 
 async function submitWithdrawalWorkflow() {
+    const refreshOwner = memberDetailOwner();
     const action = document.getElementById('withdrawalWorkflowAction').value;
     const applicationId = Number(document.getElementById('withdrawalWorkflowApplicationId').value || 0);
     const withdrawalId = Number(document.getElementById('withdrawalWorkflowId').value || 0);
@@ -13889,7 +13902,7 @@ async function submitWithdrawalWorkflow() {
         const { data, error } = await _supabase.rpc(rpcName, params);
         if (error) throw error;
         bootstrap.Modal.getOrCreateInstance(document.getElementById('withdrawalWorkflowModal')).hide();
-        await fetchApplications();
+        await refreshApplicationsAfterConfirmedChange(refreshOwner);
         await loadDashboard();
         myAlert(data?.message || '처리되었습니다.', 'success');
     } catch (error) {
@@ -13926,6 +13939,7 @@ async function processApp(appId, action, type, amount) {
             if (authError) throw authError;
             if (!authData?.user?.id) throw new Error('로그인 세션을 확인할 수 없습니다.');
 
+            const refreshOwner = memberDetailOwner();
             const { data, error } = await _supabase.rpc('admin_process_application', {
                 p_app_id: appId,
                 p_action: action,
@@ -13933,12 +13947,12 @@ async function processApp(appId, action, type, amount) {
             });
             if (error) throw error;
             resultData = data || {};
+            void refreshApplicationsAfterConfirmedChange(refreshOwner);
 
             if (!isAdminMemberSiteProfile() && action === 'approve' && type === 'extra') {
                 notificationResult = await sendApprovedExtraCapitalNotification(resultData.ref_member_id);
             }
 
-            fetchApplications(); // 목록 새로고침
             loadDashboard();     // 대시보드 갱신
         } catch (error) {
             processingError = error;
@@ -14047,6 +14061,7 @@ function closeApplicationRejectionModalThen(callback) {
 } // End of closeApplicationRejectionModalThen
 
 async function submitApplicationRejection() {
+    const refreshOwner = memberDetailOwner();
     if (g_application_rejection_in_flight) return;
     const context = g_application_rejection_context;
     const selected = document.querySelector('input[name="applicationRejectionReason"]:checked');
@@ -14083,10 +14098,10 @@ async function submitApplicationRejection() {
         });
         if (error) throw error;
 
+        void refreshApplicationsAfterConfirmedChange(refreshOwner);
         const resultMessage = String(data?.message || '신청 미승인 처리가 완료되었습니다.');
         g_application_rejection_context = null;
         closeApplicationRejectionModalThen(function () {
-            fetchApplications();
             loadDashboard();
             myAlert(resultMessage, 'success');
         });
@@ -14292,6 +14307,7 @@ async function searchProxyMember() {
 
 // 대리 등록 실행
 async function submitProxyData() {
+    const refreshOwner = memberDetailOwner();
     if (g_proxy_submit_busy) return;
     const uid = document.getElementById('proxy-member-uid').value;
     const mid = document.getElementById('proxy-member-id').value; // 텍스트 ID
@@ -14341,7 +14357,7 @@ async function submitProxyData() {
       } else {
         myAlert("접수되었습니다.\n목록에서 확인 후 승인 처리해주세요.");
         bootstrap.Modal.getInstance(document.getElementById('proxyModal')).hide();
-        fetchApplications();
+        void refreshApplicationsAfterConfirmedChange(refreshOwner);
       }
     } catch (_) {
       myAlert(rules || type === 'withdraw'
