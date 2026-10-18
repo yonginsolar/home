@@ -72,15 +72,30 @@
  }
  const helpText={
   'site-home-hero-content-visible':'끄면 배경사진만 표시하며 입력한 문구는 그대로 보관합니다.',
-  'site-home-hero-title':'홈페이지 첫 화면의 제목입니다. 입력한 줄바꿈도 그대로 표시됩니다.',
-  'site-home-hero-subtitle':'첫 화면에서 제목 아래에 보일 설명입니다.',
+  'site-home-hero-title':'입력한 줄바꿈은 실제 홈페이지 제목에도 같은 위치에 표시됩니다.',
   'site-home-slide-mode':'한 장 배너 또는 최대 네 장의 슬라이드 배너를 선택합니다.',
   'site-home-slide-autoplay':'슬라이드 배너에서만 8초마다 다음 사진으로 전환합니다.',
   'site-home-layout-mode':'현재 영역 배치를 유지하거나 선택한 디자인의 권장 배치를 적용합니다.',
-  'site-home-title-font':'홈페이지 제목에 사용할 글꼴입니다.',
-  'site-home-body-font':'홈페이지 본문에 사용할 글꼴입니다.'
+  'site-home-title-font':'기본 제공 글꼴은 상업용 홈페이지에 무료로 사용할 수 있습니다. 외부 글꼴을 선택하면 글꼴 파일 주소와 사용 권한 확인이 필요합니다.',
+  'site-home-body-font':'기본 제공 글꼴은 상업용 홈페이지에 무료로 사용할 수 있습니다. 외부 글꼴을 선택하면 글꼴 파일 주소와 사용 권한 확인이 필요합니다.'
  };
- function hint(input,label){const id=input.id||'',text=label.textContent.trim();return helpText[id]||(/(?:cta-target|button-url)$/.test(id)?'이 버튼을 눌렀을 때 이동할 곳을 선택합니다. 선택하면 기본 버튼 문구가 채워지며 아래에서 더 수정할 수 있습니다.':/(?:cta-label|button_label)$/.test(id)?'바로가기를 먼저 선택한 뒤 버튼에 보일 문구를 덧붙이거나 수정하세요.':/custom$/.test(id)?'이동할 페이지 주소를 입력하세요. 외부 페이지는 https://로, 이 홈페이지 안의 페이지는 /로 시작합니다.':/(?:link-url|banner-click)$/.test(id)?'사진을 눌렀을 때 이동할 곳입니다. 버튼과는 별도로 설정할 수 있습니다.':input.type==='file'?'사진을 선택해 미리보기로 확인하세요. 사진 한 장당 최대 10MB이며 저장해야 반영됩니다.':/image-source$/.test(id)?'PC·모바일에 같은 사진을 쓰거나 기기별 사진을 따로 등록합니다.':/fit$/.test(id)?'전체 보기는 사진 전체를 보여주고, 화면 채우기는 틀에 맞춰 일부를 자릅니다.':/position$/.test(id)?'사진을 자를 때 남길 부분의 기준 위치입니다.':/overlay/.test(id)?'사진 위의 문구를 읽기 쉽도록 배경사진을 어둡게 합니다.':input.type==='checkbox'?text+' 여부를 선택합니다. 저장 또는 등록·적용해야 반영됩니다.':input.type==='radio'?'이 표시 방식을 선택한 뒤 미리보기로 확인하세요. 저장해야 반영됩니다.':input.tagName==='SELECT'?text+'을 선택하고 미리보기로 확인하세요.':text+'에 표시할 내용을 입력하세요.');}
+ function hint(input){
+  const id=input.id||'';
+  if(helpText[id])return helpText[id];
+  if(input.matches('[data-mobile-mode]'))return helpText['site-home-slide-mode'];
+  if(input.matches('[data-mobile-image-only]'))return '켜면 문구·버튼 없이 배경사진만 보여줍니다.';
+  if(input.matches('[data-mobile-play]'))return helpText['site-home-slide-autoplay'];
+  if(/(?:cta-target|button-url)$/.test(id))return '이 버튼을 눌렀을 때 이동할 곳을 선택합니다. 선택하면 기본 버튼 문구가 채워지며 아래에서 더 수정할 수 있습니다.';
+  if(/(?:cta-label|button_label)$/.test(id))return '바로가기를 먼저 선택한 뒤 버튼에 보일 문구를 덧붙이거나 수정하세요.';
+  if(/custom$/.test(id))return '이동할 페이지 주소를 입력하세요. 외부 페이지는 https://로, 이 홈페이지 안의 페이지는 /로 시작합니다.';
+  if(/(?:link-url|banner-click)$/.test(id))return '사진을 눌렀을 때 이동할 곳입니다. 버튼과는 별도로 설정할 수 있습니다.';
+  if(input.type==='file'&&(/^site-home-(?:hero(?:-mobile)?|impact)-image-file$|^admin-about-img-file$|^site-certification-image-file$/.test(id)||input.closest('[data-slide-card]')))return '사진 한 장당 최대 10MB이며 저장해야 홈페이지에 반영됩니다.';
+  if(/image-source$/.test(id))return 'PC·모바일에 같은 사진을 쓰거나 기기별 사진을 따로 등록합니다.';
+  if(/(?:desktop|mobile)-display-fit$/.test(id))return '전체 보기는 사진 전체를 보여주고, 화면 채우기는 틀에 맞춰 일부를 자릅니다.';
+  if(/image[-_]position$|(?:desktop|mobile)-display-position$/.test(id))return '사진을 자를 때 남길 부분의 기준 위치입니다.';
+  if(/-overlay$/.test(id))return '사진 위의 문구를 읽기 쉽도록 배경사진을 어둡게 합니다.';
+  return ''; // A field name repeated as an instruction is not help.
+ }
  function helpButton(label,message){const b=document.createElement('button');b.type='button';b.className='home-field-help';b.textContent='?';b.setAttribute('aria-label',label+' 도움말');b.onclick=e=>{e.preventDefault();e.stopPropagation();b.focus({preventScroll:true});void root.CoopDialog.alert(message,{title:label+' 도움말'});};return b;}
  function cta(input){
   if(ctaDone.has(input))return;const id=input.id||'',isSingle=/^site-home-(hero|impact)-cta-target$/.test(id),isSlide=/-button-url$/.test(id);if(!isSingle&&!isSlide)return;ctaDone.add(input);
@@ -93,11 +108,11 @@
  function decorate(container){
   const controls=[...container.querySelectorAll('input,textarea,select')].filter(n=>n.type!=='hidden'&&!n.closest('.about-editor-toolbar'));
   controls.forEach(cta);
-   for(const input of controls){const labels=[...container.querySelectorAll('label')].filter(l=>l.contains(input)||input.id&&l.htmlFor===input.id);if(!labels.length&&input.id&&input.previousElementSibling?.tagName==='LABEL'&&!input.previousElementSibling.htmlFor){input.previousElementSibling.htmlFor=input.id;labels.push(input.previousElementSibling);}for(const label of labels){if(labelsDone.has(label))continue;const text=label.textContent.trim();if(!text)continue;labelsDone.add(label);const button=helpButton(text,hint(input,label));
+   for(const input of controls){const labels=[...container.querySelectorAll('label')].filter(l=>l.contains(input)||input.id&&l.htmlFor===input.id);if(!labels.length&&input.id&&input.previousElementSibling?.tagName==='LABEL'&&!input.previousElementSibling.htmlFor){input.previousElementSibling.htmlFor=input.id;labels.push(input.previousElementSibling);}for(const label of labels){if(labelsDone.has(label))continue;const text=label.textContent.trim();if(!text)continue;labelsDone.add(label);const message=hint(input);if(!message)continue;const button=helpButton(text,message);
     if(label.parentElement.matches('.home-template-grid,.home-impact-mode-grid')){const wrap=document.createElement('div');wrap.className='home-help-choice';label.before(wrap);wrap.append(label,button);}
     else if(label.contains(input)&&label.classList.contains('form-check')){const wrap=document.createElement('div');wrap.className='home-label-with-help mb-3';label.before(wrap);wrap.append(label,button);}
     else label.after(button);
-   }if(!labels.length&&input.getAttribute('aria-label')&&!controlsDone.has(input)){controlsDone.add(input);const text=input.getAttribute('aria-label');input.after(helpButton(text,hint(input,{textContent:text})));}}
+   }if(!labels.length&&input.getAttribute('aria-label')&&!controlsDone.has(input)){controlsDone.add(input);const message=hint(input);if(message)input.after(helpButton(input.getAttribute('aria-label'),message));}}
   for(const node of container.querySelectorAll('.form-text:not([id])'))if(/^(끄면 배경사진|줄을 바꾸면 공개|기본 제공 글꼴|권장 배치는)/.test(node.textContent.trim()))node.hidden=true;
  }
  function mount(){
@@ -106,5 +121,5 @@
   for(const name of ['input','change','click'])document.addEventListener(name,event=>{if(event.target.closest('.home-field-help,#home-inline-undo'))return;if(event.target.closest('#tab-site,[data-inline-original-root],.home-element-dialog')){if(name!=='input')reason='!'+name;else if(event.target.type==='hidden'){if(!reason)reason='!model';}else if(!reason.startsWith('!'))reason=event.target.matches('input:not([type=file]):not([type=checkbox]):not([type=radio]),textarea')?event.target.id:'';observe('home');}},true);
   for(const kind of Object.keys(groups))observe(kind);
  }
- root.CoopHomeEditorTools=Object.freeze({mount,decorate,observe,accepted,submitted,undo,undoState,restoreFiles,version:'1.0.2'});
+ root.CoopHomeEditorTools=Object.freeze({mount,decorate,observe,accepted,submitted,undo,undoState,restoreFiles,version:'1.0.3'});
 })(window);
