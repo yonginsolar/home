@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.3.27 | Change: 2026-10-12 - Protected display copies for uploaded and linked education photos. -->
+<!-- Version: v1.3.29 | Change: 2026-10-18 - Separate read-only education details from the retained editor. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -9,7 +9,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.28 | participation.html');</script>
+  <script>console.log('[Version] v1.3.29 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -241,6 +241,21 @@
       <div class="event-list" id="eventList"></div>
     </section>
   </main>
+
+  <div class="modal fade" id="educationDetailModal" tabindex="-1" aria-labelledby="educationDetailTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title fs-5 fw-bold" id="educationDetailTitle">교육 상세 보기</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div>
+      <div class="modal-body">
+        <div id="educationDetailStatus" role="status" class="text-muted"></div>
+        <div id="educationDetailContent" hidden>
+          <h3 id="educationDetailName" class="fs-5"></h3>
+          <dl><dt>일시</dt><dd id="educationDetailTime"></dd><dt>장소</dt><dd id="educationDetailLocation"></dd><dt>강사</dt><dd id="educationDetailInstructor"></dd><dt>교육 내용</dt><dd id="educationDetailDescription" style="white-space:pre-wrap;overflow-wrap:anywhere"></dd></dl>
+        </div>
+        <button type="button" class="btn btn-outline-primary mt-3" id="educationDetailRetry" hidden>다시 불러오기</button>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button></div>
+    </div></div>
+  </div>
 
   <div class="modal fade" id="eventModal" tabindex="-1" data-bs-backdrop="static" aria-labelledby="eventModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered">
@@ -581,6 +596,7 @@
     let pendingGuestLinkId = null;
     let pendingManualAttendeeLinkId = null;
     let eventModalInstance = null;
+    let educationDetailState = { revision:0, eventId:null, controller:null, trigger:null, open:false };
     let lightboxReturnFocus = null;
     let lightboxStoredPhoto = null;
     let storedPhotoRenderVersion = 0;
@@ -1252,12 +1268,16 @@
               ${row.event_type !== 'EDUCATION' && additionalAttended > 0 ? `<span class="stat-pill">배석 ${additionalAttended}</span>` : ''}
               ${required > 0 ? `<span class="stat-pill">서명 ${signed}/${required}</span>` : ''}
               ${fileCount > 0 ? `<span class="stat-pill">첨부 ${fileCount}</span>` : ''}
+              ${PARTICIPATION_EDUCATION_VIEW ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-view-education="${escapeHtml(row.id)}">상세 보기</button>` : ''}
               <button type="button" class="btn btn-sm btn-outline-primary" data-edit-event="${escapeHtml(row.id)}">확인·수정</button>
             </div>
           </article>`;
       }).join('');
       list.querySelectorAll('[data-edit-event]').forEach(function(button) {
         button.addEventListener('click', function() { openEditEvent(button.dataset.editEvent); });
+      });
+      list.querySelectorAll('[data-view-education]').forEach(function(button) {
+        button.addEventListener('click', function() { openEducationDetail(button.dataset.viewEducation, button); });
       });
     } // End of renderEvents
 
@@ -2101,6 +2121,62 @@
     function participationReadStillCurrent(owner) {
       return owner.userId === participationReadOwner.userId && owner.coopId === participationReadOwner.coopId
         && owner.revision === participationReadOwner.revision && !window.frameElement?.hidden;
+    }
+
+    function cancelEducationDetailRead() {
+      educationDetailState.revision++;
+      educationDetailState.open = false;
+      educationDetailState.controller?.abort();
+      educationDetailState.controller = null;
+    }
+
+    async function openEducationDetail(eventId, trigger = null) {
+      if (!PARTICIPATION_EDUCATION_VIEW || !participationReadOwner.userId || !participationReadOwner.coopId
+          || window.frameElement?.hidden) return;
+      if (educationDetailState.eventId === eventId && educationDetailState.controller) return;
+      cancelEducationDetailRead();
+      const revision = educationDetailState.revision;
+      const owner = { ...participationReadOwner };
+      const controller = new AbortController();
+      educationDetailState.eventId = eventId;
+      educationDetailState.controller = controller;
+      educationDetailState.open = true;
+      if (trigger) educationDetailState.trigger = trigger;
+      const modal = document.getElementById('educationDetailModal');
+      const status = document.getElementById('educationDetailStatus');
+      const content = document.getElementById('educationDetailContent');
+      const retry = document.getElementById('educationDetailRetry');
+      content.hidden = true;
+      retry.hidden = true;
+      status.textContent = '교육 정보를 불러오는 중입니다.';
+      bootstrap.Modal.getOrCreateInstance(modal).show();
+      const current = () => revision === educationDetailState.revision
+        && participationReadStillCurrent(owner) && educationDetailState.open;
+      const timer = setTimeout(() => controller.abort(), 15000);
+      try {
+        // The existing server RPC retains its Auth, host, tenant and education permission checks.
+        const { data, error } = await _supabase.rpc('participation_admin_get_event_v2', { p_event_id:eventId }).abortSignal(controller.signal);
+        if (!current()) return;
+        if (error) throw error;
+        const event = data?.event;
+        if (!event || String(event.id) !== String(eventId) || event.event_type !== 'EDUCATION'
+            || (event.coop_id && event.coop_id !== owner.coopId)) throw new Error('EDUCATION_DETAIL_UNAVAILABLE');
+        document.getElementById('educationDetailName').textContent = event.title || '교육';
+        document.getElementById('educationDetailTime').textContent = event.ends_at
+          ? `${formatKstDateTime(event.starts_at)} ~ ${formatKstDateTime(event.ends_at)}` : formatKstDateTime(event.starts_at);
+        document.getElementById('educationDetailLocation').textContent = event.location || '미입력';
+        document.getElementById('educationDetailInstructor').textContent = event.instructor || '미입력';
+        document.getElementById('educationDetailDescription').textContent = event.education_content || '미입력';
+        status.textContent = '';
+        content.hidden = false;
+      } catch (error) {
+        if (!current()) return;
+        status.textContent = '교육 정보를 불러오지 못했습니다.';
+        retry.hidden = false;
+      } finally {
+        clearTimeout(timer);
+        if (revision === educationDetailState.revision) educationDetailState.controller = null;
+      }
     }
 
     async function ensureMeetingContext() {
@@ -3293,6 +3369,14 @@
       document.getElementById('summaryDelegateCard').classList.toggle('d-none', PARTICIPATION_EDUCATION_VIEW);
       document.getElementById('summaryMeetingRateCard').classList.toggle('d-none', PARTICIPATION_EDUCATION_VIEW);
       eventModalInstance = bootstrap.Modal.getOrCreateInstance(document.getElementById('eventModal'));
+      document.getElementById('educationDetailRetry').addEventListener('click', function() {
+        openEducationDetail(educationDetailState.eventId);
+      });
+      document.getElementById('educationDetailModal').addEventListener('hide.bs.modal', cancelEducationDetailRead);
+      document.getElementById('educationDetailModal').addEventListener('hidden.bs.modal', function() {
+        const trigger = educationDetailState.trigger;
+        if (trigger?.isConnected && !window.frameElement?.hidden) trigger.focus();
+      });
       document.getElementById('newEventBtn').addEventListener('click', openNewEvent);
       document.getElementById('openHumanitiesImportBtn').addEventListener('click', openHumanitiesImport);
       document.getElementById('searchHumanitiesImportBtn').addEventListener('click', searchHumanitiesImport);
@@ -3404,6 +3488,8 @@
           meetingContextPending = null;
           eventOpenRevision++;
           sourceReadRevision++;
+          cancelEducationDetailRead();
+          bootstrap.Modal.getInstance(document.getElementById('educationDetailModal'))?.hide();
         }
       });
       document.getElementById('eventTypeFilter').value = PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'ALL';

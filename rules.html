@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.13
-Change: Keep search overlay and rule input styles in separate valid CSS rules.
+Version: v1.0.14
+Change: 2026-10-18 - Distinct rule search empty states and explicit search reset.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.13 | rules.html');</script>
+  <script>console.log('[Version] v1.0.14 | rules.html');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="shared/tenant_head.js?v=20260916-1"></script>
@@ -215,7 +215,8 @@ Change: Keep search overlay and rule input styles in separate valid CSS rules.
       <div class="container">
           <div class="input-group">
               <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-secondary"></i></span>
-              <input type="text" id="searchInput" class="form-control border-start-0" placeholder="찾으시는 조항 키워드를 입력하세요 (예: 이사회, 조합원)">
+              <input type="search" id="searchInput" aria-label="규정 검색어" class="form-control border-start-0" placeholder="찾으시는 조항 키워드를 입력하세요 (예: 이사회, 조합원)">
+              <button type="button" id="rules-search-clear" class="btn btn-outline-secondary" onclick="clearRulesSearch()" hidden>검색 해제</button>
               <button class="btn btn-outline-secondary" onclick="toggleSearch(event)">닫기</button>
           </div>
       </div>
@@ -239,6 +240,7 @@ Change: Keep search overlay and rule input styles in separate valid CSS rules.
             <p class="text-muted small" id="articles-version">불러오는 중...</p>
         </div>
         <div id="articles-container"></div>
+        <div id="articles-search-empty" class="text-center py-4 text-muted" role="status" hidden>검색 조건에 맞는 조항이 없습니다. <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearRulesSearch()">검색 해제</button></div>
         <div class="mt-5 pt-4 border-top">
             <h6 class="fw-bold text-muted mb-3 small">지난 개정 이력</h6>
             <div class="accordion" id="accordionArticles"></div>
@@ -251,6 +253,7 @@ Change: Keep search overlay and rule input styles in separate valid CSS rules.
             <p class="text-muted small" id="bylaws-version">불러오는 중...</p>
         </div>
         <div id="bylaws-container"></div>
+        <div id="bylaws-search-empty" class="text-center py-4 text-muted" role="status" hidden>검색 조건에 맞는 조항이 없습니다. <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearRulesSearch()">검색 해제</button></div>
         <div class="mt-5 pt-4 border-top">
             <h6 class="fw-bold text-muted mb-3 small">지난 개정 이력</h6>
             <div class="accordion" id="accordionBylaws"></div>
@@ -289,6 +292,7 @@ Change: Keep search overlay and rule input styles in separate valid CSS rules.
         ]);
         
         document.getElementById('searchInput').addEventListener('input', filterContent);
+        filterContent();
         
         // URL 해시 체크 (#bylaws)
         if(window.location.hash === '#bylaws') {
@@ -339,6 +343,7 @@ function toggleSearch(e) {
             btnA.style.backgroundColor = '#fff'; btnA.style.color = '#666'; btnA.classList.remove('active');
         }
         window.scrollTo(0,0);
+        filterContent();
     }
 
     // [기능] 모바일 메뉴 토글 (index.html 로직 이식)
@@ -601,17 +606,27 @@ function renderCards(text, containerId) {
         container.innerHTML = html;
     }
 
-    function filterContent() {
-        const keyword = document.getElementById('searchInput').value.toLowerCase();
-        const items = document.querySelectorAll('.searchable-item');
+    function clearRulesSearch() {
+        document.getElementById('searchInput').value = '';
+        filterContent();
+        document.getElementById('searchInput').focus();
+    }
 
-        items.forEach(item => {
-            const collapseDiv = item.querySelector('.accordion-collapse');
-            if (collapseDiv && !collapseDiv.classList.contains('show')) {
-                item.style.display = ''; return; 
-            }
-            if (item.innerText.toLowerCase().includes(keyword)) item.style.display = '';
-            else item.style.display = 'none';
+    function filterContent() {
+        const input = document.getElementById('searchInput');
+        const keyword = input.value.trim().toLowerCase();
+        document.getElementById('rules-search-clear').hidden = !input.value;
+        ['articles', 'bylaws'].forEach(type => {
+            const view = document.getElementById(`view-${type}`);
+            const items = Array.from(view.querySelectorAll('.searchable-item'));
+            let matches = 0;
+            items.forEach(item => {
+                const match = !keyword || item.textContent.toLowerCase().includes(keyword);
+                item.style.display = match ? '' : 'none';
+                if (match) matches++;
+            });
+            // Leave loading, unregistered and failed lookups distinct from a searched document.
+            document.getElementById(`${type}-search-empty`).hidden = !keyword || !items.length || matches > 0;
         });
     }
   </script>

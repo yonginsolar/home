@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.159
-Change: 2026-10-17 - Compact mobile cover captions without changing image settings.
+Version: v1.0.160
+Change: 2026-10-18 - Accessible closing navigation and clear pre-tax calculator guidance.
 -->
 <html lang="ko">
 
@@ -11,7 +11,7 @@ Change: 2026-10-17 - Compact mobile cover captions without changing image settin
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.159 | index.html');</script>
+<script>console.log('[Version] v1.0.160 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1808,7 +1808,7 @@ Change: 2026-10-17 - Compact mobile cover captions without changing image settin
         <a id="homeAuthLink" href="javascript:void(0);" onclick="handleMainLogin(event)" class="scrollto me-3" style="color: #fff; font-size: 14px; text-decoration: none;">로그인</a>
         <a id="homeSignupLink" href="signup.html" class="get-started-btn scrollto">조합원 가입</a>
 
-    <i class="bi bi-list mobile-nav-toggle d-lg-none ms-3" onclick="toggleMobileMenu()"></i>
+    <button type="button" class="mobile-nav-toggle d-lg-none ms-3 border-0 bg-transparent p-1" aria-label="메뉴 열기" aria-expanded="false" aria-controls="navbar" onclick="toggleMobileMenu()"><i class="bi bi-list" aria-hidden="true"></i></button>
   </div>
 
 </div>
@@ -2051,7 +2051,7 @@ Change: 2026-10-17 - Compact mobile cover captions without changing image settin
               <p class="text-muted small">매월 약 <span id="displayMonthly">4,160</span>원</p>
 
               <p class="text-muted" style="font-size: 0.8rem; margin-top: 10px;">
-                <br>* 예시 수익률 기준이며, 배당소득세(15.4%) 및 지방소득세가 포함된 세전 금액입니다.
+                <br>* 예시 수익률(연 5%)로 계산한 세금 공제 전 금액입니다. 실제 배당금과 세금은 확정된 배당 및 적용 세법에 따라 달라질 수 있습니다.
                 <br>* 최대 금액은 현재 총 출자금 기준 최대 출자 가능 금액입니다.
               </p>
             </div>
@@ -2503,33 +2503,37 @@ Change: 2026-10-17 - Compact mobile cover captions without changing image settin
       onscroll = document, headerScrolled;
     }
 
-// ▲ 위 내용을 지우고 이 코드로 대체하세요 ▲
-// [수정된 모바일 메뉴 토글 함수]
-  function toggleMobileMenu() {
-    const navbar = document.querySelector('#navbar');
-    const toggleIcon = document.querySelector('.mobile-nav-toggle');
-
-    // active 클래스를 껐다 켰다 함 (CSS에서 애니메이션 처리)
-    navbar.classList.toggle('active');
-
-    // 아이콘 변경 (햄버거 <-> X)
-    toggleIcon.classList.toggle('bi-list');
-    toggleIcon.classList.toggle('bi-x');
+  function setHomeMenuOpen(open, restoreFocus = false) {
+    const navbar = document.getElementById('navbar');
+    const button = document.querySelector('.mobile-nav-toggle');
+    if (!navbar || !button) return;
+    navbar.classList.toggle('active', open);
+    button.setAttribute('aria-expanded', String(open));
+    button.setAttribute('aria-label', open ? '메뉴 닫기' : '메뉴 열기');
+    const icon = button.querySelector('i');
+    icon?.classList.toggle('bi-list', !open);
+    icon?.classList.toggle('bi-x', open);
+    if (restoreFocus) button.focus();
   }
 
-  // [추가] 메뉴 바깥쪽(화면 아무데나) 클릭하면 닫기
+  function toggleMobileMenu() {
+    setHomeMenuOpen(!document.getElementById('navbar')?.classList.contains('active'));
+  }
+
+  document.getElementById('navbar')?.addEventListener('click', function(e) {
+    if (e.target.closest('a[href]')) setHomeMenuOpen(false, true);
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('navbar')?.classList.contains('active')) {
+      e.preventDefault();
+      setHomeMenuOpen(false, true);
+    }
+  });
   document.addEventListener('click', function(e) {
     const navbar = document.querySelector('#navbar');
-    const toggleIcon = document.querySelector('.mobile-nav-toggle');
-
-    // 메뉴가 열려있을 때만 실행
-    if (navbar.classList.contains('active')) {
-      // 클릭한 곳이 '햄버거 버튼'도 아니고 '메뉴 박스' 내부도 아니라면 닫음
-      if (!toggleIcon.contains(e.target) && !navbar.contains(e.target)) {
-        navbar.classList.remove('active');
-        toggleIcon.classList.remove('bi-x');
-        toggleIcon.classList.add('bi-list');
-      }
+    const button = document.querySelector('.mobile-nav-toggle');
+    if (navbar?.classList.contains('active') && !button?.contains(e.target) && !navbar.contains(e.target)) {
+      setHomeMenuOpen(false);
     }
   });
 
@@ -6430,7 +6434,7 @@ function openOpsContactModal() {
     </div>
   </div>
   <script src="shared/notice_attachments.js?v=1.0.0"></script>
-  <script src="notice_modal.js?v=20261006-1"></script>
+  <script src="notice_modal.js?v=20261018-1"></script>
 <script src="shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>

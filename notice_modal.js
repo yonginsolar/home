@@ -1,6 +1,6 @@
 /*
-Version: v1.0.17
-Change: 2026-10-06 - Open published notice attachments through their actual visibility permissions.
+Version: v1.0.18
+Change: 2026-10-18 - Unify notice search submission and provide search reset.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -370,10 +370,11 @@ Change: 2026-10-06 - Open published notice attachments through their actual visi
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <div class="input-group mb-3">
-          <input type="text" id="modal-search-input" class="form-control" placeholder="제목이나 내용을 입력하세요" onkeyup="filterNoticesInModal()">
-          <button class="btn btn-outline-secondary" type="button"><i class="bi bi-search"></i></button>
-        </div>
+        <form id="notice-search-form" role="search" class="input-group mb-3">
+          <input type="search" id="modal-search-input" class="form-control" aria-label="공지사항 검색어" placeholder="제목이나 내용을 입력하세요">
+          <button class="btn btn-outline-secondary" type="submit" aria-label="공지사항 검색"><i class="bi bi-search" aria-hidden="true"></i></button>
+          <button id="notice-search-clear" class="btn btn-outline-secondary" type="button" hidden>검색 해제</button>
+        </form>
         <div style="max-height: 400px; overflow-y: auto;">
             <ul id="modal-notice-list" class="list-group list-group-flush"></ul>
         </div>
@@ -525,6 +526,17 @@ Change: 2026-10-06 - Open published notice attachments through their actual visi
 </div>
 `;
         document.body.insertAdjacentHTML('beforeend', html);
+        document.getElementById('notice-search-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+            filterInModal();
+        });
+        document.getElementById('modal-search-input').addEventListener('input', filterInModal);
+        document.getElementById('notice-search-clear').addEventListener('click', function() {
+            const input = document.getElementById('modal-search-input');
+            input.value = '';
+            filterInModal();
+            input.focus();
+        });
         bindNoticeModalFocusGuards();
     }
 
@@ -602,7 +614,8 @@ Change: 2026-10-06 - Open published notice attachments through their actual visi
         if (!modalList) return;
 
         if (!items || items.length === 0) {
-            modalList.innerHTML = '<div class="text-center py-3 text-muted">검색 결과가 없습니다.</div>';
+            const searching = !!document.getElementById('modal-search-input')?.value.trim();
+            modalList.innerHTML = `<li class="list-group-item text-center py-3 text-muted" role="status">${searching ? '검색 조건에 맞는 공지사항이 없습니다.' : '등록된 공지사항이 없습니다.'}</li>`;
             return;
         }
 
@@ -630,6 +643,8 @@ Change: 2026-10-06 - Open published notice attachments through their actual visi
         const input = document.getElementById('modal-search-input');
         if (!input) return;
         const keyword = input.value.toLowerCase().trim();
+        const clear = document.getElementById('notice-search-clear');
+        if (clear) clear.hidden = !input.value;
         const filtered = cache.filter(n => {
             const t = n.title ? n.title.toLowerCase() : '';
             const c = n.content ? n.content.toLowerCase() : '';
@@ -721,10 +736,9 @@ Change: 2026-10-06 - Open published notice attachments through their actual visi
     async function openList() {
         ensureModals();
         await fetchNotices();
-        renderModalList(cache);
-
         const input = document.getElementById('modal-search-input');
         if (input) input.value = '';
+        filterInModal();
 
         if (typeof bootstrap !== 'undefined') {
             const detailEl = document.getElementById('noticeDetailModal');
