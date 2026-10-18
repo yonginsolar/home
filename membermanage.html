@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.191
-Change: 2026-10-18 - Continue board pages from the last read post across concurrent additions and deletions.
+Version: v1.0.192
+Change: 2026-10-18 - Preserve profile-scoped board drafts and keyboard focus after loading more posts.
 -->
 <html lang="ko">
 <head>
@@ -10,7 +10,7 @@ Change: 2026-10-18 - Continue board pages from the last read post across concurr
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.191 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.192 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -218,6 +218,10 @@ opacity: 0.6;
 max-height: 500px;
 overflow-y: auto;
 scrollbar-width: thin;
+}
+#boardListStatus [tabindex="-1"]:focus-visible {
+outline: 3px solid #60a5fa;
+outline-offset: 4px;
 }
 
 /* [대시보드] 카드 스타일 (style.css에 없는 전용 디자인) */
@@ -2185,22 +2189,25 @@ oninput="autoHyphen(this)"> </div>
 </div>
 </div>
 
-<div id="writeModalOverlay" class="custom-modal-overlay">
+<div id="writeModalOverlay" class="custom-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="writeModalTitle" aria-hidden="true">
 <div class="custom-modal-box" style="text-align:left; max-width:500px;">
-<h5 class="fw-bold mb-3">게시글 작성</h5>
+<h5 class="fw-bold mb-3" id="writeModalTitle">게시글 작성 <small id="boardDraftStatus" class="small text-muted" role="status"></small></h5>
 <div class="mb-2">
+<label class="visually-hidden" for="writeTitle">제목</label>
 <input type="text" id="writeTitle" class="form-control" placeholder="제목">
 </div>
 <div class="mb-2">
+<label class="visually-hidden" for="writeContent">본문</label>
 <textarea id="writeContent" class="form-control" rows="5" placeholder="내용을 입력하세요"></textarea>
 </div>
 <div class="mb-3">
-<label class="small text-muted">첨부파일 (URL 입력)</label>
+<label class="small text-muted" for="writeFile">첨부파일 (URL 입력)</label>
 <input type="text" id="writeFile" class="form-control form-control-sm" placeholder="https://...">
 </div>
 <div class="custom-modal-btn-group">
-<button class="btn-modal btn-modal-no" onclick="document.getElementById('writeModalOverlay').style.display='none'">취소</button>
-<button class="btn-modal btn-modal-yes" onclick="submitPost()">등록</button>
+<button type="button" class="btn-modal btn-modal-no" id="boardDraftDiscard" onclick="discardBoardDraft()">초안 버리기</button>
+<button type="button" class="btn-modal btn-modal-no" onclick="closeWriteModal()">닫기</button>
+<button type="button" class="btn-modal btn-modal-yes" onclick="submitPost()">등록</button>
 </div>
 </div>
 </div>
@@ -2597,6 +2604,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+window.PortalBoardEditor?.clear();
 clearPortalApplicationDrafts();
 clearPortalPartnerDrafts();
 clearPortalConnectDrafts();
@@ -4666,7 +4674,8 @@ return memberInformationPortal.refresh(member);
 }
 
 async function loadDashboardData(uuid, options = {}) {
-if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending) return false;
+if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
+window.PortalBoardEditor?.suspend();
 retainPortalProfileEdit();
 retainPortalApplicationDraft();
 retainPortalPartnerDraft();++portalPartnerReadRevision;++portalPartnerRequestRevision;
@@ -4721,6 +4730,7 @@ curMem = member;
 currentMemberCoopId = member.coop_id || await getCurrentMemberCoopId();
 initializePortalApplicationDraft(member);
 initializePortalPartnerDraft(member);
+window.PortalBoardEditor?.ready();
 await loadMembermanageBranding();
 if (!currentProfileLoad()) return;
 applyMembermanageBranding();
@@ -9774,8 +9784,10 @@ throw new Error('BOARD_CURSOR_INVALID');
 return { createdAt, id };
 }
 
-function renderPortalBoardPosts(posts, hasMore) {
+function renderPortalBoardPosts(posts, hasMore, continuing = false) {
 const listArea = document.getElementById('boardList');
+const previousMore = listArea.querySelector('button[onclick="loadMoreBoard()"],button[data-board-more-retry]');
+const continueFocus = continuing && previousMore && document.activeElement === previousMore;
 if (!posts.length) {
 listArea.innerHTML = '<div class="text-center py-5 text-muted" role="status">등록된 글이 없습니다.</div>';
 return;
@@ -9801,9 +9813,11 @@ const date = formatMemberKstDate(p.created_at);
 });
 
 html += `<div class="text-center py-3" id="boardListStatus" role="status">
-               ${hasMore ? '<button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-4" onclick="loadMoreBoard()">더 보기 (+20)</button>' : '<span class="small text-muted">마지막 글입니다.</span>'}
+               ${hasMore ? '<button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-4" onclick="loadMoreBoard()">더 보기 (+20)</button>' : '<span class="small text-muted" tabindex="-1">마지막 글입니다.</span>'}
             </div>`;
 listArea.innerHTML = html;
+if (hasMore && previousMore?.getAttribute('onclick') === 'loadMoreBoard()') listArea.querySelector('button[onclick="loadMoreBoard()"]').replaceWith(previousMore);
+if (continueFocus) (hasMore ? listArea.querySelector('button[onclick="loadMoreBoard()"]') : listArea.querySelector('#boardListStatus span'))?.focus({preventScroll:true});
 }
 
 function loadBoard(category, btn, limit = 20) {
@@ -9834,8 +9848,8 @@ btn.classList.add('active');
 document.getElementById('btnWritePost')?.classList.remove('hidden');
 const listArea = document.getElementById('boardList');
 if (!more) listArea.innerHTML = '<div class="text-center py-5 text-muted" role="status">불러오는 중...</div>';
-const trigger = listArea.querySelector('button[onclick="loadMoreBoard()"]');
-if (trigger) trigger.disabled = true;
+const trigger = listArea.querySelector('button[onclick="loadMoreBoard()"],button[data-board-more-retry]');
+if (trigger) { trigger.setAttribute('aria-disabled','true'); trigger.setAttribute('aria-busy','true'); }
 const current = () => state.pending === request && request.revision === state.revision
     && owner === getPortalBoardOwner() && currentBoardCat === category;
 request.promise = Promise.resolve().then(async () => {
@@ -9864,23 +9878,26 @@ state.hasMore = page.length > 20;
 state.owner = owner;
 state.category = category;
 currentBoardLimit = Math.max(20, state.offset);
-renderPortalBoardPosts(rows, state.hasMore);
+renderPortalBoardPosts(rows, state.hasMore, more);
 } catch (error) {
 if (!current()) return;
 const status = more ? document.getElementById('boardListStatus') : listArea;
 if (status) {
+const continueFocus = more && document.activeElement === trigger;
 status.textContent = '게시글을 불러오지 못했습니다. ';
 const retry = document.createElement('button');
 retry.type = 'button';retry.className = 'btn btn-sm btn-outline-secondary';retry.textContent = '다시 불러오기';
+if (more) retry.dataset.boardMoreRetry = '';
 retry.addEventListener('click', () => loadBoard(category, null, more ? currentBoardLimit + 20 : 20));
 status.appendChild(retry);
+if (continueFocus) retry.focus({preventScroll:true});
 }
 } finally {
 clearTimeout(timer);
 if (state.pending === request) {
 state.pending = null;
 isBoardLoading = false;
-if (trigger?.isConnected) trigger.disabled = false;
+if (trigger?.isConnected) { trigger.removeAttribute('aria-disabled'); trigger.removeAttribute('aria-busy'); }
 }
 }
 });
@@ -9895,16 +9912,115 @@ return loadBoard(currentBoardCat, null, currentBoardLimit + 20);
 
 
 
-// [글쓰기] 모달 열기
-function openWriteModal() {
-document.getElementById('writeTitle').value = '';
-document.getElementById('writeContent').value = '';
-document.getElementById('writeFile').value = '';
-document.getElementById('writeModalOverlay').style.display = 'flex';
+/* BOARD_EDITOR_START — memory only; no independent Auth, network or storage. */
+;(function() {
+const drafts = new Map(), ids = ['writeTitle','writeContent','writeFile'];
+let owner = '', editor = null, ready = false, writing = false, discarding = false, revision = 0;
+const fields = () => ids.map(id => document.getElementById(id));
+const snapshot = () => fields().map(n => n.value);
+const apply = values => fields().forEach((n,i) => { n.value = values?.[i] || ''; });
+const modal = () => document.getElementById('writeModalOverlay');
+function context() {
+const actor = String(curAuth?.id || ''), coop = String(currentMemberCoopId || ''), member = String(curMem?.id || '');
+const next = actor && coop ? JSON.stringify([actor,coop]) : '';
+if (owner !== next) { drafts.clear(); editor = null; owner = next; ++revision; apply(); }
+if (!next || !member || (curMem?.coop_id && String(curMem.coop_id) !== coop) || currentBoardCat === 'notice') return null;
+return {owner:next,coop,member,category:currentBoardCat,key:JSON.stringify([next,member,currentBoardCat])};
 }
+function sync() {
+const status = document.getElementById('boardDraftStatus');
+if (status) status.textContent = writing ? '등록 중' : snapshot().some(Boolean) ? '작성 중' : '';
+fields().forEach(n => { n.disabled = writing; });
+modal()?.querySelectorAll('button').forEach(n => { n.disabled = writing || (discarding && n.id === 'boardDraftDiscard'); });
+}
+function retain() {
+const current = context();
+if (!editor || editor.key !== current?.key) return;
+const values = snapshot();
+if (values.some(Boolean)) drafts.set(editor.key,values); else drafts.delete(editor.key);
+sync();
+}
+function close(restoreFocus = true) {
+if (writing) return;
+retain(); ++revision;
+modal().style.display = 'none'; modal().setAttribute('aria-hidden','true');
+modal().classList.remove('modal-depth-back');
+if (restoreFocus && editor?.key === context()?.key && editor.trigger?.isConnected) editor.trigger.focus({preventScroll:true});
+}
+function open() {
+if (writing || !ready || (typeof isSiteMemberPortalProfile === 'function' && isSiteMemberPortalProfile())) return;
+const current = context(); if (!current) return;
+retain(); ++revision;
+editor = {...current,trigger:document.activeElement}; apply(drafts.get(current.key)); sync();
+modal().classList.remove('modal-depth-back');
+modal().style.display = 'flex'; modal().setAttribute('aria-hidden','false'); fields()[0].focus();
+}
+function capture() {
+const current = context();
+if (!ready || writing || discarding || !editor || editor.key !== current?.key || modal().style.display !== 'flex') return null;
+retain();
+return {...current,editor,revision,values:snapshot(),authorName:curMem.name};
+}
+function isCurrent(request,checkInput = true) {
+return !!request && ready && editor === request.editor && revision === request.revision && editor.key === context()?.key
+    && modal().style.display === 'flex' && (!checkInput || JSON.stringify(request.values) === JSON.stringify(snapshot()));
+}
+async function discard() {
+const request = capture(); if (!request) return;
+if (!window.CoopDialog?.confirm) { showModal('확인창을 열지 못했습니다. 다시 시도해 주세요.'); return; }
+discarding = true; sync();
+let accepted = false;
+try { accepted = await window.CoopDialog.confirm('이 초안을 버릴까요?'); }
+finally { discarding = false; sync(); }
+if (!accepted || !isCurrent(request)) return;
+drafts.delete(request.key); apply(); ++revision; sync(); fields()[0].focus({preventScroll:true});
+}
+function clear() {
+drafts.clear(); editor = null; owner = ''; ready = false; ++revision;
+apply(); modal().style.display = 'none'; modal().setAttribute('aria-hidden','true'); sync();
+}
+window.PortalBoardEditor = {
+open,close,discard,clear,capture,current:isCurrent,
+ready() { context(); ready = true; },
+suspend() { close(false); ready = false; ++revision; },
+busy:() => writing,
+setBusy(value) { writing = value; sync(); },
+finish(request) {
+if (!isCurrent(request,false)) return false;
+if (JSON.stringify(snapshot()) === JSON.stringify(request.values)) {
+drafts.delete(request.key); apply();
+modal().classList.remove('modal-depth-back');
+modal().style.display = 'none'; modal().setAttribute('aria-hidden','true'); ++revision;
+} else retain();
+return true;
+}
+};
+document.addEventListener('input', event => { if (ids.includes(event.target.id)) retain(); });
+document.addEventListener('keydown', event => {
+if (modal().style.display !== 'flex' || window.CoopDialog?.hasPending() || document.getElementById('customModalOverlay')?.style.display === 'flex') return;
+if (event.key === 'Escape') { event.preventDefault(); close(); }
+else if (event.key === 'Tab') {
+const nodes = [...modal().querySelectorAll('input:not([disabled]),textarea:not([disabled]),button:not([disabled])')];
+if (!nodes.length) return;
+const first = nodes[0], last = nodes[nodes.length-1];
+if (event.shiftKey && (document.activeElement === first || !modal().contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+else if (!event.shiftKey && (document.activeElement === last || !modal().contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+}
+});
+window.addEventListener('beforeunload', event => {
+retain(); if (writing || (owner && drafts.size)) { event.preventDefault(); event.returnValue = ''; }
+});
+})();
+/* BOARD_EDITOR_END */
+// [글쓰기] 모달 열기
+function openWriteModal() { window.PortalBoardEditor?.open(); }
+function closeWriteModal() { window.PortalBoardEditor?.close(); }
+function discardBoardDraft() { return window.PortalBoardEditor?.discard(); }
 
 // [글쓰기] 등록 (자유/임원 게시판용)
 async function submitPost() {
+const request = window.PortalBoardEditor?.capture();
+if (!request) return;
 const title = document.getElementById('writeTitle').value;
 const content = document.getElementById('writeContent').value;
 const fileUrl = document.getElementById('writeFile').value; // 임시 파일 URL 입력
@@ -9912,15 +10028,18 @@ const fileUrl = document.getElementById('writeFile').value; // 임시 파일 URL
 if(!title || !content) return showModal('제목과 내용을 입력해주세요.');
 
 showConfirmModal('게시글을 등록하시겠습니까?', async () => {
+if (!window.PortalBoardEditor.current(request)) return;
 if (window.__memberAppLocks.submitPost) {
 showModal('이미 게시글 등록 처리 중입니다. 잠시만 기다려주세요.');
 return;
 }
 window.__memberAppLocks.submitPost = true;
+window.PortalBoardEditor.setBusy(true);
 showLoading(true);
 
 try {
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+if (!window.PortalBoardEditor.current(request)) return;
 if (!coopId) {
 throw new Error('조합 정보를 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
 }
@@ -9928,13 +10047,14 @@ throw new Error('조합 정보를 확인하지 못했습니다. 다시 로그인
 const { data: recentPost, error: recentPostErr } = await scopeMemberTenant(_supabase
 .from('coop_boards')
 .select('id, created_at'))
-.eq('category', currentBoardCat)
-.eq('author_name', curMem.name)
+.eq('category', request.category)
+.eq('author_name', request.authorName)
 .eq('title', title)
 .eq('content', content)
 .order('created_at', { ascending: false })
 .limit(1)
 .maybeSingle();
+if (!window.PortalBoardEditor.current(request)) return;
 
 if (recentPostErr && String(recentPostErr.code || '') !== 'PGRST116') {
 throw recentPostErr;
@@ -9951,23 +10071,24 @@ return;
 const files = fileUrl ? [fileUrl] : [];
 
 const { error } = await _supabase.from('coop_boards').insert(withMemberTenantPayload({
-category: currentBoardCat, // 현재 보고 있는 탭의 카테고리 (free, executive 등)
+category: request.category, // 현재 보고 있는 탭의 카테고리 (free, executive 등)
 title: title,
 content: content,
 files: files,
-author_name: curMem.name // 작성자 이름 기록
+author_name: request.authorName // 작성자 이름 기록
 }));
 
 if(error) throw error;
 
+if (!window.PortalBoardEditor.finish(request)) return;
 showModal('등록되었습니다.');
-document.getElementById('writeModalOverlay').style.display = 'none';
 loadBoard(currentBoardCat); // 목록 갱신
 } catch (error) {
-showModal('등록 실패: ' + error.message);
+if (window.PortalBoardEditor.current(request,false)) showModal('등록 실패: ' + error.message);
 } finally {
 showLoading(false);
 window.__memberAppLocks.submitPost = false;
+window.PortalBoardEditor.setBusy(false);
 }
 });
 }
@@ -10169,7 +10290,7 @@ return request.promise;
 
 // 2. 프로필 전환 실행
 async function switchProfile(targetUuid, targetName) {
-if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending) return;
+if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return;
 if(window.__memberAppLocks?.requestConnect || window.__memberAppLocks?.disconnectRelation) return;
 if(curMem && curMem.id === targetUuid && getPortalProfileReadFailure()?.member !== String(targetUuid)) return;
 const profileActor = String(curAuth?.id || '');
