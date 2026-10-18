@@ -6708,8 +6708,49 @@ const memberConsultPending = new Set();
 let memberConsultState = null;
 let memberCreateState = null;
 let memberCreateSaving = false;
+const memberFundDrafts = new Map();
+let memberFundState = null;
+
+function memberFundFields() {
+    return ['fund-date','fund-amount','fund-note','fund-depositor','fund-method'].map(id => document.getElementById(id)).filter(Boolean);
+}
+function memberFundSnapshot() {
+    return memberFundFields().map(node => [node.id,node.value]);
+}
+function isCurrentMemberFund(state = memberFundState) {
+    return !!state && state === memberFundState && state.owner === memberDetailOwner()
+        && state.member === String(g_current_member_id || '');
+}
+function captureMemberFundDraft() {
+    const state = memberFundState;
+    if (!isCurrentMemberFund(state) || state.busy || state.completed) return;
+    const values = memberFundSnapshot();
+    const normalize = rows => JSON.stringify(rows.map(([key,value]) => [key,key==='fund-amount' ? value.replace(/,/g,'') : value]));
+    if (state.uncertain || normalize(values) !== normalize(state.baseline)) memberFundDrafts.set(state.key, {...state,values});
+    else memberFundDrafts.delete(state.key);
+    syncMemberFundDraftStatus();
+}
+function syncMemberFundDraftStatus() {
+    const label = document.getElementById('fund-draft-status'),state=memberFundState;
+    if (!label) return;
+    label.hidden = !state || !(state.busy || state.uncertain || memberFundDrafts.has(state.key));
+    label.textContent = state?.busy ? '저장 중' : state?.uncertain ? '결과 확인 필요' : '작성 중';
+    const button=document.getElementById('fund-save-button');
+    if (button) button.disabled = !state || state.busy || state.uncertain || !isCurrentMemberFund(state);
+}
+function clearMemberFundDrafts() {
+    memberFundDrafts.clear(); memberFundState=null;
+    document.querySelectorAll('#fundEditorModal input,#fundEditorModal select,#fundEditorModal button').forEach(node=>{node.disabled=true;});
+}
+document.getElementById('fundEditorModal')?.addEventListener('input',captureMemberFundDraft);
+document.getElementById('fundEditorModal')?.addEventListener('change',captureMemberFundDraft);
+document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',event=>{
+    if (memberFundState?.busy && !memberFundState.completed) {event.preventDefault();return;}
+    captureMemberFundDraft();
+});
 
 function clearMemberDetailEdits() {
+    clearMemberFundDrafts();
     if (typeof resetMemberImportDraft === 'function') resetMemberImportDraft();
     memberDetailDrafts.clear();
     memberDetailEditState = null;
@@ -6853,10 +6894,14 @@ function cancelMemberBasicEdit() {
     memberDetailFields().forEach(node => window.ErpWorkspaceResume?.checkpoint(node));
 }
 
-function acceptMemberBasicSave(state, submitted, updates, includeBadges = false) {
+function acceptMemberBasicSave(state, submitted, updates, includeBadges = false, savedJoinDetails = null) {
     if (!isCurrentMemberDetailEditor(state)) return;
     const old = new Map(state.baseline);
     const savedEmail = updates.p_email || old.get('md-email-original') || '';
+    const joinValue = (key, input) => savedJoinDetails && Object.prototype.hasOwnProperty.call(savedJoinDetails, key)
+        ? String(savedJoinDetails[key] || '') : String(updates.p_join_details?.[key] || old.get(input) || '');
+    const savedJoinDate = joinValue('join_date', 'md-join-date');
+    const savedJoinCategory = joinValue('join_category', 'md-join-category');
     const account = String(updates.p_bank_account || '').replace(/[\s-]/g, '');
     const mask = updates.p_bank_account
         ? (/^[0-9]{8,30}$/.test(account) ? '****' + account.slice(-4) : '****')
@@ -6865,10 +6910,12 @@ function acceptMemberBasicSave(state, submitted, updates, includeBadges = false)
     state.baseline = submitted.map(([key,value]) => [key,
         key === 'md-bank-account' ? mask : key === 'md-rrn' ? ''
         : (key === 'md-email' || key === 'md-email-original') ? savedEmail
+        : key === 'md-join-date' ? savedJoinDate : key === 'md-join-category' ? savedJoinCategory
         : (!includeBadges && badgeIds.has(key) ? old.get(key) : value)]);
     const current = memberDetailSnapshot().map(([key,value]) => [key,
         key === 'md-bank-account' ? mask : key === 'md-rrn' ? ''
-        : (key === 'md-email' || key === 'md-email-original') ? savedEmail : value]);
+        : (key === 'md-email' || key === 'md-email-original') ? savedEmail
+        : key === 'md-join-date' ? savedJoinDate : key === 'md-join-category' ? savedJoinCategory : value]);
     applyMemberDetailSnapshot(current);
     MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'), {account_num_display:mask});
     // Keep the authorized local row consistent until its usual list refresh completes.
@@ -6880,13 +6927,16 @@ function acceptMemberBasicSave(state, submitted, updates, includeBadges = false)
         for (const [key,param] of Object.entries(fields)) g_current_member_row[key] = key === 'email' ? (savedEmail || null) : updates[param];
         g_current_member_row.account_number = mask || null;
         g_current_member_row.account_num_display = mask || null;
+        g_current_member_row.join_date = savedJoinDate || null;
+        g_current_member_row.join_category = savedJoinCategory || null;
     }
 }
 
 window.addEventListener('beforeunload', event => {
     retainMemberDetailEdit();
     retainMemberConsultEdit();
-    if (memberDetailOwner() && (memberDetailSaving || memberDetailDrafts.size || memberConsultDrafts.size
+    captureMemberFundDraft();
+    if (memberDetailOwner() && (memberFundDrafts.size || memberFundState?.busy || memberFundState?.uncertain || memberDetailSaving || memberDetailDrafts.size || memberConsultDrafts.size
         || memberConsultPending.size || memberCreateSaving || hasMemberCreateDraft()
         || (typeof hasMemberImportDraft === 'function' && hasMemberImportDraft()))) {
         event.preventDefault();
@@ -6922,7 +6972,8 @@ function setMemberDetailReadBusy(busy) {
 }
 
 document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', event => {
-    if (memberDetailSaving) { event.preventDefault(); return; }
+    if (memberDetailSaving || memberFundState?.busy) { event.preventDefault(); return; }
+    captureMemberFundDraft();
     retainMemberDetailEdit();
     retainMemberConsultEdit();
     window.MemberNotificationAdmin?.clearDetail();
@@ -7364,9 +7415,12 @@ async function loadAdminMemberQuizHistory(forceReload = false) {
 } // End of loadAdminMemberQuizHistory
 
 async function openMemberDetail(id) {
-    if (memberDetailSaving) return;
+    if (memberDetailSaving || memberFundState?.busy) return;
     const editorOwner = memberDetailOwner();
     if (!editorOwner) return;
+    captureMemberFundDraft();
+    const fundModal=document.getElementById('fundEditorModal');
+    if (fundModal?.classList.contains('show')) bootstrap.Modal.getInstance(fundModal)?.hide();
     retainMemberDetailEdit();
     retainMemberConsultEdit();
     window.ContributionCertPreview?.clear();
@@ -7459,6 +7513,8 @@ async function openMemberDetail(id) {
     document.getElementById('md-email').value = m.email || '';
     document.getElementById('md-email-original').value = m.email || '';
     document.getElementById('md-status').value = m.status || '';
+    document.getElementById('md-join-date').value = String(m.join_date || '').slice(0, 10);
+    document.getElementById('md-join-category').value = m.join_category || '';
     const currentTarget = () => requestRevision === g_member_detail_revision ? g_current_member_id : null;
     void window.GuardianAdmin?.load(_supabase,memberUid,currentTarget);
     void window.ChildDirectAdmin?.load(_supabase,{...m,id:memberUid},currentTarget);
@@ -8049,6 +8105,23 @@ async function saveMemberBasic() {
             const nextEmail = emailInput || null;
             const memberType = document.getElementById('md-type').value;
             const isGroup = String(memberType).includes('단체');
+            const memberName = (document.getElementById('md-name').value || '').trim();
+            if (!memberName || Array.from(memberName).length > 100 || /[\u0000-\u001f\u007f]/.test(memberName)) {
+                throw new Error('이름·단체명을 제어 문자 없이 100자 이내로 입력해주세요.');
+            }
+            const joinBaseline = new Map(editState.baseline);
+            const joinDetails = {};
+            const joinDate = document.getElementById('md-join-date').value;
+            const joinCategory = document.getElementById('md-join-category').value.trim();
+            if (joinDate && joinDate !== joinBaseline.get('md-join-date')) {
+                joinDetails.join_date = joinDate;
+                joinDetails.expected_join_date = joinBaseline.get('md-join-date') || null;
+            }
+            if (joinCategory && joinCategory !== (joinBaseline.get('md-join-category') || '').trim()) {
+                if (Array.from(joinCategory).length > 100 || /[\u0000-\u001f\u007f]/.test(joinCategory)) throw new Error('가입구분을 제어 문자 없이 100자 이내로 입력해주세요.');
+                joinDetails.join_category = joinCategory;
+                joinDetails.expected_join_category = joinBaseline.get('md-join-category') || null;
+            }
             const representativeName = isGroup
                 ? (document.getElementById('md-representative-name').value || '').trim()
                 : '';
@@ -8077,7 +8150,7 @@ async function saveMemberBasic() {
             // 2. 기본 정보와 단체 담당자 정보를 하나의 보안 RPC로 업데이트
             const updates = {
                 p_id: memberUid,
-                p_name: (document.getElementById('md-name').value || '').trim(),
+                p_name: memberName,
                 p_phone: (document.getElementById('md-phone').value || '').trim() || null,
                 p_email: nextEmail,
                 p_address: finalAddr,
@@ -8094,18 +8167,19 @@ async function saveMemberBasic() {
                 p_contact_name: isGroup ? contactName : null,
                 p_contact_position: isGroup ? contactPosition : null,
                 p_preferred_name: preferredName,
-                p_preferred_name_position: preferredNamePosition
+                p_preferred_name_position: preferredNamePosition,
+                p_join_details: joinDetails
             };
             const submitted = memberDetailSnapshot();
             lockedControls = Array.from(document.querySelectorAll('#memberDetailModal input,#memberDetailModal select,#memberDetailModal textarea,#memberDetailModal button'))
                 .map(node => [node,node.disabled]);
             lockedControls.forEach(([node]) => { node.disabled = true; });
 
-            const { error: basicError } = await _supabase.rpc('update_member_details_secure_v3', updates);
+            const { data: savedJoinDetails, error: basicError } = await _supabase.rpc('update_member_details_secure_v4', updates);
             if (basicError) throw basicError;
             if (!isCurrentMemberDetailEditor(editState)) return;
             basicSaved = true;
-            acceptMemberBasicSave(editState, submitted, updates);
+            acceptMemberBasicSave(editState, submitted, updates, false, savedJoinDetails);
 
             if (canManageAdminMemberIndividualBadges()) {
                 const selectedCodes = [];
@@ -8126,7 +8200,7 @@ async function saveMemberBasic() {
                 if (badgeError) throw new Error('뱃지 동기화 실패: ' + badgeError.message);
             }
             if (!isCurrentMemberDetailEditor(editState)) return;
-            acceptMemberBasicSave(editState, submitted, updates, true);
+            acceptMemberBasicSave(editState, submitted, updates, true, savedJoinDetails);
             completed = true;
             memberDetailDrafts.delete(editState.key);
 
@@ -8505,7 +8579,18 @@ function renderDonationJournalStatus(completed) {
 }
 
 function openFundEditor(type, rowDataStr) {
+    const owner=memberDetailOwner(), member=String(g_current_member_id || '');
+    if (!owner || !member || window.frameElement?.hidden || memberFundState?.busy || !['capital','donation'].includes(type)
+        || (type==='donation' && isAdminMemberSiteProfile())) return;
+    captureMemberFundDraft();
+    let record=null;
+    try {record=rowDataStr ? JSON.parse(decodeURIComponent(rowDataStr)) : null;}
+    catch (_) {return myAlert('내역을 불러오지 못했습니다. 다시 열어주세요.','error');}
+    const key=JSON.stringify([owner,member,type,record?.id || 'new']);
+    const held=memberFundDrafts.get(key);
+    memberFundState=null;
     const modalEl = document.getElementById('fundEditorModal');
+    modalEl.querySelectorAll('input,select,button').forEach(node=>{node.disabled=false;});
     const titleEl = document.getElementById('fund-modal-title');
     const delBtn = document.getElementById('btn-fund-delete'); // 삭제 버튼
 
@@ -8574,8 +8659,19 @@ function openFundEditor(type, rowDataStr) {
         delBtn.style.display = 'none';
     }
 
+    const state={key,owner,member,type,id:record?.id || null,memberTextId:document.getElementById('md-id-text').innerText,
+        baseline:memberFundSnapshot(),busy:false,uncertain:false,completed:false,
+        journalCompleted:g_fundDonationJournalCompleted,journalOriginal:g_fundDonationOriginalNote,journalMemo:g_fundDonationInitialMemo};
+    memberFundState=held ? {...held,busy:false,completed:false} : state;
+    if (held) {
+        for (const [id,value] of held.values) {const node=document.getElementById(id);if(node)node.value=value;}
+        g_fundDonationJournalCompleted=held.journalCompleted;
+        g_fundDonationOriginalNote=held.journalOriginal;g_fundDonationInitialMemo=held.journalMemo;
+        document.getElementById('fund-journal-status').innerHTML=renderDonationJournalStatus(held.journalCompleted);
+    }
+    syncMemberFundDraftStatus();
     modalEl.style.zIndex = 2000;
-    new bootstrap.Modal(modalEl).show();
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 
 function setMemberFundReadState(type, state, label = '') {
@@ -9367,6 +9463,9 @@ function runAfterFundEditorClosed(callback) {
 
 // [수정] 저장 실행 (Foreign Key 에러 방지 적용)
 async function saveFundData() {
+    const state=memberFundState;
+    if (!isCurrentMemberFund(state) || state.busy || state.uncertain || window.frameElement?.hidden
+        || !document.getElementById('fundEditorModal')?.classList.contains('show')) return;
     // 1. 폼 데이터 수집
     const type = document.getElementById('fund-edit-type').value;
 
@@ -9392,6 +9491,12 @@ async function saveFundData() {
     // 현재 상세 모달에 띄워진 조합원 정보 가져오기
     const memberUid = document.getElementById('md-uid').value;           // UUID
     const memberTextId = document.getElementById('md-id-text').innerText; // 텍스트 ID (예: 2024-001)
+    if (memberUid!==state.member || memberTextId!==state.memberTextId || type!==state.type || String(idVal || '')!==String(state.id || '')) return;
+    captureMemberFundDraft();
+    state.busy=true;syncMemberFundDraftStatus();
+    const locked=Array.from(document.querySelectorAll('#fundEditorModal input,#fundEditorModal select,#fundEditorModal button')).map(node=>[node,node.disabled]);
+    locked.forEach(([node])=>{node.disabled=true;});
+    try {
 
     showLoading(true);
 
@@ -9431,12 +9536,16 @@ async function saveFundData() {
 
     // 3. RPC 호출
     const { data, error } = await _supabase.rpc(rpcName, params);
+    if (!isCurrentMemberFund(state)) return;
 
     showLoading(false);
 
     if (error) {
+        if (!error.code || /fetch|network|timeout/i.test(String(error.code))) state.uncertain=true;
         myAlert('저장 실패: ' + error.message, 'error');
     } else {
+        state.completed=true;memberFundDrafts.delete(state.key);
+        memberFundFields().forEach(node=>window.ErpWorkspaceResume?.checkpoint(node));
         if (type === 'capital' && isAdminMemberSiteProfile() && data?.member_join_date) {
             const nextJoinDate = String(data.member_join_date).slice(0, 10);
             if (/^\d{4}-\d{2}-\d{2}$/.test(nextJoinDate)) {
@@ -9461,6 +9570,7 @@ async function saveFundData() {
         loadDashboard();
 
         runAfterFundEditorClosed(function () {
+            if (!isCurrentMemberFund(state)) return;
             if (hasCapitalNotificationPrompt) {
                 openCapitalNotificationPrompt(data, async function (result) {
                     showLoading(true);
@@ -9480,6 +9590,17 @@ async function saveFundData() {
             }
             myAlert('성공적으로 저장되었습니다.');
         });
+    }
+    } catch (error) {
+        if (isCurrentMemberFund(state)) {
+            if (!state.completed) state.uncertain=true;
+            myAlert(state.completed ? '저장했습니다. 목록을 다시 불러와 주세요.' : '저장 결과를 확인하지 못했습니다. 내역을 확인해 주세요.','warning');
+        }
+    } finally {
+        state.busy=false;
+        locked.forEach(([node,disabled])=>{if(node.isConnected)node.disabled=isCurrentMemberFund(state)?disabled:true;});
+        if (isCurrentMemberFund(state)) {captureMemberFundDraft();syncMemberFundDraftStatus();}
+        showLoading(false);
     }
 } // End of saveFundData
 
