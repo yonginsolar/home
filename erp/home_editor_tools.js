@@ -13,18 +13,19 @@
  function capture(kind){
   const keyNode=n=>{if(!nodeIds.has(n))nodeIds.set(n,++nodeSequence);return nodeIds.get(n);};
   // Borrowing original controls into a dialog is navigation, not an edit.
-  const fields=nodes(kind).map(n=>({node:n,value:n.value,checked:n.checked,files:n.type==='file'?[...n.files]:null,list:n.type==='file'?n.files:null})).sort((a,b)=>keyNode(a.node)-keyNode(b.node));
+  const fieldKey=n=>n.id||n.name||String(keyNode(n));
+  const fields=nodes(kind).map(n=>({node:n,value:n.value,checked:n.checked,files:n.type==='file'?[...n.files]:null,list:n.type==='file'?n.files:null})).sort((a,b)=>fieldKey(a.node).localeCompare(fieldKey(b.node)));
   const slides=kind==='home'?root.CoopHeroSlides?.checkpoint():null;
   const sections=kind==='sections'&&typeof g_sectionDrafts!=='undefined'?copy(g_sectionDrafts):null;
   const rows=kind==='home'?[...document.querySelectorAll('#site-home-impact-region-list .home-region-row')]:null;
   const keyFile=f=>{if(!fileIds.has(f))fileIds.set(f,++fileSequence);return fileIds.get(f);};
-  return {fields,slides,sections,rows,signature:JSON.stringify([fields.map(f=>[keyNode(f.node),f.files?f.files.map(keyFile):f.node.type==='checkbox'||f.node.type==='radio'?f.checked:f.value]),slides?.rows.map(r=>[r.item.id,r.value,r.presentation,r.file&&keyFile(r.file),r.mobileFile&&keyFile(r.mobileFile)]),sections,rows?.map(keyNode)])};
+  return {fields,slides,sections,rows,signature:JSON.stringify([fields.filter(f=>!f.node.closest('.home-region-row')).map(f=>[fieldKey(f.node),f.files?f.files.map(keyFile):f.node.type==='checkbox'||f.node.type==='radio'?f.checked:f.value]),slides?.rows.map(r=>[r.value,r.presentation,r.file&&keyFile(r.file),r.mobileFile&&keyFile(r.mobileFile)]),sections,rows?.map(n=>[...n.querySelectorAll('input')].map(n=>n.value))])};
  }
  function emit(){document.dispatchEvent(new Event('coop-home-undo-change'));}
  function journal(kind){let j=journals.get(kind);const key=owner();if(!j||j.owner!==key){j={owner:key,last:null,stack:[],mark:null};journals.set(kind,j);}return j;}
  function record(kind,key=''){
   if(restoring)return;const state=status(kind),j=journal(kind);if(!state.loaded)return;
-  const next=capture(kind);if(!j.last){j.last=next;return;}if(j.last.signature===next.signature)return;
+  const next=capture(kind);if(!j.last){j.last=next;return;}if(j.last.signature===next.signature){j.last=next;return;}
   const time=Date.now(),prior=j.stack.at(-1),merge=key&&prior?.key===key&&time-prior.time<700&&!j.mark;
   if(merge){prior.after=next;prior.time=time;}else j.stack.push({before:j.last,after:next,key,time,seq:++sequence});j.last=next;emit();
  }
@@ -105,5 +106,5 @@
   for(const name of ['input','change','click'])document.addEventListener(name,event=>{if(event.target.closest('.home-field-help,#home-inline-undo'))return;if(event.target.closest('#tab-site,[data-inline-original-root],.home-element-dialog')){if(name!=='input')reason='!'+name;else if(event.target.type==='hidden'){if(!reason)reason='!model';}else if(!reason.startsWith('!'))reason=event.target.matches('input:not([type=file]):not([type=checkbox]):not([type=radio]),textarea')?event.target.id:'';observe('home');}},true);
   for(const kind of Object.keys(groups))observe(kind);
  }
- root.CoopHomeEditorTools=Object.freeze({mount,decorate,observe,accepted,submitted,undo,undoState,restoreFiles,version:'1.0.1'});
+ root.CoopHomeEditorTools=Object.freeze({mount,decorate,observe,accepted,submitted,undo,undoState,restoreFiles,version:'1.0.2'});
 })(window);
