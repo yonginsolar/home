@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.9 — keep definitive setup-expiry guidance and retained drafts. */
+/* Persistent ERP workspace v1.2.10 — keep local document actions out of task navigation. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -329,6 +329,12 @@
       if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       const anchor = event.target.closest?.('a[href]');
       if (!anchor || anchor.hasAttribute('download') || (anchor.target && anchor.target !== '_self')) return;
+      // Local fragments/actions belong to the child document, not the task router.
+      const rawHref = anchor.getAttribute('href')?.trim();
+      if (!rawHref || rawHref.startsWith('#')) return;
+      const target = new URL(anchor.href, doc.baseURI);
+      const here = new URL(doc.location.href);
+      if (target.origin === here.origin && target.pathname === here.pathname && target.search === here.search && target.hash) return;
       if (navigate(anchor.href)) { event.preventDefault(); event.stopImmediatePropagation(); }
     }, true);
     doc.addEventListener('keydown', event => {
@@ -482,5 +488,5 @@
     try { await pending; }
     finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261016.3'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261019.1'};
 })();

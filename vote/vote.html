@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.12
+Version: v1.0.13
 Change: 2026-10-05 - Fit candidate cards and confirmation dialogs to narrow mobile screens.
 -->
 <html lang="ko" data-election-ui="vote" data-election-role="member">
@@ -9,7 +9,7 @@ Change: 2026-10-05 - Fit candidate cards and confirmation dialogs to narrow mobi
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>조합원 투표소</title>
-    <script>console.log('[Version] v1.0.12 | vote.html');</script>
+    <script>console.log('[Version] v1.0.13 | vote.html');</script>
     <link rel="stylesheet" href="style.css">
    <style>
 /* =========================================
@@ -94,6 +94,7 @@ h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; color: var(--text-dark); }
     border-color: var(--primary-color);
     box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
 }
+.candidate-card:focus-visible { outline: 3px solid #2563eb; outline-offset: 4px; }
 
 .candidate-img {
     width: 100%;
@@ -676,8 +677,15 @@ async function loadNextBallot() {
             const candidatePhotoMap = await buildCandidatePhotoUrlMap(info.candidates || []);
 
             info.candidates.forEach(cand => {
-                const card = document.createElement('div');
+                const card = document.createElement(info.isUncontested ? 'div' : 'button');
                 card.className = 'candidate-card';
+                if (!info.isUncontested) {
+                    card.type = 'button';
+                    card.setAttribute('aria-pressed', 'false');
+                    card.style.font = 'inherit';
+                    card.style.color = 'inherit';
+                    card.style.textAlign = 'left';
+                }
 
                 // 무투표일 경우 선택 효과 제거 (보기 전용)
                 if (info.isUncontested) {
@@ -722,8 +730,9 @@ async function loadNextBallot() {
                 if (!info.isUncontested) {
                     card.addEventListener('click', (e) => {
                         // if(e.target === manifestoBtn) return; // [삭제] 버튼이 없으니 이 예외처리도 필요 없음
-                        document.querySelectorAll('.candidate-card').forEach(c => c.classList.remove('selected'));
+                        document.querySelectorAll('.candidate-card').forEach(c => { c.classList.remove('selected'); if(c.tagName==='BUTTON') c.setAttribute('aria-pressed','false'); });
                         card.classList.add('selected');
+                        card.setAttribute('aria-pressed', 'true');
                         selectedValue = cand.id;
                         voteBtn.disabled = false;
                         voteBtn.innerText = `'${cand.name}' 선택완료`;
