@@ -10310,7 +10310,7 @@ function openChildForm() {
     const owner = memberDetailOwner(), parentId = String(document.getElementById('md-uid').value || '');
     if (!owner || memberChildSaving || parentId !== String(g_current_member_id || '')) return;
     const parent = findCachedAdminMember(parentId) || g_current_member_row;
-    if (!parent || String(parent.id) !== parentId || String(parent.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) return;
+    if (!parent || String(parent.id) !== parentId || (parent.coop_id && String(parent.coop_id) !== String(g_adminMemberRuntime?.coop_id || ''))) return;
     retainMemberChildDraft();
     const key = JSON.stringify([owner,parentId]), draft = memberChildDrafts.get(key);
     const baseline = draft?.baseline || [['child-name',''],['child-rrn',''],['child-phone',parent.phone || ''],['child-address',parent.address || '']];
