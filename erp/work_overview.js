@@ -1,4 +1,4 @@
-/* v1.1.1 — Keep task rows and status aligned with the latest scoped read. */
+/* v1.1.2 — Keep loading, failures and counts behind the latest scoped read boundary. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -18,13 +18,16 @@
  function mount(options) {
   if(binding) {binding.invalidate();binding=undefined;}
   const container=document.getElementById('workOverview');if(!container)return;
-  container.replaceChildren();const sections=[],controllers=new Set(),panels=new Map();
+  container.replaceChildren();const sections=[],controllers=new Map(),panels=new Map();
   const key=()=>{const c=options.context();return c?`${c.coop_id}|${c.actor}`:'';};
   const owner=key();
   let dialog=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0;
   const current=()=>!disposed&&key()===owner&&!!owner&&container.isConnected&&!container.closest('.hidden');
   async function read(section){
-   const ticket=++readSequence,controller=new AbortController();controllers.add(controller);let timer;
+   const ticket=++readSequence,controller=new AbortController();controllers.set(controller,section);let timer;
+   // Reserve the boundary when a read starts, including reads that later fail.
+   if(section==='summary'||section==='tasks')lastTaskTicket=ticket;
+   if(section==='summary'||section==='setup')lastSetupTicket=ticket;
    try{
     const requested=section==='tasks'?'tasks_v2':section;
     const request=Promise.resolve().then(()=>{const q=options.client.rpc('erp_get_work_overview',{p_section:requested});return q.abortSignal?q.abortSignal(controller.signal):q;});
@@ -37,13 +40,13 @@
    }finally{clearTimeout(timer);controllers.delete(controller);}
   }
   function counts(data,ticket){
+   if(ticket<lastTaskTicket)return false;
    const keys=new Set();let total=0;
    for(const item of data.items){
     if(!['approval','signup','member','insurance','receipts','inventory','material'].includes(item.key)||keys.has(item.key)||!Number.isSafeInteger(item.count)||item.count<0)throw Error('COUNT_UNAVAILABLE');
     keys.add(item.key);total+=item.count;
    }
    if(!Number.isSafeInteger(total))throw Error('COUNT_UNAVAILABLE');
-   if(ticket<lastTaskTicket)return false;
    lastTaskTicket=ticket;const badge=panels.get('tasks').badge;
    const panel=panels.get('tasks'),snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
    if(panel.snapshot&&panel.snapshot!==snapshot){panel.list.replaceChildren();panel.status.textContent='대기 건수가 바뀌었습니다. 최신 목록을 다시 확인해 주세요.';panel.snapshot=null;}
@@ -53,26 +56,36 @@
    return true;
   }
   function setupVisibility(value,ticket){
+   if(ticket<lastSetupTicket)return false;
    if(typeof value?.can_view!=='boolean'||typeof value.complete!=='boolean'||!Number.isSafeInteger(value.required_count)||!Number.isSafeInteger(value.pending_count)
     ||value.required_count<0||value.pending_count<0||value.pending_count>value.required_count||value.can_view!==(value.required_count>0)
     ||value.complete!==(value.required_count>0&&value.pending_count===0))throw Error('STATE_UNAVAILABLE');
-   if(ticket<lastSetupTicket)return false;lastSetupTicket=ticket;
+   lastSetupTicket=ticket;
    const panel=panels.get('setup');panel.root.hidden=!value.can_view||value.complete;
    if(panel.root.hidden){panel.root.open=false;panel.list.replaceChildren();panel.reset();}
    return true;
   }
+  function failTasks(ticket,message){
+   if(!current()||ticket<lastTaskTicket)return;
+   const panel=panels.get('tasks');panel.badge.textContent='확인 필요';panel.badge.className='badge text-bg-warning ms-2';
+   options.onTasks?.(null,'failed');panel.status.textContent=message;
+  }
   function refresh(){
    if(!current())return null;
    if(summaryPending)return summaryPending;
-   const panel=panels.get('tasks');panel.badge.textContent='확인 중…';panel.badge.className='small text-muted ms-2';options.onTasks?.(null,'loading');
+   const panel=panels.get('tasks');panel.reset();
+   for(const [controller,section]of controllers)if(section==='tasks')controller.abort();
+   panel.badge.textContent='확인 중…';panel.badge.className='small text-muted ms-2';panel.status.textContent='대기 건수를 확인하는 중…';options.onTasks?.(null,'loading');
    const attemptTicket=readSequence+1;
    summaryPending=(async()=>{try{
     const {data,ticket}=await read('summary');
-    setupVisibility(data.setup,ticket);counts(data,ticket);
+    setupVisibility(data.setup,ticket);
+    if(counts(data,ticket))panel.status.textContent=panel.snapshot?'대기 건수를 확인했습니다.':data.items.some(item=>item.count>0)?'대기 건수를 확인했습니다. 목록은 다시 확인을 눌러 불러올 수 있습니다.':'현재 확인할 대기 업무가 없습니다.';
    }catch(_){if(current()){
-    if(attemptTicket>=lastTaskTicket){panel.badge.textContent='확인 필요';panel.badge.className='badge text-bg-warning ms-2';options.onTasks?.(null,'failed');panel.status.textContent='대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.';}
+    failTasks(attemptTicket,'대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
     if(attemptTicket>=lastSetupTicket)panels.get('setup').root.hidden=true;
-   }}})().finally(()=>{summaryPending=null;});
+   }}})().finally(()=>{summaryPending=null;panel.syncRetry();});
+   panel.syncRetry();
    return summaryPending;
   }
   function closeDialog(){if(dialog){dialog.remove();dialog=null;}}
@@ -94,13 +107,14 @@
    body.append(status,list,retry);root.append(heading,body);container.append(root);
    let sequence=0,busy=false,retrying=false;
    const isCurrent=serial=>serial===sequence&&current();
-   const reset=()=>{++sequence;busy=false;retry.disabled=false;};panels.set(section,{root,status,list,badge,reset});
+   const syncRetry=()=>{retry.disabled=busy||retrying||(section==='tasks'&&!!summaryPending);};
+   const reset=()=>{++sequence;busy=false;syncRetry();};panels.set(section,{root,status,list,badge,reset,syncRetry});
    async function load() {
-    if(busy||!root.open)return;const serial=++sequence;busy=true;retry.disabled=true;list.replaceChildren();status.textContent='불러오는 중…';
+    if(busy||!root.open)return;const serial=++sequence,attemptTicket=readSequence+1;busy=true;syncRetry();list.replaceChildren();status.textContent='불러오는 중…';
     try {
      const {data,ticket}=await read(section);if(!isCurrent(serial))return;
      if(section==='tasks'){
-      if(!counts(data,ticket)){status.textContent='대기 건수가 갱신되었습니다. 최신 목록을 다시 확인해 주세요.';return;}
+      if(!counts(data,ticket))return;
      }
      else{
       const required=data.items.filter(item=>item.key!=='notifications');
@@ -139,16 +153,19 @@
      }
      status.textContent=data.items.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';
      if(section==='tasks')panels.get(section).snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
-    }catch(_){if(isCurrent(serial)){list.replaceChildren();status.textContent='불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.';}}
-    finally{if(serial===sequence){busy=false;retry.disabled=false;}}
+    }catch(_){if(isCurrent(serial)&&attemptTicket>=(section==='tasks'?lastTaskTicket:lastSetupTicket)){
+     list.replaceChildren();status.textContent='불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.';
+     if(section==='tasks')failTasks(attemptTicket,status.textContent);
+    }}
+    finally{if(serial===sequence){busy=false;syncRetry();}}
    }
    root.addEventListener('toggle',()=>{if(root.open)void load();});retry.onclick=async()=>{
     if(busy||retrying)return;retrying=true;retry.disabled=true;
-    try{await refresh();if(current())await load();}finally{retrying=false;if(!busy)retry.disabled=false;}
+    try{await refresh();if(current())await load();}finally{retrying=false;syncRetry();}
    };
    sections.push(()=>{++sequence;busy=false;root.open=false;list.replaceChildren();status.textContent='';});
   }
-  binding={refresh,invalidate:()=>{disposed=true;controllers.forEach(c=>c.abort());closeDialog();sections.forEach(fn=>fn());}};
+  binding={refresh,invalidate:()=>{disposed=true;controllers.forEach((_,c)=>c.abort());closeDialog();sections.forEach(fn=>fn());}};
   // A single scoped count/status read; detailed targets and configuration remain lazy.
   Promise.resolve().then(()=>{if(!disposed)void refresh();});
  }
