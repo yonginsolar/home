@@ -1,4 +1,4 @@
-/* v1.1.2 — Keep loading, failures and counts behind the latest scoped read boundary. */
+/* v1.1.3 — Keep latest read status without disabling settled task actions. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -73,7 +73,7 @@
   function refresh(){
    if(!current())return null;
    if(summaryPending)return summaryPending;
-   const panel=panels.get('tasks');panel.reset();
+   const panel=panels.get('tasks');panel.supersedeRead();
    for(const [controller,section]of controllers)if(section==='tasks')controller.abort();
    panel.badge.textContent='확인 중…';panel.badge.className='small text-muted ms-2';panel.status.textContent='대기 건수를 확인하는 중…';options.onTasks?.(null,'loading');
    const attemptTicket=readSequence+1;
@@ -108,7 +108,8 @@
    let sequence=0,busy=false,retrying=false;
    const isCurrent=serial=>serial===sequence&&current();
    const syncRetry=()=>{retry.disabled=busy||retrying||(section==='tasks'&&!!summaryPending);};
-   const reset=()=>{++sequence;busy=false;syncRetry();};panels.set(section,{root,status,list,badge,reset,syncRetry});
+   const reset=()=>{++sequence;busy=false;syncRetry();};
+   const supersedeRead=()=>{if(busy)reset();else syncRetry();};panels.set(section,{root,status,list,badge,reset,supersedeRead,syncRetry});
    async function load() {
     if(busy||!root.open)return;const serial=++sequence,attemptTicket=readSequence+1;busy=true;syncRetry();list.replaceChildren();status.textContent='불러오는 중…';
     try {
