@@ -6751,6 +6751,39 @@ const memberChildDrafts = new Map();
 let memberChildState = null;
 let memberChildSaving = false;
 let memberFamilyRetry = null;
+let memberAddressSearch = null;
+let memberGroupSearchState = null;
+let memberGroupConfirmation = null;
+let memberGroupConnectPending = null;
+function invalidateMemberAddressSearch() { memberAddressSearch = null; }
+function invalidateMemberRelationSearches() {
+    invalidateMemberAddressSearch();
+    memberGroupSearchState = null;
+    memberGroupConfirmation = null;
+    const list = document.getElementById('group-search-result');
+    if (list) list.textContent = '단체명을 입력하고 검색해 주세요.';
+}
+function createMemberGroupSearchState() {
+    const owner = memberDetailOwner(), member = String(g_current_member_id || '');
+    if (!owner || !member || member !== String(document.getElementById('md-uid')?.value || '')
+        || window.frameElement?.hidden || !document.getElementById('memberDetailModal')?.classList.contains('show')) return null;
+    return {owner,member,revision:g_member_detail_revision,read:null,result:null};
+}
+function isCurrentMemberGroupSearch(state = memberGroupSearchState) {
+    return !!state && state === memberGroupSearchState && state.owner === memberDetailOwner()
+        && state.member === String(g_current_member_id || '') && state.member === String(document.getElementById('md-uid')?.value || '')
+        && state.revision === g_member_detail_revision && !window.frameElement?.hidden
+        && document.getElementById('memberDetailModal')?.classList.contains('show')
+        && document.getElementById('groupSearchModal')?.classList.contains('show');
+}
+for (const id of ['md-addr','md-addr-detail']) document.getElementById(id)?.addEventListener('input',invalidateMemberAddressSearch);
+document.getElementById('group-search-input')?.addEventListener('input',() => {
+    if (memberGroupSearchState) { memberGroupSearchState.read = null; memberGroupSearchState.result = null; }
+    memberGroupConfirmation = null;
+    const list = document.getElementById('group-search-result');
+    if (list) list.textContent = '검색 버튼을 눌러주세요.';
+});
+document.getElementById('groupSearchModal')?.addEventListener('hide.bs.modal',invalidateMemberRelationSearches);
 const memberFundDrafts = new Map();
 let memberFundState = null;
 let donationGrantState = null;
@@ -7167,6 +7200,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 });
 
 function clearMemberDetailEdits() {
+    invalidateMemberRelationSearches();
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
     invalidateApplicationListRead();
@@ -7522,6 +7556,7 @@ function setMemberDetailReadBusy(busy) {
 
 document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', event => {
     if (memberDetailSaving || memberFundState?.busy || memberChildSaving) { event.preventDefault(); return; }
+    invalidateMemberRelationSearches();
     retainMemberChildDraft();
     if (memberChildState) ++memberChildState.revision;
     captureMemberFundDraft();
@@ -7969,6 +8004,7 @@ async function openMemberDetail(id) {
     if (memberDetailSaving || memberFundState?.busy || memberChildSaving) return;
     const editorOwner = memberDetailOwner();
     if (!editorOwner) return;
+    invalidateMemberRelationSearches();
     captureMemberFundDraft();
     const fundModal=document.getElementById('fundEditorModal');
     if (fundModal?.classList.contains('show')) bootstrap.Modal.getInstance(fundModal)?.hide();
@@ -8583,6 +8619,7 @@ function markAutoManagedBadgeControls() {
 } // End of markAutoManagedBadgeControls
 
 function toggleEditMode(isEdit) {
+    if (!isEdit) invalidateMemberAddressSearch();
     if (isCurrentMemberDetailEditor()) memberDetailEditState.editing = !!isEdit;
     // 1. 일반 입력창 제어 (기존 로직)
     const inputs = document.querySelectorAll('#md-tab-basic input:not([type=checkbox]), #md-tab-basic select, #md-tab-basic textarea');
@@ -8647,14 +8684,37 @@ function toggleEditMode(isEdit) {
 
 // [교체] 주소 검색 (검색 결과 -> 기본창, 포커스 -> 상세창)
 function searchAddress() {
+const editor = memberDetailEditState;
+if (!isCurrentMemberDetailEditor(editor) || !editor.editing || memberDetailSaving
+    || window.frameElement?.hidden || !document.getElementById('memberDetailModal')?.classList.contains('show')) return;
+const main = document.getElementById('md-addr'), detail = document.getElementById('md-addr-detail');
+const request = {editor,revision:g_member_detail_revision,main:main.value,detail:detail.value};
+memberAddressSearch = request;
+try {
 new daum.Postcode({
 oncomplete: function(data) {
+if (memberAddressSearch !== request || !isCurrentMemberDetailEditor(editor) || !editor.editing || memberDetailSaving
+    || request.revision !== g_member_detail_revision || window.frameElement?.hidden
+    || !document.getElementById('memberDetailModal')?.classList.contains('show')
+    || main.value !== request.main || detail.value !== request.detail || detail.disabled) return;
+invalidateMemberAddressSearch();
 const fullAddr = `(${data.zonecode}) ${data.roadAddress || data.jibunAddress}`;
-document.getElementById('md-addr').value = fullAddr;
-document.getElementById('md-addr-detail').value = ''; // 상세주소 초기화
-document.getElementById('md-addr-detail').focus();
+main.value = fullAddr;
+detail.value = '';
+main.dispatchEvent(new Event('input',{bubbles:true}));
+detail.dispatchEvent(new Event('input',{bubbles:true}));
+detail.focus();
+},
+onclose: function() {
+if (memberAddressSearch === request) invalidateMemberAddressSearch();
 }
 }).open();
+} catch (_) {
+if (memberAddressSearch === request) {
+invalidateMemberAddressSearch();
+myAlert('주소 검색을 열지 못했습니다. 잠시 후 다시 시도해 주세요.','warning');
+}
+}
 }
 
 async function saveMemberBasic() {
@@ -10226,6 +10286,11 @@ function autoHyphen(target) {
 
 // 1. 단체 검색 모달 열기
 function openGroupSearch() {
+if (memberGroupConnectPending) return;
+const state = createMemberGroupSearchState();
+if (!state) return;
+memberGroupSearchState = state;
+memberGroupConfirmation = null;
 document.getElementById('group-search-input').value = '';
 document.getElementById('group-search-result').innerHTML = '';
 const modalEl = document.getElementById('groupSearchModal');
@@ -10239,20 +10304,29 @@ bootstrap.Modal.getOrCreateInstance(modalEl).show();
 
 // 2. 검색 실행
 async function searchGroups() {
-const keyword = document.getElementById('group-search-input').value;
-if(!keyword) return;
-
-const list = document.getElementById('group-search-result');
-list.innerHTML = '<div class="p-3 text-center text-muted">검색 중...</div>';
-
-const { data, error } = await _supabase.rpc('search_groups', { keyword });
-if (error) {
-CoopSafeLog.error("search_groups failed:", error);
-list.innerHTML = '<div class="p-3 text-center text-danger">단체 검색 중 오류가 발생했습니다.</div>';
-myAlert('단체 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.', 'error');
-return;
+if (memberGroupConnectPending) return;
+const keyword = document.getElementById('group-search-input').value.trim();
+if (!isCurrentMemberGroupSearch()) {
+    memberGroupSearchState = createMemberGroupSearchState();
+    if (!isCurrentMemberGroupSearch()) return;
 }
-
+const state = memberGroupSearchState;
+const list = document.getElementById('group-search-result');
+if (!keyword) { state.read = null; state.result = null; list.textContent = '단체명을 입력하고 검색해 주세요.'; return; }
+if (state.read?.keyword === keyword) return state.read.promise;
+memberGroupConfirmation = null;
+state.result = null;
+const request = {keyword,promise:null};
+state.read = request;
+const current = () => isCurrentMemberGroupSearch(state) && state.read === request
+    && document.getElementById('group-search-input').value.trim() === keyword;
+list.innerHTML = '<div class="p-3 text-center text-muted">검색 중...</div>';
+request.promise = (async () => {
+try {
+const { data, error } = await _supabase.rpc('search_groups', { keyword });
+if (!current()) return;
+if (error) throw error;
+state.result = request;
 list.innerHTML = '';
 
 if(!data || data.length===0) { list.innerHTML = '<div class="p-3 text-center text-muted">결과 없음</div>'; return; }
@@ -10268,7 +10342,11 @@ if(!data || data.length===0) { list.innerHTML = '<div class="p-3 text-center tex
     myAlert('이미 관리자에게 연결된 단체입니다. 먼저 기존 연결을 해제한 뒤 다시 연결해 주세요.', 'warning');
     });
     } else {
-    btn.addEventListener('click', () => tryConnectGroup(g.id, g.name || '', g.rep_name || ''));
+    btn.addEventListener('click', () => {
+        if (isCurrentMemberGroupSearch(state) && state.result === request
+            && document.getElementById('group-search-input').value.trim() === keyword)
+            tryConnectGroup(g.id, g.name || '', g.rep_name || '',request);
+    });
     }
 
     const row = document.createElement('div');
@@ -10289,10 +10367,22 @@ if(!data || data.length===0) { list.innerHTML = '<div class="p-3 text-center tex
     btn.appendChild(row);
     list.appendChild(btn);
     });
+} catch (error) {
+    if (!current()) return;
+    CoopSafeLog.error('search_groups failed:',error);
+    list.textContent = '단체를 불러오지 못했습니다. 검색 버튼을 눌러 다시 시도해 주세요.';
+} finally {
+    if (state.read === request) state.read = null;
+}
+})();
+return request.promise;
 }
 
 // 3. 연결 시도
-function tryConnectGroup(groupId, groupName, currentManager) {
+function tryConnectGroup(groupId, groupName, currentManager, result = memberGroupSearchState?.result) {
+const state = memberGroupSearchState;
+if (memberGroupConnectPending || !isCurrentMemberGroupSearch(state) || !result || state.result !== result
+    || document.getElementById('group-search-input').value.trim() !== result.keyword) return;
 const myName = document.getElementById('md-name').value;
 let msg = `'${groupName}'의 관리자로 등록하시겠습니까?`;
 
@@ -10301,34 +10391,52 @@ myAlert(`현재 '${currentManager}'님이 관리자로 연결되어 있습니다
 return;
 }
 
+const confirmation = {state,result,group:groupId,member:state.member,busy:false,button:null};
+memberGroupConfirmation = confirmation;
+const current = () => memberGroupConfirmation === confirmation && isCurrentMemberGroupSearch(state)
+    && state.result === result && document.getElementById('group-search-input').value.trim() === result.keyword
+    && document.getElementById('btnConfirmYes') === confirmation.button;
 myConfirm(msg, async () => {
-showLoading(true);
-const { error } = await _supabase.rpc('connect_group_manager', {
-group_uuid: groupId,
-manager_uuid: g_current_member_id
+    if (confirmation.busy || memberGroupConnectPending || !current()) return;
+    confirmation.busy = true;
+    memberGroupConnectPending = confirmation;
+    let locked = [],loading = false;
+    try {
+        const gate = await window.ErpRuntimeGuard.enforce(_supabase,{moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+        if (!current()) return;
+        if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || ''))
+            return myAlert('현재 변경 권한을 확인하지 못했습니다. 다시 확인해 주세요.','warning');
+        locked = Array.from(document.querySelectorAll('#groupSearchModal button,#groupSearchModal input')).map(node=>[node,node.disabled]);
+        locked.forEach(([node])=>{node.disabled=true;});
+        showLoading(true); loading = true;
+        const { error } = await _supabase.rpc('connect_group_manager',{group_uuid:confirmation.group,manager_uuid:confirmation.member});
+        if (!current()) return;
+        if (error) throw error;
+        const modal = document.getElementById('groupSearchModal');
+        const finish = async () => {
+            if (state.owner !== memberDetailOwner() || state.member !== String(g_current_member_id || '')
+                || state.revision !== g_member_detail_revision || window.frameElement?.hidden
+                || !document.getElementById('memberDetailModal')?.classList.contains('show')) return;
+            const read = await loadMemberFamily(confirmation.member);
+            if (state.owner !== memberDetailOwner() || state.member !== String(g_current_member_id || '')
+                || state.revision !== g_member_detail_revision || window.frameElement?.hidden) return;
+            myAlert(read?.ok === false ? '연결했습니다. 목록은 다시 불러와 주세요.' : '연결되었습니다.');
+        };
+        if (modal?.classList.contains('show')) {
+            modal.addEventListener('hidden.bs.modal',()=>{finish().catch(error=>CoopSafeLog.error('group family refresh failed:',error));},{once:true});
+            moveFocusOutsideModal(modal);
+            bootstrap.Modal.getOrCreateInstance(modal).hide();
+        } else await finish();
+    } catch (error) {
+        if (current()) myAlert('연결 실패: ' + getManagedLinkErrorMessage(error),'error');
+    } finally {
+        if (memberGroupConnectPending === confirmation) memberGroupConnectPending = null;
+        confirmation.busy = false;
+        if (state.owner === memberDetailOwner()) locked.forEach(([node,disabled])=>{if(node.isConnected)node.disabled=disabled;});
+        if (loading) showLoading(false);
+    }
 });
-showLoading(false);
-
-if(error) myAlert('연결 실패: ' + getManagedLinkErrorMessage(error), 'error');
-else {
-const groupModalEl = document.getElementById('groupSearchModal');
-const parentId = g_current_member_id || document.getElementById('md-uid').value;
-const finishConnect = async () => {
-if (parentId) await loadMemberFamily(parentId);
-myAlert('연결되었습니다.');
-};
-if (groupModalEl && groupModalEl.classList.contains('show')) {
-const groupModal = bootstrap.Modal.getOrCreateInstance(groupModalEl);
-groupModalEl.addEventListener('hidden.bs.modal', () => {
-finishConnect();
-}, { once: true });
-moveFocusOutsideModal(groupModalEl);
-groupModal.hide();
-} else {
-await finishConnect();
-}
-}
-});
+confirmation.button = document.getElementById('btnConfirmYes');
 }
 // [신규] 관계 선택 모달 열기
 function openRelationSelectModal() {
@@ -10572,6 +10680,7 @@ window.onload = async function() {
 
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {
         window.ErpWorkspaceTask = {ready:true, refresh:async function(options = {}) {
+            invalidateMemberRelationSearches();
             const sequence = ++memberFundRefreshSequence;
             memberFundListResume = null;
             applicationListResume = null;

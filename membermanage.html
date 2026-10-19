@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.203
-Change: 2026-10-19 - Preserve profile-scoped application amount drafts and confirmation guards.
+Version: v1.0.204
+Change: 2026-10-19 - Protect current profile address edits from obsolete search results.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@ Change: 2026-10-19 - Preserve profile-scoped application amount drafts and confi
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.203 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.204 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2542,6 +2542,13 @@ let portalProfileRetryRevision = 0;
 let portalProfileDirectoryRevision = 0;
 let portalProfileDirectoryPending = null;
 let portalProfileDirectoryFailure = null;
+let portalAddressSearch = null;
+function invalidatePortalAddressSearch() {
+portalAddressSearch = null;
+const layer = document.getElementById('layer');
+if (layer) layer.style.display = 'none';
+}
+for (const id of ['editAddrMain','editAddrDetail']) document.getElementById(id)?.addEventListener('input',invalidatePortalAddressSearch);
 
 function setPortalProfileDirectoryStatus(message, busy = false) {
 const panel = document.getElementById('profileDirectoryStatus');
@@ -2624,6 +2631,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+invalidatePortalAddressSearch();
 window.PortalChildPreparation?.invalidate();
 window.PortalChildDrafts?.clear();
 window.PortalBoardDetail?.close(false);
@@ -4824,6 +4832,7 @@ return memberInformationPortal.refresh(member);
 
 async function loadDashboardData(uuid, options = {}) {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
+invalidatePortalAddressSearch();
 invalidatePortalModifyEditor();
 window.PortalChildPreparation?.invalidate();
 window.PortalBoardDetail?.close(false);
@@ -8702,6 +8711,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 async function toggleTab(type, btn) {
 if (portalApplicationWritePending && window.__memberAppLocks?.modifyApplication) return;
+invalidatePortalAddressSearch();
 invalidatePortalModifyEditor();
 window.PortalChildPreparation?.invalidate();
 window.PortalBoardDetail?.close(false);
@@ -9042,6 +9052,7 @@ const ownsPhoneRead = phoneRead?.revision === portalProfileValidationRevision
 ++portalProfileValidationRevision;
 state.phoneRead = null;
 if (ownsPhoneRead) showLoading(false);
+    invalidatePortalAddressSearch();
     applyPortalProfileSnapshot(state.baseline);
     portalProfileDrafts.delete(state.key);
     state.editing = false;
@@ -9141,10 +9152,19 @@ document.getElementById('corpNoError').style.display = 'none';
 
 // [수정] 다음 주소 찾기 (검색 완료 시 상세주소창 노출)
 function execDaumPostcode() {
+const editor = portalProfileEditor;
+if (!isCurrentPortalProfileEditor(editor) || !editor.editing || portalProfileSaving) return;
 var element_layer = document.getElementById('layer');
-
+const main = document.getElementById('editAddrMain'), detail = document.getElementById('editAddrDetail');
+const request = {editor,revision:portalProfileLoadRevision,main:main.value,detail:detail.value};
+portalAddressSearch = request;
+try {
 new daum.Postcode({
 oncomplete: function(data) {
+if (portalAddressSearch !== request || !isCurrentPortalProfileEditor(editor) || !editor.editing || portalProfileSaving
+    || request.revision !== portalProfileLoadRevision || element_layer.style.display === 'none'
+    || main.value !== request.main || detail.value !== request.detail || detail.disabled) return;
+invalidatePortalAddressSearch();
 var addr = ''; 
 var extraAddr = ''; 
 
@@ -9167,16 +9187,21 @@ addr += ' (' + extraAddr + ')';
 }
 
 // 값 넣기
-document.getElementById('editAddrMain').value = addr;
+main.value = addr;
 
 // ★ [핵심] 검색이 완료되면 상세주소 입력창을 보여주고 포커스 이동
 var detailInput = document.getElementById('editAddrDetail');
 detailInput.style.display = 'block'; // 숨겨뒀던 창을 보여줌
 detailInput.value = '';              // 기존 값 초기화
+main.dispatchEvent(new Event('input',{bubbles:true}));
+detailInput.dispatchEvent(new Event('input',{bubbles:true}));
 detailInput.focus();                 // 커서 이동
 
 // 레이어 닫기
 element_layer.style.display = 'none';
+},
+onclose: function() {
+if (portalAddressSearch === request) invalidatePortalAddressSearch();
 },
 width : '100%',
 height : '100%',
@@ -9185,6 +9210,12 @@ maxSuggestItems : 5
 
 element_layer.style.display = 'block';
 initLayerPosition();
+} catch (_) {
+if (portalAddressSearch === request) {
+invalidatePortalAddressSearch();
+showModal('주소 검색을 열지 못했습니다. 잠시 후 다시 시도해 주세요.');
+}
+}
 }
 
 // (보조) 레이어 위치 잡는 함수
@@ -9206,7 +9237,7 @@ element_layer.style.top = (((window.innerHeight || document.documentElement.clie
 
 // (보조) 닫기 버튼용 함수
 function closeDaumPostcode() {
-document.getElementById('layer').style.display = 'none';
+invalidatePortalAddressSearch();
 }
 
 // ==========================================
