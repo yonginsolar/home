@@ -6747,6 +6747,9 @@ const memberConsultPending = new Set();
 let memberConsultState = null;
 let memberCreateState = null;
 let memberCreateSaving = false;
+const memberChildDrafts = new Map();
+let memberChildState = null;
+let memberChildSaving = false;
 const memberFundDrafts = new Map();
 let memberFundState = null;
 let donationGrantState = null;
@@ -7179,6 +7182,11 @@ function clearMemberDetailEdits() {
     memberDetailDraftOwner = '';
     memberConsultDrafts.clear();
     memberConsultState = null;
+    memberChildDrafts.clear();
+    memberChildState = null;
+    memberChildFields().forEach(node => { node.value = ''; node.disabled = true; });
+    const childParent = document.getElementById('child-parent-name');
+    if (childParent) childParent.value = '';
     const consultation = document.getElementById('md-consult-input');
     if (consultation) consultation.value = '';
     memberCreateState = null;
@@ -7191,6 +7199,40 @@ function clearMemberDetailEdits() {
 function memberCreateFields() {
     return Array.from(document.querySelectorAll('#memberCreateModal input,#memberCreateModal select,#memberCreateModal textarea'));
 }
+
+function memberChildFields() {
+    return ['child-name','child-rrn','child-phone','child-address'].map(id => document.getElementById(id)).filter(Boolean);
+}
+function memberChildSnapshot() {
+    return memberChildFields().map(node => [node.id,node.value]);
+}
+function isCurrentMemberChild(state = memberChildState, visible = false) {
+    const owner = memberDetailOwner();
+    return !!owner && !!state && memberChildState === state && state.owner === owner
+        && state.parent === String(g_current_member_id || '')
+        && state.parent === String(document.getElementById('md-uid')?.value || '')
+        && (!visible || (!window.frameElement?.hidden && document.getElementById('childRegisterModal')?.classList.contains('show')));
+}
+function retainMemberChildDraft() {
+    const state = memberChildState;
+    if (!isCurrentMemberChild(state) || memberChildSaving) return;
+    const current = memberChildSnapshot();
+    if (JSON.stringify(current) !== JSON.stringify(state.baseline)) memberChildDrafts.set(state.key,{current,baseline:state.baseline});
+    else memberChildDrafts.delete(state.key);
+}
+document.getElementById('childRegisterModal')?.addEventListener('input', () => {
+    if (memberChildState) ++memberChildState.revision;
+    retainMemberChildDraft();
+});
+document.getElementById('childRegisterModal')?.addEventListener('change', () => {
+    if (memberChildState) ++memberChildState.revision;
+    retainMemberChildDraft();
+});
+document.getElementById('childRegisterModal')?.addEventListener('hide.bs.modal', event => {
+    if (memberChildSaving) { event.preventDefault(); return; }
+    retainMemberChildDraft();
+    if (memberChildState) ++memberChildState.revision;
+});
 
 function memberCreateSnapshot() {
     return JSON.stringify(memberCreateFields().map(node => [node.id,node.type === 'checkbox' ? node.checked : node.value]));
@@ -7389,9 +7431,10 @@ function acceptMemberBasicSave(state, submitted, updates, includeBadges = false,
 window.addEventListener('beforeunload', event => {
     retainMemberDetailEdit();
     retainMemberConsultEdit();
+    retainMemberChildDraft();
     captureMemberFundDraft();
     if (memberDetailOwner() && (memberFundDrafts.size || memberFundState?.busy || memberFundState?.uncertain || memberDetailSaving || memberDetailDrafts.size || memberConsultDrafts.size
-        || memberConsultPending.size || memberCreateSaving || hasMemberCreateDraft()
+        || memberConsultPending.size || memberCreateSaving || hasMemberCreateDraft() || memberChildSaving || memberChildDrafts.size
         || hasDonationGrantDraft() || hasDonationBatchDraft() || (typeof hasMemberImportDraft === 'function' && hasMemberImportDraft()))) {
         event.preventDefault();
         event.returnValue = '';
@@ -7426,7 +7469,9 @@ function setMemberDetailReadBusy(busy) {
 }
 
 document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', event => {
-    if (memberDetailSaving || memberFundState?.busy) { event.preventDefault(); return; }
+    if (memberDetailSaving || memberFundState?.busy || memberChildSaving) { event.preventDefault(); return; }
+    retainMemberChildDraft();
+    if (memberChildState) ++memberChildState.revision;
     captureMemberFundDraft();
     retainMemberDetailEdit();
     retainMemberConsultEdit();
@@ -7869,7 +7914,7 @@ async function loadAdminMemberQuizHistory(forceReload = false) {
 } // End of loadAdminMemberQuizHistory
 
 async function openMemberDetail(id) {
-    if (memberDetailSaving || memberFundState?.busy) return;
+    if (memberDetailSaving || memberFundState?.busy || memberChildSaving) return;
     const editorOwner = memberDetailOwner();
     if (!editorOwner) return;
     captureMemberFundDraft();
@@ -7877,6 +7922,8 @@ async function openMemberDetail(id) {
     if (fundModal?.classList.contains('show')) bootstrap.Modal.getInstance(fundModal)?.hide();
     retainMemberDetailEdit();
     retainMemberConsultEdit();
+    retainMemberChildDraft();
+    if (memberChildState) ++memberChildState.revision;
     window.ContributionCertPreview?.clear();
     const requestRevision = ++g_member_detail_revision;
     setMemberDetailReadBusy(true);
@@ -10260,30 +10307,26 @@ openNextStep();
 }
 // [신규] 자녀 등록 폼 열기
 function openChildForm() {
-    // 1. 현재 보고 있는 부모 조합원 정보 찾기
-    const parentId = document.getElementById('md-uid').value;
-    const parent = g_members.find(m => m.id === parentId);
-
-    if(!parent) return myAlert('부모 정보를 찾을 수 없습니다.', 'error');
-
-    // 2. 부모 정보 UI에 바인딩
+    const owner = memberDetailOwner(), parentId = String(document.getElementById('md-uid').value || '');
+    if (!owner || memberChildSaving || parentId !== String(g_current_member_id || '')) return;
+    const parent = findCachedAdminMember(parentId) || g_current_member_row;
+    if (!parent || String(parent.id) !== parentId || String(parent.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) return;
+    retainMemberChildDraft();
+    const key = JSON.stringify([owner,parentId]), draft = memberChildDrafts.get(key);
+    const baseline = draft?.baseline || [['child-name',''],['child-rrn',''],['child-phone',parent.phone || ''],['child-address',parent.address || '']];
+    memberChildState = {owner,parent:parentId,key,baseline,revision:0};
+    const values = new Map(draft?.current || baseline);
+    memberChildFields().forEach(node => { node.value = values.get(node.id) || ''; node.disabled = false; });
     document.getElementById('child-parent-name').value = `${parent.name} (${parent.member_id || '-'})`;
-
-    // 3. 부모 정보 복사 (연락처, 주소) - 편의성 제공
-    document.getElementById('child-phone').value = parent.phone || '';
-    document.getElementById('child-address').value = parent.address || '';
-
-    // 4. 나머지 초기화
-    document.getElementById('child-name').value = '';
-    document.getElementById('child-rrn').value = '';
-
-    // 5. 모달 열기
+    document.querySelectorAll('#childRegisterModal button').forEach(node => { node.disabled = false; });
     bootstrap.Modal.getOrCreateInstance(document.getElementById('childRegisterModal')).show();
 }
 
 // [신규] 자녀 저장 실행
 async function saveChildMember() {
-    const parentId = document.getElementById('md-uid').value;
+    const state = memberChildState;
+    if (memberChildSaving || !isCurrentMemberChild(state,true)) return;
+    const parentId = state.parent;
     const name = document.getElementById('child-name').value.trim();
     const rrn = document.getElementById('child-rrn').value.replace(/[^0-9]/g, ''); // 숫자만 추출
     const phone = document.getElementById('child-phone').value;
@@ -10293,9 +10336,20 @@ async function saveChildMember() {
     if(!name) return myAlert("자녀 이름을 입력해주세요.", 'warning');
     if(rrn.length !== 13) return myAlert("주민번호 13자리를 정확히 입력해주세요.", 'warning');
 
+    const submitted = JSON.stringify(memberChildSnapshot()), revision = ++state.revision;
     myConfirm(`${name} 자녀를 등록하시겠습니까?`, async () => {
+        const current = () => isCurrentMemberChild(state,true) && state.revision === revision
+            && JSON.stringify(memberChildSnapshot()) === submitted;
+        if (memberChildSaving || !current()) return;
+        memberChildSaving = true;
+        const controls = Array.from(document.querySelectorAll('#childRegisterModal input,#childRegisterModal button'));
+        const disabled = controls.map(node => node.disabled);
+        controls.forEach(node => { node.disabled = true; });
         showLoading(true);
-
+        try {
+        const gate = await window.ErpRuntimeGuard.enforce(_supabase,{moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+        if (!current()) return;
+        if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) throw new Error('현재 권한을 확인하지 못했습니다. 다시 확인해 주세요.');
         const params = {
             p_manager_id: parentId, // 부모 ID 연결
             p_name: name,
@@ -10306,15 +10360,29 @@ async function saveChildMember() {
         };
 
         const { error } = await _supabase.rpc('create_child_member', params);
-        showLoading(false);
-
-        if(error) {
-            myAlert("등록 실패: " + error.message, 'error');
-        } else {
-            myAlert("자녀 계정이 등록되었습니다.");
-            // 모달 닫기
-            bootstrap.Modal.getInstance(document.getElementById('childRegisterModal')).hide();
-            await loadMemberFamily(parentId);
+        if (error) throw error;
+        if (!current()) return;
+        memberChildDrafts.delete(state.key);
+        const baseline = new Map(state.baseline);
+        memberChildFields().forEach(node => { node.value = baseline.get(node.id) || ''; window.ErpWorkspaceResume?.checkpoint(node); });
+        memberChildSaving = false;
+        bootstrap.Modal.getInstance(document.getElementById('childRegisterModal'))?.hide();
+        try { await loadMemberFamily(parentId); }
+        catch (error) {
+            CoopSafeLog.error('[erp/admin_member] child family list refresh failed',error);
+            if (isCurrentMemberChild(state)) myAlert('등록했습니다. 가족 목록은 다시 확인해 주세요.','warning');
+            return;
+        }
+        if (isCurrentMemberChild(state)) myAlert('자녀 계정이 등록되었습니다.');
+        } catch (error) {
+            if (isCurrentMemberChild(state)) myAlert('자녀 등록을 완료하지 못했습니다. ' + (error?.message || '다시 확인해 주세요.'),'error');
+        } finally {
+            memberChildSaving = false;
+            if (isCurrentMemberChild(state)) {
+                controls.forEach((node,index) => { node.disabled = disabled[index]; });
+                retainMemberChildDraft();
+                showLoading(false);
+            }
         }
     });
 }

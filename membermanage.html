@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.199
-Change: 2026-10-19 - Make board failure guidance clear and courteous.
+Version: v1.0.200
+Change: 2026-10-19 - Bind application amount confirmations to the current profile and editor.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@ Change: 2026-10-19 - Make board failure guidance clear and courteous.
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.199 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.200 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2693,6 +2693,26 @@ let portalApplicationState = null;
 let portalApplicationGeneration = 0;
 let portalApplicationRequest = 0;
 let portalApplicationWritePending = false;
+let portalModifyEditor = null;
+let portalModifyRevision = 0;
+function invalidatePortalModifyEditor() {
+++portalModifyRevision;
+portalModifyEditor = null;
+const modal = document.getElementById('modifyAppModal');
+if (modal) modal.style.display = 'none';
+}
+function portalModifySnapshot() {
+return ['modAppId','modAppType','modAmount'].map(id => [id,document.getElementById(id)?.value || '']);
+}
+function currentPortalModifyEditor(state) {
+return !!state && state === portalModifyEditor && state.owner === portalApplicationOwner()
+    && currentPortalApplicationState(state.application) && state.generation === portalApplicationGeneration
+    && state.member === String(curMem?.id || '') && !document.hidden && !window.frameElement?.hidden
+    && document.getElementById('modifyAppModal')?.style.display === 'flex';
+}
+document.getElementById('modifyAppModal')?.addEventListener('input', () => { ++portalModifyRevision; });
+document.getElementById('modifyAppModal')?.addEventListener('change', () => { ++portalModifyRevision; });
+document.addEventListener('visibilitychange', () => { if (document.hidden) ++portalModifyRevision; });
 function portalApplicationFields() {
 return ['exAmount','redAmount','checkRedAgree','wdReason','checkWdAgree']
     .map(id => document.getElementById(id)).filter(Boolean);
@@ -2715,6 +2735,7 @@ const tab = ['extra','reduction','withdraw','cert'].find(type => !document.getEl
 portalApplicationDrafts.set(state.key,{values:portalApplicationSnapshot(),tab});
 }
 function clearPortalApplicationDrafts() {
+invalidatePortalModifyEditor();
 portalApplicationDrafts.clear();portalApplicationState = null;
 ++portalApplicationGeneration;++portalApplicationRequest;
 portalApplicationFields().forEach(n => { if(n.type === 'checkbox') n.checked = false; else n.value = ''; });
@@ -4696,6 +4717,7 @@ return memberInformationPortal.refresh(member);
 
 async function loadDashboardData(uuid, options = {}) {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
+invalidatePortalModifyEditor();
 window.PortalChildPreparation?.invalidate();
 window.PortalBoardDetail?.close(false);
 window.PortalBoardEditor?.suspend();
@@ -8572,6 +8594,8 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 async function toggleTab(type, btn) {
+if (portalApplicationWritePending && window.__memberAppLocks?.modifyApplication) return;
+invalidatePortalModifyEditor();
 window.PortalChildPreparation?.invalidate();
 window.PortalBoardDetail?.close(false);
 retainPortalPartnerDraft();++portalPartnerRequestRevision;
@@ -11403,7 +11427,10 @@ return checkDigit === parseInt(raw.charAt(12));
 
 // [신규] 수정 모달 열기
 function openModifyModal(appId, type, currentAmount) {
+if (portalApplicationWritePending || window.__memberAppLocks?.modifyApplication || !currentPortalApplicationState()) return;
 const modal = document.getElementById('modifyAppModal');
+portalModifyEditor = {owner:portalApplicationOwner(),member:String(curMem.id),application:portalApplicationState,generation:portalApplicationGeneration};
+++portalModifyRevision;
 
 // 값 세팅
 document.getElementById('modAppId').value = appId;
@@ -11420,54 +11447,67 @@ modal.style.display = 'flex';
 }
 
 function closeModifyModal() {
-document.getElementById('modifyAppModal').style.display = 'none';
+if (portalApplicationWritePending && window.__memberAppLocks?.modifyApplication) return;
+invalidatePortalModifyEditor();
 }
 
 // [신규] 수정 요청 제출 (RPC 호출)
 async function submitModifyApp() {
+const state = portalModifyEditor;
+if (portalApplicationWritePending || window.__memberAppLocks.modifyApplication || !currentPortalModifyEditor(state)) return;
 const appId = document.getElementById('modAppId').value;
 const type = document.getElementById('modAppType').value;
 const newAmount = Number(document.getElementById('modAmount').value);
 
 // 1. 기초 검증
-if(newAmount <= 0) return showModal('금액을 올바르게 입력해주세요.');
+if(!Number.isSafeInteger(newAmount) || newAmount <= 0) return showModal('금액을 올바르게 입력해주세요.');
+const snapshot = JSON.stringify(portalModifySnapshot()), revision = ++portalModifyRevision;
+const current = () => currentPortalModifyEditor(state) && revision === portalModifyRevision
+    && snapshot === JSON.stringify(portalModifySnapshot());
 
 // 2. 실행
 showConfirmModal('신청 내용을 수정하시겠습니까?', async () => {
-if (window.__memberAppLocks.modifyApplication) {
-showModal('이미 수정 처리 중입니다. 잠시만 기다려주세요.');
-return;
-}
+if (portalApplicationWritePending || window.__memberAppLocks.modifyApplication || !current()) return;
 window.__memberAppLocks.modifyApplication = true;
+portalApplicationWritePending = true;
+const controls = Array.from(document.querySelectorAll('#modifyAppModal input,#modifyAppModal button'));
+const disabled = controls.map(node => node.disabled);
+controls.forEach(node => { node.disabled = true; });
 showLoading(true, '수정 중...');
-closeModifyModal(); // 모달 닫기
 
 try {
 // RPC 호출
 const { error } = await _supabase.rpc('modify_application', {
 p_app_id: appId,
-p_user_uid: getActiveMemberProfileId(), // 보안 확인용
+p_user_uid: state.member, // Capture the same profile that opened this editor; the server remains authoritative.
 p_new_amount: newAmount,
 p_new_reason: null // 사유 수정은 UI가 복잡해지니 일단 null (기존 유지)
 });
 
 if(error) throw error;
 
+if (state.owner !== portalApplicationOwner() || state.member !== String(curMem?.id || '')) return;
 notifyMemberApplicationAdmins(appId, 'application_modified').catch((notifyError) => {
 CoopSafeLog.warn("[member-request-alert] application modification admin telegram skipped:", notifyError?.message || notifyError);
 });
 
-showLoading(false);
-showModal('성공적으로 수정되었습니다.');
-reloadDashboard(); // 데이터 갱신
+if (current()) {
+invalidatePortalModifyEditor();
+showModal('수정했습니다.');
+}
+portalApplicationWritePending = false;
+if (state.owner === portalApplicationOwner() && state.member === String(curMem?.id || '')) reloadDashboard();
 } catch (error) {
 // DB에서 10만원 미만 등 에러가 발생하면 여기서 잡힘
 // alert 대신 커스텀 모달 사용 권장
-showLoading(false);
-showModal('수정 실패:\n' + error.message);
+if (currentPortalModifyEditor(state)) showModal('수정하지 못했습니다.\n' + error.message);
 } finally {
 showLoading(false);
+portalApplicationWritePending = false;
 window.__memberAppLocks.modifyApplication = false;
+if (state.owner === portalApplicationOwner() && state.member === String(curMem?.id || '')) {
+controls.forEach((node,index) => { node.disabled = disabled[index]; });
+}
 }
 });
 } // End of submitModifyApp
