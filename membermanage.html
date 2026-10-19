@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.202
+Version: v1.0.203
 Change: 2026-10-19 - Preserve profile-scoped application amount drafts and confirmation guards.
 -->
 <html lang="ko">
@@ -11,7 +11,7 @@ Change: 2026-10-19 - Preserve profile-scoped application amount drafts and confi
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.202 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.203 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2706,6 +2706,12 @@ if (amount === state.baseline) portalModifyDrafts.delete(state.key);
 else portalModifyDrafts.set(state.key,{amount,baseline:state.baseline});
 renderPortalModifyDrafts();
 }
+function formatPortalModifyDraftAmount(value) {
+const raw = String(value ?? '');
+if (!raw.trim()) return '미입력';
+const number = Number(raw);
+return (Number.isSafeInteger(number) && number >= 0 ? number.toLocaleString('ko-KR') : raw) + '원';
+}
 function renderPortalModifyDrafts() {
 const list = document.getElementById('portalModifyDraftList');
 if (!list) return;
@@ -2716,13 +2722,17 @@ const [draftOwner,draftMember,,type] = JSON.parse(key);
 if (draftOwner !== owner || draftMember !== member) continue;
 visible.add(key);
 let button = [...list.children].find(node => node.dataset.portalModifyKey === key);
-if (button) continue;
+if (!button) {
 button = document.createElement('button');button.dataset.portalModifyKey = key;
 button.type = 'button';button.className = 'btn btn-sm btn-outline-secondary w-100 mb-2 text-start';
-const label = type === 'reduction' ? '감자 신청' : '추가 출자';
-button.textContent = label + ' 수정 초안 보기';
+button.style.whiteSpace = 'pre-line';
 button.onclick = () => openPortalModifyDraft(key);
 list.append(button);
+}
+const label = type === 'reduction' ? '감자 신청' : '추가 출자';
+const text = label + ' 수정 초안 보기\n기존 금액: ' + formatPortalModifyDraftAmount(draft.baseline)
+    + ' · 작성 금액: ' + formatPortalModifyDraftAmount(draft.amount);
+if (button.textContent !== text) button.textContent = text;
 }
 for (const node of [...list.children]) if (!visible.has(node.dataset.portalModifyKey)) node.remove();
 list.classList.toggle('hidden',!list.childElementCount);

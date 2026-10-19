@@ -7227,19 +7227,31 @@ function clearMemberFamilyRetry() {
 }
 function showMemberFamilyReadFailure(read, owner, message = '가족·단체 목록을 불러오지 못했습니다.') {
     if (!isCurrentMemberDetailRead(read) || !owner || owner !== memberDetailOwner()) return {ok:false,stale:true};
-    memberFamilyRetry = {read,owner};
+    memberFamilyRetry = {read,owner,message,pending:false};
     const tbody = document.getElementById('md-family-list');
     tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3"><div class="text-danger small"></div><button type="button" id="member-family-retry" class="btn btn-sm btn-outline-primary mt-2" onclick="retryMemberFamily()">목록 다시 불러오기</button></td></tr>';
     tbody.querySelector('.text-danger').textContent = message;
     return {ok:false};
 }
+function restoreMemberFamilyRetry() {
+    const retry = memberFamilyRetry;
+    if (!retry || retry.owner !== memberDetailOwner() || !isCurrentMemberDetailRead(retry.read)
+        || retry.read.memberId !== String(document.getElementById('md-uid')?.value || '')
+        || !document.getElementById('memberDetailModal')?.classList.contains('show')) return;
+    const button = document.getElementById('member-family-retry');
+    if (button && (retry.pending || button.disabled)) {
+        // Called only after the workspace's fresh permission check. A new identity
+        // makes any earlier gate response obsolete without re-running a writer.
+        showMemberFamilyReadFailure(retry.read,retry.owner,retry.message);
+    }
+}
 async function retryMemberFamily() {
     const retry = memberFamilyRetry;
-    const current = () => !!retry && retry.owner === memberDetailOwner() && isCurrentMemberDetailRead(retry.read)
+    const current = () => !!retry && memberFamilyRetry === retry && retry.owner === memberDetailOwner() && isCurrentMemberDetailRead(retry.read)
         && retry.read.memberId === String(document.getElementById('md-uid')?.value || '')
         && !window.frameElement?.hidden && document.getElementById('memberDetailModal')?.classList.contains('show');
-    if (!current()) return;
-    memberFamilyRetry = null;
+    if (!current() || retry.pending) return;
+    retry.pending = true;
     const button = document.getElementById('member-family-retry');
     if (button) button.disabled = true;
     try {
@@ -7253,6 +7265,11 @@ async function retryMemberFamily() {
         if (!current()) return;
         CoopSafeLog.error('[erp/admin_member] family list retry failed',error);
         return showMemberFamilyReadFailure(retry.read,retry.owner);
+    } finally {
+        if (memberFamilyRetry === retry) {
+            retry.pending = false;
+            if (current() && button?.isConnected) button.disabled = false;
+        }
     }
 }
 document.getElementById('childRegisterModal')?.addEventListener('input', () => {
@@ -10576,6 +10593,7 @@ window.onload = async function() {
                 invalidateAdminDashboardRead();
                 throw new Error('ERP_TASK_ACCESS_DENIED');
             }
+            restoreMemberFamilyRetry();
             window.MemberNotificationAdmin?.configure(_supabase,gate.runtime,adminCertificateAuthId);
             const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
             // Do not repopulate an open member editor or overwrite unfinished input.
