@@ -8966,6 +8966,9 @@ async function loadMemberFamily(parentId) {
         CoopSafeLog.error("현재 조합원 가족 연결 기준 로드 실패:", currentError);
         return showMemberFamilyReadFailure(read,owner);
     }
+    if (!currentMember) {
+        return showMemberFamilyReadFailure(read,owner,'선택한 조합원 정보를 확인하지 못했습니다. 목록을 다시 불러와 주세요.');
+    }
 
     const { data: childList, error: childError } = await scopeAdminTenant(_supabase
         .from('coop_members')
@@ -8992,7 +8995,10 @@ async function loadMemberFamily(parentId) {
             CoopSafeLog.error("보호자/관리자 연결 로드 실패:", parentError);
             return showMemberFamilyReadFailure(read,owner);
         }
-        parentMember = parentData || null;
+        if (!parentData) {
+            return showMemberFamilyReadFailure(read,owner,'연결된 보호자·관리자 정보를 확인하지 못했습니다. 목록을 다시 불러와 주세요.');
+        }
+        parentMember = parentData;
     }
 
     const familyRows = [];
