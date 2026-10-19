@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.114 | Change: 2026-10-19 - Match patch-note author guidance to the current copy policy. -->
+<!-- Version: v1.0.115 | Change: 2026-10-19 - Show confirmed task badges consistently without red loading flashes. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -9,7 +9,7 @@
   <script src="/erp/workspace_boot.js?v=20261014-setup"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.114 | index.html');</script>
+  <script>console.log('[Version] v1.0.115 | index.html');</script>
 <script src="work_overview.js?v=1.1.1"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -74,7 +74,9 @@
     .btn-menu { position: relative; text-align: left; padding: 15px; margin-bottom: 10px; transition: transform 0.2s; border: 1px solid #eee; }
     .btn-menu:hover { transform: translateY(-3px); box-shadow: 0 4px 10px rgba(0,0,0,0.05); background-color: #f8f9fa; }
     .btn-menu.has-attention { border-color: rgba(220,53,69,.42); box-shadow: 0 0 0 2px rgba(220,53,69,.08); }
-    .menu-attention-badge { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding: 4px 9px; border-radius: 999px; background: #dc3545; color: #fff; font-size: .78rem; font-weight: 800; line-height: 1; box-shadow: 0 4px 10px rgba(220,53,69,.2); }
+    .menu-attention-badge { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding: 4px 9px; border-radius: 999px; background: #e9ecef; color: #495057; font-size: .78rem; font-weight: 800; line-height: 1; }
+    .menu-attention-badge[data-state="ready"] { background: #dc3545; color: #fff; box-shadow: 0 4px 10px rgba(220,53,69,.2); }
+    .menu-attention-badge[data-state="failed"] { background: #fff3cd; color: #664d03; }
     .hidden { display: none !important; }
     .profile-box { background: #e3f2fd; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: left; }
     .btn-kakao { background: #FEE500; border: none; border-radius: 10px; font-weight: bold; color: #3a1d1d; }
@@ -266,6 +268,7 @@
 
         <button class="btn btn-white btn-menu hidden" id="btnFestivalReceipts" data-mobile-task="festival" onclick="location.href='festival_receipts.html?v=2.8.0'">
             🧾 <strong>현금매출·재고·영수증</strong>
+            <span class="menu-attention-badge hidden" id="festivalTaskBadge" aria-live="polite"></span>
             <span class="d-block small text-muted">축제 체험비, 현금영수증 신청·발급, 물품 입고·판매·불량 재고 관리</span>
         </button>
 
@@ -1880,9 +1883,11 @@ function setMenuTaskAttention(buttonId, badgeId, count, detailLabel, state = 're
     if (!button || !badge) return;
     menuTaskStates.set(buttonId, state);
     badge.dataset.state = state;
+    if (state === 'loading') button.setAttribute('aria-busy', 'true');
+    else button.removeAttribute('aria-busy');
     if (state !== 'ready') {
-        badge.textContent = state === 'loading' ? '…' : '!';
-        badge.classList.remove('hidden');
+        badge.textContent = state === 'loading' ? '' : '!';
+        badge.classList.toggle('hidden', state === 'loading');
         button.classList.remove('has-attention');
         badge.title = `${detailLabel} · ${state === 'loading' ? '조회 중' : '조회 실패'}`;
         badge.setAttribute('aria-label', badge.title);
@@ -1975,9 +1980,11 @@ function updateWorkOverviewAttention(items, state) {
     const values = new Map((items || []).map(item => [item.key, item.count]));
     for (const [button, badge, keys, label] of [
         ['btnApproval', 'approvalTaskBadge', ['approval'], '내 결재 대기'],
-        ['btnMemberAdmin', 'memberAdminTaskBadge', ['signup', 'member'], '가입 승인·업무 신청 대기']
+        ['btnMemberAdmin', 'memberAdminTaskBadge', ['signup', 'member'], '가입 승인·업무 신청 대기'],
+        ['btnFestivalReceipts', 'festivalTaskBadge', ['receipts', 'inventory', 'material'], '현금영수증·입고 검수·행사 재료비 대기']
     ]) {
-        if (document.getElementById(button)?.classList.contains('hidden')) continue;
+        // Prepare the count even if the existing asynchronous access check has not shown its menu yet.
+        // Updating a child badge never changes the menu's authority-controlled visibility.
         const complete = state === 'ready' && keys.every(key => Number.isSafeInteger(values.get(key)) && values.get(key) >= 0);
         setMenuTaskAttention(button, badge, complete ? keys.reduce((sum, key) => sum + values.get(key), 0) : null, label, complete ? 'ready' : state === 'loading' ? 'loading' : 'failed');
     }
