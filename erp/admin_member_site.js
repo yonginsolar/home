@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261019-controls-1') return;
+    if (root.AdminMemberSite?.version === '20261019-preview-scroll-2') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -1386,7 +1386,8 @@ const previewPayload = collectHomeSettingsPayload(true);
 const frame = document.getElementById('site-home-preview-frame');
 const url = getHomePreviewUrl();
 const previewSections = { hero:'hero', about:'about', impact:'impact', progress:'progress', portfolio:'portfolio', status:'status', activities:'activities', partners:'partners', faq:'faq', contact:'contact', documents:'documents', calculator:'calculator', 'ops-system':'ops-system', 'game-hall':'game-hall' };
-url.hash = previewSections[sectionId] || 'hero';
+// Native iframe fragments can scroll the editor's ancestors; navigate inside the preview after its handshake instead.
+url.hash = '';
 url.searchParams.set('home_preview', '1');
 url.searchParams.set('v', ADMIN_MEMBER_VERSION);
 const previewLayoutJson = JSON.stringify({
@@ -1435,7 +1436,7 @@ if (frame) {
 g_homePreviewSourceWindow = null;
 frame.onload = () => window.setTimeout(async () => {
 await sendHomePreviewSettings();
-const area = window.CoopHomeVisualEditor?.current() || sectionId;
+const area = window.CoopHomeVisualEditor?.current() || previewSections[sectionId] || 'hero';
 frame.contentWindow?.postMessage({type:'coop-home-preview-navigate',area},url.origin);
 }, 80);
 frame.src = url.toString();
@@ -4105,5 +4106,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,openNewSiteCertificationDraft});
-    root.AdminMemberSite = Object.freeze({ version: '20261019-controls-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261019-preview-scroll-2', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);
