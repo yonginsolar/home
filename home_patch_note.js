@@ -1,6 +1,6 @@
 /*
-Version: v1.0.11
-Change: Do not load or open shared patch notes when the tenant profile disables them.
+Version: v1.0.12
+Change: Match management controls to current server permissions without changing write policies.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -196,6 +196,115 @@ let patchNoteLastFocus = null;
 let patchNoteFocusGuardBound = false;
 let patchNoteOpenPromise = null;
 let patchNoteSavePromise = null;
+let patchNoteDeletePromise = null;
+let patchNoteListRevision = 0;
+let patchNotePermissionRevision = 0;
+let patchNotePermission = { state: 'unknown', allowed: false, client: null };
+let patchNotePermissionRequest = null;
+let patchNoteAuthClient = null;
+let patchNoteAuthSubscription = null;
+let patchNoteActor = null;
+
+function patchNoteClient() {
+  return typeof _client === 'undefined' ? null : _client;
+}
+
+function updatePatchNoteControls() {
+  const allowed = isAdminUser();
+  document.getElementById('btnShowWrite')?.classList.toggle('hidden', !allowed);
+  document.querySelectorAll('[data-home-patch-delete]').forEach(btn => {
+    btn.classList.toggle('hidden', !allowed);
+    btn.disabled = !allowed || !!patchNoteDeletePromise;
+  });
+  document.querySelectorAll('#patchWriteForm input, #patchWriteForm textarea').forEach(el => {
+    el.disabled = !allowed;
+  });
+  const save = document.getElementById('btnSavePatchNote');
+  if (save) save.disabled = !allowed || !!patchNoteSavePromise;
+  const status = document.getElementById('patchPermissionStatus');
+  if (status) status.classList.toggle('hidden', patchNotePermission.state !== 'error');
+}
+
+function invalidatePatchNotePermission() {
+  patchNotePermissionRevision++;
+  patchNotePermissionRequest?.controller.abort();
+  patchNotePermissionRequest = null;
+  patchNotePermission = { state: 'unknown', allowed: false, client: null };
+  updatePatchNoteControls();
+}
+
+function bindPatchNoteAuth(client) {
+  if (patchNoteAuthClient === client) return;
+  patchNoteAuthSubscription?.unsubscribe();
+  invalidatePatchNotePermission();
+  patchNoteAuthClient = client;
+  patchNoteActor = null;
+  patchNoteAuthSubscription = client?.auth.onAuthStateChange((event, session) => {
+    // Do not call Supabase inside its Auth callback. Invalidate synchronously only.
+    const actor = session?.user?.id || null;
+    if (event !== 'INITIAL_SESSION' && (actor !== patchNoteActor ||
+        ['SIGNED_OUT', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event))) {
+      invalidatePatchNotePermission();
+    }
+    patchNoteActor = actor;
+  })?.data?.subscription;
+}
+
+// A failed or stale read never grants access. Writes still pass the unchanged RLS.
+function checkAdminPermission() {
+  const client = patchNoteClient();
+  bindPatchNoteAuth(client);
+  if (window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ === false || !client) {
+    invalidatePatchNotePermission();
+    return Promise.resolve(false);
+  }
+  if (patchNotePermissionRequest) return patchNotePermissionRequest.promise;
+  const revision = ++patchNotePermissionRevision;
+  const controller = new AbortController();
+  patchNotePermission = { state: 'loading', allowed: false, client };
+  updatePatchNoteControls();
+  const request = { controller, promise: null };
+  let timer;
+  request.promise = (async () => {
+    try {
+      const result = await Promise.race([
+        (async () => {
+          const { data, error } = await client.auth.getSession();
+          if (error) throw error;
+          if (!data?.session) return false;
+          if (revision !== patchNotePermissionRevision) return false;
+          patchNoteActor = data.session.user.id;
+          const response = await client.rpc('home_patch_note_can_manage').abortSignal(controller.signal);
+          if (response.error) throw response.error;
+          return response.data === true;
+        })(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => { controller.abort(); reject(new Error('permission-timeout')); }, 15000);
+        })
+      ]);
+      if (revision !== patchNotePermissionRevision || client !== patchNoteClient()) return false;
+      patchNotePermission = { state: 'ready', allowed: result, client };
+      return result;
+    } catch (_) {
+      if (revision === patchNotePermissionRevision && client === patchNoteClient()) {
+        patchNotePermission = { state: 'error', allowed: false, client };
+      }
+      return false;
+    } finally {
+      clearTimeout(timer);
+      if (patchNotePermissionRequest === request) patchNotePermissionRequest = null;
+      updatePatchNoteControls();
+    }
+  })();
+  patchNotePermissionRequest = request;
+  return request.promise;
+}
+
+function isAdminUser() {
+  return window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ !== false &&
+    patchNotePermission.state === 'ready' && patchNotePermission.allowed === true &&
+    patchNotePermission.client === patchNoteClient();
+}
 
 function ensurePatchNoteFocusGuard(modalEl) {
   if (!modalEl || patchNoteFocusGuardBound) return;
@@ -228,6 +337,7 @@ function ensurePatchNoteFocusGuard(modalEl) {
   });
 
   modalEl.addEventListener('hide.bs.modal', () => {
+    invalidatePatchNotePermission();
     const active = document.activeElement;
     if (active && modalEl.contains(active) && typeof active.blur === 'function') {
       active.blur();
@@ -275,6 +385,10 @@ const patchNoteModalHTML = `
       </div>
       
       <div class="modal-body p-0">
+        <div id="patchPermissionStatus" class="p-3 small hidden" role="status">
+          작성 권한을 확인하지 못했습니다.
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="retryPatchNotePermission()">다시 확인</button>
+        </div>
         <div id="patchWriteForm" class="bg-light p-3 border-bottom hidden">
             <p class="small text-muted mb-2" style="word-break: keep-all;">홈페이지 방문자와 조합원이 직접 이용하는 변경만 안내해 주세요. 관리자 업무 변경은 ERP 패치노트에 기록하고, 요금·내부 작업 내용은 공개 여부를 따로 확인합니다.</p>
             <div class="row g-2 mb-2">
@@ -357,17 +471,18 @@ function openPatchModal() {
         ensurePatchNoteFocusGuard(modalEl);
 
         // 관리자 체크 (작성 버튼 표시 여부)
-        checkAdminPermission();
+        void checkAdminPermission();
 
         // 작성 폼 초기화 (숨김 처리 및 오늘 날짜 세팅)
         const formEl = document.getElementById("patchWriteForm");
         if(formEl) formEl.classList.add("hidden");
 
         const dateEl = document.getElementById("pnDate");
-        if(dateEl) dateEl.value = formatPatchKstDate();
+        if(dateEl && !dateEl.value) dateEl.value = formatPatchKstDate();
 
         // 리스트 로딩
         await loadPatchList();
+        updatePatchNoteControls();
 
         // 모달 띄우기
         if (!modalEl.classList.contains('show')) modal.show();
@@ -383,16 +498,20 @@ async function loadPatchList() {
     if (window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ === false) return;
     const listEl = document.getElementById("patchList");
     if (!listEl) return;
+    const revision = ++patchNoteListRevision;
+    const client = patchNoteClient();
+    if (!client) return;
     
     // 로딩 스피너
     listEl.innerHTML = '<div class="p-4 text-center"><div class="spinner-border text-primary"></div></div>';
 
     // 테이블명 변경: sys_home_patch_note
-    const { data, error } = await _client
+    const { data, error } = await client
         .from('sys_home_patch_note')
         .select('*')
         .order('release_date', { ascending: false })
         .order('id', { ascending: false });
+    if (revision !== patchNoteListRevision || client !== patchNoteClient()) return;
         
     if (error) {
         console.error("패치노트 로딩 에러:", error);
@@ -406,7 +525,6 @@ async function loadPatchList() {
     }
     
     // 관리자 여부 (삭제 버튼 표시용)
-    const isAdmin = isAdminUser();
 
     listEl.innerHTML = data.map(note => {
         const contentHtml = sanitizePatchContent(note.content || '');
@@ -421,8 +539,8 @@ async function loadPatchList() {
             : '<span class="badge bg-secondary ms-2">Patch</span>';
         
         // 삭제 버튼 (관리자만)
-        const delBtn = (isAdmin && safeNoteId !== null)
-            ? `<button class="btn btn-outline-danger btn-sm py-0 ms-auto" style="font-size:0.7rem;" onclick="deletePatchNote(${safeNoteId})">삭제</button>` 
+        const delBtn = (safeNoteId !== null)
+            ? `<button data-home-patch-delete class="btn btn-outline-danger btn-sm py-0 ms-auto hidden" style="font-size:0.7rem;" onclick="deletePatchNote(${safeNoteId})">삭제</button>`
             : '';
 
         return `
@@ -437,6 +555,7 @@ async function loadPatchList() {
             </div>
         `;
     }).join("");
+    updatePatchNoteControls();
 }
 
 // 4. 새 패치노트 저장 (관리자용)
@@ -464,91 +583,94 @@ function savePatchNote() {
             saveButton.textContent = '저장 중…';
         }
 
-        // 테이블명 변경: sys_home_patch_note
-        const { error } = await _client.from('sys_home_patch_note').insert({
+        if (!await checkAdminPermission()) return;
+        const revision = patchNotePermissionRevision;
+        const client = patchNoteClient();
+        const { error } = await client.from('sys_home_patch_note').insert({
             version: version,
             release_date: date,
             title: title,
             content: content,
             is_major: isMajor
         });
+        if (revision !== patchNotePermissionRevision || client !== patchNoteClient()) return;
 
         if(error) {
             showAlert("저장 실패: " + error.message);
             console.error(error);
         } else {
             showAlert("업데이트 되었습니다!");
-            // 입력창 초기화
-            document.getElementById("pnVersion").value = "";
-            document.getElementById("pnTitle").value = "";
-            document.getElementById("pnContent").value = "";
-            document.getElementById("patchWriteForm").classList.add("hidden"); // 폼 닫기
+            // Keep any additional editing performed while the save was pending.
+            if (document.getElementById('pnVersion').value === version &&
+                document.getElementById('pnDate').value === date &&
+                document.getElementById('pnTitle').value === title &&
+                document.getElementById('pnContent').value === content &&
+                document.getElementById('pnMajor').checked === isMajor) {
+              document.getElementById("pnVersion").value = "";
+              document.getElementById("pnTitle").value = "";
+              document.getElementById("pnContent").value = "";
+              document.getElementById("patchWriteForm").classList.add("hidden");
+            }
 
             // 리스트 새로고침
             await loadPatchList();
             loadCurrentVersion();
         }
-    })().finally(() => {
+    })().catch(() => {
+        showAlert('저장 결과를 확인하지 못했습니다. 목록을 확인해 주세요.');
+    }).finally(() => {
         if (saveButton) {
             saveButton.disabled = false;
             saveButton.removeAttribute('aria-busy');
             saveButton.textContent = originalLabel;
         }
         patchNoteSavePromise = null;
+        updatePatchNoteControls();
     });
 
     return patchNoteSavePromise;
 }
 
 // 5. 패치노트 삭제 (관리자용)
-async function deletePatchNote(id) {
+function deletePatchNote(id) {
+    if (patchNoteDeletePromise) return patchNoteDeletePromise;
+    patchNoteDeletePromise = (async () => {
+    if (!Number.isSafeInteger(id) || !await checkAdminPermission()) return;
+    const revision = patchNotePermissionRevision;
     const ok = await showConfirm("이 패치 내역을 삭제하시겠습니까? (복구 불가)");
-    if(!ok) return;
-    
-    // 테이블명 변경: sys_home_patch_note
-    const { error } = await _client
+    if(!ok || revision !== patchNotePermissionRevision || !await checkAdminPermission()) return;
+    const client = patchNoteClient();
+    const writeRevision = patchNotePermissionRevision;
+    const { error } = await client
         .from('sys_home_patch_note')
         .delete()
         .eq('id', id);
+    if (writeRevision !== patchNotePermissionRevision || client !== patchNoteClient()) return;
     
     if(error) {
         showAlert("삭제 실패: " + error.message);
     } else {
         await loadPatchList(); // 리스트 갱신
     }
+    })().catch(() => {
+        showAlert('삭제 결과를 확인하지 못했습니다. 목록을 확인해 주세요.');
+    }).finally(() => {
+        patchNoteDeletePromise = null;
+        updatePatchNoteControls();
+    });
+    updatePatchNoteControls();
+    return patchNoteDeletePromise;
 }
 
-// [Helper] 관리자 권한 체크 및 UI 제어
-function checkAdminPermission() {
-    const btn = document.getElementById("btnShowWrite");
-    if(!btn) return;
-    
-    if(isAdminUser()) {
-        btn.classList.remove("hidden");
-    } else {
-        btn.classList.add("hidden");
-    }
+async function retryPatchNotePermission() {
+    await checkAdminPermission();
 }
 
-function isAdminUser() {
-    // localStorage에서 사용자 정보 확인
-    const userStr = localStorage.getItem('erp_user');
-    if(!userStr) return false;
-    
-    try {
-        const user = JSON.parse(userStr);
-        // 국장, 관리자, 이사, 이사장 직함이 있으면 관리자로 인정
-        return (user.role === 'admin' || user.position === '국장' || user.position === '이사' || user.position === '이사장');
-    } catch (e) {
-        return false;
-    }
-}
-
-function toggleWriteForm() {
+async function toggleWriteForm() {
     const form = document.getElementById("patchWriteForm");
-    if (form) {
-        form.classList.toggle("hidden");
-    }
+    if (!form) return;
+    if (!form.classList.contains('hidden')) { form.classList.add('hidden'); return; }
+    if (await checkAdminPermission()) form.classList.remove('hidden');
 }
 
 // 페이지 로드 시 최신 버전 체크 (선택 사항)
