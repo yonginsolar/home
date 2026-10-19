@@ -1,4 +1,4 @@
-/* Version: v1.0.7
+/* Version: v1.0.8
 Change: Edit daily notes with optimistic conflict checks and retained drafts.
 */
 /**
@@ -23,7 +23,7 @@ const patchNoteModalHTML = `
       
       <div class="modal-body p-0">
         <div id="patchWriteForm" class="bg-light p-3 border-bottom hidden">
-            <p class="small text-muted mb-2">사용자가 알아야 할 변화와 할 일을 적어 주세요. 작은 수정은 ‘오류를 수정했습니다.’로 묶어요.</p>
+            <p class="small text-muted mb-2">사용자가 알아야 할 변화와 할 일을 적어 주세요. 작은 수정은 짧고 친근하게, 같은 표현은 반복하지 않아요.</p>
             <div id="patchDailyStatus" class="small text-muted mb-2" role="status"></div>
             <div class="row g-2 mb-2">
                 <div class="col-4">

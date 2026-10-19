@@ -1,6 +1,6 @@
 /*
-Version: v1.0.13
-Change: Edit one note per date with guarded daily drafts and concise release cards.
+Version: v1.0.14
+Change: Read early homepage notes separately without replacing current notes or drafts.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -347,6 +347,7 @@ function ensurePatchNoteFocusGuard(modalEl) {
   });
 
   modalEl.addEventListener('hide.bs.modal', () => {
+    cancelPatchArchiveRead();
     invalidatePatchNotePermission();
     const active = document.activeElement;
     if (active && modalEl.contains(active) && typeof active.blur === 'function') {
@@ -376,6 +377,10 @@ const style = document.createElement('style');
 style.innerHTML = `
   .hidden { display: none !important; }
   .modal-dialog-scrollable .modal-body { overflow-y: auto; }
+  #patchNoteModal[data-patch-view="archive"] #btnShowWrite { display:none !important; }
+  #patchArchivePanel { word-break:keep-all; overflow-wrap:break-word; }
+  #patchArchivePanel .patch-archive-copy { white-space:pre-wrap; font-size:.9rem; line-height:1.85; }
+  #patchArchiveHeading:focus { outline:2px solid var(--bs-primary,#0d6efd); outline-offset:3px; }
 `;
 document.head.appendChild(style);
 
@@ -395,12 +400,13 @@ const patchNoteModalHTML = `
       </div>
       
       <div class="modal-body p-0">
+        <div id="patchCurrentPanel">
         <div id="patchPermissionStatus" class="p-3 small hidden" role="status">
           작성 권한을 확인하지 못했습니다.
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="retryPatchNotePermission()">다시 확인</button>
         </div>
         <div id="patchWriteForm" class="bg-light p-3 border-bottom hidden">
-            <p class="small text-muted mb-2">방문자·조합원에게 필요한 변화와 할 일을 적어 주세요. 작은 수정은 ‘오류를 수정했습니다.’로 묶어요.</p>
+            <p class="small text-muted mb-2">방문자·조합원에게 필요한 변화와 할 일을 적어 주세요. 작은 수정은 짧고 친근하게, 같은 표현은 반복하지 않아요.</p>
             <div id="patchDailyStatus" class="small text-muted mb-2" role="status"></div>
             <div class="row g-2 mb-2">
                 <div class="col-4">
@@ -425,10 +431,19 @@ const patchNoteModalHTML = `
 
         <div id="patchList" class="list-group list-group-flush">
             </div>
+        </div>
+        <section id="patchArchivePanel" class="hidden" aria-labelledby="patchArchiveHeading">
+          <div class="p-3 border-bottom">
+            <h6 id="patchArchiveHeading" class="fw-bold mb-2" tabindex="-1">📚 초기 패치노트 원문</h6>
+            <p class="small text-muted mb-0">2025.12.02 ~ 2026.02.11에 작성된 기록이에요. 현재 이용 방법은 최근 업데이트를 확인해 주세요.</p>
+          </div>
+          <div id="patchArchiveStatus" class="p-3 small hidden" role="status" aria-live="polite"></div>
+          <div id="patchArchiveList" class="list-group list-group-flush"></div>
+        </section>
       </div>
       
       <div class="modal-footer bg-light py-1">
-        <small class="text-muted me-auto" style="font-size:0.75rem;">🌿 날짜별 업데이트</small>
+        <button type="button" id="btnPatchArchive" class="btn btn-outline-secondary btn-sm me-auto hidden" aria-controls="patchArchivePanel" aria-expanded="false">📚 지난 패치노트 보기</button>
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button>
       </div>
     </div>
@@ -438,6 +453,121 @@ const patchNoteModalHTML = `
 
 // HTML 주입 (body 맨 끝에 추가)
 document.body.insertAdjacentHTML('beforeend', patchNoteModalHTML);
+
+// Reviewed public homepage copy only; never expose the complete internal backup.
+const PATCH_ARCHIVE_URL = '/assets/patch-notes/homepage-initial-20260211.json';
+let patchArchiveVisible = false;
+let patchArchiveCache = null;
+let patchArchiveRead = null;
+let patchArchiveRevision = 0;
+let patchCurrentScroll = 0;
+let patchArchiveScroll = 0;
+
+function patchArchiveAvailable() {
+  return window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ !== false &&
+    ['www.yonginsolar.kr','yonginsolar.kr'].includes(window.location.hostname);
+}
+
+function cancelPatchArchiveRead() {
+  patchArchiveRevision++;
+  patchArchiveRead?.controller.abort();
+  patchArchiveRead = null;
+}
+
+function renderPatchArchive(notes) {
+  const list = document.getElementById('patchArchiveList');
+  const fragment = document.createDocumentFragment();
+  notes.forEach(note => {
+    const card = document.createElement('article');
+    card.className = 'list-group-item p-3';
+    const meta = document.createElement('div');
+    meta.className = 'small text-muted mb-2';
+    const date = document.createElement('time');
+    date.dateTime = note.release_date;
+    date.textContent = note.release_date;
+    const version = document.createElement('span');
+    version.className = 'ms-2';
+    version.textContent = 'v'+note.version;
+    meta.append(date,version);
+    const title = document.createElement('h6');
+    title.className = 'patch-day-title fw-bold mb-2';
+    title.textContent = note.title;
+    const copy = document.createElement('div');
+    copy.className = 'patch-archive-copy';
+    copy.textContent = note.content;
+    card.append(meta,title,copy);
+    fragment.append(card);
+  });
+  list.replaceChildren(fragment);
+}
+
+function loadPatchArchive() {
+  const modal = document.getElementById('patchNoteModal');
+  if (!patchArchiveAvailable() || !patchArchiveVisible || !modal.classList.contains('show')) return Promise.resolve(false);
+  if (patchArchiveRead) return patchArchiveRead.promise;
+  const status = document.getElementById('patchArchiveStatus');
+  if (patchArchiveCache) {renderPatchArchive(patchArchiveCache);status.classList.add('hidden');return Promise.resolve(true);}
+  const epoch = ++patchArchiveRevision;
+  const request = {controller:new AbortController(),promise:null};
+  patchArchiveRead = request;
+  status.classList.remove('hidden');
+  status.textContent = '예전 소식을 꺼내고 있어요…';
+  document.getElementById('patchArchiveList').replaceChildren();
+  let timer;
+  const current = () => epoch === patchArchiveRevision && patchArchiveVisible && patchArchiveAvailable() && modal.classList.contains('show');
+  request.promise = (async () => {
+    try {
+      const timeout = new Promise((_,reject) => {timer=setTimeout(()=>{request.controller.abort();reject(new Error('archive-timeout'));},15000);});
+      const data = await Promise.race([(async()=>{
+        const response = await fetch(PATCH_ARCHIVE_URL,{credentials:'omit',signal:request.controller.signal});
+        if(!response.ok)throw new Error('archive-read');
+        return response.json();
+      })(),timeout]);
+      if(!current())return false;
+      const keys=['version','release_date','title','content'];
+      if(data?.formatVersion!==1 || data.area!=='homepage' || data.through!=='2026-02-11' || !Array.isArray(data.notes) || data.notes.length!==21 || data.notes.some(n=>
+        !n || Object.keys(n).length!==4 || !keys.every(k=>typeof n[k]==='string') ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(n.release_date) || n.release_date<'2025-12-02' || n.release_date>'2026-02-11' ||
+        !/^\d+(?:\.\d+){1,3}$/.test(n.version) || !n.title || n.title.length>500 || !n.content || n.content.length>20000
+      ))throw new Error('archive-format');
+      patchArchiveCache=data.notes.slice().sort((a,b)=>b.release_date.localeCompare(a.release_date)||b.version.localeCompare(a.version,undefined,{numeric:true}));
+      renderPatchArchive(patchArchiveCache);
+      status.classList.add('hidden');
+      return true;
+    } catch (_) {
+      if(current()){
+        status.replaceChildren(document.createTextNode('지난 패치노트를 불러오지 못했어요. '));
+        const retry=document.createElement('button');retry.type='button';retry.className='btn btn-sm btn-outline-secondary';retry.textContent='다시 불러오기';retry.onclick=()=>{void loadPatchArchive();};status.append(retry);
+      }
+      return false;
+    } finally {
+      clearTimeout(timer);
+      if(patchArchiveRead===request)patchArchiveRead=null;
+    }
+  })();
+  return request.promise;
+}
+
+function setPatchArchiveView(show) {
+  const modal=document.getElementById('patchNoteModal'),button=document.getElementById('btnPatchArchive');
+  show=!!show&&patchArchiveAvailable();
+  button.classList.toggle('hidden',!patchArchiveAvailable());
+  if(show!==patchArchiveVisible){
+    const body=modal.querySelector('.modal-body');
+    if(show)patchCurrentScroll=body.scrollTop;else patchArchiveScroll=body.scrollTop;
+    patchArchiveVisible=show;
+    modal.dataset.patchView=show?'archive':'current';
+    document.getElementById('patchCurrentPanel').classList.toggle('hidden',show);
+    document.getElementById('patchArchivePanel').classList.toggle('hidden',!show);
+    button.textContent=show?'← 최근 업데이트 보기':'📚 지난 패치노트 보기';
+    button.setAttribute('aria-expanded',String(show));
+    body.scrollTop=show?patchArchiveScroll:patchCurrentScroll;
+    if(!show)cancelPatchArchiveRead();
+    (show?document.getElementById('patchArchiveHeading'):button).focus({preventScroll:true});
+  }
+  return show?loadPatchArchive():Promise.resolve(false);
+}
+document.getElementById('btnPatchArchive').addEventListener('click',()=>{void setPatchArchiveView(!patchArchiveVisible);});
 
 // ============================================================
 // [로직] 데이터 로드 및 관리 (DB 테이블: sys_home_patch_note)
@@ -480,6 +610,7 @@ function openPatchModal() {
     patchNoteOpenPromise = (async () => {
         patchNoteLastFocus = document.activeElement;
         ensurePatchNoteFocusGuard(modalEl);
+        setPatchArchiveView(false);
 
         // 관리자 체크 (작성 버튼 표시 여부)
         void checkAdminPermission();
