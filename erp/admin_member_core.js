@@ -6750,6 +6750,7 @@ let memberCreateSaving = false;
 const memberChildDrafts = new Map();
 let memberChildState = null;
 let memberChildSaving = false;
+let memberFamilyRetry = null;
 const memberFundDrafts = new Map();
 let memberFundState = null;
 let donationGrantState = null;
@@ -7184,6 +7185,7 @@ function clearMemberDetailEdits() {
     memberConsultState = null;
     memberChildDrafts.clear();
     memberChildState = null;
+    clearMemberFamilyRetry();
     memberChildFields().forEach(node => { node.value = ''; node.disabled = true; });
     const childParent = document.getElementById('child-parent-name');
     if (childParent) childParent.value = '';
@@ -7219,6 +7221,39 @@ function retainMemberChildDraft() {
     const current = memberChildSnapshot();
     if (JSON.stringify(current) !== JSON.stringify(state.baseline)) memberChildDrafts.set(state.key,{current,baseline:state.baseline});
     else memberChildDrafts.delete(state.key);
+}
+function clearMemberFamilyRetry() {
+    memberFamilyRetry = null;
+}
+function showMemberFamilyReadFailure(read, owner, message = '가족·단체 목록을 불러오지 못했습니다.') {
+    if (!isCurrentMemberDetailRead(read) || !owner || owner !== memberDetailOwner()) return {ok:false,stale:true};
+    memberFamilyRetry = {read,owner};
+    const tbody = document.getElementById('md-family-list');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3"><div class="text-danger small"></div><button type="button" id="member-family-retry" class="btn btn-sm btn-outline-primary mt-2" onclick="retryMemberFamily()">목록 다시 불러오기</button></td></tr>';
+    tbody.querySelector('.text-danger').textContent = message;
+    return {ok:false};
+}
+async function retryMemberFamily() {
+    const retry = memberFamilyRetry;
+    const current = () => !!retry && retry.owner === memberDetailOwner() && isCurrentMemberDetailRead(retry.read)
+        && retry.read.memberId === String(document.getElementById('md-uid')?.value || '')
+        && !window.frameElement?.hidden && document.getElementById('memberDetailModal')?.classList.contains('show');
+    if (!current()) return;
+    memberFamilyRetry = null;
+    const button = document.getElementById('member-family-retry');
+    if (button) button.disabled = true;
+    try {
+        const gate = await window.ErpRuntimeGuard.enforce(_supabase,{moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+        if (!current()) return;
+        if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) {
+            return showMemberFamilyReadFailure(retry.read,retry.owner,'현재 조회 권한을 확인하지 못했습니다. 다시 확인해 주세요.');
+        }
+        return await loadMemberFamily(retry.read.memberId);
+    } catch (error) {
+        if (!current()) return;
+        CoopSafeLog.error('[erp/admin_member] family list retry failed',error);
+        return showMemberFamilyReadFailure(retry.read,retry.owner);
+    }
 }
 document.getElementById('childRegisterModal')?.addEventListener('input', () => {
     if (memberChildState) ++memberChildState.revision;
@@ -8906,9 +8941,12 @@ function getManagedFamilyRelationBadge(relationKind, member) {
 // [수정] 가족/단체 목록 로드 (내가 관리자인 계정 + 나를 관리하는 계정 조회)
 async function loadMemberFamily(parentId) {
     const tbody = document.getElementById('md-family-list');
-    if (!tbody) return;
+    if (!tbody) return {ok:false,stale:true};
     const read = beginMemberDetailRead('family', parentId);
-    if (!isCurrentMemberDetailRead(read)) return;
+    const owner = memberDetailOwner();
+    const current = () => !!owner && owner === memberDetailOwner() && isCurrentMemberDetailRead(read);
+    if (!current()) return {ok:false,stale:true};
+    clearMemberFamilyRetry();
     try {
 
     // 1. 로딩 표시
@@ -8922,12 +8960,11 @@ async function loadMemberFamily(parentId) {
         .select('id, manager_id')
         .eq('id', parentId))
         .maybeSingle();
-    if (!isCurrentMemberDetailRead(read)) return;
+    if (!current()) return {ok:false,stale:true};
 
     if (currentError) {
         CoopSafeLog.error("현재 조합원 가족 연결 기준 로드 실패:", currentError);
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger small py-3">데이터 로드 실패</td></tr>';
-        return;
+        return showMemberFamilyReadFailure(read,owner);
     }
 
     const { data: childList, error: childError } = await scopeAdminTenant(_supabase
@@ -8935,12 +8972,11 @@ async function loadMemberFamily(parentId) {
         .select(familySelect))
         .eq('manager_id', parentId)
         .order('join_date', { ascending: false });
-    if (!isCurrentMemberDetailRead(read)) return;
+    if (!current()) return {ok:false,stale:true};
 
     if (childError) {
         CoopSafeLog.error("가족 목록 로드 실패:", childError);
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger small py-3">데이터 로드 실패</td></tr>';
-        return;
+        return showMemberFamilyReadFailure(read,owner);
     }
 
     let parentMember = null;
@@ -8950,12 +8986,11 @@ async function loadMemberFamily(parentId) {
             .select(familySelect)
             .eq('id', currentMember.manager_id))
             .maybeSingle();
-        if (!isCurrentMemberDetailRead(read)) return;
+        if (!current()) return {ok:false,stale:true};
 
         if (parentError) {
             CoopSafeLog.error("보호자/관리자 연결 로드 실패:", parentError);
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger small py-3">데이터 로드 실패</td></tr>';
-            return;
+            return showMemberFamilyReadFailure(read,owner);
         }
         parentMember = parentData || null;
     }
@@ -8982,7 +9017,7 @@ async function loadMemberFamily(parentId) {
     // 3. 데이터 없음 처리
     if (familyRows.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted small py-3">연결된 가족이나 단체가 없습니다.</td></tr>';
-        return;
+        return {ok:true};
     }
 
     // 4. 목록 렌더링
@@ -9018,10 +9053,11 @@ async function loadMemberFamily(parentId) {
             </tr>
         `;
     });
+    return {ok:true};
     } catch (error) {
-        if (!isCurrentMemberDetailRead(read)) return;
+        if (!current()) return {ok:false,stale:true};
         CoopSafeLog.error('[loadMemberFamily] load failed', error);
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-3">가족·단체 정보를 불러오지 못했습니다.</td></tr>';
+        return showMemberFamilyReadFailure(read,owner);
     }
 }
 
@@ -10367,13 +10403,16 @@ async function saveChildMember() {
         memberChildFields().forEach(node => { node.value = baseline.get(node.id) || ''; window.ErpWorkspaceResume?.checkpoint(node); });
         memberChildSaving = false;
         bootstrap.Modal.getInstance(document.getElementById('childRegisterModal'))?.hide();
-        try { await loadMemberFamily(parentId); }
+        let familyResult;
+        try { familyResult = await loadMemberFamily(parentId); }
         catch (error) {
             CoopSafeLog.error('[erp/admin_member] child family list refresh failed',error);
             if (isCurrentMemberChild(state)) myAlert('등록했습니다. 가족 목록은 다시 확인해 주세요.','warning');
             return;
         }
-        if (isCurrentMemberChild(state)) myAlert('자녀 계정이 등록되었습니다.');
+        if (isCurrentMemberChild(state) && !familyResult?.stale) {
+            myAlert(familyResult?.ok === false ? '등록했습니다. 가족 목록은 다시 확인해 주세요.' : '자녀 계정이 등록되었습니다.',familyResult?.ok === false ? 'warning' : undefined);
+        }
         } catch (error) {
             if (isCurrentMemberChild(state)) myAlert('자녀 등록을 완료하지 못했습니다. ' + (error?.message || '다시 확인해 주세요.'),'error');
         } finally {

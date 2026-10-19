@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.200
-Change: 2026-10-19 - Bind application amount confirmations to the current profile and editor.
+Version: v1.0.201
+Change: 2026-10-19 - Preserve profile-scoped application amount drafts and confirmation guards.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@ Change: 2026-10-19 - Bind application amount confirmations to the current profil
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.200 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.201 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2693,9 +2693,18 @@ let portalApplicationState = null;
 let portalApplicationGeneration = 0;
 let portalApplicationRequest = 0;
 let portalApplicationWritePending = false;
+const portalModifyDrafts = new Map();
 let portalModifyEditor = null;
 let portalModifyRevision = 0;
-function invalidatePortalModifyEditor() {
+function retainPortalModifyDraft() {
+const state = portalModifyEditor;
+if (portalApplicationWritePending || !currentPortalModifyContext(state)) return;
+const amount = document.getElementById('modAmount').value;
+if (amount === state.baseline) portalModifyDrafts.delete(state.key);
+else portalModifyDrafts.set(state.key,{amount});
+}
+function invalidatePortalModifyEditor(retain = true) {
+if (retain) retainPortalModifyDraft();
 ++portalModifyRevision;
 portalModifyEditor = null;
 const modal = document.getElementById('modifyAppModal');
@@ -2704,14 +2713,19 @@ if (modal) modal.style.display = 'none';
 function portalModifySnapshot() {
 return ['modAppId','modAppType','modAmount'].map(id => [id,document.getElementById(id)?.value || '']);
 }
-function currentPortalModifyEditor(state) {
+function currentPortalModifyContext(state) {
 return !!state && state === portalModifyEditor && state.owner === portalApplicationOwner()
     && currentPortalApplicationState(state.application) && state.generation === portalApplicationGeneration
-    && state.member === String(curMem?.id || '') && !document.hidden && !window.frameElement?.hidden
+    && state.member === String(curMem?.id || '')
+    && state.id === document.getElementById('modAppId')?.value
+    && state.type === document.getElementById('modAppType')?.value;
+}
+function currentPortalModifyEditor(state) {
+return currentPortalModifyContext(state) && !document.hidden && !window.frameElement?.hidden
     && document.getElementById('modifyAppModal')?.style.display === 'flex';
 }
-document.getElementById('modifyAppModal')?.addEventListener('input', () => { ++portalModifyRevision; });
-document.getElementById('modifyAppModal')?.addEventListener('change', () => { ++portalModifyRevision; });
+document.getElementById('modifyAppModal')?.addEventListener('input', () => { ++portalModifyRevision; retainPortalModifyDraft(); });
+document.getElementById('modifyAppModal')?.addEventListener('change', () => { ++portalModifyRevision; retainPortalModifyDraft(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) ++portalModifyRevision; });
 function portalApplicationFields() {
 return ['exAmount','redAmount','checkRedAgree','wdReason','checkWdAgree']
@@ -2735,7 +2749,8 @@ const tab = ['extra','reduction','withdraw','cert'].find(type => !document.getEl
 portalApplicationDrafts.set(state.key,{values:portalApplicationSnapshot(),tab});
 }
 function clearPortalApplicationDrafts() {
-invalidatePortalModifyEditor();
+invalidatePortalModifyEditor(false);
+portalModifyDrafts.clear();
 portalApplicationDrafts.clear();portalApplicationState = null;
 ++portalApplicationGeneration;++portalApplicationRequest;
 portalApplicationFields().forEach(n => { if(n.type === 'checkbox') n.checked = false; else n.value = ''; });
@@ -2794,8 +2809,10 @@ return window.AuthBrokerHelper?.providerMatches ? window.AuthBrokerHelper.provid
 }
 window.addEventListener('beforeunload',event => {
 retainPortalApplicationDraft();
+retainPortalModifyDraft();
 const owner = portalApplicationOwner();
-if (portalApplicationWritePending || (owner && [...portalApplicationDrafts].some(([key,draft]) => JSON.parse(key)[0] === owner && draft.values.some(([,value]) => value !== '' && value !== false)))) {
+if (portalApplicationWritePending || (owner && ( [...portalModifyDrafts.keys()].some(key => JSON.parse(key)[0] === owner)
+    || [...portalApplicationDrafts].some(([key,draft]) => JSON.parse(key)[0] === owner && draft.values.some(([,value]) => value !== '' && value !== false))))) {
 event.preventDefault();event.returnValue = '';
 }
 });
@@ -11429,13 +11446,17 @@ return checkDigit === parseInt(raw.charAt(12));
 function openModifyModal(appId, type, currentAmount) {
 if (portalApplicationWritePending || window.__memberAppLocks?.modifyApplication || !currentPortalApplicationState()) return;
 const modal = document.getElementById('modifyAppModal');
-portalModifyEditor = {owner:portalApplicationOwner(),member:String(curMem.id),application:portalApplicationState,generation:portalApplicationGeneration};
+retainPortalModifyDraft();
+const owner = portalApplicationOwner(), member = String(curMem.id), id = String(appId), appType = String(type);
+const key = JSON.stringify([owner,member,id,appType]), baseline = String(currentAmount ?? '');
+portalModifyEditor = {owner,member,id,type:appType,key,baseline,application:portalApplicationState,generation:portalApplicationGeneration};
 ++portalModifyRevision;
 
 // 값 세팅
 document.getElementById('modAppId').value = appId;
 document.getElementById('modAppType').value = type;
-document.getElementById('modAmount').value = currentAmount;
+document.getElementById('modAmount').value = portalModifyDrafts.get(key)?.amount ?? baseline;
+retainPortalModifyDraft();
 document.getElementById('modLimitMsg').classList.add('hidden');
 
 // UI 세팅
@@ -11487,12 +11508,14 @@ p_new_reason: null // 사유 수정은 UI가 복잡해지니 일단 null (기존
 if(error) throw error;
 
 if (state.owner !== portalApplicationOwner() || state.member !== String(curMem?.id || '')) return;
+state.baseline = String(newAmount);
+portalModifyDrafts.delete(state.key);
 notifyMemberApplicationAdmins(appId, 'application_modified').catch((notifyError) => {
 CoopSafeLog.warn("[member-request-alert] application modification admin telegram skipped:", notifyError?.message || notifyError);
 });
 
 if (current()) {
-invalidatePortalModifyEditor();
+invalidatePortalModifyEditor(false);
 showModal('수정했습니다.');
 }
 portalApplicationWritePending = false;
@@ -11507,6 +11530,7 @@ portalApplicationWritePending = false;
 window.__memberAppLocks.modifyApplication = false;
 if (state.owner === portalApplicationOwner() && state.member === String(curMem?.id || '')) {
 controls.forEach((node,index) => { node.disabled = disabled[index]; });
+retainPortalModifyDraft();
 }
 }
 });
