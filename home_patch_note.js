@@ -1,6 +1,6 @@
 /*
-Version: v1.0.12
-Change: Match management controls to current server permissions without changing write policies.
+Version: v1.0.13
+Change: Edit one note per date with guarded daily drafts and concise release cards.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -204,6 +204,14 @@ let patchNotePermissionRequest = null;
 let patchNoteAuthClient = null;
 let patchNoteAuthSubscription = null;
 let patchNoteActor = null;
+let patchDailyEditor = null;
+function getPatchDailyEditor() {
+  if(!patchDailyEditor && window.CoopDailyPatchNotes) patchDailyEditor=CoopDailyPatchNotes.create({
+    area:'homepage',table:'sys_home_patch_note',client:patchNoteClient,allowed:isAdminUser,
+    saving:()=>!!patchNoteSavePromise,confirm:message=>window.CoopDialog?.confirm(message)??Promise.resolve(false)
+  });
+  return patchDailyEditor;
+}
 
 function patchNoteClient() {
   return typeof _client === 'undefined' ? null : _client;
@@ -223,9 +231,11 @@ function updatePatchNoteControls() {
   if (save) save.disabled = !allowed || !!patchNoteSavePromise;
   const status = document.getElementById('patchPermissionStatus');
   if (status) status.classList.toggle('hidden', patchNotePermission.state !== 'error');
+  patchDailyEditor?.stateChanged();
 }
 
 function invalidatePatchNotePermission() {
+  patchDailyEditor?.pause();
   patchNotePermissionRevision++;
   patchNotePermissionRequest?.controller.abort();
   patchNotePermissionRequest = null;
@@ -379,7 +389,7 @@ const patchNoteModalHTML = `
             <h5 class="modal-title m-0">🚀 업데이트 히스토리</h5>
         </div>
         <div class="d-flex gap-2">
-            <button id="btnShowWrite" class="btn btn-sm btn-outline-light hidden" onclick="toggleWriteForm()">✏️ 작성</button>
+            <button id="btnShowWrite" class="btn btn-sm btn-outline-light hidden" onclick="toggleWriteForm()">✏️ 작성·수정</button>
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
         </div>
       </div>
@@ -390,7 +400,8 @@ const patchNoteModalHTML = `
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="retryPatchNotePermission()">다시 확인</button>
         </div>
         <div id="patchWriteForm" class="bg-light p-3 border-bottom hidden">
-            <p class="small text-muted mb-2" style="word-break: keep-all;">홈페이지 방문자와 조합원이 직접 이용하는 변경만 안내해 주세요. 관리자 업무 변경은 ERP 패치노트에 기록하고, 요금·내부 작업 내용은 공개 여부를 따로 확인합니다.</p>
+            <p class="small text-muted mb-2">방문자·조합원에게 필요한 변화와 할 일을 적어 주세요. 작은 수정은 ‘오류를 수정했습니다.’로 묶어요.</p>
+            <div id="patchDailyStatus" class="small text-muted mb-2" role="status"></div>
             <div class="row g-2 mb-2">
                 <div class="col-4">
                     <input type="text" id="pnVersion" class="form-control form-control-sm" placeholder="v1.0.0">
@@ -401,14 +412,14 @@ const patchNoteModalHTML = `
                 <div class="col-3 d-flex align-items-center">
                     <div class="form-check form-switch small">
                         <input class="form-check-input" type="checkbox" id="pnMajor">
-                        <label class="form-check-label" for="pnMajor">Major</label>
+                        <label class="form-check-label" for="pnMajor">중요</label>
                     </div>
                 </div>
             </div>
             <input type="text" id="pnTitle" class="form-control form-control-sm mb-2" placeholder="예: 홈페이지에서 햇빛 퀴즈를 바로 시작할 수 있어요">
             <textarea id="pnContent" class="form-control form-control-sm mb-2" rows="4" placeholder="누가 이용할 수 있는지, 전에는 무엇이 불편했는지, 이제 어떻게 이용하는지 적어 주세요."></textarea>
             <div class="d-grid">
-                <button type="button" id="btnSavePatchNote" class="btn btn-primary btn-sm" onclick="savePatchNote()">💾 저장 및 배포</button>
+                <button type="button" id="btnSavePatchNote" class="btn btn-primary btn-sm" onclick="savePatchNote()">💾 저장</button>
             </div>
         </div>
 
@@ -417,7 +428,7 @@ const patchNoteModalHTML = `
       </div>
       
       <div class="modal-footer bg-light py-1">
-        <small class="text-muted me-auto" style="font-size:0.75rem;">지속적으로 발전하는 시스템이 되겠습니다.</small>
+        <small class="text-muted me-auto" style="font-size:0.75rem;">🌿 날짜별 업데이트</small>
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button>
       </div>
     </div>
@@ -535,8 +546,8 @@ async function loadPatchList() {
         
         // 메이저 업데이트 뱃지
         const badge = note.is_major 
-            ? '<span class="badge bg-danger ms-2">Major Update</span>' 
-            : '<span class="badge bg-secondary ms-2">Patch</span>';
+            ? '<span class="badge bg-success-subtle text-success-emphasis ms-2">중요 안내</span>'
+            : '';
         
         // 삭제 버튼 (관리자만)
         const delBtn = (safeNoteId !== null)
@@ -546,12 +557,12 @@ async function loadPatchList() {
         return `
             <div class="list-group-item p-3">
                 <div class="d-flex w-100 align-items-center mb-2">
-                    <h6 class="mb-0 fw-bold text-primary">${safeVersion} ${badge}</h6>
-                    <small class="text-muted ms-2">${safeReleaseDate}</small>
+                    <time class="small text-muted" datetime="${safeReleaseDate}">${safeReleaseDate}</time>
+                    ${badge}<small class="text-muted ms-2">v${safeVersion.replace(/^v/i,'')}</small>
                     ${delBtn}
                 </div>
-                <h6 class="fw-bold mb-2">${safeTitle}</h6>
-                <p class="mb-1 small text-secondary" style="line-height: 1.6;">${contentHtml}</p>
+                <h6 class="fw-bold mb-2 patch-day-title">${safeTitle}</h6>
+                <div class="mb-1 small patch-day-copy">${contentHtml}</div>
             </div>
         `;
     }).join("");
@@ -586,7 +597,9 @@ function savePatchNote() {
         if (!await checkAdminPermission()) return;
         const revision = patchNotePermissionRevision;
         const client = patchNoteClient();
-        const { error } = await client.from('sys_home_patch_note').insert({
+        const editor=getPatchDailyEditor();
+        if(!editor){showAlert('작성 도구를 불러오지 못했습니다. 화면을 다시 열어 주세요.');return;}
+        const { error } = await editor.save({
             version: version,
             release_date: date,
             title: title,
@@ -596,10 +609,9 @@ function savePatchNote() {
         if (revision !== patchNotePermissionRevision || client !== patchNoteClient()) return;
 
         if(error) {
-            showAlert("저장 실패: " + error.message);
-            console.error(error);
+            showAlert(editor.message(error));
         } else {
-            showAlert("업데이트 되었습니다!");
+            showAlert("저장했습니다.");
             // Keep any additional editing performed while the save was pending.
             if (document.getElementById('pnVersion').value === version &&
                 document.getElementById('pnDate').value === date &&
@@ -670,7 +682,11 @@ async function toggleWriteForm() {
     const form = document.getElementById("patchWriteForm");
     if (!form) return;
     if (!form.classList.contains('hidden')) { form.classList.add('hidden'); return; }
-    if (await checkAdminPermission()) form.classList.remove('hidden');
+    if (await checkAdminPermission()) {
+      const editor=getPatchDailyEditor();
+      if(!editor){showAlert('작성 도구를 불러오지 못했습니다. 화면을 다시 열어 주세요.');return;}
+      form.classList.remove('hidden');await editor.open();
+    }
 }
 
 // 페이지 로드 시 최신 버전 체크 (선택 사항)
