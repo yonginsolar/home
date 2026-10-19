@@ -6443,6 +6443,14 @@ async function loadDashboard() {
 }
 /* ADMIN_DASHBOARD_LAZY_END */
 
+function refreshMemberDashboardAfterSave() {
+    // A successful write invalidates pre-write reads, but hidden statistics wait
+    // for their normal tab entry. Reuse the guarded lazy loader, not its private functions.
+    invalidateAdminDashboardRead();
+    if (document.getElementById('tab-dashboard')?.classList.contains('active')) return loadDashboard();
+    return Promise.resolve();
+}
+
 // [보조] 차트 렌더링 헬퍼 함수
 
 
@@ -8680,7 +8688,7 @@ async function saveMemberBasic() {
             showLoading(false);
             myAlert('저장되었습니다.');
             void loadMemberInformationSummary();
-            void loadMemberDemographicCharts();
+            void refreshMemberDashboardAfterSave();
             if (!document.getElementById('member-information-list-panel').hidden) void loadMemberInformationList(true);
 
             // 3. 리스트 갱신 (딜레이 확보)
