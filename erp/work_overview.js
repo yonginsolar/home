@@ -1,4 +1,4 @@
-/* v1.1.3 — Keep latest read status without disabling settled task actions. */
+/* v1.1.4 — Refresh open task details and expire stale target dialogs together. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -21,7 +21,7 @@
   container.replaceChildren();const sections=[],controllers=new Map(),panels=new Map();
   const key=()=>{const c=options.context();return c?`${c.coop_id}|${c.actor}`:'';};
   const owner=key();
-  let dialog=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0;
+  let dialog=null,dialogReturnFocus=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0;
   const current=()=>!disposed&&key()===owner&&!!owner&&container.isConnected&&!container.closest('.hidden');
   async function read(section){
    const ticket=++readSequence,controller=new AbortController();controllers.set(controller,section);let timer;
@@ -73,14 +73,17 @@
   function refresh(){
    if(!current())return null;
    if(summaryPending)return summaryPending;
-   const panel=panels.get('tasks');panel.supersedeRead();
+   const panel=panels.get('tasks');panel.reset();panel.list.replaceChildren();panel.snapshot=null;closeDialog(true);
    for(const [controller,section]of controllers)if(section==='tasks')controller.abort();
    panel.badge.textContent='확인 중…';panel.badge.className='small text-muted ms-2';panel.status.textContent='대기 건수를 확인하는 중…';options.onTasks?.(null,'loading');
    const attemptTicket=readSequence+1;
    summaryPending=(async()=>{try{
     const {data,ticket}=await read('summary');
     setupVisibility(data.setup,ticket);
-    if(counts(data,ticket))panel.status.textContent=panel.snapshot?'대기 건수를 확인했습니다.':data.items.some(item=>item.count>0)?'대기 건수를 확인했습니다. 목록은 다시 확인을 눌러 불러올 수 있습니다.':'현재 확인할 대기 업무가 없습니다.';
+    if(counts(data,ticket)){
+     panel.status.textContent=data.items.some(item=>item.count>0)?'대기 건수를 확인했습니다. 펼치면 최신 목록을 볼 수 있습니다.':'현재 확인할 대기 업무가 없습니다.';
+     if(current()&&panel.root.open&&ticket===lastTaskTicket)await panel.load();
+    }
    }catch(_){if(current()){
     failTasks(attemptTicket,'대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
     if(attemptTicket>=lastSetupTicket)panels.get('setup').root.hidden=true;
@@ -88,15 +91,19 @@
    panel.syncRetry();
    return summaryPending;
   }
-  function closeDialog(){if(dialog){dialog.remove();dialog=null;}}
-  function showList(title,entries){
+  function closeDialog(restoreFocus=false){
+   const closing=dialog,returnFocus=dialogReturnFocus;dialog=null;dialogReturnFocus=null;
+   if(closing){closing.remove();if(restoreFocus)returnFocus?.();}
+  }
+  function showList(title,entries,section){
    closeDialog();const opener=document.activeElement;
-   dialog=el('dialog','border rounded p-4');dialog.style.cssText='width:min(560px,calc(100% - 32px));max-height:80vh;overflow:auto;word-break:keep-all';
+   const opened=dialog=el('dialog','border rounded p-4');dialog.style.cssText='width:min(560px,calc(100% - 32px));max-height:80vh;overflow:auto;word-break:keep-all';
+   dialogReturnFocus=()=>{if(current())(opener?.isConnected&&!opener.disabled?opener:panels.get(section)?.root.querySelector('summary'))?.focus({preventScroll:true});};
    const heading=el('h2','h5',title);heading.id='work-overview-dialog-title';dialog.setAttribute('aria-labelledby',heading.id);dialog.append(heading);
    if(!entries.length)dialog.append(el('p','text-secondary',title==='등록된 홈페이지·ERP 주소'?'등록된 주소가 없습니다.':'현재 확인할 대기 업무가 없습니다.'));
    for(const item of entries){const row=item.href?el('a','d-block border rounded p-3 mb-2',item.label):el('p','border rounded p-3 mb-2',item.label);if(item.href)row.href=item.href;dialog.append(row);}
-   const close=el('button','btn btn-secondary','닫기');close.type='button';close.onclick=()=>dialog?.close();dialog.append(close);
-   dialog.addEventListener('close',()=>{closeDialog();if(opener?.isConnected)opener.focus({preventScroll:true});},{once:true});document.body.append(dialog);dialog.showModal();
+   const close=el('button','btn btn-secondary','닫기');close.type='button';close.onclick=()=>opened.close();dialog.append(close);
+   dialog.addEventListener('close',()=>{if(dialog===opened)closeDialog(true);},{once:true});document.body.append(dialog);dialog.showModal();
   }
   for(const [section,title] of [['tasks','📌 내 업무 모아보기'],['setup','✅ 조합 설정 점검표']]) {
    const root=el('details','border rounded p-3 mb-2 bg-white'),heading=el('summary','fw-bold',title);
@@ -107,11 +114,11 @@
    body.append(status,list,retry);root.append(heading,body);container.append(root);
    let sequence=0,busy=false,retrying=false;
    const isCurrent=serial=>serial===sequence&&current();
-   const syncRetry=()=>{retry.disabled=busy||retrying||(section==='tasks'&&!!summaryPending);};
+   const syncRetry=()=>{const locked=busy||retrying||(section==='tasks'&&!!summaryPending);retry.disabled=locked;list.querySelectorAll('button').forEach(button=>{button.disabled=locked;});};
    const reset=()=>{++sequence;busy=false;syncRetry();};
-   const supersedeRead=()=>{if(busy)reset();else syncRetry();};panels.set(section,{root,status,list,badge,reset,supersedeRead,syncRetry});
+   panels.set(section,{root,status,list,badge,reset,syncRetry,load});
    async function load() {
-    if(busy||!root.open)return;const serial=++sequence,attemptTicket=readSequence+1;busy=true;syncRetry();list.replaceChildren();status.textContent='불러오는 중…';
+    if(busy||!root.open)return;const serial=++sequence,attemptTicket=readSequence+1;busy=true;syncRetry();list.replaceChildren();if(section==='tasks')panels.get(section).snapshot=null;status.textContent='불러오는 중…';
     try {
      const {data,ticket}=await read(section);if(!isCurrent(serial))return;
      if(section==='tasks'){
@@ -131,13 +138,13 @@
       const choose=['receipts','material','domain'].includes(item.key);
       const link=el(choose?'button':'a',choose?'btn btn-link text-start p-0 text-decoration-none':'text-decoration-none',entry[0]);
       if(choose){link.type='button';link.onclick=()=>{
-       if(!isCurrent(serial))return;
+       if(!isCurrent(serial)||busy||retrying||(section==='tasks'&&summaryPending))return;
        if(item.key==='domain'){
         const addresses=(item.domains||[]).filter(x=>/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(x));
-        showList('등록된 홈페이지·ERP 주소',addresses.map(x=>({label:'https://'+x})));
+        showList('등록된 홈페이지·ERP 주소',addresses.map(x=>({label:'https://'+x})),section);
        }else{
         const targets=(item.targets||[]).filter(x=>x.event_id==='unassigned'||/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(x.event_id));
-        showList(entry[0],targets.map(x=>({label:String(x.label)+' · '+Number(x.count).toLocaleString('ko-KR')+'건',href:'festival_receipts.html?work='+item.key+'&event='+encodeURIComponent(x.event_id)})));
+        showList(entry[0],targets.map(x=>({label:String(x.label)+' · '+Number(x.count).toLocaleString('ko-KR')+'건',href:'festival_receipts.html?work='+item.key+'&event='+encodeURIComponent(x.event_id)})),section);
        }
       };}else link.href=href;
       row.append(link);
@@ -162,7 +169,7 @@
    }
    root.addEventListener('toggle',()=>{if(root.open)void load();});retry.onclick=async()=>{
     if(busy||retrying)return;retrying=true;retry.disabled=true;
-    try{await refresh();if(current())await load();}finally{retrying=false;syncRetry();}
+    try{await refresh();if(current()&&section!=='tasks')await load();}finally{retrying=false;syncRetry();}
    };
    sections.push(()=>{++sequence;busy=false;root.open=false;list.replaceChildren();status.textContent='';});
   }
