@@ -10428,7 +10428,14 @@ myConfirm(msg, async () => {
             bootstrap.Modal.getOrCreateInstance(modal).hide();
         } else await finish();
     } catch (error) {
-        if (current()) myAlert('연결 실패: ' + getManagedLinkErrorMessage(error),'error');
+        if (current()) {
+            if (['GROUP_LINK_CONFLICT','GROUP_ALREADY_MANAGED'].includes(String(error?.message || ''))) {
+                state.result = null;
+                memberGroupConfirmation = null;
+                document.getElementById('group-search-result').textContent = '단체 연결이 변경되었습니다. 검색 버튼을 눌러 다시 확인해 주세요.';
+                myAlert('단체 연결이 변경되어 반영하지 못했습니다. 다시 검색해 주세요.','warning');
+            } else myAlert('연결 실패: ' + getManagedLinkErrorMessage(error),'error');
+        }
     } finally {
         if (memberGroupConnectPending === confirmation) memberGroupConnectPending = null;
         confirmation.busy = false;
