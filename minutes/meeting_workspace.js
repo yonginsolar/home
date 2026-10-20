@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.5
-Change: 2026-10-11 - Show the authorized list first; defer form defaults and historical numbering.
+Version: v1.10.7
+Change: 2026-10-20 - Preserve manually added board text annexes during regeneration.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.58';
@@ -1061,6 +1061,28 @@ function normalizeBoardMaterialsHtml(value) {
   return wrapper.innerHTML;
 }
 
+function regeneratedDocumentPayload(row, existing = {}) {
+  const content_html = sanitizeHtml(row.content);
+  if (state.current?.meeting_type !== 'BOARD' || row.type !== 'MATERIALS') {
+    return { content_html, manually_edited: false };
+  }
+  const saved = document.createElement('div');
+  saved.innerHTML = sanitizeHtml(existing.content_html || '');
+  const annexes = [...saved.querySelectorAll('.board-text-annex')]
+    .filter(node => !node.parentElement.closest('.board-text-annex'));
+  if (!annexes.length) return { content_html, manually_edited: false };
+  const generated = document.createElement('div');
+  generated.innerHTML = content_html;
+  generated.querySelectorAll('.board-text-annex').forEach(node => node.remove());
+  for (const annex of annexes) {
+    annex.classList.remove('is-collapsed');
+    generated.append(annex);
+  }
+  // Annex title/body belongs to this document, not the automatically generated agenda.
+  // Keep the latest editor snapshot, including explicit removals and deliberate duplicate text.
+  return { content_html: generated.innerHTML, manually_edited: true };
+}
+
 function decorateBoardAnnexes({ expandLast = false } = {}) {
   if (state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS') return;
   const sections = [...$('documentEditor').querySelectorAll('.board-text-annex')];
@@ -1380,8 +1402,7 @@ function refreshAutoDrafts({ force = false, render = true } = {}) {
       ...existing,
       document_type: row.type,
       title: row.title,
-      content_html: sanitizeHtml(row.content),
-      manually_edited: false,
+      ...regeneratedDocumentPayload(row, existing),
       live_preview: true
     });
   }
@@ -1611,9 +1632,8 @@ async function generateAllDocuments() {
     const existing = state.documents.get(row.type);
     const { data, error } = await MeetingPackageService.saveDocument(state.current.id, row.type, {
       title: row.title,
-      content_html: sanitizeHtml(row.content),
+      ...regeneratedDocumentPayload(row, existing),
       version: Number(existing?.version || 0) + 1,
-      manually_edited: false,
       generated_at: generatedAt
     });
     if (error) throw error;
