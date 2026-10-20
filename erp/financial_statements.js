@@ -1,4 +1,4 @@
-/* Financial statement workspace 1.1.2. Refresh analysis bases without replacing focused controls. */
+/* Financial statement workspace 1.1.3. Preserve analysis when PDF re-read is cancelled. */
 (function(root){'use strict';
  function create({element,client,getContext,loadPdf}){
   const E=root.FinancialStatementsEngine,doc=element.ownerDocument,drafts=new Map();let owner='',items=[],analysisPreview=null,loaded=false,editable=false,listSeq=0,listAbort=null,active=null,next=0,preview=null,previewSeq=0,analysisYears=3,itemReview=null;
@@ -116,9 +116,10 @@
    for(const x of d.metricInputs)x.inputs[1].closest('td').hidden=!both;const th=d.table.querySelectorAll('thead th')[2];if(th)th.hidden=!both;
    syncItems(d,can);
   }
-  async function inspectDraft(d){if(!same()||!c().edit||!d.file||['reading','saving','uploading','confirming','uncertain'].includes(d.phase))return;analysisPreview=null;renderAnalysis();
-   if(d.metricInputs.some(x=>x.inputs.some(n=>n.value.trim()))){const before=d.epoch;const yes=await root.CoopDialog.confirm('PDF를 다시 읽어 입력칸에 적용할까요?');if(!yes||!same()||d.epoch!==before||!visible())return;}
-   closeItemReview();d.abort?.abort();clearReview(d);const ctl=new AbortController();d.abort=ctl;const epoch=++d.epoch,who=owner;d.phase='reading';d.status.textContent='PDF를 이 기기에서 읽는 중입니다…';syncDraft(d);
+  async function inspectDraft(d){const who=owner,before=d.epoch,file=d.file,current=()=>same()&&owner===who&&c().allowed&&c().edit&&editable&&loaded&&visible()&&drafts.get(d.key)===d&&active===d&&!d.el.hidden&&d.epoch===before&&d.file===file&&d.phase==='idle';if(!file||!current())return;
+   if(d.metricInputs.some(x=>x.inputs.some(n=>n.value.trim()))){const yes=await root.CoopDialog.confirm('PDF를 다시 읽어 입력칸에 적용할까요?');if(!yes||!current())return;}
+   analysisPreview=null;renderAnalysis();
+   closeItemReview();d.abort?.abort();clearReview(d);const ctl=new AbortController();d.abort=ctl;const epoch=++d.epoch;d.phase='reading';d.status.textContent='PDF를 이 기기에서 읽는 중입니다…';syncDraft(d);
    try{const pdf=await loadPdf();const parsed=await pdf.inspect(d.file,{signal:ctl.signal});if(owner!==who||!same()||d.epoch!==epoch||!visible())return;const result=E.parse(parsed.lines);d.extracted=result;d.itemAcks.clear();d.itemEdits.clear();d.controls.kind.value=result.kind||'';d.controls.unit.value=({'원':'1','천원':'1000','백만원':'1000000'})[result.unit]||'';for(let i=0;i<2;i++){d.controls['year'+i].value=result.columns[i].year||'';d.controls['from'+i].value=result.columns[i].period_from;d.controls['to'+i].value=result.columns[i].period_to;}metricTable(d,result.columns[0].metrics,result.columns[1].metrics,true);d.dirty=true;clearReview(d);d.reviewBaseline=reviewValues(d);d.baseline=null;d.status.textContent=result.kind?'읽은 값은 원본과 대조한 뒤 읽은 값 확인을 눌러 주세요. 빈칸은 직접 입력할 수 있습니다.':'문서 종류·연도·단위와 금액을 직접 확인해 입력해 주세요.';
    }catch(e){if(owner===who&&d.epoch===epoch){d.status.textContent=e.message&&/PDF|파일|암호|쪽|글자/.test(e.message)?e.message:'PDF를 읽지 못했습니다. 다시 읽거나 금액을 직접 입력해 주세요.';}}
    finally{if(owner===who&&d.epoch===epoch){d.phase='idle';d.abort=null;analysisPreview=null;renderAnalysis();syncDraft(d);renderDrafts();}}
@@ -156,5 +157,5 @@
   async function setVisibility(item){if(!same()||!c().allowed||!c().edit||!editable||!visible()||item.visibilityBusy)return;item.visibilityBusy=true;const who=owner;try{const excluded=!item.excluded;const yes=await root.CoopDialog.confirm(item.year+'년 '+label(item.kind)+(excluded?'를 분석에서 제외할까요?':'를 분석에 포함할까요?'));if(!yes||!same()||owner!==who||!visible()||!c().edit||!items.some(x=>x.id===item.id&&!!x.excluded===!!item.excluded))return;const data=await api('visibility',{kind:item.kind,year:item.year,expected:item.id,excluded},root.crypto.randomUUID());if(data?.outcome!=='visibility')throw Error('UNKNOWN');if(same())await refresh();}catch(e){if(same()){await root.CoopDialog.alert(e.code?errorText(e):'처리 결과를 확인하지 못했습니다. 목록을 다시 불러와 주세요.');}}finally{item.visibilityBusy=false;}}
   mount();return Object.freeze({open:async(options={})=>{if(sync())await refresh(options);},refresh,sync,hasDraft:()=>[...drafts.values()].some(d=>d.dirty)});
  }
- root.FinancialStatements=Object.freeze({version:'1.1.2',create});
+ root.FinancialStatements=Object.freeze({version:'1.1.3',create});
 })(window);
