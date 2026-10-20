@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.6.0 — preserve parent navigation and nested task menus. */
+/* ERP workspace navigation v1.6.1 — preserve parent navigation and nested task menus. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261020.4';
+  const VERSION = '20261020.5';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -262,7 +262,7 @@
     return null;
   }
   function hierarchyRows(owner,sources) {
-    const current=sources.map(source=>({source,label:localLabel(source),selected:localSelected(source),pane:paneFor(source),parent:null}));
+    let current=sources.map(source=>({source,label:localLabel(source),selected:localSelected(source),pane:paneFor(source),parent:null}));
     const hub=hubBranches[owner.dataset.menuId];
     let rows=current,branch=null;
     // Retain only live navigation controls from a previously authorized hub, never its business data.
@@ -275,6 +275,8 @@
       const controls=parent?[...parent.doc.querySelectorAll('[data-workspace-submenu]')].filter(n=>sourceAlive(n)&&localVisible(n)&&localLabel(n)):[];
       if (match && controls.some(n=>n.id===match[0])) {
         const ancestors=controls.map(source=>({source,label:localLabel(source),selected:source.id===match[0],pane:null,parent:null}));
+        // The document manager also has its own shortcut to the same package middle menu.
+        if (ancestors.some(row=>row.source.id==='cardMeetingPackages')) current=current.filter(row=>row.source.id!=='meeting-package-link');
         branch=ancestors.find(row=>row.source.id===match[0]); rows=[...ancestors,...current];
       } else {
         // Direct entry/evicted hub: use its existing navigation route; do not fetch or invent permissions/cards.
