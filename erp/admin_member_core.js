@@ -2663,13 +2663,14 @@ document.getElementById('customConfirmModal')?.addEventListener('hidden.bs.modal
 let memberSmsExportBusy = false;
 let memberSmsExportRevision = 0;
 let memberSmsExportRead = null;
+let memberSmsExportReleaseLoading = null;
 async function downloadMemberSmsExcel() {
     if (memberSmsExportBusy) return;
     const runtime=g_adminMemberRuntime,authId=adminCertificateAuthId,cutoffDate=getMemberExportCutoffDate();
     if (!normalizeMemberExportDateValue(cutoffDate)) return myAlert('기준일을 선택해 주세요.','warning');
     const modal=document.getElementById('excelModal');
     if(!modal.dataset.smsReadBound){
-        const invalidate=()=>{memberSmsExportRevision++;memberSmsExportRead?.abort();};
+        const invalidate=()=>{memberSmsExportRevision++;memberSmsExportRead?.abort();memberSmsExportReleaseLoading?.();};
         modal.addEventListener('hide.bs.modal',invalidate);
         modal.addEventListener('change',event=>{if(event.target.matches('input[name="excelOption"],#memberExportCutoffDate'))invalidate();});
         modal.dataset.smsReadBound='1';
@@ -2678,6 +2679,14 @@ async function downloadMemberSmsExcel() {
     const current=()=>revision===memberSmsExportRevision && g_adminMemberRuntime===runtime && adminCertificateAuthId===authId
       && getSelectedExcelOption()==='sms' && getMemberExportCutoffDate()===cutoffDate
       && document.getElementById('excelModal')?.classList.contains('show') && !window.frameElement?.hidden;
+    let ownsLoading=true;
+    const releaseLoading=()=>{
+        if(!ownsLoading)return;
+        ownsLoading=false;
+        if(memberSmsExportReleaseLoading===releaseLoading)memberSmsExportReleaseLoading=null;
+        showLoading(false);
+    };
+    memberSmsExportReleaseLoading=releaseLoading;
     memberSmsExportBusy=true;showLoading(true);
     try {
         const identity=await _supabase.auth.getUser();
@@ -2721,7 +2730,7 @@ async function downloadMemberSmsExcel() {
         bootstrap.Modal.getInstance(document.getElementById('excelModal'))?.hide();
     } catch (_) {
         if(current())myAlert('문자 발송용 명부를 불러오지 못했습니다. 다시 시도해 주세요.','error');
-    } finally {memberSmsExportBusy=false;showLoading(false);}
+    } finally {memberSmsExportBusy=false;releaseLoading();}
 }
 
 async function downloadExcel() {

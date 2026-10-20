@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.10 — keep local document actions out of task navigation. */
+/* Persistent ERP workspace v1.2.11 — bind the initial contract employee without replacing drafts. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -382,6 +382,27 @@
     syncFrame();
     try { attachDocument(frame.contentDocument, entry); } catch (_) {}
   }
+  function bindContractEmployee(child, employeeId) {
+    const entry = activeEntry;
+    try {
+      if (!ready || leaving || navigationPending || entry.frame !== frame || child !== frame.contentWindow || !entry.route) return false;
+      const target = new URL(child.location.href), id = String(employeeId || '');
+      const route = routes.route(target.href);
+      if (route !== entry.route || new URL(route, location.origin).pathname !== '/erp/employment_contracts.html'
+        || target.searchParams.has('employee') || !id || child.document.getElementById('employeeSelect')?.value !== id || changed(entry)) return false;
+      target.searchParams.set('employee', id);
+      const next = routes.route(target.href);
+      if (retained.has(next) && retained.get(next) !== entry) {
+        // Prefer the existing owner's exact DOM/File, with the usual fresh server check.
+        history.replaceState({erpWorkspace:true}, '', routes.address(next));
+        load(next);
+        return 'reuse';
+      }
+      child.history.replaceState(child.history.state, '', target.href);
+      syncFrame();
+      return 'bound';
+    } catch (_) { return false; }
+  }
   document.addEventListener('click', event => {
     const anchor = event.target.closest?.('a.erp-workspace-link');
     if (!anchor || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -488,5 +509,5 @@
     try { await pending; }
     finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261019.1'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, version:'20261020.1'};
 })();

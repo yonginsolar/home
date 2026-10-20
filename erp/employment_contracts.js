@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: v1.3.5 | 2026-10-20 — read-only canonical HR contract scope. */
+/* Version: v1.3.6 | 2026-10-20 — retain employee routes and invalidate obsolete attachment reads. */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -23,6 +23,7 @@ const state = {
   contracts: [],
   contractLoadRevision: 0,
   detailRevision: 0,
+  attachmentRevision: 0,
   contractsLoading: false,
   contractsLoaded: false,
   contractLoadError: false,
@@ -351,6 +352,21 @@ function renderEmployeeSelect() {
     return `<option value="${escapeHtml(employee.emp_id)}">${escapeHtml(number + (employee.emp_name || '이름 없음') + inactive)}</option>`;
   }).join('');
   if (state.employee) select.value = state.employee.emp_id;
+}
+
+function bindInitialContractEmployee() {
+  if (!state.admin || state.forceSelf || !state.employee || new URLSearchParams(location.search).has('employee')) return false;
+  try {
+    if (window.parent !== window && window.parent.ErpWorkspaceShell?.bindContractEmployee) {
+      return window.parent.ErpWorkspaceShell.bindContractEmployee(window, state.employee.emp_id) === 'reuse';
+    }
+    // Standalone documents keep the same DOM; no reload or business write is needed.
+    if (window.parent === window) {
+      const target = new URL(location.href); target.searchParams.set('employee', state.employee.emp_id);
+      history.replaceState(history.state, '', target.href);
+    }
+  } catch (_) {}
+  return false;
 }
 
 async function loadContracts() {
@@ -1461,8 +1477,11 @@ async function downloadContractPdf(contract, button) {
 async function openStoredFile(path) {
   const safePath = asText(path);
   if (!safePath) return showAlert('계약서 파일을 찾을 수 없습니다.');
-  const owner = {empId:state.employee?.emp_id,coopId:state.user?.coop_id,userId:state.user?.auth_user_id || state.user?.emp_id};
-  const current = () => owner.empId === state.employee?.emp_id && owner.coopId === state.user?.coop_id
+  const revision = ++state.attachmentRevision;
+  const owner = {empId:state.employee?.emp_id,coopId:state.user?.coop_id,userId:state.user?.auth_user_id || state.user?.emp_id,
+    detailRevision:state.detailRevision,editing:state.editing};
+  const current = () => revision === state.attachmentRevision && owner.detailRevision === state.detailRevision && owner.editing === state.editing
+    && owner.empId === state.employee?.emp_id && owner.coopId === state.user?.coop_id
     && owner.userId === (state.user?.auth_user_id || state.user?.emp_id) && !window.frameElement?.hidden;
   try {
     let url = safePath.startsWith('https://') ? safePath : '';
@@ -1568,7 +1587,14 @@ async function registerUpload(event) {
   }
 }
 
+function observeContractAttachmentContext() {
+  const invalidateAttachment = () => { state.attachmentRevision++; };
+  window.addEventListener('pagehide', invalidateAttachment);
+  if (window.frameElement) new MutationObserver(invalidateAttachment).observe(window.frameElement, {attributes:true,attributeFilter:['hidden']});
+}
+
 async function boot() {
+  observeContractAttachmentContext();
   alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
   uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
   discardModal = new bootstrap.Modal(document.getElementById('unsavedContractModal'));
@@ -1604,6 +1630,7 @@ async function boot() {
     if (!runtime.ok) return;
     await loadEmployees();
     renderEmployeeSelect();
+    if (bindInitialContractEmployee()) return;
     await loadContracts();
     document.getElementById('backButton').textContent = state.admin && !state.forceSelf ? '직원관리로' : '마이페이지로';
     document.getElementById('backButton').addEventListener('click', returnToContractOwner);
