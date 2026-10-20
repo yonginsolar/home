@@ -42,7 +42,11 @@
     }).finally(()=>{clearTimeout(timer);if(pending?.promise===promise){pending=null;button.disabled=false;}});
     pending={key,more,promise,controller};return promise;
   }
-  ids.forEach(id=>doc.getElementById(id)?.addEventListener('input',invalidate));
+  ids.forEach(id=>doc.getElementById(id)?.addEventListener('input',()=>{
+    invalidate();
+    doc.getElementById('journalHistoryMore').hidden=true;
+    doc.getElementById('journalHistoryStatus').textContent='조회를 눌러 변경한 조건으로 확인해 주세요.';
+  }));
   root.addEventListener('pagehide',invalidate);
   root.CoopAccountingHistory=Object.freeze({load,clear,invalidate});
 })(window);
