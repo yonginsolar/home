@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.162 | Change: 2026-10-20 - Refresh the active main history panel on authorized return without replacing drafts. -->
+<!-- Version: v1.0.163 | Change: 2026-10-20 - Add private PDF statement registration and local financial analysis. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -9,11 +9,12 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.162 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.163 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
-  <script src="workflow_assets.js?v=20261010-1"></script>
+  <script src="workflow_assets.js?v=20261020-finance-1"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
+  <link rel="stylesheet" href="financial_statements.css?v=1.0.0">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -198,10 +199,12 @@
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAssets" onclick="loadAssetOverview()">📦 자산·재고</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSync" onclick="loadApprovalUnclassifiedQueue()">🔄 결재·입금 가져오기</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHistory" onclick="loadHistory()">🕒 장부 찾아보기</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabStatements" onclick="openFinancialStatements()">📊 재무제표 등록·분석</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 신고·결산 안내</button></li>
   </ul>
 
   <div class="tab-content no-print">
+    <div class="tab-pane fade" id="tabStatements"><div id="financialStatementsPanel"></div></div>
     <div class="tab-pane fade" id="tabMoney"><div id="accountingMoneyPanel"></div></div>
 
     <div class="tab-pane fade" id="tabAssets">
@@ -2082,9 +2085,10 @@ window.onload = async function() {
     renderAutoSyncUndoInfo();
     if (document.getElementById('tabSync')?.classList.contains('active')) await loadApprovalUnclassifiedQueue();
     if (document.getElementById('tabGuide')?.classList.contains('active')) await mountAccountingGuide();
-    window.ErpWorkspaceResume.register({modules:['accounting'], refreshWhenDirty:()=>document.getElementById('tabHistory')?.classList.contains('active') === true, refresh:async () => {
+    window.ErpWorkspaceResume.register({modules:['accounting'], refreshWhenDirty:()=>['tabHistory','tabStatements'].some(id=>document.getElementById(id)?.classList.contains('active')), refresh:async () => {
         const pane = document.querySelector('.tab-content.no-print > .tab-pane.active')?.id;
         if (pane === 'tabHistory') await loadHistory({allowHidden:true});
+        else if (pane === 'tabStatements') await openFinancialStatements({allowHidden:true});
         else if (pane === 'tabAssets') await loadAssetOverview();
         else if (pane === 'tabSync') await loadApprovalUnclassifiedQueue();
         else if (pane === 'tabForm' || !pane) await refreshDashboard();
@@ -2092,6 +2096,27 @@ window.onload = async function() {
 };
 
 let accountingGuideLoading = null;
+let financialStatementsController = null,financialStatementsLoading = null;
+async function openFinancialStatements(options = {}) {
+    if (!accountingDataAuthorized || !myInfo?.coop_id || (!canPerform('accounting.view') && !canPerform('accounting.edit'))) return;
+    if (financialStatementsController) return financialStatementsController.open(options);
+    if (financialStatementsLoading) return financialStatementsLoading;
+    const panel=document.getElementById('financialStatementsPanel'),identity=String(myInfo.auth_user_id||myInfo.id||myInfo.emp_id||''),coopId=myInfo.coop_id;
+    panel.textContent='재무제표 도구를 불러오는 중입니다…';
+    financialStatementsLoading=(async()=>{try{
+        await window.ErpWorkflowAssets.load('financialEngine');
+        await window.ErpWorkflowAssets.load('financialStatements');
+        if (!accountingDataAuthorized || myInfo?.coop_id!==coopId || String(myInfo.auth_user_id||myInfo.id||myInfo.emp_id||'')!==identity) return;
+        financialStatementsController=window.FinancialStatements.create({element:panel,client:_supabase,loadPdf:()=>import('./financial_statement_pdf.mjs?v=1.0.0'),getContext:()=>({
+            owner:myInfo?.coop_id?JSON.stringify([String(myInfo.auth_user_id||myInfo.id||myInfo.emp_id||''),myInfo.coop_id]):'',coopId:myInfo?.coop_id,
+            allowed:accountingDataAuthorized&&(canPerform('accounting.view')||canPerform('accounting.edit')),edit:accountingDataAuthorized&&canPerform('accounting.edit')
+        })});
+        await financialStatementsController.open(options);
+    }catch(_){panel.textContent='재무제표 도구를 불러오지 못했습니다. ';const retry=document.createElement('button');retry.type='button';retry.className='btn btn-outline-secondary';retry.textContent='다시 불러오기';retry.onclick=openFinancialStatements;panel.append(retry);
+    }finally{financialStatementsLoading=null;}})();
+    return financialStatementsLoading;
+}
+
 async function mountAccountingGuide() {
     const root = document.getElementById('accountingGuide');
     if (!root || root.dataset.mounted === '1') return;
