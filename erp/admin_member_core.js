@@ -2137,9 +2137,9 @@ try {
 async function downloadMemberImportTemplate() {
     if (!(await ensureAdminMemberSpreadsheetReady())) return;
 const wsData = [
-  ['유형', '이름', '단체명', '주민등록번호', '이메일', '연락처', '사업자번호', '법인번호', '상태', '주소', '조합원번호', '가입구분', '가입일', '관리메모', '대표자명', '담당자명', '담당자 직함'],
-  ['개인', '예시 개인', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-  ['단체', '', '예시 단체', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
+  ['유형', '이름', '단체명', '주민등록번호', '이메일', '연락처', '사업자번호', '법인번호', '상태', '주소', '조합원번호', '가입구분', '가입일', '관리메모', '대표자명', '담당자명', '담당자 직함', '납입출자금', '출자금 납입일'],
+  ['개인', '예시 개인', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+  ['단체', '', '예시 단체', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
 ];
 const ws = XLSX.utils.aoa_to_sheet(wsData);
 const wb = XLSX.utils.book_new();
@@ -2196,6 +2196,10 @@ const pick = (...keys) => {
 };
 
 const joinDateRaw = pick('가입일', 'join_date');
+const capitalRaw = pick('납입출자금', '출자금', '출자금액', 'capital_amount');
+const capitalDateRaw = pick('출자금 납입일', '납입일', '출자금납입일', 'capital_date');
+const capitalText = String(capitalRaw).trim();
+const capitalAmount = capitalText === '' ? null : /^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(capitalText) ? Number(capitalText.replace(/,/g,'')) : NaN;
 const memberType = String(pick('유형', 'member_type')).trim();
 const status = String(pick('상태', 'status')).trim();
 const isGroup = memberType === '단체';
@@ -2225,6 +2229,8 @@ const normalized = {
   member_id: String(pick('조합원번호', 'member_id')).trim(),
   join_category: String(pick('가입구분', 'join_category')).trim(),
   join_date: normalizeMemberImportDate(joinDateRaw),
+  capital_amount: capitalAmount,
+  capital_date: normalizeMemberImportDate(capitalDateRaw),
   admin_memo: String(pick('관리메모', '비고', 'admin_memo')).trim(),
   rrn,
   business_number: businessNumber,
@@ -2242,6 +2248,10 @@ if (!normalized.member_type) errors.push('유형 누락');
 else if (!['개인', '단체'].includes(normalized.member_type)) errors.push('유형 오류');
 if (normalized.status && !['정상', '승인대기', '탈퇴', '제명'].includes(normalized.status)) errors.push('상태 오류');
 if (String(joinDateRaw).trim() && !normalized.join_date) errors.push('가입일 형식 오류');
+if (capitalAmount !== null && (!Number.isSafeInteger(capitalAmount) || capitalAmount < 0)) errors.push('출자금 형식 오류');
+if (String(capitalDateRaw).trim() && (!normalized.capital_date || normalized.capital_date < '1900-01-01' || normalized.capital_date > getAdminMemberKstDateString())) errors.push('출자금 납입일 형식 오류');
+if (Number.isSafeInteger(capitalAmount) && capitalAmount > 0 && !String(capitalDateRaw).trim()) errors.push('출자금 납입일 누락');
+if (String(capitalDateRaw).trim() && !(Number.isSafeInteger(capitalAmount) && capitalAmount > 0)) errors.push('납입일에 맞는 출자금 확인 필요');
 if (normalized.name.length > 100 || /[\x00-\x1f\x7f]/.test(normalized.name)) errors.push('이름·단체명 형식 오류');
 if (!isGroup && /[0-9]/.test(normalized.name)) errors.push('이름 형식 오류');
 if (String(rrnRaw).trim() && (isGroup || !/^[0-9 -]+$/.test(String(rrnRaw)) || !normalized.rrn)) errors.push('주민번호 형식 오류');
@@ -2414,6 +2424,7 @@ filteredRows.slice(0, 10).forEach((row) => {
     <td>${row.member_type === '단체' ? `${escapeHtml(row.representative_name || '-')}<br><span class="small text-muted">${escapeHtml(row.contact_name || '-')} · ${escapeHtml(row.contact_position || '-')}</span>` : '-'}</td>
     <td>${escapeHtml(row.status || '-')}</td>
     <td>${escapeHtml(row.join_date || '-')}</td>
+    <td>${Number.isSafeInteger(row.capital_amount) ? row.capital_amount.toLocaleString('ko-KR')+'원' : row.capital_amount === null || row.capital_amount === undefined ? '-' : '확인 필요'}<br><span class="small text-muted">${escapeHtml(row.capital_date || '-')}</span></td>
     <td>${row.valid && !row.server_error ? '<span class="badge bg-success">정상</span>' : errorBadges}</td>
   `;
   tbody.appendChild(tr);
@@ -2460,6 +2471,8 @@ const rows = failedRows.map((row) => ({
   대표자명: row.source_row?.['대표자명'] ?? row.representative_name ?? '',
   담당자명: row.source_row?.['담당자명'] ?? row.contact_name ?? '',
   '담당자 직함': row.source_row?.['담당자 직함'] ?? row.contact_position ?? '',
+  납입출자금: row.source_row?.['납입출자금'] ?? row.source_row?.['출자금'] ?? row.source_row?.['출자금액'] ?? row.source_row?.capital_amount ?? row.capital_amount ?? '',
+  '출자금 납입일': row.source_row?.['출자금 납입일'] ?? row.source_row?.['납입일'] ?? row.source_row?.['출자금납입일'] ?? row.source_row?.capital_date ?? row.capital_date ?? '',
   오류사유: [...row.errors, ...(row.server_error ? [row.server_error] : [])].join(', ')
 }));
 
@@ -2564,7 +2577,9 @@ return rows.map(row => ({
     representative_name:row.member_type === '단체' ? row.representative_name || null : null,
     contact_name:row.member_type === '단체' ? row.contact_name || null : null,
     contact_position:row.member_type === '단체' ? row.contact_position || null : null,
-    join_date:row.join_date || null
+    join_date:row.join_date || null,
+    ...(row.capital_amount === null || row.capital_amount === undefined ? {} : {capital_amount:row.capital_amount}),
+    ...(row.capital_date ? {capital_date:row.capital_date} : {})
 }));
 }
 
@@ -2603,6 +2618,11 @@ myConfirm(state.attempt ? '이전 등록 요청의 결과를 다시 확인할까
         p_request_key:attempt.key, p_rows:attempt.payload
     });
     if (!isCurrentMemberImport(state, revision)) return;
+    if (error?.code === '42501' || error?.code === '22023') {
+        const rejected = new Error('IMPORT_REQUEST_REJECTED');
+        rejected.importRejected = true;
+        throw rejected;
+    }
     const expected = new Set(attempt.payload.map(row => row.row_no));
     const items = Array.isArray(result?.items) ? result.items : [];
     if (error || items.length !== expected.size || new Set(items.map(item => item?.row_no)).size !== expected.size
@@ -2635,10 +2655,11 @@ myConfirm(state.attempt ? '이전 등록 요청의 결과를 다시 확인할까
             }
         });
     }
-  } catch (_) {
+  } catch (error) {
     if (!isCurrentMemberImport(state, revision)) return;
-    state.phase = sent || state.attempt ? 'unknown' : 'ready';
-    state.message = state.phase === 'unknown'
+    if (error.importRejected) { state.attempt = null; g_member_import_request_key = null; }
+    state.phase = error.importRejected ? 'ready' : sent || state.attempt ? 'unknown' : 'ready';
+    state.message = error.importRejected ? '등록 권한과 입력값을 다시 확인해 주세요.' : state.phase === 'unknown'
         ? '등록 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.'
         : '로그인과 등록 권한을 확인하지 못했습니다. 다시 시도해 주세요.';
     if (isCurrentMemberImport(state, revision, true)) myAlert(state.message, 'warning');
