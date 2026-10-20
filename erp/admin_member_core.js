@@ -715,6 +715,7 @@ bindIssueDocModalFocusGuard();
 
 const ADMIN_MEMBER_MODAL_Z_INDEX = {
     excelModal: 1055,
+    capitalImportModal: 1055,
     memberCreateModal: 1055,
     memberCertificateSettingsModal: 1055,
     memberCapitalSettingsModal: 1065,
@@ -6147,6 +6148,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-members', memberAdminEnabled],
 ['nav-badges', memberAdminEnabled && hasAdminMemberBadgePermission()],
 ['member-capital-settings-button', memberAdminEnabled],
+['capital-import-button', memberAdminEnabled],
 ['nav-org-settings', memberAdminEnabled && (isSiteMemberProfile || canOpenFullCoopSettings())],
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
@@ -6165,6 +6167,7 @@ const el = document.getElementById(id);
 if (!el) return;
 el.classList.toggle('hidden', !enabled);
 });
+capitalImportController?.syncContext();
 [
 ['site-external-news-nav-item', !isSiteMemberProfile],
 ['site-legal-nav-item', siteAdminEnabled],
@@ -6627,6 +6630,39 @@ function changeMemberPageSize(value) {
 } // End of changeMemberPageSize
 
 // [수정] 조합원 검색/목록 로드: 서버 페이지네이션 + 전체 결과 기준 정렬
+// The optional import tool owns only its File/preview state; no member editor is reset.
+let capitalImportController = null;
+let capitalImportOpening = false;
+function capitalImportContext() {
+    const actor = String(adminCertificateAuthId || '');
+    const coopId = String(g_adminMemberRuntime?.coop_id || '');
+    return {owner: actor && coopId ? JSON.stringify([actor,coopId]) : '', coopId,
+        allowed: !!actor && !!coopId && g_adminMemberRuntime?.is_active !== false && canAccessAdminMemberTab('members')};
+}
+async function openCapitalImportModal() {
+    const before = capitalImportContext();
+    if (!before.allowed || capitalImportOpening) return;
+    capitalImportOpening = true;
+    try {
+        const feature = await window.AdminMemberAssets.ensureCapitalImport();
+        const current = capitalImportContext();
+        if (!current.allowed || current.owner !== before.owner || window.frameElement?.hidden) return;
+        if (!capitalImportController) capitalImportController = feature.create({
+            client: _supabase, getContext: capitalImportContext,
+            ensureSpreadsheet: () => window.AdminMemberAssets.ensureSpreadsheet(),
+            refresh: async () => {
+                const updated = await fetchMembers();
+                await refreshMemberDashboardAfterSave();
+                return updated === true;
+            }
+        });
+        capitalImportController.open();
+    } catch (_) {
+        if (capitalImportContext().owner === before.owner && capitalImportContext().allowed && !window.frameElement?.hidden)
+            myAlert('출자금 엑셀 도구를 불러오지 못했습니다. 다시 열어 주세요.', 'error');
+    } finally { capitalImportOpening = false; }
+}
+
 async function fetchMembers() {
     const requestRevision = ++g_member_fetch_revision;
     // ✅ DOM 요소 단축 선택자
@@ -6678,13 +6714,13 @@ async function fetchMembers() {
                  renderMemberTable([]);
              }
              renderMemberPagination();
-             return;
+             return true;
         }
 
         renderMemberTable(g_members);
         renderMemberPagination();
         void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:g_adminMemberRuntime?.coop_id,actor:adminCertificateAuthId}),current:()=>requestRevision===g_member_fetch_revision,refresh:()=>fetchMembers()});
-
+        return true;
     } catch (err) {
         if (requestRevision !== g_member_fetch_revision) return;
         CoopSafeLog.error("[erp/admin_member] operation failed", err);
@@ -6692,6 +6728,7 @@ async function fetchMembers() {
         if (typeof myAlert === 'function') {
             myAlert('데이터를 불러오지 못했습니다: ' + (err?.message || err), 'error');
         }
+        return false;
     } finally {
         if (requestRevision === g_member_fetch_revision && typeof showLoading === 'function') showLoading(false);
     }
@@ -7325,6 +7362,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 });
 
 function clearMemberDetailEdits() {
+    capitalImportController?.syncContext();
     invalidateMemberRelationSearches();
     invalidateDonationListRead();
     invalidateUsageLedgerRead();

@@ -18,6 +18,10 @@
         src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
         integrity: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk'
     });
+    const capitalImport = Object.freeze({
+        src: new URL('capital_excel_import.js?v=1.0.0', document.baseURI).href,
+        integrity: 'sha384-q1KBKM8bHgL29EVT2rTWFtoovl1aMxuRxKl5/wNsAnH5ZvHBgQJ9Rn+7Ynl8j1Ur'
+    });
     const siteAssets = Object.freeze([
         Object.freeze({src: new URL('home_settings_conflict.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-2dLr0r0obVLbc9+OB2t4zQ/93bWr/XN6tUV8fMHwIggYDmjZ6ezKQX91b3CHjNz6', ready: () => root.CoopHomeConflict?.version === '1.0.0'}),
         Object.freeze({src: new URL('site_editor_drafts.js?v=1.1.0', document.baseURI).href, integrity: 'sha384-avf0MN4qCGjirM7RyH6TywwTUqp333nFCV4SsJFyRtaeRmmQKwtJzU7csLBKgFJ+', ready: () => typeof root.SiteEditorDrafts?.create === 'function'}),
@@ -62,6 +66,10 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261019-controls-1', docum
         return request;
     }
     function ensureSpreadsheet() { return ensureAsset('SPREADSHEET', spreadsheet, ready); }
+    async function ensureCapitalImport() {
+        await ensureAsset('CAPITAL_IMPORT', capitalImport, () => root.CapitalExcelImport?.version === '1.0.0');
+        return root.CapitalExcelImport;
+    }
     function ensurePdf() {
         return ensureAsset('PDF', pdf, () => root.jspdf?.jsPDF?.version === '2.5.1');
     }
@@ -100,5 +108,5 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261019-controls-1', docum
             card.appendChild(retry);
         }
     }
-    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensurePdf, ensureDashboard, ensureSite, showBootFailure });
+    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensureCapitalImport, ensurePdf, ensureDashboard, ensureSite, showBootFailure });
 })(window);
