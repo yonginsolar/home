@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.81
+Version: v1.2.82
 Change: 2026-10-06 - Separate internal/external official notices, retaining explicit publication.
 -->
 <html lang="ko">
@@ -15,7 +15,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.81 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.82 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -713,6 +713,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         let minutesStatusFilter = 'all';
         let minutesListSequence = 0;
         let minutesListPending = null;
+        let minutesListNeedsResume = false;
         let minutesListOwner = { userId:null, coopId:null, revision:0 };
         let minutesInitPending = null;
         let minutesInitRevision = 0;
@@ -772,7 +773,10 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             minutesListPending?.controller?.abort();
             minutesListPending = null;
             document.getElementById('list-area')?.setAttribute('aria-busy', 'false');
-            if (wasPending && minutesListVisible()) setMinutesListMessage('조회 조건을 확인하고 검색해 주세요.');
+            if (wasPending) {
+                minutesListNeedsResume = true;
+                setMinutesListMessage('목록을 다시 조회해 주세요.', true);
+            }
         }
         function isMinutesListCurrent(request) {
             return !request.failed && request.sequence === minutesListSequence && minutesListVisible() && isAdminUser
@@ -791,6 +795,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             const key = JSON.stringify([minutesListOwner, query, filter]);
             if (minutesListPending?.key === key) return minutesListPending.promise;
             const request = { sequence:++minutesListSequence, owner:{...minutesListOwner}, query, filter, controller:new AbortController() };
+            minutesListNeedsResume = false;
             setMinutesListMessage('의사록을 불러오는 중…');
             document.getElementById('list-area')?.setAttribute('aria-busy', 'true');
             const promise = boundedMinutesRead(signal => { request.signal = signal; return readMinutesList(request); }, request.controller).catch(error => {
@@ -821,6 +826,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             });
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden) invalidateMinutesList();
+                else if (minutesListNeedsResume && minutesListVisible()) void loadMinutes();
             });
             window.addEventListener('pagehide', invalidateMinutesList);
             supabase.auth.onAuthStateChange((event, nextSession) => {

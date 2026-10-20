@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.4 | Change: 2026-10-20 - Use Korean calendar dates and open selected education details. -->
+<!-- Version: v1.0.5 | Change: 2026-10-20 - Resume interrupted reads while preserving Korean date filters. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.4 | participation_analytics.html');</script>
+  <script>console.log('[Version] v1.0.5 | participation_analytics.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -243,6 +243,13 @@
     let analyticsReadSequence = 0;
     let analyticsReadPending = null;
 
+    function pauseAnalyticsRead() {
+      analyticsReadSequence++;
+      analyticsReadPending?.controller?.abort();
+      analyticsReadPending = null;
+      showLoading(false);
+    }
+
     function clearAnalyticsResults() {
       state.data = null; state.activities = [];
       document.querySelectorAll('.summary-grid,.dashboard-grid,.dividend-panel').forEach(el => { el.classList.add('d-none'); });
@@ -465,7 +472,8 @@
 
     function loadAnalytics(options = {}) {
       const allowHidden = options.allowHidden === true;
-      if (!analyticsReadOwner.userId || document.hidden || (!allowHidden && window.frameElement?.hidden)) return Promise.resolve();
+      if (document.hidden || (!allowHidden && window.frameElement?.hidden)) { showLoading(false); return Promise.resolve(); }
+      if (!analyticsReadOwner.userId) return Promise.resolve();
       const from = document.getElementById('dateFrom').value;
       const to = document.getElementById('dateTo').value;
       if (!from || !to || from > to) {
@@ -479,8 +487,10 @@
       if (analyticsReadPending?.key === key) return analyticsReadPending.promise;
       const sequence = ++analyticsReadSequence;
       const owner = { ...analyticsReadOwner };
-      const request = loadAnalyticsPeriod(owner, sequence, from, to, allowHidden);
-      analyticsReadPending = {key, promise:request};
+      analyticsReadPending?.controller?.abort();
+      const controller = new AbortController();
+      const request = loadAnalyticsPeriod(owner, sequence, from, to, allowHidden, controller);
+      analyticsReadPending = {key, promise:request, controller};
       request.finally(() => {
         if (analyticsReadPending?.promise === request) {
           analyticsReadPending = null;
@@ -490,11 +500,12 @@
       return request;
     }
 
-    async function loadAnalyticsPeriod(owner, sequence, from, to, allowHidden) {
+    async function loadAnalyticsPeriod(owner, sequence, from, to, allowHidden, controller = new AbortController()) {
       const isCurrent = () => analyticsReadCurrent(owner, sequence, from, to, allowHidden);
       showError(''); showLoading(true);
+      const timer = setTimeout(() => controller.abort(), 15000);
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_get_analytics',{ p_from:from, p_to:to });
+        const { data, error } = await _supabase.rpc('participation_admin_get_analytics',{ p_from:from, p_to:to }).abortSignal(controller.signal);
         if (!isCurrent()) return;
         if (error) throw error;
         if (!await analyticsReadAuthorized(owner)) {
@@ -512,7 +523,9 @@
       } catch (error) {
         if (!isCurrent()) return;
         if (error?.code === '42501') clearAnalyticsResults();
-        showError(error?.message || '참여 현황을 불러오지 못했습니다.');
+        showError(controller.signal.aborted ? '조회 시간이 길어지고 있습니다. 조회를 눌러 다시 확인해 주세요.' : '참여 현황을 불러오지 못했습니다. 조회를 눌러 다시 확인해 주세요.');
+      } finally {
+        clearTimeout(timer);
       }
     }
 
@@ -523,6 +536,11 @@
       ['typeFilter','responseFilter'].forEach(id => document.getElementById(id).addEventListener('change', renderActivityTable));
       document.getElementById('activitySearch').addEventListener('input', renderActivityTable);
       document.getElementById('activitySearch').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); renderActivityTable(); } });
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) pauseAnalyticsRead();
+        else if (analyticsReadOwner.userId && !window.frameElement?.hidden) void loadAnalytics();
+      });
+      window.addEventListener('pagehide', pauseAnalyticsRead);
 
       const userGate = await window.ErpRuntimeGuard.requireUser(_supabase,{ redirectUrl:'index.html' });
       if (!userGate.ok) return;
