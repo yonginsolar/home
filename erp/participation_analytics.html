@@ -1,16 +1,16 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.3 | Change: 2026-10-11 - Keep period queries scoped and discard superseded responses. -->
+<!-- Version: v1.0.4 | Change: 2026-10-20 - Use Korean calendar dates and open selected education details. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
-  <script src="/shared/workflow_help.js?v=20261019-3" integrity="sha384-eCVfarY73F9jq+o/UJ5LY7GJz9DHUFjFEOLbs4gfmjhlG3YLMK8oyVQ3JL6PrNA1" crossorigin="anonymous" defer></script>
+  <script src="/shared/workflow_help.js?v=20261020-1" integrity="sha384-Dn1Z1LiCGrGYxiZJTz/srbeLloRZ/eDx3+gSDteJzCKG+I/+OBo+1wm0NJpgVEuZ" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | participation_analytics.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.3 | participation_analytics.html');</script>
+  <script>console.log('[Version] v1.0.4 | participation_analytics.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -274,7 +274,10 @@
 
     function number(value) { return Number(value || 0).toLocaleString('ko-KR'); }
     function percent(value) { return value === null || value === undefined ? '-' : `${Number(value).toLocaleString('ko-KR',{ maximumFractionDigits:1 })}%`; }
-    function isoDate(date) { return date.toISOString().slice(0,10); }
+    function isoDate(date) {
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(date);
+      return ['year','month','day'].map(key => parts.find(part => part.type === key).value).join('-');
+    }
     function localDate(value) {
       if (!value) return '-';
       return new Intl.DateTimeFormat('ko-KR',{ timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(value));
@@ -324,7 +327,10 @@
       return { HIGH:'response-high', LOW:'response-low', NORMAL:'response-normal', UNOPPOSED:'response-unopposed', INSUFFICIENT:'response-insufficient' }[status] || 'response-insufficient';
     }
     function activityDetailUrl(row) {
-      if (row.source_type === 'EDUCATION') return 'participation?view=education';
+      if (row.source_type === 'EDUCATION') {
+        const id = String(row.source_key || '');
+        return 'participation.html?view=education' + (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id) ? `&event=${encodeURIComponent(id)}` : '');
+      }
       if (row.source_type === 'BOARD' || row.source_type === 'DELEGATE_ASSEMBLY') return 'participation?view=meeting';
       if (row.source_type === 'QUIZ') return 'quiz_admin.html';
       return 'vote_hub.html';
@@ -332,16 +338,19 @@
 
     function setInitialPeriod() {
       const today = new Date();
-      document.getElementById('dateFrom').value = `${today.getFullYear()}-01-01`;
+      document.getElementById('dateFrom').value = `${isoDate(today).slice(0,4)}-01-01`;
       document.getElementById('dateTo').value = isoDate(today);
     }
     function applyQuickPeriod(kind) {
       const today = new Date();
-      const from = new Date(today);
-      if (kind === 'YEAR') from.setMonth(0,1);
-      else { from.setFullYear(from.getFullYear() - 1); from.setDate(from.getDate() + 1); }
-      document.getElementById('dateFrom').value = isoDate(from);
-      document.getElementById('dateTo').value = isoDate(today);
+      const to = isoDate(today);
+      const [year, month, day] = to.split('-').map(Number);
+      // Date-only arithmetic: never convert a local midnight to a UTC day.
+      const lastDay = new Date(Date.UTC(year - 1, month, 0)).getUTCDate();
+      const from = new Date(Date.UTC(year - 1, month - 1, Math.min(day, lastDay)));
+      from.setUTCDate(from.getUTCDate() + 1);
+      document.getElementById('dateFrom').value = kind === 'YEAR' ? `${year}-01-01` : from.toISOString().slice(0,10);
+      document.getElementById('dateTo').value = to;
       void loadAnalytics();
     }
 

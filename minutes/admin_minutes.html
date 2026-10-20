@@ -1,13 +1,13 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.78
+Version: v1.2.81
 Change: 2026-10-06 - Separate internal/external official notices, retaining explicit publication.
 -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
-  <script src="/shared/workflow_help.js?v=20261019-3" integrity="sha384-eCVfarY73F9jq+o/UJ5LY7GJz9DHUFjFEOLbs4gfmjhlG3YLMK8oyVQ3JL6PrNA1" crossorigin="anonymous" defer></script>
+  <script src="/shared/workflow_help.js?v=20261020-1" integrity="sha384-Dn1Z1LiCGrGYxiZJTz/srbeLloRZ/eDx3+gSDteJzCKG+I/+OBo+1wm0NJpgVEuZ" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | admin_minutes.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
@@ -15,7 +15,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.80 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.81 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -318,11 +318,11 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
         <div id="tab-minutes" class="tab-panel active">
         <div class="sub-tabs">
-            <button id="sub-tab-editor" class="tab-btn active" onclick="switchMinutesSubTab('editor')">작성/업로드</button>
-            <button id="sub-tab-manage" class="tab-btn" onclick="switchMinutesSubTab('manage')">관리 목록</button>
+            <button id="sub-tab-manage" class="tab-btn active" onclick="switchMinutesSubTab('manage')">문서 조회</button>
+            <button id="sub-tab-editor" class="tab-btn" onclick="switchMinutesSubTab('editor')">새 문서 작성·업로드</button>
         </div>
 
-        <div id="sub-panel-editor" class="sub-panel active">
+        <div id="sub-panel-editor" class="sub-panel">
         <div class="card">
             <h3 style="margin-top:0;">📝 신규 의사록 작성</h3>
             <div class="input-group">
@@ -442,7 +442,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
         </div>
 
-        <div id="sub-panel-manage" class="sub-panel">
+        <div id="sub-panel-manage" class="sub-panel active">
         <div class="card">
             <h3 style="margin-top:0;">📂 관리 목록</h3>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:12px;">
@@ -484,7 +484,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                 </div>
             </div>
             <div class="list-scroll">
-                <div id="list-area">로딩 중...</div>
+            <div id="list-area" role="status">접속 권한을 확인하는 중…</div>
             </div>
         </div>
         </div>
@@ -650,7 +650,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
     <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.57';
+        import { MinutesService } from './MinutesService.js?v=1.0.59';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -714,6 +714,30 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         let minutesListSequence = 0;
         let minutesListPending = null;
         let minutesListOwner = { userId:null, coopId:null, revision:0 };
+        let minutesInitPending = null;
+        let minutesInitRevision = 0;
+        let minutesEditorReady = false;
+        let minutesEditorPending = null;
+        let minutesSubTabRevision = 0;
+
+        function boundedMinutesRead(work, controller = new AbortController()) {
+            let timer;
+            const deadline = new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    const error = new Error('MINUTES_READ_TIMEOUT');
+                    error.code = 'MINUTES_READ_TIMEOUT';
+                    reject(error);
+                    controller.abort();
+                }, 15000);
+            });
+            return Promise.race([Promise.resolve().then(() => work(controller.signal)), deadline])
+                .finally(() => clearTimeout(timer));
+        }
+        function minutesReadFailure(error) {
+            return error?.code === 'MINUTES_READ_TIMEOUT'
+                ? '조회 시간이 길어지고 있습니다. 다시 불러오기를 눌러 주세요.'
+                : '목록을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.';
+        }
 
         function minutesListVisible() {
             return !document.hidden && !window.frameElement?.hidden
@@ -723,7 +747,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         function minutesListQuery() {
             return String(document.getElementById('minutes-search')?.value || '').trim().toLowerCase();
         }
-        function setMinutesListMessage(message) {
+        function setMinutesListMessage(message, retry = false) {
             const container = document.getElementById('list-area');
             if (!container) return;
             const note = document.createElement('div');
@@ -731,6 +755,12 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             note.setAttribute('role', 'status');
             note.textContent = message;
             container.replaceChildren(note);
+            if (retry) {
+                const button = document.createElement('button');
+                button.type = 'button'; button.className = 'btn btn-gray'; button.textContent = '다시 불러오기';
+                button.addEventListener('click', () => { void (isAdminUser ? loadMinutes() : init()); });
+                note.append(document.createElement('br'), button);
+            }
             ['Total','Open','Waiting','Completed'].forEach(key => {
                 const value = document.getElementById('minutesSummary' + key);
                 if (value) value.textContent = '—';
@@ -739,12 +769,13 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         function invalidateMinutesList() {
             minutesListSequence++;
             const wasPending = !!minutesListPending;
+            minutesListPending?.controller?.abort();
             minutesListPending = null;
             document.getElementById('list-area')?.setAttribute('aria-busy', 'false');
             if (wasPending && minutesListVisible()) setMinutesListMessage('조회 조건을 확인하고 검색해 주세요.');
         }
         function isMinutesListCurrent(request) {
-            return request.sequence === minutesListSequence && minutesListVisible() && isAdminUser
+            return !request.failed && request.sequence === minutesListSequence && minutesListVisible() && isAdminUser
                 && currentUserId === request.owner.userId && !!request.owner.coopId
                 && minutesListOwner.userId === request.owner.userId
                 && minutesListOwner.coopId === request.owner.coopId
@@ -759,16 +790,17 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             const query = minutesListQuery(), filter = minutesStatusFilter;
             const key = JSON.stringify([minutesListOwner, query, filter]);
             if (minutesListPending?.key === key) return minutesListPending.promise;
-            const request = { sequence:++minutesListSequence, owner:{...minutesListOwner}, query, filter };
+            const request = { sequence:++minutesListSequence, owner:{...minutesListOwner}, query, filter, controller:new AbortController() };
             setMinutesListMessage('의사록을 불러오는 중…');
             document.getElementById('list-area')?.setAttribute('aria-busy', 'true');
-            const promise = Promise.resolve().then(() => readMinutesList(request)).catch(() => {
-                if (isMinutesListCurrent(request)) setMinutesListMessage('의사록 목록을 불러오지 못했습니다. 새로고침을 눌러 주세요.');
+            const promise = boundedMinutesRead(signal => { request.signal = signal; return readMinutesList(request); }, request.controller).catch(error => {
+                if (isMinutesListCurrent(request)) setMinutesListMessage(minutesReadFailure(error), true);
+                request.failed = true;
             }).finally(() => {
                 if (minutesListPending?.promise === promise) {
                     minutesListPending = null;
                     document.getElementById('list-area')?.setAttribute('aria-busy', 'false');
-                    if (!isMinutesListCurrent(request)) setMinutesListMessage('목록을 다시 조회해 주세요.');
+                    if (!request.failed && !isMinutesListCurrent(request)) setMinutesListMessage('목록을 다시 조회해 주세요.');
                 }
             });
             minutesListPending = { key, query, promise };
@@ -1575,11 +1607,29 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
         window.loadLastMinuteTemplate = async () => {
             const targetType = document.getElementById('in-doc-type')?.value || 'MINUTES';
+            const request = ++templatePickerRequest;
+            const owner = {...minutesListOwner};
+            const title = document.getElementById('in-title')?.value || '';
+            const content = getMinuteEditorContent();
+            const current = () => request === templatePickerRequest && isAdminUser
+                && owner.userId === currentUserId && owner.coopId === minutesListOwner.coopId
+                && owner.revision === minutesListOwner.revision && !window.frameElement?.hidden
+                && document.getElementById('sub-panel-editor')?.classList.contains('active')
+                && targetType === (document.getElementById('in-doc-type')?.value || 'MINUTES')
+                && title === (document.getElementById('in-title')?.value || '') && content === getMinuteEditorContent();
             let docs = Array.from(minutesCache.values());
-            if (!docs.length) {
-                const { data } = await MinutesService.listMinutesAdmin();
-                docs = data || [];
+            try {
+                if (!docs.length) {
+                    const { data, error } = await boundedMinutesRead(signal => MinutesService.listMinutesAdmin({metadataOnly:true,docType:'MINUTES',signal}));
+                    if (!current()) return;
+                    if (error) throw error;
+                    docs = data || [];
+                }
+            } catch (error) {
+                if (current()) showToast(minutesReadFailure(error));
+                return;
             }
+            if (!current()) return;
             const candidates = buildTemplateCandidates(docs, targetType);
             if (!candidates.length) {
                 showToast('불러올 기존 양식이 없습니다.');
@@ -3688,7 +3738,11 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         }
         window.setMinutesStatusFilter = setMinutesStatusFilter;
 
-        function switchMinutesSubTab(tab) {
+        async function switchMinutesSubTab(tab) {
+            const revision = ++minutesSubTabRevision;
+            if (tab !== 'manage') {
+                if (!await ensureMinutesEditor() || revision !== minutesSubTabRevision || window.frameElement?.hidden) return;
+            }
             const editor = document.getElementById('sub-panel-editor');
             const manage = document.getElementById('sub-panel-manage');
             const btnEditor = document.getElementById('sub-tab-editor');
@@ -3708,6 +3762,34 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             }
         }
         window.switchMinutesSubTab = switchMinutesSubTab;
+
+        function ensureMinutesEditor() {
+            if (minutesEditorReady) return Promise.resolve(true);
+            if (minutesEditorPending) return minutesEditorPending;
+            if (!isAdminUser) return Promise.resolve(false);
+            const owner = {...minutesListOwner};
+            const current = () => isAdminUser && owner.userId === currentUserId
+                && owner.coopId === minutesListOwner.coopId && owner.revision === minutesListOwner.revision;
+            const request = boundedMinutesRead(signal => MinutesService.getOfficials({strict:true,signal})).then(officials => {
+                if (!current()) return false;
+                allOfficials = officials;
+                renderSignerOptions(allOfficials, document.getElementById('in-doc-type')?.value || 'MINUTES');
+                setStructuredMinuteDateDefaults();
+                ['in-notice-date','in-meeting-date','in-start-time','in-end-time'].forEach(id => {
+                    document.getElementById(id)?.addEventListener('input', syncBoardMinuteScheduleConstraints);
+                    document.getElementById(id)?.addEventListener('change', syncBoardMinuteScheduleConstraints);
+                });
+                initializeMinuteEditor();
+                initializeMinuteEditModalClose();
+                minutesEditorReady = true;
+                return true;
+            }).catch(error => {
+                if (current() && !window.frameElement?.hidden) showToast(minutesReadFailure(error));
+                return false;
+            }).finally(() => { if (minutesEditorPending === request) minutesEditorPending = null; });
+            minutesEditorPending = request;
+            return request;
+        }
 
         function refreshMinutesManageList() {
             const container = document.getElementById('list-area');
@@ -3741,48 +3823,51 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             if (confirmResolve) confirmResolve(ok);
         };
 
-        async function init() {
+        function init() {
+            if (minutesInitPending) return minutesInitPending;
+            const revision = ++minutesInitRevision;
+            setMinutesListMessage('접속 권한을 확인하는 중…');
+            const promise = initializeMinutesPage(revision).catch(error => {
+                if (revision === minutesInitRevision && !window.frameElement?.hidden) setMinutesListMessage(minutesReadFailure(error), true);
+            }).finally(() => { if (minutesInitPending === promise) minutesInitPending = null; });
+            minutesInitPending = promise;
+            return promise;
+        }
+
+        async function initializeMinutesPage(revision) {
             clearLegacySessionHash();
 
             // 1. 관리자 체크
-            const session = await MinutesService.getSession();
+            const session = await boundedMinutesRead(() => MinutesService.getSession());
+            if (revision !== minutesInitRevision) return;
             if (!session) {
                 showToast("로그인이 필요합니다.");
                 location.href = getErpLoginUrl(window.location.href);
                 return;
             }
 
-            const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+            const runtimeCheck = await boundedMinutesRead(() => window.ErpRuntimeGuard.enforce(supabase, {
                 moduleKey: 'minutes',
                 moduleLabel: '회의/공문',
                 redirectUrl: getErpLoginUrl(window.location.href),
                 alertFn: (msg) => showToast(msg)
-            });
+            }));
+            if (revision !== minutesInitRevision) return;
             if (!runtimeCheck.ok) return;
 
             currentUserId = session.user.id;
             minutesListOwner = { userId:session.user.id, coopId:runtimeCheck.runtime.coop_id, revision:minutesListOwner.revision + 1 };
 
             // 관리자 여부 확인 (ERP 관리자 권한 우선, 기존 coop_admins/co-op admin fallback 유지)
-            isAdminUser = hasErpAdminAccess() || await MinutesService.isAdmin(session.user.id, session.user.email);
+            isAdminUser = hasErpAdminAccess() || await boundedMinutesRead(() => MinutesService.isAdmin(session.user.id, session.user.email));
+            if (revision !== minutesInitRevision) return;
             if (!isAdminUser) {
                 showToast("관리자 권한이 필요합니다.");
                 location.href = getErpHomeUrl();
                 return;
             }
 
-            // 2. 전체 현직 임원 목록 미리 로드 (분모 계산용)
-            if (ADMIN_MINUTES_SCOPE !== 'notices') {
-            allOfficials = await MinutesService.getOfficials();
-            renderSignerOptions(allOfficials, document.getElementById('in-doc-type')?.value || 'MINUTES');
-            setStructuredMinuteDateDefaults();
-            ['in-notice-date', 'in-meeting-date', 'in-start-time', 'in-end-time'].forEach((id) => {
-                document.getElementById(id)?.addEventListener('input', syncBoardMinuteScheduleConstraints);
-                document.getElementById(id)?.addEventListener('change', syncBoardMinuteScheduleConstraints);
-            });
-            initializeMinuteEditor();
-            initializeMinuteEditModalClose();
-            }
+            // List first. Writing tools/defaults are initialized only on explicit entry.
             applyAdminMinutesScopeUi();
             bindMinutesListControls();
 
@@ -3832,9 +3917,13 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                 if (completedEl) completedEl.textContent = String(completed);
             };
 
-            const { data: minutes, error: listError } = await MinutesService.listMinutesAdmin({metadataOnly:true,docType:'MINUTES'});
+            const [{ data: minutes, error: listError }, officials] = await Promise.all([
+                MinutesService.listMinutesAdmin({metadataOnly:true,docType:'MINUTES',signal:request.signal}),
+                MinutesService.getOfficials({strict:true,signal:request.signal})
+            ]);
             if (!isMinutesListCurrent(request)) return;
             if (listError) throw listError;
+            allOfficials = officials;
             const searchValue = request.query;
             const minuteDocs = (minutes || []).filter((m) => {
                 const type = String(m?.doc_type || '').toUpperCase();
@@ -3855,7 +3944,8 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
             const delegateList = sortDelegateOrder((allOfficials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate'));
             const minuteIds = searchedMinutes.map(m => m.id);
-            const { data: sigList, error: signatureError } = await MinutesService.listSignaturesForMinutes(minuteIds);
+            setMinutesListMessage('서명 현황을 불러오는 중…');
+            const { data: sigList, error: signatureError } = await MinutesService.listSignaturesForMinutes(minuteIds,{signal:request.signal});
             if (!isMinutesListCurrent(request)) return;
             if (signatureError) throw signatureError;
             minutesCache = new Map((minutes || []).map(m => [m.id, m]));

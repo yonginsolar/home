@@ -1,15 +1,15 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.159 | Change: 2026-10-19 - Describe missing account choices in user-facing terms. -->
+<!-- Version: v1.0.160 | Change: 2026-10-20 - Search complete transaction groups and browse earlier history. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
-  <script src="/shared/workflow_help.js?v=20261019-3" integrity="sha384-eCVfarY73F9jq+o/UJ5LY7GJz9DHUFjFEOLbs4gfmjhlG3YLMK8oyVQ3JL6PrNA1" crossorigin="anonymous" defer></script>
+  <script src="/shared/workflow_help.js?v=20261020-1" integrity="sha384-Dn1Z1LiCGrGYxiZJTz/srbeLloRZ/eDx3+gSDteJzCKG+I/+OBo+1wm0NJpgVEuZ" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | accounting.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.159 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.160 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
@@ -668,13 +668,21 @@
 
 	    <div class="tab-pane fade" id="tabHistory">
 	      <div class="d-flex justify-content-between align-items-center mb-2">
-	          <h6 class="fw-bold m-0">최근 전표</h6>
+	          <h6 class="fw-bold m-0">전표 조회</h6>
 	          <div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-primary" onclick="openBankCompare()">통장 파일 대조</button><button class="btn btn-sm btn-outline-primary" onclick="loadHistory()">🔄 새로고침</button></div>
 	      </div>
 	      <div class="d-flex justify-content-end align-items-center mb-3">
 	          <small class="text-muted" id="historyMeta"></small>
 	      </div>
+          <form id="journalHistorySearch" class="row g-2 align-items-end mb-3" onsubmit="event.preventDefault();loadHistory();">
+            <div class="col-sm-3"><label class="form-label" for="journalHistoryFrom">시작일</label><input data-erp-query-control type="date" class="form-control" id="journalHistoryFrom"></div>
+            <div class="col-sm-3"><label class="form-label" for="journalHistoryTo">종료일</label><input data-erp-query-control type="date" class="form-control" id="journalHistoryTo"></div>
+            <div class="col-sm-4"><label class="form-label" for="journalHistoryKeyword">장부 검색</label><input data-erp-query-control type="search" maxlength="200" class="form-control" id="journalHistoryKeyword" placeholder="적요·계정과목·사업·작성자"></div>
+            <div class="col-sm-2 d-flex gap-2"><button type="submit" class="btn btn-primary">조회</button><button type="button" class="btn btn-outline-secondary" onclick="CoopAccountingHistory.clear();loadHistory();">해제</button></div>
+          </form>
 	      <div id="historyList" class="list-group"></div>
+          <div id="journalHistoryStatus" class="small text-muted my-2" role="status"></div>
+          <button id="journalHistoryMore" type="button" class="btn btn-outline-primary" hidden onclick="loadHistory({more:true})">이전 내역 더 보기</button>
 	    </div>
 
     <div class="tab-pane fade" id="tabGuide">
@@ -9457,26 +9465,12 @@ function confirmSync(type) {
 
 }
 
-function loadHistory() {
-    const el = document.getElementById("historyList");
-    const metaEl = document.getElementById("historyMeta");
-    el.innerHTML = "로딩 중...";
-    if (metaEl) metaEl.textContent = '';
-    // 복식 원장은 원시 분개를 거래별로 묶은 뒤 최근 20건을 보여주므로 충분한 행을 먼저 읽는다.
-    const rowLimit = 160;
-    return _supabase
-        .from('ac_journal')
-        .select('*')
-        .order('Date', { ascending: false })
-        .limit(rowLimit)
-        .then(({ data, error }) => {
-            if (error) {
-                el.innerHTML = `<div class="list-group-item text-danger small">조회 실패: ${escapeHtml(error.message)}</div>`;
-                return false;
-            }
-            renderHistoryDouble(data || []);
-            return true;
-        });
+function loadHistory(options = {}) {
+    const owner = myInfo;
+    return window.CoopAccountingHistory.load({more:options.more===true,client:_supabase,owner,
+        authorized:accountingDataAuthorized && (canPerform('accounting.view') || canPerform('accounting.edit')),
+        currentOwner:()=>accountingDataAuthorized && myInfo===owner && (canPerform('accounting.view') || canPerform('accounting.edit')),
+        render:rows=>renderHistoryDouble(rows,true)});
 }
 
 function openBankCompare() {
@@ -9675,10 +9669,11 @@ function buildDoubleEntryHistory(rows) {
     return items;
 }
 
-function renderHistoryDouble(rows) {
+function renderHistoryDouble(rows, completePage = false) {
     const el = document.getElementById("historyList");
     const metaEl = document.getElementById("historyMeta");
-    const items = buildDoubleEntryHistory(rows).slice(0, 20);
+    const groupedItems = buildDoubleEntryHistory(rows);
+    const items = completePage ? groupedItems : groupedItems.slice(0, 20);
     el.innerHTML = "";
     if (items.length === 0) {
         el.innerHTML = `<div class="list-group-item text-muted small">표시할 전표가 없습니다.</div>`;
@@ -10726,6 +10721,7 @@ async function fetchLiabilitySum() {
 }
 </script>
 <script src="accounting_money_module.js?v=20261017-1"></script>
+<script src="accounting_history.js?v=20261020-1"></script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>

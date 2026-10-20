@@ -1,5 +1,5 @@
 /*
-Version: v1.0.58
+Version: v1.0.59
 Change: 2026-10-11 - Allow deferred meeting defaults to distinguish failed reads from an empty roster.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -21,10 +21,16 @@ async function getRuntimeCoopId() {
     return cachedRuntimeCoopId;
 }
 
-async function getVisibleCoopId() {
+function minuteReadQuery(query, signal) {
+    return signal ? query.abortSignal(signal) : query;
+}
+
+async function getVisibleCoopId({ signal } = {}) {
     if (cachedVisibleCoopId !== undefined) return cachedVisibleCoopId;
-    const { data, error } = await supabase.rpc('get_visible_coop_id');
+    const { data, error } = await minuteReadQuery(supabase.rpc('get_visible_coop_id'), signal);
     if (error) {
+        // Bounded administrator reads must remain retryable, not cache a failed scope.
+        if (signal) throw error;
         console.warn('MinutesService.getVisibleCoopId failed:', error);
         cachedVisibleCoopId = null;
         return cachedVisibleCoopId;
@@ -283,14 +289,14 @@ async function getMyOfficial(session) {
     };
 }
 
-async function getOfficials({ strict = false } = {}) {
-    const coopId = await getVisibleCoopId();
+async function getOfficials({ strict = false, signal } = {}) {
+    const coopId = await getVisibleCoopId({ signal });
     let data = null;
     let error = null;
 
-    ({ data, error } = await scopeByCoop(supabase
+    ({ data, error } = await minuteReadQuery(scopeByCoop(supabase
         .from('coop_officials')
-        .select('*'), coopId));
+        .select('*'), coopId), signal));
 
     if (error && strict) throw error;
     if (error || !data) return [];
@@ -299,10 +305,10 @@ async function getOfficials({ strict = false } = {}) {
     const memberIds = filtered.map(o => o.member_id).filter(Boolean);
     const memberMap = {};
     if (memberIds.length > 0) {
-        const { data: members, error: memberError } = await scopeByCoop(supabase
+        const { data: members, error: memberError } = await minuteReadQuery(scopeByCoop(supabase
             .from('coop_members')
             .select('member_id, name, member_type')
-            .in('member_id', memberIds), coopId);
+            .in('member_id', memberIds), coopId), signal);
         if (memberError && strict) throw memberError;
         if (Array.isArray(members)) {
             members.forEach(m => { memberMap[m.member_id] = m; });
@@ -359,7 +365,7 @@ async function getCompanyInfo() {
 }
 
 async function listMinutesAdmin(options = {}) {
-    const coopId = await getVisibleCoopId();
+    const coopId = await getVisibleCoopId({ signal:options.signal });
     if (options.metadataOnly) {
         const columns='id,title,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids';
         const rows=[];
@@ -368,7 +374,7 @@ async function listMinutesAdmin(options = {}) {
             let query=scopeByCoop(supabase.from('minutes').select(columns),coopId);
             if(options.docType==='ASSEMBLY_MATERIAL')query=query.eq('doc_type','ASSEMBLY_MATERIAL');
             else if(options.docType==='MINUTES')query=query.or('doc_type.is.null,and(doc_type.neq.NOTICE,doc_type.neq.ASSEMBLY_MATERIAL)');
-            const {data,error}=await query.order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+499);
+            const {data,error}=await minuteReadQuery(query.order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+499),options.signal);
             if(error)return {data:[],error};
             rows.push(...(data||[]));
             if((data||[]).length<500)return {data:rows,error:null};
@@ -630,13 +636,13 @@ async function getMinuteById(minuteId) {
     return { data, error };
 }
 
-async function listSignaturesForMinutes(minuteIds) {
+async function listSignaturesForMinutes(minuteIds, { signal } = {}) {
     if (!minuteIds || minuteIds.length === 0) return { data: [], error: null };
-    const coopId = await getVisibleCoopId();
-    const { data, error } = await scopeByCoop(supabase
+    const coopId = await getVisibleCoopId({ signal });
+    const { data, error } = await minuteReadQuery(scopeByCoop(supabase
         .from('doc_signatures')
         .select('minute_id, official_id, signed_at')
-        .in('minute_id', minuteIds), coopId);
+        .in('minute_id', minuteIds), coopId), signal);
     return { data: data || [], error };
 }
 
