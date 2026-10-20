@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.97 | Change: 2026-10-20 - Distinguish loaded scope and current filtered document counts. -->
+<!-- Version: v1.2.98 | Change: 2026-10-20 - Preserve document-scoped attachment reads and show recoverable preview failures. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.97 | approval.html');</script>
+  <script>console.log('[Version] v1.2.98 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1633,6 +1633,8 @@ let approvalRichEditor = null;
 let generalProposalTiptap = null;
 let currentAttachmentPreviewObjectUrl = null;
 let relViewObjectUrls = [];
+let approvalAttachmentPreviewRevision = 0;
+let relAttachmentViewerRevision = 0;
 let leaveSnapshotState = null;
 let historyStatusFilter = 'ALL';
 let historyDocTypeFilter = 'ALL';
@@ -7686,16 +7688,52 @@ function extractDisplayFileName(rawRef, fallback = '첨부파일') {
 
 async function resolveStorageUrl(rawRef, expiresSec = 3600, options = {}) {
     const ref = parseStorageObjectRef(rawRef);
-    if (!ref) return String(rawRef || '');
+    if (!ref) {
+        if (options.strict && !/^https?:\/\//i.test(String(rawRef || ''))) throw new Error('ATTACHMENT_UNAVAILABLE');
+        return String(rawRef || '');
+    }
     try {
         const download = options.download !== false;
         const opts = download && ref.downloadName ? { download: ref.downloadName } : undefined;
         const { data, error } = await _supabase.storage.from(ref.bucket).createSignedUrl(ref.path, expiresSec, opts);
-        if (error || !data?.signedUrl) return String(rawRef || '');
+        if (error || !data?.signedUrl) {
+            if (options.strict) throw Object.assign(new Error('ATTACHMENT_UNAVAILABLE'), { status: error?.statusCode || error?.status });
+            return String(rawRef || '');
+        }
         return data.signedUrl;
-    } catch (_) {
+    } catch (error) {
+        if (options.strict) throw error;
         return String(rawRef || '');
     }
+}
+
+function boundedApprovalAttachmentRead(work) {
+    const controller = new AbortController();
+    let timer;
+    const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => { reject(new Error('ATTACHMENT_READ_TIMEOUT')); controller.abort(); }, 15000);
+    });
+    return Promise.race([Promise.resolve().then(() => work(controller.signal)), deadline]).finally(() => clearTimeout(timer));
+}
+
+function approvalAttachmentReadContext() {
+    const auth = myAuthUserId, coop = getApprovalScopedCoopId(), docId = currentViewingDocId;
+    return () => auth === myAuthUserId && coop === getApprovalScopedCoopId() && docId === currentViewingDocId
+        && !window.frameElement?.hidden;
+}
+
+function renderApprovalAttachmentFailure(container, error, retry) {
+    const note = document.createElement('div');
+    note.className = 'text-center text-danger p-4';
+    note.setAttribute('role', 'status');
+    note.textContent = error?.message === 'ATTACHMENT_READ_TIMEOUT'
+        ? '첨부파일 조회가 지연되고 있습니다. 다시 불러와 주세요.'
+        : '첨부파일을 열 수 없습니다. 다시 불러와 주세요. 문제가 계속되면 담당자에게 문의해 주세요.';
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'btn btn-outline-primary btn-sm mt-3'; button.textContent = '다시 불러오기';
+    button.addEventListener('click', retry);
+    note.append(document.createElement('br'), button);
+    container.replaceChildren(note);
 }
 
 function getAttachmentPreviewType(fileNameOrRef, mimeType = '') {
@@ -7722,6 +7760,7 @@ function resetAttachmentPreviewObjectUrl() {
 }
 
 function resetRelViewObjectUrls() {
+    relAttachmentViewerRevision++;
     if (!Array.isArray(relViewObjectUrls) || relViewObjectUrls.length === 0) return;
     relViewObjectUrls.forEach((url) => {
         if (!url) return;
@@ -7773,10 +7812,13 @@ function getAttachmentTypeLabel(fileNameOrRef, mimeType = '') {
 }
 
 async function fetchPreviewBlob(rawRef, expiresSec = 3600) {
-    const signedUrl = await resolveStorageUrl(rawRef, expiresSec, { download: false });
-    const response = await fetch(signedUrl || rawRef);
-    if (!response.ok) throw new Error(`preview fetch failed: ${response.status}`);
-    const blob = await response.blob();
+    const blob = await boundedApprovalAttachmentRead(async signal => {
+        const signedUrl = await resolveStorageUrl(rawRef, expiresSec, { download: false, strict:true });
+        if (signal.aborted) throw new Error('ATTACHMENT_READ_TIMEOUT');
+        const response = await fetch(signedUrl, {signal});
+        if (!response.ok) throw new Error('ATTACHMENT_UNAVAILABLE');
+        return response.blob();
+    });
     return {
         url: URL.createObjectURL(blob),
         blob,
@@ -9539,6 +9581,7 @@ window.onload = async function() {
     }
     if (attachmentPreviewModalEl) {
         attachmentPreviewModalEl.addEventListener('hidden.bs.modal', () => {
+            approvalAttachmentPreviewRevision++;
             resetAttachmentPreviewObjectUrl();
             const bodyEl = document.getElementById('attachmentPreviewBody');
             if (bodyEl) bodyEl.innerHTML = '<div class="d-flex align-items-center justify-content-center text-muted" style="min-height: 360px;">미리볼 파일을 불러오는 중입니다.</div>';
@@ -14922,30 +14965,37 @@ function updateFileList() {
 }
 
 function openSignedDoc(encodedUrl) {
-    if (!encodedUrl) return;
-    const rawUrl = decodeURIComponent(encodedUrl);
-    resolveStorageUrl(rawUrl, 60 * 60 * 6)
-        .then(url => window.open(url || rawUrl, '_blank'))
-        .catch(() => window.open(rawUrl, '_blank'));
+    return openAttachment(encodedUrl);
 }
 
-function openAttachment(encodedUrl) {
+async function openAttachment(encodedUrl) {
     if (!encodedUrl) return;
-    const rawUrl = decodeURIComponent(encodedUrl);
-    resolveStorageUrl(rawUrl, 60 * 60 * 6)
-        .then(url => window.open(url || rawUrl, '_blank'))
-        .catch(() => window.open(rawUrl, '_blank'));
+    const current = approvalAttachmentReadContext();
+    try {
+        const rawUrl = decodeURIComponent(encodedUrl);
+        const url = await boundedApprovalAttachmentRead(() => resolveStorageUrl(rawUrl, 60 * 60 * 6, {strict:true}));
+        if (!current()) return;
+        const opened = window.open(url, '_blank');
+        if (opened) { try { opened.opener = null; } catch (_) {} }
+        else showAlert('새 창을 열 수 없습니다. 브라우저의 팝업 차단 여부를 확인해 주세요.');
+    } catch (_) {
+        if (current()) showAlert('첨부파일을 열 수 없습니다. 다시 시도해 주세요. 문제가 계속되면 담당자에게 문의해 주세요.');
+    }
 }
 
-function openAttachmentPreview(encodedUrl) {
+async function openAttachmentPreview(encodedUrl) {
     if (!encodedUrl) return;
+    const revision = ++approvalAttachmentPreviewRevision;
+    const ownerCurrent = approvalAttachmentReadContext();
+    const current = () => revision === approvalAttachmentPreviewRevision && ownerCurrent();
     const rawUrl = decodeURIComponent(encodedUrl);
     const fileName = extractDisplayFileName(rawUrl, '첨부파일');
     const bodyEl = document.getElementById('attachmentPreviewBody');
     if (bodyEl) bodyEl.innerHTML = '<div class="d-flex align-items-center justify-content-center text-muted" style="min-height: 360px;">첨부파일을 불러오는 중입니다.</div>';
     if (attachmentPreviewModalInstance) attachmentPreviewModalInstance.show();
-    fetchPreviewBlob(rawUrl, 60 * 60 * 6)
-        .then(({ url, blob, sizeLabel, typeLabel }) => {
+    try {
+            const {url,blob,sizeLabel,typeLabel} = await fetchPreviewBlob(rawUrl, 60 * 60 * 6);
+            if (!current()) { URL.revokeObjectURL(url); return; }
             resetAttachmentPreviewObjectUrl();
             currentAttachmentPreviewObjectUrl = url;
             const previewType = getAttachmentPreviewType(fileName, blob?.type || '');
@@ -14958,29 +15008,16 @@ function openAttachmentPreview(encodedUrl) {
                 url,
                 previewType
             });
-        })
-        .catch(async () => {
-            try {
-                const fallbackUrl = await resolveStorageUrl(rawUrl, 60 * 60 * 6, { download: false });
-                const previewType = getAttachmentPreviewType(fileName);
-                if (!previewType) {
-                    throw new Error('unsupported-preview-type');
-                }
-                renderAttachmentPreviewModal({
-                    title: fileName,
-                    meta: `${getAttachmentTypeLabel(fileName)} · 직접 미리보기`,
-                    url: fallbackUrl || rawUrl,
-                    previewType
-                });
-            } catch (_) {
-                const previewBodyEl = document.getElementById('attachmentPreviewBody');
-                if (previewBodyEl) previewBodyEl.innerHTML = '<div class="text-danger text-center py-5">첨부파일을 바로보는 중 오류가 발생했습니다.<br>새 창 열기 또는 다운로드를 사용해주세요.</div>';
-                showAlert('현재는 PDF와 이미지 파일만 웹 바로보기를 지원합니다.');
-            }
-        });
+    } catch (error) {
+        if (!current()) return;
+        const downloadEl = document.getElementById('attachmentPreviewDownload');
+        if (downloadEl) { downloadEl.classList.add('hidden'); downloadEl.removeAttribute('href'); }
+        if (bodyEl) renderApprovalAttachmentFailure(bodyEl, error, () => { if (current()) void openAttachmentPreview(encodedUrl); });
+    }
 }
 
 function openLocalAttachmentPreview(fileIndex) {
+    approvalAttachmentPreviewRevision++;
     const file = Array.from(document.getElementById('attachFile')?.files || [])[fileIndex];
     if (!file) return;
     const previewType = getAttachmentPreviewType(file.name || '', file.type || '');
@@ -15435,6 +15472,8 @@ async function selectRelDoc(doc) {
 }
 
 async function buildRelAttachmentViewer(attachments) {
+    const viewerRevision = ++relAttachmentViewerRevision;
+    const ownerCurrent = approvalAttachmentReadContext();
     const wrapper = document.createElement('div');
     wrapper.className = 'mt-4';
 
@@ -15487,6 +15526,7 @@ async function buildRelAttachmentViewer(attachments) {
     const getItemDisplayName = (item, fallback) => String(item?.displayName || extractDisplayFileName(item?.rawRef, fallback));
     const state = {
         index: 0,
+        revision: 0,
         previewable: attachments
             .map((item, idx) => ({ ...item, idx }))
             .filter(item => canPreviewAttachment(getItemDisplayName(item, `첨부파일 ${item.idx + 1}`), item.mimeType))
@@ -15513,6 +15553,9 @@ async function buildRelAttachmentViewer(attachments) {
     };
 
     const renderCurrent = async (previewIndex) => {
+        const revision = ++state.revision;
+        const currentRead = () => revision === state.revision && viewerRevision === relAttachmentViewerRevision && ownerCurrent();
+        if (!currentRead()) return;
         if (!state.previewable.length) {
             metaBox.textContent = '첨부파일은 있지만 웹 바로보기를 지원하는 형식은 없습니다.';
             stage.innerHTML = '<div class="text-center text-muted">PDF와 이미지 파일만 여기에서 바로 볼 수 있습니다.</div>';
@@ -15538,6 +15581,7 @@ async function buildRelAttachmentViewer(attachments) {
                 return;
             }
             const payload = await fetchPreviewBlob(current.rawRef, 60 * 60 * 3);
+            if (!currentRead()) { URL.revokeObjectURL(payload.url); return; }
             const previewType = getAttachmentPreviewType(currentName, payload.blob?.type || current.mimeType || '');
             if (!previewType) {
                 throw new Error('unsupported-preview-type');
@@ -15550,24 +15594,10 @@ async function buildRelAttachmentViewer(attachments) {
             } else {
                 stage.innerHTML = `<img src="${escapeHtml(stageObjectUrl)}" alt="${escapeHtml(currentName)}">`;
             }
-        } catch (_) {
-            try {
-                const currentName = getItemDisplayName(current, `첨부파일 ${current.idx + 1}`);
-                const previewType = getAttachmentPreviewType(currentName, current.mimeType || '');
-                if (!previewType) {
-                    throw new Error('unsupported-preview-type');
-                }
-                const fallbackUrl = await resolveStorageUrl(current.rawRef, 60 * 60 * 3, { download: false });
-                metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${currentName} · ${getAttachmentTypeLabel(currentName, current.mimeType || '')} · 직접 미리보기`;
-                if (previewType === 'pdf') {
-                    stage.innerHTML = `<iframe src="${escapeHtml(fallbackUrl || current.rawRef)}#toolbar=1"></iframe>`;
-                } else {
-                    stage.innerHTML = `<img src="${escapeHtml(fallbackUrl || current.rawRef)}" alt="${escapeHtml(currentName)}">`;
-                }
-            } catch (_) {
-                metaBox.textContent = `${getItemDisplayName(current, `첨부파일 ${current.idx + 1}`)} · 미리보기 실패`;
-                stage.innerHTML = '<div class="text-danger text-center">첨부파일을 불러오지 못했습니다. 목록에서 새 창 열기를 사용해주세요.</div>';
-            }
+        } catch (error) {
+            if (!currentRead()) return;
+            metaBox.textContent = `${getItemDisplayName(current, `첨부파일 ${current.idx + 1}`)} · 미리보기 실패`;
+            renderApprovalAttachmentFailure(stage,error,()=>{ if (currentRead()) void renderCurrent(state.index); });
         }
     };
 
