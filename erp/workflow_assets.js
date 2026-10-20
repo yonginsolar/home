@@ -11,8 +11,8 @@
         approvalPrint: {src:local('approval_print_templates.js?v=20261010-1'), integrity:'sha384-0VFICoc4VXiHMnSosaKc1uKD1CBTiNdY44sZHytw5okxrBbwGlpIGgKXhuGH9Eqo', ready:() => typeof root.ApprovalPrintTemplates?.buildPhysicalPrintHtml === 'function'},
         accountingGuide: {src:local('accounting_guide.js?v=1.0.2'), integrity:'sha384-a9rglJK2ZQ77p9hwdDbn1hv5+pds91L0dxU4U4f3hXLBBsqRwrbuqoVRfehhfI3f', ready:() => typeof root.CoopAccountingGuide?.mount === 'function'},
         smartaGuide: {src:local('accounting_smarta_guide.js?v=1.0.0'), integrity:'sha384-MHe/7q/URIf9NEtrnuV2o/LsZgpLANn3RxIdzSAjH+g8oLsyNCCusj2lgHOgSdXZ', ready:() => typeof root.CoopSmartaGuide?.mount === 'function'},
-        financialEngine: {src:local('financial_statements_engine.js?v=1.0.0'),integrity:'sha384-eQWZEsqG3V7J+EEa49XKdhvx/14b05ir8ClV3fVrJotf+d2hOsbOEyFj58T9yiDb',ready:()=>root.FinancialStatementsEngine?.version==='1.0.0'},
-        financialStatements: {src:local('financial_statements.js?v=1.0.2'),integrity:'sha384-aKAXuRYirYosK4wMy1tP0x7/k8gtHsA8GpbQakYaJYJanHbD3gB/NdFgXjXbN6z8',ready:()=>root.FinancialStatements?.version==='1.0.2'}
+        financialEngine: {src:local('financial_statements_engine.js?v=1.1.0'),integrity:'sha384-tHgs9MvyMyqTqO0xgb085190rccIQa+mRTNiZDpLTrpvvs5qMnZ+MZhqgVRV9H/s',ready:()=>root.FinancialStatementsEngine?.version==='1.1.0'},
+        financialStatements: {src:local('financial_statements.js?v=1.1.0'),integrity:'sha384-X2JmU8i0h08caS4A8AsMHUU6LP/KFrsQomIK6aPPP/rcz/ZjoFLFIwMemQ0tCX13',ready:()=>root.FinancialStatements?.version==='1.1.0'}
     });
     const pending = new Map();
     function load(key) {
