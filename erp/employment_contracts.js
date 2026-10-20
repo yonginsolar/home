@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: v1.3.2 | 2026-10-12 */
+/* Version: v1.3.5 | 2026-10-20 — read-only canonical HR contract scope. */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -74,6 +74,9 @@ function coalesceContractRead(key, read) {
 
 async function readContractDetail(id, owner) {
   return coalesceContractRead(`contract:${owner.coopId}:${owner.employeeId}:${id}`, async () => {
+    if (state.admin && !state.forceSelf) {
+      return readHrContract('detail', {p_emp_id:owner.employeeId,p_contract_id:id});
+    }
     const { data, error } = await db.from('erp_employment_contracts').select(selectContractColumns)
       .eq('coop_id', owner.coopId).eq('emp_id', owner.employeeId).eq('id', id).single();
     if (error || !data) throw error || new Error('계약서를 찾을 수 없거나 조회 권한이 없습니다.');
@@ -82,6 +85,15 @@ async function readContractDetail(id, owner) {
 }
 
 async function loadContractDefaults(owner) {
+  if (state.admin && !state.forceSelf) {
+    const data = await coalesceContractRead(`defaults:${owner.coopId}:${owner.employeeId}`,
+      () => readHrContract('defaults', {p_emp_id:owner.employeeId}));
+    if (!owner.isCurrent()) return false;
+    if (!data?.employee || data.employee.emp_id !== owner.employeeId || data.employee.coop_id !== owner.coopId) throw new Error('EMPLOYEE_NOT_FOUND');
+    state.company = data.company || {};
+    Object.assign(state.employee, data.employee);
+    return true;
+  }
   const [company, employee] = await Promise.all([
     coalesceContractRead(`company:${owner.coopId}`, async () => {
       const { data, error } = await db.from('ref_company_info').select('key,value').eq('coop_id', owner.coopId).in('key', contractCompanyKeys);
@@ -249,6 +261,8 @@ function updateContractReadActions() {
 function normalizeError(error) {
   const raw = String(error?.message || error || '처리하지 못했습니다.');
   const map = {
+    SETTINGS_ACCESS_DENIED: '근로계약서를 조회할 권한을 확인하지 못했습니다. 다시 로그인하거나 담당자에게 문의해 주세요.',
+    CONTRACT_NOT_FOUND: '계약서를 찾을 수 없거나 조회 권한이 없습니다.',
     HR_ADMIN_REQUIRED: '근로계약서를 관리할 권한이 없습니다.',
     EMPLOYEE_NOT_FOUND: '직원 정보를 찾을 수 없습니다.',
     PARENT_CONTRACT_REQUIRED: '변경합의서의 기준이 되는 완료 계약서를 선택해 주세요.',
@@ -265,6 +279,22 @@ function normalizeError(error) {
 
 function getRoleFallback(user) {
   return ['admin', 'admin_all'].includes(String(user?.role || ''));
+}
+
+async function readHrContract(action, values = {}) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    const deadline = new Promise((_, reject) => { timer = setTimeout(() => {
+      reject(new Error('계약서 조회가 지연되고 있습니다. 다시 시도해 주세요.'));
+      controller.abort();
+    }, 15000); });
+    const {data,error} = await Promise.race([
+      db.rpc('erp_hr_contract_read', {p_action:action,...values}).abortSignal(controller.signal), deadline
+    ]);
+    if (error) throw error;
+    return data;
+  } finally { clearTimeout(timer); }
 }
 
 async function loadPermissions(user) {
@@ -298,13 +328,9 @@ async function loadEmployees() {
     return;
   }
 
-  const { data, error } = await db.from('ref_employees')
-    .select(employeeListColumns)
-    .eq('coop_id', state.user.coop_id)
-    .order('is_active', { ascending: false })
-    .order('emp_name', { ascending: true });
-  if (error) throw error;
-  state.employees = data || [];
+  const data = await readHrContract('employees');
+  if (!Array.isArray(data) || data.some(row => row.coop_id !== state.user.coop_id)) throw new Error('EMPLOYEE_NOT_FOUND');
+  state.employees = data;
   const routeEmployee = new URLSearchParams(location.search).get('employee');
   const requested = routeEmployee || sessionStorage.getItem('erp_contract_employee_id');
   sessionStorage.removeItem('erp_contract_employee_id');
@@ -342,7 +368,9 @@ async function loadContracts() {
   try {
     const rows = [];
     for (let offset = 0; ; offset += 500) {
-    const { data, error } = await db.from('erp_employment_contracts')
+    const { data, error } = state.admin && !state.forceSelf
+      ? {data:await readHrContract('history', {p_emp_id:employeeId,p_offset:offset}),error:null}
+      : await db.from('erp_employment_contracts')
       .select(contractHistoryColumns)
       .eq('coop_id', coopId)
       .eq('emp_id', employeeId)
@@ -1433,6 +1461,9 @@ async function downloadContractPdf(contract, button) {
 async function openStoredFile(path) {
   const safePath = asText(path);
   if (!safePath) return showAlert('계약서 파일을 찾을 수 없습니다.');
+  const owner = {empId:state.employee?.emp_id,coopId:state.user?.coop_id,userId:state.user?.auth_user_id || state.user?.emp_id};
+  const current = () => owner.empId === state.employee?.emp_id && owner.coopId === state.user?.coop_id
+    && owner.userId === (state.user?.auth_user_id || state.user?.emp_id) && !window.frameElement?.hidden;
   try {
     let url = safePath.startsWith('https://') ? safePath : '';
     if (!url) {
@@ -1441,10 +1472,11 @@ async function openStoredFile(path) {
       url = data?.signedUrl || '';
     }
     if (!/^https:\/\//i.test(url)) throw new Error('안전한 열람 주소를 만들지 못했습니다.');
+    if (!current()) return;
     window.open(url, '_blank', 'noopener,noreferrer');
   } catch (error) {
-    console.error('[employment_contracts] file open failed', error);
-    showAlert(normalizeError(error));
+    console.error('[employment_contracts] file open failed', {code:error?.code || error?.status || 'READ_FAILED'});
+    if (current()) showAlert('계약서 파일을 열지 못했습니다. 다시 눌러 확인해 주세요.');
   }
 }
 
