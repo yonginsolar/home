@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.82
-Change: 2026-10-06 - Separate internal/external official notices, retaining explicit publication.
+Version: v1.2.83
+Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, retaining drafts and files.
 -->
 <html lang="ko">
 <head>
@@ -10,12 +10,12 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
   <script src="/shared/workflow_help.js?v=20261020-1" integrity="sha384-Dn1Z1LiCGrGYxiZJTz/srbeLloRZ/eDx3+gSDteJzCKG+I/+OBo+1wm0NJpgVEuZ" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | admin_minutes.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
-  <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
+  <script src="/erp/workspace_resume.js?v=20261020-1"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.82 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.83 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -740,8 +740,8 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                 : '목록을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.';
         }
 
-        function minutesListVisible() {
-            return !document.hidden && !window.frameElement?.hidden
+        function minutesListVisible(allowHidden = false) {
+            return !document.hidden && (allowHidden || !window.frameElement?.hidden)
                 && document.getElementById('tab-minutes')?.classList.contains('active')
                 && document.getElementById('sub-panel-manage')?.classList.contains('active');
         }
@@ -779,22 +779,23 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             }
         }
         function isMinutesListCurrent(request) {
-            return !request.failed && request.sequence === minutesListSequence && minutesListVisible() && isAdminUser
+            return !request.failed && request.sequence === minutesListSequence && minutesListVisible(request.allowHidden) && isAdminUser
                 && currentUserId === request.owner.userId && !!request.owner.coopId
                 && minutesListOwner.userId === request.owner.userId
                 && minutesListOwner.coopId === request.owner.coopId
                 && minutesListOwner.revision === request.owner.revision
                 && minutesListQuery() === request.query && minutesStatusFilter === request.filter;
         }
-        function loadMinutes() {
-            if (!minutesListVisible() || !isAdminUser || !minutesListOwner.userId || !minutesListOwner.coopId) {
+        function loadMinutes(options = {}) {
+            const allowHidden = options.allowHidden === true;
+            if (!minutesListVisible(allowHidden) || !isAdminUser || !minutesListOwner.userId || !minutesListOwner.coopId) {
                 invalidateMinutesList();
                 return Promise.resolve();
             }
             const query = minutesListQuery(), filter = minutesStatusFilter;
-            const key = JSON.stringify([minutesListOwner, query, filter]);
+            const key = JSON.stringify([minutesListOwner, query, filter, allowHidden]);
             if (minutesListPending?.key === key) return minutesListPending.promise;
-            const request = { sequence:++minutesListSequence, owner:{...minutesListOwner}, query, filter, controller:new AbortController() };
+            const request = { sequence:++minutesListSequence, owner:{...minutesListOwner}, query, filter, allowHidden, controller:new AbortController() };
             minutesListNeedsResume = false;
             setMinutesListMessage('의사록을 불러오는 중…');
             document.getElementById('list-area')?.setAttribute('aria-busy', 'true');
@@ -808,7 +809,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                     if (!request.failed && !isMinutesListCurrent(request)) setMinutesListMessage('목록을 다시 조회해 주세요.');
                 }
             });
-            minutesListPending = { key, query, promise };
+            minutesListPending = { key, query, promise, controller:request.controller };
             return promise;
         }
         function bindMinutesListControls() {
@@ -3901,11 +3902,11 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                 minutesListOwner = { userId:currentUserId, coopId:runtime.coop_id, revision:minutesListOwner.revision + 1 };
                 return runtime.effective_permissions.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
                     || await MinutesService.isAdmin(session.user.id,session.user.email);
-            },refresh:async()=>{
+            },refreshWhenDirty:()=>minutesListVisible(true),ownsReadRequests:true,refresh:async()=>{
                 const pane=document.querySelector('.tab-panel.active')?.id;
                 if(pane==='tab-notices')await loadNotices();
                 else if(pane==='tab-materials')await loadAssemblyMaterials();
-                else await loadMinutes();
+                else await loadMinutes({allowHidden:true});
             }});
         }
 

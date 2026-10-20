@@ -1,15 +1,15 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.160 | Change: 2026-10-20 - Search complete transaction groups and browse earlier history. -->
+<!-- Version: v1.0.161 | Change: 2026-10-20 - Refresh history on authorized workspace return without replacing drafts. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
   <script src="/shared/workflow_help.js?v=20261020-1" integrity="sha384-Dn1Z1LiCGrGYxiZJTz/srbeLloRZ/eDx3+gSDteJzCKG+I/+OBo+1wm0NJpgVEuZ" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | accounting.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
-  <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
+  <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.160 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.161 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
@@ -2082,9 +2082,9 @@ window.onload = async function() {
     renderAutoSyncUndoInfo();
     if (document.getElementById('tabSync')?.classList.contains('active')) await loadApprovalUnclassifiedQueue();
     if (document.getElementById('tabGuide')?.classList.contains('active')) await mountAccountingGuide();
-    window.ErpWorkspaceResume.register({modules:['accounting'], refresh:async () => {
+    window.ErpWorkspaceResume.register({modules:['accounting'], refreshWhenDirty:()=>document.getElementById('tabHistory')?.classList.contains('active') === true, refresh:async () => {
         const pane = document.querySelector('.tab-content > .tab-pane.active')?.id;
-        if (pane === 'tabHistory') await loadHistory();
+        if (pane === 'tabHistory') await loadHistory({allowHidden:true});
         else if (pane === 'tabAssets') await loadAssetOverview();
         else if (pane === 'tabSync') await loadApprovalUnclassifiedQueue();
         else if (pane === 'tabForm' || !pane) await refreshDashboard();
@@ -9467,7 +9467,7 @@ function confirmSync(type) {
 
 function loadHistory(options = {}) {
     const owner = myInfo;
-    return window.CoopAccountingHistory.load({more:options.more===true,client:_supabase,owner,
+    return window.CoopAccountingHistory.load({more:options.more===true,allowHidden:options.allowHidden===true,client:_supabase,owner,
         authorized:accountingDataAuthorized && (canPerform('accounting.view') || canPerform('accounting.edit')),
         currentOwner:()=>accountingDataAuthorized && myInfo===owner && (canPerform('accounting.view') || canPerform('accounting.edit')),
         render:rows=>renderHistoryDouble(rows,true)});
@@ -10721,7 +10721,7 @@ async function fetchLiabilitySum() {
 }
 </script>
 <script src="accounting_money_module.js?v=20261017-1"></script>
-<script src="accounting_history.js?v=20261020-2"></script>
+<script src="accounting_history.js?v=20261020-3"></script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>

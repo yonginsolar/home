@@ -1,22 +1,22 @@
-/* v1.0.0 — Read-only transaction-group search. No business writes or storage. */
+/* v1.0.1 — Authorized workspace return may prepare the active read-only list while its frame is held. */
 (function(root){
   'use strict';
   const doc=root.document,ids=['journalHistoryFrom','journalHistoryTo','journalHistoryKeyword'];
   let revision=0,pending=null,page=null;
   const values=()=>ids.map(id=>String(doc.getElementById(id)?.value||'').trim());
-  const visible=()=>!root.frameElement?.hidden && !!doc.getElementById('tabHistory')?.classList.contains('active');
+  const visible=(allowHidden=false)=>(allowHidden||!root.frameElement?.hidden) && !!doc.getElementById('tabHistory')?.classList.contains('active');
   function invalidate(){revision++;pending?.controller.abort();pending=null;const more=doc.getElementById('journalHistoryMore');if(more)more.disabled=false;}
   function clear(){invalidate();ids.forEach(id=>{doc.getElementById(id).value='';});}
-  function load({more=false,client,owner,authorized,currentOwner,render}){
+  function load({more=false,allowHidden=false,client,owner,authorized,currentOwner,render}){
     const status=doc.getElementById('journalHistoryStatus'),button=doc.getElementById('journalHistoryMore');
-    if(!authorized||!owner?.coop_id||!visible()){invalidate();return Promise.resolve(false);}
+    if(!authorized||!owner?.coop_id||!visible(allowHidden)){invalidate();return Promise.resolve(false);}
     const filters=values(),identity=JSON.stringify([owner.auth_user_id||owner.emp_id||owner.id,owner.coop_id]);
-    const key=JSON.stringify([identity,filters]);
-    if(pending?.key===key&&pending.more===more)return pending.promise;
+    const key=JSON.stringify([identity,filters]),pendingKey=JSON.stringify([key,allowHidden]);
+    if(pending?.key===pendingKey&&pending.more===more)return pending.promise;
     if(filters[0]&&filters[1]&&filters[0]>filters[1]){invalidate();status.textContent='시작일과 종료일을 확인해 주세요.';return Promise.resolve(false);}
     if(more&&(!page||page.key!==key||!page.hasMore))return Promise.resolve(false);
     invalidate();const seq=revision,controller=new AbortController();
-    const current=()=>seq===revision&&currentOwner()&&visible()&&key===JSON.stringify([identity,values()]);
+    const current=()=>seq===revision&&currentOwner()&&visible(allowHidden)&&key===JSON.stringify([identity,values()]);
     const cursor=more?page.next:null;
     status.textContent=more?'이전 내역을 불러오는 중…':'장부를 불러오는 중…';button.disabled=true;
     if(!more){page=null;button.hidden=true;doc.getElementById('historyList').textContent='';doc.getElementById('historyMeta').textContent='';}
@@ -40,7 +40,7 @@
       if(more)button.hidden=false;
       return false;
     }).finally(()=>{clearTimeout(timer);if(pending?.promise===promise){pending=null;button.disabled=false;}});
-    pending={key,more,promise,controller};return promise;
+    pending={key:pendingKey,more,promise,controller};return promise;
   }
   ids.forEach(id=>doc.getElementById(id)?.addEventListener('input',()=>{
     invalidate();

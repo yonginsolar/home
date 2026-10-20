@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* ERP task resume v1.0.2: keep authorization checks; restore held task screens for explicit internal moves. */
+/* ERP task resume v1.0.3: explicitly opted-in read-only panels may refresh beside retained drafts. */
 (() => {
   'use strict';
   function register(options = {}) {
@@ -16,8 +16,12 @@
         : runtime.modules?.[key] !== false)) throw new Error('ERP_TASK_ACCESS_DENIED');
       if (options.authorize && await options.authorize(runtime) !== true) throw new Error('ERP_TASK_ACCESS_DENIED');
       // A held editor is not reinitialized. Its original save and conflict checks remain authoritative.
-      // Open dialogs, local dirty guards and in-flight operations take precedence over list refresh.
-      if (context.dirty || document.querySelector('.modal.show,dialog[open]') || options.busy?.()) return;
+      // Only an explicitly opted-in read-only panel may refresh beside a draft.
+      // Open dialogs and in-flight operations still take precedence.
+      if ((context.dirty && options.refreshWhenDirty?.() !== true) || document.querySelector('.modal.show,dialog[open]') || options.busy?.()) return;
+      // Scoped readers that already cancel/coalesce by owner/query must not share
+      // a superseded outer promise after their fresh authorize hook invalidates it.
+      if (options.ownsReadRequests === true) { await options.refresh(); return; }
       if (!pending) pending = Promise.resolve().then(options.refresh).finally(() => { pending = null; });
       await pending;
     }};
