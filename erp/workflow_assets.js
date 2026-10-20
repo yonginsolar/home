@@ -12,7 +12,7 @@
         accountingGuide: {src:local('accounting_guide.js?v=1.0.2'), integrity:'sha384-a9rglJK2ZQ77p9hwdDbn1hv5+pds91L0dxU4U4f3hXLBBsqRwrbuqoVRfehhfI3f', ready:() => typeof root.CoopAccountingGuide?.mount === 'function'},
         smartaGuide: {src:local('accounting_smarta_guide.js?v=1.0.0'), integrity:'sha384-MHe/7q/URIf9NEtrnuV2o/LsZgpLANn3RxIdzSAjH+g8oLsyNCCusj2lgHOgSdXZ', ready:() => typeof root.CoopSmartaGuide?.mount === 'function'},
         financialEngine: {src:local('financial_statements_engine.js?v=1.1.0'),integrity:'sha384-tHgs9MvyMyqTqO0xgb085190rccIQa+mRTNiZDpLTrpvvs5qMnZ+MZhqgVRV9H/s',ready:()=>root.FinancialStatementsEngine?.version==='1.1.0'},
-        financialStatements: {src:local('financial_statements.js?v=1.1.1'),integrity:'sha384-Xi0xmFHOK3GKz+jdZPrQkYFX2pFRcDo2R6MmbEz5iW3DOMMwajEwUPFHkV0OVAH5',ready:()=>root.FinancialStatements?.version==='1.1.1'}
+        financialStatements: {src:local('financial_statements.js?v=1.1.2'),integrity:'sha384-TZNW4CGRl/82Oc/+Bx4RRO/Q806ouo3KpX76shJH8ThLG03wAHJ58MIeyDJUWdVb',ready:()=>root.FinancialStatements?.version==='1.1.2'}
     });
     const pending = new Map();
     function load(key) {
