@@ -19,7 +19,7 @@
    $('[data-fs-tools]').lastChild.classList.add('coop-workflow-help');$('[data-fs-tools]').lastChild.setAttribute('aria-label','재무제표 분석 도움말');
    if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)invalidate();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
    root.addEventListener('beforeunload',e=>{if([...drafts.values()].some(d=>d.dirty)){e.preventDefault();e.returnValue='';}});
-   doc.querySelector('[data-bs-target="#'+element.closest('.tab-pane')?.id+'"]')?.addEventListener('hide.bs.tab',invalidate);
+   const tab=doc.querySelector('[data-bs-target="#'+element.closest('.tab-pane')?.id+'"]');tab?.addEventListener('hide.bs.tab',invalidate);tab?.addEventListener('shown.bs.tab',()=>void refresh());
   }
   function invalidate(){listSeq++;listAbort?.abort();listAbort=null;previewSeq++;preview=null;$('[data-fs-preview]').replaceChildren();for(const d of drafts.values()){d.epoch++;d.abort?.abort();if(d.phase==='reading'){d.phase='idle';d.status.textContent='파일 읽기가 중단됐습니다. 다시 읽기를 눌러 주세요.';}if(d.phase==='confirming'){d.phase=d.attempt?.uncertain?'uncertain':'idle';if(d.attempt&&!d.attempt.uncertain)d.attempt=null;}syncDraft(d);}}
   function sync(){const ctx=c();if(owner&&owner!==ctx.owner){invalidate();drafts.clear();active=null;items=[];loaded=false;editable=false;$('[data-fs-editor]').replaceChildren();}owner=ctx.owner||'';const allowed=!!owner&&ctx.allowed===true;
