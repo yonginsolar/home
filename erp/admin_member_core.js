@@ -2660,52 +2660,92 @@ document.getElementById('customConfirmModal')?.addEventListener('hidden.bs.modal
 }
 
 // [수정] 엑셀 다운로드 (보안 모드 RPC 연동 및 로그 기록)
-let memberSmsExportBusy = false;
-let memberSmsExportRevision = 0;
-let memberSmsExportRead = null;
-let memberSmsExportReleaseLoading = null;
-async function downloadMemberSmsExcel() {
-    if (memberSmsExportBusy) return;
-    const runtime=g_adminMemberRuntime,authId=adminCertificateAuthId,cutoffDate=getMemberExportCutoffDate();
-    if (!normalizeMemberExportDateValue(cutoffDate)) return myAlert('기준일을 선택해 주세요.','warning');
-    const modal=document.getElementById('excelModal');
-    if(!modal.dataset.smsReadBound){
-        const invalidate=()=>{memberSmsExportRevision++;memberSmsExportRead?.abort();memberSmsExportReleaseLoading?.();};
-        modal.addEventListener('hide.bs.modal',invalidate);
-        modal.addEventListener('change',event=>{if(event.target.matches('input[name="excelOption"],#memberExportCutoffDate'))invalidate();});
-        modal.dataset.smsReadBound='1';
-    }
-    const revision=++memberSmsExportRevision;
-    const current=()=>revision===memberSmsExportRevision && g_adminMemberRuntime===runtime && adminCertificateAuthId===authId
-      && getSelectedExcelOption()==='sms' && getMemberExportCutoffDate()===cutoffDate
+let memberExcelExportAttempt = null;
+function isCurrentMemberExcelExport(attempt) {
+    return memberExcelExportAttempt === attempt && !attempt.cancelled
+      && g_adminMemberRuntime === attempt.runtime && g_adminMemberRuntime?.coop_id === attempt.coopId
+      && adminCertificateAuthId === attempt.authId && getSelectedExcelOption() === attempt.type
+      && getMemberExportCutoffDate() === attempt.cutoffDate
+      && (attempt.type !== 'secret' || document.getElementById('decryptKey')?.value === attempt.pin)
       && document.getElementById('excelModal')?.classList.contains('show') && !window.frameElement?.hidden;
-    let ownsLoading=true;
-    const releaseLoading=()=>{
-        if(!ownsLoading)return;
-        ownsLoading=false;
-        if(memberSmsExportReleaseLoading===releaseLoading)memberSmsExportReleaseLoading=null;
-        showLoading(false);
+}
+function finishMemberExcelExport(attempt) {
+    attempt.releaseLoading();
+    if (memberExcelExportAttempt === attempt) memberExcelExportAttempt = null;
+    attempt.cancelled = true;
+    attempt.controllers.forEach(controller => controller.abort());
+    attempt.pin = '';
+}
+function cancelMemberExcelExport() {
+    if (memberExcelExportAttempt) finishMemberExcelExport(memberExcelExportAttempt);
+}
+function beginMemberExcelExport() {
+    const modal=document.getElementById('excelModal');
+    if (!modal?.classList.contains('show') || window.frameElement?.hidden) return null;
+    if(!modal.dataset.excelReadBound){
+        modal.addEventListener('hide.bs.modal',cancelMemberExcelExport);
+        const changed=event=>{
+            if(event.target.matches('input[name="excelOption"],#memberExportCutoffDate,#memberExportReportYear,#decryptKey')) cancelMemberExcelExport();
+        };
+        modal.addEventListener('input',changed);
+        modal.addEventListener('change',changed);
+        window.addEventListener('pagehide',cancelMemberExcelExport);
+        if(window.frameElement) new MutationObserver(cancelMemberExcelExport).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+        modal.dataset.excelReadBound='1';
+    }
+    if(memberExcelExportAttempt && isCurrentMemberExcelExport(memberExcelExportAttempt)) return null;
+    cancelMemberExcelExport();
+    const type=getSelectedExcelOption();
+    const attempt={runtime:g_adminMemberRuntime,coopId:g_adminMemberRuntime?.coop_id,authId:adminCertificateAuthId,
+      type,cutoffDate:getMemberExportCutoffDate(),pin:type==='secret' ? document.getElementById('decryptKey')?.value || '' : '',
+      cancelled:false,controllers:new Set(),loading:true};
+    attempt.releaseLoading=()=>{
+        if(!attempt.loading)return;
+        attempt.loading=false;
+        if(memberExcelExportAttempt===attempt)showLoading(false);
     };
-    memberSmsExportReleaseLoading=releaseLoading;
-    memberSmsExportBusy=true;showLoading(true);
+    memberExcelExportAttempt=attempt;showLoading(true);
+    return attempt;
+}
+async function readMemberExcelExport(attempt,read) {
+    if(!isCurrentMemberExcelExport(attempt))throw new Error('MEMBER_EXPORT_CANCELLED');
+    const controller=new AbortController();attempt.controllers.add(controller);
+    let timer,onAbort;
     try {
-        const identity=await _supabase.auth.getUser();
-        if(identity.error||!authId||identity.data?.user?.id!==authId)throw new Error('SMS_EXPORT_ACCESS_DENIED');
-        const gate=await window.ErpRuntimeGuard.enforce(_supabase,{moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
-        if(!current())return;
-        if(!gate.ok||!runtime?.coop_id||gate.runtime?.coop_id!==runtime.coop_id)throw new Error('SMS_EXPORT_ACCESS_DENIED');
+        const result=await Promise.race([
+            Promise.resolve().then(()=>{
+                if(!isCurrentMemberExcelExport(attempt))throw new Error('MEMBER_EXPORT_CANCELLED');
+                return read(controller.signal);
+            }),
+            new Promise((_,reject)=>{
+                onAbort=()=>reject(new Error('MEMBER_EXPORT_CANCELLED'));
+                controller.signal.addEventListener('abort',onAbort,{once:true});
+                timer=setTimeout(()=>{reject(new Error('MEMBER_EXPORT_READ_TIMEOUT'));controller.abort();},15000);
+            })
+        ]);
+        if(!isCurrentMemberExcelExport(attempt))throw new Error('MEMBER_EXPORT_CANCELLED');
+        return result;
+    } finally {
+        clearTimeout(timer);controller.signal.removeEventListener('abort',onAbort);attempt.controllers.delete(controller);
+    }
+}
+async function verifyMemberExcelExportAccess(attempt) {
+    const identity=await readMemberExcelExport(attempt,()=>_supabase.auth.getUser());
+    if(identity.error||!attempt.authId||identity.data?.user?.id!==attempt.authId)throw new Error('MEMBER_EXPORT_ACCESS_DENIED');
+    const gate=await readMemberExcelExport(attempt,()=>window.ErpRuntimeGuard.enforce(_supabase,{moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'}));
+    if(!gate.ok||!attempt.coopId||gate.runtime?.coop_id!==attempt.coopId)throw new Error('MEMBER_EXPORT_ACCESS_DENIED');
+}
+async function downloadMemberSmsExcel(attempt) {
+    const current=()=>isCurrentMemberExcelExport(attempt),cutoffDate=attempt.cutoffDate;
+    if (!normalizeMemberExportDateValue(cutoffDate)) return myAlert('기준일을 선택해 주세요.','warning');
+    try {
+        await verifyMemberExcelExportAccess(attempt);
         const records=[];let cursor=null;
         for(;;){
             let query=scopeAdminTenant(_supabase.from('coop_members').select('id,name,phone')
               .neq('status','승인대기').lte('join_date',cutoffDate).order('id',{ascending:true}).limit(500));
             if(cursor)query=query.gt('id',cursor);
-            const controller=new AbortController();memberSmsExportRead=controller;let timer;
-            let data,error;
-            try {
-                ({data,error}=await Promise.race([query.abortSignal(controller.signal),new Promise((_,reject)=>{
-                    timer=setTimeout(()=>{reject(new Error('SMS_EXPORT_READ_TIMEOUT'));controller.abort();},15000);
-                })]));
-            } finally {clearTimeout(timer);if(memberSmsExportRead===controller)memberSmsExportRead=null;}
+            const {data,error}=await readMemberExcelExport(attempt,signal=>query.abortSignal(signal));
             if(!current())return;
             if(error||!Array.isArray(data))throw error||new Error('SMS_EXPORT_READ_FAILED');
             records.push(...data);
@@ -2717,12 +2757,7 @@ async function downloadMemberSmsExcel() {
         const rows=window.CoopMemberSmsExport.build(records);
         if(!current())return;
         if(!rows.length)return myAlert('문자 발송용으로 내려받을 휴대전화 번호가 없습니다.','warning');
-        const finalIdentity=await _supabase.auth.getUser();
-        if(!current())return;
-        if(finalIdentity.error||finalIdentity.data?.user?.id!==authId)throw new Error('SMS_EXPORT_ACCESS_DENIED');
-        const finalGate=await window.ErpRuntimeGuard.enforce(_supabase,{moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
-        if(!current())return;
-        if(!finalGate.ok||finalGate.runtime?.coop_id!==runtime.coop_id)throw new Error('SMS_EXPORT_ACCESS_DENIED');
+        await verifyMemberExcelExportAccess(attempt);
         const wb=XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb,window.CoopMemberSmsExport.worksheet(XLSX,rows),'문자 발송용');
         XLSX.writeFile(wb,`조합원명부_문자발송용_${cutoffDate}.xlsx`);
@@ -2730,17 +2765,21 @@ async function downloadMemberSmsExcel() {
         bootstrap.Modal.getInstance(document.getElementById('excelModal'))?.hide();
     } catch (_) {
         if(current())myAlert('문자 발송용 명부를 불러오지 못했습니다. 다시 시도해 주세요.','error');
-    } finally {memberSmsExportBusy=false;releaseLoading();}
+    }
 }
 
 async function downloadExcel() {
-    if (!(await ensureAdminMemberSpreadsheetReady())) return;
-    const type = getSelectedExcelOption();
-    if(type==='sms')return downloadMemberSmsExcel();
-    const cutoffDate = getMemberExportCutoffDate();
+    const attempt=beginMemberExcelExport();
+    if(!attempt)return;
+    try {
+    if (!(await readMemberExcelExport(attempt,()=>ensureAdminMemberSpreadsheetReady()))) return;
+    const type = attempt.type;
+    if(type==='sms')return await downloadMemberSmsExcel(attempt);
+    const cutoffDate = attempt.cutoffDate;
+    await verifyMemberExcelExportAccess(attempt);
     let shareUnitAmount;
-    try { shareUnitAmount = (await refreshMemberCapitalDisplays()).unit; }
-    catch (_) { return myAlert('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.', 'error'); }
+    try { shareUnitAmount = (await readMemberExcelExport(attempt,()=>refreshMemberCapitalDisplays())).unit; }
+    catch (_) { if(isCurrentMemberExcelExport(attempt))myAlert('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.', 'error');return; }
     const coopName = String(g_memberExportOrgName || '').trim();
     let dataToExport = [];
     let fileName = "조합원명부_일반.xlsx";
@@ -2755,46 +2794,51 @@ async function downloadExcel() {
     }
 
 
-    showLoading(true);
     let snapshotMap = {};
     try {
-        snapshotMap = await fetchMemberCapitalSnapshotByDate(cutoffDate);
+        snapshotMap = await readMemberExcelExport(attempt,()=>fetchMemberCapitalSnapshotByDate(cutoffDate));
     } catch (snapshotError) {
-        showLoading(false);
+        if(!isCurrentMemberExcelExport(attempt))return;
+        attempt.releaseLoading();
         CoopSafeLog.error("[erp/admin_member] operation failed", snapshotError);
         return myAlert('기준일 출자금 계산 실패: ' + snapshotError.message, 'error');
     }
 
     try {
-        exportSourceRecords = await fetchAllMembersForExport();
+        exportSourceRecords = await readMemberExcelExport(attempt,()=>fetchAllMembersForExport());
     } catch (memberError) {
-        showLoading(false);
+        if(!isCurrentMemberExcelExport(attempt))return;
+        attempt.releaseLoading();
         CoopSafeLog.error("[erp/admin_member] operation failed", memberError);
         return myAlert('전체 조합원 명부 조회 실패: ' + memberError.message, 'error');
     }
 
     // 1. 보안용 엑셀 다운로드
     if(type === 'secret') {
-        const inputPin = document.getElementById('decryptKey').value;
+        const inputPin = attempt.pin;
 
         if (!g_memberExportSecurePinConfigured) {
-            showLoading(false);
+            attempt.releaseLoading();
             return myAlert('보안 엑셀 PIN이 아직 설정되지 않았습니다. 먼저 PIN을 저장해주세요.', 'warning');
         }
 
         if (!inputPin) {
-            showLoading(false);
+            attempt.releaseLoading();
             return myAlert('보안 엑셀 PIN을 입력해주세요.', 'warning');
         }
 
-        const { data, error } = await _supabase.rpc('get_full_members_secure', { p_pin: inputPin });
+        const { data, error } = await readMemberExcelExport(attempt,signal=>{
+            const request=_supabase.rpc('get_full_members_secure', { p_pin: inputPin });
+            return request.abortSignal ? request.abortSignal(signal) : request;
+        });
 
         if(error) {
-            showLoading(false);
+            attempt.releaseLoading();
             CoopSafeLog.error("[erp/admin_member] operation failed", error);
             return myAlert('보안 데이터 로드 실패: ' + error.message, 'error');
         }
 
+        await verifyMemberExcelExportAccess(attempt);
         const exportResult = buildMemberExportRows(data || [], {
             cutoffDate,
             shareUnitAmount,
@@ -2813,7 +2857,7 @@ async function downloadExcel() {
 
         dataToExport = exportResult.rows;
         if (exportResult.overLimitMembers.length > 0) {
-            showLoading(false);
+            attempt.releaseLoading();
             const ws = buildMemberExportWorksheet(type, dataToExport, { cutoffDate, shareUnitAmount, coopName });
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "명부");
@@ -2825,6 +2869,7 @@ async function downloadExcel() {
         }
     } else {
         // 2. 일반용/시청 신고용 엑셀 다운로드 (가입일 기준일 이하 조합원 기준)
+        await verifyMemberExcelExportAccess(attempt);
         const exportResult = buildMemberExportRows(exportSourceRecords, {
             cutoffDate,
             shareUnitAmount,
@@ -2838,7 +2883,7 @@ async function downloadExcel() {
         logAdminAction('DOWNLOAD', '조합원명부', type === 'city-report' ? `시청 신고용 다운로드 (기준일 ${cutoffDate})` : `일반용 다운로드 (기준일 ${cutoffDate})`);
 
         if (exportResult.overLimitMembers.length > 0) {
-            showLoading(false);
+            attempt.releaseLoading();
             const ws = buildMemberExportWorksheet(type, dataToExport, { cutoffDate, shareUnitAmount, coopName });
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "명부");
@@ -2851,7 +2896,7 @@ async function downloadExcel() {
     }
 
     // 3. 엑셀 파일 생성 및 다운로드 (SheetJS)
-    showLoading(false);
+    attempt.releaseLoading();
     const ws = buildMemberExportWorksheet(type, dataToExport, { cutoffDate, shareUnitAmount, coopName });
 
     const wb = XLSX.utils.book_new();
@@ -2861,6 +2906,9 @@ async function downloadExcel() {
     // 모달 닫기 및 초기화
     document.getElementById('decryptKey').value = '';
     bootstrap.Modal.getInstance(document.getElementById('excelModal')).hide();
+    } catch (_) {
+        if(isCurrentMemberExcelExport(attempt))myAlert('엑셀 명부를 불러오지 못했습니다. 다시 시도해 주세요.','error');
+    } finally {finishMemberExcelExport(attempt);}
 }
 
 
