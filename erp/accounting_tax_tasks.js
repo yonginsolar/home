@@ -1,4 +1,4 @@
-/* Tax tasks 1.0.0. Memory-only drafts; existing approval/accounting writers are never called. */
+/* Tax tasks 1.0.1. Memory-only drafts and outcomes; existing approval/accounting writers are never called. */
 (function(root){
  'use strict';
  const names={vat:'부가세 신고·납부',vat_notice:'부가세 예정고지 납부',withholding:'원천세 신고·납부',local_withholding:'지방소득세 특별징수'};
@@ -11,15 +11,19 @@
  const completed=r=>(!r.filing_required||!!r.state?.filed_date)&&['paid','none','refund'].includes(r.state?.settlement);
  const taskInput=r=>({filed_date:r.state?.filed_date||'',settlement:r.state?.settlement||'pending',paid_date:r.state?.paid_date||'',filing_due:r.filing_due,payment_due:r.payment_due,receipt:r.state?.receipt||'',memo:r.state?.memo||'',due_reason:r.state?.due_reason||''});
  function create({element,client,getContext}){
-  let owner='',rows=[],settings=null,settingsDraft=null,year=Number(today().slice(0,4)),seq=0,editorSeq=0,active=null,modal=null,status,list,yearControl,filter='pending',settingsButton,reloadButton,pending=null,pendingYear=null;
-  const drafts=new Map(),controllers=new Set();let canEdit=false,serverToday=today(),message='',routeHandled=false;
+  let owner='',rows=[],settings=null,settingsDraft=null,year=Number(today().slice(0,4)),seq=0,editorSeq=0,active=null,modal=null,status,list,orphanList,outcomes,yearControl,filter='pending',settingsButton,reloadButton,pending=null,pendingYear=null;
+  const drafts=new Map(),controllers=new Set(),dialogs=new Set();let canEdit=false,serverToday=today(),message='',routeHandled=false,loadedYear=null,listFresh=false,navigationClose=false,modalClosing=false,closeAfterShow=false,queuedOpen=null;
   const fingerprint=d=>JSON.stringify([d.data,d.approval?.id||null]);
   const ctx=()=>getContext()||{},valid=()=>!!owner&&owner===ctx().owner&&ctx().allowed===true;
   const visible=()=>ctx().visible!==false&&!root.frameElement?.hidden;
   const editable=()=>valid()&&canEdit&&ctx().edit===true;
   const hasDraft=()=>!!settingsDraft?.dirty||!!settingsDraft?.attempt||[...drafts.values()].some(d=>d.dirty||d.attempt);
   const current=(ticket,who)=>ticket===seq&&who===owner&&valid()&&visible();
-  function reset(){++seq;++editorSeq;controllers.forEach(c=>c.abort());controllers.clear();pending=null;rows=[];settings=null;drafts.clear();settingsDraft=null;active=null;canEdit=false;routeHandled=false;if(modal)root.bootstrap.Modal.getInstance(modal)?.hide();}
+  const rowYear=r=>r?.due_month?Number(r.due_month.slice(0,4)):Number(r?.period_end?.slice(0,4))+(r?.period_end?.slice(5,7)==='12'?1:0);
+  const isOrphan=d=>!!d?.row&&listFresh&&loadedYear===rowYear(d.row)&&!rows.some(r=>key(r)===key(d.row));
+  const blocked=d=>!!d?.saving||!!d?.attempt;
+  function dialog(kind,message,options){const ticket={owner};dialogs.add(ticket);return Promise.resolve(root.CoopDialog[kind](message,options)).finally(()=>dialogs.delete(ticket));}
+  function reset(){pause();rows=[];settings=null;drafts.clear();settingsDraft=null;active=null;canEdit=false;routeHandled=false;loadedYear=null;listFresh=false;}
   async function read(action,data,ticket=seq){
    const who=owner,c=new AbortController();controllers.add(c);let timer;
    try{const q=client.rpc('accounting_tax_tasks',{p_action:action,p_coop_id:ctx().coopId,p_data:data,p_request_key:null});
@@ -37,13 +41,33 @@
    yearControl.onchange=()=>{year=Number(yearControl.value);void load();};
    settingsButton=button('신고 주기 설정',()=>openSettings());reloadButton=button('다시 확인',()=>void load());
    const scope=make('select','form-select form-select-sm');scope.id='taxTaskFilter';scope.style.width='auto';scope.dataset.erpQueryControl='';scope.setAttribute('aria-label','세무 할 일 상태');for(const [v,t]of [['pending','진행 중'],['completed','완료 이력'],['all','전체']]){const o=make('option','',t);o.value=v;scope.append(o);}scope.onchange=()=>{filter=scope.value;render();};
-   bar.append(label,yearControl,settingsButton,reloadButton,button('?',()=>void root.CoopDialog.alert('조합의 신고 주기를 먼저 설정하세요. 기존 지출결의를 연결하면 금액·첨부는 그 문서를 그대로 확인할 수 있어요. 실제 신고와 납부는 각각 확인하며, 결재 승인만으로 완료되지는 않아요. 기한은 공휴일을 반영한 일반 기준이므로 고지·연장 기한이 다르면 해당 업무에서 조정하세요.',{title:'세무 할 일 도움말'}),'btn btn-outline-secondary btn-sm coop-workflow-help'));
-   bar.append(scope);status=make('p','small');status.setAttribute('role','status');list=make('div','d-grid gap-3');element.replaceChildren(bar,status,list);
+   bar.append(label,yearControl,settingsButton,reloadButton,button('?',()=>void dialog('alert','조합의 신고 주기를 먼저 설정하세요. 기존 지출결의를 연결하면 금액·첨부는 그 문서를 그대로 확인할 수 있어요. 실제 신고와 납부는 각각 확인하며, 결재 승인만으로 완료되지는 않아요. 기한은 공휴일을 반영한 일반 기준이므로 고지·연장 기한이 다르면 해당 업무에서 조정하세요.',{title:'세무 할 일 도움말'}),'btn btn-outline-secondary btn-sm coop-workflow-help'));
+   bar.append(scope);status=make('p','small');status.setAttribute('role','status');list=make('div','d-grid gap-3');orphanList=make('div','d-grid gap-3 mt-3');orphanList.dataset.taxOrphans='';outcomes=make('div','d-grid gap-2 mb-3');outcomes.dataset.taxOutcomes='';element.replaceChildren(bar,status,outcomes,list,orphanList);
    root.addEventListener('beforeunload',e=>{if(hasDraft()){e.preventDefault();e.returnValue='';}});
    if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)pause();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
+   const pane=element.closest('.tab-pane');
+   if(pane)new MutationObserver(()=>{if(!visible())pause();}).observe(pane,{attributes:true,attributeFilter:['class','hidden']});
+   document.addEventListener('hide.bs.tab',e=>{if(pane?.id&&[e.target?.getAttribute('data-bs-target'),e.target?.getAttribute('href')].includes('#'+pane.id))pause();else if(!visible())pause();});
+   document.addEventListener('shown.bs.tab',()=>{if(!visible())pause();});
+  }
+  function renderAux(){
+   if(!orphanList)return;orphanList.replaceChildren();outcomes.replaceChildren();if(!valid())return;
+   for(const d of drafts.values())if((d.dirty||d.attempt)&&isOrphan(d)){
+    const card=make('section','border rounded p-3 bg-white');card.dataset.taxOrphan=key(d.row);
+    card.append(make('h3','h6','현재 주기에서 빠진 초안'),make('p','small mb-2',(names[d.row.kind]||'세무 업무')+' · '+d.row.period_from+' ~ '+d.row.period_end),button('초안 확인',()=>openOrphan(d)));
+    const discard=button('초안 버리기',e=>void discardDraft(d,e.currentTarget),'btn btn-outline-danger btn-sm ms-2');discard.disabled=blocked(d)||!!d.discarding;card.append(discard);
+    if(d.attempt)card.append(make('p','small mt-2 mb-0','저장 결과 확인이 필요합니다. 다시 확인으로 목록을 불러와 주세요.'));
+    orphanList.append(card);
+   }
+   for(const d of [settingsDraft,...drafts.values()])if(d?.notice){
+    const card=make('section','border rounded p-3');card.dataset.taxOutcome=d.row?key(d.row):'settings';
+    const p=make('p','small mb-2',(d.row?(names[d.row.kind]+' · '+d.row.period_end):'신고 주기 설정')+' — '+d.notice);p.setAttribute('role','status');card.append(p);
+    const view=button(d.attempt?'결과 확인':'내용 확인',()=>{if(d.row){const row=rows.find(r=>key(r)===key(d.row));if(row)openTask(row);else if(isOrphan(d))openOrphan(d);}else openSettings();});view.disabled=!!pending||(d.row&&!rows.some(r=>key(r)===key(d.row))&&!isOrphan(d));
+    const dismiss=button('안내 닫기',()=>{d.notice=null;renderAux();syncEditor();reloadButton?.focus({preventScroll:true});});card.append(view,dismiss);outcomes.append(card);
+   }
   }
   function render(){
-   status.textContent=message;list.replaceChildren();settingsButton.disabled=!valid();reloadButton.disabled=!!pending;
+   status.textContent=message;list.replaceChildren();settingsButton.disabled=!valid();reloadButton.disabled=!!pending;renderAux();
    if(!settings){list.append(make('p','text-muted','신고 주기를 설정하면 해당 기간의 할 일이 표시됩니다.'));return;}
    const shown=rows.filter(r=>drafts.get(key(r))?.dirty||filter==='all'||completed(r)===(filter==='completed'));
    if(!shown.length){list.append(make('p','text-muted',rows.length?'선택한 상태에 해당하는 세무 할 일이 없습니다.':'선택한 연도에 표시할 세무 할 일이 없습니다.'));return;}
@@ -61,21 +85,24 @@
    if(owner!==ctx().owner){reset();owner=ctx().owner;}
    if(!visible())return false;if(pending&&pendingYear===year)return pending;
    if(pending){++seq;controllers.forEach(c=>c.abort());pending=null;rows=[];}
-   pendingYear=year;
+   pendingYear=year;listFresh=false;
    const ticket=++seq,who=owner;message='세무 할 일을 불러오는 중입니다…';render();
    const p=(async()=>{try{const r=await read('list',{year},ticket);if(!Array.isArray(r?.items)||typeof r.can_edit!=='boolean')throw Error('조회 결과를 확인하지 못했습니다.');
-    rows=r.items;settings=r.settings;canEdit=r.can_edit;serverToday=r.today||today();message='';render();syncEditor();return true;
+    rows=r.items;settings=r.settings;canEdit=r.can_edit;serverToday=r.today||today();loadedYear=year;listFresh=true;message='';render();syncEditor();return true;
    }catch(e){if(current(ticket,who)&&e.message!=='STALE_READ'){message='세무 할 일을 불러오지 못했습니다. 다시 확인해 주세요.';canEdit=false;render();syncEditor();}return false;
-   }finally{if(pending===p){pending=null;reloadButton.disabled=false;settingsButton.disabled=!valid();}}})();pending=p;reloadButton.disabled=true;settingsButton.disabled=true;return p;
+   }finally{if(pending===p){pending=null;reloadButton.disabled=false;settingsButton.disabled=!valid();renderAux();}}})();pending=p;reloadButton.disabled=true;settingsButton.disabled=true;return p;
   }
   function ensureModal(){
    if(modal)return;modal=make('div','modal fade');modal.id='accountingTaxModal';modal.tabIndex=-1;modal.setAttribute('aria-labelledby','accountingTaxTitle');
-   modal.innerHTML='<div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="accountingTaxTitle"></h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"></div><div class="modal-footer"><span class="small me-auto" data-tax-dirty></span><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-tax-save>저장</button></div></div></div>';
-   document.body.append(modal);modal.addEventListener('hide.bs.modal',e=>{if(active?.draft?.saving){e.preventDefault();return;}++editorSeq;});
-   modal.addEventListener('hidden.bs.modal',()=>{const closing=active;active=null;render();if(visible())(closing?.type==='task'?(list.querySelector('section[data-tax-task="'+key(closing.row)+'"] button')||reloadButton):settingsButton)?.focus({preventScroll:true});});
+   modal.innerHTML='<div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="accountingTaxTitle"></h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"></div><div class="modal-footer"><span class="small me-auto" data-tax-dirty></span><button type="button" class="btn btn-outline-danger" data-tax-discard hidden>초안 버리기</button><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-tax-save>저장</button></div></div></div>';
+   document.body.append(modal);modal.addEventListener('hide.bs.modal',e=>{if(active?.draft?.saving&&!navigationClose){e.preventDefault();return;}modalClosing=true;++editorSeq;});
+   modal.addEventListener('shown.bs.modal',()=>{if(closeAfterShow||!visible())pause();});
+   modal.addEventListener('hidden.bs.modal',()=>{const closing=active,queued=queuedOpen;queuedOpen=null;active=null;modalClosing=false;closeAfterShow=false;render();if(queued&&queued.owner===owner&&valid()&&visible()){queued.run();return;}if(visible())(closing?.row?(list.querySelector('section[data-tax-task="'+key(closing.row)+'"] button')||orphanList.querySelector('section[data-tax-orphan="'+key(closing.row)+'"] button')||reloadButton):settingsButton)?.focus({preventScroll:true});});
    modal.querySelector('[data-tax-save]').onclick=()=>void save();
+   modal.querySelector('[data-tax-discard]').onclick=e=>void discardDraft(active?.draft,e.currentTarget);
   }
-  function dirty(d){d.dirty=fingerprint(d)!==d.baseline;syncEditor();}
+  function dirty(d){d.dirty=fingerprint(d)!==d.baseline;if(d.dirty)d.notice=null;syncEditor();renderAux();}
+  function deferOpen(run){if(!modalClosing)return false;queuedOpen={owner,run};return true;}
   function field(body,d,name,label,type='text',options){
    const box=make('div','mb-3'),l=make('label','form-label',label),n=make(options?'select':type==='textarea'?'textarea':'input','form-control');n.id='tax-'+name;l.htmlFor=n.id;
    if(options){n.className='form-select';for(const [v,t]of options){const o=make('option','',t);o.value=v;n.append(o);}}
@@ -90,23 +117,24 @@
    ensureModal();if(active?.draft?.saving)return null;
    const opener=document.activeElement;++editorSeq;active={draft,type,row,opener,epoch:editorSeq};
    modal.querySelector('h2').textContent=title;const body=modal.querySelector('.modal-body');body.replaceChildren();
+   const result=make('p','small text-secondary');result.dataset.taxResult='';result.setAttribute('role','status');body.append(result);
    root.bootstrap.Modal.getOrCreateInstance(modal).show();return body;
   }
   function openSettings(){
-   if(!valid())return;
+   if(!valid()||!visible()||pending||deferOpen(openSettings))return;
    if(!settingsDraft||(!settingsDraft.dirty&&!settingsDraft.attempt)){const data={effective_month:(settings?.effective_month||serverToday.slice(0,7)+'-01').slice(0,7),vat:settings?.vat||'unset',withholding:settings?.withholding||'unset',local_withholding:settings?.local_withholding||'unset'};
-    settingsDraft={data,expected:settings?.revision||null,dirty:false};settingsDraft.baseline=fingerprint(settingsDraft);}
+    settingsDraft={data,expected:settings?.revision||null,dirty:false,notice:settingsDraft?.notice};settingsDraft.baseline=fingerprint(settingsDraft);}
    const d=settingsDraft,body=start('조합별 신고 주기',d,'settings');if(!body)return;
    field(body,d,'effective_month','할 일 시작월','month');
    field(body,d,'vat','부가세','select',['unset','quarterly','notice','halfyear','none'].map(v=>[v,modes[v]]));
    field(body,d,'withholding','원천세','select',['unset','monthly','halfyear','none'].map(v=>[v,modes[v]]));
    field(body,d,'local_withholding','지방소득세 특별징수','select',['unset','monthly','halfyear','none'].map(v=>[v,modes[v]]));
-   body.append(button('설정 도움말',()=>void root.CoopDialog.alert('홈택스·위택스의 실제 신고 유형에 맞춰 선택하세요. 반기납부는 승인받은 경우에 선택합니다. 시작월은 신고·납부 기한이 속한 달이에요. 변경된 주기는 아직 기록하지 않은 업무에 적용하며 이미 확인·저장한 업무는 유지합니다.',{title:'신고 주기 선택'})));
+   body.append(button('설정 도움말',()=>void dialog('alert','홈택스·위택스의 실제 신고 유형에 맞춰 선택하세요. 반기납부는 승인받은 경우에 선택합니다. 시작월은 신고·납부 기한이 속한 달이에요. 변경된 주기는 아직 기록하지 않은 업무에 적용하며 이미 확인·저장한 업무는 유지합니다.',{title:'신고 주기 선택'})));
    body.append(button('현재 설정과 비교',()=>void compareCurrent()));syncEditor();
   }
   function openTask(row){
-   if(!valid()||!visible()||pending||!rows.includes(row))return;const k=key(row);let d=drafts.get(k);
-   if(!d||(!d.dirty&&!d.attempt)){const data=taskInput(row);d={data,expected:row.expected,approval:row.approval,dirty:false,row};d.baseline=fingerprint(d);drafts.set(k,d);}
+   if(!valid()||!visible()||pending||!rows.includes(row)||deferOpen(()=>{const live=rows.find(r=>key(r)===key(row));if(live)openTask(live);}))return;const k=key(row);let d=drafts.get(k);
+   if(!d||(!d.dirty&&!d.attempt)){const data=taskInput(row);d={data,expected:row.expected,approval:row.approval,dirty:false,row,notice:d?.notice};d.baseline=fingerprint(d);drafts.set(k,d);}
    const body=start(names[row.kind],d,'task',row);if(!body)return;
    body.append(make('p','text-muted',row.period_from+' ~ '+row.period_end));
    if(row.filing_required)field(body,d,'filed_date','신고 완료일','date');
@@ -123,6 +151,21 @@
    search.append(query,button('검색',run));body.append(search,results);
    const create=make('a','btn btn-outline-secondary btn-sm mt-2','전자결재 작성');create.href='approval.html?tab=draft';body.append(create,button('현재 저장값과 비교',()=>void compareCurrent()));syncEditor();
   }
+  function openOrphan(d){
+   if(!valid()||!visible()||pending||!isOrphan(d)||drafts.get(key(d.row))!==d||deferOpen(()=>openOrphan(d)))return;
+   const body=start('현재 주기에서 빠진 초안',d,'orphan',d.row);if(!body)return;
+   body.append(make('p','text-muted',(names[d.row.kind]||'세무 업무')+' · '+d.row.period_from+' ~ '+d.row.period_end),make('p','small','현재 신고 주기에 포함되지 않아 읽기 전용으로 표시합니다.'));
+   const values=[['신고 완료일',d.data.filed_date||'미확인'],['납부 상태',payment({state:d.data})],['신고기한',d.data.filing_due],['납부기한',d.data.payment_due],['기한 조정 근거',d.data.due_reason||'없음'],['신고 접수번호',d.data.receipt||'없음'],['업무 메모',d.data.memo||'없음'],['결재 연결',d.approval?'있음':'없음']];
+   const dl=make('dl','mb-0');for(const [label,value]of values){const dd=make('dd','mb-3',value||'없음');dd.style.whiteSpace='pre-wrap';dl.append(make('dt','small text-muted',label),dd);}body.append(dl);syncEditor();
+  }
+  async function discardDraft(d,opener){
+   if(!d?.row||!valid()||!visible()||!isOrphan(d)||blocked(d)||d.discarding)return;
+   const who=owner,epoch=editorSeq,before=fingerprint(d);d.discarding=true;opener.disabled=true;
+   const yes=await dialog('confirm','이 초안을 버릴까요?');d.discarding=false;
+   if(owner!==who||!valid()||!visible()||editorSeq!==epoch||drafts.get(key(d.row))!==d||!isOrphan(d)||blocked(d)||fingerprint(d)!==before)return;
+   if(!yes){opener.disabled=false;opener.focus({preventScroll:true});return;}
+   drafts.delete(key(d.row));if(active?.draft===d)root.bootstrap.Modal.getInstance(modal)?.hide();render();reloadButton.focus({preventScroll:true});
+  }
   function renderLink(){const n=modal.querySelector('[data-tax-link]');if(!n||!active)return;n.replaceChildren();const d=active.draft;
     if(d.approval){const a=make('a','d-block',d.approval.title+' · '+d.approval.status);a.href='approval.html?doc='+encodeURIComponent(d.approval.id);n.append(a,button('연결 해제',()=>{if(!editable()||d.attempt)return;d.approval=null;dirty(d);renderLink();}));}
    else n.textContent=active.row?.link_unavailable?'연결 결재를 현재 권한으로 확인할 수 없습니다.':'연결한 전자결재가 없습니다.';
@@ -137,46 +180,50 @@
    }catch(e){if(active===a&&editorSeq===epoch&&a.draft.docSeq===serial){area.textContent='지출결의를 불러오지 못했습니다. 권한을 확인하거나 다시 검색해 주세요.';}}finally{if(a.docPending===attempt)a.docPending=null;}
   }
   function syncEditor(){
-   if(!modal||!active)return;const d=active.draft,locked=!editable()||!!d.attempt||d.saving;
+   if(!modal||!active)return;const d=active.draft,orphan=active.type==='orphan'||isOrphan(d),locked=orphan||!editable()||!!d.attempt||d.saving;
    modal.querySelectorAll('[data-tax-field]').forEach(n=>{n.disabled=locked||(n.dataset.taxField==='paid_date'&&d.data.settlement!=='paid');});
-   const b=modal.querySelector('[data-tax-save]');b.disabled=!editable()||d.saving||(!d.dirty&&!d.attempt);b.textContent=d.attempt?'같은 요청 다시 확인':'저장';
-   modal.querySelector('[data-tax-dirty]').textContent=d.saving?'저장 중…':d.attempt?'저장 결과 확인 필요':d.dirty?'작성 중':'';
+   const b=modal.querySelector('[data-tax-save]');b.hidden=orphan;b.disabled=orphan||!editable()||d.saving||(!d.dirty&&!d.attempt);b.textContent=d.attempt?'같은 요청 다시 확인':'저장';
+   const discard=modal.querySelector('[data-tax-discard]');discard.hidden=!orphan;discard.disabled=blocked(d)||!!d.discarding;
+   modal.querySelector('[data-tax-dirty]').textContent=d.saving?'저장 중…':d.attempt?'저장 결과 확인 필요':orphan?'읽기 전용':d.dirty?'작성 중':'';
+   const result=modal.querySelector('[data-tax-result]');result.textContent=d.notice||'';result.hidden=!d.notice;
   }
   async function compareCurrent(){
-   const a=active;if(!a||a.draft.saving||a.draft.attempt||!editable())return;const epoch=editorSeq;if(!await load()||active!==a||editorSeq!==epoch)return;
+   const a=active;if(!a||a.type==='orphan'||isOrphan(a.draft)||a.draft.saving||a.draft.attempt||!editable())return;const epoch=editorSeq;if(!await load()||active!==a||editorSeq!==epoch)return;
    const latest=a.type==='settings'?settings:rows.find(r=>key(r)===key(a.row));if(!latest)return;
    const content=a.type==='settings'?'현재 설정 ('+latest.effective_month.slice(0,7)+')\n부가세: '+modes[latest.vat]+'\n원천세: '+modes[latest.withholding]+'\n지방소득세: '+modes[latest.local_withholding]+'\n\n작성한 설정 ('+a.draft.data.effective_month+')\n부가세: '+modes[a.draft.data.vat]+'\n원천세: '+modes[a.draft.data.withholding]+'\n지방소득세: '+modes[a.draft.data.local_withholding]:
     '현재 저장값\n'+filing(latest)+'\n'+payment(latest)+'\n신고기한 '+latest.filing_due+' · 납부기한 '+latest.payment_due+'\n접수번호: '+(latest.state?.receipt||'없음')+'\n메모: '+(latest.state?.memo||'없음')+'\n결재: '+(latest.approval?.title||'확인 가능한 연결 없음')+
     '\n\n작성한 내용\n신고일: '+(a.draft.data.filed_date||'미확인')+'\n납부 상태: '+payment({state:a.draft.data})+'\n신고기한 '+a.draft.data.filing_due+' · 납부기한 '+a.draft.data.payment_due+'\n접수번호: '+(a.draft.data.receipt||'없음')+'\n메모: '+(a.draft.data.memo||'없음')+'\n결재: '+(a.draft.approval?.title||'연결 없음');
-   if(!await root.CoopDialog.confirm(content+'\n\n현재 저장값을 확인하고 작성한 내용으로 이어갈까요?'))return;
+   if(!await dialog('confirm',content+'\n\n현재 저장값을 확인하고 작성한 내용으로 이어갈까요?'))return;
    if(active!==a||editorSeq!==epoch||!editable())return;a.draft.expected=a.type==='settings'?latest.revision:latest.expected;
    if(a.type==='task'&&a.draft.approval?.id===latest.approval?.id)a.draft.approval=latest.approval;
    a.draft.dirty=true;syncEditor();
   }
   async function save(){
-   const a=active;if(!a||!editable()||a.draft.saving||(!a.draft.dirty&&!a.draft.attempt))return;const d=a.draft,epoch=editorSeq,who=owner;
+   const a=active;if(!a||a.type==='orphan'||isOrphan(a.draft)||!visible()||!editable()||a.draft.saving||(!a.draft.dirty&&!a.draft.attempt))return;const d=a.draft,epoch=editorSeq,who=owner;
    if(!d.attempt){
     const data=a.type==='settings'?{...d.data,effective_month:d.data.effective_month+'-01',expected:d.expected}:{kind:a.row.kind,period_end:a.row.period_end,expected:d.expected,state:{...d.data},approval_id:d.approval?.id||null,approval_revision:d.approval?.revision||null};
-    if(a.type==='settings'&&!/^\d{4}-\d{2}$/.test(d.data.effective_month))return void root.CoopDialog.alert('할 일 시작월을 선택해 주세요.');
-    if(a.type==='task'&&d.data.settlement==='paid'&&!d.data.paid_date)return void root.CoopDialog.alert('실제 납부일을 입력해 주세요.');
+    if(a.type==='settings'&&!/^\d{4}-\d{2}$/.test(d.data.effective_month))return void dialog('alert','할 일 시작월을 선택해 주세요.');
+    if(a.type==='task'&&d.data.settlement==='paid'&&!d.data.paid_date)return void dialog('alert','실제 납부일을 입력해 주세요.');
     d.attempt={key:root.crypto.randomUUID(),data,action:a.type==='settings'?'settings':'save'};
    }
    d.saving=true;syncEditor();const attempt=d.attempt;
-   const yes=await root.CoopDialog.confirm(a.type==='settings'?'신고 주기 설정을 저장할까요?':'신고·납부 확인 내용을 저장할까요?');
+   const yes=await dialog('confirm',a.type==='settings'?'신고 주기 설정을 저장할까요?':'신고·납부 확인 내용을 저장할까요?');
    if(active!==a||editorSeq!==epoch||!editable()||!visible()){d.saving=false;if(!attempt.unknown)d.attempt=null;syncEditor();return;}
    if(!yes){d.saving=false;if(!attempt.unknown)d.attempt=null;syncEditor();modal.querySelector('[data-tax-save]')?.focus({preventScroll:true});return;}
    let timer;
    try{const r=await Promise.race([client.rpc('accounting_tax_tasks',{p_action:attempt.action,p_coop_id:ctx().coopId,p_data:attempt.data,p_request_key:attempt.key}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('WRITE_RESULT_UNKNOWN')),20000);})]);
     if(r.error)throw r.error;if(r.data?.outcome!=='saved')throw Error('UNCONFIRMED');
-    if(owner!==who||!valid())return;d.expected=r.data.revision;d.baseline=fingerprint(d);d.dirty=false;d.attempt=null;d.saving=false;
-    root.ErpWorkspaceResume?.checkpoint(modal);syncEditor();
-    const refreshed=await load();if(valid())await root.CoopDialog.alert(refreshed?'저장했습니다.':'저장했습니다. 목록은 다시 불러와 주세요.');
-   }catch(e){if(owner!==who||!valid())return;d.saving=false;
-    if(['PT409','42501','22023','22007','22008'].includes(e.code)){d.attempt=null;syncEditor();await root.CoopDialog.alert(e.code==='42501'?'현재 권한으로 저장할 수 없습니다.':String(e.message||'').includes('TAX_NEW_EFFECTIVE_MONTH_REQUIRED')?'시작월은 현재 설정의 시작월과 같거나 이후로 선택해 주세요.':e.code==='PT409'?'저장된 내용이나 연결 문서가 바뀌었습니다. 현재 저장값과 비교한 뒤 다시 확인해 주세요.':'날짜와 신고 주기를 확인해 주세요. 기한을 조정했다면 근거도 입력해 주세요.');}
-    else{attempt.unknown=true;syncEditor();await root.CoopDialog.alert('저장 결과를 확인하지 못했습니다. 같은 요청 다시 확인을 눌러 주세요.');}
+    if(owner!==who)return;d.expected=r.data.revision;d.baseline=fingerprint(d);d.dirty=false;d.attempt=null;d.saving=false;d.notice='저장했습니다.';
+    if(active===a&&editorSeq===epoch&&valid()&&visible())root.ErpWorkspaceResume?.checkpoint(modal);syncEditor();renderAux();
+    if(valid()&&visible()){const refreshed=await load();if(owner===who&&valid()&&visible()&&!refreshed)d.notice='저장했습니다. 목록은 다시 불러와 주세요.';}
+    if(owner===who&&valid()){renderAux();syncEditor();if(active===a&&editorSeq===epoch&&visible())await dialog('alert',d.notice);}
+   }catch(e){if(owner!==who)return;d.saving=false;
+    if(['PT409','42501','22023','22007','22008'].includes(e.code)){d.attempt=null;d.notice=e.code==='42501'?'현재 권한으로 저장할 수 없습니다.':String(e.message||'').includes('TAX_NEW_EFFECTIVE_MONTH_REQUIRED')?'시작월은 현재 설정의 시작월과 같거나 이후로 선택해 주세요.':e.code==='PT409'?'저장된 내용이나 연결 문서가 바뀌었습니다. 현재 저장값과 비교한 뒤 다시 확인해 주세요.':'날짜와 신고 주기를 확인해 주세요. 기한을 조정했다면 근거도 입력해 주세요.';}
+    else{attempt.unknown=true;d.notice='저장 결과를 확인하지 못했습니다. 같은 요청 다시 확인을 눌러 주세요.';}
+    if(valid()){syncEditor();renderAux();if(active===a&&editorSeq===epoch&&visible())await dialog('alert',d.notice);}
    }finally{clearTimeout(timer);}
   }
-  function pause(){++seq;pending=null;controllers.forEach(c=>c.abort());controllers.clear();if(modal&&!active?.draft?.saving)root.bootstrap.Modal.getInstance(modal)?.hide();}
+  function pause(){++seq;++editorSeq;pending=null;queuedOpen=null;controllers.forEach(c=>c.abort());controllers.clear();if(dialogs.size)root.CoopDialog.cancelAll?.(root);if(modal?.classList.contains('show')){navigationClose=true;modalClosing=true;closeAfterShow=true;try{root.bootstrap.Modal.getInstance(modal)?.hide();}finally{navigationClose=false;}}}
   async function open(){const p=new URLSearchParams(root.location.search);if(!routeHandled&&/^\d{4}-\d{2}-\d{2}$/.test(p.get('period')||''))year=Number(p.get('period').slice(0,4))+(p.get('period').slice(5,7)==='12'?1:0);if(!status)build();yearControl.value=String(year);const result=await load();if(result&&!routeHandled&&p.get('tax')&&p.get('period')){routeHandled=true;const r=rows.find(r=>r.kind===p.get('tax')&&r.period_end===p.get('period'));if(r&&!active)openTask(r);}return result;}
   return Object.freeze({open,pause,hasDraft,reset});
  }
@@ -189,5 +236,5 @@
    for(const row of r.data.items){const a=make('a','d-block mb-2',(names[row.kind]||'세무 업무')+' · '+filing(row)+' / '+payment(row));a.href='accounting.html?work=taxes&tax='+encodeURIComponent(row.kind)+'&period='+encodeURIComponent(row.period_end);section.append(a);}element.append(section);
   }catch(_){if(isCurrent()){const notice=make('p','small mt-3','세무 할 일 연결을 확인하지 못했습니다. '),retry=make('button','btn btn-outline-secondary btn-sm','다시 확인');retry.type='button';retry.onclick=()=>{if(!isCurrent())return;notice.remove();void approvalLink({element,client,coopId,documentId,isCurrent});};notice.append(retry);element.append(notice);}}finally{clearTimeout(timer);}
  }
- root.AccountingTaxTasks=Object.freeze({version:'1.0.0',create,approvalLink,filing,payment});
+ root.AccountingTaxTasks=Object.freeze({version:'1.0.1',create,approvalLink,filing,payment});
 })(window);
