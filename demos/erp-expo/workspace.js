@@ -11,7 +11,7 @@ function draftKey(){return model?`expo-draft-v1:${model.workspace}:${model.role}
 function saveDrafts(){
  if(!model)return;const data={expires:expiry,forms:{},pending:[...pending],versions:[...editVersions]};
  for(const [name,form] of Object.entries(forms))if(dirty.has(name))data.forms[name]=values(form);
- try{localStorage.setItem(draftKey(),JSON.stringify(data));}catch{message('이 브라우저에 초안을 보관하지 못했어요. 창을 닫기 전에 내용을 복사해 주세요.',true);}
+ try{sessionStorage.setItem(draftKey(),JSON.stringify(data));}catch{message('이 브라우저에 초안을 보관하지 못했어요. 창을 닫기 전에 내용을 복사해 주세요.',true);}
 }
 function updateDraftState(){
  for(const name of Object.keys(forms)){const el=document.querySelector(`[data-form-state="${name}"]`);el.textContent=pending.has(name)?'결과 확인 대기':dirty.has(name)?'작성 중':'';
@@ -25,7 +25,7 @@ function fill(name,next){
  baselines.set(name,next);updateDraftState();
 }
 function restore(){
- let data;try{data=JSON.parse(localStorage.getItem(draftKey())||'null');}catch{}
+ let data;try{data=JSON.parse(sessionStorage.getItem(draftKey())||'null');}catch{}
  if(!data||data.expires!==expiry)return;
  for(const [name,fields] of Object.entries(data.forms||{}))if(forms[name]){
   for(const [key,value] of Object.entries(fields)){const el=forms[name].elements.namedItem(key);if(el&&typeof value==='string')el.value=value;}

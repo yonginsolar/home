@@ -6,7 +6,7 @@ export function createAttachments({getModel,isEnded,onChange,onList,message}){
  let rows=[],choices=[],selected=new Set(),generation=0,uploading=false,restored=false;
  const urls=new Set(),opening=new Set(),reads=new Map();
  const key=()=>{const m=getModel();return m?`expo-files-v1:${m.workspace}:${m.role}`:null;};
- const remember=()=>{try{if(key())localStorage.setItem(key(),JSON.stringify([...selected]));}catch{}};
+ const remember=()=>{try{if(key())sessionStorage.setItem(key(),JSON.stringify([...selected]));}catch{}};
  const rpc=async(action,data={})=>{
   const m=getModel();if(!m||isEnded())throw Error('DEMO_ACCESS_ENDED');
   let request=client.rpc('erp_demo_file',{p_action:action,p_data:{workspace:m.workspace,...data}});
@@ -29,7 +29,7 @@ export function createAttachments({getModel,isEnded,onChange,onList,message}){
   const current=++generation,workspace=getModel()?.workspace;
   try{const result=await rpc('list');if(current!==generation||isEnded()||workspace!==getModel()?.workspace)return;
    rows=result;
-   if(!restored){try{const saved=JSON.parse(localStorage.getItem(key())||'[]');if(Array.isArray(saved))selected=new Set([...selected,...saved.filter(id=>rows.some(r=>r.id===id&&!r.approval_id))]);}catch{}restored=true;}
+   if(!restored){try{const saved=JSON.parse(sessionStorage.getItem(key())||'[]');if(Array.isArray(saved))selected=new Set([...selected,...saved.filter(id=>rows.some(r=>r.id===id&&!r.approval_id))]);}catch{}restored=true;}
    selected=new Set([...selected].filter(id=>rows.some(r=>r.id===id&&!r.approval_id)));remember();render();onList(rows);
   }catch(e){if(current===generation&&!isEnded()){message('첨부 목록을 불러오지 못했어요. ‘목록 다시 확인’을 눌러 주세요.',true);}}
  }
