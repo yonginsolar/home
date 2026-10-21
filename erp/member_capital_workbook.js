@@ -783,11 +783,15 @@
             거래구분: r.reference || "",
             검사결과:
               v?.reason ||
-              (v?.needs_confirmation
-                ? "별도 입금 확인 필요"
-                : v
-                  ? "등록 가능"
-                  : "검사 전"),
+              (s.phase === "saved"
+                ? "등록 완료"
+                : v?.needs_confirmation
+                  ? r.confirmed_duplicate
+                    ? "별도 입금 확인됨"
+                    : "별도 입금 확인 필요"
+                  : v
+                    ? "등록 가능"
+                    : "검사 전"),
           };
         });
         X.utils.book_append_sheet(
@@ -829,7 +833,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.0.0",
+    version: "1.0.1",
     create,
     parse,
     memberHeaders,
