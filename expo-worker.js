@@ -11,7 +11,7 @@ export default{async fetch(request,env){
  if(url.pathname==='/favicon.ico'||url.pathname==='/favicon.svg')return new Response(request.method==='HEAD'?null:icon,{headers:{...headers,'Content-Type':'image/svg+xml; charset=utf-8'}});
  if(url.pathname==='/robots.txt')return new Response(request.method==='HEAD'?null:robots,{headers:{...headers,'Content-Type':'text/plain; charset=utf-8'}});
  if(url.pathname==='/')url.pathname=portal?'/demos/erp-expo/index.html':'/demos/erp-expo/workspace.html';
- if(!/^\/demos\/erp-expo\/(index|enter|workspace)\.html$/.test(url.pathname)&&!/^\/demos\/erp-expo\/(client|portal|enter|workspace)\.js$/.test(url.pathname)&&url.pathname!=='/demos/erp-expo/expo.css'&&url.pathname!=='/shared/coop_dialog.js')return new Response('Not found',{status:404,headers});
+ if(!/^\/demos\/erp-expo\/(index|enter|workspace)\.html$/.test(url.pathname)&&!/^\/demos\/erp-expo\/(client|portal|enter|workspace|attachments)\.js$/.test(url.pathname)&&url.pathname!=='/demos/erp-expo/expo.css'&&url.pathname!=='/shared/coop_dialog.js'&&url.pathname!=='/shared/checked_upload.js')return new Response('Not found',{status:404,headers});
  const asset=await env.ASSETS.fetch(new Request(url,request));
  const result=new Response(asset.body,asset);for(const [key,value] of Object.entries(headers))result.headers.set(key,value);
  return result;

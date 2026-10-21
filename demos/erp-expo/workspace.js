@@ -1,10 +1,12 @@
 import {client,codeMessage} from './client.js';
+import {createAttachments} from './attachments.js';
 const $=id=>document.getElementById(id),forms={approval:$('approvalForm'),member:$('memberForm'),site:$('siteForm'),profile:$('profileForm')};
 let model=null,readVersion=0,refreshing=false,ended=false,expiry=0;
 const dirty=new Set(),pending=new Map(),busy=new Set(),baselines=new Map(),editVersions=new Map();
 const values=form=>Object.fromEntries(new FormData(form)),same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 for(const [name,form] of Object.entries(forms))baselines.set(name,values(form));
 function message(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
+const attachments=createAttachments({getModel:()=>model,isEnded:()=>ended,message,onChange:()=>{updateDraftState();saveDrafts();},onList:()=>renderApprovalFiles()});
 function draftKey(){return model?`expo-draft-v1:${model.workspace}:${model.role}`:null;}
 function saveDrafts(){
  if(!model)return;const data={expires:expiry,forms:{},pending:[...pending],versions:[...editVersions]};
@@ -14,7 +16,7 @@ function saveDrafts(){
 function updateDraftState(){
  for(const name of Object.keys(forms)){const el=document.querySelector(`[data-form-state="${name}"]`);el.textContent=pending.has(name)?'결과 확인 대기':dirty.has(name)?'작성 중':'';
   forms[name].querySelector('[type="submit"]').textContent=pending.has(name)?'결과 다시 확인':({approval:'승인 요청',member:'예시 조합원 등록',site:'변경사항 저장',profile:'변경사항 저장'})[name];}
- $('draftState').textContent=dirty.size?'✍️ 작성 중인 내용이 있어요':'';
+ $('draftState').textContent=dirty.size||attachments.hasDraft()?'✍️ 작성 중인 내용이 있어요':'';
 }
 // Defaults refresh only untouched fields. Late reads never replace a form node,
 // its draft or a file input, and a write invalidates any older list response.
@@ -45,12 +47,13 @@ for(const [name,form] of Object.entries(forms))form.addEventListener('input',()=
  else{if(!dirty.has(name)&&['site','profile'].includes(name))editVersions.set(name,model?.[name]?.version);dirty.add(name);}
  updateDraftState();saveDrafts();
 });
-window.addEventListener('beforeunload',event=>{if(dirty.size||pending.size){event.preventDefault();event.returnValue='';}});
+window.addEventListener('beforeunload',event=>{if(dirty.size||pending.size||attachments.hasDraft()){event.preventDefault();event.returnValue='';}});
 function block(reason){
  ended=true;++readVersion;closeConfirm(false);$('ended').hidden=false;$('ended').textContent=reason;
  for(const form of Object.values(forms))for(const el of form.elements){if(el.type==='submit')el.disabled=true;else if(el.matches('input,textarea'))el.readOnly=true;}
  for(const el of document.querySelectorAll('[data-approve]'))el.disabled=true;
  $('refresh').disabled=true;$('checkSafety').disabled=true;client.auth.stopAutoRefresh();
+ attachments.block();
 }
 async function rpc(action,data={}){let query=client.rpc('erp_demo_business',{p_action:action,p_data:{...(model?{workspace:model.workspace}:{}),...data}});if(action==='context'&&typeof query.abortSignal==='function')query=query.abortSignal(AbortSignal.timeout(15000));const {data:result,error}=await query;if(error)throw error;return result;}
 client.auth.onAuthStateChange((event,session)=>{
@@ -75,10 +78,20 @@ function render(){
   const title=document.createElement('h3');title.textContent=doc.title;const state=document.createElement('p');state.className='muted';state.textContent=`${doc.drafter_name} · ${doc.status==='진행중'?'승인 대기':doc.status}`;
   const body=document.createElement('p');body.className='body';const parsed=new DOMParser().parseFromString(doc.content||'','text/html');body.textContent=parsed.body.textContent||'';item.append(title,state,body);
   if(model.can_process&&doc.status==='진행중'){const button=document.createElement('button');button.textContent='문서 승인';button.className='primary';button.dataset.approve=String(doc.id);button.disabled=refreshing||busy.has('approve:'+doc.id)||ended;button.addEventListener('click',()=>approve(doc));item.append(button);}
-  $('approvalList').append(item);
+  item.dataset.docId=String(doc.id);$('approvalList').append(item);
  }
  if(focused)document.querySelector(`[data-approve="${CSS.escape(focused)}"]`)?.focus({preventScroll:true});
  $('memberList').replaceChildren();for(const member of model.members){const item=document.createElement('p');item.className='item';item.textContent=`${member.name} · ${member.member_id||''} · ${member.status||'미설정'}`;$('memberList').append(item);}
+ renderApprovalFiles();
+}
+function renderApprovalFiles(){
+ document.querySelectorAll('[data-doc-files]').forEach(el=>el.remove());
+ for(const card of document.querySelectorAll('[data-doc-id]')){
+  const files=attachments.rows().filter(f=>String(f.approval_id)===card.dataset.docId);if(!files.length)continue;
+  const group=document.createElement('div');group.dataset.docFiles='';group.className='actions';
+  for(const file of files){const b=document.createElement('button');b.type='button';b.textContent='📎 '+file.name;b.disabled=ended;b.addEventListener('click',()=>void attachments.download(file));group.append(b);}card.append(group);
+ }
+ updateDraftState();
 }
 async function refresh({quiet=false}={}){
  if(ended)return;const version=++readVersion;refreshing=true;$('refresh').disabled=true;
@@ -89,7 +102,7 @@ async function refresh({quiet=false}={}){
   const first=!model;if(model&&model.workspace!==result.workspace){block('체험 공간이 바뀌었어요. 새 체험 화면을 이용해 주세요.');return false;}model=result;expiry=Date.parse(model.access.expires_at);
   if(!model.access.active){block(codeMessage('DEMO_ACCESS_ENDED'));return;}
   if(first)restore();
-  refreshing=false;render();if(first)try{const view=localStorage.getItem(draftKey()+':view');if(view)showView(view,false);}catch{}
+  refreshing=false;render();if(model.can_submit||model.can_process)void attachments.refresh();if(first)try{const view=localStorage.getItem(draftKey()+':view');if(view)showView(view,false);}catch{}
   if(!quiet)message('최신 내용을 불러왔어요.');return true;
  }catch(error){if(version!==readVersion||ended)return false;const code=String(error.message||'');if(/DEMO_(ACCESS_ENDED|CONTEXT_CHANGED)/.test(code))block(codeMessage(code));else message('체험 자료를 불러오지 못했어요. ‘목록 다시 확인’을 눌러 주세요.',true);return false;}
  finally{if(version===readVersion&&!ended){refreshing=false;$('refresh').disabled=false;document.querySelectorAll('[data-approve]').forEach(b=>b.disabled=busy.has('approve:'+b.dataset.approve));}}
@@ -112,10 +125,10 @@ async function write(name,action,extra={},confirmation=null){
   if(confirmation&&!await ask(confirmation[0],confirmation[1]))return;
   if(ended||!same(snapshot,values(form)))return message('입력이 바뀌었어요. 지금 내용을 확인한 뒤 다시 눌러 주세요.');
   let request=pending.get(name);
-  if(!request){request={...snapshot,...extra,workspace:model.workspace,request_id:crypto.randomUUID()};pending.set(name,request);saveDrafts();}
+  if(!request){request={...snapshot,...extra,...(name==='approval'?{file_ids:attachments.ids()}:{}),workspace:model.workspace,request_id:crypto.randomUUID()};pending.set(name,request);saveDrafts();}
   ++readVersion;refreshing=false;$('refresh').disabled=false;
   form.querySelector('[type="submit"]').disabled=true;updateDraftState();
-  const result=await rpc(action,request);pending.delete(name);
+  const result=await rpc(action,request);pending.delete(name);if(name==='approval')attachments.submitted(request.file_ids||[]);
   // The request may have completed while another edit was made. Preserve it.
   const sentFields=Object.fromEntries(Object.keys(snapshot).map(k=>[k,request[k]]));
   if(same(values(form),sentFields)){
@@ -130,7 +143,7 @@ async function write(name,action,extra={},confirmation=null){
   saveDrafts();updateDraftState();
  }finally{busy.delete(name);form.querySelector('[type="submit"]').disabled=ended;}
 }
-forms.approval.addEventListener('submit',e=>{e.preventDefault();void write('approval','submit',{},['승인을 요청할까요?','관리자 화면의 승인 대기에 문서가 나타나요.']);});
+forms.approval.addEventListener('submit',e=>{e.preventDefault();if(!pending.has('approval')&&!attachments.canSubmit())return void window.CoopDialog.alert('선택한 파일을 먼저 올린 뒤 승인 요청을 눌러 주세요.');void write('approval','submit',{},['승인을 요청할까요?','관리자 화면의 승인 대기에 문서가 나타나요.']);});
 forms.member.addEventListener('submit',e=>{e.preventDefault();if(!forms.member.elements.name.value.trim())return message('예시 이름을 입력해 주세요.');void write('member','member_add');});
 forms.site.addEventListener('submit',e=>{e.preventDefault();if(!dirty.has('site')&&!pending.has('site'))return message('변경한 내용이 없어요.');void write('site','site_save',{version:editVersions.get('site')||model.site.version});});
 forms.profile.addEventListener('submit',e=>{e.preventDefault();if(!dirty.has('profile')&&!pending.has('profile'))return message('변경한 내용이 없어요.');void write('profile','profile_save',{version:editVersions.get('profile')||model.profile.version});});
