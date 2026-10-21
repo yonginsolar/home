@@ -48,12 +48,12 @@ function block(reason){
  for(const el of document.querySelectorAll('[data-approve]'))el.disabled=true;
  $('refresh').disabled=true;client.auth.stopAutoRefresh();
 }
-async function rpc(action,data={}){const {data:result,error}=await client.rpc('erp_demo_business',{p_action:action,p_data:{...(model?{workspace:model.workspace}:{}),...data}});if(error)throw error;return result;}
+async function rpc(action,data={}){let query=client.rpc('erp_demo_business',{p_action:action,p_data:{...(model?{workspace:model.workspace}:{}),...data}});if(action==='context'&&typeof query.abortSignal==='function')query=query.abortSignal(AbortSignal.timeout(15000));const {data:result,error}=await query;if(error)throw error;return result;}
 client.auth.onAuthStateChange((event,session)=>{
  if(model&&(event==='SIGNED_OUT'||session?.user?.app_metadata?.erp_demo_workspace_id!==model.workspace))queueMicrotask(()=>block('다른 체험 계정이 열렸어요. 이 화면은 확인용으로 남겨 두었으니 새 체험 화면을 이용해 주세요.'));
 });
 function render(){
- const role=model.role;$('identity').textContent={administrator:'관리자',employee:'직원',member:'조합원'}[role]+'로 체험 중';
+ const role=model.role;$('identity').textContent={administrator:'관리자',employee:'직원',member:'조합원'}[role]+' 계정으로 체험 중';
  const visibility={approvals:model.can_submit||model.can_process,members:model.can_members,site:model.can_site};
  for(const [name,visible] of Object.entries(visibility))document.querySelector(`[data-view="${name}"]`).hidden=!visible;
  $('compose').hidden=!model.can_submit;
@@ -141,6 +141,24 @@ async function approve(doc){
  finally{busy.delete(key);if(!ended)document.querySelector(`[data-approve="${doc.id}"]`)?.removeAttribute('disabled');}
 }
 $('refresh').addEventListener('click',()=>void refresh());
+// The same read-only denial probes back the visible boundary check and QA.
+// No token/session is exposed, no approval can pass the fixed invalid revision.
+window.ExpoSafetyCheck=async function({otherWorkspace=crypto.randomUUID(),otherDocument=9007199254740990}={}){
+ if(!model||ended)throw Error('DEMO_ACCESS_ENDED');
+ const raw=await client.from('coop_members').select('id',{head:true,count:'exact'});
+ const platform=await client.rpc('platform_get_context');
+ const graph=await client.schema('graphql_public').rpc('graphql',{query:'{__typename}'});
+ const context=await client.rpc('erp_demo_business',{p_action:'context',p_data:{workspace:otherWorkspace}});
+ const document=await client.rpc('erp_demo_business',{p_action:'approve',p_data:{workspace:model.workspace,id:otherDocument,version:'boundary-probe',request_id:crypto.randomUUID()}});
+ return {rawBlocked:raw.error?.code==='PT403',platformBlocked:platform.error?.code==='PT403',graphBlocked:graph.error?.code==='PT403',
+   contextBlocked:String(context.error?.message||'').includes('DEMO_CONTEXT_CHANGED'),otherDocBlocked:!!document.error};
+};
+$('checkSafety').addEventListener('click',async()=>{
+ $('checkSafety').disabled=true;$('safetyResult').textContent='이 계정의 접근 범위를 확인하고 있어요…';
+ try{const result=await window.ExpoSafetyCheck();$('safetyResult').textContent=Object.values(result).every(Boolean)?'🔒 확인했어요. 이 체험 공간의 허용된 업무만 사용할 수 있어요.':'일부 차단 결과를 확인하지 못했어요. 안내 부스로 문의해 주세요.';}
+ catch{$('safetyResult').textContent='확인하지 못했어요. 다시 눌러 주세요.';}
+ finally{$('checkSafety').disabled=ended;}
+});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!refreshing&&!ended)void refresh({quiet:true});});
 setInterval(()=>{
  if(!expiry||ended)return;const seconds=Math.max(0,Math.ceil((expiry-Date.now())/1000));$('clock').textContent=`남은 시간 ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;

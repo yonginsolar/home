@@ -17,4 +17,5 @@ button.addEventListener('click',async()=>{
  }catch(e){status.textContent=codeMessage(e.message);button.textContent='같은 체험 다시 확인';if(String(e.message).includes('TICKET_ENDED')){sessionStorage.removeItem(ticketKey);button.textContent='새 체험 시작';}}
  finally{busy=false;button.disabled=false;}
 });
-if(!probe){factory({action:'status'}).then(s=>{button.disabled=!s.is_open;button.textContent=s.is_open?'내 체험조합 시작하기':'11월 27일에 만나요';status.textContent=s.is_open?'지금 체험할 수 있어요.':'한국 시간 11월 27일 0시부터 29일 자정까지 열려요.';}).catch(()=>{status.textContent='운영 일정을 확인하지 못했어요. 페이지를 다시 열어 주세요.';button.textContent='일정 확인 필요';});}
+if(probe){button.disabled=false;button.dataset.ready='true';status.textContent='버튼을 누르면 새 점검 공간을 준비해요.';}
+else{factory({action:'status'}).then(s=>{button.disabled=!s.is_open;button.textContent=s.is_open?'내 체험조합 시작하기':'11월 27일에 만나요';status.textContent=s.is_open?'지금 체험할 수 있어요.':'한국 시간 11월 27일 0시부터 29일 자정까지 열려요.';}).catch(()=>{status.textContent='운영 일정을 확인하지 못했어요. 페이지를 다시 열어 주세요.';button.textContent='일정 확인 필요';});}
