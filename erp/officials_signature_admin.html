@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.19 -->
+<!-- Version: v1.0.20 -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.19 | officials_signature_admin.html');</script>
+  <script>console.log('[Version] v1.0.20 | officials_signature_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -247,6 +247,8 @@
     let currentSignatureFilter = 'all';
     let signatureListRequest = null;
     let signatureListSequence = 0;
+    let expoExampleBusy = false;
+    const expoExamplePending = new Map();
     const MAX_SEAL_LONG_EDGE = 1600;
     const MIN_SEAL_LONG_EDGE_WARNING = 600;
 
@@ -416,6 +418,12 @@
       if (telegramEl) telegramEl.textContent = String(telegramLinked);
 
       if (bannerEl) {
+        if (window.ExpoRuntimeBridge) {
+          bannerEl.className = 'alert alert-info';
+          bannerEl.textContent = '🖊️ 체험용 예시 서명을 준비해 보세요. 알림은 시연 표시로 확인할 수 있어요.';
+          bannerEl.classList.remove('d-none');
+          return;
+        }
         const telegramMissing = Math.max(0, telegramEligible.length - telegramLinked);
         const actionButtons = [];
         if (missing > 0) {
@@ -553,7 +561,7 @@
     }
 
     function hasPendingSignatureUpload() {
-      return Array.from(document.querySelectorAll('#officialSignBody input[type="file"]')).some(input => input.files?.length > 0);
+      return expoExampleBusy || Array.from(document.querySelectorAll('#officialSignBody input[type="file"]')).some(input => input.files?.length > 0);
     }
 
     function applySignatureFilter() {
@@ -688,10 +696,10 @@
               </div>
             </td>
             <td>
-              <input type="file" id="seal-file-${group.key}" accept="image/*" class="form-control form-control-sm">
+              ${window.ExpoRuntimeBridge ? '<span class="small text-muted">체험용 서명 예시</span>' : `<input type="file" id="seal-file-${group.key}" accept="image/*" class="form-control form-control-sm">`}
             </td>
             <td class="text-end">
-              <button class="btn btn-sm btn-primary" type="button" data-upload-key="${group.key}">업로드</button>
+              <button class="btn btn-sm btn-primary" type="button" data-upload-key="${group.key}">${window.ExpoRuntimeBridge ? (expoExamplePending.has(group.key) ? '저장 결과 확인' : '예시 서명 사용') : '업로드'}</button>
             </td>
           </tr>
         `;
@@ -707,6 +715,7 @@
     }
 
     async function uploadOfficialSeal(groupKey) {
+      if (window.ExpoRuntimeBridge) return prepareExpoOfficialExample(groupKey);
       const group = officialSignGroups[groupKey];
       if (!group) {
         showAlert('대상 정보를 찾지 못했습니다. 새로고침 후 다시 시도해주세요.', 'warning');
@@ -789,6 +798,18 @@
         showAlert('미리보기할 서명 이미지가 없습니다.', 'warning');
         return;
       }
+      if (window.ExpoRuntimeBridge && group.seal_url === 'expo-demo-signature-example') {
+        document.getElementById('sealPreviewTitle').textContent = `${group.display_name || '임원'} · 체험용 서명`;
+        document.getElementById('sealPreviewMeta').textContent = 'DEMO · 박람회 체험용 예시';
+        const box = document.getElementById('sealPreviewBody');
+        box.textContent = '';
+        const sample = document.createElement('div');
+        sample.className = 'border border-3 border-primary rounded-4 p-4 text-center text-primary';
+        sample.textContent = '🖊️ DEMO · 체험용 서명';
+        box.appendChild(sample);
+        sealPreviewModal.show();
+        return;
+      }
       const { data, error } = await _supabase.storage
         .from('attachments')
         .createSignedUrl(group.seal_url, 3600);
@@ -814,6 +835,51 @@
         bodyEl.appendChild(img);
       }
       sealPreviewModal.show();
+    }
+
+    async function prepareExpoOfficialExample(groupKey) {
+      if (expoExampleBusy || window.ExpoRuntimeBridge?.status().stopped) return;
+      const group = officialSignGroups[groupKey];
+      if (!group?.member_id || !group.officialIds?.length) return;
+      const owner = currentUser, coop = currentCoopId;
+      const ids = group.officialIds.map(String).sort();
+      const current = () => owner === currentUser && coop === currentCoopId && officialSignGroups[groupKey] === group && !window.ExpoRuntimeBridge?.status().stopped;
+      const pending = expoExamplePending.get(groupKey);
+      if (!pending && !(await window.CoopDialog.confirm(`${group.display_name || '선택한 임원'}의 체험용 예시 서명을 사용할까요?`))) return;
+      if (!current()) return;
+      expoExampleBusy = true;
+      const buttons = Array.from(document.querySelectorAll('#officialSignBody [data-upload-key]'));
+      buttons.forEach(b => { b.disabled = true; });
+      try {
+        if (pending) {
+          const {data,error} = await scopeByTenant(_supabase.from('coop_officials').select('id,member_id,seal_url,status').in('id',pending.ids));
+          if (error) throw error;
+          if (!current()) return;
+          if (!Array.isArray(data) || data.length !== pending.ids.length || data.some(r => r.member_id !== pending.member || r.seal_url !== 'expo-demo-signature-example')) {
+            showAlert('저장 결과를 아직 확인하지 못했어요. 현재 목록을 다시 확인해 주세요.', 'warning');
+            return;
+          }
+        } else {
+          expoExamplePending.set(groupKey,{ids,member:group.member_id});
+          const {data,error} = await _supabase.rpc('erp_demo_prepare_official_example',{p_member_id:group.member_id,p_official_ids:group.officialIds});
+          if (error) throw error;
+          if (!current()) return;
+          if (!data?.ok || data.simulation !== true || JSON.stringify((data.official_ids || []).map(String).sort()) !== JSON.stringify(ids)) throw new Error('DEMO_RESULT_UNCONFIRMED');
+        }
+        expoExamplePending.delete(groupKey);
+        group.seal_url = 'expo-demo-signature-example';
+        showAlert('체험용 예시 서명을 준비했어요.', 'success');
+      } catch (error) {
+        const rejected = ['PT409','PT403','42501','22023'].includes(String(error?.code || ''));
+        if (rejected && !pending) expoExamplePending.delete(groupKey);
+        if (current()) showAlert(rejected ? '대상이나 사용 권한이 바뀌었어요. 현재 목록을 다시 확인해 주세요.' : '저장 결과를 확인하지 못했어요. ‘저장 결과 확인’으로 다시 조회해 주세요.', 'warning');
+      } finally {
+        expoExampleBusy = false;
+        if (current()) {
+          buttons.forEach(b => { b.disabled = false; });
+          await loadOfficialSignatures();
+        }
+      }
     }
 
     async function ensureAccess() {
