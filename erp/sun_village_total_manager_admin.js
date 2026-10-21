@@ -35,6 +35,8 @@
     checkbox.disabled = true;
     button.disabled = true;
     status.textContent = '지정 상태를 확인하는 중입니다.';
+    // Expo rooms are standalone fictional cooperatives, never village operators.
+    if (window.ExpoRuntimeBridge) return;
     if (!selectedEmpId || typeof _supabase === 'undefined') return;
     try {
       const { data, error } = await _supabase.rpc('sun_village_total_manager_context', {
