@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.171 | Change: 2026-10-21 - Keep source paging current and review dialogs above their backdrop. -->
+<!-- Version: v1.0.172 | Change: 2026-10-21 - Cooperative tax tasks with separate filing and payment checks. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -9,10 +9,10 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.171 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.172 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
-  <script src="workflow_assets.js?v=20261021-finance-9"></script>
+  <script src="workflow_assets.js?v=20261021-tax-1"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
   <link rel="stylesheet" href="financial_statements.css?v=1.1.1">
   <meta charset="UTF-8">
@@ -200,10 +200,12 @@
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSync" onclick="loadApprovalUnclassifiedQueue()">🔄 결재·입금 가져오기</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHistory" onclick="loadHistory()">🕒 장부 찾아보기</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabStatements" onclick="openFinancialStatements()">📊 재무제표 등록·분석</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabTaxes" onclick="openAccountingTaxTasks()">🗓️ 세무 할 일</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 신고·결산 안내</button></li>
   </ul>
 
   <div class="tab-content no-print">
+    <div class="tab-pane fade" id="tabTaxes"><div id="accountingTaxPanel"></div></div>
     <div class="tab-pane fade" id="tabStatements"><div id="financialStatementsPanel"></div></div>
     <div class="tab-pane fade" id="tabMoney"><div id="accountingMoneyPanel"></div></div>
 
@@ -2085,10 +2087,15 @@ window.onload = async function() {
     renderAutoSyncUndoInfo();
     if (document.getElementById('tabSync')?.classList.contains('active')) await loadApprovalUnclassifiedQueue();
     if (document.getElementById('tabGuide')?.classList.contains('active')) await mountAccountingGuide();
-    window.ErpWorkspaceResume.register({modules:['accounting'], refreshWhenDirty:()=>['tabHistory','tabStatements'].some(id=>document.getElementById(id)?.classList.contains('active')), refresh:async () => {
+    if (new URLSearchParams(location.search).get('work') === 'taxes') {
+        bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#tabTaxes"]')).show();
+        await openAccountingTaxTasks();
+    }
+    window.ErpWorkspaceResume.register({modules:['accounting'], refreshWhenDirty:()=>['tabHistory','tabStatements','tabTaxes'].some(id=>document.getElementById(id)?.classList.contains('active')), refresh:async () => {
         const pane = document.querySelector('.tab-content.no-print > .tab-pane.active')?.id;
         if (pane === 'tabHistory') await loadHistory({allowHidden:true});
         else if (pane === 'tabStatements') await openFinancialStatements({allowHidden:true});
+        else if (pane === 'tabTaxes') await openAccountingTaxTasks();
         else if (pane === 'tabAssets') await loadAssetOverview();
         else if (pane === 'tabSync') await loadApprovalUnclassifiedQueue();
         else if (pane === 'tabForm' || !pane) await refreshDashboard();
@@ -2096,6 +2103,26 @@ window.onload = async function() {
 };
 
 let accountingGuideLoading = null;
+let accountingTaxController = null, accountingTaxLoading = null;
+async function openAccountingTaxTasks() {
+    if (!accountingDataAuthorized || !myInfo?.coop_id || (!canPerform('accounting.view') && !canPerform('accounting.edit'))) return;
+    if (accountingTaxController) return accountingTaxController.open();
+    if (accountingTaxLoading) return accountingTaxLoading;
+    const panel=document.getElementById('accountingTaxPanel'), owner=myInfo, coop=myInfo.coop_id;
+    panel.textContent='세무 도구를 불러오는 중입니다…';
+    accountingTaxLoading=(async()=>{try{
+        await window.ErpWorkflowAssets.load('accountingTax');
+        if(myInfo!==owner || myInfo?.coop_id!==coop || !accountingDataAuthorized)return;
+        accountingTaxController=window.AccountingTaxTasks.create({element:panel,client:_supabase,getContext:()=>({
+            owner:myInfo?.coop_id?JSON.stringify([String(myInfo.auth_user_id||myInfo.id||myInfo.emp_id||''),myInfo.coop_id]):'',coopId:myInfo?.coop_id,
+            allowed:accountingDataAuthorized&&(canPerform('accounting.view')||canPerform('accounting.edit')),edit:accountingDataAuthorized&&canPerform('accounting.edit'),
+            visible:document.getElementById('tabTaxes')?.classList.contains('active')&&!window.frameElement?.hidden
+        })});
+        await accountingTaxController.open();
+    }catch(_){panel.textContent='세무 도구를 불러오지 못했습니다. ';const retry=document.createElement('button');retry.type='button';retry.className='btn btn-outline-secondary';retry.textContent='다시 불러오기';retry.onclick=openAccountingTaxTasks;panel.append(retry);
+    }finally{accountingTaxLoading=null;}})();
+    return accountingTaxLoading;
+}
 let financialStatementsController = null,financialStatementsLoading = null;
 async function openFinancialStatements(options = {}) {
     if (!accountingDataAuthorized || !myInfo?.coop_id || (!canPerform('accounting.view') && !canPerform('accounting.edit'))) return;

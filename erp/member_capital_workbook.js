@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.0.2. Original member writers and legacy import drafts remain separate. */
+/* Member/capital workbook 1.0.3. Original member writers and legacy import drafts remain separate. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -216,6 +216,7 @@
               data: state.data,
               review: state.review,
               acks: state.acks,
+              rechecks: state.rechecks,
               errors: state.errors,
               dirty: state.dirty,
               phase: state.phase,
@@ -226,6 +227,7 @@
         state.data = null;
         state.review = null;
         state.acks = new Map();
+        state.rechecks = new Set();
         state.attempt = null;
         state.dirty = true;
         void readFile();
@@ -340,7 +342,9 @@
                   : row.amount.toLocaleString("ko-KR") + "원",
                 s.phase === "saved"
                   ? "등록 완료"
-                  : r?.reason ||
+                  : s.rechecks?.has(row.row_no)
+                    ? "재확인 필요"
+                    : r?.reason ||
                     (r?.needs_confirmation && !row.confirmed_duplicate
                       ? "별도 입금 확인 필요"
                       : r?.needs_confirmation && row.confirmed_duplicate
@@ -380,6 +384,7 @@
             row.reference = input.value;
             row.confirmed_duplicate = false;
             s.acks.delete(row.row_no);
+            s.rechecks.add(row.row_no);
             s.epoch++;
             s.review = null;
             s.attempt = null;
@@ -394,13 +399,16 @@
               confirmation.classList.add("btn-outline-warning");
               confirmation.disabled = true;
             }
+            for (const button of table.tBodies[0].querySelectorAll("button")) {
+              button.disabled = true;
+            }
             render(false);
           };
           td.append(input);
-          if (r?.needs_confirmation) {
+          if (r?.needs_confirmation || s.rechecks?.has(row.row_no)) {
             const b = el(
               "button",
-              row.confirmed_duplicate ? "별도 입금 확인됨" : "별도 입금 확인",
+              s.rechecks?.has(row.row_no) ? "재확인 필요" : row.confirmed_duplicate ? "별도 입금 확인됨" : "별도 입금 확인",
             );
             b.type = "button";
             b.className =
@@ -410,6 +418,7 @@
                 : "btn-outline-warning");
             b.disabled =
               !allowed(s) ||
+              !readyForConfirm(s) ||
               locked(s) ||
               !text(row.reference) ||
               row.confirmed_duplicate;
@@ -586,6 +595,7 @@
           return await review();
         }
         s.review = r;
+        s.rechecks.clear();
         s.phase = "ready";
         s.message = ["members", "payments"].some((k) =>
           r[k].some((x) => x.status === "error"),
@@ -827,6 +837,7 @@
           message: "",
           dirty: false,
           acks: new Map(),
+          rechecks: new Set(),
           attempt: null,
         };
       opener = document.activeElement;
@@ -842,7 +853,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.0.2",
+    version: "1.0.3",
     create,
     parse,
     memberHeaders,

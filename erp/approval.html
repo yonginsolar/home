@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.98 | Change: 2026-10-20 - Preserve document-scoped attachment reads and show recoverable preview failures. -->
+<!-- Version: v1.2.99 | Change: 2026-10-21 - Read the linked tax task without duplicating approval details. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.98 | approval.html');</script>
+  <script>console.log('[Version] v1.2.99 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -47,7 +47,7 @@
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_permission_request.js?v=1.2.1-uimodal-20261013-1"></script>
-  <script src="workflow_assets.js?v=20261010-1"></script>
+  <script src="workflow_assets.js?v=20261021-tax-1"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
@@ -15735,8 +15735,20 @@ async function openRelView(docId) {
     const attachmentViewerEl = await buildRelAttachmentViewer(attachmentRefs);
     contentEl.appendChild(attachmentViewerEl);
     syncRelViewActionArea(data);
+    void mountApprovalTaxTaskLinks(contentEl, data);
 }
 
+async function mountApprovalTaxTaskLinks(contentEl, doc) {
+    if (!canPerform('accounting.view') && !canPerform('accounting.edit')) return;
+    const marker = document.createElement('div'), actor = myAuthUserId, coop = getApprovalScopedCoopId();
+    contentEl.append(marker);
+    const isCurrent=()=>marker.isConnected && actor===myAuthUserId && coop===getApprovalScopedCoopId()
+        && Number(currentViewingDocId)===Number(doc.id) && document.getElementById('relViewModal')?.classList.contains('show') && !window.frameElement?.hidden;
+    try {
+        await window.ErpWorkflowAssets.load('accountingTax');
+        if(isCurrent())await window.AccountingTaxTasks.approvalLink({element:marker,client:_supabase,coopId:coop,documentId:doc.id,isCurrent});
+    } catch (_) { if(isCurrent())marker.textContent='세무 할 일 연결을 확인하지 못했습니다.'; }
+}
 
   </script>
 </body>

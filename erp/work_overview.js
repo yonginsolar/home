@@ -1,7 +1,8 @@
-/* v1.1.4 — Refresh open task details and expire stale target dialogs together. */
+/* v1.1.5 — Shared tax task counts, with existing scopes and lazy details preserved. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
+  tax:['세무 할 일','accounting.html?work=taxes'],
   approval:['내 결재 대기','approval.html?tab=todo'], signup:['신규 가입 승인 대기','admin_member.html?scope=member_admin&tab=members&sub=signup-pending'], member:['처리 대기 조합원 신청','admin_member.html?scope=member_admin&tab=applications&sub=pending-all'],
   insurance:['준비 중인 입사·퇴사 서류','hr_insurance.html?work=pending'], receipts:['현금영수증 발급 대기','festival_receipts.html'],
   inventory:['입고 검수 대기','festival_receipts.html?work=inventory'], material:['아직 받지 않은 행사 재료비','festival_receipts.html'],
@@ -30,7 +31,7 @@
    if(section==='summary'||section==='setup')lastSetupTicket=ticket;
    try{
     const requested=section==='tasks'?'tasks_v2':section;
-    const request=Promise.resolve().then(()=>{const q=options.client.rpc('erp_get_work_overview',{p_section:requested});return q.abortSignal?q.abortSignal(controller.signal):q;});
+    const request=Promise.resolve().then(()=>{const q=options.client.rpc('erp_get_work_overview_tax',{p_section:requested});return q.abortSignal?q.abortSignal(controller.signal):q;});
     const response=await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('READ_TIMEOUT'));},15000);})]);
     if(!current())throw Error('SCOPE_CHANGED');
     if(response.error)throw Error('READ_FAILED');
@@ -43,14 +44,14 @@
    if(ticket<lastTaskTicket)return false;
    const keys=new Set();let total=0;
    for(const item of data.items){
-    if(!['approval','signup','member','insurance','receipts','inventory','material'].includes(item.key)||keys.has(item.key)||!Number.isSafeInteger(item.count)||item.count<0)throw Error('COUNT_UNAVAILABLE');
+    if(!['approval','signup','member','insurance','receipts','inventory','material','tax'].includes(item.key)||keys.has(item.key)||!Number.isSafeInteger(item.count)||item.count<0)throw Error('COUNT_UNAVAILABLE');
     keys.add(item.key);total+=item.count;
    }
    if(!Number.isSafeInteger(total))throw Error('COUNT_UNAVAILABLE');
    lastTaskTicket=ticket;const badge=panels.get('tasks').badge;
    const panel=panels.get('tasks'),snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
    if(panel.snapshot&&panel.snapshot!==snapshot){panel.list.replaceChildren();panel.status.textContent='대기 건수가 바뀌었습니다. 최신 목록을 다시 확인해 주세요.';panel.snapshot=null;}
-   badge.textContent=total?'대기 '+total.toLocaleString('ko-KR')+'건':'대기 업무 없음';
+   badge.textContent=total?'대기 '+total.toLocaleString('ko-KR')+'건':data.items.some(x=>x.key==='tax'&&x.configured===false)?'세무 주기 확인 필요':'대기 업무 없음';
    badge.className=total?'badge text-bg-danger ms-2':'small text-muted ms-2';
    options.onTasks?.(data.items,'ready');
    return true;
@@ -150,7 +151,7 @@
       row.append(link);
       if(section==='tasks') {
        if(!Number.isSafeInteger(item.count)||item.count<0)throw new Error('COUNT_UNAVAILABLE');
-       row.append(el('span',item.count?'badge text-bg-primary':'text-muted small',`${item.count.toLocaleString('ko-KR')}건`));
+       row.append(el('span',item.count?'badge text-bg-primary':'text-muted small',item.key==='tax'&&item.configured===false?(item.count?`${item.count.toLocaleString('ko-KR')}건 · 주기 확인`:'주기 미설정'):`${item.count.toLocaleString('ko-KR')}건`));
       }else{
        if(!labels[item.state])throw new Error('STATE_UNAVAILABLE');
        const right=el('span','small text-end',labels[item.state]);
