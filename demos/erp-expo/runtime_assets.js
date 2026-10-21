@@ -52,6 +52,7 @@ export const runtimeEntries = new Set([
  "vote/vote.html"
 ]);
 export const runtimeAssets = new Set([
+ "demos/erp-expo/examples/receipt.svg",
  "assets/home-fonts/do-hyeon/font.css",
  "assets/home-fonts/gmarket-sans/font.css",
  "assets/home-fonts/gowun-batang/font.css",

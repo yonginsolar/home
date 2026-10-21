@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.101 | Change: 2026-10-21 - Distinguish exhibition simulation and scoped demo audit. -->
+<!-- Version: v1.2.102 | Change: 2026-10-22 - Prepared exhibition attachment only. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.101 | approval.html');</script>
+  <script>console.log('[Version] v1.2.102 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1459,6 +1459,7 @@
         <div id="attachmentDropZone" class="attachment-dropzone">
           <div class="attachment-dropzone-label">여기로 파일을 끌어놓아도 첨부됩니다.</div>
           <input type="file" class="form-control" id="attachFile" multiple accept=".pdf,.png,.jpg,.jpeg" onchange="updateFileList()">
+          <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="expoApprovalExample" hidden onclick="chooseExpoApprovalExample()">📎 예시 영수증 첨부</button>
           <div class="small text-muted mt-2" id="attachmentDropZoneText">여기로 파일을 끌어놓거나 위에서 선택하세요. 업로드는 PDF 또는 이미지(PNG, JPG, JPEG) 파일만 가능합니다.</div>
         </div>
         <div id="fileListArea" class="mt-2" role="list"></div>
@@ -7687,6 +7688,10 @@ function extractDisplayFileName(rawRef, fallback = '첨부파일') {
 }
 
 async function resolveStorageUrl(rawRef, expiresSec = 3600, options = {}) {
+    if (window.ExpoRuntimeBridge && rawRef === 'expo-example:receipt.svg') {
+        if (window.ExpoRuntimeBridge.status().stopped) throw new Error('DEMO_ACCESS_ENDED');
+        return new URL('/demos/erp-expo/examples/receipt.svg', window.location.origin).href;
+    }
     const ref = parseStorageObjectRef(rawRef);
     if (!ref) {
         if (options.strict && !/^https?:\/\//i.test(String(rawRef || ''))) throw new Error('ATTACHMENT_UNAVAILABLE');
@@ -9555,6 +9560,7 @@ function setupAttachmentDropZone() {
 }
 
 window.onload = async function() {
+    if (window.ExpoRuntimeBridge) document.getElementById('expoApprovalExample').hidden = false;
     initializeApprovalRelatedModals();
     const userModalEl = document.getElementById('userModal');
     const alertModalEl = document.getElementById('alertModal');
@@ -14904,6 +14910,20 @@ function renderDocs(target, list, isTodo) {
         target.innerHTML += `<div class="list-group-item shadow-sm mb-3 border-0 p-3"><div class="d-flex justify-content-between mb-2"><div><span class="badge bg-primary me-1">${safeDocType}</span>${jeongyeolBadge}${evidencePendingBadge}${attachmentBadge}${signedDocBadge}${relBtn}</div><small class="text-muted">${safeDate}${ageBadge}</small></div>${titleHtml}<div class="small mb-2">${lineHtml}</div>${reasonHtml}${btnHtml}</div>`;
     });
 }
+function chooseExpoApprovalExample() {
+    const bridge = window.ExpoRuntimeBridge;
+    if (!bridge || !bridge.status().verified || bridge.status().stopped || approvalDraftSaving) return;
+    const rawRef = 'expo-example:receipt.svg';
+    if (approvalDraftAttachmentRefs.some(item => item.rawRef === rawRef)) return;
+    if (approvalDraftAttachmentRefs.length + Array.from(document.getElementById('attachFile')?.files || []).length >= 5) {
+        void window.CoopDialog.alert('첨부파일은 5개까지 선택해 주세요.');
+        return;
+    }
+    approvalDraftAttachmentRefs.push({rawRef,displayName:'체험용 영수증.svg',mimeType:'image/svg+xml'});
+    updateFileList();
+    syncApprovalDraftStatusText();
+}
+
 function updateFileList() {
     const area = document.getElementById("fileListArea");
     if (!area) return;
@@ -14935,7 +14955,7 @@ function updateFileList() {
             const canPreview = canPreviewAttachment(item.displayName || item.rawRef || '');
             const sizeLabel = item.size > 0 ? ` · ${formatAttachmentSize(item.size)}` : '';
             displayName = item.displayName || '저장된 첨부';
-            sourceLabel = `서버 임시저장${sizeLabel}`;
+            sourceLabel = window.ExpoRuntimeBridge && item.rawRef === 'expo-example:receipt.svg' ? '체험용 예시' : `서버 임시저장${sizeLabel}`;
             previewButton = canPreview
                 ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openSavedApprovalDraftAttachmentPreview(${descriptor.savedIndex})">바로보기</button>`
                 : '';
