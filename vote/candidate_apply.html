@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.23
-Change: 2026-10-19 - Give applicants actionable guidance without directing them to ERP administration.
+Version: v1.0.24
+Change: 2026-10-21 - Minimal demo branding and explicit simulated submission; preserve normal application flow.
 -->
 <html lang="ko" data-election-ui="candidate_apply" data-election-role="member">
 <head>
@@ -13,7 +13,7 @@ Change: 2026-10-19 - Give applicants actionable guidance without directing them 
     <meta name="candidate-session-version" content="1.0.0">
     <link rel="modulepreload" href="/vote/candidate_session.js?v=1.0.0" integrity="sha384-7fBW6I9955mikX38MUyw3wW27Etl2HIlynIXtoIOufwxuxtmRUSs4a3fxGhKDWxs" crossorigin="anonymous">
     <link rel="modulepreload" href="/vote/election_term.js?v=1.1.0" integrity="sha384-jO+llWE0vA0SmVki/uznt+LVFTYVYgDRHfP3nSN1GkYUnlgE39tn58cAsw58jLNt" crossorigin="anonymous">
-    <script>console.log('[Version] v1.0.23 | candidate_apply.html');</script>
+    <script>console.log('[Version] v1.0.24 | candidate_apply.html');</script>
     <script src="../telegram_bot.js"></script>
     <link rel="stylesheet" href="style.css">
 <style>
@@ -721,6 +721,12 @@ Change: 2026-10-19 - Give applicants actionable guidance without directing them 
     async function loadCandidateApplyCoopInfo() {
         if (!currentCoopId) return null;
         try {
+            if (globalThis.ExpoRuntimeBridge) {
+                const { data, error } = await supabase.rpc('get_public_site_context');
+                if (error) throw error;
+                currentCoopName = String(data?.coop_name || '').trim();
+                return currentCoopName || null;
+            }
             const { data, error } = await scopeByTenant(
                 supabase.from('ref_company_info').select('key,value').in('key', ['company_name', 'orgName'])
             );
@@ -947,10 +953,6 @@ Change: 2026-10-19 - Give applicants actionable guidance without directing them 
                 manualCandidateMode = false;
                 applyCandidateProfileMode();
             }
-
-            console.log('[Romi Debug] Active Profile ID:', targetMemberId);
-            console.log('[Romi Debug] Loaded Profile Name:', currentUser.name);
-            console.log('[Romi Debug] Loaded Profile Type:', currentUser.member_type);
 
             // 4. 선거 목록 로드
             const { data: elections } = await scopeByTenant(
@@ -1508,7 +1510,9 @@ Change: 2026-10-19 - Give applicants actionable guidance without directing them 
             window.sendTalk(`새로운 후보자 등록 신청이 접수되었습니다.
 이름: ${baseCandidateObj.name}`, "[후보 등록 알림]");
 
-            showModal('성공', '신청이 완료되었습니다. 관리자 승인을 기다려주세요.', () => location.reload());
+            showModal('성공', globalThis.ExpoRuntimeBridge
+                ? '시연 신청을 저장했어요. 관리자 화면에서 승인할 수 있어요. 알림은 실제로 발송하지 않아요.'
+                : '신청이 완료되었습니다. 관리자 승인을 기다려주세요.', () => location.reload());
 
 
         } catch (err) {

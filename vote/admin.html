@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.62
-Change: 2026-10-05 - Keep participation and winner calculations within the current round.
+Version: v1.0.63
+Change: 2026-10-21 - Atomic demo-only result publication; preserve operating election flow.
 -->
 <html lang="ko" data-election-ui="admin" data-election-role="admin">
 <head>
@@ -16,7 +16,7 @@ Change: 2026-10-05 - Keep participation and winner calculations within the curre
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.62 | admin.html');</script>
+    <script>console.log('[Version] v1.0.63 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -1246,6 +1246,7 @@ function safeUrl(value) {
     }
 
     async function resolveElectionNoticeSealUrl() {
+        if (globalThis.ExpoRuntimeBridge) return '';
         if (!currentCoopId) return ELECTION_NOTICE_SEAL_FALLBACK_URL;
         const { data: configured } = await supabase.from('ref_company_info')
             .select('value').eq('coop_id', currentCoopId).eq('key', 'election_seal_url').maybeSingle();
@@ -1590,6 +1591,29 @@ function safeUrl(value) {
         return `${prefix}${seq}호`;
     }
 
+    async function createDemoElectedNoticeSnapshot(preview) {
+        const electionId = currentElectionId;
+        for (let attempt = 1; attempt <= ELECTED_NOTICE_MAX_DOCNO_RETRY; attempt += 1) {
+            const docNo = await generateElectedNoticeDocNo();
+            const options = { issueNo: extractIssueNoFromDocNo(docNo),
+                noticeDateText: formatElectionNoticeDateText(new Date()), openingText: buildElectionNoticeOpeningText() };
+            const contentHtml = '<p>DEMO · 박람회 시연 결과</p>' + buildElectedNoticeHtml(preview.rows, '', options);
+            if (electionId !== currentElectionId || !globalThis.ExpoRuntimeBridge) throw new Error('현재 선거를 다시 확인해주세요.');
+            const { data, error } = await supabase.rpc('erp_demo_publish_election', {
+                p_election: electionId,
+                p_snapshot: { doc_no: docNo, content_html: contentHtml,
+                    content_text: '[시연] ' + buildElectedNoticeText(preview.rows, options),
+                    winners_json: buildElectedWinnersSnapshotRows(preview.rows) }
+            });
+            if (!error) {
+                if (electionId !== currentElectionId) throw new Error('선거가 바뀌었어요. 현재 선거를 다시 확인해주세요.');
+                return data;
+            }
+            if (isDocNoUniqueConflictError(error) && attempt < ELECTED_NOTICE_MAX_DOCNO_RETRY) continue;
+            throw error;
+        }
+    }
+
     async function createOrReusePublishedElectedNoticeSnapshot() {
         if (!currentElectionId) {
             throw new Error('선거 정보가 없어 당선인 공고를 게시할 수 없습니다.');
@@ -1626,6 +1650,7 @@ function safeUrl(value) {
         if (!preview.rows || preview.rows.length === 0) {
             throw new Error('당선자 목록이 없어 공고문을 게시할 수 없습니다.');
         }
+        if (globalThis.ExpoRuntimeBridge) return createDemoElectedNoticeSnapshot(preview);
 
         for (let attempt = 1; attempt <= ELECTED_NOTICE_MAX_DOCNO_RETRY; attempt += 1) {
             const docNo = await generateElectedNoticeDocNo();
