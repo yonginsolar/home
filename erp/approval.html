@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.100 | Change: 2026-10-21 - Refresh the shared tax task reader asset; approval behavior unchanged. -->
+<!-- Version: v1.2.101 | Change: 2026-10-21 - Distinguish exhibition simulation and scoped demo audit. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.99 | approval.html');</script>
+  <script>console.log('[Version] v1.2.101 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8852,6 +8852,7 @@ async function sendTelegramApprovalNotification(payload) {
         }
         return {
             telegramSent: payloadData?.sent !== false,
+            simulation: payloadData?.simulation === true && payloadData?.sent === false,
             notificationSaved: Number(payloadData?.notification_id || 0) > 0
         };
     } catch (e) {
@@ -8875,6 +8876,7 @@ async function createNotification(targetEmpId, title, message, linkUrl, meta = n
             linkUrl,
             meta: safeMeta
         });
+        if (dispatchResult.simulation) return { ok:true, simulation:true, telegramSent:false, fallbackInserted:false, appNotificationSaved:false };
         if (!dispatchResult.notificationSaved) {
             const { error: insertError } = await _supabase
                 .from('erp_notifications')
@@ -8907,6 +8909,7 @@ function buildApprovalSubmitNotice(firstApproverName, notificationResult) {
     const firstRoleLabel = isSunVillageApproval() ? '첫 검토자' : '첫 결재자';
     const requestLabel = isSunVillageApproval() ? '검토 요청' : '결재 요청';
     const result = notificationResult && typeof notificationResult === 'object' ? notificationResult : null;
+    if (result?.simulation) return `상신이 완료되었습니다.\n${firstRoleLabel}: ${safeApproverName}\n🔔 시연 알림 · 이 단계에서 알림이 발송됩니다. 지금은 실제로 전송하지 않았어요.`;
     if (result?.ok && result?.telegramSent === true) {
         return `상신이 완료되었습니다.\n${firstRoleLabel}: ${safeApproverName}\nTelegram ${requestLabel} 알림을 전송했습니다.`;
     }
@@ -9029,6 +9032,10 @@ async function notifyApprovalUploadFailure(options = {}) {
 
 async function logAudit(action, entityId, summary, detail = null) {
     try {
+        if (/^expo-(admin|staff|member)-0[1-8]\.coopco\.kr$/.test(location.hostname)) {
+            await _supabase.rpc('erp_demo_runtime_audit', { p_action:action, p_document_id:entityId ? Number(entityId) : null, p_summary:summary || '' });
+            return;
+        }
         await _supabase.from('erp_audit_logs').insert({
             coop_id: myInfo?.coop_id || null,
             actor_emp_id: myInfo?.emp_id || null,
@@ -13707,6 +13714,7 @@ async function processApprovalDoc(docId, action, reason = '') {
     if (businessTripCancelSettlementNotice) notices.push(businessTripCancelSettlementNotice);
     if (attendanceSettlementNotice) notices.push(attendanceSettlementNotice);
     if (hasTelegramFallback) notices.push('앱 알림은 저장했지만 Telegram 전송은 실패했습니다.');
+    if (notificationResults.some(result => result?.simulation)) notices.push('🔔 시연 알림 · 이 단계에서 알림이 발송됩니다. 지금은 실제로 전송하지 않았어요.');
     return {
         ok: true,
         notice: notices.length > 0
