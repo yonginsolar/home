@@ -33,7 +33,7 @@ function appendPreview(root, official, previewUrl) {
     } else {
         const badge = document.createElement('span');
         badge.className = 'inline-signature-status';
-        badge.textContent = '전자서명 완료';
+        badge.textContent = globalThis.ExpoRuntimeBridge ? '체험 확인 완료' : '전자서명 완료';
         fragment.appendChild(badge);
     }
     fragment.appendChild(document.createTextNode(text.slice(match.index + match[0].length)));

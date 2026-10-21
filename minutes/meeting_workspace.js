@@ -1,10 +1,10 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.7
+Version: v1.10.8
 Change: 2026-10-20 - Preserve manually added board text annexes during regeneration.
 */
 import { supabase } from '../shared/supabase-client.js';
-import { MinutesService } from './MinutesService.js?v=1.0.58';
+import { MinutesService } from './MinutesService.js?v=1.0.60';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.1';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.6';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';

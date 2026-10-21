@@ -1,6 +1,6 @@
 /*
-Version: v1.0.59
-Change: 2026-10-11 - Allow deferred meeting defaults to distinguish failed reads from an empty roster.
+Version: v1.0.60
+Change: 2026-10-21 - Exhibition member branding, own read receipts and signature-status previews.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -324,6 +324,11 @@ async function getOfficials({ strict = false, signal } = {}) {
 }
 
 async function getCompanyInfo() {
+    if (globalThis.ExpoRuntimeBridge && globalThis.location?.hostname.startsWith('expo-member-')) {
+        const { data, error } = await supabase.rpc('get_public_site_context');
+        const context = Array.isArray(data) ? data[0] : null;
+        return { data: context ? { company_name: context.coop_name, address: '', contact: '', phone: '', email: '', homepage: '' } : null, error };
+    }
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('ref_company_info')
@@ -470,6 +475,7 @@ async function getLibraryDocumentById(documentId) {
 }
 
 async function markDocumentBoxSeen(targetId = null, seenAt = null) {
+    if (globalThis.ExpoRuntimeBridge) return await supabase.rpc('erp_demo_document_seen', { p_member: targetId || null });
     const session = await getSession();
     if (!session?.user) return { data: null, error: { message: '로그인이 필요합니다.' } };
 
@@ -770,6 +776,8 @@ async function deleteSignature(minuteId, officialId, isExternalDirector = false)
 }
 
 async function createSignedUrl(bucket, path, expiresIn = 3600) {
+    // Exhibition acknowledgements have no visitor handwriting or stored preview.
+    if (globalThis.ExpoRuntimeBridge && bucket === 'signature-previews') return { data: { signedUrl: null }, error: null };
     if (!bucket || !path) return { data: null, error: { message: 'missing bucket or path' } };
     return await supabase.storage.from(bucket).createSignedUrl(path, expiresIn);
 }
