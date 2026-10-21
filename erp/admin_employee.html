@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.147
+Version: v1.0.148
 Change: 2026-10-13 - Preserve new employee inputs until explicit discard, without changing employee permissions or registration payloads.
 -->
 <html>
@@ -758,6 +758,7 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
           <div class="col-md-9">
             <label class="small text-muted mb-1" for="payrollImportFile">엑셀 파일</label>
             <input type="file" id="payrollImportFile" class="form-control" accept=".xlsx,.xls" onchange="handlePayrollImportFileChange(this)">
+            <button type="button" id="expoPayrollExample" class="btn btn-outline-primary btn-sm mt-2" hidden onclick="chooseExpoPayrollExample()">예시 급여로 체험</button>
           </div>
         </div>
         <div class="payroll-import-summary-card mb-3">
@@ -3912,10 +3913,44 @@ function resetPayrollImportState(options = {}) {
 
 function openPayrollImportModal() {
     if (!payrollImportState?.rows?.length) resetPayrollImportState({ keepMonth: false });
+    const example = document.getElementById('expoPayrollExample');
+    if (example) example.hidden = !window.ExpoRuntimeBridge;
     payrollImportModal?.show();
 } // End of openPayrollImportModal
 
 let payrollImportFileSequence = 0;
+
+async function chooseExpoPayrollExample() {
+    const bridge = window.ExpoRuntimeBridge;
+    if (!bridge || chooseExpoPayrollExample._busy || getPayrollImportBatchController().busy()) return;
+    const status = { ...bridge.status() };
+    if (!status.verified || status.stopped) return;
+    const owner = myInfo, previous = payrollImportState;
+    const fileInput = document.getElementById('payrollImportFile'), file = fileInput?.files?.[0];
+    const sequence = ++payrollImportFileSequence;
+    const current = () => myInfo === owner && payrollImportState === previous
+        && sequence === payrollImportFileSequence && fileInput?.files?.[0] === file
+        && !window.frameElement?.hidden && document.getElementById('payrollImportModal')?.classList.contains('show')
+        && bridge.status().verified && !bridge.status().stopped && bridge.status().workspace === status.workspace;
+    chooseExpoPayrollExample._busy = true;
+    try {
+        if ((previous?.rows?.length || file) && !await window.CoopDialog.confirm('현재 급여 미리보기를 예시로 바꿀까요?')) return;
+        if (!current() || getPayrollImportBatchController().busy()) return;
+        const employee = employeeCache.find(item => item.role === 'staff' && String(item.email || '').endsWith('@erp-demo.invalid'));
+        if (!employee) return showAlert('체험 직원을 확인하지 못했어요. 직원 목록을 다시 확인해 주세요.');
+        const headers = ['사번','성명','종사업무','근로일수','근로시간','기본급','식대','지급총액','공제총액','실지급액'];
+        getPayrollImportBatchController().clear();
+        payrollImportState = {
+            fileName: '시연용 급여 예시', sheetName: '급여', headers,
+            rows: [{'사번':String(employee.emp_id),'성명':String(employee.emp_name),'종사업무':'박람회 체험 업무','근로일수':20,'근로시간':160,'기본급':2000000,'식대':200000,'지급총액':2200000,'공제총액':0,'실지급액':2200000}],
+            headerSignature: buildPayrollImportHeaderSignature(headers), mapping: autoMatchPayrollImportHeaders(headers),
+            savedMappingMatched: false, previewRows: [], validationMessages: []
+        };
+        setPayrollImportStatus('시연용 급여 예시를 준비했어요.', '가상 직원의 예시입니다. 미리보기와 적용 조건을 확인한 뒤 일괄 반영해 보세요.');
+        renderPayrollImportMappingTable();
+        rebuildPayrollImportPreview();
+    } finally { chooseExpoPayrollExample._busy = false; }
+}
 
 function resetPayrollImportMappingToAuto() {
     if (!payrollImportState || !Array.isArray(payrollImportState.headers) || payrollImportState.headers.length === 0) return;
