@@ -1,6 +1,6 @@
 /*
-Version: v1.0.15
-Change: 2026-10-21 - Prepare only the authenticated administrator's registered expo election example.
+Version: v1.0.14
+Change: 2026-10-21 - Unique-person turnout and saved published result summary.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -49,11 +49,7 @@ export class AdminService {
         }
         
         // true면 권한 있음, false면 권한 없음
-        if (data === true && globalThis.ExpoRuntimeBridge) {
-            const prepared = await supabase.rpc('erp_demo_prepare_election');
-            if (prepared.error || prepared.data?.ready !== true) throw new Error('시연 선거 예제를 준비하지 못했어요. 다시 열어 확인해주세요.');
-        }
-        return data;
+        return data; 
     }
 
     // 1. 선거 정보 및 현재 상태 가져오기
