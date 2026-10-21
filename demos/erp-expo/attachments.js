@@ -4,7 +4,7 @@ import {client,codeMessage} from './client.js';
 export function createAttachments({getModel,isEnded,onChange,onList,message}){
  const input=document.getElementById('attachmentInput'),button=document.getElementById('uploadAttachments'),list=document.getElementById('attachmentList');
  let rows=[],choices=[],selected=new Set(),generation=0,uploading=false,restored=false;
- const urls=new Set();
+ const urls=new Set(),opening=new Set(),reads=new Map();
  const key=()=>{const m=getModel();return m?`expo-files-v1:${m.workspace}:${m.role}`:null;};
  const remember=()=>{try{if(key())localStorage.setItem(key(),JSON.stringify([...selected]));}catch{}};
  const rpc=async(action,data={})=>{
@@ -34,20 +34,23 @@ export function createAttachments({getModel,isEnded,onChange,onList,message}){
   }catch(e){if(current===generation&&!isEnded()){message('첨부 목록을 불러오지 못했어요. ‘목록 다시 확인’을 눌러 주세요.',true);}}
  }
  async function download(row){
-  if(isEnded())return;const workspace=getModel()?.workspace;
+  if(isEnded()||opening.has(row.id))return;opening.add(row.id);const workspace=getModel()?.workspace;
   try{const data=await fetchFile(row);
    if(isEnded()||workspace!==getModel()?.workspace)return;
    const url=URL.createObjectURL(data);urls.add(url);const a=document.createElement('a');a.href=url;a.download=row.name;a.click();
    setTimeout(()=>{URL.revokeObjectURL(url);urls.delete(url);},30000);
   }catch(error){if(!isEnded())message(String(error?.message||'').includes('DEMO_DOWNLOAD_LIMIT')?codeMessage('DEMO_DOWNLOAD_LIMIT'):'파일을 열지 못했어요. 체험 시간이 남아 있다면 다시 눌러 주세요.',true);}
+  finally{opening.delete(row.id);}
  }
  async function fetchFile(row){
   const m=getModel();if(!m||isEnded())throw Error('DEMO_ACCESS_ENDED');
-  const {data,error,response}=await client.functions.invoke('erp-expo-file',{body:{workspace:m.workspace,id:row.id}});
-  if(error){let code;try{code=(await error.context.json()).error;}catch{}throw Error(code==='DEMO_DOWNLOAD_LIMIT'?code:'DEMO_FILE_UNAVAILABLE');}
-  if(!(data instanceof Blob)||data.size!==row.size)throw Error('DEMO_FILE_UNAVAILABLE');
-  const mime=response?.headers.get('X-Coop-File-Mime')||'application/octet-stream';
-  return new Blob([data],{type:mime});
+  const key=m.workspace+':'+row.id;if(reads.has(key))return await reads.get(key);
+  const task=(async()=>{const {data,error,response}=await client.functions.invoke('erp-expo-file',{body:{workspace:m.workspace,id:row.id},signal:AbortSignal.timeout(30000)});
+   if(error){let code;try{code=(await error.context.json()).error;}catch{}throw Error(code==='DEMO_DOWNLOAD_LIMIT'?code:'DEMO_FILE_UNAVAILABLE');}
+   if(!(data instanceof Blob)||data.size!==row.size)throw Error('DEMO_FILE_UNAVAILABLE');
+   const mime=response?.headers.get('X-Coop-File-Mime')||'application/octet-stream';
+   return new Blob([data],{type:mime});})();reads.set(key,task);
+  try{return await task;}finally{if(reads.get(key)===task)reads.delete(key);}
  }
  input.addEventListener('change',()=>{
   if(isEnded()||uploading)return;

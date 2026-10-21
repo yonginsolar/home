@@ -182,6 +182,15 @@ window.ExpoAttachmentCheck=async function({otherWorkspace=crypto.randomUUID(),ot
  const other=await client.storage.from('attachments').download(otherPath);
  return {ownFileAvailable:!!file,ownDownload,signBlocked,wrongWorkspaceBlocked:!!wrong.error,otherFileBlocked:!!other.error};
 };
+// Read-only server-boundary probe. Deliberately usable after the UI expires so
+// the test verifies the server, not merely disabled controls. Returns no bytes,
+// tokens, download links, or session data.
+window.ExpoAttachmentBoundaryCheck=async function({workspace,id}={}){
+ if(!/^[0-9a-f-]{36}$/.test(workspace||'')||!/^[0-9a-f-]{36}$/.test(id||''))throw Error('INVALID_PROBE');
+ const metadata=await client.rpc('erp_demo_file_get',{p_workspace:workspace,p_file_id:id});
+ const read=await client.functions.invoke('erp-expo-file',{body:{workspace,id},signal:AbortSignal.timeout(30000)});
+ return {metadataBlocked:!!metadata.error,downloadBlocked:!!read.error,status:read.error?.context?.status||read.response?.status||0};
+};
 $('checkSafety').addEventListener('click',async()=>{
  $('checkSafety').disabled=true;$('safetyResult').textContent='이 계정의 접근 범위를 확인하고 있어요…';
  try{const result=await window.ExpoSafetyCheck();$('safetyResult').textContent=Object.values(result).every(Boolean)?'🔒 확인했어요. 이 체험 공간의 허용된 업무만 사용할 수 있어요.':'일부 차단 결과를 확인하지 못했어요. 안내 부스로 문의해 주세요.';}
