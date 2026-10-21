@@ -58,7 +58,9 @@
   if(stopped)return;stopped=true;verified=false;finish(false);
   for(const client of clients)client.auth?.stopAutoRefresh?.();
   window.CoopDialog?.cancelAll(window);banner();controls();
-  if(window.top!==window.self)window.top.postMessage({type:'erp-expo-ended'},location.origin);
+  // Relay through each registered direct parent. A grandchild preview is not
+  // a direct iframe of the shell, so sending only to top would be ignored.
+  if(window.parent!==window.self)window.parent.postMessage({type:'erp-expo-ended'},location.origin);
   for(const frame of document.querySelectorAll('iframe'))frame.contentWindow?.postMessage({type:'erp-expo-ended'},location.origin);
  }
  const unavailable=()=>Response.json({code:'PT403',message:stopped?'DEMO_ACCESS_ENDED':'DEMO_CONTEXT_CHANGED'},{status:403});
