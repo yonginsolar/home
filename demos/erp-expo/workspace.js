@@ -170,6 +170,18 @@ window.ExpoSafetyCheck=async function({otherWorkspace=crypto.randomUUID(),otherD
  return {rawBlocked:raw.status===403&&!!raw.error,rawStatus:raw.status,platformBlocked:platform.error?.code==='PT403',graphBlocked:graph.error?.code==='PT403',
    contextBlocked:String(context.error?.message||'').includes('DEMO_CONTEXT_CHANGED'),otherDocBlocked:!!document.error};
 };
+// Same authenticated download path as the visible file button; no session,
+// file content or capability URL is returned by this diagnostic.
+window.ExpoAttachmentCheck=async function({otherWorkspace=crypto.randomUUID(),otherPath='erp-expo/'+crypto.randomUUID()+'/missing.txt'}={}){
+ if(!model||ended)throw Error('DEMO_ACCESS_ENDED');
+ const listed=await client.rpc('erp_demo_file',{p_action:'list',p_data:{workspace:model.workspace}});
+ const wrong=await client.rpc('erp_demo_file',{p_action:'list',p_data:{workspace:otherWorkspace}});
+ const file=listed.data?.[0];let ownDownload=false,signBlocked=false;
+ if(file){const read=await client.storage.from('attachments').download(file.path);ownDownload=!read.error&&read.data?.size===file.size;
+  const signed=await client.storage.from('attachments').createSignedUrl(file.path,3600);signBlocked=!!signed.error;}
+ const other=await client.storage.from('attachments').download(otherPath);
+ return {ownFileAvailable:!!file,ownDownload,signBlocked,wrongWorkspaceBlocked:!!wrong.error,otherFileBlocked:!!other.error};
+};
 $('checkSafety').addEventListener('click',async()=>{
  $('checkSafety').disabled=true;$('safetyResult').textContent='이 계정의 접근 범위를 확인하고 있어요…';
  try{const result=await window.ExpoSafetyCheck();$('safetyResult').textContent=Object.values(result).every(Boolean)?'🔒 확인했어요. 이 체험 공간의 허용된 업무만 사용할 수 있어요.':'일부 차단 결과를 확인하지 못했어요. 안내 부스로 문의해 주세요.';}
