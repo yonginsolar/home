@@ -1,5 +1,5 @@
 /*
-Version: v1.0.3
+Version: v1.0.4
 Change: 2026-10-21 - Atomic expo-only draft replay; preserve operating poll calls.
 */
 import { supabase, resolveCurrentMemberProfileId } from './ElectionService.js';
@@ -334,6 +334,7 @@ export class PreferencePollService {
             };
         }
         const pending = this.expoPendingSave;
+        this.onExpoPendingSave?.();
         const { data, error } = await supabase.rpc('erp_demo_save_preference_poll', {
             p_request: pending.request, p_data: pending.data
         });

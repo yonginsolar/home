@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.3
+Version: v1.0.4
 Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results without duplicate creation.
 -->
 <html lang="ko" data-election-ui="poll_setup" data-election-role="admin">
@@ -15,7 +15,7 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선호도 투표 설정</title>
-    <script>console.log('[Version] v1.0.3 | poll_setup.html');</script>
+    <script>console.log('[Version] v1.0.4 | poll_setup.html');</script>
     <style>
         :root {
             --bg: #f4f7fb;
@@ -348,7 +348,44 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
     let optionState = [];
     let loadedPoll = null;
     let expoSavedForm = null, expoPollBusy = false, expoControlRestore = null, expoPublishUnknown = false;
+    const expoEditorKey = 'expo-preference-editor-v1:' + (currentPollId || 'new');
     const expoPollVisible = () => !document.hidden && !window.frameElement?.hidden;
+    function preserveExpoPollEditor() {
+        if (!globalThis.ExpoRuntimeBridge) return;
+        try {
+            const form = readFormPayload();
+            const key = 'expo-preference-editor-v1:' + (currentPollId || 'new');
+            if (!service.expoPendingSave && !expoPublishUnknown && JSON.stringify(form) === expoSavedForm) {
+                localStorage.removeItem(expoEditorKey); localStorage.removeItem(key); return;
+            }
+            const value = JSON.stringify({form,poll:loadedPoll,baseline:expoSavedForm,pending:service.expoPendingSave || null,publishUnknown:expoPublishUnknown});
+            localStorage.setItem(expoEditorKey,value); localStorage.setItem(key,value);
+        } catch (_) { /* The current editor is kept even if browser storage is unavailable. */ }
+    }
+    function restoreExpoPollEditor() {
+        if (!globalThis.ExpoRuntimeBridge || globalThis.ExpoRuntimeBridge.status?.().stopped) return;
+        try {
+            const draft = JSON.parse(localStorage.getItem(expoEditorKey) || 'null');
+            const form = draft?.form;
+            if (!form || !Array.isArray(form.options) || form.options.length < 2 || form.options.length > 9) return;
+            currentPollId = String(form.id || ''); loadedPoll = draft.poll;
+            document.getElementById('pollTitle').value = form.title || '';
+            document.getElementById('pollDescription').value = form.description || '';
+            document.getElementById('pollStartAt').value = kstIsoToInputValue(form.startAt);
+            document.getElementById('pollEndAt').value = kstIsoToInputValue(form.endAt);
+            optionState = form.options.map(o => ({id:o.id || null,label:String(o.label || '')}));
+            renderOptionList(); minChoicesEl.value = String(form.minChoices); maxChoicesEl.value = String(form.maxChoices); syncChoiceSelectors(true);
+            expoSavedForm = draft.baseline; service.expoPendingSave = draft.pending || null; expoPublishUnknown = draft.publishUnknown === true;
+            if (service.expoPendingSave || expoPublishUnknown) {
+                holdExpoPollControls();
+                const save = document.getElementById('btnSaveDraft'); save.disabled = expoPublishUnknown;
+                save.textContent = service.expoPendingSave ? '저장 결과 확인' : '초안 저장';
+                if (expoPublishUnknown) { const publish = document.getElementById('btnPublish'); publish.disabled = false; publish.textContent = '공개 결과 확인'; }
+            }
+        } catch (_) { /* Ignore an invalid local draft; server authority is never restored from it. */ }
+    }
+    service.onExpoPendingSave = preserveExpoPollEditor;
+    window.addEventListener('pagehide',preserveExpoPollEditor);
     function holdExpoPollControls() {
         if (expoControlRestore) return;
         const controls = [...document.querySelectorAll('input,textarea,select,button')].filter(n => n.id !== 'btnSaveDraft');
@@ -399,10 +436,12 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
     }
 
     function showAlert(title, message) {
+        if (globalThis.ExpoRuntimeBridge) return window.CoopDialog.alert(message,{title});
         showModal(title, escapeHtml(message));
     }
 
     function showConfirm(title, message) {
+        if (globalThis.ExpoRuntimeBridge) return window.CoopDialog.confirm(message,{title});
         return new Promise((resolve) => {
             showModal(title, escapeHtml(message), [
                 { label: '취소', type: '', onClick: () => resolve(false) },
@@ -566,12 +605,13 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
     }
 
     async function saveExpoDraft() {
-        if (expoPollBusy) return;
+        if (expoPollBusy || expoPublishUnknown) return;
         const btn = document.getElementById('btnSaveDraft');
         expoPollBusy = true; holdExpoPollControls(); btn.disabled = true; btn.textContent = '저장 중...';
         try {
             const owner = await service.initializeAdminContext();
             if (!owner?.canAdmin) throw Object.assign(new Error('현재 저장 권한을 확인하지 못했어요.'), {code:'42501'});
+            if (globalThis.ExpoRuntimeBridge.status?.().stopped) return;
             const id = await service.savePoll({...readFormPayload(),expectedUpdatedAt:loadedPoll?.updated_at || null});
             const saved = service.lastExpoSavedPoll;
             currentPollId = id; loadedPoll = saved.poll;
@@ -590,6 +630,7 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
             if (!service.expoPendingSave) expoControlRestore?.();
             btn.disabled = globalThis.ExpoRuntimeBridge?.status?.().stopped === true;
             btn.textContent = service.expoPendingSave ? '저장 결과 확인' : '초안 저장';
+            preserveExpoPollEditor();
         }
     }
 
@@ -625,9 +666,9 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
                 if (!owner?.canAdmin) throw new Error('현재 조회 권한을 확인하지 못했어요.');
                 const {poll} = await service.getAdminPoll(currentPollId,{includeRewardPolicy:false});
                 if (!poll || globalThis.ExpoRuntimeBridge.status?.().stopped) throw new Error('공개 결과를 확인하지 못했어요.');
-                setStatusBox(poll); expoPublishUnknown = false;
-                if (expoPollVisible()) showAlert('공개 결과 확인',poll.status==='DRAFT'
-                    ? '초안 상태로 확인됐어요. 내용을 확인한 뒤 다시 공개할 수 있어요.'
+                setStatusBox(poll); expoPublishUnknown = poll.status === 'DRAFT';
+                if (expoPollVisible()) showAlert('공개 결과 확인',expoPublishUnknown
+                    ? '아직 공개된 상태를 확인하지 못했어요. 잠시 후 다시 확인해주세요.'
                     : '공개된 상태로 확인됐어요.');
             } catch (error) {
                 if (expoPollVisible()) showAlert('공개 결과 확인',error.message || '잠시 후 다시 확인해주세요.');
@@ -637,6 +678,7 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
                 btn.disabled = globalThis.ExpoRuntimeBridge.status?.().stopped === true;
                 btn.textContent = expoPublishUnknown ? '공개 결과 확인' : '대상자 확정·공개';
                 document.getElementById('btnSaveDraft').disabled = expoPublishUnknown || btn.disabled;
+                preserveExpoPollEditor();
             }
             return;
         }
@@ -659,6 +701,7 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
         btn.textContent = '공개 중...';
         if (globalThis.ExpoRuntimeBridge) {
             expoPollBusy = true; holdExpoPollControls(); document.getElementById('btnSaveDraft').disabled = true;
+            expoPublishUnknown = true; preserveExpoPollEditor();
         }
         let expoPublishCommitted = false;
         try {
@@ -666,8 +709,9 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
             expoPublishCommitted = !!globalThis.ExpoRuntimeBridge && result?.ok === true;
             if (!globalThis.ExpoRuntimeBridge || expoPollVisible()) showAlert('공개 완료', `대상자 ${result?.voter_count || 0}명을 기준으로 투표를 공개했습니다.`);
             await loadPoll();
+            if (globalThis.ExpoRuntimeBridge) expoPublishUnknown = false;
         } catch (error) {
-            if (globalThis.ExpoRuntimeBridge && (expoPublishCommitted || !['22023','22P02','42501','PT409','PT403','P0001'].includes(String(error.code || '')))) expoPublishUnknown = true;
+            if (globalThis.ExpoRuntimeBridge) expoPublishUnknown = expoPublishCommitted || !['22023','22P02','42501','PT409','PT403','P0001'].includes(String(error.code || ''));
             if (!globalThis.ExpoRuntimeBridge || expoPollVisible()) showAlert(expoPublishUnknown ? '공개 결과 확인' : '공개 실패',
                 expoPublishCommitted ? '공개했어요. 화면을 갱신하지 못해 공개 결과 확인이 필요해요.'
                     : expoPublishUnknown ? '처리 결과를 확인하지 못했어요. 공개 결과 확인을 눌러 상태를 확인해주세요.' : error.message || '투표 공개에 실패했습니다.');
@@ -679,6 +723,7 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
                 btn.disabled = globalThis.ExpoRuntimeBridge.status?.().stopped === true;
                 btn.textContent = expoPublishUnknown ? '공개 결과 확인' : previousLabel;
                 document.getElementById('btnSaveDraft').disabled = expoPublishUnknown || btn.disabled;
+                preserveExpoPollEditor();
             }
         }
     }
@@ -718,6 +763,12 @@ Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results wi
             location.href = 'index.html?portal=1';
         });
         await loadPoll();
+        restoreExpoPollEditor();
+        if (globalThis.ExpoRuntimeBridge) {
+            document.addEventListener('input',preserveExpoPollEditor);
+            document.addEventListener('change',preserveExpoPollEditor);
+            document.addEventListener('click',() => queueMicrotask(preserveExpoPollEditor));
+        }
         window.ErpWorkspaceResume.register({modules:['vote'],authorize:async()=>{
             return service.canAdmin();
         },refresh:async()=>{}});

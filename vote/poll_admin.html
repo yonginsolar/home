@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.4
+Version: v1.0.5
 Change: 2026-10-11 - Restore held poll drafts and guard stale selection responses with server authority.
 -->
 <html lang="ko" data-election-ui="poll_admin" data-election-role="admin">
@@ -16,7 +16,7 @@ Change: 2026-10-11 - Restore held poll drafts and guard stale selection response
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선호도 투표 관리</title>
-    <script>console.log('[Version] v1.0.4 | poll_admin.html');</script>
+    <script>console.log('[Version] v1.0.5 | poll_admin.html');</script>
     <style>
         :root {
             --bg: #f5f7fb;
@@ -234,12 +234,14 @@ Change: 2026-10-11 - Restore held poll drafts and guard stale selection response
     }
 
     function showAlert(title, message, onClose = null) {
+        if (globalThis.ExpoRuntimeBridge) return window.CoopDialog.alert(message,{title}).then(() => { if (isPollViewVisible() && onClose) onClose(); });
         showModal(title, escapeHtml(message), onClose ? [
             { label: '확인', type: 'primary', onClick: onClose }
         ] : []);
     }
 
     function showConfirm(title, message) {
+        if (globalThis.ExpoRuntimeBridge) return window.CoopDialog.confirm(message,{title});
         return new Promise((resolve) => {
             showModal(title, escapeHtml(message), [
                 { label: '취소', type: '', onClick: () => resolve(false) },
@@ -483,7 +485,7 @@ Change: 2026-10-11 - Restore held poll drafts and guard stale selection response
         await renderSelectedPoll();
         window.ErpWorkspaceResume.register({modules:['vote'],authorize:async()=>{
             return service.canAdmin();
-        },busy:()=>pollOperationBusy || modalBackdropEl.style.display === 'flex',refresh:async()=>{
+        },busy:()=>pollOperationBusy || modalBackdropEl.style.display === 'flex' || (!!globalThis.ExpoRuntimeBridge && window.CoopDialog.hasPending()),refresh:async()=>{
             pollResumePreparing = true;
             try { await refresh();renderPollList();await renderSelectedPoll({ force: true }); }
             finally { pollResumePreparing = false; }

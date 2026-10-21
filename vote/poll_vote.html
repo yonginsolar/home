@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
+Version: v1.0.2
 Change: 2026-10-19 - Explain missing poll information without blaming the participant.
 -->
 <html lang="ko" data-election-ui="poll_vote" data-election-role="member">
@@ -9,7 +9,7 @@ Change: 2026-10-19 - Explain missing poll information without blaming the partic
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선호도 투표</title>
-    <script>console.log('[Version] v1.0.1 | poll_vote.html');</script>
+    <script>console.log('[Version] v1.0.2 | poll_vote.html');</script>
     <style>
         :root {
             --bg: #f3f6fb;
@@ -99,6 +99,34 @@ Change: 2026-10-19 - Explain missing poll information without blaming the partic
 
     let currentPayload = null;
     let selectedIds = new Set();
+    let expoPollSubmitting = false, expoPollUncertain = null;
+    const expoSelectionKey = () => 'expo-preference-selection-v1:' + pollId + ':' + (service.currentMemberProfileId || 'self');
+    function preserveExpoSelection() {
+        if (!globalThis.ExpoRuntimeBridge || !currentPayload) return;
+        try {
+            const stored = new Set(currentPayload.selected_option_ids || []);
+            if (!expoPollUncertain && [...stored].sort().join(',') === [...selectedIds].sort().join(',')) localStorage.removeItem(expoSelectionKey());
+            else localStorage.setItem(expoSelectionKey(),JSON.stringify({options:[...selectedIds],pending:expoPollUncertain}));
+        } catch (_) {}
+    }
+    function restoreExpoSelection() {
+        if (!globalThis.ExpoRuntimeBridge) return;
+        try {
+            const draft = JSON.parse(localStorage.getItem(expoSelectionKey()) || 'null');
+            if (!draft || !Array.isArray(draft.options)) return;
+            const available = new Set((currentPayload.options || []).map(o => String(o.id)));
+            selectedIds = new Set(draft.options.filter(id => available.has(String(id))).map(String));
+            expoPollUncertain = draft.pending || null;
+            setStatusMessage(expoPollUncertain ? '제출 결과 확인' : '작성 중인 선택을 불러왔어요',expoPollUncertain
+                ? '제출 결과 확인을 눌러 저장 여부를 확인해주세요.' : '선택 내용을 확인한 뒤 제출해주세요.');
+        } catch (_) {}
+    }
+    window.addEventListener('pagehide',preserveExpoSelection);
+    window.addEventListener('beforeunload',event => {
+        if (!globalThis.ExpoRuntimeBridge || !currentPayload) return;
+        const changed = [...(currentPayload.selected_option_ids || [])].sort().join(',') !== [...selectedIds].sort().join(',');
+        if (changed || expoPollSubmitting || expoPollUncertain) { event.preventDefault(); event.returnValue = ''; }
+    });
 
     function escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -124,13 +152,17 @@ Change: 2026-10-19 - Explain missing poll information without blaming the partic
         const isValid = choiceCount >= minChoices && choiceCount <= maxChoices;
         submitButtonEl.disabled = !(isEditable && isValid);
         submitButtonEl.textContent = currentPayload?.current_revision > 0 ? '선택 수정 제출' : '선택 제출';
+        if (globalThis.ExpoRuntimeBridge) {
+            submitButtonEl.disabled = globalThis.ExpoRuntimeBridge.status?.().stopped === true || expoPollSubmitting || (!expoPollUncertain && !(isEditable && isValid));
+            if (expoPollUncertain) submitButtonEl.textContent = '제출 결과 확인';
+        }
     }
 
     function renderOptions() {
         optionWrapEl.innerHTML = '';
         const poll = currentPayload?.poll || {};
         const phase = derivePreferencePollPhase(poll);
-        const editable = phase === 'OPEN';
+        const editable = phase === 'OPEN' && (!globalThis.ExpoRuntimeBridge || (!globalThis.ExpoRuntimeBridge.status?.().stopped && !expoPollSubmitting && !expoPollUncertain));
         const maxChoices = Number(poll.max_choices || 1);
         const options = Array.isArray(currentPayload?.options) ? currentPayload.options : [];
 
@@ -151,7 +183,17 @@ Change: 2026-10-19 - Explain missing poll information without blaming the partic
                     <small>${selected ? '현재 선택됨' : '선택하지 않음'}</small>
                 </div>
             `;
-            card.addEventListener('click', (event) => {
+            if (globalThis.ExpoRuntimeBridge) card.querySelector('input').addEventListener('change', event => {
+                const input = event.currentTarget, optionId = String(option.id || '');
+                if (!editable || !optionId) { input.checked = selectedIds.has(optionId); return; }
+                if (!input.checked) selectedIds.delete(optionId);
+                else if (selectedIds.size < maxChoices) selectedIds.add(optionId);
+                else { input.checked = false; setStatusMessage('선택 개수 확인',`최대 ${maxChoices}개까지 선택할 수 있어요.`); }
+                card.classList.toggle('selected',input.checked);
+                card.querySelector('small').textContent = input.checked ? '현재 선택됨' : '선택하지 않음';
+                preserveExpoSelection(); updateSubmitButton();
+            });
+            else card.addEventListener('click', (event) => {
                 if (!editable) return;
                 event.preventDefault();
                 const optionId = String(option.id || '').trim();
@@ -172,7 +214,7 @@ Change: 2026-10-19 - Explain missing poll information without blaming the partic
         updateSubmitButton();
     }
 
-    async function loadPoll() {
+    async function loadPoll({restoreDraft = true} = {}) {
         if (!pollId) {
             setStatusMessage('투표 정보 확인', '투표 정보를 찾지 못했습니다. 목록에서 다시 선택해 주세요.');
             optionWrapEl.innerHTML = '<div class="empty-box">투표 정보를 찾을 수 없습니다.</div>';
@@ -200,22 +242,55 @@ Change: 2026-10-19 - Explain missing poll information without blaming the partic
         } else {
             setStatusMessage('투표가 종료되었습니다', currentPayload?.current_revision > 0 ? '내 제출 내역은 저장되어 있습니다. 결과는 관리자만 확인할 수 있습니다.' : '이 투표는 종료되었습니다.');
         }
+        if (restoreDraft) restoreExpoSelection();
         renderOptions();
     }
 
     async function submitVote() {
+        if (globalThis.ExpoRuntimeBridge && (expoPollSubmitting || globalThis.ExpoRuntimeBridge.status?.().stopped)) return;
+        if (globalThis.ExpoRuntimeBridge && expoPollUncertain) {
+            const intent = expoPollUncertain;
+            expoPollSubmitting = true; updateSubmitButton();
+            try {
+                await loadPoll({restoreDraft:false});
+                const actual = [...selectedIds].sort().join(',');
+                if (Number(currentPayload?.current_revision) >= intent.revision + 1 && actual === [...intent.options].sort().join(',')) {
+                    expoPollUncertain = null; setStatusMessage('제출 완료','저장된 선택 내용을 확인했어요.');
+                } else {
+                    selectedIds = new Set(intent.options);
+                    setStatusMessage('제출 결과 확인','아직 같은 선택의 저장 결과를 확인하지 못했어요. 잠시 후 다시 확인해주세요.');
+                }
+            } catch (_) { setStatusMessage('제출 결과 확인','결과를 불러오지 못했어요. 잠시 후 다시 확인해주세요.'); }
+            finally { expoPollSubmitting = false; renderOptions(); preserveExpoSelection(); }
+            return;
+        }
         const poll = currentPayload?.poll || {};
         const phase = derivePreferencePollPhase(poll);
         if (phase !== 'OPEN') return;
+        let expoCommitted = false;
         try {
+            if (globalThis.ExpoRuntimeBridge) {
+                expoPollSubmitting = true;
+                expoPollUncertain = {revision:Number(currentPayload?.current_revision || 0),options:[...selectedIds]};
+                preserveExpoSelection();
+                renderOptions();
+            }
             submitButtonEl.disabled = true;
             submitButtonEl.textContent = '제출 중...';
             await service.submitPortalBallot({ pollId, optionIds: [...selectedIds] });
-            await loadPoll();
+            expoCommitted = !!globalThis.ExpoRuntimeBridge;
+            await loadPoll({restoreDraft:false});
+            expoPollUncertain = null;
             setStatusMessage('제출 완료', '선택 내용을 저장했습니다. 기간 안에는 다시 수정 제출할 수 있습니다.');
         } catch (error) {
-            setStatusMessage('제출 실패', error.message || '투표를 제출하지 못했습니다.');
+            if (globalThis.ExpoRuntimeBridge) {
+                if (!expoCommitted && ['22023','22P02','42501','PT403','PT409','P0001','23505','23514'].includes(String(error.code || ''))) expoPollUncertain = null;
+                setStatusMessage(expoCommitted ? '제출 완료' : expoPollUncertain ? '제출 결과 확인' : '제출하지 못했어요',
+                    expoCommitted ? '선택은 저장했어요. 화면 갱신은 제출 결과 확인을 눌러 다시 확인해주세요.'
+                        : expoPollUncertain ? '처리 결과를 확인하지 못했어요. 제출 결과 확인을 눌러 저장 여부만 확인해주세요.' : error.message || '선택 내용을 확인해주세요.');
+            } else setStatusMessage('제출 실패', error.message || '투표를 제출하지 못했습니다.');
         } finally {
+            if (globalThis.ExpoRuntimeBridge) { expoPollSubmitting = false; renderOptions(); preserveExpoSelection(); }
             updateSubmitButton();
         }
     }
