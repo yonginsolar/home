@@ -3,6 +3,7 @@ const $=id=>document.getElementById(id),forms={approval:$('approvalForm'),member
 let model=null,readVersion=0,refreshing=false,ended=false,expiry=0;
 const dirty=new Set(),pending=new Map(),busy=new Set(),baselines=new Map(),editVersions=new Map();
 const values=form=>Object.fromEntries(new FormData(form)),same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+for(const [name,form] of Object.entries(forms))baselines.set(name,values(form));
 function message(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
 function draftKey(){return model?`expo-draft-v1:${model.workspace}:${model.role}`:null;}
 function saveDrafts(){
@@ -39,14 +40,17 @@ function notifyResult(result){
 function closeConfirm(){window.CoopDialog.cancelAll(window);}
 const ask=(title,text)=>window.CoopDialog.confirm(text,{title});
 for(const [name,form] of Object.entries(forms))form.addEventListener('input',()=>{
- if(ended)return;if(!dirty.has(name)&&['site','profile'].includes(name))editVersions.set(name,model?.[name]?.version);dirty.add(name);updateDraftState();saveDrafts();
+ if(ended)return;
+ if(same(values(form),baselines.get(name))&&!pending.has(name)){dirty.delete(name);editVersions.delete(name);}
+ else{if(!dirty.has(name)&&['site','profile'].includes(name))editVersions.set(name,model?.[name]?.version);dirty.add(name);}
+ updateDraftState();saveDrafts();
 });
 window.addEventListener('beforeunload',event=>{if(dirty.size||pending.size){event.preventDefault();event.returnValue='';}});
 function block(reason){
  ended=true;++readVersion;closeConfirm(false);$('ended').hidden=false;$('ended').textContent=reason;
  for(const form of Object.values(forms))for(const el of form.elements){if(el.type==='submit')el.disabled=true;else if(el.matches('input,textarea'))el.readOnly=true;}
  for(const el of document.querySelectorAll('[data-approve]'))el.disabled=true;
- $('refresh').disabled=true;client.auth.stopAutoRefresh();
+ $('refresh').disabled=true;$('checkSafety').disabled=true;client.auth.stopAutoRefresh();
 }
 async function rpc(action,data={}){let query=client.rpc('erp_demo_business',{p_action:action,p_data:{...(model?{workspace:model.workspace}:{}),...data}});if(action==='context'&&typeof query.abortSignal==='function')query=query.abortSignal(AbortSignal.timeout(15000));const {data:result,error}=await query;if(error)throw error;return result;}
 client.auth.onAuthStateChange((event,session)=>{
@@ -150,7 +154,7 @@ window.ExpoSafetyCheck=async function({otherWorkspace=crypto.randomUUID(),otherD
  const graph=await client.schema('graphql_public').rpc('graphql',{query:'{__typename}'});
  const context=await client.rpc('erp_demo_business',{p_action:'context',p_data:{workspace:otherWorkspace}});
  const document=await client.rpc('erp_demo_business',{p_action:'approve',p_data:{workspace:model.workspace,id:otherDocument,version:'boundary-probe',request_id:crypto.randomUUID()}});
- return {rawBlocked:raw.error?.code==='PT403',platformBlocked:platform.error?.code==='PT403',graphBlocked:graph.error?.code==='PT403',
+ return {rawBlocked:raw.status===403&&!!raw.error,rawStatus:raw.status,platformBlocked:platform.error?.code==='PT403',graphBlocked:graph.error?.code==='PT403',
    contextBlocked:String(context.error?.message||'').includes('DEMO_CONTEXT_CHANGED'),otherDocBlocked:!!document.error};
 };
 $('checkSafety').addEventListener('click',async()=>{

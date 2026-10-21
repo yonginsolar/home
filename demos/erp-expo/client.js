@@ -7,7 +7,7 @@ export const client=createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_
 export function codeMessage(code){
  const s=String(code||'');
  const messages={DEMO_NOT_OPEN:'공개 체험은 11월 27~29일에 열려요.',DEMO_ROOMS_BUSY:'체험 자리가 모두 사용 중이에요. 잠시 후 다시 시도해 주세요.',
- DEMO_VISITOR_LIMIT:'오늘 준비한 체험 공간을 모두 사용했어요. 안내 부스로 문의해 주세요.',DEMO_TICKET_ENDED:'이 체험 시간이 끝났어요. 입구에서 새로 시작해 주세요.',
+ DEMO_VISITOR_LIMIT:'이번 행사에 준비한 체험 공간을 모두 사용했어요. 안내 부스로 문의해 주세요.',DEMO_TICKET_ENDED:'이 체험 시간이 끝났어요. 입구에서 새로 시작해 주세요.',
  DEMO_ACCESS_ENDED:'체험 시간이 끝났어요. 작성 중인 내용은 화면에서 확인할 수 있어요.',DEMO_CONTEXT_CHANGED:'체험 공간이 바뀌었어요. 새 체험 화면을 이용해 주세요.',DEMO_LOGIN_BUSY:'같은 계정의 접속을 준비 중이에요. 잠시 후 다시 눌러 주세요.',
  DEMO_DOCUMENT_CHANGED:'문서 상태가 바뀌었어요. 목록을 다시 확인해 주세요.',DEMO_SETTINGS_CHANGED:'다른 창에서 홈페이지를 수정했어요. 작성한 내용은 남겨 두었으니 최신 내용을 확인해 주세요.',
  DEMO_PROFILE_CHANGED:'다른 창에서 정보를 수정했어요. 작성한 내용은 남겨 두었으니 최신 내용을 확인해 주세요.',DEMO_REQUEST_CHANGED:'이 요청의 내용이 달라졌어요. 원래 요청 결과부터 확인해 주세요.',
