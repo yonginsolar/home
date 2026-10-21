@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.79 | Change: 2026-10-12 - Display leave with confirmed employee daily work hours. -->
+<!-- Version: v1.0.81 | Change: 2026-10-21 - Expo personal integrations are explanation-only. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.80 | mypage.html');</script>
+<script>console.log('[Version] v1.0.81 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -965,8 +965,23 @@ if(compLeaveEl) compLeaveEl.textContent=`${Number(summary?.compLeaveDays||0)}시
 if(helpEl) helpEl.textContent=summary?.count>0?`승인 완료 문서 ${summary.count}건을 기준으로 집계했습니다.`:'이번 달 승인 완료된 시간외 근로 문서가 없습니다.';
 }
 
+function renderExpoMypageTelegram(){
+ensureTelegramConnectUi();
+const badge=document.getElementById('telegramConnectStatusBadge'),help=document.getElementById('telegramConnectHelpText'),meta=document.getElementById('telegramConnectMeta'),button=document.getElementById('btnTelegramConnect');
+if(!badge||!help||!meta||!button)return;
+badge.className='badge bg-info text-dark';badge.textContent='시연 안내';
+help.textContent='연결한 Telegram으로 업무 알림을 받을 수 있어요.';
+meta.textContent='체험에서는 실제 계정을 연결하지 않고, 업무 처리 화면에 시연 알림을 표시해요.';
+button.textContent='연결 방법 보기';button.disabled=!!window.ExpoRuntimeBridge.status?.().stopped;
+for(const id of ['btnTelegramCopyLink','btnTelegramCopyStart','btnTelegramTest','btnTelegramDisconnect'])document.getElementById(id)?.classList.add('hidden');
+}
+async function showExpoMypageTelegramHelp(){
+if(window.ExpoRuntimeBridge?.status?.().stopped)return;
+await window.CoopDialog.alert('🔔 Telegram 알림\n\n실제 서비스에서는 연결 버튼으로 조합 봇을 연 뒤, Telegram의 시작 버튼을 눌러 본인 계정을 연결해요. 이후 담당 업무의 알림을 받을 수 있어요.\n\n지금은 체험 중이에요. 실제 연결·발송은 하지 않고 시연 알림으로 표시해요.');
+}
 function renderMypageTelegramLinkStatus(statusData){
 ensureTelegramConnectUi();
+if(window.ExpoRuntimeBridge){renderExpoMypageTelegram();return;}
 const badge=document.getElementById('telegramConnectStatusBadge');
 const help=document.getElementById('telegramConnectHelpText');
 const meta=document.getElementById('telegramConnectMeta');
@@ -1025,6 +1040,7 @@ disconnectBtn.classList.add('hidden');
 
 async function loadMypageTelegramLinkStatus(isCurrent=()=>true){
 ensureTelegramConnectUi();
+if(window.ExpoRuntimeBridge){if(!isCurrent())return false;renderExpoMypageTelegram();return true;}
 try{
 const {data,error}=await _supabase.rpc('erp_get_telegram_link_status');
 if(error) throw error;
@@ -1041,6 +1057,7 @@ return false;
 } // End of loadMypageTelegramLinkStatus
 
 async function openMypageTelegramConnect(){
+if(window.ExpoRuntimeBridge)return showExpoMypageTelegramHelp();
 try{
 const {data,error}=await _supabase.rpc('erp_issue_my_telegram_link_request');
 if(error) throw error;
@@ -1070,6 +1087,7 @@ showAlert('Telegram 연결 링크 생성 실패: '+(error?.message||error));
 } // End of openMypageTelegramConnect
 
 async function copyMypageTelegramConnectCommand(){
+if(window.ExpoRuntimeBridge)return showExpoMypageTelegramHelp();
 if(!mypageTelegramConnectCommand) return showAlert('먼저 Telegram 연결 링크를 생성해 주세요.');
 try{
 await navigator.clipboard.writeText(mypageTelegramConnectCommand);
@@ -1080,6 +1098,7 @@ showAlert('연결 명령 복사 실패: '+(error?.message||error));
 } // End of copyMypageTelegramConnectCommand
 
 async function copyMypageTelegramConnectLink(){
+if(window.ExpoRuntimeBridge)return showExpoMypageTelegramHelp();
 if(!mypageTelegramConnectUrl) return showAlert('먼저 Telegram 연결 링크를 생성해 주세요.');
 try{
 await navigator.clipboard.writeText(mypageTelegramConnectUrl);
@@ -1090,6 +1109,7 @@ showAlert('링크 복사 실패: '+(error?.message||error));
 } // End of copyMypageTelegramConnectLink
 
 async function disconnectMypageTelegramLink(){
+if(window.ExpoRuntimeBridge)return showExpoMypageTelegramHelp();
 if(!(await window.CoopDialog.confirm('이 조합의 본인 계정에서 사용하는 텔레그램 알림 연결을 해제할까요? 조합원 화면의 연결도 함께 해제됩니다.'))) return;
 try{
 const {data,error}=await _supabase.rpc('erp_disconnect_my_telegram_link');
@@ -1104,6 +1124,7 @@ showAlert('Telegram 연결 해제 실패: '+(error?.message||error));
 } // End of disconnectMypageTelegramLink
 
 async function sendMypageTelegramTestMessage(){
+if(window.ExpoRuntimeBridge)return showExpoMypageTelegramHelp();
 const testBtn=document.getElementById('btnTelegramTest');
 const originalLabel=testBtn?.innerHTML||'테스트 메시지';
 if(testBtn){
