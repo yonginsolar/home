@@ -17,7 +17,7 @@ export function codeMessage(code){
  DEMO_DOCUMENT_CHANGED:'문서 상태가 바뀌었어요. 목록을 다시 확인해 주세요.',DEMO_SETTINGS_CHANGED:'다른 창에서 홈페이지를 수정했어요. 작성한 내용은 남겨 두었으니 최신 내용을 확인해 주세요.',
  DEMO_PROFILE_CHANGED:'다른 창에서 정보를 수정했어요. 작성한 내용은 남겨 두었으니 최신 내용을 확인해 주세요.',DEMO_REQUEST_CHANGED:'이 요청의 내용이 달라졌어요. 원래 요청 결과부터 확인해 주세요.',
  DEMO_PERMISSION_REQUIRED:'이 계정에서는 할 수 없는 작업이에요.',DEMO_PROBE_NOT_ALLOWED:'점검용 체험은 등록된 통합관리자만 준비할 수 있어요.',DEMO_WRITE_LIMIT:'이 체험 공간에서 준비한 저장 횟수를 모두 사용했어요.',
- DEMO_INPUT_INVALID:'입력한 내용과 길이를 확인해 주세요.',DEMO_FILE_LIMIT:'이 체험에 준비한 첨부 용량을 모두 사용했어요. 안내 부스로 문의해 주세요.',
+ DEMO_INPUT_INVALID:'입력한 내용과 길이를 확인해 주세요.',DEMO_FILE_LIMIT:'이 체험에 준비한 첨부 용량을 모두 사용했어요. 안내 부스로 문의해 주세요.',DEMO_DOWNLOAD_LIMIT:'이 체험에 준비한 파일 열기 한도를 모두 사용했어요. 안내 부스로 문의해 주세요.',
  DEMO_FILE_UNAVAILABLE:'첨부파일의 업로드 상태를 확인해 주세요. 이미 다른 문서에 사용한 파일은 다시 첨부할 수 없어요.'};
  return Object.entries(messages).find(([k])=>s.includes(k))?.[1]||'처리 결과를 확인하지 못했어요. 같은 요청으로 다시 확인해 주세요.';
 }

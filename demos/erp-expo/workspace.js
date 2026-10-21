@@ -177,7 +177,7 @@ window.ExpoAttachmentCheck=async function({otherWorkspace=crypto.randomUUID(),ot
  const listed=await client.rpc('erp_demo_file',{p_action:'list',p_data:{workspace:model.workspace}});
  const wrong=await client.rpc('erp_demo_file',{p_action:'list',p_data:{workspace:otherWorkspace}});
  const file=listed.data?.[0];let ownDownload=false,signBlocked=false;
- if(file){const read=await client.storage.from('attachments').download(file.path);ownDownload=!read.error&&read.data?.size===file.size;
+ if(file){try{const read=await attachments.fetchFile(file);ownDownload=read.size===file.size;}catch{}
   const signed=await client.storage.from('attachments').createSignedUrl(file.path,3600);signBlocked=!!signed.error;}
  const other=await client.storage.from('attachments').download(otherPath);
  return {ownFileAvailable:!!file,ownDownload,signBlocked,wrongWorkspaceBlocked:!!wrong.error,otherFileBlocked:!!other.error};

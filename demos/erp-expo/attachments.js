@@ -35,11 +35,19 @@ export function createAttachments({getModel,isEnded,onChange,onList,message}){
  }
  async function download(row){
   if(isEnded())return;const workspace=getModel()?.workspace;
-  try{const {data,error}=await client.storage.from('attachments').download(row.path);if(error||!data)throw error||Error();
+  try{const data=await fetchFile(row);
    if(isEnded()||workspace!==getModel()?.workspace)return;
    const url=URL.createObjectURL(data);urls.add(url);const a=document.createElement('a');a.href=url;a.download=row.name;a.click();
    setTimeout(()=>{URL.revokeObjectURL(url);urls.delete(url);},30000);
-  }catch{if(!isEnded())message('파일을 열지 못했어요. 체험 시간이 남아 있다면 다시 눌러 주세요.',true);}
+  }catch(error){if(!isEnded())message(String(error?.message||'').includes('DEMO_DOWNLOAD_LIMIT')?codeMessage('DEMO_DOWNLOAD_LIMIT'):'파일을 열지 못했어요. 체험 시간이 남아 있다면 다시 눌러 주세요.',true);}
+ }
+ async function fetchFile(row){
+  const m=getModel();if(!m||isEnded())throw Error('DEMO_ACCESS_ENDED');
+  const {data,error,response}=await client.functions.invoke('erp-expo-file',{body:{workspace:m.workspace,id:row.id}});
+  if(error){let code;try{code=(await error.context.json()).error;}catch{}throw Error(code==='DEMO_DOWNLOAD_LIMIT'?code:'DEMO_FILE_UNAVAILABLE');}
+  if(!(data instanceof Blob)||data.size!==row.size)throw Error('DEMO_FILE_UNAVAILABLE');
+  const mime=response?.headers.get('X-Coop-File-Mime')||'application/octet-stream';
+  return new Blob([data],{type:mime});
  }
  input.addEventListener('change',()=>{
   if(isEnded()||uploading)return;
@@ -78,7 +86,7 @@ export function createAttachments({getModel,isEnded,onChange,onList,message}){
   finally{uploading=false;render();onList(rows);}
  });
  return {
-  refresh,download,rows:()=>rows,ids:()=>[...selected],hasDraft:()=>choices.length>0||selected.size>0,
+  refresh,download,fetchFile,rows:()=>rows,ids:()=>[...selected],hasDraft:()=>choices.length>0||selected.size>0,
   canSubmit:()=>!uploading&&!choices.length,
   submitted(ids){selected=new Set([...selected].filter(id=>!ids.includes(id)));remember();render();},
   block(){++generation;for(const url of urls)URL.revokeObjectURL(url);urls.clear();document.getElementById('sampleAttachment').disabled=true;render();},
