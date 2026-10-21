@@ -1,7 +1,11 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2.112.2';
 const origin=location.hostname;
+const requestHeaders={'x-public-host':origin};
+// Like the real member portal, a member uses PUBLIC tenant context. An ERP
+// header deliberately resolves only employees and would block own-profile saves.
+if(!/^expo-member-0[1-8]\.coopco\.kr$/.test(origin))requestHeaders['x-erp-host']=origin;
 export const client=createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{
- global:{headers:{'x-erp-host':origin,'x-public-host':origin}},
+ global:{headers:requestHeaders},
  auth:{persistSession:origin!=='expo.coopco.kr',autoRefreshToken:origin!=='expo.coopco.kr',detectSessionInUrl:false}
 });
 export function codeMessage(code){

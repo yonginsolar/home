@@ -14,7 +14,7 @@ button.addEventListener('click',async()=>{
    const a=document.createElement('a');a.className='button';a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=labels[item.role];links.append(a);
   }
   links.hidden=false;status.textContent='준비됐어요! 직원 화면에서 작성한 뒤 관리자 화면에서 승인해 보세요.';button.textContent='역할별 링크 다시 확인';
- }catch(e){status.textContent=codeMessage(e.message);button.textContent='같은 체험 다시 확인';if(String(e.message).includes('TICKET_ENDED')){sessionStorage.removeItem(ticketKey);button.textContent='새 체험 시작';}}
+ }catch(e){links.hidden=true;status.textContent=codeMessage(e.message);button.textContent='같은 체험 다시 확인';if(String(e.message).includes('TICKET_ENDED')){sessionStorage.removeItem(ticketKey);button.textContent='새 체험 시작';}}
  finally{busy=false;button.disabled=false;}
 });
 if(probe){button.disabled=false;button.dataset.ready='true';status.textContent='버튼을 누르면 새 점검 공간을 준비해요.';}
