@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: v1.3.6 | 2026-10-20 — retain employee routes and invalidate obsolete attachment reads. */
+/* Version: v1.3.7 | 2026-10-21 — mark exhibition-only document previews and PDF output. */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -1359,6 +1359,7 @@ async function signContract(id, role, button) {
 }
 
 function contractOutputState(contract) {
+  if (window.ExpoRuntimeBridge) return 'DEMO';
   if (contract.status === 'completed' && asText(contract.content_hash)) return 'COMPLETED';
   if (contract.status === 'awaiting_signatures') return 'SIGNING';
   return 'DRAFT';
@@ -1370,6 +1371,7 @@ function contractVerificationCode(contract) {
 }
 
 function renderIntegrityNotice(contract) {
+  if (window.ExpoRuntimeBridge) return '<div class="integrity-note"><strong>🌱 박람회 시연용 예시 문서</strong><br>체험용 가상 정보로 작성한 문서입니다.</div>';
   const hash = asText(contract.content_hash);
   if (!hash) {
     return '<div class="integrity-note"><strong>미확정 문서 안내</strong><br>전자 확인이 완료되기 전의 초안 또는 진행 중 문서입니다. 확정 계약서는 ERP에 보관된 완료 문서와 대조해 주세요.</div>';
