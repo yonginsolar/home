@@ -114,6 +114,7 @@ export const runtimeAssets = new Set([
  "erp/employment_contracts.js",
  "erp/erp_runtime_guard.js",
  "erp/erp_theme.css",
+ "erp/expo_employee_certificate.js",
  "erp/festival_income.css",
  "erp/festival_income.js",
  "erp/festival_receipts.css",

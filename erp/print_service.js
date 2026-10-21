@@ -1,4 +1,4 @@
-/* Version: v1.0.11 | Change: 2026-05-10 - Support payroll over-deduction settlement in salary statements and legacy ledger output. */
+/* Version: v1.0.12 | Change: 2026-10-22 - Add an explicit exhibition certificate notice without changing ordinary documents. */
 const PrintService = {
     // 1. 공통 CSS 스타일 (유지보수를 위해 이곳에서 통합 관리)
     styles: {
@@ -266,6 +266,7 @@ const PrintService = {
 
     // 4. [기능] 재직/경력증명서 출력
     printCert: function(data) {
+        const simulationNotice=data?.simulation===true?'<style>.print-cert td,.print-cert th{font-size:11pt!important}.print-cert{font-size:11pt}</style><div style="text-align:center;font-weight:700;color:#8a4300;font-size:11pt">DEMO · 박람회 체험용 / 실제 증명서로 사용할 수 없어요</div>':'';
         const safeLogoUrl = this.safeUrl(data?.logo, true);
         const safeSiteUrl = this.escapeHtml(String(data?.siteUrl || '').trim());
         const safeDocNum = this.escapeHtml(data?.docNum);
@@ -299,6 +300,7 @@ const PrintService = {
         });
         const content = `
         <div class="print-cert" style="padding: 20px; height: 100%; box-sizing: border-box; position: relative;">
+            ${simulationNotice}
             ${safeLogoUrl ? `<img src="${safeLogoUrl}" style="position:absolute; left:20px; top:20px; height:45px;">` : ''}
             ${safeSiteUrl ? `<div style="text-align:right; font-size:12px; margin-top:20px; margin-bottom:5px;">${safeSiteUrl}</div>` : ''}
             <h2 style="text-align:center; font-size: 32px; text-decoration: underline; margin: 50px 0 40px 0; font-weight: bold;">${safeCertTitle.replace(/\s+/g, '').split('').join(' ')}</h2>
