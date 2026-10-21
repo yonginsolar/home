@@ -1,5 +1,5 @@
 /* Published election results 1.0.0. No writes, tally recomputation or notifications. */
-import { AdminService } from './AdminService.js?v=20261021-expo-2';
+import { AdminService } from './AdminService.js?v=20261021-1';
 const service = new AdminService();
 const id = new URL(location.href).searchParams.get('id') || '';
 const byId = value => document.getElementById(value);
