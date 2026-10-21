@@ -58,6 +58,7 @@
   if(stopped)return;stopped=true;verified=false;finish(false);
   for(const client of clients)client.auth?.stopAutoRefresh?.();
   window.CoopDialog?.cancelAll(window);banner();controls();
+  if(window.top!==window.self)window.top.postMessage({type:'erp-expo-ended'},location.origin);
   for(const frame of document.querySelectorAll('iframe'))frame.contentWindow?.postMessage({type:'erp-expo-ended'},location.origin);
  }
  const unavailable=()=>Response.json({code:'PT403',message:stopped?'DEMO_ACCESS_ENDED':'DEMO_CONTEXT_CHANGED'},{status:403});
@@ -74,6 +75,13 @@
   headers.set('x-public-host',location.hostname);
   if(member)headers.delete('x-erp-host');else headers.set('x-erp-host',location.hostname);
   const result=await nativeFetch(new Request(request,{headers}));
+  // A lease may be closed before the cached expiry. Only the server's exact
+  // demo boundary errors end the workspace; ordinary per-menu denials do not.
+  if(result.status===403&&url.pathname.startsWith('/rest/v1/')){
+   try{const failure=await result.clone().json();
+    if(failure.code==='PT403'&&['DEMO_ACCESS_ENDED','DEMO_CONTEXT_CHANGED'].includes(failure.message))stop();
+   }catch{}
+  }
   // Bounded diagnostic metadata only. Never retain headers, URL queries,
   // request/response bodies, Auth data, file names or storage object paths.
   if(/^\/(rest|functions)\/v1\//.test(url.pathname)){
@@ -118,7 +126,11 @@
  intercept('CoopCheckedUploads',uploads=>uploads?.install?Object.freeze({...uploads,install(client){return install(uploads.install(client));}}):uploads);
  // Module-only clients can opt in without exposing Auth/session contents.
  window.ExpoRuntimeBridge=Object.freeze({install,authOptions,status:()=>({workspace,verified,stopped}),diagnostics:()=>diagnostics.map(row=>({...row}))});
- window.addEventListener('message',e=>{if(e.origin===location.origin&&(e.source===window.parent||e.source===window.top)&&e.data?.type==='erp-expo-ended')stop();});
+ window.addEventListener('message',e=>{
+  if(e.origin!==location.origin||e.data?.type!=='erp-expo-ended')return;
+  const ownFrame=[...document.querySelectorAll('iframe')].some(frame=>frame.contentWindow===e.source);
+  if(e.source===window.parent||e.source===window.top||ownFrame)stop();
+ });
  document.addEventListener('click',e=>{
   // Exhibition visitors need not supply personal documents/photos. The guided
   // private-attachment exercise remains available outside this unchanged-page

@@ -48,6 +48,7 @@ export const runtimeEntries = new Set([
  "vote/poll_admin.html",
  "vote/poll_setup.html",
  "vote/poll_vote.html",
+ "vote/results.html",
  "vote/vote.html"
 ]);
 export const runtimeAssets = new Set([
@@ -294,5 +295,7 @@ export const runtimeAssets = new Set([
  "vote/poll_setup.html",
  "vote/poll_vote.html",
  "vote/style.css",
+ "vote/results.html",
+ "vote/results.js",
  "vote/vote.html"
 ]);
