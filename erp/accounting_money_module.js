@@ -280,7 +280,12 @@ window.AccountingMoney = (() => {
                 }
                 $('moneyEditor').hidden = true;
             }
-            const refreshed = await Promise.allSettled([loadCases, refreshDashboard, loadHistory].map(read => Promise.resolve().then(read)));
+            // An inactive history tab intentionally returns false without a read.
+            // Invalidate its old cursor, but do not label that deferral a failure.
+            const reads = [loadCases, refreshDashboard];
+            if (document.getElementById('tabHistory')?.classList.contains('active')) reads.push(loadHistory);
+            else window.CoopAccountingHistory?.invalidate();
+            const refreshed = await Promise.allSettled(reads.map(read => Promise.resolve().then(read)));
             const refreshFailed = refreshed.some(item => item.status === 'rejected' || item.value === false);
             showAlert('완료', refreshFailed ? '장부에 저장했습니다. 화면을 갱신하지 못했으니 목록을 다시 조회해 주세요. 다시 저장할 필요는 없습니다.' : result.replayed ? '이미 반영한 내역입니다. 장부에 중복으로 기록하지 않았습니다.' : '장부와 처리 내역에 반영했습니다.');
         } catch (error) {
