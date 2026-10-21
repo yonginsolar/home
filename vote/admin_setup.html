@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.21
-Change: 2026-10-19 - Use clear action names in election setup guidance.
+Version: v1.0.22
+Change: 2026-10-21 - Published result view and unique-person turnout.
 -->
 <html lang="ko" data-election-ui="admin_setup" data-election-role="admin">
 <head>
@@ -19,7 +19,7 @@ Change: 2026-10-19 - Use clear action names in election setup guidance.
     <meta name="election-term-version" content="1.1.0">
     <link rel="modulepreload" href="/vote/election_term.js?v=1.1.0" integrity="sha384-jO+llWE0vA0SmVki/uznt+LVFTYVYgDRHfP3nSN1GkYUnlgE39tn58cAsw58jLNt" crossorigin="anonymous">
     <link rel="modulepreload" href="/vote/election_term_planner.js?v=1.0.1" integrity="sha384-nFn6by7tez+ronZuxBjsAH5+MBhK/ffbg1fQjTU7ZUyhtTKwz9Y/B12n38lQ3BN/" crossorigin="anonymous">
-    <script>console.log('[Version] v1.0.21 | admin_setup.html');</script>
+    <script>console.log('[Version] v1.0.22 | admin_setup.html');</script>
 
 <style>
     /* [기본 변수] */
@@ -374,6 +374,8 @@ Change: 2026-10-19 - Use clear action names in election setup guidance.
             <div style="display:flex; justify-content:space-between; margin-bottom:10px;"><span>투표 기간</span> <span id="modal-period">-</span></div>
             <div style="display:flex; justify-content:space-between; margin-bottom:10px;"><span>총 유권자</span> <span><strong id="modal-total">0</strong>명</span></div>
             <div style="display:flex; justify-content:space-between; margin-bottom:10px;"><span>투표 참여</span> <span><strong id="modal-current">0</strong>명 (<span id="modal-rate">0</span>%)</span></div>
+            <p id="history-state" role="status"></p>
+            <button type="button" id="history-retry" class="btn-control" hidden>다시 확인</button>
             <div style="margin-top:20px; text-align:center;">
                 <button id="btn-go-result" class="btn-modal btn-confirm" style="width:100%;">상세 결과 보기 ></button>
             </div>
@@ -422,7 +424,7 @@ function escapeJsString(value) {
         .replace(/\r/g, '\\r')
         .replace(/\n/g, '\\n');
 }
-    import { AdminService } from './AdminService.js?v=20261005-2';
+    import { AdminService } from './AdminService.js?v=20261021-1';
     import { supabase } from './ElectionService.js';
     /* election-term:start */
     import { readElectionTerm, showElectionTermHelp, createElectionTermEditor, sameElectionTermPlan } from './election_term.js?v=1.1.0';
@@ -1819,28 +1821,42 @@ window.createElection = async () => {
 // End of function createElection
 
 
+    let historyRequest = 0, historyAbort = null, historyElection = null;
     window.openHistoryModal = async (el) => {
+        historyElection = el;
+        const request = ++historyRequest;
+        historyAbort?.abort();
+        const controller = historyAbort = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15000);
         const modal = document.getElementById('history-modal');
+        modal.style.display = 'flex';
         document.getElementById('modal-title').innerText = el.title;
         // 날짜 표기 변경 (투표 기간)
         const vStart = formatVoteSetupKstDate(el.vote_start_at, '-');
         const vEnd = formatVoteSetupKstDate(el.vote_end_at, '-');
         document.getElementById('modal-period').innerText = `${vStart} ~ ${vEnd}`;
-
+        for (const id of ['modal-total','modal-current','modal-rate']) document.getElementById(id).innerText = '—';
+        document.getElementById('history-state').textContent = '투표 참여 현황을 확인하고 있어요…';
+        document.getElementById('history-retry').hidden = true;
+        document.getElementById('btn-go-result').onclick = () => {
+            window.open(`/vote/results.html?id=${encodeURIComponent(el.id)}`, '_blank', 'noopener');
+        };
         try {
-            const stats = await adminService.getTurnoutStats(el.id);
+            const stats = await adminService.getPublishedSummary(el.id, { signal: controller.signal });
+            if (request !== historyRequest) return;
             document.getElementById('modal-total').innerText = stats.total;
             document.getElementById('modal-current').innerText = stats.current;
             document.getElementById('modal-rate').innerText = stats.percent;
-        } catch(e) { console.error(e); }
-
-        document.getElementById('btn-go-result').onclick = () => {
-            window.open(`monitor.html?id=${el.id}`, '_blank');
-        };
-        modal.style.display = 'flex';
+            document.getElementById('history-state').textContent = '같은 사람은 한 번만 세며, 이번 회차에 한 번이라도 투표한 인원을 표시해요.';
+        } catch(e) {
+            if (request !== historyRequest) return;
+            document.getElementById('history-state').textContent = '참여 현황을 불러오지 못했어요. 다시 확인해 주세요.';
+            document.getElementById('history-retry').hidden = false;
+        } finally { clearTimeout(timer); }
     };
-
+    document.getElementById('history-retry').onclick = () => { if (historyElection) void openHistoryModal(historyElection); };
     window.closeHistoryModal = () => {
+        ++historyRequest; historyAbort?.abort(); historyElection = null;
         document.getElementById('history-modal').style.display = 'none';
     };
 

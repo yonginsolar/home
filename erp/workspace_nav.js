@@ -78,7 +78,7 @@
       || (path === 'admin_member' && params.get('scope') === 'documents_admin')
       || (path === 'participation' && params.get('view') === 'meeting');
     if (leaf === 'participation') return path === leaf && (params.get('view') || 'education') === 'education';
-    if (leaf === 'vote_hub') return path === leaf || /\/vote\/(?:admin|admin_setup|poll_admin|poll_setup)(?:\.html)?\/?$/.test(pageUrl.pathname);
+    if (leaf === 'vote_hub') return path === leaf || /\/vote\/(?:admin|admin_setup|poll_admin|poll_setup|results)(?:\.html)?\/?$/.test(pageUrl.pathname);
     return path === leaf;
   }
 

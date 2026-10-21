@@ -14,7 +14,7 @@
       const leaf = path.split('/').pop();
       if (!(path === '/erp/' + leaf && pages.has(leaf))
         && !/^\/minutes\/(?:meeting_workspace|admin_minutes)$/.test(path)
-        && !/^\/vote\/(?:admin|admin_setup|poll_admin|poll_setup)$/.test(path)) return null;
+        && !/^\/vote\/(?:admin|admin_setup|poll_admin|poll_setup|results)$/.test(path)) return null;
       return path + '.html' + target.search + target.hash;
     } catch (_) { return null; }
   }

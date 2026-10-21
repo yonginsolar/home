@@ -1,6 +1,6 @@
 /*
-Version: v1.0.13
-Change: 2026-10-05 - Election-only member lookup, participation and closed-election aggregate tally.
+Version: v1.0.14
+Change: 2026-10-21 - Unique-person turnout and saved published result summary.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -124,15 +124,20 @@ export class AdminService {
     // 5. [모니터링] 실시간 투표율 집계
     // RLS 때문에 일반 유저는 못 쓰는 쿼리
     async getTurnoutStats(electionId) {
-        const participation = await this.getParticipation(electionId);
-        const totalVoters = participation.length;
-        const currentVotes = participation.filter(row => row.has_voted).length;
+        const { total, current, percent } = await this.getPublishedSummary(electionId);
+        return { total, current, percent };
+    }
 
-        return {
-            total: totalVoters,
-            current: currentVotes,
-            percent: totalVoters ? ((currentVotes / totalVoters) * 100).toFixed(1) : 0
-        };
+    async getPublishedSummary(electionId, options = {}) {
+        let request = supabase.rpc('get_election_admin_summary', { p_election_id: electionId });
+        if (options.signal) request = request.abortSignal(options.signal);
+        const { data, error } = await request;
+        if (error) throw error;
+        if (!data || !Number.isSafeInteger(data.total) || !Number.isSafeInteger(data.current)
+            || data.total < 0 || data.current < 0 || data.current > data.total) {
+            throw new Error('ELECTION_SUMMARY_UNAVAILABLE');
+        }
+        return data;
     }
 
     // 6. [개표] 결과 가져오기 (관리자 전용)
