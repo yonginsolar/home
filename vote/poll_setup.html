@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.2
-Change: 2026-10-11 - Preserve held poll drafts and use the existing server preference authority.
+Version: v1.0.3
+Change: 2026-10-21 - Protect expo poll drafts and confirm atomic save results without duplicate creation.
 -->
 <html lang="ko" data-election-ui="poll_setup" data-election-role="admin">
 <head>
@@ -15,7 +15,7 @@ Change: 2026-10-11 - Preserve held poll drafts and use the existing server prefe
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선호도 투표 설정</title>
-    <script>console.log('[Version] v1.0.2 | poll_setup.html');</script>
+    <script>console.log('[Version] v1.0.3 | poll_setup.html');</script>
     <style>
         :root {
             --bg: #f4f7fb;
@@ -329,11 +329,11 @@ Change: 2026-10-11 - Preserve held poll drafts and use the existing server prefe
 </div>
 
 <script type="module">
-    import { PreferencePollService, derivePreferencePollPhase, supabase } from './PreferencePollService.js?v=20261011-2';
+    import { PreferencePollService, derivePreferencePollPhase, supabase } from './PreferencePollService.js?v=20261021-expo-1';
 
     const service = new PreferencePollService();
     const urlParams = new URLSearchParams(window.location.search || '');
-    const currentPollId = String(urlParams.get('id') || '').trim();
+    let currentPollId = String(urlParams.get('id') || '').trim();
     const optionListEl = document.getElementById('optionList');
     const minChoicesEl = document.getElementById('pollMinChoices');
     const maxChoicesEl = document.getElementById('pollMaxChoices');
@@ -347,6 +347,24 @@ Change: 2026-10-11 - Preserve held poll drafts and use the existing server prefe
 
     let optionState = [];
     let loadedPoll = null;
+    let expoSavedForm = null, expoPollBusy = false, expoControlRestore = null, expoPublishUnknown = false;
+    const expoPollVisible = () => !document.hidden && !window.frameElement?.hidden;
+    function holdExpoPollControls() {
+        if (expoControlRestore) return;
+        const controls = [...document.querySelectorAll('input,textarea,select,button')].filter(n => n.id !== 'btnSaveDraft');
+        const states = controls.map(n => [n,n.disabled]);
+        controls.forEach(n => n.disabled = true);
+        expoControlRestore = () => {
+            if (!globalThis.ExpoRuntimeBridge?.status?.().stopped) states.forEach(([n,disabled]) => n.disabled = disabled);
+            expoControlRestore = null;
+        };
+    }
+    window.addEventListener('beforeunload', event => {
+        if (!globalThis.ExpoRuntimeBridge) return;
+        if (expoPollBusy || service.expoPendingSave || (expoSavedForm !== null && JSON.stringify(readFormPayload()) !== expoSavedForm)) {
+            event.preventDefault(); event.returnValue = '';
+        }
+    });
 
     function escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -544,9 +562,39 @@ Change: 2026-10-11 - Preserve held poll drafts and use the existing server prefe
         maxChoicesEl.value = String(Math.max(1, Number(poll.max_choices) || 1));
         syncChoiceSelectors(true);
         setStatusBox(poll);
+        if (globalThis.ExpoRuntimeBridge) expoSavedForm = JSON.stringify(readFormPayload());
+    }
+
+    async function saveExpoDraft() {
+        if (expoPollBusy) return;
+        const btn = document.getElementById('btnSaveDraft');
+        expoPollBusy = true; holdExpoPollControls(); btn.disabled = true; btn.textContent = '저장 중...';
+        try {
+            const owner = await service.initializeAdminContext();
+            if (!owner?.canAdmin) throw Object.assign(new Error('현재 저장 권한을 확인하지 못했어요.'), {code:'42501'});
+            const id = await service.savePoll({...readFormPayload(),expectedUpdatedAt:loadedPoll?.updated_at || null});
+            const saved = service.lastExpoSavedPoll;
+            currentPollId = id; loadedPoll = saved.poll;
+            optionState = saved.options.map(o => ({id:o.id,label:o.label || ''}));
+            renderOptionList(); setStatusBox(loadedPoll);
+            const target = new URL(location.href); target.searchParams.set('id',id);
+            history.replaceState(history.state,'',target.href);
+            expoSavedForm = JSON.stringify(readFormPayload());
+            if (expoPollVisible()) showAlert('저장 완료','선호도 투표 초안을 저장했어요.');
+        } catch (error) {
+            if (expoPollVisible()) showAlert(service.expoPendingSave ? '저장 결과 확인' : '저장하지 못했어요', service.expoPendingSave
+                ? '처리 결과를 확인하지 못했어요. 저장 결과 확인을 눌러 같은 요청을 확인해주세요.'
+                : error.message || '입력한 내용을 확인한 뒤 다시 시도해주세요.');
+        } finally {
+            expoPollBusy = false;
+            if (!service.expoPendingSave) expoControlRestore?.();
+            btn.disabled = globalThis.ExpoRuntimeBridge?.status?.().stopped === true;
+            btn.textContent = service.expoPendingSave ? '저장 결과 확인' : '초안 저장';
+        }
     }
 
     async function saveDraft() {
+        if (globalThis.ExpoRuntimeBridge) return saveExpoDraft();
         const btn = document.getElementById('btnSaveDraft');
         const previousLabel = btn.textContent;
         btn.disabled = true;
@@ -568,6 +616,34 @@ Change: 2026-10-11 - Preserve held poll drafts and use the existing server prefe
     }
 
     async function publishPoll() {
+        if (globalThis.ExpoRuntimeBridge && expoPublishUnknown) {
+            if (expoPollBusy) return;
+            const btn = document.getElementById('btnPublish');
+            expoPollBusy = true; btn.disabled = true;
+            try {
+                const owner = await service.initializeAdminContext();
+                if (!owner?.canAdmin) throw new Error('현재 조회 권한을 확인하지 못했어요.');
+                const {poll} = await service.getAdminPoll(currentPollId,{includeRewardPolicy:false});
+                if (!poll || globalThis.ExpoRuntimeBridge.status?.().stopped) throw new Error('공개 결과를 확인하지 못했어요.');
+                setStatusBox(poll); expoPublishUnknown = false;
+                if (expoPollVisible()) showAlert('공개 결과 확인',poll.status==='DRAFT'
+                    ? '초안 상태로 확인됐어요. 내용을 확인한 뒤 다시 공개할 수 있어요.'
+                    : '공개된 상태로 확인됐어요.');
+            } catch (error) {
+                if (expoPollVisible()) showAlert('공개 결과 확인',error.message || '잠시 후 다시 확인해주세요.');
+            } finally {
+                expoPollBusy = false;
+                if (!expoPublishUnknown) expoControlRestore?.();
+                btn.disabled = globalThis.ExpoRuntimeBridge.status?.().stopped === true;
+                btn.textContent = expoPublishUnknown ? '공개 결과 확인' : '대상자 확정·공개';
+                document.getElementById('btnSaveDraft').disabled = expoPublishUnknown || btn.disabled;
+            }
+            return;
+        }
+        if (globalThis.ExpoRuntimeBridge && (expoPollBusy || service.expoPendingSave || JSON.stringify(readFormPayload()) !== expoSavedForm)) {
+            showAlert('공개 전 확인','작성 중인 내용을 먼저 저장해주세요.'); return;
+        }
+        const expoPoint = globalThis.ExpoRuntimeBridge ? JSON.stringify(readFormPayload()) : null;
         const pollId = currentPollId || '';
         if (!pollId) {
             showAlert('공개 전 확인', '먼저 초안을 저장한 뒤 공개해주세요.');
@@ -575,20 +651,35 @@ Change: 2026-10-11 - Preserve held poll drafts and use the existing server prefe
         }
         const ok = await showConfirm('대상자 확정 후 공개', '현재 조합의 정상 조합원 전체를 대상으로 스냅샷을 확정하고 공개합니다. 계속할까요?');
         if (!ok) return;
+        if (globalThis.ExpoRuntimeBridge && (!expoPollVisible() || expoPollBusy || expoPoint !== JSON.stringify(readFormPayload()))) return;
 
         const btn = document.getElementById('btnPublish');
         const previousLabel = btn.textContent;
         btn.disabled = true;
         btn.textContent = '공개 중...';
+        if (globalThis.ExpoRuntimeBridge) {
+            expoPollBusy = true; holdExpoPollControls(); document.getElementById('btnSaveDraft').disabled = true;
+        }
+        let expoPublishCommitted = false;
         try {
             const result = await service.publishPoll(pollId);
-            showAlert('공개 완료', `대상자 ${result?.voter_count || 0}명을 기준으로 투표를 공개했습니다.`);
+            expoPublishCommitted = !!globalThis.ExpoRuntimeBridge && result?.ok === true;
+            if (!globalThis.ExpoRuntimeBridge || expoPollVisible()) showAlert('공개 완료', `대상자 ${result?.voter_count || 0}명을 기준으로 투표를 공개했습니다.`);
             await loadPoll();
         } catch (error) {
-            showAlert('공개 실패', error.message || '투표 공개에 실패했습니다.');
+            if (globalThis.ExpoRuntimeBridge && (expoPublishCommitted || !['22023','22P02','42501','PT409','PT403','P0001'].includes(String(error.code || '')))) expoPublishUnknown = true;
+            if (!globalThis.ExpoRuntimeBridge || expoPollVisible()) showAlert(expoPublishUnknown ? '공개 결과 확인' : '공개 실패',
+                expoPublishCommitted ? '공개했어요. 화면을 갱신하지 못해 공개 결과 확인이 필요해요.'
+                    : expoPublishUnknown ? '처리 결과를 확인하지 못했어요. 공개 결과 확인을 눌러 상태를 확인해주세요.' : error.message || '투표 공개에 실패했습니다.');
         } finally {
             btn.disabled = false;
             btn.textContent = previousLabel;
+            if (globalThis.ExpoRuntimeBridge) {
+                expoPollBusy = false; if (!expoPublishUnknown) expoControlRestore?.();
+                btn.disabled = globalThis.ExpoRuntimeBridge.status?.().stopped === true;
+                btn.textContent = expoPublishUnknown ? '공개 결과 확인' : previousLabel;
+                document.getElementById('btnSaveDraft').disabled = expoPublishUnknown || btn.disabled;
+            }
         }
     }
 
@@ -606,6 +697,7 @@ Change: 2026-10-11 - Preserve held poll drafts and use the existing server prefe
         void window.ErpWorkspace?.connect(supabase);
         optionState = [{ id: null, label: '' }, { id: null, label: '' }];
         renderOptionList();
+        if (globalThis.ExpoRuntimeBridge) expoSavedForm = JSON.stringify(readFormPayload());
         document.getElementById('btnAddOption').addEventListener('click', () => {
             if (optionState.length >= 9) {
                 showAlert('옵션 제한', '옵션은 최대 9개까지만 등록할 수 있습니다.');

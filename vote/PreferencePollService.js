@@ -1,6 +1,6 @@
 /*
-Version: v1.0.2
-Change: 2026-10-11 - Use fresh server poll authority and explicitly defer unused reward reads.
+Version: v1.0.3
+Change: 2026-10-21 - Atomic expo-only draft replay; preserve operating poll calls.
 */
 import { supabase, resolveCurrentMemberProfileId } from './ElectionService.js';
 export { supabase };
@@ -195,6 +195,7 @@ export class PreferencePollService {
     }
 
     async savePoll(payload = {}) {
+        if (globalThis.ExpoRuntimeBridge) return this.saveExpoPoll(payload);
         if (!this.currentCoopId) this.currentCoopId = await getRuntimeCoopId();
         const options = normalizeOptions(payload.options);
         if (options.length < 2) throw new Error('옵션은 최소 2개 이상 필요합니다.');
@@ -315,6 +316,35 @@ export class PreferencePollService {
         }
 
         return nextPollId;
+    }
+
+    async saveExpoPoll(payload = {}) {
+        if (!this.expoPendingSave) {
+            this.expoPendingSave = {
+                request: crypto.randomUUID(),
+                data: {
+                    id: String(payload.id || ''), title: String(payload.title || '').trim(),
+                    description: String(payload.description || ''), start_at: payload.startAt, end_at: payload.endAt,
+                    min_choices: payload.minChoices, max_choices: payload.maxChoices,
+                    allow_revote: payload.allowRevote !== false,
+                    option_order_mode: payload.optionOrderMode === 'FIXED' ? 'FIXED' : 'RANDOM_PER_MEMBER',
+                    options: (payload.options || []).map(o => ({ id: o.id || null, label: String(o.label || '').trim() })),
+                    expected_updated_at: payload.expectedUpdatedAt || null
+                }
+            };
+        }
+        const pending = this.expoPendingSave;
+        const { data, error } = await supabase.rpc('erp_demo_save_preference_poll', {
+            p_request: pending.request, p_data: pending.data
+        });
+        if (error) {
+            if (['22023','22P02','42501','PT409','PT403','23514','23505'].includes(String(error.code || ''))) this.expoPendingSave = null;
+            throw error;
+        }
+        if (!data?.poll_id || !data.poll || !Array.isArray(data.options)) throw new Error('저장 결과를 확인하지 못했어요. 같은 요청으로 다시 확인해주세요.');
+        this.lastExpoSavedPoll = data;
+        this.expoPendingSave = null;
+        return data.poll_id;
     }
 
     async publishPoll(pollId) {
