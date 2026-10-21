@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.85
+Version: v1.2.86
 Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, retaining drafts and files.
 -->
 <html lang="ko">
@@ -15,7 +15,7 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.85 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.86 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -2584,6 +2584,7 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
             if (!rawUrl) return '';
             const trimmed = String(rawUrl).trim();
             if (!trimmed) return '';
+            if (window.ExpoRuntimeBridge && trimmed === 'expo-demo-confirmation') return '';
 
             if (trimmed.startsWith('http')) {
                 const parsed = parseStorageUrl(trimmed);
@@ -2727,6 +2728,7 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
 
         function buildMinuteCertificationPreviewHtml(minute, signatures) {
             if (!isMinuteSignatureFullyCompleted(minute, signatures || [])) return '';
+            if (window.ExpoRuntimeBridge) return '<p style="padding:10px;border:1px solid #a7f3d0;background:#ecfdf5;color:#065f46;">🌱 박람회 시연용 예시 문서 · 예시 확인 완료</p>';
             return `
                 <div style="margin-bottom:14px; padding:10px 14px; border:1px solid #cbd5e1; border-radius:14px; background:#eff6ff;">
                     <div style="font-size:0.82rem; font-weight:800; color:#1d4ed8; margin-bottom:4px;">전자서명 완료 문서 출력본</div>
@@ -2995,6 +2997,9 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
             const originalBodyHtml = minute?.content
                 ? sanitizeHtml(normalizeMinuteContent(minute.content))
                 : '<div style="color:#64748b;">내용이 없습니다.</div>';
+            if (window.ExpoRuntimeBridge) return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>${title}</title><style>
+                @page{size:A4;margin:18mm}body{font-family:system-ui,sans-serif;color:#172033;line-height:1.7}.expo-watermark{position:fixed;top:42%;left:18%;font-size:90px;font-weight:800;color:rgba(16,100,70,.16);transform:rotate(-25deg);pointer-events:none}main{position:relative}img,table{max-width:100%}table{width:100%}header{border-bottom:2px solid #10b981;padding-bottom:10px;margin-bottom:18px}header p{font-size:13px}@media print{.expo-watermark{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+                </style></head><body><div class="expo-watermark">DEMO</div><main><header><strong>🌱 박람회 시연용 예시 문서</strong><p>체험용 가상 정보와 예시 확인을 담은 문서입니다.</p></header><h1>${title}</h1><p>${typeLabel} · 작성일 ${dateLabel}</p>${originalBodyHtml}</main></body></html>`;
             const bodyHtml = await injectInlineSignatureImages(originalBodyHtml, minute, signatures || []);
             const signaturePrintHtml = bodyHtml === originalBodyHtml
                 ? await buildMinuteSignaturePrintHtml(minute, signatures || [])
