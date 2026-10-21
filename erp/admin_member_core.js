@@ -716,6 +716,7 @@ bindIssueDocModalFocusGuard();
 const ADMIN_MEMBER_MODAL_Z_INDEX = {
     excelModal: 1055,
     capitalImportModal: 1055,
+    memberWorkbookModal: 1055,
     memberCreateModal: 1055,
     memberCertificateSettingsModal: 1055,
     memberCapitalSettingsModal: 1065,
@@ -6170,6 +6171,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-badges', memberAdminEnabled && hasAdminMemberBadgePermission()],
 ['member-capital-settings-button', memberAdminEnabled],
 ['capital-import-button', memberAdminEnabled],
+['member-workbook-button', memberAdminEnabled],
 ['nav-org-settings', memberAdminEnabled && (isSiteMemberProfile || canOpenFullCoopSettings())],
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
@@ -6189,6 +6191,7 @@ if (!el) return;
 el.classList.toggle('hidden', !enabled);
 });
 capitalImportController?.syncContext();
+window.memberWorkbookController?.syncContext();
 [
 ['site-external-news-nav-item', !isSiteMemberProfile],
 ['site-legal-nav-item', siteAdminEnabled],
@@ -6654,6 +6657,27 @@ function changeMemberPageSize(value) {
 // The optional import tool owns only its File/preview state; no member editor is reset.
 let capitalImportController = null;
 let capitalImportOpening = false;
+window.memberWorkbookController = null;
+let memberWorkbookOpening = false;
+async function openMemberWorkbookModal() {
+    const before = capitalImportContext();
+    if (!before.allowed || memberWorkbookOpening) return;
+    memberWorkbookOpening = true;
+    try {
+        const feature = await window.AdminMemberAssets.ensureMemberWorkbook();
+        if (!capitalImportContext().allowed || before.owner !== capitalImportContext().owner || window.frameElement?.hidden) return;
+        if (!window.memberWorkbookController) window.memberWorkbookController = feature.create({
+            client: _supabase, getContext: capitalImportContext,
+            normalizeMember: normalizeMemberImportRow, memberPayload: memberImportPayload,
+            ensureSpreadsheet: () => window.AdminMemberAssets.ensureSpreadsheet(),
+            refresh: async () => { const updated = await fetchMembers(); await refreshMemberDashboardAfterSave(); return updated === true; }
+        });
+        window.memberWorkbookController.open();
+    } catch (_) {
+        if (before.owner === capitalImportContext().owner && capitalImportContext().allowed && !window.frameElement?.hidden)
+            myAlert('회원·출자금 엑셀 도구를 불러오지 못했습니다. 다시 열어 주세요.', 'error');
+    } finally { memberWorkbookOpening = false; }
+}
 function capitalImportContext() {
     const actor = String(adminCertificateAuthId || '');
     const coopId = String(g_adminMemberRuntime?.coop_id || '');
@@ -7384,6 +7408,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 
 function clearMemberDetailEdits() {
     capitalImportController?.syncContext();
+    window.memberWorkbookController?.syncContext();
     invalidateMemberRelationSearches();
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
