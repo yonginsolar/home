@@ -7,6 +7,7 @@
  const member=location.hostname.startsWith('expo-member-'),uuid=/^[0-9a-f-]{36}$/;
  let workspace='',expires=0,stopped=false,verified=false,verifying=false;
  const clients=new Set(),nativeFetch=window.fetch.bind(window),diagnostics=[];
+ let controlObserver;
  let finish;const readiness=new Promise(resolve=>{finish=resolve;});
  try{
   if(window.top!==window.self)workspace=String(window.top.ExpoImmutableWorkspace||'');
@@ -40,11 +41,20 @@
  function controls(){
   if(!document.body)return;
   for(const el of document.querySelectorAll('input,textarea')){
-   if(['file','checkbox','radio','range'].includes(el.type))el.disabled=true;else el.readOnly=true;
+   if(['file','checkbox','radio','range'].includes(el.type)){if(!el.disabled)el.disabled=true;}
+   else if(!el.readOnly)el.readOnly=true;
   }
   document.querySelectorAll('button,select,[contenteditable=true]').forEach(el=>{
-   if(el.matches('[contenteditable]'))el.contentEditable='false';else el.disabled=true;
+   if(el.matches('[contenteditable]'))el.contentEditable='false';else if(!el.disabled)el.disabled=true;
   });
+ }
+ function observeControls(){
+  if(!document.body)return;
+  controlObserver ||= new MutationObserver(()=>{if(stopped)controls();});
+  // Attribute observation starts only after expiry. A late menu finally may
+  // remove disabled/readOnly without inserting any new DOM. Reapply the same
+  // read-only state without replacing editors or their exact File objects.
+  controlObserver.observe(document.body,{childList:true,subtree:true,...(stopped?{attributes:true,attributeFilter:['disabled','readonly','contenteditable']}:{})});
  }
  function banner(){
   if(window.top!==window.self||!document.body)return;
@@ -57,7 +67,7 @@
  function stop(){
   if(stopped)return;stopped=true;verified=false;finish(false);
   for(const client of clients)client.auth?.stopAutoRefresh?.();
-  window.CoopDialog?.cancelAll(window);banner();controls();
+  window.CoopDialog?.cancelAll(window);banner();controls();observeControls();
   // Relay through each registered direct parent. A grandchild preview is not
   // a direct iframe of the shell, so sending only to top would be ignored.
   if(window.parent!==window.self)window.parent.postMessage({type:'erp-expo-ended'},location.origin);
@@ -154,7 +164,7 @@
   if(!stopped)void window.CoopDialog?.alert('박람회에서는 준비된 예시 자료로 파일 첨부 기능을 살펴봐 주세요.',{title:'📎 파일 첨부'});
  },true);
  document.addEventListener('DOMContentLoaded',()=>{banner();if(stopped)controls();
-  new MutationObserver(()=>{if(stopped)controls();}).observe(document.body,{childList:true,subtree:true});
+  observeControls();
  },{once:true});
  if(!uuid.test(workspace))stop();
  setTimeout(()=>{if(!verified)stop();},15000);
