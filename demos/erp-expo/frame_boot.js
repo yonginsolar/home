@@ -136,6 +136,15 @@
  }
  intercept('supabase',sdk=>sdk?.createClient?{...sdk,createClient(url,key,options={}){return install(sdk.createClient(url,key,{...options,auth:authOptions(options.auth)}));}}:sdk);
  intercept('CoopCheckedUploads',uploads=>uploads?.install?Object.freeze({...uploads,install(client){return install(uploads.install(client));}}):uploads);
+ // A late read/write handler may request a new dialog after stop() cancelled
+ // the old one. Resolve as cancellation, never create a locked overlay above
+ // preserved drafts and never interpret expiry as approval.
+ intercept('CoopDialog',dialog=>dialog?Object.freeze({...dialog,
+  alert(...args){return stopped?Promise.resolve(false):dialog.alert(...args);},
+  confirm(...args){return stopped?Promise.resolve(false):dialog.confirm(...args);},
+  prompt(...args){return stopped?Promise.resolve(null):dialog.prompt(...args);},
+  forOwner(owner,kind,...args){return stopped?Promise.resolve(kind==='prompt'?null:false):dialog.forOwner(owner,kind,...args);}
+ }):dialog);
  // Module-only clients can opt in without exposing Auth/session contents.
  window.ExpoRuntimeBridge=Object.freeze({install,authOptions,status:()=>({workspace,verified,stopped}),diagnostics:()=>diagnostics.map(row=>({...row}))});
  window.addEventListener('message',e=>{
