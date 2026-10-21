@@ -1,5 +1,5 @@
 import {factory,codeMessage} from './client.js';
-const probe=location.pathname==='/erp/expo_admin.html',button=document.getElementById('start'),status=document.getElementById('status'),links=document.getElementById('links');
+const probe=/^\/erp\/expo_admin(?:\.html)?\/?$/.test(location.pathname),button=document.getElementById('start'),status=document.getElementById('status'),links=document.getElementById('links');
 let busy=false;
 const ticketKey=probe?'expo-probe-ticket-v1':'expo-visitor-ticket-v1';
 const labels={administrator:'관리자 화면 열기',employee:'직원 화면 열기',member:'조합원 화면 열기'};
