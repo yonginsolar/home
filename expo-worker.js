@@ -29,7 +29,7 @@ export function rewriteExpoHTML(html){
   value=value.replace(re,'$1$3');
  }
  value=value.replace(/(<[^>]*\bid=["']about-img-src["'][^>]*?)\s+src=["'][^"']*["']/gi,'$1');
- return value.replace(/<head\b[^>]*>/i,'$&<meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="coop-tenant-profile" content="exhibition"><meta name="coop-tenant-name" content="햇빛 체험조합"><title>햇빛 체험조합 ERP</title><link rel="icon" href="/favicon.svg"><script src="/demos/erp-expo/frame_boot.js?v=20261021-1"></script>');
+ return value.replace(/<head\b[^>]*>/i,'$&<meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="coop-tenant-profile" content="exhibition"><meta name="coop-tenant-name" content="햇빛 체험조합"><title>햇빛 체험조합 ERP</title><link rel="icon" href="/favicon.svg"><style>#btnLinkKakao,#btnLinkNaver,#kakaoLinkHint,#naverLinkHint{display:none!important}</style><script src="/demos/erp-expo/frame_boot.js?v=20261021-1"></script>');
 }
 export function rewriteExpoModule(code){
  const original="https://esm.sh/@supabase/supabase-js@2.112.2";
@@ -42,6 +42,7 @@ export default{async fetch(request,env){
  if(!portal&&!role.test(url.hostname))return new Response('Not found',{status:404,headers});
  if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405,headers});
  if(url.pathname==='/favicon.ico'||url.pathname==='/favicon.svg')return new Response(request.method==='HEAD'?null:icon,{headers:{...headers,'Content-Type':'image/svg+xml; charset=utf-8'}});
+ if(url.pathname==='/coop-branding.json')return new Response(request.method==='HEAD'?null:JSON.stringify({display_url:null,icon_url:null}),{headers:{...headers,'Content-Type':'application/json; charset=utf-8'}});
  if(url.pathname==='/robots.txt')return new Response(request.method==='HEAD'?null:robots,{headers:{...headers,'Content-Type':'text/plain; charset=utf-8'}});
  if(url.pathname==='/')url.pathname=portal?'/demos/erp-expo/index.html':url.searchParams.get('home_preview')==='1'?'/index.html':'/demos/erp-expo/workspace.html';
  const runtime=runtimePath(url.pathname,portal,url.search);

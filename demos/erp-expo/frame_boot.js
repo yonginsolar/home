@@ -6,7 +6,7 @@
  const project='https://ifdqlwxgqgsvnawmhlfc.supabase.co',key='expo-runtime-workspace-v1';
  const member=location.hostname.startsWith('expo-member-'),uuid=/^[0-9a-f-]{36}$/;
  let workspace='',expires=0,stopped=false,verified=false,verifying=false;
- const clients=new Set(),nativeFetch=window.fetch.bind(window);
+ const clients=new Set(),nativeFetch=window.fetch.bind(window),diagnostics=[];
  let finish;const readiness=new Promise(resolve=>{finish=resolve;});
  try{
   if(window.top!==window.self)workspace=String(window.top.ExpoImmutableWorkspace||'');
@@ -73,7 +73,14 @@
   headers.set('x-client-info','expo-workspace/'+workspace+' '+(headers.get('x-client-info')||'erp-expo'));
   headers.set('x-public-host',location.hostname);
   if(member)headers.delete('x-erp-host');else headers.set('x-erp-host',location.hostname);
-  return nativeFetch(new Request(request,{headers}));
+  const result=await nativeFetch(new Request(request,{headers}));
+  // Bounded diagnostic metadata only. Never retain headers, URL queries,
+  // request/response bodies, Auth data, file names or storage object paths.
+  if(/^\/(rest|functions)\/v1\//.test(url.pathname)){
+   diagnostics.push({api:url.pathname.replace(/^\/(rest|functions)\/v1\//,''),status:result.status});
+   if(diagnostics.length>64)diagnostics.shift();
+  }
+  return result;
  };
  async function verify(client){
   if(verifying||verified||stopped)return;verifying=true;attempted.add(client);
@@ -110,7 +117,7 @@
  intercept('supabase',sdk=>sdk?.createClient?{...sdk,createClient(url,key,options={}){return install(sdk.createClient(url,key,{...options,auth:authOptions(options.auth)}));}}:sdk);
  intercept('CoopCheckedUploads',uploads=>uploads?.install?Object.freeze({...uploads,install(client){return install(uploads.install(client));}}):uploads);
  // Module-only clients can opt in without exposing Auth/session contents.
- window.ExpoRuntimeBridge=Object.freeze({install,authOptions,status:()=>({workspace,verified,stopped})});
+ window.ExpoRuntimeBridge=Object.freeze({install,authOptions,status:()=>({workspace,verified,stopped}),diagnostics:()=>diagnostics.map(row=>({...row}))});
  window.addEventListener('message',e=>{if(e.origin===location.origin&&(e.source===window.parent||e.source===window.top)&&e.data?.type==='erp-expo-ended')stop();});
  document.addEventListener('click',e=>{
   const a=e.target.closest?.('a[href]');if(!a)return;

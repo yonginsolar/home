@@ -102,7 +102,7 @@ async function refresh({quiet=false}={}){
   const first=!model;if(model&&model.workspace!==result.workspace){block('체험 공간이 바뀌었어요. 새 체험 화면을 이용해 주세요.');return false;}model=result;expiry=Date.parse(model.access.expires_at);
   if(!model.access.active){block(codeMessage('DEMO_ACCESS_ENDED'));return;}
   if(first)restore();
-  refreshing=false;render();if(model.can_submit||model.can_process)void attachments.refresh();if(first)try{const view=localStorage.getItem(draftKey()+':view');if(view)showView(view,false);}catch{}
+  refreshing=false;render();if(model.can_submit||model.can_process)void attachments.refresh();if(first)try{const view=sessionStorage.getItem(draftKey()+':view');if(view)showView(view,false);}catch{}
   if(!quiet)message('최신 내용을 불러왔어요.');return true;
  }catch(error){if(version!==readVersion||ended)return false;const code=String(error.message||'');if(/DEMO_(ACCESS_ENDED|CONTEXT_CHANGED)/.test(code))block(codeMessage(code));else message('체험 자료를 불러오지 못했어요. ‘목록 다시 확인’을 눌러 주세요.',true);return false;}
  finally{if(version===readVersion&&!ended){refreshing=false;$('refresh').disabled=false;document.querySelectorAll('[data-approve]').forEach(b=>b.disabled=busy.has('approve:'+b.dataset.approve));}}
@@ -112,7 +112,7 @@ function showView(view,remember=true){
  if($('editor').open)$('editor').close();closeConfirm(false);
  for(const p of document.querySelectorAll('[data-panel]'))p.hidden=p.dataset.panel!==view;
  for(const b of document.querySelectorAll('[data-view]'))b.setAttribute('aria-current',b===button?'page':'false');
- if(remember&&model)try{localStorage.setItem(draftKey()+':view',view);}catch{}
+ if(remember&&model)try{sessionStorage.setItem(draftKey()+':view',view);}catch{}
 }
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.view)));
 $('compose').addEventListener('click',()=>{if(!ended&&!$('editor').open){$('editor').showModal();$('docTitle').focus();}});
