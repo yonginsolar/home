@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.0.0. Original member writers and legacy import drafts remain separate. */
+/* Member/capital workbook 1.0.2. Original member writers and legacy import drafts remain separate. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -355,6 +355,7 @@
           tr.append(td);
         }
         if (tab === "payments") {
+          const resultCell = tr.lastElementChild;
           const td = el("td"),
             input = el("input");
           input.className = "form-control form-control-sm";
@@ -385,6 +386,14 @@
             s.phase = "needs_check";
             s.dirty = true;
             s.message = "거래 구분을 입력했습니다. 다시 검사를 눌러 주세요.";
+            resultCell.textContent = "재확인 필요";
+            const confirmation = td.querySelector("button");
+            if (confirmation) {
+              confirmation.textContent = "재확인 필요";
+              confirmation.classList.remove("btn-outline-success");
+              confirmation.classList.add("btn-outline-warning");
+              confirmation.disabled = true;
+            }
             render(false);
           };
           td.append(input);
@@ -833,7 +842,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.0.1",
+    version: "1.0.2",
     create,
     parse,
     memberHeaders,
