@@ -120,11 +120,24 @@
  window.ExpoRuntimeBridge=Object.freeze({install,authOptions,status:()=>({workspace,verified,stopped}),diagnostics:()=>diagnostics.map(row=>({...row}))});
  window.addEventListener('message',e=>{if(e.origin===location.origin&&(e.source===window.parent||e.source===window.top)&&e.data?.type==='erp-expo-ended')stop();});
  document.addEventListener('click',e=>{
+  // Exhibition visitors need not supply personal documents/photos. The guided
+  // private-attachment exercise remains available outside this unchanged-page
+  // adapter; original menu file controls show the feature instead of uploading.
+  if(e.target.matches?.('input[type=file]')){
+   e.preventDefault();e.stopImmediatePropagation();
+   if(!stopped)void window.CoopDialog?.alert('사진·PDF·엑셀을 선택해 미리 보고 등록하는 기능이에요. 박람회에서는 준비된 예시 자료로 살펴봐 주세요.',{title:'📎 파일 첨부'});
+   return;
+  }
   const a=e.target.closest?.('a[href]');if(!a)return;
   const target=new URL(a.href,location.href);
   if(['https://www.yonginsolar.kr','https://erp.yonginsun.kr','https://erp.yonginsolar.kr','https://erp.hcrec.kr'].includes(target.origin)){
    e.preventDefault();void window.CoopDialog?.alert('체험 화면의 메뉴에서 업무를 선택해 주세요.');
   }
+ },true);
+ document.addEventListener('drop',e=>{
+  if(!e.dataTransfer?.files?.length)return;
+  e.preventDefault();e.stopImmediatePropagation();
+  if(!stopped)void window.CoopDialog?.alert('박람회에서는 준비된 예시 자료로 파일 첨부 기능을 살펴봐 주세요.',{title:'📎 파일 첨부'});
  },true);
  document.addEventListener('DOMContentLoaded',()=>{banner();if(stopped)controls();
   new MutationObserver(()=>{if(stopped)controls();}).observe(document.body,{childList:true,subtree:true});
