@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.8
+Version: v1.10.9
 Change: 2026-10-20 - Preserve manually added board text annexes during regeneration.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -1544,7 +1544,9 @@ async function requestAuditReview() {
   const sentCount = Number(notification?.sentCount || 0);
   const pendingKakaoCount = Number(notification?.kakaoTemplatePendingCount || 0);
   const failedCount = Number(notification?.failedCount || 0);
-  if (sentCount > 0) {
+  if (window.ExpoRuntimeBridge && notification?.simulation === true) {
+    showToast('🔔 감사보고서를 준비했어요. 이 단계에서 서명 요청 알림이 가요. 지금은 시연 중이에요.', 4200);
+  } else if (sentCount > 0) {
     showToast(`감사보고서를 준비하고 서명 요청 ${sentCount}건을 보냈습니다.`, 4200);
   } else if (pendingKakaoCount > 0) {
     showToast('감사보고서를 준비했습니다. 알림톡 검수 완료 뒤 문서함에서 서명 요청을 다시 보내 주세요.', 5200);

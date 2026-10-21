@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.36
+Version: v1.2.37
 Change: 2026-10-06 - Show authorized signature previews without changing signing permissions.
 -->
 <html lang="ko">
@@ -9,7 +9,7 @@ Change: 2026-10-06 - Show authorized signature previews without changing signing
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.36 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.37 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -1096,6 +1096,16 @@ Change: 2026-10-06 - Show authorized signature previews without changing signing
         } // End of renderSignatureTelegramLinkStatus
 
         async function loadSignatureTelegramLinkStatus() {
+            if (window.ExpoRuntimeBridge) {
+                document.getElementById('signature-telegram-panel')?.classList.remove('hidden');
+                document.getElementById('signatureTelegramStatusBadge').textContent = '시연 알림';
+                document.getElementById('signatureTelegramHelpText').textContent = '서명 요청과 확인 완료 시 알림이 가는 흐름을 체험해요.';
+                document.getElementById('signatureTelegramMeta').textContent = '실제 Telegram·카카오톡으로는 전송하지 않아요.';
+                document.querySelectorAll('.signature-telegram-actions button').forEach(button => { button.hidden = true; });
+                const privacy = document.querySelector('.signature-privacy-panel');
+                if (privacy) privacy.textContent = '🌱 체험용 문서에 예시 확인과 시각을 기록해요. 손글씨나 실제 서명 이미지는 받지 않아요.';
+                return;
+            }
             if (myOfficialIds.length === 0) {
                 renderSignatureTelegramLinkStatus({ enabled: false, linked: false });
                 return;
@@ -1647,6 +1657,12 @@ async function openDocumentById(id) {
                 editAuditBtn.style.display = 'inline-flex';
             }
 
+            if (window.ExpoRuntimeBridge) {
+                statusEl.innerText = '문서를 읽고 체험용 예시 확인을 남겨 주세요.';
+                btn.innerText = '예시 확인하기';
+                btn.disabled = false;
+                return;
+            }
             if (!mySealUrl) {
                 statusEl.innerText = `${myName || ''}님은 도장 이미지가 없어서 터치패드(직접 그리기)로 진행합니다.`;
                 btn.disabled = false;
