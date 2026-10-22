@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.151
+Version: v1.0.152
 Change: 2026-10-22 - Retain unknown leave requests until their original result is verified.
 -->
 <html>
@@ -12,7 +12,7 @@ Change: 2026-10-22 - Retain unknown leave requests until their original result i
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.151 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.152 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -66,8 +66,9 @@ Change: 2026-10-22 - Retain unknown leave requests until their original result i
 <script src="coop_settings_groups.js?v=1.0.0"></script>
 <script src="initial_setup_access.js?v=1.1.6"></script>
 <script src="initial_setup_employee.js?v=1.0.1"></script>
-<script src="permission_settings.js?v=20261017-notice-1"></script>
-<link rel="stylesheet" href="permission_settings.css?v=1.0.0">
+<script src="permission_help.js?v=1.0.0" integrity="sha384-2zqfj9JqbMoT6UJdiQ/DQ7D6WgQ4GmQavGcD8ZHX89634bbQCdHCsMllginiF8l/" crossorigin="anonymous"></script>
+<script src="permission_settings.js?v=1.2.0" integrity="sha384-ILXawNulxqIDZByjT/xkD8gGcN/KZuW6UXqA9x07V1WOnFWguifGiTDtfog7Xb2I" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="permission_settings.css?v=1.2.0">
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -5262,7 +5263,7 @@ function ensureCoopPermissionLaunchers() {
     }
     const toolbar=document.querySelector('.hr-toolbar');
     if(toolbar&&!document.getElementById('employeeBulkPermissionsButton')) {
-        const b=document.createElement('button');b.type='button';b.id='employeeBulkPermissionsButton';b.className='btn btn-outline-primary btn-sm btn-rounded';b.textContent='🔐 권한 일괄 변경';
+        const b=document.createElement('button');b.type='button';b.id='employeeBulkPermissionsButton';b.className='btn btn-outline-primary btn-sm btn-rounded';b.textContent='🔐 직원별 업무 권한';
         b.onclick=()=>window.ERPPermissionSettings.dialog(_supabase,'bulk',getHrSettingsOwner);toolbar.append(b);
     }
     const bulk=document.getElementById('employeeBulkPermissionsButton');if(bulk)bulk.hidden=!canManage;
@@ -5487,7 +5488,7 @@ function resetEmployeeModuleAccessUi(message = '업무 권한을 불러오는 �
         note.classList.add('d-none');
     }
     if (saveBtn) saveBtn.disabled = true;
-    const selectAll=document.getElementById('employeeModuleSelectAllBtn');if(selectAll)selectAll.hidden=true;
+    for(const id of ['employeeModuleSelectAllBtn','employeeModuleDisableAllBtn']){const button=document.getElementById(id);if(button)button.hidden=true;}
     const rights = document.getElementById('employeeApprovedRights');
     if (rights) rights.textContent = '결재 권한을 확인하는 중입니다.';
 } // End of resetEmployeeModuleAccessUi
@@ -5542,6 +5543,12 @@ function renderEmployeeModuleAccess(payload) {
           </div>`;
     }).join('') || '<div class="text-center text-muted py-4">설정할 모듈이 없습니다.</div>';
 
+    for(const row of list.querySelectorAll('[data-module-row]')) {
+        const title=row.querySelector('.employee-module-title'),text=window.ERPPermissionHelp?.moduleText(row.dataset.moduleRow);
+        const help=window.ERPPermissionHelp?.button(title?.textContent||'업무 권한',text);
+        if(title&&help)title.after(help);
+    }
+
     if (note) {
         note.textContent = '';
         note.classList.add('d-none');
@@ -5557,8 +5564,11 @@ function renderEmployeeModuleAccess(payload) {
         saveBtn.disabled = !canManageAccess || modules.length === 0;
         saveBtn.classList.toggle('d-none', !canManageAccess);
         let selectAll=document.getElementById('employeeModuleSelectAllBtn');
-        if(!selectAll){selectAll=document.createElement('button');selectAll.type='button';selectAll.id='employeeModuleSelectAllBtn';selectAll.className='btn btn-outline-primary btn-sm me-2';selectAll.textContent='사용 중인 업무 전체 선택';selectAll.onclick=selectAllEmployeeModules;saveBtn.before(selectAll);}
+        if(!selectAll){selectAll=document.createElement('button');selectAll.type='button';selectAll.id='employeeModuleSelectAllBtn';selectAll.className='btn btn-outline-primary btn-sm me-2';selectAll.textContent='모두 사용';selectAll.onclick=selectAllEmployeeModules;saveBtn.before(selectAll);}
         selectAll.hidden=!canManageAccess;selectAll.disabled=employeeModuleAccessSaveInFlight||!modules.some(m=>m.organization_enabled!==false);
+        let disableAll=document.getElementById('employeeModuleDisableAllBtn');
+        if(!disableAll){disableAll=document.createElement('button');disableAll.type='button';disableAll.id='employeeModuleDisableAllBtn';disableAll.className='btn btn-outline-secondary btn-sm me-2';disableAll.textContent='모두 사용 안 함';disableAll.onclick=disableAllEmployeeModules;saveBtn.before(disableAll);}
+        disableAll.hidden=!canManageAccess;disableAll.disabled=employeeModuleAccessSaveInFlight||!modules.length;
         if(!document.getElementById('employeeModuleAccessRefreshBtn')) {
             const retry=document.createElement('button');retry.type='button';retry.id='employeeModuleAccessRefreshBtn';retry.className='btn btn-outline-secondary btn-sm ms-2';retry.textContent='최신 권한 확인';
             retry.onclick=()=>void refreshEmployeeModuleAccessKeepingDraft();saveBtn.after(retry);
@@ -5574,6 +5584,16 @@ function selectAllEmployeeModules() {
         const module=snapshot.modules?.find(m=>m.module_key===select.dataset.employeeModuleKey);
         if(!module||module.organization_enabled===false||select.disabled)continue;
         if(select.value!=='enabled'){select.value='enabled';select.dispatchEvent(new Event('change',{bubbles:true}));}
+    }
+}
+
+function disableAllEmployeeModules() {
+    const snapshot=employeeModuleAccessSnapshot;
+    if(employeeModuleAccessSaveInFlight||snapshot?.can_manage_access!==true||snapshot?.employee?.emp_id!==String(currentEmpId||'').trim())return;
+    for(const select of document.querySelectorAll('[data-employee-module-key]')) {
+        const module=snapshot.modules?.find(m=>m.module_key===select.dataset.employeeModuleKey);
+        if(!module||select.disabled)continue;
+        if(select.value!=='disabled'){select.value='disabled';select.dispatchEvent(new Event('change',{bubbles:true}));}
     }
 }
 
@@ -5671,6 +5691,7 @@ async function saveEmployeeModuleAccess() {
     controls.forEach(({element}) => {element.disabled = true;});
     employeeModuleAccessSaveInFlight = true;
     const selectAll=document.getElementById('employeeModuleSelectAllBtn');if(selectAll)selectAll.disabled=true;
+    const disableAll=document.getElementById('employeeModuleDisableAllBtn');if(disableAll)disableAll.disabled=true;
     if (saveBtn) {
         saveBtn.disabled = true;
         saveBtn.textContent = '저장 중...';
@@ -5701,6 +5722,7 @@ async function saveEmployeeModuleAccess() {
     } finally {
         employeeModuleAccessSaveInFlight = false;
         if(selectAll?.isConnected)selectAll.disabled=employeeModuleAccessSnapshot?.can_manage_access!==true||!employeeModuleAccessSnapshot?.modules?.some(m=>m.organization_enabled!==false);
+        if(disableAll?.isConnected)disableAll.disabled=employeeModuleAccessSnapshot?.can_manage_access!==true||!employeeModuleAccessSnapshot?.modules?.length;
         controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
         if (saveBtn && isCurrent()) {
             saveBtn.disabled = employeeModuleAccessSnapshot?.can_manage_access !== true || !employeeModuleAccessSnapshot?.modules?.length;
