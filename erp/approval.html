@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.104 | Change: 2026-10-22 - Local insurance notice review and aligned expense fields. -->
+<!-- Version: v1.2.105 | Change: 2026-10-22 - Reviewed insurance summary page as a password-free attachment. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.104 | approval.html');</script>
+  <script>console.log('[Version] v1.2.105 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -46,9 +46,9 @@
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
-  <script src="approval_insurance_notice.js?v=1.0.1" integrity="sha384-MrVTpdFnox9Iq4Klf48oCtHY+AbXO2/Cn/5/EDvftejBOuEoMfiNzWKVRh5TSMim" crossorigin="anonymous"></script>
+  <script src="approval_insurance_notice.js?v=1.1.0" integrity="sha384-Spvndc7dfAbXZsa0yogiQVgv3Ywu4Y8eBXMTgZBsydfbaJUznwI2WA8AJr6RbQXE" crossorigin="anonymous"></script>
   <script src="approval_permission_request.js?v=1.2.1-uimodal-20261013-1"></script>
-  <script src="workflow_assets.js?v=20261022-tax-window-1"></script>
+  <script src="workflow_assets.js?v=20261022-insurance-page-1"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
@@ -5596,10 +5596,12 @@ function initApprovalInsuranceNoticeReader() {
     const fingerprint = () => JSON.stringify([collectApprovalDraftFormPayload(), currentApprovalDraftId, currentApprovalDraftUpdatedAt, getApprovalOrderedAttachmentDescriptors().map(x => x.id)]);
     approvalInsuranceNoticeReader = window.CoopInsuranceNotice.create({
         button, getContext: context, getFingerprint: fingerprint, onDirty: () => syncApprovalDraftStatusText(),
-        apply(values, file, baseline) {
+        apply(values, file, baseline, previousFile) {
             if (!context().allowed || !context().visible || fingerprint() !== baseline) return false;
             const input = document.getElementById('attachFile');
-            const files = mergeAttachmentFiles(input.files, [file]);
+            // Replace only the exact local print copy from this reader. Never remove saved or manually selected attachments.
+            const retained = Array.from(input.files || []).filter(item => !previousFile || item !== previousFile || item === file);
+            const files = mergeAttachmentFiles(retained, [file]);
             if (files.length + approvalDraftAttachmentRefs.length > 5 || !validateAttachments(files).ok || !Array.from(files).includes(file)) return false;
             // Prepare and validate everything before touching the existing draft.
             const entries = Object.entries(values).filter(([id, value]) => (id === 'insuranceBillingMonth' || APPROVAL_INSURANCE_FIELD_IDS.includes(id)) && document.getElementById(id) && value !== '' && value !== undefined);

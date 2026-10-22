@@ -1,4 +1,4 @@
-/* Local PDF.js 6.3.289 only. No upload, AI, password persistence or decrypted file output. */
+/* Local PDF.js 6.3.289. Original stays untouched; only the explicitly reviewed page is printed to an attachment. */
 import * as pdfjs from '../shared/vendor/pdfjs/pdf.mjs';
 const base=new URL('../shared/vendor/pdfjs/',import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc=new URL('pdf.worker.mjs',base).href;
@@ -24,7 +24,7 @@ export function analyze(pages){
  const values={},evidence={},warnings=[];let sourcePage=null,billingMonth='',totals=null;
  const summaries=pages.filter(p=>{const text=compact(lines(p.items).join(''));return text.includes('고지인원')&&text.includes('고용보험료')&&text.includes('산재보험료')&&text.includes('사회보험료지원금')&&text.includes('납부할금액');});
  const monthSet=new Set();for(const p of pages.slice(0,4))for(const m of compact(p.items.filter(i=>i.y>p.height-85).map(i=>i.str).join('')).matchAll(/(20\d{2})년(\d{1,2})월(?:분|(?:건강|국민연금|연금|고용|산재)?보험료)/g)){if(Number(m[2])>=1&&Number(m[2])<=12)monthSet.add(m[1]+'-'+m[2].padStart(2,'0'));}if(monthSet.size===1)billingMonth=[...monthSet][0];
- if(summaries.length!==1){warnings.push('보험별 합산표를 하나로 특정하지 못했습니다. 원본을 보며 금액을 입력해 주세요.');return{values,evidence,warnings,billingMonth,sourcePage:1,totals};}
+ if(summaries.length!==1){warnings.push('보험별 합산표를 하나로 특정하지 못했습니다. 원본을 보며 금액과 첨부할 쪽을 확인해 주세요.');return{values,evidence,warnings,billingMonth,sourcePage:null,totals};}
  const page=summaries[0];sourcePage=page.number;
  const regions={health:[],pension:[],employment:[],industrial:[]};
  for(const i of page.items){const side=i.x<page.width/2?'left':'right',half=i.y>page.height/2?'top':'bottom';regions[side==='left'?(half==='top'?'health':'employment'):(half==='top'?'pension':'industrial')].push(i);}
@@ -59,7 +59,23 @@ export async function open(file,{password='',signal}={}){
  const destroy=()=>task.destroy().catch(()=>{});if(signal?.aborted){void destroy();throw Error('CANCELLED');}signal?.addEventListener('abort',destroy,{once:true});
  try{const pdf=await task.promise;if(pdf.numPages>20)throw Error('PDF_PAGES');let count=0;const pages=[];
  for(let n=1;n<=pdf.numPages;n++){if(signal?.aborted)throw Error('CANCELLED');const p=await pdf.getPage(n),v=p.getViewport({scale:1}),content=await p.getTextContent();count+=content.items.length;if(count>100000)throw Error('PDF_TEXT_LIMIT');pages.push({number:n,width:v.width,height:v.height,items:content.items.filter(i=>i.str).map(i=>({str:i.str,x:i.transform[4],y:i.transform[5]}))});p.cleanup();}
- const result=analyze(pages);let rendering=null;
- return{result,pageCount:pdf.numPages,async render(canvas,n=1){if(signal?.aborted)throw Error('CANCELLED');rendering?.cancel();const p=await pdf.getPage(n),v=p.getViewport({scale:1}),vp=p.getViewport({scale:Math.min(1.8,850/v.width)});canvas.width=vp.width;canvas.height=vp.height;rendering=p.render({canvasContext:canvas.getContext('2d'),viewport:vp,background:'#fff'});await rendering.promise;},async destroy(){rendering?.cancel();signal?.removeEventListener('abort',destroy);await destroy();}};
+ const result=analyze(pages);let rendering=null,closed=false;const printing=new Set();
+ const check=()=>{if(closed||signal?.aborted)throw Error('CANCELLED');};
+ return{result,pageCount:pdf.numPages,async render(canvas,n=1){check();rendering?.cancel();const p=await pdf.getPage(n);check();const v=p.getViewport({scale:1}),vp=p.getViewport({scale:Math.min(1.8,850/v.width)});canvas.width=vp.width;canvas.height=vp.height;rendering=p.render({canvasContext:canvas.getContext('2d'),viewport:vp,background:'#fff'});await rendering.promise;check();},
+ async createAttachment(n){
+  check();if(!Number.isInteger(n)||n<1||n>pdf.numPages)throw Error('PDF_PAGE_INVALID');
+  // This is a print copy of exactly one source page, not a reconstruction of read/edited amounts.
+  // Keep physical size/rotation and the full page; no password, scripts, links or other source pages are copied.
+  await globalThis.ErpWorkflowAssets?.load('pdfCreate');check();const PDFDocument=globalThis.PDFLib?.PDFDocument;if(!PDFDocument)throw Error('PDF_PRINT_UNAVAILABLE');
+  const p=await pdf.getPage(n);check();const v=p.getViewport({scale:1}),scale=Math.min(3,Math.sqrt(12000000/(v.width*v.height)));
+  if(!Number.isFinite(scale)||scale<1||v.width<1||v.height<1)throw Error('PDF_PAGE_INVALID');
+  const canvas=document.createElement('canvas'),vp=p.getViewport({scale});canvas.width=Math.ceil(vp.width);canvas.height=Math.ceil(vp.height);let job;
+  try{job=p.render({canvasContext:canvas.getContext('2d'),viewport:vp,background:'#fff'});printing.add(job);await job.promise;check();
+   const image=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));check();if(!image)throw Error('PDF_PRINT_UNAVAILABLE');
+   const doc=await PDFDocument.create(),png=await doc.embedPng(await image.arrayBuffer());check();const page=doc.addPage([v.width,v.height]);page.drawImage(png,{x:0,y:0,width:v.width,height:v.height});
+   const bytes=await doc.save();check();if(bytes.length>10485760)throw Error('PDF_PRINT_LIMIT');
+   return new File([bytes],`4대보험_고지서_${n}쪽_첨부용.pdf`,{type:'application/pdf'});
+  }finally{if(job)printing.delete(job);canvas.width=1;canvas.height=1;}
+ },async destroy(){closed=true;rendering?.cancel();for(const job of printing)job.cancel();printing.clear();signal?.removeEventListener('abort',destroy);await destroy();}};
  }catch(e){signal?.removeEventListener('abort',destroy);await destroy();if(e?.name==='PasswordException')throw Error('PDF_PASSWORD');throw e;}
 }
