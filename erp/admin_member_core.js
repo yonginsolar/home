@@ -8496,7 +8496,7 @@ async function openAdminMemberConfirmation() {
         && g_adminMemberRuntime?.coop_id===coopId && (!window.frameElement || !window.frameElement.hidden);
     if(!target || !memberId || !current())return;
     if(!window.MemberConfirmation)return myAlert('확인서 준비 기능을 불러오지 못했습니다. 다시 시도해 주세요.','error');
-    await window.MemberConfirmation.open({client:_supabase,memberId,coopId,isCurrent:current,notify:m=>myAlert(m,'warning'),authorize:async()=>{
+    await window.MemberConfirmation.open({client:_supabase,memberId,coopId,isCurrent:current,prepare:ensureCertGeneratorReady,notify:m=>myAlert(m,'warning'),authorize:async()=>{
         const access=await _supabase.rpc('get_my_erp_runtime');
         const runtime=access.data;
         if(access.error || !current() || runtime?.coop_id!==coopId || runtime.is_active===false

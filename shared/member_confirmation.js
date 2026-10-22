@@ -1,4 +1,4 @@
-/* v1.0.1 — Current membership confirmation. No capital writes, notices or local data storage. */
+/* v1.0.2 — Prepare optional PDF dependencies before requesting a membership certificate. */
 (function (root) {
   'use strict';
   let busy = false;
@@ -9,7 +9,8 @@
     MEMBERSHIP_INFORMATION_INCOMPLETE: '성명·조합원 번호·가입일을 확인해 주세요.',
     MEMBERSHIP_ISSUER_INCOMPLETE: '조합의 발급 정보와 직인을 확인해 주세요.',
     MEMBERSHIP_CONTEXT_CHANGED: '발급 정보가 변경되었습니다. 다시 열어 확인해 주세요.',
-    MEMBERSHIP_REQUEST_CHANGED: '발급 요청을 확인하지 못했습니다. 다시 열어 확인해 주세요.'
+    MEMBERSHIP_REQUEST_CHANGED: '발급 요청을 확인하지 못했습니다. 다시 열어 확인해 주세요.',
+    PDF_NOT_READY: 'PDF 출력 도구를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'
   };
   function message(error) {
     return messages[error?.message] || '확인서를 준비하지 못했습니다. 다시 시도해 주세요.';
@@ -66,7 +67,7 @@
     try { const request=client.rpc(name,args);return await (request.abortSignal?request.abortSignal(controller.signal):request); }
     finally {clearTimeout(timer);}
   }
-  async function open({client,memberId,coopId,isCurrent,authorize,notify}) {
+  async function open({client,memberId,coopId,isCurrent,authorize,prepare,notify}) {
     if(busy || !client || !memberId || !coopId || !isCurrent?.())return;
     busy=true;let preview;
     try {
@@ -94,6 +95,10 @@
       const key=actor+'|'+coopId+'|'+memberId;
       const existing=pending.get(key);
       const request=existing || {p_member_id:memberId,p_request_key:crypto.randomUUID(),p_expected_revision:context.revision};
+      // ERP loads jsPDF on demand. A blocked/late dependency must never allocate a number.
+      try {await prepare?.();}catch(_){throw new Error('PDF_NOT_READY');}
+      if(!preview.isCurrent())return;
+      if(typeof root.jspdf?.jsPDF!=='function')throw new Error('PDF_NOT_READY');
       // Prepare the font and the existing private display seal before allocating a number.
       await getCertPretendardFontBase64();
       const seal=await downloadCertStorageAssetDataUrl(client,'attachments',context.snapshot.seal_path);
