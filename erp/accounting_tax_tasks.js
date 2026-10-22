@@ -1,4 +1,4 @@
-/* Tax tasks 1.1.1. Simple reminders; old drafts/evidence are preserved separately. */
+/* Tax tasks 1.2.0. Current due month and overdue reminders, with independent grouped checks. */
 (function(root){
  'use strict';
  const names={vat:'부가세 신고·납부',vat_notice:'부가세 예정고지 납부',withholding:'원천세 신고·납부',local_withholding:'지방소득세 특별징수'};
@@ -10,6 +10,10 @@
  const filing=r=>!r.filing_required?'신고 대상 아님':r.state?.filed_date?'신고 완료 · '+r.state.filed_date:'신고 전';
  const payment=r=>({paid:'납부 완료',none:'납부할 세액 없음',refund:'환급 대상'}[r.state?.settlement]||'납부 확인 전')+(r.state?.paid_date?' · '+r.state.paid_date:'');
  const completed=r=>typeof r.state?.reminder_done==='boolean'?r.state.reminder_done:(!r.filing_required||!!r.state?.filed_date)&&['paid','none','refund'].includes(r.state?.settlement);
+ const available=(r,day)=>String(r.period_end)<day;
+ const deadline=r=>[r.filing_required?r.filing_due:null,r.payment_due].filter(Boolean).sort()[0]||'';
+ const actionable=(r,day)=>available(r,day)&&!!deadline(r)&&deadline(r).slice(0,7)<=day.slice(0,7);
+ const groupKey=r=>['withholding','local_withholding'].includes(r.kind)?JSON.stringify([r.period_from,r.period_end,r.filing_due,r.payment_due,r.filing_required]):key(r);
  const taskInput=r=>({filed_date:r.state?.filed_date||'',settlement:r.state?.settlement||'pending',paid_date:r.state?.paid_date||'',filing_due:r.filing_due,payment_due:r.payment_due,receipt:r.state?.receipt||'',memo:r.state?.memo||'',due_reason:r.state?.due_reason||''});
  function create({element,client,getContext}){
   let owner='',rows=[],settings=null,settingsDraft=null,year=Number(today().slice(0,4)),seq=0,editorSeq=0,active=null,modal=null,status,list,orphanList,outcomes,yearControl,filter='pending',settingsButton,reloadButton,pending=null,pendingYear=null;
@@ -53,9 +57,10 @@
   }
   function renderAux(){
    if(!orphanList)return;orphanList.replaceChildren();outcomes.replaceChildren();if(!valid())return;
-   for(const d of drafts.values())if((d.dirty||d.attempt)&&isOrphan(d)){
+   for(const d of drafts.values())if((d.dirty||d.attempt)&&(isOrphan(d)||!actionable(d.row,serverToday))){
     const card=make('section','border rounded p-3 bg-white');card.dataset.taxOrphan=key(d.row);
-    card.append(make('h3','h6','현재 주기에서 빠진 초안'),make('p','small mb-2',(names[d.row.kind]||'세무 업무')+' · '+period(d.row)),button('초안 확인',()=>openOrphan(d)));
+    const orphan=isOrphan(d);
+    card.append(make('h3','h6',orphan?'현재 주기에서 빠진 초안':'작성 중인 기록'),make('p','small mb-2',(names[d.row.kind]||'세무 업무')+' · '+period(d.row)),button('초안 확인',()=>orphan?openOrphan(d):openTask(rows.find(r=>key(r)===key(d.row))||d.row)));
     const discard=button('초안 버리기',e=>void discardDraft(d,e.currentTarget),'btn btn-outline-danger btn-sm ms-2');discard.disabled=blocked(d)||!!d.discarding;card.append(discard);
     if(d.attempt)card.append(make('p','small mt-2 mb-0','저장 결과 확인이 필요합니다. 다시 확인으로 목록을 불러와 주세요.'));
     orphanList.append(card);
@@ -70,25 +75,31 @@
   function render(){
    status.textContent=message;list.replaceChildren();settingsButton.disabled=!valid();reloadButton.disabled=!!pending;renderAux();
    if(!settings){list.append(make('p','text-muted','신고 주기를 설정하면 해당 기간의 할 일이 표시됩니다.'));return;}
-   const shown=rows.filter(r=>drafts.get(key(r))?.dirty||filter==='all'||completed(r)===(filter==='completed'));
+   const shown=rows.filter(r=>actionable(r,serverToday)&&(filter==='all'||completed(r)===(filter==='completed')));
    if(!shown.length){list.append(make('p','text-muted',rows.length?'선택한 상태에 해당하는 세무 할 일이 없습니다.':'선택한 연도에 표시할 세무 할 일이 없습니다.'));return;}
-   for(const r of shown){const card=make('section','border rounded p-3 bg-white'),head=make('div','d-flex gap-2 flex-wrap align-items-center');card.dataset.taxTask=key(r);
+   const groups=new Map();for(const r of shown){const k=groupKey(r);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(r);}
+   for(const members of groups.values()){
+    // Include the paired completed item as well, so marking one never hides its sibling's state.
+    const first=members[0],paired=['withholding','local_withholding'].includes(first.kind)?rows.filter(r=>actionable(r,serverToday)&&groupKey(r)===groupKey(first)):members;
+    const card=make('section','border rounded p-3 bg-white');card.dataset.taxGroup=groupKey(first);
+    if(paired.length===2)card.append(make('h3','h6 mb-3','원천세·지방소득세'));
+    for(const r of paired){const part=make('section',paired.length===2?'border-top pt-3 mt-2':''),head=make('div','d-flex gap-2 flex-wrap align-items-center');part.dataset.taxTask=key(r);
     const pendingReminder=reminders.get(key(r));
     const done=button(pendingReminder?.attempt?'같은 요청 다시 확인':completed(r)?'다시 할 일로':'완료했어요',()=>void markDone(r));
-    const future=String(r.period_end)>serverToday;
+    const future=!available(r,serverToday);
     done.disabled=!editable()||!listFresh||!!pending||!!pendingReminder?.busy||future;if(future)done.title='귀속 기간이 끝난 뒤 완료로 표시할 수 있어요.';head.append(make('h3','h6 mb-0 me-auto',names[r.kind]||'세무 업무'),done);
     const held=drafts.get(key(r));
     if(held?.dirty||held?.attempt||Object.keys(r.state||{}).some(k=>k!=='reminder_done'))head.append(button(held?.dirty?'작성 중 · 이어 쓰기':'기존 기록 보기',()=>openTask(r)));
-    card.append(head,make('p','small text-muted mt-2 mb-2',period(r)),make('p','mb-1',completed(r)?'✅ 마쳤어요':'🗓️ 해야 할 일이에요'),make('p','small mb-1','기한 '+r.payment_due));
-    if(pendingReminder?.notice)card.append(make('p','small mb-1',pendingReminder.notice));
-    if(!r.calendar_checked)card.append(make('p','small text-warning mb-1','공식 고지·신고 화면에서 기한을 확인해 주세요.'));
-    if(r.approval)card.append(make('p','small mb-0','연결 결재: '+r.approval.title+' · '+r.approval.status));
-    else if(r.link_unavailable)card.append(make('p','small text-muted mb-0','연결 결재를 현재 권한으로 확인할 수 없습니다.'));
-    list.append(card);
-   }
+    part.append(head,make('p','small text-muted mt-2 mb-2',period(r)),make('p','mb-1',completed(r)?'✅ 마쳤어요':'🗓️ 해야 할 일이에요'),make('p','small mb-1','기한 '+r.payment_due));
+    if(pendingReminder?.notice)part.append(make('p','small mb-1',pendingReminder.notice));
+    if(!r.calendar_checked)part.append(make('p','small text-warning mb-1','공식 고지·신고 화면에서 기한을 확인해 주세요.'));
+    if(r.approval)part.append(make('p','small mb-0','연결 결재: '+r.approval.title+' · '+r.approval.status));
+    else if(r.link_unavailable)part.append(make('p','small text-muted mb-0','연결 결재를 현재 권한으로 확인할 수 없습니다.'));
+    card.append(part);
+   }list.append(card);}
   }
   async function markDone(row){
-   if(!editable()||!visible()||pending||!listFresh||!rows.includes(row))return;
+   if(!editable()||!visible()||pending||!listFresh||!rows.includes(row)||!available(row,serverToday))return;
    const k=key(row),who=owner,revision=row.expected;let d=reminders.get(k);
    if(d?.busy)return;
    if(!d){d={};reminders.set(k,d);}
@@ -267,5 +278,5 @@
    for(const row of r.data.items){const a=make('a','d-block mb-2',(names[row.kind]||'세무 업무')+' · '+filing(row)+' / '+payment(row));a.href='accounting.html?work=taxes&tax='+encodeURIComponent(row.kind)+'&period='+encodeURIComponent(row.period_end);section.append(a);}element.append(section);
   }catch(_){if(isCurrent()){const notice=make('p','small mt-3','세무 할 일 연결을 확인하지 못했습니다. '),retry=make('button','btn btn-outline-secondary btn-sm','다시 확인');retry.type='button';retry.onclick=()=>{if(!isCurrent())return;notice.remove();void approvalLink({element,client,coopId,documentId,isCurrent});};notice.append(retry);element.append(notice);}}finally{clearTimeout(timer);}
  }
- root.AccountingTaxTasks=Object.freeze({version:'1.1.1',create,approvalLink,filing,payment,period,completed});
+ root.AccountingTaxTasks=Object.freeze({version:'1.2.0',create,approvalLink,filing,payment,period,completed,actionable,groupKey});
 })(window);

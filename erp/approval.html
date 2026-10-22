@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.103 | Change: 2026-10-22 - Card use dates and demo assigned-approver transition. -->
+<!-- Version: v1.2.104 | Change: 2026-10-22 - Local insurance notice review and aligned expense fields. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.103 | approval.html');</script>
+  <script>console.log('[Version] v1.2.104 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -46,8 +46,9 @@
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
+  <script src="approval_insurance_notice.js?v=1.0.0" integrity="sha384-vQGxhnv9WXRaQpHV7uHOtbkpkFjjl5HtTH4EVCeFrnJa6/DQLit21d8baaslbNdt" crossorigin="anonymous"></script>
   <script src="approval_permission_request.js?v=1.2.1-uimodal-20261013-1"></script>
-  <script src="workflow_assets.js?v=20261022-reminder-2"></script>
+  <script src="workflow_assets.js?v=20261022-tax-window-1"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
@@ -70,6 +71,9 @@
     .approval-leave-mixed-row + .approval-leave-mixed-row {
       margin-top: 8px;
     }
+    .approval-expense-choice, #divExpensePaymentMethod, #divExpenseCardSelect { display:flex; flex-direction:column; }
+    .approval-expense-choice > label, #divExpensePaymentMethod > label, #divExpenseCardSelect > label { min-height:1.5rem; margin-bottom:.25rem; }
+    .approval-expense-choice > .form-select, #divExpensePaymentMethod > .form-select, #divExpenseCardSelect > .form-select { min-height:31px; margin-top:auto; }
     .approval-insurance-panel {
       border: 1px solid #dbe4ee;
       border-radius: 14px;
@@ -853,7 +857,8 @@
           <label class="small text-muted fw-bold">지출 상세</label>
           <div class="card p-3 border-0 bg-light">
             <div class="row g-2">
-              <div class="col-sm-4">
+              <div class="col-sm-4 approval-expense-choice">
+                <label class="small text-muted fw-bold" for="expenseSubType">지출 항목</label>
                 <select class="form-select form-select-sm" id="expenseSubType" onchange="handleExpenseSubTypeChange()">
                   <option value="일반">일반 지출</option>
                   <option value="급여">급여 (급여대장 연동)</option>
@@ -874,6 +879,7 @@
                   <div class="mb-3">
                     <div class="fw-bold fs-6">4대보험 납부 내역</div>
                     <div class="text-muted mt-1">고지서 금액을 입력하면 지원금과 충당·수납액을 차감해 결재 금액을 자동 계산합니다.</div>
+                    <button type="button" class="btn btn-outline-primary mt-2" id="btnReadInsuranceNotice">📄 고지서 PDF 읽기</button>
                   </div>
                   <div class="approval-insurance-section">
                     <div class="approval-insurance-section-title">기본 정보</div>
@@ -1592,6 +1598,7 @@ CoopPermissionRequest.bindDocument({
 let approvalDraftModalInstance = null;
 let approvalDraftCache = [];
 let currentApprovalDraftId = null;
+let approvalInsuranceNoticeReader = null, approvalInsuranceNoticeEpoch = 0;
 let approvalDraftSavedState = '', approvalDraftSaving = false, approvalDraftLastSaveFailed = false, approvalDraftSaveUncertain = false;
 let currentApprovalDraftUpdatedAt = '';
 let approvalDraftAttachmentRefs = [];
@@ -3144,7 +3151,8 @@ function syncApprovalDraftStatusText() {
         statusEl.dataset.state = 'error'; statusEl.textContent = '임시저장 실패 · 작성 내용은 화면에 남아 있음'; return;
     }
     if (currentApprovalDraftId) {
-        const dirty = !approvalDraftSavedState || approvalDraftSavedState !== getApprovalDraftStatusState() || Array.from(document.getElementById('attachFile')?.files || []).length > 0;
+        const dirty = !approvalDraftSavedState || approvalDraftSavedState !== getApprovalDraftStatusState() || Array.from(document.getElementById('attachFile')?.files || []).length > 0
+            || (window.CoopInsuranceNotice && approvalInsuranceNoticeReader?.hasCurrentDraft());
         statusEl.dataset.state = dirty ? 'dirty' : 'saved';
         statusEl.textContent = `${dirty ? '저장하지 않은 변경 있음' : '임시저장됨'} · 마지막 저장 ${formatApprovalDraftSavedAt(currentApprovalDraftUpdatedAt)}`;
         return;
@@ -3362,6 +3370,10 @@ async function prepareApprovalSubmitAttachments(prefix = '') {
 }
 
 function resetApprovalComposerForm(options = {}) {
+    if (window.CoopInsuranceNotice) {
+        approvalInsuranceNoticeReader?.close();
+        if (options.keepDraftIdentity !== true) approvalInsuranceNoticeEpoch++;
+    }
     const keepDraftIdentity = options.keepDraftIdentity === true;
     const skipAutoRefresh = options.skipAutoRefresh === true;
     const form = document.getElementById('draftForm');
@@ -5567,6 +5579,38 @@ function buildApprovalBusinessTripSnapshot() {
         saved_at: new Date().toISOString()
     };
 } // End of buildApprovalBusinessTripSnapshot
+
+function initApprovalInsuranceNoticeReader() {
+    const button = document.getElementById('btnReadInsuranceNotice');
+    if (!button || approvalInsuranceNoticeReader || !window.CoopInsuranceNotice) return;
+    const context = () => ({
+        owner: `${myAuthUserId}:${getApprovalScopedCoopId()}:${getCurrentDraftDrafterEmpId()}`,
+        draft: currentApprovalDraftId ? `saved:${currentApprovalDraftId}` : `new:${approvalInsuranceNoticeEpoch}`,
+        allowed: !!myAuthUserId && !!getApprovalScopedCoopId() && canPerform('approval.submit')
+            && canUseApprovalExpenseSubType('4대보험') && !approvalDraftSaving && !approvalDraftSaveUncertain
+            && getCurrentDraftMainType() === '지출결의' && document.getElementById('expenseSubType')?.value === '4대보험'
+            && !document.getElementById('divInsuranceExpense')?.classList.contains('hidden'),
+        visible: activeApprovalTab === 'draft' && !window.frameElement?.hidden,
+        businessNumber: approvalCompanyInfoRemoteConfirmed ? String(approvalCompanyInfo.bizNum || '') : ''
+    });
+    const fingerprint = () => JSON.stringify([collectApprovalDraftFormPayload(), currentApprovalDraftId, currentApprovalDraftUpdatedAt, getApprovalOrderedAttachmentDescriptors().map(x => x.id)]);
+    approvalInsuranceNoticeReader = window.CoopInsuranceNotice.create({
+        button, getContext: context, getFingerprint: fingerprint, onDirty: () => syncApprovalDraftStatusText(),
+        apply(values, file, baseline) {
+            if (!context().allowed || !context().visible || fingerprint() !== baseline) return false;
+            const input = document.getElementById('attachFile');
+            const files = mergeAttachmentFiles(input.files, [file]);
+            if (files.length + approvalDraftAttachmentRefs.length > 5 || !validateAttachments(files).ok || !Array.from(files).includes(file)) return false;
+            // Prepare and validate everything before touching the existing draft.
+            const entries = Object.entries(values).filter(([id, value]) => (id === 'insuranceBillingMonth' || APPROVAL_INSURANCE_FIELD_IDS.includes(id)) && document.getElementById(id) && value !== '' && value !== undefined);
+            for (const [id,value] of entries) document.getElementById(id).value = String(value);
+            input.files = files;
+            syncApprovalInsuranceExpenseTotal(); updateFileList(); syncApprovalDraftStatusText();
+            document.getElementById('draftForm')?.dispatchEvent(new Event('input', {bubbles:true}));
+            return true;
+        }
+    });
+}
 
 const APPROVAL_INSURANCE_FIELD_IDS = Object.freeze([
     'insurancePension',
@@ -9670,6 +9714,7 @@ window.onload = async function() {
     await loadApprovalTabData(initialTab, { render: true });
 
     await companyInfoPromise;
+    initApprovalInsuranceNoticeReader();
     applyApprovalRuntimeProfileUi();
 
     const employeeData = await employeePromise;
