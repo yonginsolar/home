@@ -127,6 +127,10 @@
  const installed=new WeakSet(),attempted=new WeakSet();
  function install(client){
   if(!client?.auth||installed.has(client))return client;installed.add(client);clients.add(client);
+  // Portal boot already has a verified room/profile binding. Never execute the
+  // operating email/phone/social matching writer merely to open the demo.
+  const originalRpc=client.rpc.bind(client);
+  client.rpc=(name,args,options)=>originalRpc(name==='claim_member_profile'?'erp_expo_linked_member_context':name,args,options);
   // Do not send OTP/email or bind a visitor's real social identity from a demo.
   for(const name of ['signInWithOAuth','linkIdentity','unlinkIdentity','signInWithOtp','verifyOtp','signInWithPassword','signInWithIdToken','signInAnonymously','exchangeCodeForSession','reauthenticate','signUp','resetPasswordForEmail','updateUser'])if(typeof client.auth[name]==='function')client.auth[name]=unavailableAuth;
   client.auth.onAuthStateChange?.((event,session)=>{

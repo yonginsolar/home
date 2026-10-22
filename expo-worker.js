@@ -29,7 +29,7 @@ export function rewriteExpoHTML(html){
   value=value.replace(re,'$1$3');
  }
  value=value.replace(/(<[^>]*\bid=["']about-img-src["'][^>]*?)\s+src=["'][^"']*["']/gi,'$1');
- return value.replace(/<head\b[^>]*>/i,'$&<meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="coop-tenant-profile" content="exhibition"><meta name="coop-tenant-name" content="햇빛 체험조합"><title>햇빛 체험조합 ERP</title><link rel="icon" href="/favicon.svg"><style>#btnLinkKakao,#btnLinkNaver,#kakaoLinkHint,#naverLinkHint{display:none!important}</style><script src="/demos/erp-expo/frame_boot.js?v=20261022-2"></script>');
+ return value.replace(/<head\b[^>]*>/i,'$&<meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="coop-tenant-profile" content="exhibition"><meta name="coop-tenant-name" content="햇빛 체험조합"><title>햇빛 체험조합 ERP</title><link rel="icon" href="/favicon.svg"><style>#btnLinkKakao,#btnLinkNaver,#kakaoLinkHint,#naverLinkHint{display:none!important}</style><script src="/demos/erp-expo/frame_boot.js?v=20261022-3"></script>');
 }
 export function rewriteExpoModule(code){
  const original="https://esm.sh/@supabase/supabase-js@2.112.2";
