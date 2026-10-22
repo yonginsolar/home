@@ -242,6 +242,7 @@ export const runtimeAssets = new Set([
  "shared/company_seal_upload.js",
  "shared/contribution_cert_preview.js",
  "shared/member_confirmation.js",
+ "demos/erp-expo/member_confirmation.js",
  "shared/coop_branding.js",
  "shared/coop_dialog.js",
  "shared/coop_favicon_field.js",

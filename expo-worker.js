@@ -6,7 +6,7 @@ const icon='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect wi
 const csp="default-src 'none'; script-src 'self' https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src https://ifdqlwxgqgsvnawmhlfc.supabase.co https://esm.sh; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests";
 // Only the exhibition hosts use the original static ERP assets. Authentication,
 // tenant rights, per-function review and expiry are independently checked by DB.
-const runtimeCsp="default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://t1.daumcdn.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://webfontworld.github.io; connect-src 'self' https://ifdqlwxgqgsvnawmhlfc.supabase.co https://esm.sh https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; img-src 'self' data: blob:; font-src 'self' data: https://cdn.jsdelivr.net https://webfontworld.github.io; frame-src 'self' blob: https://postcode.map.daum.net; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests";
+const runtimeCsp="default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://esm.sh https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://t1.daumcdn.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://webfontworld.github.io; connect-src 'self' blob: https://ifdqlwxgqgsvnawmhlfc.supabase.co https://esm.sh https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com; img-src 'self' data: blob:; font-src 'self' data: https://cdn.jsdelivr.net https://webfontworld.github.io; frame-src 'self' blob: https://postcode.map.daum.net; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests";
 const publicFont=/^assets\/home-fonts\/(?:do-hyeon|gmarket-sans|gowun-batang|gowun-dodum|ibm-plex-sans-kr|nanum-gothic|nanum-myeongjo|noto-sans-kr|noto-serif-kr|pretendard)\/[a-zA-Z0-9._-]+\.woff2?$/;
 export function runtimePath(pathname,portal,search){
  if(portal)return '';
@@ -29,7 +29,7 @@ export function rewriteExpoHTML(html){
   value=value.replace(re,'$1$3');
  }
  value=value.replace(/(<[^>]*\bid=["']about-img-src["'][^>]*?)\s+src=["'][^"']*["']/gi,'$1');
- return value.replace(/<head\b[^>]*>/i,'$&<meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="coop-tenant-profile" content="exhibition"><meta name="coop-tenant-name" content="햇빛 체험조합"><title>햇빛 체험조합 ERP</title><link rel="icon" href="/favicon.svg"><style>#btnLinkKakao,#btnLinkNaver,#kakaoLinkHint,#naverLinkHint{display:none!important}</style><script src="/demos/erp-expo/frame_boot.js?v=20261022-1"></script>');
+ return value.replace(/<head\b[^>]*>/i,'$&<meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="coop-tenant-profile" content="exhibition"><meta name="coop-tenant-name" content="햇빛 체험조합"><title>햇빛 체험조합 ERP</title><link rel="icon" href="/favicon.svg"><style>#btnLinkKakao,#btnLinkNaver,#kakaoLinkHint,#naverLinkHint{display:none!important}</style><script src="/demos/erp-expo/frame_boot.js?v=20261022-2"></script>');
 }
 export function rewriteExpoModule(code){
  const original="https://esm.sh/@supabase/supabase-js@2.112.2";

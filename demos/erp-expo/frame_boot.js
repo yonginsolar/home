@@ -67,6 +67,7 @@
  function stop(){
   if(stopped)return;stopped=true;verified=false;finish(false);
   for(const client of clients)client.auth?.stopAutoRefresh?.();
+  window.ContributionCertPreview?.clear();
   window.CoopDialog?.cancelAll(window);banner();controls();observeControls();
   // Relay through each registered direct parent. A grandchild preview is not
   // a direct iframe of the shell, so sending only to top would be ignored.
@@ -76,6 +77,10 @@
  const unavailable=()=>Response.json({code:'PT403',message:stopped?'DEMO_ACCESS_ENDED':'DEMO_CONTEXT_CHANGED'},{status:403});
  window.fetch=async(input,init)=>{
   const url=new URL(input instanceof Request?input.url:String(input),location.href);
+  // Same verified public font bytes, fixed release and integrity. No arbitrary proxy or credentials.
+  if(url.href==='https://raw.githubusercontent.com/orioncactus/pretendard/master/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf')
+   return nativeFetch('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf',{
+    credentials:'omit',redirect:'error',integrity:'sha384-xW61Q4J1NZyAOyvEFjblIB+1uEsV+n+5ChHAPwpsxpYIKS/9FsIGDRmBcuO1ING/'});
   if(url.origin!==project||!/^\/(rest|storage|functions)\/v1\//.test(url.pathname))return nativeFetch(input,init);
   if(!uuid.test(workspace)||stopped)return unavailable();
   // This diagnostic/access RPC is the only read allowed before authentication
@@ -145,6 +150,15 @@
   prompt(...args){return stopped?Promise.resolve(null):dialog.prompt(...args);},
   forOwner(owner,kind,...args){return stopped?Promise.resolve(kind==='prompt'?null:false):dialog.forOwner(owner,kind,...args);}
  }):dialog);
+ let memberCertificateModule;
+ intercept('MemberConfirmation',api=>api?Object.freeze({...api,async open(options){
+  if(stopped||!options.isCurrent?.())return;
+  try{
+   memberCertificateModule ||= import('/demos/erp-expo/member_confirmation.js?v=1.0.0').catch(error=>{memberCertificateModule=null;throw error;});
+   const module=await memberCertificateModule;
+   if(!stopped&&options.isCurrent())return module.open({...options,generate:api.generate});
+  }catch{if(!stopped&&options.isCurrent())options.notify?.('시연 확인서 도구를 불러오지 못했어요. 다시 시도해 주세요.');}
+ }}):api);
  // Module-only clients can opt in without exposing Auth/session contents.
  window.ExpoRuntimeBridge=Object.freeze({install,authOptions,status:()=>({workspace,verified,stopped}),diagnostics:()=>diagnostics.map(row=>({...row}))});
  window.addEventListener('message',e=>{
