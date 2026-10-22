@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.204
-Change: 2026-10-19 - Protect current profile address edits from obsolete search results.
+Version: v1.0.205
+Change: 2026-10-22 - Add current membership confirmation without changing contribution certificates.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@ Change: 2026-10-19 - Protect current profile address edits from obsolete search 
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.204 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.205 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -54,7 +54,8 @@ allowKakaoApp: true
 <script src="/shared/participation_image_display.js?v=20261012-2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
 <script src="cert_generator.js?v=20261018-organization-1"></script>
-<script src="shared/contribution_cert_preview.js?v=20261010-1"></script>
+<script src="shared/contribution_cert_preview.js?v=20261022-1"></script>
+<script src="shared/member_confirmation.js?v=20261022-1"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" integrity="sha384-xgNdoEQu0JeBEAN3/f7mrS+EPOsrmARCvhS7PEpk7QI2wvo4YOF3xY3EjQGKHAY9" crossorigin="anonymous"></script>
 <script src="badges.js?v=20260828-1"></script>
@@ -2026,6 +2027,12 @@ NO. <span id="infoMemberId">-</span>
 <p class="small text-muted">현재 납입된 출자금을 기준으로 발급합니다.</p>
 <button id="memberContributionCertificateView" class="btn btn-outline-success w-100 fw-bold" onclick="downloadCert()">
 <i class="bi bi-file-earmark-text me-2"></i>증명서 보기
+</button>
+<hr class="my-4">
+<h6 class="fw-bold">조합원 확인서</h6>
+<p class="small text-muted">발급일 현재 조합원임을 확인하는 문서입니다.</p>
+<button type="button" id="memberConfirmationCertificateView" class="btn btn-outline-success w-100 fw-bold" onclick="openMemberConfirmation()">
+<i class="bi bi-file-earmark-check me-2"></i>조합원 확인서 보기
 </button>
 </div>
 </div>
@@ -8787,6 +8794,15 @@ showModal(`최대 ${limit.toLocaleString()}원까지만 가능합니다.`); // a
 // One issuance is shared by preview, printing and saving; no automatic dashboard reload.
 // [2026-03-15] tenant hardening: 발급기관 정보는 현재 조합(ref_company_info.coop_id)에서만 읽는다.
 let contributionCertificateBusy = false;
+async function openMemberConfirmation() {
+if(!curMem?.member_id || !curAuth?.id)return;
+const target=curMem.id,authId=curAuth.id,memberId=curMem.member_id;
+const coopId=currentMemberCoopId || await getCurrentMemberCoopId();
+const current=()=>curMem?.id===target && curAuth?.id===authId && currentMemberCoopId===coopId;
+if(!current())return;
+if(!window.MemberConfirmation)return showModal('확인서 준비 기능을 불러오지 못했습니다. 다시 시도해 주세요.');
+await window.MemberConfirmation.open({client:_supabase,memberId,coopId,isCurrent:current,notify:showModal});
+}
 async function downloadCert() {
 if (!curMem || !curAuth || contributionCertificateBusy) return;
 if (!window.ContributionCertPreview) return showModal('증명서 미리보기를 불러오지 못했습니다. 화면을 새로고침해 주세요.');

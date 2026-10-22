@@ -1711,6 +1711,7 @@ async function fetchAllMembersForExport() {
                 'account_num_display'
             ].join(','))
             .neq('status', '승인대기')
+            .not('status', 'in', '(탈퇴,탈퇴완료,withdrawn,withdrawal_completed)')
             .order('name', { ascending: true })
     );
     if (error) throw error;
@@ -1743,7 +1744,7 @@ function normalizeMemberExportDateValue(value) {
 } // End of normalizeMemberExportDateValue
 
 function filterMemberExportRecordsByCutoffDate(records, cutoffDate) {
-    const safeRecords = Array.isArray(records) ? records : [];
+    const safeRecords = (Array.isArray(records) ? records : []).filter(record => !isWithdrawnMemberExport(record));
     const safeCutoffDate = normalizeMemberExportDateValue(cutoffDate);
     if (!safeCutoffDate) return safeRecords.slice();
     return safeRecords.filter((record) => {
@@ -1751,6 +1752,10 @@ function filterMemberExportRecordsByCutoffDate(records, cutoffDate) {
         return Boolean(joinDate) && joinDate <= safeCutoffDate;
     });
 } // End of filterMemberExportRecordsByCutoffDate
+
+function isWithdrawnMemberExport(record) {
+    return ['탈퇴','탈퇴완료','withdrawn','withdrawal_completed'].includes(String(record?.status || '').trim().toLowerCase());
+}
 
 function buildMemberExportRows(records, options = {}) {
     const safeRecords = Array.isArray(records) ? records : [];
@@ -2766,7 +2771,7 @@ async function downloadMemberSmsExcel(attempt) {
         const records=[];let cursor=null;
         for(;;){
             let query=scopeAdminTenant(_supabase.from('coop_members').select('id,name,phone')
-              .neq('status','승인대기').lte('join_date',cutoffDate).order('id',{ascending:true}).limit(500));
+              .neq('status','승인대기').not('status','in','(탈퇴,탈퇴완료,withdrawn,withdrawal_completed)').lte('join_date',cutoffDate).order('id',{ascending:true}).limit(500));
             if(cursor)query=query.gt('id',cursor);
             const {data,error}=await readMemberExcelExport(attempt,signal=>query.abortSignal(signal));
             if(!current())return;
@@ -2777,7 +2782,7 @@ async function downloadMemberSmsExcel(attempt) {
             if(!next||next===cursor)throw new Error('SMS_EXPORT_PAGE_INVALID');
             cursor=next;
         }
-        const rows=window.CoopMemberSmsExport.build(records);
+        const rows=window.CoopMemberSmsExport.build(records.filter(record=>!isWithdrawnMemberExport(record)));
         if(!current())return;
         if(!rows.length)return myAlert('문자 발송용으로 내려받을 휴대전화 번호가 없습니다.','warning');
         await verifyMemberExcelExportAccess(attempt);
@@ -8481,6 +8486,25 @@ function openIssueDocModal(docType) {
     syncIssueDocAmountMode();
 
     new bootstrap.Modal(document.getElementById('issueDocModal')).show();
+}
+
+async function openAdminMemberConfirmation() {
+    const target=g_current_member_id,memberId=g_current_member_row?.member_id,revision=g_member_detail_revision;
+    const coopId=String(g_adminMemberRuntime?.coop_id || ''),authId=adminCertificateAuthId;
+    const current=()=>g_current_member_id===target && g_current_member_row?.member_id===memberId
+        && g_member_detail_revision===revision && adminCertificateAuthId===authId
+        && g_adminMemberRuntime?.coop_id===coopId && (!window.frameElement || !window.frameElement.hidden);
+    if(!target || !memberId || !current())return;
+    if(!window.MemberConfirmation)return myAlert('확인서 준비 기능을 불러오지 못했습니다. 다시 시도해 주세요.','error');
+    await window.MemberConfirmation.open({client:_supabase,memberId,coopId,isCurrent:current,notify:m=>myAlert(m,'warning'),authorize:async()=>{
+        const access=await _supabase.rpc('get_my_erp_runtime');
+        const runtime=access.data;
+        if(access.error || !current() || runtime?.coop_id!==coopId || runtime.is_active===false
+            || !window.ErpRuntimeGuard.isModuleEnabled(runtime,'member_admin')
+            || !window.ErpRuntimeGuard.isModuleAssigned(runtime,'member_admin')
+            || !(runtime.effective_permissions?.includes('member.admin') || (runtime.runtime_profile==='site_member' && runtime.module_access?.member_admin===true)))
+            throw new Error('MEMBERSHIP_ACCESS_DENIED');
+    }});
 }
 
 async function calcIssueAmountByCriteria(docType, mode, cutoffDate, manualAmount, memberRow, periodFrom, periodTo) {

@@ -1,4 +1,4 @@
-/* Version: v1.0.0 — One issued PDF, an in-memory preview, print and save. */
+/* Version: v1.0.1 — Optional certificate title; existing contribution flow is unchanged. */
 (function () {
   'use strict';
   let active = null;
@@ -19,7 +19,7 @@
     if (state.focus?.isConnected) state.focus.focus({ preventScroll: true });
   }
 
-  function start({ isCurrent, authorize } = {}) {
+  function start({ isCurrent, authorize, title = '출자증명서' } = {}) {
     clear();
     const dialog = document.createElement('dialog');
     dialog.className = 'contribution-cert-preview';
@@ -41,6 +41,7 @@
     const state = { dialog, isCurrent, authorize, doc: null, frame: null, url: '', image: null,
       focus: document.activeElement, previousOverflow: document.documentElement.style.overflow, busy: false };
     active = state;
+    dialog.querySelector('h2').textContent = title;
     document.body.appendChild(dialog);
     document.documentElement.style.overflow = 'hidden';
     const valid = () => active === state && (!isCurrent || isCurrent());
@@ -94,16 +95,16 @@
           state.url = '';
         }
         if (!valid()) return;
-        if (pages.length !== 1) throw new Error('출자증명서 쪽수를 확인하지 못했습니다.');
+        if (pages.length !== 1) throw new Error('증명서 쪽수를 확인하지 못했습니다.');
         const image = document.createElement('img');
-        image.alt = '출자증명서 미리보기';
+        image.alt = title + ' 미리보기';
         image.src = pages[0].dataUrl;
         state.image = image;
         await image.decode();
         if (!valid()) return;
         dialog.querySelector('.cert-scroll').appendChild(image);
         const frame = document.createElement('iframe');
-        frame.title = '출자증명서 인쇄';
+        frame.title = title + ' 인쇄';
         frame.setAttribute('aria-hidden', 'true');
         frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
         document.body.appendChild(frame);
@@ -114,7 +115,7 @@
         printDoc.title = fileName.replace(/\.pdf$/i, '');
         printDoc.head.appendChild(style);
         const printImage = printDoc.createElement('img');
-        printImage.alt = '출자증명서';
+        printImage.alt = title;
         printImage.src = pages[0].dataUrl;
         printDoc.body.appendChild(printImage);
         await printImage.decode();
