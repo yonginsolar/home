@@ -1,4 +1,4 @@
-/* Tax tasks 1.1.0. Simple reminders; old drafts/evidence are preserved separately. */
+/* Tax tasks 1.1.1. Simple reminders; old drafts/evidence are preserved separately. */
 (function(root){
  'use strict';
  const names={vat:'부가세 신고·납부',vat_notice:'부가세 예정고지 납부',withholding:'원천세 신고·납부',local_withholding:'지방소득세 특별징수'};
@@ -75,7 +75,8 @@
    for(const r of shown){const card=make('section','border rounded p-3 bg-white'),head=make('div','d-flex gap-2 flex-wrap align-items-center');card.dataset.taxTask=key(r);
     const pendingReminder=reminders.get(key(r));
     const done=button(pendingReminder?.attempt?'같은 요청 다시 확인':completed(r)?'다시 할 일로':'완료했어요',()=>void markDone(r));
-    done.disabled=!editable()||!listFresh||!!pending||!!pendingReminder?.busy;head.append(make('h3','h6 mb-0 me-auto',names[r.kind]||'세무 업무'),done);
+    const future=String(r.period_end)>serverToday;
+    done.disabled=!editable()||!listFresh||!!pending||!!pendingReminder?.busy||future;if(future)done.title='귀속 기간이 끝난 뒤 완료로 표시할 수 있어요.';head.append(make('h3','h6 mb-0 me-auto',names[r.kind]||'세무 업무'),done);
     const held=drafts.get(key(r));
     if(held?.dirty||held?.attempt||Object.keys(r.state||{}).some(k=>k!=='reminder_done'))head.append(button(held?.dirty?'작성 중 · 이어 쓰기':'기존 기록 보기',()=>openTask(r)));
     card.append(head,make('p','small text-muted mt-2 mb-2',period(r)),make('p','mb-1',completed(r)?'✅ 마쳤어요':'🗓️ 해야 할 일이에요'),make('p','small mb-1','기한 '+r.payment_due));
@@ -266,5 +267,5 @@
    for(const row of r.data.items){const a=make('a','d-block mb-2',(names[row.kind]||'세무 업무')+' · '+filing(row)+' / '+payment(row));a.href='accounting.html?work=taxes&tax='+encodeURIComponent(row.kind)+'&period='+encodeURIComponent(row.period_end);section.append(a);}element.append(section);
   }catch(_){if(isCurrent()){const notice=make('p','small mt-3','세무 할 일 연결을 확인하지 못했습니다. '),retry=make('button','btn btn-outline-secondary btn-sm','다시 확인');retry.type='button';retry.onclick=()=>{if(!isCurrent())return;notice.remove();void approvalLink({element,client,coopId,documentId,isCurrent});};notice.append(retry);element.append(notice);}}finally{clearTimeout(timer);}
  }
- root.AccountingTaxTasks=Object.freeze({version:'1.1.0',create,approvalLink,filing,payment,period,completed});
+ root.AccountingTaxTasks=Object.freeze({version:'1.1.1',create,approvalLink,filing,payment,period,completed});
 })(window);
