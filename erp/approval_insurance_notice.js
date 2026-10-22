@@ -1,11 +1,11 @@
-/* v1.1.0 — local PDF review and one-page print attachment after explicit review. */
+/* v1.1.1 — recover explicit retry after a tab-interrupted PDF read or attachment preparation. */
 (function(root){'use strict';
  const make=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
  function create({button,getContext,getFingerprint,apply,onDirty=()=>{}}){
- const drafts=new Map();let modal,body,status,fileInput,fileMeta,password,readButton,review,canvas,pageSelect,attachmentPageSelect,ack,applyButton,current=null,session=null,controller=null,epoch=0,busy=false,pdfModule=null,baseline='',renderEpoch=0,focusTarget=null,opened=false;
+ const drafts=new Map();let modal,body,status,fileInput,fileMeta,password,readButton,review,canvas,pageSelect,attachmentPageSelect,ack,applyButton,current=null,session=null,controller=null,epoch=0,busy=false,activeTask='',pdfModule=null,baseline='',renderEpoch=0,focusTarget=null,opened=false;
   const scope=()=>{const c=getContext();return c?.allowed&&c.visible!==false?c.owner+'|'+c.draft:'';};
   const live=(s,t)=>s===current&&s.key===scope()&&t===epoch&&opened;
-  const stop=()=>{epoch++;renderEpoch++;controller?.abort();controller=null;void session?.destroy();session=null;busy=false;if(password)password.value='';};
+  const stop=()=>{epoch++;renderEpoch++;controller?.abort();controller=null;void session?.destroy();session=null;busy=false;activeTask='';if(password)password.value='';};
   const notice=s=>{status.textContent=s;};
   function build(){
    modal=make('div','modal fade');modal.id='insuranceNoticeReview';modal.tabIndex=-1;modal.setAttribute('aria-labelledby','insuranceNoticeTitle');modal.style.zIndex='1080';
@@ -29,7 +29,13 @@
    body.append(fileLabel,fileInput,fileMeta,help,passLabel,password,readButton,cancelChoice,status,grid);content.append(head,body,footer);dialog.append(content);modal.append(dialog);document.body.append(modal);
    modal.addEventListener('hide.bs.modal',()=>{opened=false;stop();});modal.addEventListener('hidden.bs.modal',()=>{if(scope()===current?.key)focusTarget?.focus({preventScroll:true});});
    modal.addEventListener('shown.bs.modal',()=>{if(!opened||!scope()||current?.key!==scope()){root.bootstrap.Modal.getInstance(modal)?.hide();return;}document.querySelector('.modal-backdrop:last-of-type')?.style.setProperty('z-index','1075');fileInput.focus({preventScroll:true});if(current?.file&&!session&&!busy)void previewOnly();});
-   document.addEventListener('visibilitychange',()=>{if(document.hidden&&busy)stop();});
+   document.addEventListener('visibilitychange',()=>{
+    if(!document.hidden||!busy)return;const s=current,task=activeTask;stop();
+    // Only recover the same still-authorized editor. Obsolete completions remain invalidated.
+    if(opened&&s===current&&s?.key===scope()){
+     notice(task==='read'?'탭 이동으로 읽기를 멈췄습니다. 다시 읽기를 눌러 주세요.':'탭 이동으로 첨부 준비를 멈췄습니다. 확인한 내용 반영을 다시 눌러 주세요.');sync();
+    }
+   });
    root.addEventListener('beforeunload',e=>{if([...drafts.values()].some(d=>d.dirty)){e.preventDefault();e.returnValue='';}});
    // Changing a menu, actor, draft or expense subtype closes the viewer, not its draft.
    const watch=()=>{if(opened&&(!scope()||current?.key!==scope())){opened=false;stop();root.bootstrap.Modal.getInstance(modal)?.hide();}};
@@ -58,13 +64,13 @@
   async function read(manual=false){
    if(busy||!scope()||current?.key!==scope())return;const s=current,f=s.candidate||s.file;if(!f)return;
    if(s.result&&f===s.file&&s.dirty){const before=JSON.stringify([s.values,s.month]);const yes=await root.CoopDialog.confirm('작성한 검토값을 PDF에서 다시 읽을까요?');if(!yes||current!==s||!scope()||JSON.stringify([s.values,s.month])!==before)return;}
-   stop();const ticket=epoch,fp=getFingerprint();busy=true;s.ack=false;controller=new AbortController();const ctl=controller;
-   let pass=manual?password.value:String(getContext().businessNumber||'').replace(/\D/g,'');password.value='';notice('PDF를 읽고 있습니다…');sync();
+   stop();const ticket=epoch,fp=getFingerprint();busy=true;activeTask='read';s.ack=false;controller=new AbortController();const ctl=controller;
+   let pass=manual&&password.value?password.value:String(getContext().businessNumber||'').replace(/\D/g,'');password.value='';notice('PDF를 읽고 있습니다…');sync();
    try{pdfModule=pdfModule||await import('./insurance_notice_pdf.mjs?v=1.1.0');const loaded=await pdfModule.open(f,{password:pass,signal:ctl.signal});pass='';if(!live(s,ticket)||getFingerprint()!==fp){await loaded.destroy();if(live(s,ticket))notice('결재 입력이 바뀌었습니다. 현재 내용을 확인하고 다시 읽어 주세요.');return;}
     session=loaded;s.file=f;s.candidate=null;delete s.candidateDirtyBaseline;s.result=loaded.result;s.values={...loaded.result.values};s.month=loaded.result.billingMonth;s.pageCount=loaded.pageCount;s.attachmentPage=loaded.result.sourcePage;s.prepared=null;s.dirty=true;s.ack=false;
     notice('읽은 내용을 원본과 확인해 주세요.');draw();void renderPage();onDirty();
    }catch(e){if(live(s,ticket)){notice(({PDF_PASSWORD:'등록된 사업자번호로 열리지 않았습니다. PDF 암호를 직접 입력하고 다시 읽기를 눌러 주세요.',PDF_LIMIT:'10MB 이하의 PDF를 선택해 주세요.',PDF_INVALID:'PDF 파일 형식을 확인해 주세요.',PDF_PAGES:'20쪽 이하의 PDF를 선택해 주세요.'})[e.message]||'PDF를 읽지 못했습니다. 파일을 확인하고 다시 시도해 주세요.');}}
-   finally{pass='';if(live(s,ticket)){busy=false;sync();}}
+   finally{pass='';if(live(s,ticket)){busy=false;activeTask='';sync();}}
   }
   async function renderPage(){
    if(!session||!current||!scope())return;const ticket=++renderEpoch,s=current,active=session;
@@ -78,7 +84,7 @@
   async function commit(){
    if(!scope()||current?.key!==scope()||busy||!current.ack||!validValues())return;
    if(getFingerprint()!==baseline){current.ack=false;notice('결재 입력이 바뀌었습니다. 창을 닫고 현재 내용을 확인한 뒤 다시 열어 주세요.');sync();return;}
-   const s=current,ticket=epoch,fp=baseline,page=s.attachmentPage,snapshot=JSON.stringify([s.values,s.month,page]),values={...s.values,insuranceBillingMonth:s.month};busy=true;sync();notice('첨부할 한 쪽을 PDF로 준비하고 있습니다…');
+   const s=current,ticket=epoch,fp=baseline,page=s.attachmentPage,snapshot=JSON.stringify([s.values,s.month,page]),values={...s.values,insuranceBillingMonth:s.month};busy=true;activeTask='attachment';sync();notice('첨부할 한 쪽을 PDF로 준비하고 있습니다…');
    try{
     let file=s.prepared?.page===page?s.prepared.file:null;
     if(!file){
@@ -90,11 +96,11 @@
     if(getFingerprint()!==fp||!s.ack||JSON.stringify([s.values,s.month,s.attachmentPage])!==snapshot){s.ack=false;notice('입력이 바뀌었습니다. 현재 내용을 다시 확인해 주세요.');return;}
     if(apply(values,file,fp,s.attachedFile)!==true)throw Error('NOT_APPLIED');s.attachedFile=file;s.dirty=false;s.ack=false;onDirty();root.bootstrap.Modal.getInstance(modal).hide();
    }catch(e){if(live(s,ticket))notice(e.message==='PDF_PASSWORD'?'원본 PDF 암호를 입력한 뒤 확인한 내용 반영을 다시 눌러 주세요.':e.message==='PDF_PRINT_LIMIT'?'첨부용 PDF가 10MB를 넘습니다. 파일을 확인해 주세요.':'첨부용 PDF를 준비하거나 반영하지 못했습니다. 현재 입력과 첨부를 확인한 뒤 다시 시도해 주세요.');}
-   finally{if(live(s,ticket)){busy=false;sync();}}
+   finally{if(live(s,ticket)){busy=false;activeTask='';sync();}}
   }
   function open(){const k=scope();if(!k)return;if(!modal)build();if(opened)return;stop();canvas.width=1;canvas.height=1;pageSelect.replaceChildren();current=drafts.get(k)||{key:k,dirty:false,ack:false};drafts.set(k,current);baseline=getFingerprint();focusTarget=document.activeElement;password.value='';fileInput.value='';notice(current.file?'선택한 고지서: '+current.file.name:'');draw();opened=true;root.bootstrap.Modal.getOrCreateInstance(modal).show();}
   button.addEventListener('click',open);
   return Object.freeze({open,hasDraft:()=>[...drafts.values()].some(d=>d.dirty),hasCurrentDraft:()=>!!drafts.get(scope())?.dirty,close:()=>{opened=false;stop();if(modal)root.bootstrap.Modal.getInstance(modal)?.hide();}});
  }
- root.CoopInsuranceNotice=Object.freeze({version:'1.1.0',create});
+ root.CoopInsuranceNotice=Object.freeze({version:'1.1.1',create});
 })(window);
