@@ -83,7 +83,7 @@
   const id=input.id||'';
   if(helpText[id])return helpText[id];
   if(input.matches('[data-mobile-mode]'))return helpText['site-home-slide-mode'];
-  if(input.matches('[data-mobile-image-only]'))return '켜면 현재 사진의 제목·설명·버튼을 숨기고 배경사진만 보여 줍니다. 사진 자체에 완성된 안내 문구가 들어 있을 때 적합합니다. 입력해 둔 문구는 보관되므로 다시 켜서 사용할 수 있으며 사진 클릭 바로가기도 별도로 확인하세요.';
+  if(input.matches('[data-mobile-image-only]'))return '메인 배너 전체에 공통으로 적용하는 설정입니다. 켜면 한 장 배너와 모든 슬라이드의 제목·설명·버튼을 숨기고 사진만 보여 줍니다. 끄면 작성해 둔 문구를 각 표시 설정에 따라 다시 보여 줍니다.\n\n사진 자체에 안내 문구가 들어 있을 때 사용하면 문구 겹침을 줄일 수 있습니다. 사진과 작성한 문구는 유지되며, 변경 결과는 미리보기로 확인한 뒤 저장해 주세요.';
   if(input.matches('[data-mobile-play]'))return helpText['site-home-slide-autoplay'];
   if(/(?:cta-target|button-url)$/.test(id))return '방문자가 이 버튼을 누르면 이동할 곳을 먼저 정합니다. 조합원 가입·조합 소개 등을 선택하면 해당 기본 문구가 채워지며 아래에서 표현을 수정할 수 있습니다. 버튼 문구만 바꿔서는 목적지가 바뀌지 않으니 연결할 곳과 문구를 함께 확인하세요.';
   if(/(?:cta-label|button_label)$/.test(id))return '버튼 안에 표시할 문구입니다. 바로가기를 먼저 고르면 목적지에 맞는 기본 문구가 들어오며, 필요한 말을 덧붙이거나 바꿀 수 있습니다. 눌렀을 때 무엇을 할 수 있는지 알아볼 수 있게 쓰고 모바일에서 길이가 적당한지 확인하세요.';

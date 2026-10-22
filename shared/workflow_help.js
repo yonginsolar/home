@@ -1,4 +1,4 @@
-/* Workflow help 1.0.3. Contextual explanations only; business behavior is unchanged. */
+/* Workflow help 1.0.4. Contextual explanations only; business behavior is unchanged. */
 (function(root){
  'use strict';
  if(root.CoopWorkflowHelp)return;
@@ -18,7 +18,7 @@
   employment_contracts:['근로계약서','직접 작성하거나 이미 서명한 외부 계약 원본을 등록할 수 있습니다. 외부 원본을 올릴 때도 급여·근로시간 조건은 원본과 대조해 입력하세요.\n\n이 조건은 확정 계약의 적용일부터 새 급여·휴가 계산 근거로 사용됩니다. 월 중간에 조건이 바뀌면 기간별 기준을 확인하며, 과거에 확정한 급여를 새 계약으로 다시 계산하지는 않습니다.'],
   hr_insurance:['4대보험 서류','직원을 선택해 취득·상실 등에 필요한 신고 자료를 준비하고 공식 서식으로 출력하는 화면입니다. 같은 이름의 직원이 있다면 대상자와 적용일을 함께 확인하세요.\n\n출력본의 필수 항목을 원자료와 대조한 뒤 실제 제출 절차를 진행합니다. 화면에서 준비·출력한 상태와 기관에 접수된 상태는 구분해서 확인해야 합니다.'],
   officials_admin:['임원 관리','직책·임기·등기 상태와 종료 이력을 관리합니다. 선거 당선자를 가져올 때도 실제 선임 내용과 적용할 임기를 확인한 뒤 등록하세요.\n\n임기 종료일은 종료 예정 내역과 이력 확인에 사용됩니다. 직책을 맡은 사실과 등기 완료 여부는 별도 항목으로 관리하면 변경 시점을 구분하기 쉽습니다.'],
-  officials_signature_admin:['임원 전자서명','누가 어떤 문서에 서명해야 하는지와 요청·완료 상태를 확인하는 관리 화면입니다. 문서 제목과 실제 서명 대상을 확인한 뒤 요청을 진행하세요.\n\n요청이 접수된 것과 본인이 서명을 완료한 것은 다릅니다. 당사자는 전자서명 화면에서 문서를 읽고, 지난 본인 서명 또는 새 서명을 확인한 뒤 완료합니다.'],
+  officials_signature_admin:['임원 서명 이미지 관리','등록·교체하는 곳입니다\n임원·대의원·선관위원이 사용할 서명 이미지를 준비합니다. 대상자를 확인하고 파일을 고른 뒤 업로드를 누르면 그 대상자의 등록 이미지가 저장됩니다. 이미 등록된 이미지가 있다면 새 파일로 교체됩니다. 미리보기에서 선명하게 보이는지 확인하세요.\n\n어디에 쓰이나요?\n등록한 이미지는 의사록 등 전자서명 화면에서 본인이 선택해 사용할 수 있습니다. 서명할 때는 당사자가 해당 문서를 읽고 사용할 이미지를 확인한 뒤 완료합니다.'],
   vote_hub:['선거·투표 관리','사람을 선출한다면 선거 관리, 질문에 대한 의견을 모은다면 일반 투표를 선택하세요. 선거는 선거구·후보·선거인 명부를, 일반 투표는 질문·선택 수·대상을 중심으로 준비합니다.\n\n관리 권한이 있어도 실제 투표는 본인의 참여 자격과 기간을 따릅니다. 먼저 선택한 선거·투표의 제목과 현재 단계를 확인하세요.'],
   admin:['선거 관리','선거구·후보·선거권자를 준비한 뒤 후보 확정, 투표, 개표, 결과 공포 순서로 진행 상황을 확인합니다. 서로 다른 선거를 오갈 때는 상단 제목과 회차를 먼저 보세요.\n\n개표 결과를 확인하는 단계와 당선 결과를 공포하는 단계는 구분됩니다. 안내 발송도 별도 확인을 거치므로 대상과 문구를 살핀 뒤 진행하세요.'],
   admin_setup:['선거 설정','공고·후보 등록·투표 일정, 당선인 임기와 선거구별 선출 인원·유형을 준비합니다. 실제 선거 공고를 옆에 두고 일정과 인원을 맞추면 누락을 줄일 수 있습니다.\n\n정기선거·결선·보궐은 임기 연결 방식이 다릅니다. 제안된 날짜도 실제 임기와 대조하고 선거인 명부를 확정하기 전에 선거구 배정을 확인하세요.'],
@@ -276,7 +276,7 @@
   const pending=new Set();let queued=false;
   new MutationObserver(records=>{for(const r of records){if(r.target.closest?.('.'+CLASS+',.coop-help-preference,.coop-dialog'))continue;for(const n of r.addedNodes)if(n.nodeType===1&&!n.matches('.'+CLASS+',.coop-help-preference,.coop-dialog')&&!n.closest('.'+CLASS+',.coop-help-preference,.coop-dialog'))pending.add(n);if(r.target.matches?.('label'))pending.add(r.target);}if(!pending.size||queued)return;queued=true;queueMicrotask(()=>{queued=false;const nodes=[...pending];pending.clear();nodes.forEach(decorate);});}).observe(doc.body,{subtree:true,childList:true});
  }
- root.CoopWorkflowHelp=Object.freeze({version:'1.0.3',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
+ root.CoopWorkflowHelp=Object.freeze({version:'1.0.4',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
  root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)sync(read());});root.addEventListener('pageshow',()=>sync(read()));
  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })(window);
