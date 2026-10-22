@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.149
-Change: 2026-10-13 - Preserve new employee inputs until explicit discard, without changing employee permissions or registration payloads.
+Version: v1.0.150
+Change: 2026-10-22 - Preserve normal bulk leave draft inputs and employee selection across modal reopening.
 -->
 <html>
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-13 - Preserve new employee inputs until explicit discard, withou
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.149 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.150 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1127,7 +1127,7 @@ function guardEmployeeDetailClose(event) {
     cancelEmployeeDetailReads();
 }
 window.addEventListener('beforeunload', event => {
-    if (runInvite._inFlight || hasUnsavedEmployeeInvite() || isEmployeeDetailSaving() || hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || document.getElementById('coopDepositSetup')?.certificateSetupController?.dirty() || document.getElementById('coopDepositSetup')?.certificateSetupController?.writing() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
+    if (runInvite._inFlight || hasUnsavedEmployeeInvite() || isEmployeeDetailSaving() || hasUnsavedEmployeeDetail() || hasUnsavedNormalBulkLeave() || window.ERPEmployeeSettingsView?.isDirty() || document.getElementById('coopDepositSetup')?.certificateSetupController?.dirty() || document.getElementById('coopDepositSetup')?.certificateSetupController?.writing() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
 });
 let inviteDraftBaseline = null, inviteDiscardPending = false, inviteDiscardAllowed = false;
 const EMPLOYEE_INVITE_DRAFT_IDS = ['newName','newEmail','newRank','newDeptSelect','newDeptCustom','newRole','newAuthLevel'];
@@ -1205,6 +1205,7 @@ let salaryMealCarryForward = { sourceMonth: '', sourceAmount: 0, found: false, u
 let salarySaveInFlight = false;
 let alertModal, confirmModal, settingsModal, inviteModal, detailModal, adminCertModal, loadingModal, ledgerModal, resignModal, orgChartModal, payrollImportModal, adminLeaveDetailModal, bulkLeaveModal;
 const expoBulkLeaveState = {closing:false,reopen:false,committed:false,restoreControls:null};
+const normalBulkLeaveState = {owner:'',draft:null,epoch:0,closing:false,reopen:false,opening:false};
 let hasCheckedExpired = false;
 let myInfo = null;
 let hrAuthorizedUserId = '';
@@ -3119,7 +3120,12 @@ window.onload = async function() {
     if (bulkLeaveModalEl && !bulkLeaveModalEl.dataset.resetBound) {
         bulkLeaveModalEl.dataset.resetBound = '1';
         bulkLeaveModalEl.addEventListener('hide.bs.modal', () => {
-            if (!window.ExpoRuntimeBridge) return;
+            if (!window.ExpoRuntimeBridge) {
+                preserveNormalBulkLeaveDraft();
+                normalBulkLeaveState.closing = true;
+                normalBulkLeaveState.epoch += 1;
+                return;
+            }
             expoBulkLeaveState.closing = true;
             if (!expoBulkLeaveState.committed) preserveExpoBulkLeaveDraft();
         });
@@ -3136,8 +3142,8 @@ window.onload = async function() {
                 if (expoBulkLeaveState.reopen) { expoBulkLeaveState.reopen = false; void openBulkLeaveModal(); }
                 return;
             }
-            if (applyBulkLeaveAdjustment._inFlight) return;
-            resetBulkLeaveForm();
+            normalBulkLeaveState.closing = false;
+            if (normalBulkLeaveState.reopen) { normalBulkLeaveState.reopen = false; void openBulkLeaveModal(); }
         });
     }
 
@@ -7538,6 +7544,37 @@ function resetBulkLeaveForm() {
     updateBulkLeaveSelectionSummary();
 } // End of resetBulkLeaveForm
 
+function snapshotNormalBulkLeaveDraft() {
+    return {
+        type:document.getElementById('bulkLeaveType')?.value || '지급',
+        days:document.getElementById('bulkLeaveDays')?.value || '',
+        reason:document.getElementById('bulkLeaveReason')?.value || '',
+        department:document.getElementById('bulkLeaveDepartmentSelect')?.value || '',
+        selected:getBulkLeaveSelectedEmployeeIds().map(String).sort()
+    };
+}
+function hasUnsavedNormalBulkLeave() {
+    if (window.ExpoRuntimeBridge || !normalBulkLeaveState.owner || normalBulkLeaveState.owner!==getHrSettingsOwner()) return false;
+    const d=snapshotNormalBulkLeaveDraft();
+    return !!(applyBulkLeaveAdjustment._inFlight || d.days || d.reason || d.type!=='지급' || d.selected.length);
+}
+function preserveNormalBulkLeaveDraft() {
+    if (window.ExpoRuntimeBridge || !normalBulkLeaveState.owner) return;
+    if (normalBulkLeaveState.owner !== getHrSettingsOwner()) {
+        normalBulkLeaveState.owner=''; normalBulkLeaveState.draft=null; return;
+    }
+    normalBulkLeaveState.draft=snapshotNormalBulkLeaveDraft();
+}
+function restoreNormalBulkLeaveDraft() {
+    const draft=normalBulkLeaveState.owner===getHrSettingsOwner() ? normalBulkLeaveState.draft : null;
+    if (!draft) return;
+    for (const [key,id] of [['type','bulkLeaveType'],['days','bulkLeaveDays'],['reason','bulkLeaveReason'],['department','bulkLeaveDepartmentSelect']]) {
+        document.getElementById(id).value=draft[key];
+    }
+    document.querySelectorAll('.bulk-leave-employee-check').forEach(n=>n.checked=draft.selected.includes(n.dataset.empId));
+    updateBulkLeaveSelectionSummary();
+}
+
 function getBulkLeaveDepartmentKey(employee) {
     const department = String(employee?.department || '').trim();
     return department || '__UNASSIGNED__';
@@ -7556,6 +7593,29 @@ function getBulkLeaveEligibleEmployees() {
 } // End of getBulkLeaveEligibleEmployees
 
 async function openBulkLeaveModal() {
+    if (!window.ExpoRuntimeBridge) {
+        if (normalBulkLeaveState.closing) { normalBulkLeaveState.reopen=true; return; }
+        if (normalBulkLeaveState.opening || document.getElementById('bulkLeaveModal')?.classList.contains('show')) return;
+        const owner=getHrSettingsOwner();
+        if (!owner || window.frameElement?.hidden) return;
+        normalBulkLeaveState.opening=true;
+        const epoch=++normalBulkLeaveState.epoch;
+        try {
+            if (!bulkLeaveModal) return showAlert('전체 휴가 관리 화면을 열 수 없습니다.');
+            if (normalBulkLeaveState.owner===owner) preserveNormalBulkLeaveDraft();
+            else { normalBulkLeaveState.owner=owner; normalBulkLeaveState.draft=null; }
+            if (!Array.isArray(employeeCache) || employeeCache.length===0) await loadList();
+            if (owner!==getHrSettingsOwner() || epoch!==normalBulkLeaveState.epoch || window.frameElement?.hidden) return;
+            resetBulkLeaveForm();
+            renderBulkLeaveEmployeeRows();
+            renderBulkLeaveDepartmentOptions();
+            restoreNormalBulkLeaveDraft();
+            setBulkLeaveApplyButtonState(!!applyBulkLeaveAdjustment._inFlight);
+            bulkLeaveModal.show();
+            window.setTimeout(syncHrModalStack,0);
+        } finally { normalBulkLeaveState.opening=false; }
+        return;
+    }
     if (window.ExpoRuntimeBridge && expoBulkLeaveState.closing) { expoBulkLeaveState.reopen=true;return; }
     if (window.ExpoRuntimeBridge && document.getElementById('bulkLeaveModal')?.classList.contains('show')) return;
     if (!bulkLeaveModal) {
@@ -7704,6 +7764,7 @@ function setBulkLeaveApplyButtonState(isBusy) {
     const btn = document.getElementById('bulkLeaveApplyBtn');
     if (!btn) return;
     btn.disabled = !!isBusy;
+    if (!window.ExpoRuntimeBridge && !isBusy) btn.disabled = getBulkLeaveSelectedEmployeeIds().length === 0;
     btn.textContent = isBusy ? '반영 중...' : '선택 직원에게 일괄 반영';
     if (window.ExpoRuntimeBridge && !isBusy && applyBulkLeaveAdjustment._expoUncertain) btn.textContent='처리 결과 확인';
     if (!isBusy) updateBulkLeaveSelectionSummary();
@@ -7730,10 +7791,14 @@ async function applyBulkLeaveAdjustment() {
     }
     const sign = input.adjType === '차감' ? '-' : '+';
     const expoPoint = window.ExpoRuntimeBridge ? expoBulkLeaveSnapshot() : null;
+    const normalPoint = window.ExpoRuntimeBridge ? null : {owner:getHrSettingsOwner(),epoch:normalBulkLeaveState.epoch,form:JSON.stringify(snapshotNormalBulkLeaveDraft())};
     const confirmMessage = `${selectedEmployees.length}명에게 ${sign}${input.days}일을 일괄 반영합니다. 사유: ${input.reason}`;
     showConfirm('전체 휴가 관리', confirmMessage, async function() {
         if (applyBulkLeaveAdjustment._inFlight) return;
         if (window.ExpoRuntimeBridge && (expoPoint !== expoBulkLeaveSnapshot() || !document.getElementById('bulkLeaveModal').classList.contains('show'))) return;
+        if (normalPoint && (!normalPoint.owner || normalPoint.owner!==getHrSettingsOwner() || normalPoint.epoch!==normalBulkLeaveState.epoch
+            || normalPoint.form!==JSON.stringify(snapshotNormalBulkLeaveDraft()) || window.frameElement?.hidden
+            || !document.getElementById('bulkLeaveModal').classList.contains('show'))) return;
         applyBulkLeaveAdjustment._inFlight = true;
         if (window.ExpoRuntimeBridge) holdExpoBulkLeaveControls();
         setBulkLeaveApplyButtonState(true);
@@ -7753,13 +7818,19 @@ async function applyBulkLeaveAdjustment() {
             applyBulkLeaveAdjustment._requestKey = null;
             applyBulkLeaveAdjustment._request = null;
             if (window.ExpoRuntimeBridge) { applyBulkLeaveAdjustment._expoUncertain=false;expoBulkLeaveState.committed=true;try{localStorage.removeItem('expo-bulk-leave-v1');}catch(_){} }
-            if (bulkLeaveModal) bulkLeaveModal.hide();
-            if (currentEmpId && selectedIdSet.has(String(currentEmpId))) {
+            const sameOwner = !normalPoint || normalPoint.owner===getHrSettingsOwner();
+            const sameDraft = !normalPoint || sameOwner && normalPoint.form===JSON.stringify(snapshotNormalBulkLeaveDraft());
+            if (normalPoint && sameOwner && sameDraft) {
+                normalBulkLeaveState.draft=null;
+                resetBulkLeaveForm();
+            }
+            if (sameDraft && sameOwner && (!normalPoint || normalPoint.epoch===normalBulkLeaveState.epoch) && bulkLeaveModal) bulkLeaveModal.hide();
+            if (sameOwner && currentEmpId && selectedIdSet.has(String(currentEmpId))) {
                 loadLeave();
             }
         } catch (error) {
             if (window.ExpoRuntimeBridge && ['22023','22P02','42501','PT400','PT403','PT409','P0001','23505','23514'].includes(String(error?.code || ''))) applyBulkLeaveAdjustment._expoUncertain=false;
-            showAlert('일괄 반영 실패: ' + (error?.message || '알 수 없는 오류'));
+            if (!normalPoint || normalPoint.owner===getHrSettingsOwner() && normalPoint.epoch===normalBulkLeaveState.epoch && !window.frameElement?.hidden) showAlert('일괄 반영 실패: ' + (error?.message || '알 수 없는 오류'));
         } finally {
             applyBulkLeaveAdjustment._inFlight = false;
             if (window.ExpoRuntimeBridge) { if (!applyBulkLeaveAdjustment._expoUncertain) expoBulkLeaveState.restoreControls?.();preserveExpoBulkLeaveDraft(); }
