@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.210
-Change: 2026-10-22 - Identify an email shown from the current login account.
+Version: v1.0.211
+Change: 2026-10-23 - Keep participation document responses in their original window and profile.
 -->
 <html lang="ko">
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-22 - Identify an email shown from the current login account.
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.210 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.211 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -2640,6 +2640,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
 window.PortalChildPreparation?.invalidate();
 window.PortalChildDrafts?.clear();
@@ -4841,6 +4842,7 @@ return memberInformationPortal.refresh(member);
 
 async function loadDashboardData(uuid, options = {}) {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
+if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
 invalidatePortalModifyEditor();
 window.PortalChildPreparation?.invalidate();
@@ -6697,6 +6699,7 @@ let participationHumanitiesRequest = null;
 let participationHistoryPages = createEmptyParticipationHistoryPages();
 let participationHistoryReturnFocus = null;
 let participationDocumentReturnFocus = null;
+let participationDocumentRequest = null;
 let participationImageReturnFocus = null;
 let participationImageGallery = [];
 let participationImageIndex = -1;
@@ -6717,6 +6720,7 @@ MEETING: createParticipationHistoryPageState()
 } // End of createEmptyParticipationHistoryPages
 
 function resetParticipationHistoryState(memberUuid) {
+if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 closeParticipationImageLightbox();
 participationSignedUrlCache.clear();
 if (participationHistoryInfiniteObserver) {
@@ -7257,6 +7261,16 @@ return `<p>${escapeHtml(parsed.body.textContent).replace(/\r?\n/g, '<br>')}</p>`
 return parsed.body.innerHTML;
 } // End of sanitizeParticipationDocumentHtml
 
+function currentParticipationDocumentRequest(request) {
+return request === participationDocumentRequest &&
+request.actor === String(curAuth?.id || '') &&
+request.coop === String(currentMemberCoopId || '') &&
+request.member === String(getActiveMemberProfileId() || '') &&
+request.profileRevision === portalProfileLoadRevision &&
+request.overlay === document.getElementById('participationDocumentModal') &&
+request.overlay.isConnected && request.overlay.style.display === 'flex';
+} // End of currentParticipationDocumentRequest
+
 async function openParticipationDocument(eventId, trigger) {
 const safeEventId = String(eventId || '').trim();
 const memberUuid = getActiveMemberProfileId();
@@ -7267,6 +7281,11 @@ const content = document.getElementById('participationDocumentContent');
 const fullLink = document.getElementById('participationDocumentFullLink');
 const signLink = document.getElementById('participationDocumentSignLink');
 if (!overlay || !memberUuid || !/^[0-9a-f-]{36}$/i.test(safeEventId)) return;
+const request = {
+actor: String(curAuth?.id || ''), coop: String(currentMemberCoopId || ''),
+member: String(memberUuid), profileRevision: portalProfileLoadRevision, overlay
+};
+participationDocumentRequest = request;
 participationDocumentReturnFocus = trigger || document.activeElement;
 document.getElementById('participationHistoryModal')?.classList.add('modal-depth-back');
 overlay.style.display = 'flex';
@@ -7274,14 +7293,15 @@ overlay.setAttribute('aria-hidden', 'false');
 if (title) title.textContent = '회의록';
 if (meta) meta.textContent = '';
 if (content) content.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>회의록을 불러오는 중...</div>';
-if (fullLink) fullLink.hidden = true;
-if (signLink) signLink.hidden = true;
+if (fullLink) { fullLink.hidden = true; fullLink.removeAttribute('href'); }
+if (signLink) { signLink.hidden = true; signLink.removeAttribute('href'); }
 document.getElementById('participationDocumentCloseBtn')?.focus();
 try {
 const { data, error } = await _supabase.rpc('participation_member_document_preview', {
 p_member_uuid: memberUuid,
 p_event_id: safeEventId
 });
+if (!currentParticipationDocumentRequest(request)) return;
 if (error) throw error;
 if (!data?.available || !data?.document_id) {
 closeParticipationDocument(false);
@@ -7308,6 +7328,7 @@ signLink.href = `minutes/minutes_sign.html?id=${encodedId}`;
 signLink.hidden = data.can_open_signature !== true;
 }
 } catch (error) {
+if (!currentParticipationDocumentRequest(request)) return;
 CoopSafeLog.error("openParticipationDocument failed:", error);
 closeParticipationDocument(false);
 showModal('회의록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
@@ -7315,13 +7336,24 @@ showModal('회의록을 불러오지 못했습니다. 잠시 후 다시 시도�
 } // End of openParticipationDocument
 
 function closeParticipationDocument(restoreFocus = true) {
+participationDocumentRequest = null;
 const overlay = document.getElementById('participationDocumentModal');
 if (overlay) {
 overlay.style.display = 'none';
 overlay.setAttribute('aria-hidden', 'true');
 }
+const title = document.getElementById('participationDocumentTitle');
+const meta = document.getElementById('participationDocumentMeta');
+const content = document.getElementById('participationDocumentContent');
+if (title) title.textContent = '회의록';
+if (meta) meta.textContent = '';
+if (content) content.replaceChildren();
+['participationDocumentFullLink', 'participationDocumentSignLink'].forEach(id => {
+const link = document.getElementById(id);
+if (link) { link.hidden = true; link.removeAttribute('href'); }
+});
 document.getElementById('participationHistoryModal')?.classList.remove('modal-depth-back');
-if (restoreFocus && participationDocumentReturnFocus && typeof participationDocumentReturnFocus.focus === 'function') participationDocumentReturnFocus.focus();
+if (restoreFocus && participationDocumentReturnFocus?.isConnected && !participationDocumentReturnFocus.disabled && typeof participationDocumentReturnFocus.focus === 'function') participationDocumentReturnFocus.focus();
 participationDocumentReturnFocus = null;
 } // End of closeParticipationDocument
 
@@ -8722,6 +8754,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 async function toggleTab(type, btn) {
 if (portalApplicationWritePending && window.__memberAppLocks?.modifyApplication) return;
+if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
 invalidatePortalModifyEditor();
 window.PortalChildPreparation?.invalidate();
