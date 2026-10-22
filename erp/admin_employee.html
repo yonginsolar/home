@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.150
-Change: 2026-10-22 - Preserve normal bulk leave draft inputs and employee selection across modal reopening.
+Version: v1.0.151
+Change: 2026-10-22 - Retain unknown leave requests until their original result is verified.
 -->
 <html>
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-22 - Preserve normal bulk leave draft inputs and employee select
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.150 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.151 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -683,6 +683,7 @@ Change: 2026-10-22 - Preserve normal bulk leave draft inputs and employee select
         <div class="alert alert-info bulk-leave-note mb-3">
           주말 근무 대체휴가처럼 여러 직원에게 같은 사유와 일수를 적용할 때 사용합니다. 지급과 차감은 조정 구분에서 선택하고, 일수는 양수로 입력합니다.
         </div>
+        <div id="bulkLeaveRequestStatus" class="small text-primary mb-3" role="status" hidden></div>
         <div class="bulk-leave-summary-card mb-3">
           <div class="row g-2 align-items-end">
             <div class="col-md-3">
@@ -1205,7 +1206,7 @@ let salaryMealCarryForward = { sourceMonth: '', sourceAmount: 0, found: false, u
 let salarySaveInFlight = false;
 let alertModal, confirmModal, settingsModal, inviteModal, detailModal, adminCertModal, loadingModal, ledgerModal, resignModal, orgChartModal, payrollImportModal, adminLeaveDetailModal, bulkLeaveModal;
 const expoBulkLeaveState = {closing:false,reopen:false,committed:false,restoreControls:null};
-const normalBulkLeaveState = {owner:'',draft:null,epoch:0,closing:false,reopen:false,opening:false};
+const normalBulkLeaveState = {owner:'',draft:null,epoch:0,closing:false,reopen:false,opening:false,pending:null,notice:''};
 let hasCheckedExpired = false;
 let myInfo = null;
 let hrAuthorizedUserId = '';
@@ -7556,7 +7557,7 @@ function snapshotNormalBulkLeaveDraft() {
 function hasUnsavedNormalBulkLeave() {
     if (window.ExpoRuntimeBridge || !normalBulkLeaveState.owner || normalBulkLeaveState.owner!==getHrSettingsOwner()) return false;
     const d=snapshotNormalBulkLeaveDraft();
-    return !!(applyBulkLeaveAdjustment._inFlight || d.days || d.reason || d.type!=='지급' || d.selected.length);
+    return !!(normalBulkLeaveState.pending || applyBulkLeaveAdjustment._inFlight || d.days || d.reason || d.type!=='지급' || d.selected.length);
 }
 function preserveNormalBulkLeaveDraft() {
     if (window.ExpoRuntimeBridge || !normalBulkLeaveState.owner) return;
@@ -7603,7 +7604,7 @@ async function openBulkLeaveModal() {
         try {
             if (!bulkLeaveModal) return showAlert('전체 휴가 관리 화면을 열 수 없습니다.');
             if (normalBulkLeaveState.owner===owner) preserveNormalBulkLeaveDraft();
-            else { normalBulkLeaveState.owner=owner; normalBulkLeaveState.draft=null; }
+            else { normalBulkLeaveState.owner=owner; normalBulkLeaveState.draft=null; normalBulkLeaveState.pending=null; normalBulkLeaveState.notice=''; }
             if (!Array.isArray(employeeCache) || employeeCache.length===0) await loadList();
             if (owner!==getHrSettingsOwner() || epoch!==normalBulkLeaveState.epoch || window.frameElement?.hidden) return;
             resetBulkLeaveForm();
@@ -7733,6 +7734,7 @@ function updateBulkLeaveSelectionSummary() {
         selectAllEl.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
         selectAllEl.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
     }
+    if (!window.ExpoRuntimeBridge) { syncNormalBulkLeaveRequestUi(); return; }
     if (applyBtn && !applyBulkLeaveAdjustment._inFlight) {
         applyBtn.disabled = selectedCount === 0;
     }
@@ -7761,6 +7763,7 @@ function getBulkLeaveAdjustmentInput() {
 } // End of getBulkLeaveAdjustmentInput
 
 function setBulkLeaveApplyButtonState(isBusy) {
+    if (!window.ExpoRuntimeBridge) { syncNormalBulkLeaveRequestUi(); return; }
     const btn = document.getElementById('bulkLeaveApplyBtn');
     if (!btn) return;
     btn.disabled = !!isBusy;
@@ -7770,7 +7773,80 @@ function setBulkLeaveApplyButtonState(isBusy) {
     if (!isBusy) updateBulkLeaveSelectionSummary();
 } // End of setBulkLeaveApplyButtonState
 
+function syncNormalBulkLeaveRequestUi() {
+    const owned=!!normalBulkLeaveState.owner && normalBulkLeaveState.owner===getHrSettingsOwner();
+    const pending=owned ? normalBulkLeaveState.pending : null;
+    const btn=document.getElementById('bulkLeaveApplyBtn');
+    if (btn) {
+        btn.disabled=!owned || !!applyBulkLeaveAdjustment._inFlight || (!pending && getBulkLeaveSelectedEmployeeIds().length===0);
+        btn.textContent=applyBulkLeaveAdjustment._inFlight ? '확인 중...' : pending ? '이전 처리 결과 확인' : '선택 직원에게 일괄 반영';
+    }
+    const status=document.getElementById('bulkLeaveRequestStatus');
+    if (status) {
+        status.textContent=owned ? (pending?.uncertain ? '처리 결과를 확인하지 못했어요. 이전 요청의 결과부터 확인해 주세요.' : normalBulkLeaveState.notice || '') : '';
+        status.hidden=!status.textContent;
+    }
+}
+
+function prepareNormalBulkLeaveAdjustment() {
+    if (applyBulkLeaveAdjustment._inFlight) return;
+    const owner=getHrSettingsOwner(), form=snapshotNormalBulkLeaveDraft(), epoch=normalBulkLeaveState.epoch;
+    if (!owner || owner!==normalBulkLeaveState.owner || window.frameElement?.hidden || !document.getElementById('bulkLeaveModal')?.classList.contains('show')) return;
+    let pending=normalBulkLeaveState.pending;
+    if (!pending) {
+        const selectedIds=Array.from(new Set(form.selected));
+        if (!selectedIds.length) return showAlert('휴가를 조정할 직원을 선택해주세요.');
+        const input=getBulkLeaveAdjustmentInput();
+        if (input.error) return showAlert(input.error);
+        const employees=getBulkLeaveEligibleEmployees().filter(e=>selectedIds.includes(String(e.emp_id || '').trim()));
+        if (employees.length!==selectedIds.length) return showAlert('선택한 직원 목록을 다시 확인해주세요.');
+        pending={owner,form,rows:employees.map(e=>withEmployeeTenantPayload({emp_id:String(e.emp_id).trim(),adj_type:input.adjType,days:input.days,reason:input.reason})),key:crypto.randomUUID(),uncertain:false};
+    }
+    const retry=normalBulkLeaveState.pending===pending;
+    const title=retry ? '이전 처리 결과 확인' : '전체 휴가 관리';
+    const message=retry ? `${pending.rows.length}명에게 요청한 ${pending.form.days}일 ${pending.form.type}의 처리 결과를 확인합니다. 사유: ${pending.form.reason}`
+        : `${pending.rows.length}명에게 ${pending.form.type==='차감'?'-':'+'}${pending.form.days}일을 일괄 반영합니다. 사유: ${pending.form.reason}`;
+    showConfirm(title,message,async function() {
+        if (applyBulkLeaveAdjustment._inFlight || owner!==getHrSettingsOwner() || epoch!==normalBulkLeaveState.epoch || window.frameElement?.hidden
+            || !document.getElementById('bulkLeaveModal')?.classList.contains('show') || JSON.stringify(form)!==JSON.stringify(snapshotNormalBulkLeaveDraft())
+            || (normalBulkLeaveState.pending && normalBulkLeaveState.pending!==pending)) return;
+        normalBulkLeaveState.pending=pending;
+        normalBulkLeaveState.notice='';
+        applyBulkLeaveAdjustment._inFlight=true;
+        syncNormalBulkLeaveRequestUi();
+        try {
+            const result=await _supabase.rpc('erp_hr_leave_adjustment',{p_rows:pending.rows,p_request_key:pending.key});
+            if (result.error) throw result.error;
+            if (result.data?.verified!==true || !Array.isArray(result.data.ids) || result.data.ids.length!==pending.rows.length
+                || new Set(result.data.ids.map(String)).size!==pending.rows.length || result.data.ids.some(id=>!/^\d+$/.test(String(id)) || Number(id)<=0)) throw new Error('LEAVE_RESULT_UNVERIFIED');
+            if (owner!==getHrSettingsOwner() || normalBulkLeaveState.pending!==pending) return;
+            normalBulkLeaveState.pending=null;
+            const unchanged=JSON.stringify(pending.form)===JSON.stringify(snapshotNormalBulkLeaveDraft());
+            if (unchanged) { normalBulkLeaveState.draft=null; resetBulkLeaveForm(); }
+            else { preserveNormalBulkLeaveDraft(); normalBulkLeaveState.notice='이전 요청의 반영을 확인했습니다. 현재 입력은 작성 중입니다.'; }
+            if (unchanged && epoch===normalBulkLeaveState.epoch) bulkLeaveModal?.hide();
+            if (currentEmpId && pending.rows.some(row=>row.emp_id===String(currentEmpId))) {
+                // A refresh failure is not a failed write and must never repeat the adjustment.
+                Promise.resolve().then(()=>loadLeave()).catch(()=>{});
+            }
+        } catch (error) {
+            const definitive=['22023','22P02','42501','PT400','PT403','PT404','PT409','P0001','23505','23514'].includes(String(error?.code || ''));
+            if (definitive && !pending.uncertain) {
+                if (normalBulkLeaveState.pending===pending) normalBulkLeaveState.pending=null;
+            } else { pending.uncertain=true; }
+            if (owner===getHrSettingsOwner() && epoch===normalBulkLeaveState.epoch && !window.frameElement?.hidden) {
+                showAlert(pending.uncertain ? '반영 결과를 확인하지 못했습니다. 이전 처리 결과 확인을 눌러 주세요.' : '휴가를 반영하지 못했습니다. 입력을 확인한 뒤 다시 시도해 주세요.');
+            }
+        } finally {
+            applyBulkLeaveAdjustment._inFlight=false;
+            syncNormalBulkLeaveRequestUi();
+            window.setTimeout(syncHrModalStack,0);
+        }
+    });
+}
+
 async function applyBulkLeaveAdjustment() {
+    if (!window.ExpoRuntimeBridge) return prepareNormalBulkLeaveAdjustment();
     if (applyBulkLeaveAdjustment._inFlight) return;
     const selectedIds = Array.from(new Set(getBulkLeaveSelectedEmployeeIds()));
     if (selectedIds.length === 0) {
