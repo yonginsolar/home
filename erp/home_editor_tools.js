@@ -71,29 +71,29 @@
   finally{restoring=false;reason='';emit();}
  }
  const helpText={
-  'site-home-hero-content-visible':'끄면 배경사진만 표시하며 입력한 문구는 그대로 보관합니다.',
-  'site-home-hero-title':'입력한 줄바꿈은 실제 홈페이지 제목에도 같은 위치에 표시됩니다.',
-  'site-home-slide-mode':'한 장 배너 또는 최대 네 장의 슬라이드 배너를 선택합니다.',
-  'site-home-slide-autoplay':'슬라이드 배너에서만 8초마다 다음 사진으로 전환합니다.',
-  'site-home-layout-mode':'현재 영역 배치를 유지하거나 선택한 디자인의 권장 배치를 적용합니다.',
-  'site-home-title-font':'기본 제공 글꼴은 상업용 홈페이지에 무료로 사용할 수 있습니다. 외부 글꼴을 선택하면 글꼴 파일 주소와 사용 권한 확인이 필요합니다.',
-  'site-home-body-font':'기본 제공 글꼴은 상업용 홈페이지에 무료로 사용할 수 있습니다. 외부 글꼴을 선택하면 글꼴 파일 주소와 사용 권한 확인이 필요합니다.'
+  'site-home-hero-content-visible':'사진 위·아래에 제목·설명·버튼을 함께 보여 줄지 정합니다. 사진에 이미 글자가 들어 있다면 끄고 이미지 전용으로 쓰면 문구가 겹치는 일을 줄일 수 있습니다. 꺼도 작성한 문구는 보관되며, 다시 켠 뒤 PC·모바일 미리보기로 배치를 확인하세요.',
+  'site-home-hero-title':'방문자가 첫 화면에서 읽을 배너 제목입니다. 입력한 줄바꿈은 실제 홈페이지에도 반영되므로 핵심 문구가 한눈에 들어오도록 정리하세요. PC·모바일의 가로 폭이 다르니 두 미리보기에서 줄 수와 사진 가림을 확인하는 것을 권합니다.',
+  'site-home-slide-mode':'한 장 배너는 대표 사진 하나를, 슬라이드 배너는 최대 네 장을 차례로 보여 줍니다. 안내할 내용이 여러 개일 때는 사진별 문구·버튼·클릭 목적지를 따로 정할 수 있습니다. 슬라이드를 선택한 경우에만 자동 전환 설정을 사용합니다.',
+  'site-home-slide-autoplay':'슬라이드 배너를 8초마다 다음 사진으로 넘길지 정합니다. 여러 소식을 자연스럽게 보여 주려면 켜고, 방문자가 직접 넘기게 하려면 꺼 두세요. 긴 안내를 넣었다면 모바일에서도 읽을 시간이 충분한지 확인하는 것이 좋습니다.',
+  'site-home-layout-mode':'디자인을 바꿀 때 현재 영역 배치를 유지할지, 선택한 디자인의 권장 배치를 적용할지 정합니다. 기존 공개 구성을 이어가려면 현재 배치를 유지하세요. 권장 배치를 쓰는 경우 표시 영역·순서와 미리보기를 함께 확인한 뒤 저장합니다.',
+  'site-home-title-font':'배너·영역 제목의 인상을 정하는 글꼴입니다. 기본 제공 글꼴은 상업용 홈페이지에 무료로 사용할 수 있습니다. 외부 글꼴은 허용된 글꼴 파일 주소와 해당 조합 웹사이트에서의 사용 권한을 확인해야 하며, 긴 제목의 줄바꿈도 PC·모바일에서 살펴보세요.',
+  'site-home-body-font':'소개·소식 등 본문의 읽기 편한 정도를 결정하는 글꼴입니다. 장식성보다는 긴 문장을 읽기 쉬운 글꼴을 권합니다. 기본 제공 글꼴은 상업용 홈페이지에 무료로 사용할 수 있고, 외부 글꼴은 파일 주소·사용 권한을 확인한 뒤 선택하세요.'
  };
  function hint(input){
   const id=input.id||'';
   if(helpText[id])return helpText[id];
   if(input.matches('[data-mobile-mode]'))return helpText['site-home-slide-mode'];
-  if(input.matches('[data-mobile-image-only]'))return '켜면 문구·버튼 없이 배경사진만 보여줍니다.';
+  if(input.matches('[data-mobile-image-only]'))return '켜면 현재 사진의 제목·설명·버튼을 숨기고 배경사진만 보여 줍니다. 사진 자체에 완성된 안내 문구가 들어 있을 때 적합합니다. 입력해 둔 문구는 보관되므로 다시 켜서 사용할 수 있으며 사진 클릭 바로가기도 별도로 확인하세요.';
   if(input.matches('[data-mobile-play]'))return helpText['site-home-slide-autoplay'];
-  if(/(?:cta-target|button-url)$/.test(id))return '이 버튼을 눌렀을 때 이동할 곳을 선택합니다. 선택하면 기본 버튼 문구가 채워지며 아래에서 더 수정할 수 있습니다.';
-  if(/(?:cta-label|button_label)$/.test(id))return '바로가기를 먼저 선택한 뒤 버튼에 보일 문구를 덧붙이거나 수정하세요.';
-  if(/custom$/.test(id))return '이동할 페이지 주소를 입력하세요. 외부 페이지는 https://로, 이 홈페이지 안의 페이지는 /로 시작합니다.';
-  if(/(?:link-url|banner-click)$/.test(id))return '사진을 눌렀을 때 이동할 곳입니다. 버튼과는 별도로 설정할 수 있습니다.';
-  if(input.type==='file'&&(/^site-home-(?:hero(?:-mobile)?|impact)-image-file$|^admin-about-img-file$|^site-certification-image-file$/.test(id)||input.closest('[data-slide-card]')))return '사진 한 장당 최대 10MB이며 저장해야 홈페이지에 반영됩니다.';
-  if(/image-source$/.test(id))return 'PC·모바일에 같은 사진을 쓰거나 기기별 사진을 따로 등록합니다.';
-  if(/(?:desktop|mobile)-display-fit$/.test(id))return '전체 보기는 사진 전체를 보여주고, 화면 채우기는 틀에 맞춰 일부를 자릅니다.';
-  if(/image[-_]position$|(?:desktop|mobile)-display-position$/.test(id))return '사진을 자를 때 남길 부분의 기준 위치입니다.';
-  if(/-overlay$/.test(id))return '사진 위의 문구를 읽기 쉽도록 배경사진을 어둡게 합니다.';
+  if(/(?:cta-target|button-url)$/.test(id))return '방문자가 이 버튼을 누르면 이동할 곳을 먼저 정합니다. 조합원 가입·조합 소개 등을 선택하면 해당 기본 문구가 채워지며 아래에서 표현을 수정할 수 있습니다. 버튼 문구만 바꿔서는 목적지가 바뀌지 않으니 연결할 곳과 문구를 함께 확인하세요.';
+  if(/(?:cta-label|button_label)$/.test(id))return '버튼 안에 표시할 문구입니다. 바로가기를 먼저 고르면 목적지에 맞는 기본 문구가 들어오며, 필요한 말을 덧붙이거나 바꿀 수 있습니다. 눌렀을 때 무엇을 할 수 있는지 알아볼 수 있게 쓰고 모바일에서 길이가 적당한지 확인하세요.';
+  if(/custom$/.test(id))return '기본 목록에 없는 페이지로 연결할 때 주소를 직접 입력합니다. 외부 페이지는 https://, 이 홈페이지 안의 경로는 /로 시작하세요. 관리자 전용 주소나 로그인 토큰이 포함된 주소가 아니라 방문자가 실제로 열 수 있는 공개 목적지인지 확인합니다.';
+  if(/(?:link-url|banner-click)$/.test(id))return '버튼이 아니라 배너 사진 자체를 눌렀을 때 이동할 곳입니다. 이미지 전용 배너로 가입·소식을 안내할 때 유용합니다. 버튼의 바로가기와는 별도이므로 사진 속 안내와 실제 목적지가 같은지 확인하세요.';
+  if(input.type==='file'&&(/^site-home-(?:hero(?:-mobile)?|impact)-image-file$|^admin-about-img-file$|^site-certification-image-file$/.test(id)||input.closest('[data-slide-card]')))return '현재 영역에 쓸 사진을 선택하는 항목입니다. 사진 한 장당 최대 10MB이며 화면의 권장 크기와 미리보기를 확인하세요. 파일을 고르는 것은 편집 단계이고, 해당 저장을 완료해야 홈페이지에 반영됩니다.';
+  if(/image-source$/.test(id))return 'PC·모바일에 같은 사진을 쓸지 기기별 사진을 따로 넣을지 정합니다. 글자나 여러 요소가 있는 배너는 모바일 전용 사진을 준비하면 작은 화면에 맞추기 쉽습니다. 모바일용이 없으면 PC용 사진을 사용하므로 전체 보기·화면 채우기 설정을 함께 확인하세요.';
+  if(/(?:desktop|mobile)-display-fit$/.test(id))return '전체 보기는 사진 전체를 보여 주므로 글자가 들어간 이미지에 적합합니다. 화면 채우기는 일정한 틀을 채우면서 일부가 잘릴 수 있어 여백 없이 사진을 강조할 때 쓰기 좋습니다. 모바일 전체 보기의 문구는 사진 아래, 화면 채우기의 문구는 사진 위에 나오므로 자르기 기준 위치와 함께 확인하세요.';
+  if(/image[-_]position$|(?:desktop|mobile)-display-position$/.test(id))return '화면 채우기에서 사진의 어느 부분을 중심으로 남길지 정합니다. 인물·로고·사진 속 글자가 가장자리에 있다면 해당 부분이 잘리지 않도록 위치를 골라 보세요. 원본 사진은 바뀌지 않으며 PC·모바일 각각의 미리보기에서 결과를 확인합니다.';
+  if(/-overlay$/.test(id))return '사진 위 문구를 읽기 쉽도록 배경사진을 어둡게 하는 정도입니다. 밝거나 복잡한 사진에서는 어둡게 하면 글자가 또렷해질 수 있습니다. 사진 자체의 분위기도 달라 보이므로 미리보기에서 조절하고 이미지 전용 표시와 구분해 사용하세요.';
   return ''; // A field name repeated as an instruction is not help.
  }
  function helpButton(label,message){const b=document.createElement('button');b.type='button';b.className='home-field-help';b.textContent='?';b.setAttribute('aria-label',label+' 도움말');b.onclick=e=>{e.preventDefault();e.stopPropagation();b.focus({preventScroll:true});void root.CoopDialog.alert(message,{title:label+' 도움말'});};return b;}

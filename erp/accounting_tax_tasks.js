@@ -46,7 +46,7 @@
    yearControl.onchange=()=>{year=Number(yearControl.value);void load();};
    settingsButton=button('신고 주기 설정',()=>openSettings());reloadButton=button('다시 확인',()=>void load());
    const scope=make('select','form-select form-select-sm');scope.id='taxTaskFilter';scope.style.width='auto';scope.dataset.erpQueryControl='';scope.setAttribute('aria-label','세무 할 일 상태');for(const [v,t]of [['pending','진행 중'],['completed','완료 이력'],['all','전체']]){const o=make('option','',t);o.value=v;scope.append(o);}scope.onchange=()=>{filter=scope.value;render();};
-   bar.append(label,yearControl,settingsButton,reloadButton,button('?',()=>void dialog('alert','🌱 신고 주기에 맞춰 해야 할 일을 알려드려요. 업무를 마쳤다면 완료를 누르세요. 결재 승인만으로 자동 완료되지는 않아요. 실제 기한은 홈택스·위택스의 고지와 함께 확인해 주세요.',{title:'세무 할 일 도움말'}),'btn btn-outline-secondary btn-sm coop-workflow-help'));
+   bar.append(label,yearControl,settingsButton,reloadButton,button('?',()=>void dialog('alert','💡 이번에 해야 할 일을 확인합니다.\n설정한 신고 주기에 따라 이번 달 기한과 기한 지난 미완료를 보여 줍니다. 귀속월이 끝나지 않은 업무는 아직 완료할 대상이 아니므로 목록에서 구분합니다.\n\n업무를 마쳤다면\n완료를 눌러 리마인드를 정리하세요. 원천세·지방소득세의 주기·기한이 같으면 한 카드에 모아 보되 완료는 각각 확인합니다. 신고·납부 상태와 연결한 전자결재의 승인 상태도 함께 대조하세요.\n\n기한 확인\n화면의 귀속연월은 어느 기간의 업무인지 뜻합니다. 실제 신고·납부 기한은 홈택스·위택스의 고지·연장 안내와 함께 확인해 주세요.',{title:'세무 할 일 도움말'}),'btn btn-outline-secondary btn-sm coop-workflow-help'));
    bar.append(scope);status=make('p','small');status.setAttribute('role','status');list=make('div','d-grid gap-3');orphanList=make('div','d-grid gap-3 mt-3');orphanList.dataset.taxOrphans='';outcomes=make('div','d-grid gap-2 mb-3');outcomes.dataset.taxOutcomes='';element.replaceChildren(bar,status,outcomes,list,orphanList);
    root.addEventListener('beforeunload',e=>{if(hasDraft()){e.preventDefault();e.returnValue='';}});
    if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)pause();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
@@ -171,7 +171,7 @@
    field(body,d,'vat','부가세','select',['unset','quarterly','notice','halfyear','none'].map(v=>[v,modes[v]]));
    field(body,d,'withholding','원천세','select',['unset','monthly','halfyear','none'].map(v=>[v,modes[v]]));
    field(body,d,'local_withholding','지방소득세 특별징수','select',['unset','monthly','halfyear','none'].map(v=>[v,modes[v]]));
-   body.append(button('설정 도움말',()=>void dialog('alert','홈택스·위택스의 실제 신고 유형에 맞춰 선택하세요. 반기납부는 승인받은 경우에 선택합니다. 시작월은 신고·납부 기한이 속한 달이에요. 변경된 주기는 아직 기록하지 않은 업무에 적용하며 이미 확인·저장한 업무는 유지합니다.',{title:'신고 주기 선택'})));
+   body.append(button('설정 도움말',()=>void dialog('alert','💡 무엇을 알려드릴지 정합니다.\n홈택스·위택스에서 실제 적용하는 신고 주기에 맞춰 선택하세요. 반기납부는 승인받은 경우에 사용하며 시작월은 신고·납부 기한이 속한 달입니다.\n\n기존 기록과의 관계\n주기를 바꾸면 아직 기록하지 않은 업무의 리마인드 기준이 달라집니다. 이미 확인·저장한 업무와 연결된 결재는 유지하며, 주기에서 빠진 작성 중 초안은 별도로 확인·정리할 수 있습니다.\n\n입력 후 확인\n귀속연월과 실제 기한을 대조해 이번 달 할 일에 맞게 나타나는지 확인하세요.',{title:'신고 주기 선택'})));
    body.append(button('현재 설정과 비교',()=>void compareCurrent()));syncEditor();
   }
   function openTask(row){

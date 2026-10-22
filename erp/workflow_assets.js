@@ -13,8 +13,8 @@
         accountingGuide: {src:local('accounting_guide.js?v=1.0.2'), integrity:'sha384-a9rglJK2ZQ77p9hwdDbn1hv5+pds91L0dxU4U4f3hXLBBsqRwrbuqoVRfehhfI3f', ready:() => typeof root.CoopAccountingGuide?.mount === 'function'},
         smartaGuide: {src:local('accounting_smarta_guide.js?v=1.0.0'), integrity:'sha384-MHe/7q/URIf9NEtrnuV2o/LsZgpLANn3RxIdzSAjH+g8oLsyNCCusj2lgHOgSdXZ', ready:() => typeof root.CoopSmartaGuide?.mount === 'function'},
         financialEngine: {src:local('financial_statements_engine.js?v=1.1.0'),integrity:'sha384-tHgs9MvyMyqTqO0xgb085190rccIQa+mRTNiZDpLTrpvvs5qMnZ+MZhqgVRV9H/s',ready:()=>root.FinancialStatementsEngine?.version==='1.1.0'},
-        financialStatements: {src:local('financial_statements.js?v=1.1.5'),integrity:'sha384-KWQgCKkOmrWpQ4yFFzOT1C3SNK3k+Uq7Jbl+MHzFEZ4lJLrJpFTWcQi0CkOIt8Ui',ready:()=>root.FinancialStatements?.version==='1.1.5'},
-        accountingTax: {src:local('accounting_tax_tasks.js?v=1.2.0'),integrity:'sha384-SRuTm2D1gAAkkHwLSi1xOlZDNmPdWZ7Tddr3Cq/oFX1pf7m0lCUlrmQbmKniakYO',ready:()=>root.AccountingTaxTasks?.version==='1.2.0'}
+        financialStatements: {src:local('financial_statements.js?v=20261022-help-1'),integrity:'sha384-197uk3V7iE6wQHZ3ym5FaJlxM+YFII3EvoqIWWJ4nmSpSe+ZwGrMvoKi4/p1frPq',ready:()=>root.FinancialStatements?.version==='1.1.5'},
+        accountingTax: {src:local('accounting_tax_tasks.js?v=20261022-help-1'),integrity:'sha384-i0UO3uN8LTMXLcKNhX+WjrNbFyLdonFk17IqBrVj42c/X30JHwi4Pp9FUfC0iu/p',ready:()=>root.AccountingTaxTasks?.version==='1.2.0'}
     });
     const pending = new Map();
     function load(key) {

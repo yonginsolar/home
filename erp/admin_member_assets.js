@@ -19,12 +19,12 @@
         integrity: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk'
     });
     const capitalImport = Object.freeze({
-        src: new URL('capital_excel_import.js?v=1.0.0', document.baseURI).href,
-        integrity: 'sha384-q1KBKM8bHgL29EVT2rTWFtoovl1aMxuRxKl5/wNsAnH5ZvHBgQJ9Rn+7Ynl8j1Ur'
+        src: new URL('capital_excel_import.js?v=20261022-help-1', document.baseURI).href,
+        integrity: 'sha384-5y+Dcz/wtb7Mcb+gkxBLc8A+bVs7U7Hpn1s6XjY72OgyPt9UQ/dnPhAn8RJM+Dc9'
     });
     const memberWorkbook = Object.freeze({
-        src: new URL('member_capital_workbook.js?v=1.0.3', document.baseURI).href,
-        integrity: 'sha384-BG6cFhMgX4xlFbUevPlp7RFTDMRahqSsL9R2tU3e4ehVe8/dY5ftnXUoJCBcVv9O'
+        src: new URL('member_capital_workbook.js?v=20261022-help-1', document.baseURI).href,
+        integrity: 'sha384-ZZgZav+MnVxqJZ4sbGGelmxVVJgbM93TiTDT47Kvmy50EKejaV1GFCAck9OSC7Tx'
     });
     const siteAssets = Object.freeze([
         Object.freeze({src: new URL('home_settings_conflict.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-2dLr0r0obVLbc9+OB2t4zQ/93bWr/XN6tUV8fMHwIggYDmjZ6ezKQX91b3CHjNz6', ready: () => root.CoopHomeConflict?.version === '1.0.0'}),
@@ -36,9 +36,9 @@
 Object.freeze({src: new URL('admin_member_site.js?v=20261019-preview-scroll-2', document.baseURI).href, integrity: 'sha384-XamgKT+VbP1UrBZHpY8w4fQb1hCq0tGynUgVCqJk/kQQLoJKu93uOfms2VKr1J8r', ready: () => root.AdminMemberSite?.version === '20261019-preview-scroll-2'}),
         Object.freeze({src: new URL('site_legal_samples.js?v=20261008-1', document.baseURI).href, integrity: 'sha384-8En93aFZlH8BEdzebQ4j4kJzZycfI/wI+t+wVTm3KyhVwDb/9SHzDV9cBcC3s2oq', ready: () => !!root.CoopSiteLegalSamples}),
 Object.freeze({src: new URL('site_inline_editor.js?v=20261019-controls-1', document.baseURI).href, integrity: 'sha384-r1Gq8S2KXVIngX3WPRHPYrwsCTYOxqkNBZo17pFTB6VS4+4+ylxAb3VejgDSvdRR', ready: () => typeof root.CoopSiteInlineHost?.mount === 'function'}),
-        Object.freeze({src: new URL('home_visual_editor.js?v=20261019-controls-1', document.baseURI).href, integrity: 'sha384-ENWke0VLRExTscqYwSJr0Tr8dzRXZkEmHeCFym2YGIogkiH0nqRYYEp8uf2LUB1v', ready: () => root.CoopHomeVisualEditor?.version === '20261019-controls-1'}),
+        Object.freeze({src: new URL('home_visual_editor.js?v=20261022-help-1', document.baseURI).href, integrity: 'sha384-sVje3AcWY4Bxgp067nE+YOBg6TEWyIBV7vXLK4QQxB+XCx1XN+nFfn9yFPps/b4e', ready: () => root.CoopHomeVisualEditor?.version === '20261019-controls-1'}),
         Object.freeze({src: new URL('hero_slides_editor.js?v=1.5.2', document.baseURI).href, integrity: 'sha384-2jkfSGk7lEzSt5aFFs7gjlPdwrNMl8xBPIdiMK1U9+S7q6vybWqqdaEg8ma/fqCJ', ready: () => typeof root.CoopHeroSlides?.mount === 'function'}),
-        Object.freeze({src: new URL('home_editor_tools.js?v=1.0.3', document.baseURI).href, integrity: 'sha384-c82TS5zFpzjDbe3zZYPsBg2ufeZiko6VHuAwNRbJdNuoc3aAeh3Rvzk8Q2BeUn35', ready: () => root.CoopHomeEditorTools?.version === '1.0.3'}),
+        Object.freeze({src: new URL('home_editor_tools.js?v=20261022-help-1', document.baseURI).href, integrity: 'sha384-TP9dBBVhF1yN7lqeyZ3YwUqIFgKeTM6R5AIxJQSq2fcO6Qv9ABfVrgq/11oFexSa', ready: () => root.CoopHomeEditorTools?.version === '1.0.3'}),
         Object.freeze({src: new URL('hero_slides_visual.js?v=2.3.0', document.baseURI).href, integrity: 'sha384-kdrAacTDpQksE8o505Ita3wA16yx8OS876aDkytwejSlqxg6gqhJTHPyw18B4cQi', ready: () => root.CoopHeroVisual?.version === '2.3.0'}),
         Object.freeze({src: new URL('site_legal_editor.js?v=20261017-sample-draft-1', document.baseURI).href, integrity: 'sha384-DcXgkwK+JSLogH1/7MsmYgoLDdld57M+zsnT2hWfI1ue/IoPCIco8DReZvISUnLs', ready: () => typeof root.CoopSiteLegalEditor?.refreshPreview === 'function'})
     ]);

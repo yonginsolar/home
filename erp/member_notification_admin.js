@@ -35,7 +35,7 @@
    const message=e.target.closest('[data-notification-message]');if(message){await preview(message.dataset.notificationMessage);return;}
    if(e.target.closest('[data-notification-provider-check]')){await checkProvider(false);return;}
    if(e.target.closest('[data-notification-provider-manual]')){await checkProvider(true);return;}
-   if(e.target.closest('[data-notification-provider-help]')){e.target.closest('button').focus({preventScroll:true});void window.CoopDialog.alert('연동 확인은 발송업체에 연결된 조합 채널과 템플릿을 조회합니다. 관리자 수동 확인은 직접 확인한 기록이며 자동 검증과 구분합니다. 실제 수신 결과는 발송 내역에서 확인하세요.',{title:'발송업체 연동 도움말'});return;}
+   if(e.target.closest('[data-notification-provider-help]')){e.target.closest('button').focus({preventScroll:true});void window.CoopDialog.alert('💡 연결·준비·사용은 서로 다른 상태입니다.\n‘연동 확인’은 현재 조합의 발송업체 채널과 템플릿 연결을 조회하는 작업입니다. 마지막 확인 시각과 자동 확인·관리자 수동 확인을 함께 보세요.\n\n수동 확인은 언제 쓰나요?\n담당자가 업체 화면에서 직접 확인한 사실을 남길 때 사용합니다. 자동 검증의 실패를 성공으로 바꾸는 확인은 아니므로 실패 사유가 있으면 별도로 살펴봐야 합니다.\n\n알림을 사용하기 전에\n업체 연결 외에도 알림별 템플릿·업무 준비 상태와 사용 여부를 확인하세요. 발송업체 접수와 실제 수신은 다르므로 처리 결과는 발송 내역에서 구분해 확인합니다.',{title:'발송업체 연동 도움말'});return;}
    const save=e.target.closest('[data-notification-save]');if(save){await saveSetting(save.dataset.notificationSave);return;}
    const next=e.target.closest('[data-notification-offset]');if(next){await loadList(Number(next.dataset.notificationOffset));return;}
    const member=e.target.closest('[data-notification-member]');if(member&&typeof window.openMemberDetail==='function')window.openMemberDetail(member.dataset.notificationMember);
