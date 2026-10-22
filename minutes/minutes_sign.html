@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.37
-Change: 2026-10-06 - Show authorized signature previews without changing signing permissions.
+Version: v1.2.38
+Change: 2026-10-22 - Review an own previous signature or draw again before explicit completion.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-10-06 - Show authorized signature previews without changing signing
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.37 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.38 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -501,6 +501,7 @@ Change: 2026-10-06 - Show authorized signature previews without changing signing
         import { MinutesService } from './MinutesService.js?v=1.0.60';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { buildSignatureDisplay } from './signature_display.js?v=1.0.1';
+        import { createSignatureChoice, signatureSnapshot } from './signature_choice.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
@@ -653,6 +654,70 @@ Change: 2026-10-06 - Show authorized signature previews without changing signing
             return String(params.get('minuteId') || params.get('id') || '').trim();
         })();
         let autoOpenedRequestedMinute = false;
+
+        const signatureChoice = createSignatureChoice({
+            isCurrent: context => myAuthId === context.authId && currentMinuteId === context.minuteId
+                && Number(myOfficialId) === context.officialId && detailRequestVersion === context.version
+                && !document.getElementById('detail-panel').classList.contains('hidden'),
+            prepare: (context, previous) => supabase.rpc('prepare_my_signature', {
+                p_minute_id: context.minuteId, p_official_id: context.officialId,
+                p_snapshot: context.snapshot, p_previous: previous
+            }),
+            loadImage: async path => {
+                const url = await resolveSignaturePreviewSource(path);
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('SIGNATURE_IMAGE_UNAVAILABLE');
+                return response.blob();
+            },
+            uploadRaw: (path, blob) => uploadSignaturePart('attachments', path, blob),
+            uploadPreview: async (context, pending) => {
+                const url = URL.createObjectURL(pending.blob);
+                try {
+                    const preview = await createSignaturePreviewBlob(url);
+                    try {
+                        await uploadSignaturePart(SIGNATURE_PREVIEW_BUCKET,
+                            getSignaturePreviewPath(context.minuteId, context.officialId, pending.id), preview);
+                    } catch (error) {
+                        const ready = await supabase.rpc('my_signature_assets_ready', {
+                            p_minute_id:context.minuteId, p_official_id:context.officialId,
+                            p_request_id:pending.id, p_path:pending.path
+                        });
+                        if (ready.error || ready.data !== true) throw error;
+                    }
+                } finally { URL.revokeObjectURL(url); }
+            },
+            complete: (context, pending) => supabase.rpc('complete_my_signature', {
+                p_minute_id: context.minuteId, p_official_id: context.officialId,
+                p_revision: pending.revision, p_request_id: pending.id, p_path: pending.path
+            }),
+            onComplete: async context => {
+                if (myAuthId !== context.authId) return;
+                await notifySignatureCompletionIfNeeded(context.minuteId);
+                if (myAuthId !== context.authId || currentMinuteId !== context.minuteId || detailRequestVersion !== context.version) return;
+                markLocallySigned(context.minuteId);
+                showToast('서명을 완료했습니다.');
+                const {data: doc} = await MinutesService.getMinuteById(context.minuteId);
+                if (myAuthId !== context.authId || currentMinuteId !== context.minuteId || detailRequestVersion !== context.version) return;
+                if (doc) { currentMinuteDoc=doc; await updateSignStatus(doc); }
+                await loadSignList();
+            }
+        });
+        async function uploadSignaturePart(bucket, path, blob) {
+            const {error} = await supabase.storage.from(bucket).upload(path, blob, {contentType:'image/png', upsert:false});
+            if (!error) return;
+            // A lost upload reply may leave the exact file in place. Only accept identical bytes.
+            const existing = await supabase.storage.from(bucket).download(path);
+            if (!existing.error && existing.data) {
+                const digest = async value => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await value.arrayBuffer()))).join(',');
+                if (await digest(existing.data) === await digest(blob)) return;
+            }
+            throw error;
+        }
+        supabase.auth.onAuthStateChange((event, session) => {
+            if (event === 'SIGNED_OUT' || (myAuthId && session?.user?.id !== myAuthId)) {
+                signatureChoice.clear(); myAuthId=null; detailRequestVersion++;
+            }
+        });
 
         function sanitizeStyle(styleText) {
             const raw = String(styleText || '');
@@ -1284,6 +1349,7 @@ Change: 2026-10-06 - Show authorized signature previews without changing signing
         };
 
         function showList() {
+            signatureChoice.close();
             if (auditEditing) cancelAuditEdit();
             detailRequestVersion++;
             signatureDisplayVersion++;
@@ -1481,6 +1547,7 @@ Change: 2026-10-06 - Show authorized signature previews without changing signing
         }
 
 async function openDocumentById(id) {
+            signatureChoice.close();
             const requestVersion = ++detailRequestVersion;
             signatureDisplayVersion++;
             try {
@@ -1664,7 +1731,7 @@ async function openDocumentById(id) {
                 return;
             }
             if (!mySealUrl) {
-                statusEl.innerText = `${myName || ''}님은 도장 이미지가 없어서 터치패드(직접 그리기)로 진행합니다.`;
+                statusEl.innerText = '내용을 확인한 뒤 지난 서명을 불러오거나 새로 서명해 주세요.';
                 btn.disabled = false;
                 return;
             }
@@ -1936,15 +2003,9 @@ async function openDocumentById(id) {
                 } finally { expoSignPending = false; }
                 return;
             }
-            const ok = await showConfirm(`이 ${getDocTypeLabel(currentMinuteDoc?.doc_type)}의 내용을 확인하였으며, 등록된 서명으로 날인하시겠습니까?`);
-            if (!ok) return;
-
-            if (!mySealUrl) {
-                pendingSignAfterPad = true;
-                openSignaturePad();
-                return;
-            }
-            await submitSignature(mySealUrl);
+            await signatureChoice.open({authId:myAuthId, coopId:currentMinuteDoc.coop_id,
+                minuteId:currentMinuteId, officialId:Number(myOfficialId), version:detailRequestVersion,
+                snapshot:signatureSnapshot(currentMinuteDoc), title:currentMinuteDoc.title || getDocTypeLabel(currentMinuteDoc.doc_type)});
         };
 
 
