@@ -1,4 +1,4 @@
-/* Workflow help 1.0.4. Contextual explanations only; business behavior is unchanged. */
+/* Workflow help 1.0.5. Contextual explanations only; business behavior is unchanged. */
 (function(root){
  'use strict';
  if(root.CoopWorkflowHelp)return;
@@ -47,7 +47,7 @@
   'childBankLabel':"자녀에게 배당 등 지급할 금액이 생겼을 때 확인하는 자녀 본인 명의 계좌입니다. 부모의 계좌와 혼동하지 않도록 은행·예금주를 함께 확인하세요. 자녀별 출자금·신청 내역도 각각 관리됩니다.",
   'exAmount':"이번에 추가로 출자하기로 약정할 금액입니다. 현재 출자금 잔액 전체가 아니라 이번 신청 금액을 입력하세요. 신청 후 안내된 조합 계좌로 납입하고 출자금 반영 상태를 확인합니다.",
   'redAmount':"출자금 일부를 줄이고 반환받으려는 신청 금액입니다. 화면의 요청 가능 범위를 확인해 입력하세요. 신청 접수·승인과 실제 반환은 단계가 다르므로 처리 상태와 반환 내역을 함께 확인합니다.",
-  'wdReason':"현재 선택한 개인·자녀·단체 명의의 탈퇴 신청 사유입니다. 신청 전에 상단 프로필과 본인 계좌를 확인하세요. 접수 이후의 승인·반환 상태는 업무 신청 내역에서 확인할 수 있습니다.",
+  'wdReason':"본인 프로필에서 신청합니다\n탈퇴 신청은 로그인한 본인의 프로필에서만 가능합니다. 자녀·단체를 대리로 보고 있다면 상단 프로필을 나(개인)으로 바꿔 본인의 탈퇴를 신청하세요. 자녀·단체의 탈퇴는 조합 사무국에 문의해 주세요.\n\n신청 전·후에 확인하세요\n탈퇴 사유와 본인 계좌를 확인한 뒤 신청합니다. 접수 이후의 처리 상태와 출자금 반환 내역은 활동 타임라인에서 확인할 수 있습니다.",
   'ptName':"홈페이지의 함께하는 단체 영역에 표시할 단체·기업명입니다. 방문자가 실제 협력 대상을 알아볼 수 있는 공식 이름을 권합니다. 로고와 연결할 웹사이트도 같은 단체의 정보인지 함께 확인하세요.",
   'ptDesc':"함께하는 단체 목록에서 방문자가 읽을 짧은 소개입니다. 어떤 활동이나 협력을 하는지 중심으로 적으면 로고만 볼 때보다 관계를 이해하기 쉽습니다. 공개할 수 있는 내용으로 작성하세요.",
   'ptLink':"홈페이지에서 해당 단체를 선택했을 때 열 공식 웹사이트 주소입니다. 방문자가 단체의 활동을 더 알아보도록 연결할 때 사용합니다. 저장 전에 실제 열리는 주소와 단체가 일치하는지 확인하세요.",
@@ -276,7 +276,7 @@
   const pending=new Set();let queued=false;
   new MutationObserver(records=>{for(const r of records){if(r.target.closest?.('.'+CLASS+',.coop-help-preference,.coop-dialog'))continue;for(const n of r.addedNodes)if(n.nodeType===1&&!n.matches('.'+CLASS+',.coop-help-preference,.coop-dialog')&&!n.closest('.'+CLASS+',.coop-help-preference,.coop-dialog'))pending.add(n);if(r.target.matches?.('label'))pending.add(r.target);}if(!pending.size||queued)return;queued=true;queueMicrotask(()=>{queued=false;const nodes=[...pending];pending.clear();nodes.forEach(decorate);});}).observe(doc.body,{subtree:true,childList:true});
  }
- root.CoopWorkflowHelp=Object.freeze({version:'1.0.4',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
+ root.CoopWorkflowHelp=Object.freeze({version:'1.0.5',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
  root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)sync(read());});root.addEventListener('pageshow',()=>sync(read()));
  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })(window);
