@@ -1,29 +1,30 @@
-/* Tax tasks 1.0.1. Memory-only drafts and outcomes; existing approval/accounting writers are never called. */
+/* Tax tasks 1.1.0. Simple reminders; old drafts/evidence are preserved separately. */
 (function(root){
  'use strict';
  const names={vat:'부가세 신고·납부',vat_notice:'부가세 예정고지 납부',withholding:'원천세 신고·납부',local_withholding:'지방소득세 특별징수'};
+ const period=r=>{const a=String(r.period_from||'').slice(0,7),b=String(r.period_end||'').slice(0,7);return '귀속연월 '+a+(a===b?'':' ~ '+b);};
  const modes={unset:'미설정',none:'대상 아님',quarterly:'분기별 예정·확정 신고',notice:'반기별 확정 신고 + 예정고지 납부',halfyear:'반기별 신고·납부',monthly:'매월 신고·납부'};
  const make=(tag,cls,value)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(value!==undefined)n.textContent=value;return n;};
  const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const key=r=>r.kind+'|'+r.period_end;
  const filing=r=>!r.filing_required?'신고 대상 아님':r.state?.filed_date?'신고 완료 · '+r.state.filed_date:'신고 전';
  const payment=r=>({paid:'납부 완료',none:'납부할 세액 없음',refund:'환급 대상'}[r.state?.settlement]||'납부 확인 전')+(r.state?.paid_date?' · '+r.state.paid_date:'');
- const completed=r=>(!r.filing_required||!!r.state?.filed_date)&&['paid','none','refund'].includes(r.state?.settlement);
+ const completed=r=>typeof r.state?.reminder_done==='boolean'?r.state.reminder_done:(!r.filing_required||!!r.state?.filed_date)&&['paid','none','refund'].includes(r.state?.settlement);
  const taskInput=r=>({filed_date:r.state?.filed_date||'',settlement:r.state?.settlement||'pending',paid_date:r.state?.paid_date||'',filing_due:r.filing_due,payment_due:r.payment_due,receipt:r.state?.receipt||'',memo:r.state?.memo||'',due_reason:r.state?.due_reason||''});
  function create({element,client,getContext}){
   let owner='',rows=[],settings=null,settingsDraft=null,year=Number(today().slice(0,4)),seq=0,editorSeq=0,active=null,modal=null,status,list,orphanList,outcomes,yearControl,filter='pending',settingsButton,reloadButton,pending=null,pendingYear=null;
-  const drafts=new Map(),controllers=new Set(),dialogs=new Set();let canEdit=false,serverToday=today(),message='',routeHandled=false,loadedYear=null,listFresh=false,navigationClose=false,modalClosing=false,closeAfterShow=false,queuedOpen=null;
+  const drafts=new Map(),reminders=new Map(),controllers=new Set(),dialogs=new Set();let canEdit=false,serverToday=today(),message='',routeHandled=false,loadedYear=null,listFresh=false,navigationClose=false,modalClosing=false,closeAfterShow=false,queuedOpen=null;
   const fingerprint=d=>JSON.stringify([d.data,d.approval?.id||null]);
   const ctx=()=>getContext()||{},valid=()=>!!owner&&owner===ctx().owner&&ctx().allowed===true;
   const visible=()=>ctx().visible!==false&&!root.frameElement?.hidden;
   const editable=()=>valid()&&canEdit&&ctx().edit===true;
-  const hasDraft=()=>!!settingsDraft?.dirty||!!settingsDraft?.attempt||[...drafts.values()].some(d=>d.dirty||d.attempt);
+  const hasDraft=()=>!!settingsDraft?.dirty||!!settingsDraft?.attempt||[...drafts.values()].some(d=>d.dirty||d.attempt)||[...reminders.values()].some(d=>d.attempt);
   const current=(ticket,who)=>ticket===seq&&who===owner&&valid()&&visible();
   const rowYear=r=>r?.due_month?Number(r.due_month.slice(0,4)):Number(r?.period_end?.slice(0,4))+(r?.period_end?.slice(5,7)==='12'?1:0);
   const isOrphan=d=>!!d?.row&&listFresh&&loadedYear===rowYear(d.row)&&!rows.some(r=>key(r)===key(d.row));
   const blocked=d=>!!d?.saving||!!d?.attempt;
   function dialog(kind,message,options){const ticket={owner};dialogs.add(ticket);return Promise.resolve(root.CoopDialog[kind](message,options)).finally(()=>dialogs.delete(ticket));}
-  function reset(){pause();rows=[];settings=null;drafts.clear();settingsDraft=null;active=null;canEdit=false;routeHandled=false;loadedYear=null;listFresh=false;}
+  function reset(){pause();rows=[];settings=null;drafts.clear();reminders.clear();settingsDraft=null;active=null;canEdit=false;routeHandled=false;loadedYear=null;listFresh=false;}
   async function read(action,data,ticket=seq){
    const who=owner,c=new AbortController();controllers.add(c);let timer;
    try{const q=client.rpc('accounting_tax_tasks',{p_action:action,p_coop_id:ctx().coopId,p_data:data,p_request_key:null});
@@ -41,7 +42,7 @@
    yearControl.onchange=()=>{year=Number(yearControl.value);void load();};
    settingsButton=button('신고 주기 설정',()=>openSettings());reloadButton=button('다시 확인',()=>void load());
    const scope=make('select','form-select form-select-sm');scope.id='taxTaskFilter';scope.style.width='auto';scope.dataset.erpQueryControl='';scope.setAttribute('aria-label','세무 할 일 상태');for(const [v,t]of [['pending','진행 중'],['completed','완료 이력'],['all','전체']]){const o=make('option','',t);o.value=v;scope.append(o);}scope.onchange=()=>{filter=scope.value;render();};
-   bar.append(label,yearControl,settingsButton,reloadButton,button('?',()=>void dialog('alert','조합의 신고 주기를 먼저 설정하세요. 기존 지출결의를 연결하면 금액·첨부는 그 문서를 그대로 확인할 수 있어요. 실제 신고와 납부는 각각 확인하며, 결재 승인만으로 완료되지는 않아요. 기한은 공휴일을 반영한 일반 기준이므로 고지·연장 기한이 다르면 해당 업무에서 조정하세요.',{title:'세무 할 일 도움말'}),'btn btn-outline-secondary btn-sm coop-workflow-help'));
+   bar.append(label,yearControl,settingsButton,reloadButton,button('?',()=>void dialog('alert','🌱 신고 주기에 맞춰 해야 할 일을 알려드려요. 업무를 마쳤다면 완료를 누르세요. 결재 승인만으로 자동 완료되지는 않아요. 실제 기한은 홈택스·위택스의 고지와 함께 확인해 주세요.',{title:'세무 할 일 도움말'}),'btn btn-outline-secondary btn-sm coop-workflow-help'));
    bar.append(scope);status=make('p','small');status.setAttribute('role','status');list=make('div','d-grid gap-3');orphanList=make('div','d-grid gap-3 mt-3');orphanList.dataset.taxOrphans='';outcomes=make('div','d-grid gap-2 mb-3');outcomes.dataset.taxOutcomes='';element.replaceChildren(bar,status,outcomes,list,orphanList);
    root.addEventListener('beforeunload',e=>{if(hasDraft()){e.preventDefault();e.returnValue='';}});
    if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)pause();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
@@ -54,7 +55,7 @@
    if(!orphanList)return;orphanList.replaceChildren();outcomes.replaceChildren();if(!valid())return;
    for(const d of drafts.values())if((d.dirty||d.attempt)&&isOrphan(d)){
     const card=make('section','border rounded p-3 bg-white');card.dataset.taxOrphan=key(d.row);
-    card.append(make('h3','h6','현재 주기에서 빠진 초안'),make('p','small mb-2',(names[d.row.kind]||'세무 업무')+' · '+d.row.period_from+' ~ '+d.row.period_end),button('초안 확인',()=>openOrphan(d)));
+    card.append(make('h3','h6','현재 주기에서 빠진 초안'),make('p','small mb-2',(names[d.row.kind]||'세무 업무')+' · '+period(d.row)),button('초안 확인',()=>openOrphan(d)));
     const discard=button('초안 버리기',e=>void discardDraft(d,e.currentTarget),'btn btn-outline-danger btn-sm ms-2');discard.disabled=blocked(d)||!!d.discarding;card.append(discard);
     if(d.attempt)card.append(make('p','small mt-2 mb-0','저장 결과 확인이 필요합니다. 다시 확인으로 목록을 불러와 주세요.'));
     orphanList.append(card);
@@ -72,13 +73,42 @@
    const shown=rows.filter(r=>drafts.get(key(r))?.dirty||filter==='all'||completed(r)===(filter==='completed'));
    if(!shown.length){list.append(make('p','text-muted',rows.length?'선택한 상태에 해당하는 세무 할 일이 없습니다.':'선택한 연도에 표시할 세무 할 일이 없습니다.'));return;}
    for(const r of shown){const card=make('section','border rounded p-3 bg-white'),head=make('div','d-flex gap-2 flex-wrap align-items-center');card.dataset.taxTask=key(r);
-    head.append(make('h3','h6 mb-0 me-auto',names[r.kind]||'세무 업무'),button(drafts.get(key(r))?.dirty?'작성 중 · 이어 쓰기':'확인·기록',()=>openTask(r)));
-    card.append(head,make('p','small text-muted mt-2 mb-2',r.period_from+' ~ '+r.period_end),make('p','mb-1',filing(r)),make('p','mb-1',payment(r)),make('p','small mb-1','신고기한 '+(r.filing_required?r.filing_due:'해당 없음')+' · 납부기한 '+r.payment_due));
+    const pendingReminder=reminders.get(key(r));
+    const done=button(pendingReminder?.attempt?'같은 요청 다시 확인':completed(r)?'다시 할 일로':'완료했어요',()=>void markDone(r));
+    done.disabled=!editable()||!listFresh||!!pending||!!pendingReminder?.busy;head.append(make('h3','h6 mb-0 me-auto',names[r.kind]||'세무 업무'),done);
+    const held=drafts.get(key(r));
+    if(held?.dirty||held?.attempt||Object.keys(r.state||{}).some(k=>k!=='reminder_done'))head.append(button(held?.dirty?'작성 중 · 이어 쓰기':'기존 기록 보기',()=>openTask(r)));
+    card.append(head,make('p','small text-muted mt-2 mb-2',period(r)),make('p','mb-1',completed(r)?'✅ 마쳤어요':'🗓️ 해야 할 일이에요'),make('p','small mb-1','기한 '+r.payment_due));
+    if(pendingReminder?.notice)card.append(make('p','small mb-1',pendingReminder.notice));
     if(!r.calendar_checked)card.append(make('p','small text-warning mb-1','공식 고지·신고 화면에서 기한을 확인해 주세요.'));
     if(r.approval)card.append(make('p','small mb-0','연결 결재: '+r.approval.title+' · '+r.approval.status));
     else if(r.link_unavailable)card.append(make('p','small text-muted mb-0','연결 결재를 현재 권한으로 확인할 수 없습니다.'));
     list.append(card);
    }
+  }
+  async function markDone(row){
+   if(!editable()||!visible()||pending||!listFresh||!rows.includes(row))return;
+   const k=key(row),who=owner,revision=row.expected;let d=reminders.get(k);
+   if(d?.busy)return;
+   if(!d){d={};reminders.set(k,d);}
+   d.busy=true;render();
+   try{
+    if(!d.attempt){
+     const done=!completed(row);
+     const yes=await dialog('confirm',done?'이 세무 할 일을 마쳤나요?':'다시 해야 할 일로 표시할까요?');
+     if(!yes||who!==owner||!editable()||!visible()||!rows.includes(row)||row.expected!==revision)return;
+     d.attempt={key:root.crypto.randomUUID(),data:{kind:row.kind,period_end:row.period_end,expected:revision,done}};
+    }
+    const attempt=d.attempt;let timer;
+    try{
+     const r=await Promise.race([client.rpc('accounting_tax_tasks',{p_action:'reminder',p_coop_id:ctx().coopId,p_data:attempt.data,p_request_key:attempt.key}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('WRITE_RESULT_UNKNOWN')),20000);})]);
+     if(r.error)throw r.error;if(r.data?.outcome!=='saved')throw Error('UNCONFIRMED');
+     if(who!==owner)return;d.attempt=null;d.notice='반영했습니다.';
+     const held=drafts.get(k);if(held&&!held.attempt)held.expected=r.data.revision;
+     if(valid()&&visible()){const refreshed=await load();if(!refreshed)d.notice='반영했습니다. 목록을 다시 확인해 주세요.';}
+    }catch(error){if(who!==owner)return;if(['PT409','42501','22023'].includes(error.code)){d.attempt=null;d.notice=error.code==='PT409'?'내용이 바뀌었습니다. 다시 확인해 주세요.':'현재 권한과 상태를 다시 확인해 주세요.';}else d.notice='결과를 확인하지 못했습니다. 같은 요청 다시 확인을 눌러 주세요.';}
+    finally{clearTimeout(timer);}
+   }finally{d.busy=false;if(who===owner&&valid()&&visible()){render();(list.querySelector('section[data-tax-task="'+k+'"] button')||reloadButton)?.focus({preventScroll:true});}}
   }
   async function load(){
    if(!ctx().owner||!ctx().allowed)return false;
@@ -90,7 +120,7 @@
    const p=(async()=>{try{const r=await read('list',{year},ticket);if(!Array.isArray(r?.items)||typeof r.can_edit!=='boolean')throw Error('조회 결과를 확인하지 못했습니다.');
     rows=r.items;settings=r.settings;canEdit=r.can_edit;serverToday=r.today||today();loadedYear=year;listFresh=true;message='';render();syncEditor();return true;
    }catch(e){if(current(ticket,who)&&e.message!=='STALE_READ'){message='세무 할 일을 불러오지 못했습니다. 다시 확인해 주세요.';canEdit=false;render();syncEditor();}return false;
-   }finally{if(pending===p){pending=null;reloadButton.disabled=false;settingsButton.disabled=!valid();renderAux();}}})();pending=p;reloadButton.disabled=true;settingsButton.disabled=true;return p;
+   }finally{if(pending===p){pending=null;reloadButton.disabled=false;settingsButton.disabled=!valid();render();}}})();pending=p;reloadButton.disabled=true;settingsButton.disabled=true;return p;
   }
   function ensureModal(){
    if(modal)return;modal=make('div','modal fade');modal.id='accountingTaxModal';modal.tabIndex=-1;modal.setAttribute('aria-labelledby','accountingTaxTitle');
@@ -136,7 +166,7 @@
    if(!valid()||!visible()||pending||!rows.includes(row)||deferOpen(()=>{const live=rows.find(r=>key(r)===key(row));if(live)openTask(live);}))return;const k=key(row);let d=drafts.get(k);
    if(!d||(!d.dirty&&!d.attempt)){const data=taskInput(row);d={data,expected:row.expected,approval:row.approval,dirty:false,row,notice:d?.notice};d.baseline=fingerprint(d);drafts.set(k,d);}
    const body=start(names[row.kind],d,'task',row);if(!body)return;
-   body.append(make('p','text-muted',row.period_from+' ~ '+row.period_end));
+   body.append(make('p','text-muted',period(row)));
    if(row.filing_required)field(body,d,'filed_date','신고 완료일','date');
    field(body,d,'settlement','납부 상태','select',[['pending','납부 확인 전'],['paid','납부 완료'],['none','납부할 세액 없음'],['refund','환급 대상']]);
    field(body,d,'paid_date','실제 납부일','date');
@@ -236,5 +266,5 @@
    for(const row of r.data.items){const a=make('a','d-block mb-2',(names[row.kind]||'세무 업무')+' · '+filing(row)+' / '+payment(row));a.href='accounting.html?work=taxes&tax='+encodeURIComponent(row.kind)+'&period='+encodeURIComponent(row.period_end);section.append(a);}element.append(section);
   }catch(_){if(isCurrent()){const notice=make('p','small mt-3','세무 할 일 연결을 확인하지 못했습니다. '),retry=make('button','btn btn-outline-secondary btn-sm','다시 확인');retry.type='button';retry.onclick=()=>{if(!isCurrent())return;notice.remove();void approvalLink({element,client,coopId,documentId,isCurrent});};notice.append(retry);element.append(notice);}}finally{clearTimeout(timer);}
  }
- root.AccountingTaxTasks=Object.freeze({version:'1.0.1',create,approvalLink,filing,payment});
+ root.AccountingTaxTasks=Object.freeze({version:'1.1.0',create,approvalLink,filing,payment,period,completed});
 })(window);

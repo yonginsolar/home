@@ -45,6 +45,7 @@
    else if(!el.readOnly)el.readOnly=true;
   }
   document.querySelectorAll('button,select,[contenteditable=true]').forEach(el=>{
+   if(el.matches('[data-bs-dismiss="modal"]'))return;
    if(el.matches('[contenteditable]'))el.contentEditable='false';else if(!el.disabled)el.disabled=true;
   });
  }
@@ -68,6 +69,8 @@
   if(stopped)return;stopped=true;verified=false;finish(false);
   for(const client of clients)client.auth?.stopAutoRefresh?.();
   window.ContributionCertPreview?.clear();
+  const ownAlert=document.getElementById('alertModal');
+  if(ownAlert)window.bootstrap?.Modal?.getInstance(ownAlert)?.hide();
   window.CoopDialog?.cancelAll(window);banner();controls();observeControls();
   // Relay through each registered direct parent. A grandchild preview is not
   // a direct iframe of the shell, so sending only to top would be ignored.
@@ -190,6 +193,7 @@
   e.preventDefault();e.stopImmediatePropagation();
   if(!stopped)void window.CoopDialog?.alert('박람회에서는 준비된 예시 자료로 파일 첨부 기능을 살펴봐 주세요.',{title:'📎 파일 첨부'});
  },true);
+ document.addEventListener('show.bs.modal',e=>{if(stopped)e.preventDefault();},true);
  document.addEventListener('DOMContentLoaded',()=>{banner();if(stopped)controls();
   observeControls();
  },{once:true});

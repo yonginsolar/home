@@ -7,7 +7,7 @@
   const error = document.getElementById('erpWorkspaceError');
   const routes = window.ErpWorkspaceRoute;
   let current = '', requested = '', client, ready = false, leaving = false, timer, slowTimer, probeTimer;
-  let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', userId = '', transition = 0;
+  let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', accessCoop = '', userId = '', transition = 0;
   const retained = new Map(), attached = new WeakSet();
   const RETAIN_LIMIT = 6;
   let accessPending = null, startupPending = null;
@@ -229,13 +229,23 @@
           if (ticket !== transition) return;
           if (!access || access.id !== userId) { purge(); ready=false; leaving=true; home(target); return; }
           if (access.key !== accessKey) {
-            purge(); accessKey=access.key;
-            const resetTicket=transition;
-            window.ErpWorkspace.clear(); await window.ErpWorkspace.connect(client,access.runtime);
-            if (!ready || resetTicket!==transition) return;
-            activeEntry={frame:document.createElement('iframe'),route:'',fields:new Map()};
-            document.getElementById('erpWorkspaceContent').append(activeEntry.frame); frame=activeEntry.frame;
-            load(target,true); return;
+            const demo=window.ExpoRuntimeBridge?.status();
+            if (demo?.verified && !demo.stopped && demo.workspace===window.ExpoImmutableWorkspace && access.runtime.coop_id===accessCoop) {
+              // Only this authenticated visitor's exact DOM/File survives a
+              // demo permission change. Every return still runs its fresh task
+              // authority check before the held frame becomes visible.
+              accessKey=access.key;
+              window.ErpWorkspace.clear();await window.ErpWorkspace.connect(client,access.runtime);
+              if(ticket!==transition||!ready)return;
+            } else {
+              purge(); accessKey=access.key;accessCoop=access.runtime.coop_id;
+              const resetTicket=transition;
+              window.ErpWorkspace.clear(); await window.ErpWorkspace.connect(client,access.runtime);
+              if (!ready || resetTicket!==transition) return;
+              activeEntry={frame:document.createElement('iframe'),route:'',fields:new Map()};
+              document.getElementById('erpWorkspaceContent').append(activeEntry.frame); frame=activeEntry.frame;
+              load(target,true); return;
+            }
           }
           window.ErpWorkspace.updateSetupRuntime?.(client, access.runtime);
           if (!initialOverlayAllows(cached,access.runtime)) {
@@ -250,6 +260,10 @@
         } catch (failure) {
           if (ticket !== transition) return;
           if (failure?.message === 'ERP_TASK_ACCESS_DENIED') {
+            const demo=window.ExpoRuntimeBridge?.status();
+            if(demo?.verified&&!demo.stopped&&demo.workspace===window.ExpoImmutableWorkspace){
+              cancelLoading();status.textContent='현재 권한으로 이 화면을 열 수 없습니다. 작성 내용은 보존됩니다.';status.hidden=false;error.hidden=false;return;
+            }
             purge(); ready=false; leaving=true; home(target); return;
           }
           status.hidden=true; error.hidden=false;
@@ -491,7 +505,7 @@
     const pending = (async () => { try {
       const access = await serverAccess();
       if (!access) return home(target);
-      const runtime=access.runtime; userId=access.id; accessKey=access.key;
+      const runtime=access.runtime; userId=access.id; accessKey=access.key;accessCoop=runtime.coop_id;
       void window.ErpWorkspace.connect(client, runtime);
       ready = true;
       client.auth.onAuthStateChange((event,session) => {

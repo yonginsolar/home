@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.102 | Change: 2026-10-22 - Prepared exhibition attachment only. -->
+<!-- Version: v1.2.103 | Change: 2026-10-22 - Card use dates and demo assigned-approver transition. -->
 <html lang="ko">
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.102 | approval.html');</script>
+  <script>console.log('[Version] v1.2.103 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -47,7 +47,7 @@
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_permission_request.js?v=1.2.1-uimodal-20261013-1"></script>
-  <script src="workflow_assets.js?v=20261021-tax-2"></script>
+  <script src="workflow_assets.js?v=20261022-reminder-1"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
@@ -1088,12 +1088,14 @@
                 </div>
               </div>
               <div class="col-sm-4 hidden" id="divExpensePaymentMethod">
+                <label class="small text-muted fw-bold" for="expensePaymentMethod">결제수단</label>
                 <select class="form-select form-select-sm" id="expensePaymentMethod" onchange="handleExpensePaymentMethodChange()">
-                  <option value="auto">자동(기존 방식)</option>
-                  <option value="card">등록 카드 사용</option>
+                  <option value="auto">계좌 이체</option>
+                  <option value="card">조합 등록 카드</option>
                 </select>
               </div>
               <div class="col-sm-4 hidden" id="divExpenseCardSelect">
+                <label class="small text-muted fw-bold" for="expenseCardSelect">사용한 카드</label>
                 <select class="form-select form-select-sm" id="expenseCardSelect" onchange="handleExpensePaymentMethodChange()">
                   <option value="">카드 선택</option>
                 </select>
@@ -1141,7 +1143,7 @@
               <label class="form-check-label fw-bold" for="expensePrepaid">선지출</label>
             </div>
             <div id="expensePrepaidDateFields" class="approval-expense-date hidden">
-              <label class="form-label" for="expensePrepaidDate">실제 지출(이체)일</label>
+              <label class="form-label" id="expensePrepaidDateLabel" for="expensePrepaidDate">실제 지출(이체)일</label>
               <input type="date" class="form-control form-control-sm" id="expensePrepaidDate">
             </div>
           </div>
@@ -6727,9 +6729,7 @@ function syncApprovalExpenseDateUi() {
         && (String(document.getElementById('expenseSubType')?.value || '일반') === '일반'
             || (document.getElementById('expenseSubType')?.value === '4대보험'
                 && document.getElementById('insurancePaymentMethod')?.value !== 'auto_debit'))
-        && getApprovalExpenseAdjustmentMode() !== 'decrease'
-        && !(document.getElementById('expensePaymentMethod')?.value === 'card'
-            && normalizeApprovalCardTypeValue(getSelectedApprovalCardRow()?.card_type) === 'credit_card');
+        && getApprovalExpenseAdjustmentMode() !== 'decrease';
     const checked = !!document.getElementById('expensePrepaid')?.checked;
     const section = document.getElementById('divExpenseExecution');
     if (section) { section.classList.toggle('hidden', !general); section.hidden = !general; }
@@ -6738,11 +6738,14 @@ function syncApprovalExpenseDateUi() {
     document.getElementById('expensePrepaidDateFields')?.classList.toggle('hidden', !general || !checked);
     const date = document.getElementById('expensePrepaidDate');
     if (date) { date.disabled = !general || !checked; date.required = general && checked; date.max = formatApprovalKstDateISO(new Date()); }
+    const card = document.getElementById('expensePaymentMethod')?.value === 'card';
+    const label = document.getElementById('expensePrepaidDateLabel');
+    if (label) label.textContent = card ? '카드 사용일' : '실제 지출(이체)일';
 } // End of syncApprovalExpenseDateUi
 
 function collectApprovalExecutionDate(paymentMethod, expenseSubType, adjustmentType) {
     const manualInsurance = expenseSubType === '4대보험' && document.getElementById('insurancePaymentMethod')?.value !== 'auto_debit';
-    if ((!manualInsurance && expenseSubType !== '일반') || adjustmentType === 'decrease' || paymentMethod === 'credit_card') return null;
+    if ((!manualInsurance && expenseSubType !== '일반') || adjustmentType === 'decrease') return null;
     if (!document.getElementById('expensePrepaid')?.checked) return { prepaid: false };
     const date = String(document.getElementById('expensePrepaidDate')?.value || '');
     const parsed = new Date(`${date}T00:00:00Z`);
@@ -9769,6 +9772,14 @@ window.onload = async function() {
     await window.ServiceContractApproval.load(_supabase);
     // Hold the existing composer in memory; resume refreshes reads, never rebuilds the form.
     window.ErpWorkspaceTask = {ready:true, refresh:async function() {
+        if(window.ExpoRuntimeBridge){
+            const runtime=await window.ErpRuntimeGuard.getRuntime(_supabase);
+            if(!runtime?.is_active||runtime.coop_id!==myInfo?.coop_id||runtime.modules?.approval===false
+                ||!runtime.effective_permissions?.includes('approval.view'))throw new Error('ERP_TASK_ACCESS_DENIED');
+            const employee=await window.ErpRuntimeGuard.getBoundEmployee(_supabase);
+            if(!employee||employee.coop_id!==myInfo.coop_id||String(employee.emp_id)!==String(myInfo.emp_id))throw new Error('ERP_TASK_ACCESS_DENIED');
+            permissionSet=await loadPermissions(employee);myInfo=employee;
+        }
         const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'approval',moduleLabel:'전자결재',redirectUrl:'index.html'});
         if (!gate.ok) throw new Error('ERP_TASK_ACCESS_DENIED');
         const summary = await _supabase.rpc('erp_get_approval_bootstrap_summary');
@@ -10191,7 +10202,7 @@ function getApprovalExpensePaymentMethodLabel(method) {
     if (safeMethod === 'credit_card') return '신용카드';
     if (safeMethod === 'check_card') return '체크카드';
     if (safeMethod === 'card') return '등록 카드 사용';
-    return '자동(기존 방식)';
+    return '계좌 이체';
 } // End of getApprovalExpensePaymentMethodLabel
 
 function resetApprovalExpensePaymentUi() {
@@ -11931,7 +11942,7 @@ function buildApprovalSubmitPreviewData() {
         title = getApprovalResolvedTitle(mainType, `${mainType}`);
     }
 
-    if (expenseSnapshotPayload?.execution?.prepaid) appendDesc += `\n\n[선지출]\n- 실제 지출(이체)일: ${expenseSnapshotPayload.execution.date}`;
+    if (expenseSnapshotPayload?.execution?.prepaid) appendDesc += `\n\n[선지출]\n- ${['credit_card','check_card'].includes(expenseSnapshotPayload.payment_method)?'카드 사용일':'실제 지출(이체)일'}: ${expenseSnapshotPayload.execution.date}`;
     const rawBodyContent = getApprovalEditorContent();
     if (!String(rawBodyContent || '').trim()) throw new Error('내용을 입력하세요.');
 
@@ -13391,7 +13402,7 @@ async function handleDraftSubmit(e) {
 
     const relatedDocId = document.getElementById("relDocId").value || null;
     const allowHtmlContent = isApprovalHtmlEditorType(mainType);
-    if (expenseSnapshotPayload?.execution?.prepaid) appendDesc += `\n\n[선지출]\n- 실제 지출(이체)일: ${expenseSnapshotPayload.execution.date}`;
+    if (expenseSnapshotPayload?.execution?.prepaid) appendDesc += `\n\n[선지출]\n- ${['credit_card','check_card'].includes(expenseSnapshotPayload.payment_method)?'카드 사용일':'실제 지출(이체)일'}: ${expenseSnapshotPayload.execution.date}`;
     const rawBodyContent = getApprovalEditorContent();
     const isNoticeDraft = mainType === '공문';
     const mergedBodyContent = mergeSystemAppendContent(rawBodyContent, isNoticeDraft ? '' : appendDesc, allowHtmlContent);
@@ -13653,10 +13664,17 @@ async function processApprovalDoc(docId, action, reason = '') {
         approvalUpdatePayload.processed_at = nowIso;
     }
 
-    const { error: approvalUpdateError } = await scopeApprovalTenant(_supabase
-        .from('ref_approval')
-        .update(approvalUpdatePayload))
-        .eq('id', docId);
+    let approvalUpdateError;
+    if (window.ExpoRuntimeBridge) {
+        const result = await _supabase.rpc('erp_expo_process_assigned_approval', {
+            p_document_id:Number(docId),p_action:action,p_reason:reason,
+            p_expected:doc,p_request_key:crypto.randomUUID()
+        });
+        approvalUpdateError=result.error || (result.data?.ok===true&&result.data?.verified===true&&result.data?.simulation===true?null:new Error('시연 결재 처리 결과를 확인하지 못했습니다. 목록을 다시 확인해 주세요.'));
+    } else {
+        const result = await scopeApprovalTenant(_supabase.from('ref_approval').update(approvalUpdatePayload)).eq('id', docId);
+        approvalUpdateError=result.error;
+    }
     if (approvalUpdateError) {
         showAlert("결재 상태 저장 실패: " + approvalUpdateError.message);
         return { ok: false };
@@ -13682,7 +13700,7 @@ async function processApprovalDoc(docId, action, reason = '') {
         CoopSafeLog.error("시간외 근로 반영 실패:", settlementError);
         attendanceSettlementNotice = '시간외 근로 후처리는 반영하지 못했습니다. 설정을 확인해 주세요.';
     }
-    await logAudit('approval.process', docId, `${action === '승인' && isSunVillageReviewUser() ? '검토' : action} 처리`, {
+    if (!window.ExpoRuntimeBridge) await logAudit('approval.process', docId, `${action === '승인' && isSunVillageReviewUser() ? '검토' : action} 처리`, {
         status: newStatus,
         reason: reason || null,
         delegated_from_emp_id: delegatedFrom ? effectiveApproverEmpId : null,

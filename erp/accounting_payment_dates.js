@@ -1,7 +1,8 @@
-/* v1.1.0 — confirm insurance payments as well as ordinary expenses. */
+/* v1.2.0 — distinguish card use from bank payment; memory-only confirmation drafts. */
 (function () {
     'use strict';
-    let active = null, editing = false;
+    let active = null, editing = false, draftOwner = '';
+    const drafts = new Map();
     const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) &&
         !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime()) &&
         new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
@@ -12,12 +13,25 @@
         if (window.CoopInsurancePayment.isInsurance(doc)) return snapshot.adjustment_type !== 'decrease' && !/감액/.test(String(doc.doc_type || ''));
         return !/급여|보험|원천세|출자금반환|배당금|감액/.test(String(doc.doc_type || '')) &&
             !['급여', '4대보험', '원천세', '출자금반환', '배당금'].includes(snapshot.expense_sub_type) &&
-            snapshot.adjustment_type !== 'decrease' && !snapshot.payout && !snapshot.withholding_tax && !snapshot.insurance &&
-            snapshot.payment_method !== 'credit_card';
+            snapshot.adjustment_type !== 'decrease' && !snapshot.payout && !snapshot.withholding_tax && !snapshot.insurance;
+    }
+    function canChooseMethod(doc) {
+        const s = doc.expense_snapshot || {};
+        return eligible(doc) && !window.CoopInsurancePayment.isInsurance(doc) &&
+            !s.adjustment_type && !s.original_approval_id && !['credit_card','check_card'].includes(s.payment_method);
+    }
+    function resolvePayment(doc, payment, cards = []) {
+        const s = doc.expense_snapshot || {};
+        if (!payment?.method || payment.method === 'auto') return { method: s.payment_method || 'auto', alias: s.card_alias || '' };
+        if (!canChooseMethod(doc) || payment.method !== 'card') throw Error('결재의 결제수단을 다시 확인해 주세요.');
+        const matches = cards.filter(c => c.card_alias === payment.card_alias && c.coop_id === doc.coop_id);
+        if (matches.length !== 1 || !['credit_card','check_card'].includes(matches[0].card_type) ||
+            matches[0].card_type !== payment.card_type) throw Error('카드 정보가 바뀌었습니다. 사용한 카드를 다시 확인해 주세요.');
+        return { method: matches[0].card_type, alias: matches[0].card_alias };
     }
     function validate(payment, today) {
         if (payment?.confirmed !== true) return '지출 확인을 선택하지 않아 이번 연동에서 제외했습니다.';
-        if (!validDate(payment.date)) return '실제 지출(이체)일을 입력해 주세요.';
+        if (!validDate(payment.date)) return '실제 지출일 또는 카드 사용일을 입력해 주세요.';
         if (!validDate(today) || payment.date > today) return '실제 지출일은 오늘 이후로 입력할 수 없습니다.';
         return '';
     }
@@ -45,31 +59,56 @@
         cancel.addEventListener('click', () => modal.hide());
         return { root, form, body, error, cancel, submit, modal };
     }
-    function collect(candidates, today) {
+    function collect(candidates, today, options = {}) {
         if (!candidates.length) return Promise.resolve(new Map());
         if (active) return active;
         active = new Promise(resolve => {
-            const ui = dialog('지출(이체)일 확인', 'expensePaymentDateModal');
-            ui.body.append(el('p', 'text-muted', '실제로 지출한 건만 선택해 주세요. 날짜를 확인한 뒤 연동하며, 아직 지출하지 않은 건은 다음에 처리할 수 있습니다.'));
+            const owner = String(options.owner || candidates[0]?.doc.coop_id || '');
+            if (owner !== draftOwner) { drafts.clear(); draftOwner = owner; }
+            const cards = options.cards || [];
+            const ui = dialog('결제수단·사용일 확인', 'expensePaymentDateModal');
+            ui.body.append(el('p', 'text-muted', '실제로 이체하거나 카드를 사용한 건을 선택해 주세요. 신용카드는 사용액만 기록하며 카드대금 출금과 구분합니다.'));
             const controls = candidates.map(({ doc, approvedDate, scheduledDate }, index) => {
                 const prepaid = doc.expense_snapshot?.execution?.prepaid === true;
                 const insurance = window.CoopInsurancePayment.isInsurance(doc);
+                const sig = signature(doc), held = drafts.get(String(doc.id));
+                const draft = held?.signature === sig ? held : { signature: sig, confirmed: prepaid, date: prepaid ? String(doc.expense_snapshot.execution.date || '') : scheduledDate || approvedDate, method: 'auto', card_alias: '', card_type: '' };
+                drafts.set(String(doc.id), draft);
                 const section = el('section', 'border rounded p-3 mb-3');
                 section.append(el('h6', 'fw-bold', doc.title || '지출결의'),
                     el('p', 'mb-2', `${Number(doc.amount).toLocaleString()}원${prepaid ? ' · 선지출' : ''}`));
                 if (insurance) section.append(el('p', 'small text-muted', window.CoopInsurancePayment.label(doc.expense_snapshot?.insurance)));
                 const row = el('div', 'form-check mb-2'), check = el('input', 'form-check-input');
-                check.type = 'checkbox'; check.id = `expensePaidCheck${index}`; check.checked = prepaid;
-                const checkLabel = el('label', 'form-check-label', '실제 지출을 확인했습니다.'); checkLabel.htmlFor = check.id;
+                check.type = 'checkbox'; check.id = `expensePaidCheck${index}`; check.checked = draft.confirmed;
+                const checkLabel = el('label', 'form-check-label', '이체 또는 카드 사용을 확인했습니다.'); checkLabel.htmlFor = check.id;
                 row.append(check, checkLabel);
                 const date = el('input', 'form-control'); date.type = 'date'; date.id = `expensePaidDate${index}`;
-                date.max = today; date.value = prepaid ? String(doc.expense_snapshot.execution.date || '') : scheduledDate || approvedDate;
+                date.max = today; date.value = draft.date;
                 date.disabled = !check.checked || prepaid; date.required = !prepaid;
-                const label = el('label', 'form-label', '실제 지출(이체)일'); label.htmlFor = date.id;
-                check.addEventListener('change', () => { date.disabled = !check.checked || prepaid; });
+                const label = el('label', 'form-label', '실제 지출일'); label.htmlFor = date.id;
+                let method, card;
+                if (canChooseMethod(doc)) {
+                    method = el('select', 'form-select mb-2'); method.id = `expensePaidMethod${index}`;
+                    for (const [value,text] of [['auto','계좌 이체'],['card','조합 등록 카드']]) { const o=el('option','',text);o.value=value;method.append(o); }
+                    method.value = draft.method;
+                    const ml=el('label','form-label','결제수단');ml.htmlFor=method.id;
+                    card=el('select','form-select mb-2');card.id=`expensePaidCard${index}`;
+                    const empty=el('option','','사용한 카드 선택');empty.value='';card.append(empty);
+                    for(const c of cards.filter(c=>c.coop_id===doc.coop_id&&['credit_card','check_card'].includes(c.card_type))){const o=el('option','',`${c.card_alias} · ${c.card_type==='credit_card'?'신용카드':'체크카드'}`);o.value=c.card_alias;card.append(o);}
+                    card.value=draft.card_alias;const cl=el('label','form-label','사용한 카드');cl.htmlFor=card.id;
+                    section.append(ml,method,cl,card);cl.dataset.cardLabel='';
+                    const update=()=>{draft.method=method.value;draft.card_alias=card.value;draft.card_type=cards.find(c=>c.coop_id===doc.coop_id&&c.card_alias===card.value)?.card_type||'';card.hidden=cl.hidden=method.value!=='card';card.disabled=!check.checked;method.disabled=!check.checked;label.textContent=method.value==='card'?'카드 사용일':'실제 지출(이체)일';};
+                    method.addEventListener('change',update);card.addEventListener('change',update);check.addEventListener('change',update);update();
+                } else {
+                    const s=doc.expense_snapshot||{};
+                    section.append(el('p','small mb-2',insurance?window.CoopInsurancePayment.label(s.insurance):s.payment_method==='credit_card'?`신용카드 · ${s.card_alias||''}`:s.payment_method==='check_card'?`체크카드 · ${s.card_alias||''}`:'계좌 이체'));
+                    label.textContent=['credit_card','check_card'].includes(s.payment_method)?'카드 사용일':'실제 지출(이체)일';
+                }
+                check.addEventListener('change', () => { draft.confirmed=check.checked;date.disabled = !check.checked || prepaid; });
+                date.addEventListener('input',()=>{draft.date=date.value;});
                 section.append(row, label, date);
                 if (prepaid) section.append(el('p', 'small text-muted mt-2 mb-0', '선지출은 승인된 문서에 기재한 날짜를 사용합니다.'));
-                ui.body.append(section); return { doc, check, date, prepaid };
+                ui.body.append(section); return { doc, check, date, prepaid, draft };
             });
             let result = null, submitted = false;
             ui.submit.textContent = '연동 내용 확인';
@@ -78,10 +117,11 @@
                 event.preventDefault(); if (submitted) return;
                 const values = new Map();
                 for (const control of controls) {
-                    const payment = { confirmed: control.check.checked, date: control.date.value, signature: signature(control.doc) };
+                    const payment = { ...control.draft, confirmed: control.check.checked, date: control.date.value, signature: signature(control.doc) };
                     if (payment.confirmed) {
                         const message = validate(payment, today);
                         if (message) { ui.error.textContent = message; return; }
+                        try { resolvePayment(control.doc, payment, cards); } catch(error) { ui.error.textContent=error.message;return; }
                     }
                     values.set(String(control.doc.id), payment);
                 }
@@ -153,5 +193,5 @@
             ui.modal.show();
         } catch (error) { editing = false; if (ui) ui.root.remove(); window.showAlert('날짜 수정 확인', error.message); }
     }
-    window.CoopPaymentDates = { version: '1.1.0', validDate, eligible, signature, validate, collect, edit };
+    window.CoopPaymentDates = { version: '1.2.0', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, edit };
 })();

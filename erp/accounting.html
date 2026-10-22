@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.176 | Change: 2026-10-22 - Connect exhibition payouts through reviewed canonical sources. -->
+<!-- Version: v1.0.177 | Change: 2026-10-22 - Card use confirmation and simple tax reminders. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -9,10 +9,10 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.176 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.177 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
-  <script src="workflow_assets.js?v=20261021-tax-2"></script>
+  <script src="workflow_assets.js?v=20261022-reminder-1"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
   <link rel="stylesheet" href="financial_statements.css?v=1.1.1">
   <meta charset="UTF-8">
@@ -44,12 +44,16 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="accounting_withholding_payment.js?v=1.0.0"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
-  <script src="accounting_payment_dates.js?v=1.1.0"></script>
+  <script src="accounting_payment_dates.js?v=1.2.0"></script>
 
   <style>
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
     body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
     .main-container { max-width: 1380px; width: min(100%, 1380px); margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 25px; }
+    body.erp-page-accounting #accTab { flex-wrap: wrap; overflow: visible; gap: 4px; }
+    body.erp-page-accounting #accTab .nav-item { flex: 0 1 auto; min-width: 0; }
+    body.erp-page-accounting #accTab .nav-link { white-space: normal; word-break: keep-all; height: 100%; }
+    body.erp-page-accounting .erp-local-navigation .sidebar-menu { flex-wrap: wrap; overflow: visible; }
 
     .stat-card { flex: 1; padding: 15px; border-radius: 12px; text-align: center; color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     .bg-rev { background: linear-gradient(135deg, #2ecc71, #27ae60); }
@@ -612,7 +616,7 @@
 	          <div class="card p-3 border-start border-5 border-warning bg-light">
 	             <div class="d-flex justify-content-between align-items-center">
 	               <div><h6 class="fw-bold mb-1">📝 전자결재 연동</h6><small class="text-muted">승인된 지출결의를 회계에 반영합니다. 급여는 귀속월 말 비용과 실제 지급일 출금을 나누어 기록합니다.</small></div>
-               <button class="btn btn-warning btn-sm text-white" onclick="confirmSync('approval')">지출일·연동 내용 확인</button>
+               <button class="btn btn-warning btn-sm text-white" onclick="confirmSync('approval')">결제수단·연동 내용 확인</button>
 	             </div>
 	          </div>
           <div class="card p-3 border-start border-5 border-success-subtle bg-white">
@@ -4634,6 +4638,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
         const transId = `APR-${doc.id}`;
         const operator = doc?.drafter_name || writer;
         let journalDate = getApprovalJournalDate(doc, fallbackDate);
+        let confirmedPayment = null;
         if (window.CoopPaymentDates.eligible(doc) && !isSalaryLikeApproval(doc)) {
             const payment = options.expensePayments?.get(String(doc.id));
             let reason = window.CoopPaymentDates.validate(payment, fallbackDate);
@@ -4643,6 +4648,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
             if (!reason) reason = (await window.CoopWithholdingPayment.periodError(_supabase, myInfo?.coop_id, payment.date)).replaceAll('원천세', '지출');
             if (reason) { blockedDocs.push({ id: doc.id, label: doc.title || '지출결의', reason }); continue; }
             journalDate = payment.date;
+            confirmedPayment = payment;
         }
 
         const payoutKind = String(doc?.expense_snapshot?.payout?.kind || '').trim();
@@ -4857,8 +4863,11 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
         }
 
         const expenseSnapshot = normalizeApprovalExpenseSnapshot(doc);
-        const paymentMethod = String(expenseSnapshot.payment_method || 'auto').trim();
-        const cardAlias = String(expenseSnapshot.card_alias || '').trim();
+        let effectivePayment;
+        try { effectivePayment = window.CoopPaymentDates.resolve(doc, confirmedPayment, typeof cardData==='undefined'?[]:cardData); }
+        catch(error) { blockedDocs.push({id:doc.id,label:doc.title||'지출결의',reason:error.message});continue; }
+        const paymentMethod = String(effectivePayment.method || 'auto').trim();
+        const cardAlias = String(effectivePayment.alias || '').trim();
         const cardPrefix = cardAlias ? `[${cardAlias}] ` : '';
         const descBase = `${cardPrefix}${doc?.title || doc?.doc_type || '지출결의'}`;
         const inventoryPurchase = doc?.expense_snapshot?.inventory_purchase;
@@ -8563,7 +8572,8 @@ function confirmSync(type) {
             const expenseCandidates = targetDocs.filter(doc => window.CoopPaymentDates.eligible(doc) && !isSalaryLikeApproval(doc))
                 .map(doc => ({ doc, approvedDate: getApprovalJournalDate(doc, today),
                     scheduledDate: isInsuranceApproval(doc) ? parseApprovalInsurancePaymentDate(doc, '') : '' }));
-            const expensePayments = await window.CoopPaymentDates.collect(expenseCandidates, today);
+            await loadCards();
+            const expensePayments = await window.CoopPaymentDates.collect(expenseCandidates, today, {cards:cardData,owner:myInfo.coop_id+':'+myInfo.emp_id});
             if (expensePayments === null) return;
 
             const previewPlanResult = await buildApprovalSyncPlans(targetDocs, today, writer, {
@@ -8605,6 +8615,7 @@ function confirmSync(type) {
             ].filter(Boolean).join('\n');
 
             await window.CoopWithholdingPayment.review(previewMsg, async () => {
+                await loadCards();
                 const { data: runApprovals, error: runFetchError } = await _supabase
                     .from('ref_approval')
                     .select('id,coop_id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,related_doc_id,expense_snapshot,salary_ledger_snapshot,accounting_synced_at')
