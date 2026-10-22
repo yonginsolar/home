@@ -1,4 +1,4 @@
-/* v1.2.1 — Distinguish unconfigured/unlimited/bylaw basis without widening erasure. */
+/* v1.3.0 — Separate verified backup cleanup from newly pending erasures. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,status=null,body=null,controls=null,bank=null,grace=null,opener=null,all=null,sequence=0,badgeSequence=0,busy=false,loaded=false,pending=null,focusId=null,savedSelection=null;
@@ -25,7 +25,10 @@
   const serial=++badgeSequence;try{const r=await call(b,'status',ids(b));if(!valid(b)||serial!==badgeSequence)return;
    if(!Array.isArray(r.items)||r.items.some(x=>!ids(b).includes(x.member_uid)))return;
    document.querySelectorAll('[data-review-badge],[data-review-status-error],[data-review-backup]').forEach(x=>x.remove());
-   if(Number(r.backup_cleanup_pending)>0){const text=node('span','small text-warning-emphasis ms-2','운영정보 파기 '+r.backup_cleanup_pending+'건 · 백업 정리 대기');text.dataset.reviewBackup='';document.getElementById('memberApplicationReviewTools')?.append(text);}
+   for(const [field,label,style] of [['backup_cleanup_completed','백업 정리 완료','text-success'],['backup_cleanup_pending','백업 정리 대기','text-warning-emphasis']]){
+    const count=Number(r[field]??0);if(!Number.isSafeInteger(count)||count<=0)continue;
+    const text=node('span','small '+style+' ms-2',label+' '+count+'건');text.dataset.reviewBackup=field;document.getElementById('memberApplicationReviewTools')?.append(text);
+   }
    for(const row of r.items){const box=[...document.querySelectorAll('[data-admission-member]')].find(x=>x.dataset.admissionMember===row.member_uid);if(!box)continue;
     if(row.checking||row.deferred_until){const label=node('div','small text-primary',row.checking?'입금 확인 중':'유예 종료일 '+row.deferred_until);label.dataset.reviewBadge='';box.append(label);}
    }
