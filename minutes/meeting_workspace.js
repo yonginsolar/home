@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.10
-Change: 2026-10-23 - Keep new-meeting drafts until explicitly discarded.
+Version: v1.10.11
+Change: 2026-10-23 - Scope new-meeting keyboard navigation and preserve drafts on Escape.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
@@ -184,7 +184,9 @@ async function openNewPackage() {
   await ensureMeetingDefaults({ history:true });
   if (revision !== newPackageDialogRevision || window.frameElement?.hidden) return;
   activateNewPackageDraft();
-  $('newPackageModal').classList.add('show');
+  const modal = $('newPackageModal'), wasOpen = modal.classList.contains('show');
+  modal.classList.add('show');
+  if (!wasOpen) $('newMeetingType').focus();
 }
 
 function numberFromMoney(value) {
@@ -2288,6 +2290,25 @@ async function runAction(action) {
 function bindEvents() {
   $('backToDocuments').addEventListener('click', () => { location.href = '../erp/governance.html'; });
   $('newPackageButton').addEventListener('click', () => runAction(openNewPackage));
+  $('newPackageModal').addEventListener('keydown', event => {
+    const modal = $('newPackageModal');
+    if (!modal.classList.contains('show') || window.frameElement?.hidden || event.defaultPrevented
+      || event.isComposing || event.keyCode === 229 || event.target.closest('dialog[open]')
+      || document.querySelector('dialog[open]')) return;
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation();
+      if (!state.loading) closeNewPackage();
+    } else if (event.key === 'Tab') {
+      const controls = [...modal.querySelectorAll('button,input,select,textarea,a[href],[tabindex]')]
+        .filter(node => !node.disabled && node.tabIndex >= 0 && !node.closest('[inert]')
+          && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
+      if (!controls.length) return;
+      event.preventDefault(); event.stopPropagation();
+      const index = controls.indexOf(document.activeElement);
+      controls[index < 0 ? (event.shiftKey ? controls.length - 1 : 0)
+        : (index + controls.length + (event.shiftKey ? -1 : 1)) % controls.length].focus();
+    }
+  });
   $('newMeetingType').addEventListener('change', activateNewPackageDraft);
   $('newAssemblyKind').addEventListener('change', activateNewPackageDraft);
   $('newMeetingTitle').addEventListener('input', rememberNewPackageDraft);
