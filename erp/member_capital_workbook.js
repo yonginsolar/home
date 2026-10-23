@@ -821,7 +821,7 @@
       }
       X.writeFile(wb, "회원_출자금_검토목록.xlsx");
     }
-    function open() {
+    function open({replacementFile=null}={}) {
       build();
       syncContext();
       const c = context();
@@ -840,11 +840,16 @@
           rechecks: new Set(),
           attempt: null,
         };
+      const replacing = replacementFile instanceof root.File;
+      if (replacing && locked(state)) return false;
+      // A new File follows the normal change/parser path after handoff, not the old-file recheck.
+      if (replacing) pause();
       opener = document.activeElement;
       render();
       root.bootstrap.Modal.getOrCreateInstance(modal).show();
-      if (state.file && !locked(state)) {
-        const go = () => void (state.data ? review() : readFile());
+      if (state.file && !locked(state) && !replacing) {
+        const snapshot=state, ticket=state.epoch;
+        const go = () => {if(state===snapshot && state.epoch===ticket && allowed(state) && visible() && !locked(state))void (state.data ? review() : readFile());};
         if (visible()) go();
         else modal.addEventListener("shown.bs.modal", go, { once: true });
       }
@@ -853,7 +858,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.0.3",
+    version: "1.0.4",
     create,
     parse,
     memberHeaders,

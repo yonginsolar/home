@@ -6693,7 +6693,7 @@ async function openMemberExcelUpload() {
                 document.getElementById('member-excel-upload-button')?.focus({preventScroll:true});
                 if(kind==='members')openMemberImportModal();
                 else if(kind==='capital')await openCapitalImportModal();
-                else if(kind==='workbook')await openMemberWorkbookModal();
+                else if(kind==='workbook'){if(!await openMemberWorkbookModal({replacementFile:transfer?.files?.[0],isCurrent:current}))return false;}
                 else return false;
                 const input=document.getElementById(ids[kind]);
                 const modal=input?.closest('.modal');
@@ -6720,20 +6720,20 @@ async function openMemberExcelUpload() {
             myAlert('엑셀 업로드 도구를 불러오지 못했어요. 다시 열어 주세요.','error');
     } finally {memberExcelEntryOpening=false;}
 }
-async function openMemberWorkbookModal() {
+async function openMemberWorkbookModal({replacementFile=null,isCurrent=()=>true}={}) {
     const before = capitalImportContext();
-    if (!before.allowed || memberWorkbookOpening) return;
+    if (!before.allowed || memberWorkbookOpening || !isCurrent()) return false;
     memberWorkbookOpening = true;
     try {
         const feature = await window.AdminMemberAssets.ensureMemberWorkbook();
-        if (!capitalImportContext().allowed || before.owner !== capitalImportContext().owner || window.frameElement?.hidden) return;
+        if (!capitalImportContext().allowed || before.owner !== capitalImportContext().owner || window.frameElement?.hidden || !isCurrent()) return false;
         if (!window.memberWorkbookController) window.memberWorkbookController = feature.create({
             client: _supabase, getContext: capitalImportContext,
             normalizeMember: normalizeMemberImportRow, memberPayload: memberImportPayload,
             ensureSpreadsheet: () => window.AdminMemberAssets.ensureSpreadsheet(),
             refresh: async () => { const updated = await fetchMembers(); await refreshMemberDashboardAfterSave(); return updated === true; }
         });
-        window.memberWorkbookController.open();
+        return window.memberWorkbookController.open({replacementFile});
     } catch (_) {
         if (before.owner === capitalImportContext().owner && capitalImportContext().allowed && !window.frameElement?.hidden)
             myAlert('회원·출자금 엑셀 도구를 불러오지 못했습니다. 다시 열어 주세요.', 'error');

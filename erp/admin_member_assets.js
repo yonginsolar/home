@@ -23,12 +23,12 @@
         integrity: 'sha384-5y+Dcz/wtb7Mcb+gkxBLc8A+bVs7U7Hpn1s6XjY72OgyPt9UQ/dnPhAn8RJM+Dc9'
     });
     const memberWorkbook = Object.freeze({
-        src: new URL('member_capital_workbook.js?v=20261022-help-1', document.baseURI).href,
-        integrity: 'sha384-ZZgZav+MnVxqJZ4sbGGelmxVVJgbM93TiTDT47Kvmy50EKejaV1GFCAck9OSC7Tx'
+        src: new URL('member_capital_workbook.js?v=20261023-excel-retry-1', document.baseURI).href,
+        integrity: 'sha384-vrX4bkL34ph2gTxO+vNzaoy2dNuVoAjpj7Jdiyq3OoFpVvwPZr43ifccJrE+kNwd'
     });
     const memberExcelEntry = Object.freeze({
-        src: new URL('member_excel_entry.js?v=1.0.0', document.baseURI).href,
-        integrity: 'sha384-K9+Dzl5/RoxMme0g7mAc8r+yTHxNqOVDM+qn8MHYNFPxUcUf3Ez+Pt/FaQZOKQdO'
+        src: new URL('member_excel_entry.js?v=1.0.1', document.baseURI).href,
+        integrity: 'sha384-ehjbXF+sm3y9Q/sXNl3p25HK2GOd8Qvlqj3vKdE58z6Q0vl/13K2g6oMDt55YxYZ'
     });
     const siteAssets = Object.freeze([
         Object.freeze({src: new URL('home_settings_conflict.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-2dLr0r0obVLbc9+OB2t4zQ/93bWr/XN6tUV8fMHwIggYDmjZ6ezKQX91b3CHjNz6', ready: () => root.CoopHomeConflict?.version === '1.0.0'}),
@@ -80,11 +80,11 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261019-controls-1', docum
     }
     async function ensureMemberWorkbook() {
         await ensureCapitalImport();
-        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.0.3');
+        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.0.4');
         return root.MemberCapitalWorkbook;
     }
     async function ensureMemberExcelEntry() {
-        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.0.0');
+        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.0.1');
         return root.MemberExcelEntry;
     }
     function ensurePdf() {
