@@ -27,8 +27,8 @@
         integrity: 'sha384-vrX4bkL34ph2gTxO+vNzaoy2dNuVoAjpj7Jdiyq3OoFpVvwPZr43ifccJrE+kNwd'
     });
     const memberExcelEntry = Object.freeze({
-        src: new URL('member_excel_entry.js?v=1.0.3', document.baseURI).href,
-        integrity: 'sha384-TvidIfwDonzMLXiu0b4JSk18IuBOpgWfl5EoivJmXQlzVgOdWlkXY3y6stbKGzoL'
+        src: new URL('member_excel_entry.js?v=1.0.4', document.baseURI).href,
+        integrity: 'sha384-F4dg338gifzgPhdO1wBkAmczdZgyb4G4mGwayvj9WPszhdGSxS0SPtyxoNT0RHRb'
     });
     const siteAssets = Object.freeze([
         Object.freeze({src: new URL('home_settings_conflict.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-2dLr0r0obVLbc9+OB2t4zQ/93bWr/XN6tUV8fMHwIggYDmjZ6ezKQX91b3CHjNz6', ready: () => root.CoopHomeConflict?.version === '1.0.0'}),
@@ -84,7 +84,7 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261019-controls-1', docum
         return root.MemberCapitalWorkbook;
     }
     async function ensureMemberExcelEntry() {
-        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.0.3');
+        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.0.4');
         return root.MemberExcelEntry;
     }
     function ensurePdf() {

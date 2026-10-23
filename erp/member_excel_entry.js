@@ -1,4 +1,4 @@
-/* Member Excel entry v1.0.3. File routing only; original preview/writers remain authoritative. */
+/* Member Excel entry v1.0.4. File routing only; original preview/writers remain authoritative. */
 (function (root) {
     'use strict';
     const labels = {members:'회원 등록',capital:'출자금 추가',workbook:'회원·출자금 함께 등록'};
@@ -21,14 +21,13 @@
         throw Error('양식의 항목을 확인해 주세요. 양식 다운로드에서 회원·출자금 통합 양식을 받을 수 있습니다.');
     }
     function create({getContext,ensureSpreadsheet,openReview,getDrafts,downloadTemplate}) {
-        let modal, input, status, proceed, retry, drafts, opener, owner='', epoch=0, file=null, kind=null, forwarding=false, permissionBlocked=false, reading=false, interrupted=false, stopFocusWatch=null;
+        let modal, input, status, proceed, retry, drafts, opener, owner='', epoch=0, file=null, kind=null, forwarding=false, permissionBlocked=false, reading=false, interrupted=false, stopFocusWatch=null, closeReturn=null;
         const context = () => getContext() || {};
         const current = ticket => ticket === epoch && owner && owner === context().owner && context().allowed === true && !root.frameElement?.hidden;
         const visible = () => modal?.classList.contains('show');
         const retryMessage = '파일 확인이 중단됐어요. 다시 확인을 눌러 이어가 주세요.';
         function cancelFocusReturn() {stopFocusWatch?.();stopFocusWatch=null;}
-        function ownsKeyboard() {
-            if(!current(epoch)||!visible()||modal.closest('[inert]'))return false;
+        function unblockedByDialog() {
             try {
                 let host=root;
                 while(true){
@@ -39,6 +38,39 @@
                 }
             }catch(_){return false;}
             return true;
+        }
+        function ownsKeyboard() {
+            return !!owner&&owner===context().owner&&!root.frameElement?.hidden&&visible()&&!modal.closest('[inert]')&&unblockedByDialog();
+        }
+        function cancelCloseReturn() {closeReturn?.stop?.();closeReturn=null;}
+        function prepareCloseReturn(event) {
+            if(event.target!==modal)return;
+            cancelCloseReturn();
+            if(forwarding)return;
+            const state={eligible:modal.contains(document.activeElement),target:opener,changed:false};closeReturn=state;
+            root.queueMicrotask(()=>{if(event.defaultPrevented&&closeReturn===state)cancelCloseReturn();});
+        }
+        function watchCloseReturn() {
+            const state=closeReturn;if(!state?.eligible)return;
+            state.ticket=epoch;state.baseline=document.activeElement;
+            const documents=[],events=['pointerdown','keydown','input','focusin'],changed=()=>{state.changed=true;};
+            try {
+                let host=root;
+                while(true){documents.push(host.document);if(host===host.parent)break;host=host.parent;}
+            }catch(_){cancelCloseReturn();return;}
+            for(const doc of documents)for(const name of events)doc.addEventListener(name,changed,true);
+            root.addEventListener('blur',changed);
+            state.stop=()=>{for(const doc of documents)for(const name of events)doc.removeEventListener(name,changed,true);root.removeEventListener('blur',changed);};
+            // Bootstrap deactivates its focus trap after hide listeners return. Clear only
+            // residual focus in the closing dialog before the core's next-frame fallback.
+            root.queueMicrotask(()=>{if(closeReturn===state&&modal.contains(document.activeElement)){document.activeElement.blur();state.baseline=document.activeElement;}});
+        }
+        function finishCloseReturn() {
+            const state=closeReturn;cancelCloseReturn();
+            const target=state?.target;
+            if(!state?.eligible||state.changed||forwarding||!current(state.ticket)||visible()||!document.hasFocus()||!unblockedByDialog()||document.querySelector('.modal.show'))return;
+            if(![state.baseline,document.body].includes(document.activeElement)||!target?.isConnected||target.disabled||target.closest('[hidden],[inert]')||!target.getClientRects().length||getComputedStyle(target).visibility!=='visible')return;
+            target.focus({preventScroll:true});
         }
         function containTab(event) {
             if(event.key!=='Tab'||event.defaultPrevented||event.isComposing||!ownsKeyboard())return;
@@ -91,9 +123,11 @@
             modal.addEventListener('keydown',containTab);
             modal.querySelector('[data-template]').onclick=async()=>{const ticket=epoch;try{await downloadTemplate(()=>current(ticket)&&visible());}catch(_){if(current(ticket)&&visible())status.textContent='양식을 내려받지 못했어요. 다시 시도해 주세요.';}};
             modal.querySelector('[data-help]').onclick=()=>{if(root.CoopWorkflowHelp?.visible()===false)return;void root.CoopDialog.alert('회원만 등록할 때는 조합원 시트만 작성하세요. 유형과 이름·단체명은 필수이며, 나머지 빈칸은 나중에 보완할 수 있어요.\n\n여러 차례 납입했다면 출자금 납입내역 시트에 실제 입금을 한 줄씩 적으세요. 기존 조합원은 조합원번호로 연결하고, 신규 회원은 유형과 이름·단체명을 일치시켜 주세요.\n\n같은 날 같은 금액의 별도 입금은 거래 구분을 다르게 적고 검토 화면에서 확인해 주세요. 파일 선택만으로 등록되지는 않으며 검토 후 등록을 눌러야 반영돼요.',{title:'엑셀 업로드'});};
-            modal.addEventListener('hide.bs.modal',()=>{if(!forwarding){epoch++;interruptRead();proceed.disabled=!kind;}});
-            modal.addEventListener('hidden.bs.modal',()=>{if(!forwarding&&opener?.isConnected&&!opener.disabled)opener.focus({preventScroll:true});});
-            if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden){epoch++;forwarding=false;interruptRead();proceed.disabled=!kind;}}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
+            root.addEventListener('hide.bs.modal',prepareCloseReturn,true);
+            modal.addEventListener('hide.bs.modal',()=>{if(!forwarding){epoch++;interruptRead();proceed.disabled=!kind;watchCloseReturn();}});
+            modal.addEventListener('hidden.bs.modal',finishCloseReturn);
+            root.addEventListener('pagehide',cancelCloseReturn);
+            if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden){epoch++;cancelCloseReturn();forwarding=false;interruptRead();proceed.disabled=!kind;}}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
             root.addEventListener('beforeunload',event=>{if(file){event.preventDefault();event.returnValue='';}});
         }
         async function read(fromRetry=false) {
@@ -151,7 +185,7 @@
         function syncContext() {
             if(!modal)return;
             const c=context();
-            if(owner&&owner!==c.owner){epoch++;cancelFocusReturn();file=null;kind=null;reading=false;interrupted=false;input.value='';status.textContent='';permissionBlocked=false;owner='';root.bootstrap.Modal.getInstance(modal)?.hide();}
+            if(owner&&owner!==c.owner){epoch++;cancelCloseReturn();cancelFocusReturn();file=null;kind=null;reading=false;interrupted=false;input.value='';status.textContent='';permissionBlocked=false;owner='';root.bootstrap.Modal.getInstance(modal)?.hide();}
             if(!c.allowed){epoch++;interruptRead();permissionBlocked=true;proceed.disabled=true;status.textContent='현재 권한으로는 업로드할 수 없습니다.';}
             else if(permissionBlocked){permissionBlocked=false;proceed.disabled=!kind||forwarding;status.textContent=kind?labels[kind]+' 양식입니다. 검토하기를 눌러 내용과 중복 여부를 확인해 주세요.':interrupted?retryMessage:'';}
             input.disabled=!c.allowed||forwarding;
@@ -159,11 +193,12 @@
         }
         function open() {
             if(forwarding)return false;
+            cancelCloseReturn();
             build();syncContext();const c=context();if(!c.owner||!c.allowed)return false;
             owner=c.owner;opener=document.activeElement;renderDrafts();renderRetry();input.disabled=false;proceed.disabled=!kind;root.bootstrap.Modal.getOrCreateInstance(modal).show();
             if(file&&!kind){const go=()=>void read();if(visible())go();else modal.addEventListener('shown.bs.modal',go,{once:true});}return true;
         }
         return Object.freeze({open,syncContext});
     }
-    root.MemberExcelEntry=Object.freeze({version:'1.0.3',create,classify});
+    root.MemberExcelEntry=Object.freeze({version:'1.0.4',create,classify});
 })(window);
