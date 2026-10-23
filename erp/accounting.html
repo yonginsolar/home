@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.179 | Change: 2026-10-23 - Scoped accounting reads and retained review drafts. -->
+<!-- Version: v1.0.180 | Change: 2026-10-24 - Protect retained closing drafts and expire old discard confirmations. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -9,7 +9,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.179 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.180 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261022-help-1"></script>
@@ -754,7 +754,7 @@
       <div class="modal-body">
         <div class="mb-2">
           <label class="small text-muted">결산 연도</label>
-          <input type="number" class="form-control" id="closingYearInput" min="1900" max="2100">
+          <input data-erp-query-control type="number" class="form-control" id="closingYearInput" min="1900" max="2100">
         </div>
         <div class="small text-muted mb-2" id="closingReadonlyInfo"></div>
         <p class="small text-muted" id="closingReadStatus" role="status"></p>
@@ -1221,11 +1221,13 @@ let approvalUnclassifiedIndex = new Map();
 // Read state is screen memory only. Never use it in place of server authority.
 const accountingReadTasks = new Map();
 const accountingReviewOwners = new Map();
+const accountingReviewRevisions = new Map();
 let assetReadPhase = 'idle', approvalQueuePhase = 'idle';
 let accountingMasterLoaded = false, accountingMasterPhase = 'idle', accountingMasterOwner = '';
 let closingPreparedScope = null, closingFormBaseline = null, closingBaselineYear = null, closingFormOwner = '';
 const closingYearDrafts = new Map();
 let closingActiveYear = null, closingActionRevision = 0;
+let closingPendingDraft = null;
 const approvalReclassBusy = new Set();
 const assetReviewBusy = new Set();
 let approvalSplitReclassState = null;
@@ -1288,6 +1290,14 @@ const SALARY_INSURANCE_EXPENSE_ACCOUNT_ALIASES = [SALARY_INSURANCE_EXPENSE_ACCOU
 function accountingReadIdentity() {
     return myInfo?.coop_id ? JSON.stringify([myInfo.auth_user_id || myInfo.emp_id || myInfo.id || '', myInfo.coop_id]) : '';
 }
+function invalidateAccountingDiscard(kind) {
+    accountingReviewRevisions.set(kind,(accountingReviewRevisions.get(kind)||0)+1);
+}
+function hasUnsavedClosingDraft() {
+    if(!closingFormOwner || closingFormOwner!==accountingReadIdentity())return false;
+    rememberClosingDraft();
+    return closingYearDrafts.size>0;
+}
 function accountingReadScope(pane, options = {}) {
     return {owner:myInfo,identity:accountingReadIdentity(),pane:document.getElementById(pane || ''),allowHidden:options.allowHidden===true,
         modal:options.modal ? document.getElementById(options.modal) : null,valid:options.valid};
@@ -1343,9 +1353,13 @@ function markAccountingRetainedRow(row,stale,replacement,phase) {
     const note=document.createElement('div');note.dataset.accountingRetained='';note.className='small text-warning-emphasis mt-2';
     note.append(document.createTextNode('등록된 자료가 달라져 작성 내용만 보관 중입니다. '));
     const discard=document.createElement('button');discard.type='button';discard.className='btn btn-sm btn-outline-secondary';discard.textContent='초안 버리기';
-    discard.onclick=()=>{const owner=accountingReadIdentity(),snapshot=accountingEditSnapshot(row);
+    const source=row.dataset.accountingSource;
+    const current=()=>row.isConnected&&note.isConnected
+        &&row.querySelector('[data-accounting-retained]')===note&&row.dataset.accountingSource===source&&row.dataset.accountingStale==='1';
+    discard.onclick=()=>{if(!current()||accountingReadTasks.has(phase))return;
+        const owner=accountingReadIdentity(),snapshot=accountingEditSnapshot(row),revision=accountingReviewRevisions.get(phase)||0;
         showConfirm('초안 버리기','이 초안을 버릴까요?',()=>{
-            if(owner!==accountingReadIdentity()||!accountingReadScopeCurrent(accountingReadScope(phase==='asset'?'tabAssets':'tabSync'))||!row.isConnected||snapshot!==accountingEditSnapshot(row)||accountingReadTasks.has(phase))return;
+            if(owner!==accountingReadIdentity()||!accountingReadScopeCurrent(accountingReadScope(phase==='asset'?'tabAssets':'tabSync'))||revision!==(accountingReviewRevisions.get(phase)||0)||!current()||snapshot!==accountingEditSnapshot(row)||accountingReadTasks.has(phase))return;
             replacement ? row.replaceWith(replacement) : row.remove();syncAccountingReviewControls();
         });};
     note.append(discard);row.append(note);
@@ -1374,12 +1388,13 @@ function acceptAccountingEditRow(kind,key,snapshot) {
 }
 function bindAccountingReadLifecycle() {
     const cancelStale=()=>{for(const [kind,read] of accountingReadTasks)if(!read.current())cancelAccountingRead(kind);};
-    for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('accTab').addEventListener(name,()=>{closingActionRevision++;cancelStale();});
+    const expireDiscards=()=>{invalidateAccountingDiscard('asset');invalidateAccountingDiscard('queue');};
+    for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('accTab').addEventListener(name,()=>{closingActionRevision++;if(name==='hidden.bs.tab')expireDiscards();cancelStale();});
     document.getElementById('closingModal').addEventListener('hidden.bs.modal',()=>{rememberClosingDraft();closingPreparedScope=null;cancelAccountingRead('closing');});
-    if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden)closingActionRevision++;cancelStale();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
-    window.addEventListener('pagehide',()=>{for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
+    if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden){closingActionRevision++;expireDiscards();}cancelStale();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+    window.addEventListener('pagehide',()=>{expireDiscards();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('beforeunload',event=>{
-        if([...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
+        if(hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
     });
 }
 
@@ -2981,6 +2996,7 @@ function loadApprovalUnclassifiedQueue(options = {}) {
         approvalQueuePhase='loaded';status.textContent='';syncAccountingReviewControls();
     },message=>{approvalQueuePhase='error';status.textContent=message;syncAccountingReviewControls();},{...options,
         start:()=>{
+            invalidateAccountingDiscard('queue');
             if(accountingReviewOwners.get('queue')&&accountingReviewOwners.get('queue')!==scope.identity){listEl.replaceChildren();approvalUnclassifiedIndex=new Map();}
             accountingReviewOwners.set('queue',scope.identity);approvalQueuePhase='loading';
             status.textContent='계정과목 확인 목록을 불러오는 중입니다.';retry.setAttribute('aria-busy','true');syncAccountingReviewControls();
@@ -5872,7 +5888,7 @@ function loadAssetOverview(options = {}) {
         if(!data||typeof data!=='object')throw Error('INVALID_ASSET_RESULT');return data;
     },data=>{renderAssetOverview(data);assetOverviewPayload=data;assetReadPhase='loaded';status.textContent=`${data.as_of || '오늘'} 기준 · 재고는 연말 결산 전까지 장부 자산과 별도로 표시합니다.`;syncAccountingReviewControls();
     },message=>{assetReadPhase='error';status.textContent=message;syncAccountingReviewControls();},{...options,
-        start:()=>{if(accountingReviewOwners.get('asset')&&accountingReviewOwners.get('asset')!==scope.identity)document.getElementById('assetPurchaseReviewRows').replaceChildren();accountingReviewOwners.set('asset',scope.identity);assetOverviewLoading=true;assetReadPhase='loading';status.textContent='자산과 재고를 불러오는 중입니다.';syncAccountingReviewControls();},
+        start:()=>{invalidateAccountingDiscard('asset');if(accountingReviewOwners.get('asset')&&accountingReviewOwners.get('asset')!==scope.identity)document.getElementById('assetPurchaseReviewRows').replaceChildren();accountingReviewOwners.set('asset',scope.identity);assetOverviewLoading=true;assetReadPhase='loading';status.textContent='자산과 재고를 불러오는 중입니다.';syncAccountingReviewControls();},
         finish:()=>{assetOverviewLoading=false;syncAccountingReviewControls();},cancel:()=>{assetOverviewLoading=false;assetReadPhase='idle';status.textContent='새로고침을 눌러 자산과 재고를 확인해 주세요.';syncAccountingReviewControls();}
     });
 }
@@ -7987,7 +8003,7 @@ async function openClosingModal() {
     if(!accountingReadScopeCurrent(accountingReadScope(null))||!canPerform('accounting.edit'))return showAlert('결산 권한을 확인해 주세요.');
     closingActionRevision++;
     if(closingFormOwner!==accountingReadIdentity()){
-    closingFormOwner=accountingReadIdentity();closingYearDrafts.clear();closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;
+    closingFormOwner=accountingReadIdentity();closingYearDrafts.clear();closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;closingPendingDraft=null;
     const defaultYear = new Date().getFullYear() - 1;
     document.getElementById("closingYearInput").value = defaultYear;
     document.getElementById("closingLegalInput").type = "text";
@@ -8282,8 +8298,11 @@ function closingInputSnapshot() {
     return Object.fromEntries(['closingLegalInput','closingVoluntaryInput','closingTaxExpenseInput','closingTaxCreditInput','closingPrepaidNationalTaxInput','closingPrepaidLocalTaxInput'].map(id=>[id,String(ERPNumberInput.raw(document.getElementById(id).value))]));
 }
 function rememberClosingDraft() {
-    if(closingFormOwner!==accountingReadIdentity()||!closingActiveYear||closingBaselineYear!==closingActiveYear||!closingFormBaseline)return;
-    const values=closingInputSnapshot(),changes=Object.fromEntries(Object.entries(values).filter(([id,value])=>value!==closingFormBaseline[id]));
+    if(closingFormOwner!==accountingReadIdentity()||!closingActiveYear)return;
+    const pending=closingPendingDraft?.identity===closingFormOwner&&closingPendingDraft.year===closingActiveYear?closingPendingDraft:null;
+    const baseline=closingBaselineYear===closingActiveYear?closingFormBaseline:pending?.before;
+    if(!baseline)return;
+    const values=closingInputSnapshot(),changes={...(closingBaselineYear===closingActiveYear?{}:pending?.saved||{}),...Object.fromEntries(Object.entries(values).filter(([id,value])=>value!==baseline[id]))};
     if(Object.keys(changes).length)closingYearDrafts.set(closingActiveYear,changes);else closingYearDrafts.delete(closingActiveYear);
 }
 function refreshClosingContext() {
@@ -8292,7 +8311,7 @@ function refreshClosingContext() {
     const pane=document.querySelector('.tab-content.no-print>.tab-pane.active')?.id;
     const scope=accountingReadScope(pane,{modal:'closingModal',valid:()=>Number(document.getElementById('closingYearInput').value)===yearVal});
     if(!accountingReadScopeCurrent(scope))return Promise.resolve(false);
-    if(closingFormOwner!==scope.identity){closingFormOwner=scope.identity;closingYearDrafts.clear();closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;}
+    if(closingFormOwner!==scope.identity){closingFormOwner=scope.identity;closingYearDrafts.clear();closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;closingPendingDraft=null;}
     rememberClosingDraft();const before=closingInputSnapshot(),saved={...(closingYearDrafts.get(yearVal)||{})};closingActiveYear=yearVal;
     const status=document.getElementById('closingReadStatus'),button=document.getElementById('btnClosingRun'),calc=document.getElementById('btnClosingCalc');
     return runAccountingRead('closing',String(yearVal),scope,read=>buildClosingContext(yearVal,{signal:read.controller.signal}),ctx=>{
@@ -8313,9 +8332,9 @@ function refreshClosingContext() {
     }
     status.textContent='';rememberClosingDraft();
     },message=>{closingPreparedScope=null;button.disabled=true;status.textContent=message.replace('다시 확인','재계산');},{
-        start:()=>{closingPreparedScope=null;button.disabled=true;status.textContent=yearVal+'년 결산 자료를 불러오는 중입니다.';calc.setAttribute('aria-busy','true');},
-        finish:()=>{calc.setAttribute('aria-busy','false');button.disabled=!closingPreparedScope||!accountingReadScopeCurrent(closingPreparedScope)||!!closingContext?.isClosed||!canPerform('accounting.edit');},
-        cancel:()=>{closingPreparedScope=null;button.disabled=true;calc.setAttribute('aria-busy','false');status.textContent='재계산을 눌러 결산 자료를 확인해 주세요.';}
+        start:()=>{closingPendingDraft={identity:scope.identity,year:yearVal,before,saved};closingPreparedScope=null;button.disabled=true;status.textContent=yearVal+'년 결산 자료를 불러오는 중입니다.';calc.setAttribute('aria-busy','true');},
+        finish:()=>{rememberClosingDraft();closingPendingDraft=null;calc.setAttribute('aria-busy','false');button.disabled=!closingPreparedScope||!accountingReadScopeCurrent(closingPreparedScope)||!!closingContext?.isClosed||!canPerform('accounting.edit');},
+        cancel:()=>{rememberClosingDraft();closingPendingDraft=null;closingPreparedScope=null;button.disabled=true;calc.setAttribute('aria-busy','false');status.textContent='재계산을 눌러 결산 자료를 확인해 주세요.';}
     });
 }
 
