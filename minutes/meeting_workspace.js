@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.11
-Change: 2026-10-23 - Scope new-meeting keyboard navigation and preserve drafts on Escape.
+Version: v1.10.12
+Change: 2026-10-23 - Keep discard confirmation keyboard focus and resume the first input.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
@@ -135,11 +135,36 @@ function clearNewPackageDrafts() {
 async function discardNewPackageDraft() {
   if (state.loading || !newPackageDraftKey) return;
   const owner = newPackageOwnerKey(), key = newPackageDraftKey, values = newPackageValues(), revision = newPackageDialogRevision;
-  if (!(await window.CoopDialog.confirm('이 초안을 버릴까요?'))) return;
+  let host = window;
+  try {
+    while (host.parent !== host && host.parent.location.origin === host.location.origin && host.parent.CoopDialog) host = host.parent;
+  } catch (_) { /* Use the current permitted dialog host. */ }
+  if (host.CoopDialog?.hasPending?.()) return;
+  const choice = window.CoopDialog.confirm('이 초안을 버릴까요?');
+  const dialog = host.document.querySelector('dialog.coop-dialog[open]');
+  const keepFocus = event => {
+    if (event.key !== 'Tab' || !dialog?.open || event.defaultPrevented || event.isComposing
+      || event.ctrlKey || event.altKey || event.metaKey) return;
+    const controls = [...dialog.querySelectorAll('button,input,a[href],[tabindex]')]
+      .filter(node => !node.disabled && node.tabIndex >= 0 && !node.hidden && node.getClientRects().length);
+    if (!controls.length) return;
+    const index = controls.indexOf(host.document.activeElement);
+    const next = event.shiftKey ? (index <= 0 ? controls.length - 1 : index - 1) : (index + 1) % controls.length;
+    event.preventDefault(); event.stopImmediatePropagation();
+    controls[next].focus();
+  };
+  dialog?.addEventListener('keydown', keepFocus, true);
+  let confirmed;
+  try { confirmed = await choice; }
+  finally { dialog?.removeEventListener('keydown', keepFocus, true); }
+  if (!confirmed) return;
   if (!owner || owner !== newPackageOwnerKey() || key !== newPackageDraftKey || values !== newPackageValues()
     || revision !== newPackageDialogRevision || state.loading || window.frameElement?.hidden || !$('newPackageModal').classList.contains('show')) return;
+  const previousFocus = document.activeElement;
+  const resumeInput = previousFocus === $('discardNewPackage') || previousFocus === document.body || previousFocus === document.documentElement;
   newPackageDrafts.delete(key); fillNewPackageSuggestion(); newPackageDraftBaseline = newPackageValues();
   window.ErpWorkspaceResume?.checkpoint($('newPackageModal')); syncNewPackageDraftUi();
+  if (resumeInput && !host.document.querySelector('dialog[open]')) $('newMeetingType').focus();
 }
 
 function meetingDefaultsStillCurrent(owner) {
