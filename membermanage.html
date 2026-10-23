@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.213
-Change: 2026-10-23 - Keep meeting preview actions reachable on short screens.
+Version: v1.0.214
+Change: 2026-10-23 - Keep incoming account requests current and readable.
 -->
 <html lang="ko">
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-23 - Keep meeting preview actions reachable on short screens.
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.213 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.214 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -794,6 +794,41 @@ outline: 3px solid #99f6e4;
 outline-offset: 3px;
 border-radius: 4px;
 }
+/* Incoming account requests share no styling with other alerts or editors. */
+#connectRequestAlert {
+background: #eaf3ff;
+border-color: #9fc1eb;
+color: #174978;
+}
+#connectRequestAlert .connect-request-heading { color: inherit; }
+#connectRequestAlert .connect-request-row {
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 12px;
+min-width: 0;
+}
+#connectRequestAlert .connect-request-text {
+min-width: 0;
+word-break: keep-all;
+overflow-wrap: anywhere;
+}
+#connectRequestAlert .connect-request-actions {
+display: flex;
+flex-shrink: 0;
+gap: 8px;
+}
+#connectRequestAlert .connect-request-actions .btn { white-space: nowrap; }
+html[data-theme="dark"] #connectRequestAlert {
+background: #14243a;
+border-color: #42658c;
+color: #b8d8ff;
+}
+@media (max-width: 640px) {
+#connectRequestAlert .connect-request-row { flex-direction: column; align-items: stretch; }
+#connectRequestAlert .connect-request-actions { justify-content: flex-end; }
+}
+
 #participationDocumentModal { z-index: 1080; }
 #participationDocumentModal .custom-modal-box {
 width: min(92%, 760px);
@@ -2563,6 +2598,7 @@ let portalProfileEditor = null;
 let portalProfileDraftOwner = '';
 let portalProfileSaving = false;
 let portalProfileLoadRevision = 0;
+let portalIncomingConnectRequest = null;
 let portalProfileValidationRevision = 0;
 let portalProfileReadFailure = null;
 let portalProfileRetryRevision = 0;
@@ -2658,6 +2694,8 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+portalIncomingConnectRequest = null;
+document.getElementById('connectRequestAlert')?.remove();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
 window.PortalChildPreparation?.invalidate();
@@ -10812,29 +10850,36 @@ loadBoard(currentBoardCat); // 목록 갱신
 }
 // [신규] 나에게 온 연결 요청 확인 및 렌더링
 async function checkIncomingConnects() {
-// 1. RPC 호출 (Step 1에서 수정한 함수)
-const { data: requests, error } = await _supabase.rpc('get_my_pending_connects');
-
-// 2. 에러 및 데이터 체크
-if (error) {
-CoopSafeLog.error("연결 요청 조회 실패:", error);
+const container = document.getElementById('dashboardSection');
+const request = {
+actor: String(curAuth?.id || ''), coop: String(currentMemberCoopId || ''),
+member: String(curMem?.id || ''), profileRevision: portalProfileLoadRevision, container
+};
+portalIncomingConnectRequest = request;
+if (!container || !request.actor || !request.coop || !request.member) {
+document.getElementById('connectRequestAlert')?.remove();
 return;
 }
-// requests가 null이거나 빈 배열이면 종료
-if (!requests || requests.length === 0) return;
+const current = () => portalIncomingConnectRequest === request &&
+request.actor === String(curAuth?.id || '') && request.coop === String(currentMemberCoopId || '') &&
+request.member === String(curMem?.id || '') && request.profileRevision === portalProfileLoadRevision &&
+container === document.getElementById('dashboardSection') && container.isConnected && !window.frameElement?.hidden;
+try {
+const { data: requests, error } = await _supabase.rpc('get_my_pending_connects');
+if (!current()) return;
+if (error) throw error;
+if (!Array.isArray(requests)) throw new Error('INCOMING_CONNECT_READ_INVALID');
 
-// 3. 알림 UI 생성
-const container = document.getElementById('dashboardSection');
 const existingAlert = document.getElementById('connectRequestAlert');
 if(existingAlert) existingAlert.remove();
+if (requests.length === 0) return;
 
 const alertDiv = document.createElement('div');
 alertDiv.id = 'connectRequestAlert';
-alertDiv.className = 'alert alert-primary border-primary d-flex flex-column gap-2 mb-4 shadow-sm';
-alertDiv.style.backgroundColor = '#e3f2fd';
+alertDiv.className = 'alert d-flex flex-column gap-2 mb-4 shadow-sm';
 
 const header = document.createElement('div');
-header.className = 'd-flex align-items-center text-primary fw-bold';
+header.className = 'connect-request-heading d-flex align-items-center fw-bold';
 const headerIcon = document.createElement('i');
 headerIcon.className = 'bi bi-link-45deg fs-3 me-2';
 header.appendChild(headerIcon);
@@ -10846,8 +10891,9 @@ requests.forEach(req => {
 const safeAppId = Number(req?.app_id);
 if (!Number.isFinite(safeAppId) || safeAppId <= 0) return;
 const requestRow = document.createElement('div');
-requestRow.className = 'bg-white p-3 rounded border d-flex justify-content-between align-items-center mt-2';
+requestRow.className = 'connect-request-row bg-white p-3 rounded border mt-2';
 const requestText = document.createElement('div');
+requestText.className = 'connect-request-text';
 const requesterNameEl = document.createElement('span');
 requesterNameEl.className = 'fw-bold text-dark';
 requesterNameEl.textContent = String(req?.requester_name || '이름 미상');
@@ -10859,7 +10905,7 @@ requestHelp.className = 'text-muted';
 requestHelp.textContent = '내 계정을 관리하길 원합니다.';
 requestText.appendChild(requestHelp);
 const requestActions = document.createElement('div');
-requestActions.className = 'd-flex gap-2';
+requestActions.className = 'connect-request-actions';
 const rejectBtn = document.createElement('button');
 rejectBtn.type = 'button';
 rejectBtn.className = 'btn btn-sm btn-outline-danger';
@@ -10883,6 +10929,9 @@ if(banner && banner.nextSibling) {
 container.insertBefore(alertDiv, banner.nextSibling);
 } else {
 container.prepend(alertDiv);
+}
+} catch (error) {
+if (current()) CoopSafeLog.error("연결 요청 조회 실패:", error);
 }
 }
 
