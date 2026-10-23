@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.169
-Change: 2026-10-23 - Stable header and demand-loaded public sections.
+Version: v1.0.170
+Change: 2026-10-23 - Open news article sources in a separate tab.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -11,7 +11,7 @@ Change: 2026-10-23 - Stable header and demand-loaded public sections.
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.169 | index.html');</script>
+<script>console.log('[Version] v1.0.170 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -5247,6 +5247,19 @@ function handleExternalNewsCardAction(event, scope, encodedId) {
 }
 window.handleExternalNewsCardAction = handleExternalNewsCardAction;
 
+function prepareActivityArticleLinks(contentEl) {
+    contentEl.querySelectorAll('a[href]').forEach(link => {
+        try {
+            const url = new URL(link.getAttribute('href'), window.location.href);
+            if (!['http:', 'https:'].includes(url.protocol) || url.origin === window.location.origin) return;
+            link.target = '_blank';
+            const rel = new Set(link.rel.split(/\s+/).filter(value => value && value.toLowerCase() !== 'opener'));
+            rel.add('noopener'); rel.add('noreferrer');
+            link.rel = Array.from(rel).join(' ');
+        } catch (_) {}
+    });
+}
+
 async function openActivityDetail(id, triggerEl = null) {
     rememberActivityDetailTrigger(triggerEl);
     let item = null;
@@ -5270,7 +5283,10 @@ async function openActivityDetail(id, triggerEl = null) {
     if (titleEl) titleEl.textContent = item.title || '활동 내역';
     CoopTextStyles.paint(titleEl,item.title || '활동 내역',item.text_styles?.activityTitle);
     if (dateEl) dateEl.textContent = formatKoreanDate(item.event_date || item.updated_at) || '';
-    if (contentEl) contentEl.innerHTML = normalizeActivityContentHtml(item.content);
+    if (contentEl) {
+        contentEl.innerHTML = normalizeActivityContentHtml(item.content);
+        prepareActivityArticleLinks(contentEl);
+    }
 
     const galleryUrls = getActivityGalleryUrls(item);
     if (coverWrapEl) {
