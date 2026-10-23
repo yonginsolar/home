@@ -1,10 +1,11 @@
-/* v1.1.11 - Show a loaded sample in its draft preview without changing registered text. */
+/* v1.1.12 - Bounded, scoped legal reads; preserve drafts across failed retries. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
   const locations={signup_purpose:['조합원 가입 → 설립목적 동의','[필수] 조합의 설립목적에 동의하고 의무를 다하겠습니다.','signup'],signup_privacy:['조합원 가입 → 개인정보 동의','[필수] 개인정보 수집·이용에 동의합니다.','signup'],terms:['홈페이지 하단 → 이용약관','이용약관','terms.html'],privacy:['홈페이지 하단 → 개인정보 처리방침','개인정보 처리방침','privacy.html']};
   const state = new Map();
   let loaded = false, loading = false, context = null, actionInFlight = false, retryButton = null;
+  let readRequest=null,readMessage='',readStatus=null;
   let selectedKind='signup_purpose',previewMode='draft';
   let signupImageOpener=null;
   const contacts = {representative:'이사장 이름',address:'조합 주소',officer_name:'개인정보 보호책임자 성명',officer_title:'직책',officer_phone:'전화번호',officer_email:'이메일'};
@@ -33,6 +34,15 @@
   }
   function dirty(kind) { const s=state.get(kind);return !!s && JSON.stringify(values(kind))!==s.baseline; }
   function permitted() { return hasAdminMemberScopePermission('site_admin') && isAdminMemberRuntimeModuleEnabled('site_admin'); }
+  function readScope(){return {runtime:typeof g_adminMemberRuntime==='undefined'?null:g_adminMemberRuntime,actor:typeof adminCertificateAuthId==='undefined'?'':adminCertificateAuthId,area:window.CoopHomeVisualEditor?.current()};}
+  function sameReadScope(scope){const current=readScope();return permitted()&&current.runtime===scope.runtime&&current.actor===scope.actor&&current.area===scope.area&&!window.frameElement?.hidden;}
+  function readSignature(){return JSON.stringify(Object.keys(labels).map(kind=>values(kind)));}
+  function currentRead(read){return readRequest===read&&sameReadScope(read.scope);}
+  function cancelRead(){
+    const read=readRequest;if(!read)return;
+    readRequest=null;read.controller.abort();window.clearTimeout(read.timer);read.release({cancelled:true});loading=false;
+    readMessage='다시 불러오기를 눌러 문서를 확인해 주세요.';syncEnabled();
+  }
   function confirmAction(message) {
     return new Promise(resolve=>{
       const modal=document.getElementById('customConfirmModal');let accepted=false;
@@ -43,7 +53,8 @@
   function setEnabled(kind, enabled) { for(const b of el(kind,'card').querySelectorAll('button,input,textarea')) b.disabled=!enabled; }
   function syncEnabled() {
     for(const kind of Object.keys(labels))setEnabled(kind,loaded&&!loading&&!actionInFlight&&permitted());
-    if(retryButton)retryButton.disabled=loading||actionInFlight;
+    if(retryButton){retryButton.disabled=loading||actionInFlight||!permitted();retryButton.setAttribute('aria-busy',String(loading));}
+    if(readStatus)readStatus.textContent=readMessage;
     refreshPreview();
   }
   function beginAction() {
@@ -114,7 +125,7 @@
     const effective=previewMode==='published'?doc?.published_effective_date:el(selectedKind,'effective-date')?.value;
     date.textContent=effective?`시행일 ${effective}`:'';
     const article=document.createElement('article');
-    article.textContent=!loaded?'문서를 불러오는 중입니다.':previewMode==='published'?(doc?.is_published?String(doc.published_content||''):'등록된 내용이 없습니다.'):renderText(el(selectedKind,'content')?.value||'',selectedKind);
+    article.textContent=!loaded?(loading?'문서를 불러오는 중입니다.':readMessage||'다시 불러오기를 눌러 문서를 확인해 주세요.'):previewMode==='published'?(doc?.is_published?String(doc.published_content||''):'등록된 내용이 없습니다.'):renderText(el(selectedKind,'content')?.value||'',selectedKind);
     if(editable()){
       article.setAttribute('tabindex','0');article.setAttribute('aria-label','문서 초안 수정');
       article.onclick=()=>{if(!article.isConnected||!editable()||article.hasAttribute('contenteditable'))return;article.textContent=el(kind,'content').value;article.setAttribute('contenteditable','plaintext-only');article.focus();};
@@ -167,19 +178,35 @@
       document.getElementById('site-home-visual-workspace').before(tabs);selectKind(selectedKind);
     }
   }
-  async function fetchDocuments() {
-    if(loading||actionInFlight||!permitted())return;
-    if(loaded) return; // Tab changes must not overwrite an edited draft.
-    loading=true;syncEnabled();
-    try {
-      const [docsResult,ctxResult]=await Promise.all([_supabase.rpc('get_my_site_legal_documents'),_supabase.rpc('get_my_site_legal_context')]);
-      if(docsResult.error||ctxResult.error||!ctxResult.data?.coop_name)throw Error('LEGAL_READ_FAILED');
-      context=ctxResult.data;el('privacy','processor').value=context.coop_name;const data=docsResult.data;
-      for(const kind of Object.keys(labels))setForm(kind,data?.[kind]);loaded=true;
-    } catch(error) {
-      for(const kind of Object.keys(labels))el(kind,'status').textContent='문서를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.';
-      myAlert('가입·약관 문서를 불러오지 못했습니다.','warning');
-    } finally {loading=false;syncEnabled();refreshPreview();}
+  function fetchDocuments(options={}) {
+    if(actionInFlight||!permitted()||window.frameElement?.hidden)return Promise.resolve(false);
+    if(readRequest){if(currentRead(readRequest))return readRequest.promise;cancelRead();}
+    if(loaded&&!options.reload)return Promise.resolve(false); // A task return never overwrites an edited draft.
+    const read={scope:readScope(),signature:readSignature(),controller:new AbortController(),release:null,timer:0,promise:null};
+    readRequest=read;loading=true;
+    readMessage='가입 안내·약관을 불러오는 중입니다.';syncEnabled();
+    const stopped=new Promise((resolve,reject)=>{read.release=resolve;read.timer=window.setTimeout(()=>{read.timedOut=true;read.controller.abort();reject(Error('LEGAL_READ_TIMEOUT'));},15000);});
+    read.promise=(async()=>{
+      try {
+        const result=await Promise.race([Promise.all([
+          _supabase.rpc('get_my_site_legal_documents').abortSignal(read.controller.signal),
+          _supabase.rpc('get_my_site_legal_context').abortSignal(read.controller.signal)
+        ]),stopped]);
+        if(!currentRead(read)||result?.cancelled)return false;
+        if(read.signature!==readSignature()){readMessage='작성 내용이 바뀌어 조회 결과를 반영하지 않았습니다. 다시 불러오기를 눌러 주세요.';return false;}
+        const [docsResult,ctxResult]=result;
+        if(docsResult.error||ctxResult.error||!ctxResult.data?.coop_name)throw Error('LEGAL_READ_FAILED');
+        context=ctxResult.data;el('privacy','processor').value=context.coop_name;const data=docsResult.data;
+        for(const kind of Object.keys(labels))setForm(kind,data?.[kind]);loaded=true;readMessage='';return true;
+      } catch(error) {
+        if(currentRead(read))readMessage=read.timedOut?'조회가 지연되었습니다. 다시 불러오기를 눌러 주세요.':'가입 안내·약관을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.';
+        return false;
+      } finally {
+        read.controller.abort();window.clearTimeout(read.timer);
+        if(readRequest===read){readRequest=null;loading=false;syncEnabled();}
+      }
+    })();
+    return read.promise;
   }
   async function loadSample(kind) {
     if(!beginAction())return;
@@ -236,12 +263,18 @@
   window.addEventListener('beforeunload',event=>{if(actionInFlight||[...state.keys()].some(dirty)){event.preventDefault();event.returnValue='';}});
   function start(){render();const root=document.getElementById('sub-legal');if(!root)return;retryButton=document.createElement('button');retryButton.type='button';retryButton.className='btn btn-sm btn-outline-secondary mb-3';retryButton.textContent='다시 불러오기';retryButton.onclick=async()=>{
     if(loading||actionInFlight||!permitted())return;
+    const scope=readScope(),signature=readSignature();
     actionInFlight=true;syncEnabled();
     let confirmed=false;
     try {confirmed=![...state.keys()].some(dirty)||await confirmAction('저장하지 않은 수정을 버리고 다시 불러올까요?');}
     finally {endAction();}
-    if(!confirmed)return;
-    loaded=false;await fetchDocuments();
-  };root.prepend(retryButton);syncEnabled();}
+    if(!confirmed||!sameReadScope(scope)||readSignature()!==signature)return;
+    await fetchDocuments({reload:true});
+  };readStatus=document.createElement('p');readStatus.id='site-legal-read-status';readStatus.className='small text-muted';readStatus.setAttribute('role','status');readStatus.setAttribute('aria-live','polite');root.prepend(retryButton,readStatus);syncEnabled();
+    const cancelStale=()=>{if(readRequest&&!currentRead(readRequest))cancelRead();};
+    for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('site-content-tabs')?.addEventListener(name,cancelStale);
+    if(window.frameElement)new MutationObserver(cancelStale).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+    window.addEventListener('pagehide',cancelRead);
+  }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
 })();

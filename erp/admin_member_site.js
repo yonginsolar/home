@@ -1,10 +1,11 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261019-preview-scroll-2') return;
+    if (root.AdminMemberSite?.version === '20261023-home-reads-1') return;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
+let activityListRead=null, activityListOwner='';
 let faqModalRead=null, faqReadGuardBound=false;
 let faqListRead=null, faqActiveDraft=null;
 const faqDrafts=new Map(); // Screen memory only; never persist FAQ business data in browser storage.
@@ -2395,30 +2396,73 @@ return false;
 }
 } // End of deleteActivityPhotoIfUnreferenced
 
-async function fetchActivities() {
-const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*'))
-  .eq('category', 'activity')
-  .order('event_date', { ascending: false })
-  .order('updated_at', { ascending: false });
-
-const tbody = document.getElementById('activityListBody');
-if (!tbody) return;
-tbody.innerHTML = '';
-
-if (error) {
-CoopSafeLog.error("[fetchActivities] failed:", error);
-tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-danger">활동 내역을 불러오지 못했습니다.</td></tr>';
-return false;
+function isActivityListReadCurrent(read) {
+return activityListRead===read && siteModalScopeCurrent(read)
+&& document.getElementById('activityListBody')===read.body;
 }
+function setActivityListReadStatus(phase) {
+const status=document.getElementById('activity-list-status'),retry=document.getElementById('activity-list-retry');
+if(status){
+status.textContent=phase==='loading'?'우리 소식을 불러오는 중입니다.':phase==='timeout'?'조회가 지연되었습니다. 다시 확인해 주세요.':phase==='error'?'우리 소식을 불러오지 못했습니다. 다시 확인해 주세요.':'';
+status.classList.toggle('text-danger',phase==='error'||phase==='timeout');
+}
+if(retry){retry.setAttribute('aria-busy',String(phase==='loading'));retry.setAttribute('aria-disabled',String(phase==='loading'));retry.classList.toggle('disabled',phase==='loading');}
+}
+function cancelActivityListRead() {
+const read=activityListRead;if(!read)return;
+activityListRead=null;read.controller.abort();window.clearTimeout(read.timer);read.release({cancelled:true});
+setActivityListReadStatus('');
+}
+function fetchActivities(options={}) {
+const context={owner:siteModalOwner(),runtime:g_adminMemberRuntime,area:root.CoopHomeVisualEditor?.current(),body:document.getElementById('activityListBody')};
+if(!context.body||!siteModalScopeCurrent(context))return Promise.resolve(false);
+if(activityListRead){
+if(!options.refresh&&isActivityListReadCurrent(activityListRead))return activityListRead.promise;
+cancelActivityListRead();
+}
+// A different authenticated owner must not inherit the old list. Draft controls
+// and selected Files are independent and are never rebuilt by a list read.
+if(activityListOwner&&activityListOwner!==context.owner){context.body.replaceChildren();g_siteActivities=[];activityListOwner='';}
+const read={...context,controller:new AbortController(),release:null,timer:0,promise:null};
+activityListRead=read;setActivityListReadStatus('loading');
+const stopped=new Promise((resolve,reject)=>{
+read.release=resolve;
+read.timer=window.setTimeout(()=>{read.timedOut=true;read.controller.abort();reject(Error('ACTIVITY_LIST_TIMEOUT'));},15000);
+});
+read.promise=(async()=>{
+try{
+const result=await Promise.race([scopeAdminTenant(_supabase.from('site_documents').select('*'))
+  .eq('category','activity').order('event_date',{ascending:false}).order('updated_at',{ascending:false}).abortSignal(read.controller.signal),stopped]);
+if(!isActivityListReadCurrent(read)||result?.cancelled)return false;
+if(result.error)throw result.error;
+if(!Array.isArray(result.data))throw Error('ACTIVITY_LIST_INVALID');
+renderActivityListRows(result.data);activityListOwner=read.owner;setActivityListReadStatus('');return true;
+}catch(error){
+if(isActivityListReadCurrent(read)){
+CoopSafeLog.error('[fetchActivities] failed:',error);
+setActivityListReadStatus(read.timedOut?'timeout':'error');
+}
+return false;
+}finally{
+window.clearTimeout(read.timer);
+if(activityListRead===read){activityListRead=null;const retry=document.getElementById('activity-list-retry');if(retry){retry.setAttribute('aria-busy','false');retry.setAttribute('aria-disabled','false');retry.classList.remove('disabled');}}
+}
+})();
+return read.promise;
+}
+function renderActivityListRows(data) {
+const target = document.getElementById('activityListBody');
+if (!target) return;
+// Prepare off-screen first: even a malformed result cannot erase the last list.
+const tbody=document.createElement('tbody'),rows=Array.isArray(data)?data:[];
 
-g_siteActivities = Array.isArray(data) ? data : [];
-
-if (g_siteActivities.length === 0) {
+if (rows.length === 0) {
 tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">등록된 활동 내역이 없습니다.</td></tr>';
+target.replaceChildren(...tbody.childNodes);g_siteActivities=rows;
 return true;
 }
 
-g_siteActivities.forEach((row) => {
+rows.forEach((row) => {
 const parsedActivity = parseActivityContentWithGallery(row.content || '', row.file_url || '');
 const coverUrl = normalizeAdminHttpUrl(parsedActivity.galleryUrls[0] || row.file_url);
 const smallCover=coverUrl?CoopDisplayImages.display(coverUrl,'small'):'';
@@ -2447,6 +2491,7 @@ tbody.innerHTML += `<tr>
 </tr>`;
 });
 tbody.querySelectorAll('[data-activity-view-id]').forEach(button=>button.addEventListener('click',()=>{const row=g_siteActivities.find(row=>String(row.id)===button.dataset.activityViewId);if(!row)return;const parsed=parseActivityContentWithGallery(row.content||'',row.file_url||'');openActivityPhotoPreview({kind:'url',url:parsed.galleryUrls[0]||row.file_url},button);}));
+target.replaceChildren(...tbody.childNodes);g_siteActivities=rows;
 return true;
 }
 
@@ -2774,7 +2819,7 @@ if (!isActivityContextCurrent(context) || hasUnsavedActivityChanges()) break;
 if (!activityGalleryItems.some(item=>item.url === url)) await deleteActivityPhotoIfUnreferenced(url);
 }
 if (!isActivityContextCurrent(context)) return;
-const refreshed = await Promise.all([fetchActivities(), fetchHistory()]);
+const refreshed = await Promise.all([fetchActivities({refresh:true}), fetchHistory()]);
 if (!isActivityContextCurrent(context)) return;
 if (refreshed.some((result) => result === false)) {
 myAlert(hasUnsavedActivityChanges() ? '저장 중 추가한 내용은 아직 저장되지 않았습니다. 목록은 다시 불러와 주세요.' : '저장했습니다. 목록을 다시 불러와 확인해 주세요.', 'warning');
@@ -2820,7 +2865,7 @@ for (const url of parsedActivity.galleryUrls) {
 await deleteActivityPhotoIfUnreferenced(url);
 }
 
-await fetchActivities();
+await fetchActivities({refresh:true});
 myAlert('활동 내역이 삭제되었습니다.');
 } catch (e) {
 CoopSafeLog.error("[askDeleteActivity] failed:", e);
@@ -4069,13 +4114,14 @@ CoopHomeVisualEditor.mount(); // Mount before taking the initial draft snapshot.
 getSiteEditorDraft('home');
 getSiteEditorDraft('about');
 getCertificationDraftStore();
-window.addEventListener('pagehide',() => {cancelActivityModalRead();cancelActivitySourceRead();});
+window.addEventListener('pagehide',() => {cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();});
 for (const eventName of ['hidden.bs.tab','shown.bs.tab']) document.getElementById('site-content-tabs')?.addEventListener(eventName,() => {
+if(activityListRead&&!isActivityListReadCurrent(activityListRead))cancelActivityListRead();
 if (activitySourceRead && root.CoopHomeVisualEditor?.current() !== activitySourceRead.area) cancelActivitySourceRead();
 if (activityModalRead && root.CoopHomeVisualEditor?.current() !== activityModalRead.area) cancelActivityModalRead();
 });
 if (root.frameElement) new MutationObserver(() => {
-if (root.frameElement?.hidden) {cancelActivityModalRead();cancelActivitySourceRead();}
+if (root.frameElement?.hidden) {cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();}
 }).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
 
 window.addEventListener('beforeunload', (event) => {
@@ -4106,5 +4152,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,openNewSiteCertificationDraft});
-    root.AdminMemberSite = Object.freeze({ version: '20261019-preview-scroll-2', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261023-home-reads-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);
