@@ -1,17 +1,17 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.167
-Change: 2026-10-18 - Respect the selected shared or device-specific banner picture.
+Version: v1.0.168
+Change: 2026-10-23 - Stable header and demand-loaded public sections.
 -->
-<html lang="ko">
+<html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.166 | index.html');</script>
+<script>console.log('[Version] v1.0.168 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -93,6 +93,21 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
     body {
       word-break: keep-all;
       overflow-wrap: break-word;
+    }
+    #header > .container { min-height:42px; }
+    #home-auth-controls { display:flex; align-items:center; justify-content:flex-end; position:relative; width:200px; min-height:40px; flex-shrink:0; }
+    #homeAuthStatus { position:absolute; inset:0; margin:auto; border:0; background:transparent; color:#d3d8df; font-size:14px; width:max-content; max-width:100%; }
+    #homeAuthStatus[hidden], #homeNavRetry[hidden] { display:none!important; }
+    html[data-home-auth-state="loading"] #home-auth-controls > a,
+    html[data-home-auth-state="failed"] #home-auth-controls > a { visibility:hidden; pointer-events:none; }
+    html[data-home-nav-state="loading"] #navbar ul,
+    html[data-home-nav-state="failed"] #navbar ul { visibility:hidden; }
+    #homeNavRetry { color:#fff; background:transparent; border:1px solid #7b8491; border-radius:6px; font-size:13px; }
+    #header .logo { min-width:0; }
+    @media(max-width:991px) {
+      #home-auth-controls { width:142px; }
+      #header .logo { max-width:calc(100% - 180px); }
+      #header .logo .site-title a { font-size:14px; line-height:1.3; overflow-wrap:break-word; }
     }
     html[data-public-tenant-pending] #main > section,
     html[data-public-tenant-pending] #navbar li:has(a[href^="#"]),
@@ -1777,6 +1792,7 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
 <script src="shared/home_preview_editor.js?v=20261019-frame-scroll-1" defer></script>
 <script src="shared/hero_banner.js?v=1.5.0" defer></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
+<script src="shared/home_progressive.js?v=20261023-1" integrity="sha384-gTQrG161DKj08vE2TVs7SfnKNQeeDnguDV/f9h/BUEKJVt73dRjTkOsYs67wTr2q" crossorigin="anonymous" defer></script>
 <link rel="stylesheet" href="shared/hero_banner.css?v=1.8.1">
   <link rel="stylesheet" href="shared/home_design.css?v=20261015-2">
 </head>
@@ -1788,7 +1804,7 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
     <div class="site-title"><a href="index.html" id="siteBrandName">용인모두의햇빛협동조합</a></div>
   </div>
 
-  <nav id="navbar" class="navbar">
+  <nav id="navbar" class="navbar" aria-busy="true">
     <ul>
       <li><a class="nav-link scrollto active" href="#hero">홈</a></li>
       <li><a class="nav-link scrollto" href="#about">소개</a></li>
@@ -1802,13 +1818,17 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
       <li><a class="nav-link scrollto" href="#faq">FAQ</a></li>
       <li><a class="nav-link scrollto" href="#contact">문의하기</a></li>
     </ul>
+    <button id="homeNavRetry" type="button" hidden onclick="void bootPublicHome()">메뉴 다시 확인</button>
   </nav>
 
 <div class="d-flex align-items-center">
+    <div id="home-auth-controls">
+        <button id="homeAuthStatus" type="button" disabled onclick="void refreshHomeAuthUi()" aria-live="polite">확인 중…</button>
         <a id="homeAuthLink" href="javascript:void(0);" onclick="handleMainLogin(event)" class="scrollto me-3" style="color: #fff; font-size: 14px; text-decoration: none;">로그인</a>
         <a id="homeSignupLink" href="signup.html" class="get-started-btn scrollto">조합원 가입</a>
+    </div>
 
-    <button type="button" class="mobile-nav-toggle d-lg-none ms-3 border-0 bg-transparent p-1" aria-label="메뉴 열기" aria-expanded="false" aria-controls="navbar" onclick="toggleMobileMenu()"><i class="bi bi-list" aria-hidden="true"></i></button>
+    <button type="button" class="mobile-nav-toggle d-lg-none ms-3 border-0 bg-transparent p-1" disabled aria-label="메뉴 열기" aria-expanded="false" aria-controls="navbar" onclick="toggleMobileMenu()"><i class="bi bi-list" aria-hidden="true"></i></button>
   </div>
 
 </div>
@@ -1918,13 +1938,13 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
             <div class="village-summary-card">
               <i class="bi bi-people-fill simple-impact-icon" aria-hidden="true"></i>
               <span class="village-summary-label">현재 함께하는 조합원</span>
-              <span class="village-summary-value"><span id="stat-total-members">0</span>명</span>
-              <span class="village-summary-meta">개인 <strong id="stat-ind-members">0</strong>명 · 단체 <strong id="stat-grp-members">0</strong>곳</span>
+              <span class="village-summary-value"><span id="stat-total-members">—</span>명</span>
+              <span class="village-summary-meta">개인 <strong id="stat-ind-members">—</strong>명 · 단체 <strong id="stat-grp-members">—</strong>곳</span>
             </div>
             <div class="village-summary-card">
               <i class="bi bi-piggy-bank-fill simple-impact-icon" aria-hidden="true"></i>
               <span class="village-summary-label">현재 총출자금</span>
-              <span class="village-summary-value"><span id="stat-total-amount">0</span>원</span>
+              <span class="village-summary-value"><span id="stat-total-amount">—</span>원</span>
               <span class="village-summary-meta">시민이 직접 만든 에너지 자립 기금</span>
             </div>
             <div class="village-summary-card">
@@ -1973,7 +1993,7 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
         <div class="row no-gutters">
           <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
             <div class="count-box">
-              <i class="bi bi-sun" style="color: #ffc107;"></i> <span id="power-stat-latest-day-kwh">0</span>
+              <i class="bi bi-sun" style="color: #ffc107;"></i> <span id="power-stat-latest-day-kwh">—</span>
               <p><strong id="power-stat-day-label">최근 발전일 발전량</strong> (kWh)</p>
             </div>
           </div>
@@ -1981,7 +2001,7 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
           <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
             <div class="count-box">
               <i class="bi bi-calendar3" style="color: var(--color-primary);"></i>
-              <span id="power-stat-month-kwh">0</span>
+              <span id="power-stat-month-kwh">—</span>
               <p><strong>이번 달 누적</strong> (kWh)</p>
             </div>
           </div>
@@ -1989,7 +2009,7 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
           <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
             <div class="count-box">
               <i class="bi bi-battery-charging" style="color: #2e7d32;"></i>
-              <span id="power-stat-cumulative-kwh">0</span>
+              <span id="power-stat-cumulative-kwh">—</span>
               <p><strong>누적 발전량</strong> (kWh)</p>
             </div>
           </div>
@@ -1997,7 +2017,7 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
           <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
             <div class="count-box">
               <i class="bi bi-building" style="color: #ff5722;"></i>
-              <span id="power-stat-operating-count">0</span>
+              <span id="power-stat-operating-count">—</span>
               <p><strong>운영 발전소 수</strong> (개소)</p>
             </div>
           </div>
@@ -2523,6 +2543,7 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
   }
 
   function toggleMobileMenu() {
+    if (document.documentElement.dataset.homeNavState !== 'ready') return;
     setHomeMenuOpen(!document.getElementById('navbar')?.classList.contains('active'));
   }
 
@@ -3116,6 +3137,7 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
             renderPublicCertifications(window.CoopSitePreview?.get('certifications') || data || []);
         } catch (error) {
             console.warn('fetchPublicCertifications failed:', error);
+            return false;
         }
     }
 
@@ -3576,41 +3598,80 @@ Change: 2026-10-18 - Respect the selected shared or device-specific banner pictu
     };
     window.showConfirm = homeShowConfirm;
 
-    // 페이지 로드 완료 시 실행
-document.addEventListener('DOMContentLoaded', async () => {
-    await hydratePublicBranding();
-    const homeSettingsReady = await hydratePublicHomeSettings();
-    bindHomeAuthState();
-    refreshHomeAuthUi();
-    // 1. 섹션 관리는 먼저 실행 (화면 레이아웃 잡기)
-    const homeSectionsReady = await manageSections();
-    finishPublicTenantBoot(homeSettingsReady, homeSectionsReady);
-    AOS.refresh();
-
-    // 2. 데이터 로드: 병렬 처리 (동시에 출발!)
-    const activityHistoryLoad = fetchActivities().then(fetchHistory);
-    const publicSectionLoadResults = await Promise.allSettled([
-        fetchStats(),
-        fetchPowerGenerationStats(),
-        fetchPlants(),
-        fetchPublicCertifications(),
-        activityHistoryLoad,
-        window.__PUBLIC_SHOW_EXTERNAL_NEWS__ === false ? Promise.resolve() : fetchAllExternalNews(),
-        fetchPartners(),
-        fetchNotices(),
-        fetchFaqs(),
-        fetchAbout()
-    ]);
-    publicSectionLoadResults.forEach(function (result) {
-        if (result.status === 'rejected') {
-            console.warn('Public section load failed:', result.reason);
-        }
-    });
-
-    // 3. 모든 데이터가 다 들어온 뒤 최종 새로고침
-    AOS.refresh();
- printConsoleSignature();
-});
+    let publicHomeBootRequest = null;
+    let publicHomeLoader = null;
+    let publicHomeToolRequest = null;
+    async function ensurePublicHomeLoader() {
+        if (window.CoopHomeProgressive) return;
+        if (!publicHomeToolRequest) publicHomeToolRequest = new Promise((resolve,reject) => {
+            const script = document.createElement('script');
+            script.src = 'shared/home_progressive.js?v=20261023-1';
+            script.integrity = 'sha384-gTQrG161DKj08vE2TVs7SfnKNQeeDnguDV/f9h/BUEKJVt73dRjTkOsYs67wTr2q';
+            script.crossOrigin = 'anonymous';
+            const timer = setTimeout(() => { script.remove(); reject(Error('TOOL_UNAVAILABLE')); },15000);
+            script.onload = () => { clearTimeout(timer); window.CoopHomeProgressive ? resolve() : reject(Error('TOOL_UNAVAILABLE')); };
+            script.onerror = () => { clearTimeout(timer); script.remove(); reject(Error('TOOL_UNAVAILABLE')); };
+            document.head.append(script);
+        }).finally(() => { publicHomeToolRequest = null; });
+        return publicHomeToolRequest;
+    }
+    function preparePublicSectionLoads() {
+        publicHomeLoader?.dispose();
+        const jobs = [
+            {key:'about',targets:['about'],run:fetchAbout},
+            {key:'stats',targets:['impact','calculator'],run:fetchStats},
+            {key:'plants',targets:['progress','portfolio'],boundaryTargets:publicHiddenSectionIds.has('progress')?[]:['progress'],run:fetchPlants},
+            {key:'power',targets:['status'],run:fetchPowerGenerationStats},
+            {key:'certifications',targets:['hero','about'],run:fetchPublicCertifications},
+            {key:'activities',targets:['activities'],run:fetchActivities},
+            {key:'history',targets:['history'],run:fetchHistory},
+            {key:'partners',targets:['partners'],run:fetchPartners},
+            {key:'notices',targets:['documents'],run:fetchNotices},
+            {key:'faq',targets:['faq'],run:fetchFaqs},
+            {key:'external-regional',targets:[],statusTargets:['home-news-panel-regional'],run:()=>fetchExternalNews('regional')},
+            {key:'external-national',targets:[],statusTargets:['home-news-panel-national'],run:()=>fetchExternalNews('national')}
+        ];
+        publicHomeLoader = window.CoopHomeProgressive.create({
+            jobs, eager:isHomePreviewMode,
+            enabled:job => job.key.startsWith('external-')
+                ? window.__PUBLIC_SHOW_EXTERNAL_NEWS__ !== false && !publicHiddenSectionIds.has('activities')
+                : job.targets.some(id => !publicHiddenSectionIds.has(id) && !document.getElementById(id)?.hidden),
+            onSettled:()=>{ window.AOS?.refresh(); }
+        });
+        publicHomeLoader.start();
+        const selected = document.querySelector('.home-news-tab[aria-selected="true"]')?.id;
+        if (selected === 'home-news-tab-regional' || selected === 'home-news-tab-national') void publicHomeLoader.load(`external-${selected.split('-').pop()}`,true);
+    }
+    async function bootPublicHome() {
+        if (publicHomeBootRequest) return publicHomeBootRequest;
+        document.documentElement.dataset.homeNavState = 'loading';
+        document.getElementById('navbar')?.setAttribute('aria-busy','true');
+        const toggle = document.querySelector('.mobile-nav-toggle');
+        if (toggle) toggle.disabled = true;
+        const retry = document.getElementById('homeNavRetry');
+        if (retry) retry.hidden = true;
+        publicHomeBootRequest = (async () => {
+            const [,homeSettingsReady,homeSectionsReady] = await Promise.all([
+                hydratePublicBranding(), hydratePublicHomeSettings(), manageSections()
+            ]);
+            // Both settings and order must be settled before the menu is revealed.
+            if (homeSettingsReady && homeSectionsReady) applyPublicSectionOrder(g_publicSectionsForLayout || []);
+            if (homeSettingsReady && homeSectionsReady) await ensurePublicHomeLoader();
+            finishPublicTenantBoot(homeSettingsReady,homeSectionsReady);
+            if (homeSettingsReady && homeSectionsReady) preparePublicSectionLoads();
+            window.AOS?.refresh();
+        })().catch(() => {
+            finishPublicTenantBoot(false,false);
+        }).finally(() => { publicHomeBootRequest = null; });
+        return publicHomeBootRequest;
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+        // Auth does not wait for branding, public settings, photographs or lists.
+        bindHomeAuthState();
+        void refreshHomeAuthUi();
+        void bootPublicHome();
+        printConsoleSignature();
+    }, {once:true});
 
     // ★ [핵심 추가] 사진까지 다 뜨고 나서 "최종 재측량"
     // (이걸 넣어야 인터넷 느린 곳에서도 정확하게 작동합니다)
@@ -3639,13 +3700,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.syncPublicSectionLinks = syncPublicSectionLinks;
 
     function finishPublicTenantBoot(settingsReady, sectionsReady) {
+        const ready = settingsReady && sectionsReady;
+        document.documentElement.dataset.homeNavState = ready ? 'ready' : 'failed';
+        document.getElementById('navbar')?.setAttribute('aria-busy','false');
+        const toggle = document.querySelector('.mobile-nav-toggle');
+        if (toggle) toggle.disabled = !ready;
+        const retry = document.getElementById('homeNavRetry');
+        if (retry) retry.hidden = Boolean(ready);
         if (!document.documentElement.hasAttribute('data-public-tenant-pending')) return;
         // A failed read must not expose another cooperative's default sections.
         if (!settingsReady || !sectionsReady) {
-            document.querySelectorAll('#main > section').forEach(section => {
-                section.style.display = 'none';
-                publicHiddenSectionIds.add(section.id);
-            });
+            // The pending root rule keeps every section hidden, without overwriting
+            // its configured visibility before an explicit retry.
             return;
         }
         document.documentElement.removeAttribute('data-public-tenant-pending');
@@ -3696,10 +3762,8 @@ async function fetchStats() {
       const impactMode = String(window.__PUBLIC_IMPACT_MODE__ || (window.__PUBLIC_SITE_MEMBER_PROFILE__ === true ? 'total' : 'village'));
       if (impactMode !== 'village') {
         const { data: stats, error: statsError } = await _client.rpc('get_public_stats');
-        const normalizedStats = (!statsError && stats)
-          ? normalizeVillageStats(stats)
-          : { count: 0, ind_count: 0, grp_count: 0, amount: 0 };
-        if (statsError) console.warn('get_public_stats failed:', statsError);
+        if (statsError || !stats) return false;
+        const normalizedStats = normalizeVillageStats(stats);
         updateCounter('stat-total-members', normalizedStats.count);
         updateCounter('stat-total-amount', normalizedStats.amount);
         updateCounter('stat-ind-members', normalizedStats.ind_count);
@@ -3715,7 +3779,7 @@ async function fetchStats() {
           const { data: regionPayload, error: regionError } = await _client.rpc('get_public_impact_region_stats');
           if (regionError) {
             console.warn('get_public_impact_region_stats failed:', regionError);
-            renderImpactRegionCards((window.__PUBLIC_IMPACT_REGIONS__ || []).map((label) => ({ label, count: 0 })));
+            return false;
           } else {
             renderImpactRegionCards(regionPayload?.regions || []);
           }
@@ -3741,8 +3805,7 @@ async function fetchStats() {
       const { data: stats, error: statsError } = await _client.rpc('get_public_stats');
       if (statsError || !stats) {
         console.warn('get_public_stats fallback failed:', statsError);
-        hydrateVillageDashboard({ count: 0, ind_count: 0, grp_count: 0, amount: 0 }, null, true);
-        return;
+        return false;
       }
 
       const fallbackMonths = getVillageMonthEntries();
@@ -4317,7 +4380,7 @@ async function fetchPowerGenerationStats() {
       if (error) {
         console.warn('fetchPowerGenerationStats failed:', error);
         renderPublicPowerStats({});
-        return;
+        return false;
       }
       renderPublicPowerStats(data || {});
     }
@@ -4815,7 +4878,7 @@ async function fetchActivities() {
         console.warn('fetchActivities failed:', error);
         g_activity_has_more = false;
         renderActivityCards([]);
-        return;
+        return false;
     }
 
     g_activity_list = data;
@@ -5019,22 +5082,31 @@ async function fetchExternalNews(scope, options = {}) {
     const append = options.append === true;
     const offset = Number.isFinite(Number(options.offset)) ? Math.max(0, Number(options.offset)) : 0;
     g_external_news_loading[safeScope] = true;
-    const { data, error } = await (await scopePublicTenant(_client.from('site_external_news')
+    let data, error;
+    try {
+    ({ data, error } = await (await scopePublicTenant(_client.from('site_external_news')
         .select('id, scope, title, summary, image_url, external_link, source_name, published_at, updated_at')
         .eq('scope', safeScope)
         .eq('is_visible', true)
         .is('removed_at', null)
         .order('published_at', { ascending: false, nullsFirst: false })
         .order('updated_at', { ascending: false })
-        .range(offset, offset + EXTERNAL_NEWS_PAGE_SIZE)));
-    g_external_news_loading[safeScope] = false;
+        .range(offset, offset + EXTERNAL_NEWS_PAGE_SIZE))));
+    } catch (_) {
+        error = {code:'PUBLIC_READ_FAILED'};
+    } finally {
+        g_external_news_loading[safeScope] = false;
+    }
 
     if (error) {
         console.warn(`fetchExternalNews(${safeScope}) failed:`, error);
         if (!append) g_external_news[safeScope] = [];
         g_external_news_has_more[safeScope] = false;
         renderExternalNews(safeScope, []);
-        return;
+        const panel = document.getElementById(`home-news-panel-${safeScope}`);
+        const empty = panel?.querySelector('.external-news-empty');
+        if (empty) empty.textContent = '소식을 불러오지 못했습니다.';
+        return false;
     }
 
     const rows = Array.isArray(data) ? data : [];
@@ -5079,6 +5151,7 @@ function switchHomeNewsTab(scope) {
         }
         if (panelEl) panelEl.hidden = !isActive;
     });
+    if (safeScope !== 'local') void publicHomeLoader?.load(`external-${safeScope}`, true);
 }
 window.switchHomeNewsTab = switchHomeNewsTab;
 
@@ -5294,7 +5367,8 @@ async function fetchNotices() {
 
     const mainList = document.getElementById('recent-notices-list');
 
-    if (error || !notices || notices.length === 0) {
+    if (error) return false;
+    if (!notices || notices.length === 0) {
         if(mainList) mainList.innerHTML = '<li class="text-muted small text-center">등록된 글이 없습니다.</li>';
         return;
     }
@@ -5415,10 +5489,10 @@ function openNoticeDetail(id) {
         }, 'site_power_plants');
         data = response?.data || null;
     } catch (error) {
-        return;
+        return false;
     }
 
-    if(!data) return;
+    if(!data) return false;
 
     // 전역 변수에 저장 (모달에서 쓰기 위함)
     g_plants_list = data;
@@ -5838,7 +5912,8 @@ function openPlantDetail(id) {
         error = fallback.error;
       }
 
-      if (error || !docs || docs.length === 0) {
+      if (error) return false;
+      if (!docs || docs.length === 0) {
         container.innerHTML = '<div class="col-12 text-center text-muted py-3">등록된 연혁이 없습니다.</div>';
         return;
       }
@@ -6013,7 +6088,7 @@ function openPlantDetail(id) {
 // [수정] About 데이터 로드 (점 삭제 + 아이콘 강제 삭제 버전)
     async function fetchAbout() {
         const { data, error } = await (await scopePublicTenant(_client.from('site_about').select('*').limit(1)));
-        if (error) return;
+        if (error) return false;
         const row = window.CoopSitePreview?.get('about') || (Array.isArray(data) ? data[0] : data);
         if (!row) {
             if (g_public_site_context?.coop_name && g_public_site_context.coop_name !== '용인모두의햇빛협동조합') {
@@ -6133,7 +6208,8 @@ function openPlantDetail(id) {
            .eq('member_eligible', true)
            .order('display_order', { ascending: true })));
 
-       if (error || !partners || partners.length === 0) {
+       if (error) return false;
+       if (!partners || partners.length === 0) {
            container.innerHTML = '<div class="col-12 text-center py-5 text-muted">등록된 협력 단체가 없습니다.</div>';
            return;
        }
@@ -6244,7 +6320,8 @@ function openPlantDetail(id) {
            .eq('is_visible', true)
            .order('display_order', { ascending: true })));
 
-       if (error || !faqs || faqs.length === 0) {
+       if (error) return false;
+       if (!faqs || faqs.length === 0) {
            container.innerHTML = '<div class="text-center text-muted py-5">등록된 질문이 없습니다.</div>';
            return;
        }
@@ -6341,23 +6418,68 @@ function openPlantDetail(id) {
             signupLink.href = hasProfile ? memberUrl : 'signup.html';
             signupLink.setAttribute('aria-label', signupLink.textContent);
         }
+        document.documentElement.dataset.homeAuthState = 'ready';
+        const status = document.getElementById('homeAuthStatus');
+        if (status) status.hidden = true;
     }
 
     let homeAuthUiRevision = 0;
-    async function refreshHomeAuthUi() {
-        const revision = ++homeAuthUiRevision;
-        try {
-            const { data: { session } } = await _client.auth.getSession();
-            if (revision !== homeAuthUiRevision) return;
-            setHomeAuthUiState(!!session);
-            if (!session) return;
-            const { data, error } = await _client.rpc('get_my_public_membership_state');
-            if (error) throw error;
-            if (revision === homeAuthUiRevision) setHomeAuthUiState(true, data);
-        } catch (error) {
-            console.warn('refreshHomeAuthUi failed:', error);
-            // A failed membership lookup must not turn authentication into membership.
+    let homeAuthOwner = '';
+    let homeAuthMembership = null;
+    let homeAuthRequest = null;
+    let homeAuthTimer = null;
+    function setHomeAuthPending(failed = false) {
+        document.documentElement.dataset.homeAuthState = failed ? 'failed' : 'loading';
+        const status = document.getElementById('homeAuthStatus');
+        if (status) {
+            status.hidden = false; status.disabled = !failed;
+            status.textContent = failed ? '다시 확인' : '확인 중…';
+            status.setAttribute('aria-label', failed ? '로그인 상태 다시 확인' : '로그인 상태 확인 중');
         }
+    }
+    async function refreshHomeAuthUi() {
+        if (homeAuthRequest?.revision === homeAuthUiRevision) return homeAuthRequest.promise;
+        const revision = ++homeAuthUiRevision;
+        const request = {revision,promise:null};
+        homeAuthRequest = request;
+        request.promise = (async () => {
+            const controller = new AbortController();
+            let timer;
+            const timeout = new Promise((_, reject) => {
+                timer = setTimeout(() => { controller.abort(); reject(Error('READ_TIMEOUT')); },15000);
+            });
+            try {
+                const response = await Promise.race([_client.auth.getSession(),timeout]);
+                if (revision !== homeAuthUiRevision) return;
+                if (response.error) throw response.error;
+                const session = response.data?.session;
+                if (!session) {
+                    homeAuthOwner = ''; homeAuthMembership = null;
+                    setHomeAuthUiState(false); return;
+                }
+                const owner = String(session.user?.id || '');
+                if (!owner) throw Error('AUTH_UNAVAILABLE');
+                if (homeAuthOwner !== owner) { homeAuthOwner = owner; homeAuthMembership = null; }
+                // A repeat Auth event must not turn a known member into a signup visitor.
+                if (homeAuthMembership === null) setHomeAuthPending();
+                const query = _client.rpc('get_my_public_membership_state');
+                const { data, error } = await Promise.race([query.abortSignal ? query.abortSignal(controller.signal) : query,timeout]);
+                if (error) throw error;
+                if (!['none','active','pending','former'].includes(data)) throw Error('MEMBERSHIP_UNAVAILABLE');
+                if (revision !== homeAuthUiRevision || owner !== homeAuthOwner) return;
+                homeAuthMembership = data;
+                setHomeAuthUiState(true, data);
+            } catch (error) {
+                if (revision !== homeAuthUiRevision) return;
+                console.warn('refreshHomeAuthUi failed:', String(error?.code || 'READ_FAILED'));
+                // Only the same owner's already-confirmed presentation may remain.
+                if (homeAuthMembership === null) setHomeAuthPending(true);
+            } finally {
+                clearTimeout(timer);
+                if (homeAuthRequest === request) homeAuthRequest = null;
+            }
+        })();
+        return request.promise;
     }
 
     function bindHomeAuthState() {
@@ -6365,10 +6487,20 @@ function openPlantDetail(id) {
         bindHomeAuthState.bound = true;
         if (!_client?.auth || typeof _client.auth.onAuthStateChange !== 'function') return;
         _client.auth.onAuthStateChange((_event, session) => {
-            ++homeAuthUiRevision;
-            setHomeAuthUiState(!!session);
+            if (!session) {
+                ++homeAuthUiRevision; homeAuthOwner = ''; homeAuthMembership = null;
+                clearTimeout(homeAuthTimer); homeAuthTimer = null;
+                setHomeAuthUiState(false); return;
+            }
+            const owner = String(session.user?.id || '');
+            if (owner !== homeAuthOwner) {
+                ++homeAuthUiRevision; homeAuthOwner = owner; homeAuthMembership = null;
+                setHomeAuthPending();
+            }
             // Defer RPCs until outside Supabase Auth's callback lock.
-            if (session) setTimeout(() => { void refreshHomeAuthUi(); }, 0);
+            if (homeAuthTimer === null) homeAuthTimer = setTimeout(() => {
+                homeAuthTimer = null; void refreshHomeAuthUi();
+            }, 0);
         });
     }
 
@@ -6381,7 +6513,7 @@ async function handleMainLogin(event) {
     try {
         const { data: { session } } = await _client.auth.getSession();
         const memberUrl = getHomeMembermanageUrl();
-        setHomeAuthUiState(!!session);
+        if (!session) setHomeAuthUiState(false);
 
         location.href = memberUrl;
     } catch (error) {
