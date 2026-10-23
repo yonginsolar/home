@@ -1,4 +1,4 @@
-/* Homepage demand loader v1.0.0. Public reads only; no persistence or Auth cache. */
+/* Homepage demand loader v1.0.1. Public reads only; no persistence or Auth cache. */
 (function (host) {
   'use strict';
   function create(options) {
@@ -54,16 +54,27 @@
           continue;
         }
         active++; job.state = 'loading'; status(job, 'loading');
-        Promise.resolve().then(job.run).then(result => {
-          if (stopped) return;
+        const controller = new AbortController();
+        const attempt = { signal: controller.signal, isCurrent: () => allowed(job) && job.attempt === attempt && !controller.signal.aborted };
+        job.attempt = attempt;
+        job.cancel = () => controller.abort();
+        let timer;
+        const expired = new Promise((_, reject) => {
+          controller.signal.addEventListener('abort', () => reject(Error('PUBLIC_READ_CANCELLED')), { once: true });
+          // The connected power monitor has its own bounded shared request.
+          if (job.timeoutMs !== 0) timer = host.setTimeout(() => controller.abort(), 15000);
+        });
+        Promise.race([Promise.resolve().then(() => job.run(attempt)), expired]).then(result => {
+          if (!attempt.isCurrent()) { job.state = 'waiting'; job.resolve?.(false); return; }
           if (result === false) throw Error('PUBLIC_READ_FAILED');
           job.state = 'ready'; status(job, 'ready'); job.resolve?.(true);
           options.onSettled?.(job);
         }).catch(() => {
-          if (stopped) return;
+          if (stopped || job.attempt !== attempt) return;
           job.state = 'failed'; status(job, 'failed'); job.resolve?.(false);
         }).finally(() => {
-          active--; job.promise = null; job.resolve = null;
+          host.clearTimeout(timer);
+          active--; job.promise = null; job.resolve = null; job.cancel = null;
           void pump();
         });
       }
@@ -124,7 +135,7 @@
       stopped = true; observer?.disconnect();
       host.removeEventListener('scroll', scan); host.removeEventListener('resize', scan);
       host.removeEventListener('hashchange', hash); document.removeEventListener('click', click);
-      for (const job of jobs.values()) job.resolve?.(false);
+      for (const job of jobs.values()) { job.resolve?.(false); job.cancel?.(); }
       queue.length = 0;
     }
     return Object.freeze({ start, load, area, scan, dispose });

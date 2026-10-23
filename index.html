@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.170
-Change: 2026-10-23 - Open news article sources in a separate tab.
+Version: v1.0.171
+Change: 2026-10-23 - Recover stalled public reads and preserve news on pagination failure.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -11,7 +11,7 @@ Change: 2026-10-23 - Open news article sources in a separate tab.
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.170 | index.html');</script>
+<script>console.log('[Version] v1.0.171 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1792,7 +1792,7 @@ Change: 2026-10-23 - Open news article sources in a separate tab.
 <script src="shared/home_preview_editor.js?v=20261019-frame-scroll-1" defer></script>
 <script src="shared/hero_banner.js?v=1.5.0" defer></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
-<script src="shared/home_progressive.js?v=20261023-1" integrity="sha384-gTQrG161DKj08vE2TVs7SfnKNQeeDnguDV/f9h/BUEKJVt73dRjTkOsYs67wTr2q" crossorigin="anonymous" defer></script>
+<script src="shared/home_progressive.js?v=20261023-2" integrity="sha384-FR6XaYs0VN0ApRsaE5Srd+rKA4HYoxxkZgkIr8PplD6g2n4xZDWiG8chIm3YaAuN" crossorigin="anonymous" defer></script>
 <link rel="stylesheet" href="shared/hero_banner.css?v=1.8.1">
   <link rel="stylesheet" href="shared/home_design.css?v=20261015-2">
 </head>
@@ -3130,9 +3130,9 @@ Change: 2026-10-23 - Open news article sources in a separate tab.
         }
     }
 
-    async function fetchPublicCertifications() {
+    async function fetchPublicCertifications(attempt) {
         try {
-            const { data, error } = await _client.rpc('get_public_site_certifications');
+            const { data, error } = await readPublicHome(signal => _client.rpc('get_public_site_certifications').abortSignal(signal), attempt);
             if (error) throw error;
             renderPublicCertifications(window.CoopSitePreview?.get('certifications') || data || []);
         } catch (error) {
@@ -3174,6 +3174,33 @@ Change: 2026-10-23 - Open news article sources in a separate tab.
         const coopId = String(await getVisibleSiteCoopId() || '').trim();
         if (!coopId) throw new Error('PUBLIC_COOP_CONTEXT_UNAVAILABLE');
         return query.eq('coop_id', coopId);
+    }
+
+    // Public reads only: bound a stalled request and reject late/cancelled results
+    // before callers update their existing DOM or memory snapshots.
+    async function readPublicHome(makeQuery, attempt) {
+        const controller = new AbortController();
+        const cancel = () => controller.abort();
+        const current = () => !controller.signal.aborted && (!attempt || attempt.isCurrent());
+        let timer;
+        const cancelled = new Promise((_, reject) => {
+            controller.signal.addEventListener('abort', () => reject(Error('PUBLIC_READ_CANCELLED')), {once:true});
+        });
+        attempt?.signal.addEventListener('abort', cancel, {once:true});
+        timer = setTimeout(cancel, 15000);
+        try {
+            if (!current()) throw Error('PUBLIC_READ_CANCELLED');
+            const response = await Promise.race([Promise.resolve().then(() => makeQuery(controller.signal)), cancelled]);
+            if (!current()) throw Error('PUBLIC_READ_CANCELLED');
+            return response;
+        } finally {
+            clearTimeout(timer);
+            attempt?.signal.removeEventListener('abort', cancel);
+        }
+    }
+
+    function readPublicHomeScoped(query, signal) {
+        return scopePublicTenant(query.abortSignal(signal));
     }
 
     function waitForPublicReadRetry(delayMs) {
@@ -3605,8 +3632,8 @@ Change: 2026-10-23 - Open news article sources in a separate tab.
         if (window.CoopHomeProgressive) return;
         if (!publicHomeToolRequest) publicHomeToolRequest = new Promise((resolve,reject) => {
             const script = document.createElement('script');
-            script.src = 'shared/home_progressive.js?v=20261023-1';
-            script.integrity = 'sha384-gTQrG161DKj08vE2TVs7SfnKNQeeDnguDV/f9h/BUEKJVt73dRjTkOsYs67wTr2q';
+            script.src = 'shared/home_progressive.js?v=20261023-2';
+            script.integrity = 'sha384-FR6XaYs0VN0ApRsaE5Srd+rKA4HYoxxkZgkIr8PplD6g2n4xZDWiG8chIm3YaAuN';
             script.crossOrigin = 'anonymous';
             const timer = setTimeout(() => { script.remove(); reject(Error('TOOL_UNAVAILABLE')); },15000);
             script.onload = () => { clearTimeout(timer); window.CoopHomeProgressive ? resolve() : reject(Error('TOOL_UNAVAILABLE')); };
@@ -3620,16 +3647,16 @@ Change: 2026-10-23 - Open news article sources in a separate tab.
         const jobs = [
             {key:'about',targets:['about'],run:fetchAbout},
             {key:'stats',targets:['impact','calculator'],run:fetchStats},
-            {key:'plants',targets:['progress','portfolio'],boundaryTargets:publicHiddenSectionIds.has('progress')?[]:['progress'],run:fetchPlants},
-            {key:'power',targets:['status'],run:fetchPowerGenerationStats},
+            {key:'plants',targets:['progress','portfolio'],boundaryTargets:publicHiddenSectionIds.has('progress')?[]:['progress'],run:fetchPlants,timeoutMs:0},
+            {key:'power',targets:['status'],run:fetchPowerGenerationStats,timeoutMs:0},
             {key:'certifications',targets:['hero','about'],run:fetchPublicCertifications},
             {key:'activities',targets:['activities'],run:fetchActivities},
             {key:'history',targets:['history'],run:fetchHistory},
             {key:'partners',targets:['partners'],run:fetchPartners},
             {key:'notices',targets:['documents'],run:fetchNotices},
             {key:'faq',targets:['faq'],run:fetchFaqs},
-            {key:'external-regional',targets:[],statusTargets:['home-news-panel-regional'],run:()=>fetchExternalNews('regional')},
-            {key:'external-national',targets:[],statusTargets:['home-news-panel-national'],run:()=>fetchExternalNews('national')}
+            {key:'external-regional',targets:[],statusTargets:['home-news-panel-regional'],run:attempt=>fetchExternalNews('regional',{},attempt)},
+            {key:'external-national',targets:[],statusTargets:['home-news-panel-national'],run:attempt=>fetchExternalNews('national',{},attempt)}
         ];
         publicHomeLoader = window.CoopHomeProgressive.create({
             jobs, eager:isHomePreviewMode,
@@ -3758,10 +3785,10 @@ Change: 2026-10-23 - Open news article sources in a separate tab.
     // [1] 통계 데이터
 // [1] 통계 데이터 (수정됨: 공개 함수 RPC 호출)
 // [1] 통계 데이터 (업그레이드 버전)
-async function fetchStats() {
+async function fetchStats(attempt) {
       const impactMode = String(window.__PUBLIC_IMPACT_MODE__ || (window.__PUBLIC_SITE_MEMBER_PROFILE__ === true ? 'total' : 'village'));
       if (impactMode !== 'village') {
-        const { data: stats, error: statsError } = await _client.rpc('get_public_stats');
+        const { data: stats, error: statsError } = await readPublicHome(signal => _client.rpc('get_public_stats').abortSignal(signal), attempt);
         if (statsError || !stats) return false;
         const normalizedStats = normalizeVillageStats(stats);
         updateCounter('stat-total-members', normalizedStats.count);
@@ -3776,7 +3803,7 @@ async function fetchStats() {
             renderImpactRegionCards((window.__PUBLIC_IMPACT_REGIONS__ || []).map((label) => ({ label, count: null })));
             return;
           }
-          const { data: regionPayload, error: regionError } = await _client.rpc('get_public_impact_region_stats');
+          const { data: regionPayload, error: regionError } = await readPublicHome(signal => _client.rpc('get_public_impact_region_stats').abortSignal(signal), attempt);
           if (regionError) {
             console.warn('get_public_impact_region_stats failed:', regionError);
             return false;
@@ -3789,7 +3816,7 @@ async function fetchStats() {
         return;
       }
 
-      const { data: timelinePayload, error: timelineError } = await _client.rpc('get_public_village_timeline');
+      const { data: timelinePayload, error: timelineError } = await readPublicHome(signal => _client.rpc('get_public_village_timeline').abortSignal(signal), attempt);
       const actualMonths = normalizeVillageTimelineMonths(timelinePayload);
 
       if (!timelineError && actualMonths.length > 0) {
@@ -3802,7 +3829,7 @@ async function fetchStats() {
       }
 
       console.warn('get_public_village_timeline failed:', timelineError);
-      const { data: stats, error: statsError } = await _client.rpc('get_public_stats');
+      const { data: stats, error: statsError } = await readPublicHome(signal => _client.rpc('get_public_stats').abortSignal(signal), attempt);
       if (statsError || !stats) {
         console.warn('get_public_stats fallback failed:', statsError);
         return false;
@@ -4373,10 +4400,10 @@ async function getPublicHomeMonitor() {
       return g_public_home_monitor;
     }
 
-async function fetchPowerGenerationStats() {
-      const monitor = await getPublicHomeMonitor();
+async function fetchPowerGenerationStats(attempt) {
+      const monitor = await readPublicHome(() => getPublicHomeMonitor(), attempt);
       if (monitor) { await monitor.refresh(); return; }
-      const { data, error } = await _client.rpc('get_public_power_generation_stats');
+      const { data, error } = await readPublicHome(signal => _client.rpc('get_public_power_generation_stats').abortSignal(signal), attempt);
       if (error) {
         console.warn('fetchPowerGenerationStats failed:', error);
         return false;
@@ -4399,6 +4426,51 @@ const ACTIVITY_PAGE_SIZE = 3;
 const EXTERNAL_NEWS_PAGE_SIZE = 5;
 let g_activity_has_more = true;
 let g_activity_loading_more = false;
+const publicNewsAttempts = new Map();
+
+function beginPublicNewsRead(key, parent) {
+    publicNewsAttempts.get(key)?.cancel();
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    const attempt = {
+        signal: controller.signal, cancel,
+        owns: () => publicNewsAttempts.get(key) === attempt,
+        isCurrent: () => attempt.owns() && !controller.signal.aborted && (!parent || parent.isCurrent()),
+        finish: () => parent?.signal.removeEventListener('abort', cancel)
+    };
+    publicNewsAttempts.set(key, attempt);
+    parent?.signal.addEventListener('abort', cancel, {once:true});
+    return attempt;
+}
+
+function publicNewsReadFailure(key, retry) {
+    const container = document.getElementById(key === 'activities' ? 'activities-container' : `${key}-news-list`);
+    if (!container) return;
+    clearPublicNewsReadFailure(key);
+    const row = document.createElement('div');
+    row.id = `home-news-retry-${key}`;
+    row.className = 'home-read-status py-3';
+    row.setAttribute('role', 'status');
+    const text = document.createElement('span');
+    text.textContent = '다음 소식을 불러오지 못했습니다. ';
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'btn btn-sm btn-outline-secondary';
+    button.textContent = '다시 확인';
+    button.onclick = () => { void retry(); };
+    row.append(text, button); container.after(row);
+}
+
+function clearPublicNewsReadFailure(key) {
+    document.getElementById(`home-news-retry-${key}`)?.remove();
+}
+
+function setPublicNewsReadBusy(key, busy) {
+    const container = document.getElementById(key === 'activities' ? 'activities-container' : `${key}-news-list`);
+    container?.setAttribute('aria-busy', String(busy));
+    container?.querySelectorAll('.activity-load-more-card,.external-news-more-btn').forEach(button => { button.disabled = busy; });
+    const retry = document.querySelector(`#home-news-retry-${key} button`);
+    if (retry) retry.disabled = busy;
+}
 const ACTIVITY_CARD_IMAGE_WIDTH = 640;
 const ACTIVITY_CARD_IMAGE_HEIGHT = 420;
 const ACTIVITY_DETAIL_IMAGE_WIDTH = 1280;
@@ -4849,15 +4921,15 @@ function appendActivityCards(items, startIndex = 0) {
     window.CoopTextStyles?.adapt(container);
 }
 
-async function fetchActivityPage(offset = 0) {
-    const { data, error } = await (await scopePublicTenant(_client.from('site_documents')
+async function fetchActivityPage(offset = 0, attempt) {
+    const { data, error } = await readPublicHome(signal => readPublicHomeScoped(_client.from('site_documents')
         .select('id, title, text_styles, content, event_date, file_url, is_current, access_scope, updated_at')
         .eq('category', 'activity')
         .eq('is_current', true)
         .eq('access_scope', 'PUBLIC')
         .order('event_date', { ascending: false })
         .order('updated_at', { ascending: false })
-        .range(offset, offset + ACTIVITY_PAGE_SIZE)));
+        .range(offset, offset + ACTIVITY_PAGE_SIZE), signal), attempt);
 
     const rows = Array.isArray(data) ? data : [];
     return {
@@ -4867,35 +4939,39 @@ async function fetchActivityPage(offset = 0) {
     };
 }
 
-async function fetchActivities() {
+async function fetchActivities(parent) {
+    const attempt = beginPublicNewsRead('activities', parent);
     g_activity_loading_more = true;
-    g_activity_has_more = true;
-    const { data, hasMore, error } = await fetchActivityPage(0);
-    g_activity_loading_more = false;
-
-    if (error) {
-        console.warn('fetchActivities failed:', error);
-        g_activity_has_more = false;
-        document.getElementById('activities-container')?.replaceChildren();
+    setPublicNewsReadBusy('activities', true);
+    try {
+        const { data, hasMore, error } = await fetchActivityPage(0, attempt);
+        if (!attempt.isCurrent()) return false;
+        if (error) throw Error('PUBLIC_READ_FAILED');
+        g_activity_list = data;
+        g_activity_has_more = hasMore;
+        clearPublicNewsReadFailure('activities');
+        renderActivityCards(g_activity_list);
+    } catch (_) {
         return false;
+    } finally {
+        if (attempt.owns()) {
+            g_activity_loading_more = false;
+            setPublicNewsReadBusy('activities', false);
+        }
+        attempt.finish();
     }
-
-    g_activity_list = data;
-    g_activity_has_more = hasMore;
-    renderActivityCards(g_activity_list);
 }
 
 async function fetchMoreActivities() {
     if (g_activity_loading_more || !g_activity_has_more) return;
+    const attempt = beginPublicNewsRead('activities');
     g_activity_loading_more = true;
-    const { data, hasMore, error } = await fetchActivityPage(g_activity_list.length);
-    g_activity_loading_more = false;
-
-    if (error) {
-        console.warn('fetchMoreActivities failed:', error);
-        return;
-    }
-
+    setPublicNewsReadBusy('activities', true);
+    try {
+    const { data, hasMore, error } = await fetchActivityPage(g_activity_list.length, attempt);
+    if (!attempt.isCurrent()) return false;
+    if (error) throw Error('PUBLIC_READ_FAILED');
+    clearPublicNewsReadFailure('activities');
     g_activity_has_more = hasMore;
     if (data.length === 0) {
         syncActivityLoadMoreCard(document.getElementById('activities-container'));
@@ -4911,6 +4987,16 @@ async function fetchMoreActivities() {
     const startIndex = g_activity_list.length;
     g_activity_list = g_activity_list.concat(nextItems);
     appendActivityCards(nextItems, startIndex);
+    } catch (_) {
+        if (attempt.isCurrent()) publicNewsReadFailure('activities', fetchMoreActivities);
+        return false;
+    } finally {
+        if (attempt.owns()) {
+            g_activity_loading_more = false;
+            setPublicNewsReadBusy('activities', false);
+        }
+        attempt.finish();
+    }
 }
 
 async function resolveActivityDetailItem(id) {
@@ -5075,39 +5161,26 @@ function renderExternalNews(scope, items = []) {
     listEl.innerHTML = `${listHtml}${moreHtml}`;
 }
 
-async function fetchExternalNews(scope, options = {}) {
+async function fetchExternalNews(scope, options = {}, parent) {
     const safeScope = scope === 'national' ? 'national' : 'regional';
-    if (g_external_news_loading[safeScope]) return;
+    if (g_external_news_loading[safeScope]) return false;
     const append = options.append === true;
     const offset = Number.isFinite(Number(options.offset)) ? Math.max(0, Number(options.offset)) : 0;
     g_external_news_loading[safeScope] = true;
-    let data, error;
+    const attempt = beginPublicNewsRead(safeScope, parent);
+    setPublicNewsReadBusy(safeScope, true);
     try {
-    ({ data, error } = await (await scopePublicTenant(_client.from('site_external_news')
+    const { data, error } = await readPublicHome(signal => readPublicHomeScoped(_client.from('site_external_news')
         .select('id, scope, title, summary, image_url, external_link, source_name, published_at, updated_at')
         .eq('scope', safeScope)
         .eq('is_visible', true)
         .is('removed_at', null)
         .order('published_at', { ascending: false, nullsFirst: false })
         .order('updated_at', { ascending: false })
-        .range(offset, offset + EXTERNAL_NEWS_PAGE_SIZE))));
-    } catch (_) {
-        error = {code:'PUBLIC_READ_FAILED'};
-    } finally {
-        g_external_news_loading[safeScope] = false;
-    }
-
-    if (error) {
-        console.warn(`fetchExternalNews(${safeScope}) failed:`, error);
-        if (!append) g_external_news[safeScope] = [];
-        g_external_news_has_more[safeScope] = false;
-        renderExternalNews(safeScope, []);
-        const panel = document.getElementById(`home-news-panel-${safeScope}`);
-        const empty = panel?.querySelector('.external-news-empty');
-        if (empty) empty.textContent = '소식을 불러오지 못했습니다.';
-        return false;
-    }
-
+        .range(offset, offset + EXTERNAL_NEWS_PAGE_SIZE), signal), attempt);
+    if (!attempt.isCurrent()) return false;
+    if (error) throw Error('PUBLIC_READ_FAILED');
+    clearPublicNewsReadFailure(safeScope);
     const rows = Array.isArray(data) ? data : [];
     const nextRows = rows.slice(0, EXTERNAL_NEWS_PAGE_SIZE);
     g_external_news_has_more[safeScope] = rows.length > EXTERNAL_NEWS_PAGE_SIZE;
@@ -5118,6 +5191,16 @@ async function fetchExternalNews(scope, options = {}) {
         g_external_news[safeScope] = nextRows;
     }
     renderExternalNews(safeScope, g_external_news[safeScope]);
+    } catch (_) {
+        if (append && attempt.isCurrent()) publicNewsReadFailure(safeScope, () => fetchMoreExternalNews(safeScope));
+        return false;
+    } finally {
+        if (attempt.owns()) {
+            g_external_news_loading[safeScope] = false;
+            setPublicNewsReadBusy(safeScope, false);
+        }
+        attempt.finish();
+    }
 }
 
 async function fetchMoreExternalNews(scope) {
@@ -5371,14 +5454,14 @@ function closeActivityDetailFallback() {
 window.closeActivityDetailFallback = closeActivityDetailFallback;
 
 // 1. 공지사항 데이터 가져오기 (최초 1회 실행)
-async function fetchNotices() {
+async function fetchNotices(attempt) {
     // 넉넉하게 50개 가져옴
-    const { data: notices, error } = await (await scopePublicTenant(_client.from('coop_notices')
+    const { data: notices, error } = await readPublicHome(signal => readPublicHomeScoped(_client.from('coop_notices')
         .select('*')
         .eq('status', 'published')
         .eq('is_members_only', false)
         .order('created_at', { ascending: false })
-        .limit(50)));
+        .limit(50), signal), attempt);
 
     const mainList = document.getElementById('recent-notices-list');
 
@@ -5492,15 +5575,15 @@ function openNoticeDetail(id) {
     }
 
 	// 1. 발전소 데이터 로드 및 분배
-	async function fetchPlants() {
-    const monitor = await getPublicHomeMonitor();
+	async function fetchPlants(attempt) {
+    const monitor = await readPublicHome(() => getPublicHomeMonitor(), attempt);
     if (monitor) { await monitor.refresh(); return; }
     let data = null;
     try {
         const response = await executePublicReadWithRetry(async function () {
-            return await (await scopePublicTenant(
-                _client.from('site_power_plants').select('*').order('display_order')
-            ));
+            return await readPublicHome(signal => readPublicHomeScoped(
+                _client.from('site_power_plants').select('*').order('display_order'), signal
+            ), attempt);
         }, 'site_power_plants');
         data = response?.data || null;
     } catch (error) {
@@ -5915,14 +5998,14 @@ function openPlantDetail(id) {
     // [3] 연혁
 // [3] 연혁 (수정됨: 심부름꾼 함수 호출 방식)
 // [3] 연혁 (더 보기 기능 적용)
-    async function fetchHistory() {
+    async function fetchHistory(attempt) {
       const container = document.getElementById('history-container');
       if(!container) return;
 
       // 기존 탭과의 배포 호환성을 위해 v2가 없을 때 기존 독립 연혁으로 안전하게 대체한다.
-      let { data: docs, error } = await _client.rpc('get_public_history_v2');
+      let { data: docs, error } = await readPublicHome(signal => _client.rpc('get_public_history_v2').abortSignal(signal), attempt);
       if (error) {
-        const fallback = await _client.rpc('get_public_history');
+        const fallback = await readPublicHome(signal => _client.rpc('get_public_history').abortSignal(signal), attempt);
         docs = fallback.data;
         error = fallback.error;
       }
@@ -6101,8 +6184,8 @@ function openPlantDetail(id) {
 // [수정] About 섹션 데이터 로드 (전체 HTML 허용 모드)
 // [수정] About 섹션 데이터 로드 (샘플 강제 삭제 버전)
 // [수정] About 데이터 로드 (점 삭제 + 아이콘 강제 삭제 버전)
-    async function fetchAbout() {
-        const { data, error } = await (await scopePublicTenant(_client.from('site_about').select('*').limit(1)));
+    async function fetchAbout(attempt) {
+        const { data, error } = await readPublicHome(signal => readPublicHomeScoped(_client.from('site_about').select('*').limit(1), signal), attempt);
         if (error) return false;
         const row = window.CoopSitePreview?.get('about') || (Array.isArray(data) ? data[0] : data);
         if (!row) {
@@ -6203,7 +6286,7 @@ function openPlantDetail(id) {
     // =================================================================
 
 
-    async function fetchPartners() {
+    async function fetchPartners(attempt) {
        const container = document.getElementById('partners-container');
        if(!container) return;
 
@@ -6211,17 +6294,18 @@ function openPlantDetail(id) {
        if (window.__PUBLIC_SHOW_PARTNER_BADGES__ === false) {
            g_badge_def = [];
        } else {
-           const { data: badges } = await (await scopePublicTenant(_client.from('site_badges').select('*')));
+           const { data: badges, error: badgeError } = await readPublicHome(signal => readPublicHomeScoped(_client.from('site_badges').select('*'), signal), attempt);
+           if (badgeError) return false;
            g_badge_def = badges || [];
        }
 
        // 2. 파트너 데이터 로드 (승인된 것만)
-       const { data: partners, error } = await (await scopePublicTenant(_client
+       const { data: partners, error } = await readPublicHome(signal => readPublicHomeScoped(_client
            .from('site_partners')
            .select('*')
            .eq('status', 'active')
            .eq('member_eligible', true)
-           .order('display_order', { ascending: true })));
+           .order('display_order', { ascending: true }), signal), attempt);
 
        if (error) return false;
        if (!partners || partners.length === 0) {
@@ -6324,16 +6408,16 @@ function openPlantDetail(id) {
     // =================================================================
     // [기능] FAQ 데이터 로드 (카드형 아코디언)
     // =================================================================
-    async function fetchFaqs() {
+    async function fetchFaqs(attempt) {
        const container = document.getElementById('faq-list-container');
        if(!container) return;
 
        // 1. DB에서 공개된(is_visible=true) FAQ만 가져오기
-       const { data: faqs, error } = await (await scopePublicTenant(_client
+       const { data: faqs, error } = await readPublicHome(signal => readPublicHomeScoped(_client
            .from('site_faqs')
            .select('*')
            .eq('is_visible', true)
-           .order('display_order', { ascending: true })));
+           .order('display_order', { ascending: true }), signal), attempt);
 
        if (error) return false;
        if (!faqs || faqs.length === 0) {
