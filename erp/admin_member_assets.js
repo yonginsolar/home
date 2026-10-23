@@ -26,6 +26,10 @@
         src: new URL('member_capital_workbook.js?v=20261022-help-1', document.baseURI).href,
         integrity: 'sha384-ZZgZav+MnVxqJZ4sbGGelmxVVJgbM93TiTDT47Kvmy50EKejaV1GFCAck9OSC7Tx'
     });
+    const memberExcelEntry = Object.freeze({
+        src: new URL('member_excel_entry.js?v=1.0.0', document.baseURI).href,
+        integrity: 'sha384-K9+Dzl5/RoxMme0g7mAc8r+yTHxNqOVDM+qn8MHYNFPxUcUf3Ez+Pt/FaQZOKQdO'
+    });
     const siteAssets = Object.freeze([
         Object.freeze({src: new URL('home_settings_conflict.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-2dLr0r0obVLbc9+OB2t4zQ/93bWr/XN6tUV8fMHwIggYDmjZ6ezKQX91b3CHjNz6', ready: () => root.CoopHomeConflict?.version === '1.0.0'}),
         Object.freeze({src: new URL('site_editor_drafts.js?v=1.1.0', document.baseURI).href, integrity: 'sha384-avf0MN4qCGjirM7RyH6TywwTUqp333nFCV4SsJFyRtaeRmmQKwtJzU7csLBKgFJ+', ready: () => typeof root.SiteEditorDrafts?.create === 'function'}),
@@ -79,6 +83,10 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261019-controls-1', docum
         await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.0.3');
         return root.MemberCapitalWorkbook;
     }
+    async function ensureMemberExcelEntry() {
+        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.0.0');
+        return root.MemberExcelEntry;
+    }
     function ensurePdf() {
         return ensureAsset('PDF', pdf, () => root.jspdf?.jsPDF?.version === '2.5.1');
     }
@@ -117,5 +125,5 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261019-controls-1', docum
             card.appendChild(retry);
         }
     }
-    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensureCapitalImport, ensureMemberWorkbook, ensurePdf, ensureDashboard, ensureSite, showBootFailure });
+    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensureCapitalImport, ensureMemberWorkbook, ensureMemberExcelEntry, ensurePdf, ensureDashboard, ensureSite, showBootFailure });
 })(window);

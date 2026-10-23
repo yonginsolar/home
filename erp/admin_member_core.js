@@ -717,6 +717,7 @@ const ADMIN_MEMBER_MODAL_Z_INDEX = {
     excelModal: 1055,
     capitalImportModal: 1055,
     memberWorkbookModal: 1055,
+    memberExcelEntryModal: 1055,
     memberCreateModal: 1055,
     memberCertificateSettingsModal: 1055,
     memberCapitalSettingsModal: 1065,
@@ -6177,6 +6178,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['member-capital-settings-button', memberAdminEnabled],
 ['capital-import-button', memberAdminEnabled],
 ['member-workbook-button', memberAdminEnabled],
+['member-excel-upload-button', memberAdminEnabled],
 ['nav-org-settings', memberAdminEnabled && (isSiteMemberProfile || canOpenFullCoopSettings())],
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
@@ -6197,6 +6199,7 @@ el.classList.toggle('hidden', !enabled);
 });
 capitalImportController?.syncContext();
 window.memberWorkbookController?.syncContext();
+memberExcelEntryController?.syncContext();
 [
 ['site-external-news-nav-item', !isSiteMemberProfile],
 ['site-legal-nav-item', siteAdminEnabled],
@@ -6664,6 +6667,59 @@ let capitalImportController = null;
 let capitalImportOpening = false;
 window.memberWorkbookController = null;
 let memberWorkbookOpening = false;
+let memberExcelEntryController = null, memberExcelEntryOpening = false;
+function memberExcelDraftKinds() {
+    if (!capitalImportContext().allowed) return [];
+    capitalImportController?.syncContext();
+    window.memberWorkbookController?.syncContext();
+    const kinds=[];
+    if (hasMemberImportDraft()) kinds.push('members');
+    if (document.getElementById('capitalImportFile')?.files?.length) kinds.push('capital');
+    if (window.memberWorkbookController?.hasDraft()) kinds.push('workbook');
+    return kinds;
+}
+async function openMemberExcelUpload() {
+    const before=capitalImportContext();if(!before.allowed||memberExcelEntryOpening)return;
+    memberExcelEntryOpening=true;
+    try {
+        const feature=await window.AdminMemberAssets.ensureMemberExcelEntry();
+        if(!capitalImportContext().allowed||before.owner!==capitalImportContext().owner||window.frameElement?.hidden)return;
+        if(!memberExcelEntryController)memberExcelEntryController=feature.create({
+            getContext:capitalImportContext,ensureSpreadsheet:()=>window.AdminMemberAssets.ensureSpreadsheet(),getDrafts:memberExcelDraftKinds,
+            openReview:async(kind,transfer,current)=>{
+                const ids={members:'member-import-file',capital:'capitalImportFile',workbook:'memberWorkbookFile'};
+                const existing=document.getElementById(ids[kind]);
+                if(!current()||!capitalImportContext().allowed||(transfer&&existing?.files?.length&&existing.disabled))return false;
+                document.getElementById('member-excel-upload-button')?.focus({preventScroll:true});
+                if(kind==='members')openMemberImportModal();
+                else if(kind==='capital')await openCapitalImportModal();
+                else if(kind==='workbook')await openMemberWorkbookModal();
+                else return false;
+                const input=document.getElementById(ids[kind]);
+                const modal=input?.closest('.modal');
+                if(modal&&!modal.classList.contains('show'))await new Promise(resolve=>{
+                    const done=()=>{clearTimeout(timer);modal.removeEventListener('shown.bs.modal',done);resolve();};
+                    const timer=setTimeout(done,3000);modal.addEventListener('shown.bs.modal',done,{once:true});
+                });
+                if(!current()||!capitalImportContext().allowed||!input?.closest('.modal.show'))return false;
+                if(transfer){if(input.disabled)return false;input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));}
+                return true;
+            },
+            downloadTemplate:async(current)=>{
+                const tools=await window.AdminMemberAssets.ensureMemberWorkbook();await window.AdminMemberAssets.ensureSpreadsheet();
+                if(!current())return;
+                const wb=XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([tools.memberHeaders]),'조합원');
+                XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([tools.paymentHeaders]),'출자금 납입내역');
+                XLSX.writeFile(wb,'회원_출자금_통합양식.xlsx');
+            }
+        });
+        memberExcelEntryController.open();
+    } catch (_) {
+        if(before.owner===capitalImportContext().owner&&capitalImportContext().allowed&&!window.frameElement?.hidden)
+            myAlert('엑셀 업로드 도구를 불러오지 못했어요. 다시 열어 주세요.','error');
+    } finally {memberExcelEntryOpening=false;}
+}
 async function openMemberWorkbookModal() {
     const before = capitalImportContext();
     if (!before.allowed || memberWorkbookOpening) return;
@@ -6914,7 +6970,7 @@ function renderNoMembersState() {
         <div class="mb-2">등록된 조합원이 없습니다.</div>
         <div class="d-flex gap-2 justify-content-center">
           <button class="btn btn-sm btn-primary" onclick="openCreateMemberModal()">첫 조합원 등록</button>
-          <button class="btn btn-sm btn-outline-primary" onclick="openMemberImportModal()">엑셀 등록</button>
+          <button class="btn btn-sm btn-outline-primary" onclick="openMemberExcelUpload()">엑셀 업로드</button>
         </div>
       </td>
     </tr>
@@ -7414,6 +7470,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 function clearMemberDetailEdits() {
     capitalImportController?.syncContext();
     window.memberWorkbookController?.syncContext();
+    memberExcelEntryController?.syncContext();
     invalidateMemberRelationSearches();
     invalidateDonationListRead();
     invalidateUsageLedgerRead();

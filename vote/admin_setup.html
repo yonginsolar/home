@@ -341,14 +341,15 @@ Change: 2026-10-21 - Published result view and unique-person turnout.
                         <div class="panel">
                             <div class="panel-header">
                                 <span id="target-dist-name" style="font-weight:bold; color:var(--color-primary);">선거구 명부</span>
-                                <span id="voter-count" style="font-size:0.8rem; background:var(--color-primary); color:white; padding:2px 8px; border-radius:10px;">0명</span>
+                                <span id="voter-count" style="font-size:0.8rem; background:var(--color-primary); color:white; padding:2px 8px; border-radius:10px;">—</span>
                             </div>
                             <div style="padding:10px 10px 0 10px;">
                                 <input type="text" id="search-voter" placeholder="등록된 명부 내 검색..." class="search-box" onkeyup="filterVoters()">
                             </div>
+                            <div class="px-3 pt-2"><span id="voter-list-status" role="status" aria-live="polite"></span> <button id="voter-list-retry" type="button" class="btn-control" onclick="loadDistrictVoters()" hidden>다시 확인</button></div>
                             <div id="target-list" class="panel-body"></div>
                             <div style="padding:10px; border-top:1px solid #eee;">
-                                <button onclick="removeSelectedVoters()" style="width:100%; padding:10px; background:#fee2e2; color:#dc2626; border:1px solid #fca5a5; border-radius:4px; font-weight:bold;">
+                                <button id="btn-remove-selected" onclick="removeSelectedVoters()" style="width:100%; padding:10px; background:#fee2e2; color:#dc2626; border:1px solid #fca5a5; border-radius:4px; font-weight:bold;">
                                     < 선택 인원 제외 (삭제)
                                 </button>
                             </div>
@@ -480,6 +481,8 @@ function escapeJsString(value) {
     let districtsCache = [];  // 선거구 정보 캐시 (중복 체크용)
     let selectedMemberIds = new Set(); // 왼쪽 패널 선택
     let selectedVoterIds = new Set();  // 오른쪽 패널 선택
+    let voterReadVersion = 0, voterReadAbort = null, voterReadPhase = 'idle', voterReadyKey = '';
+    const voterSelections = new Map();
     let createElectionInFlight = false;
     let currentCoopId = null;
     /* election-term:start */
@@ -877,6 +880,8 @@ function escapeJsString(value) {
 
     // [수정] 유권자 등록 (Alert -> ShowAlert, Confirm -> ShowConfirm 교체)
     window.addSelectedVoters = async () => {
+        const voterVersion = voterReadVersion, voterKey = voterReadyKey;
+        if (!districtVotersCurrent(voterVersion, voterKey)) return window.showAlert('선거구 명부를 다시 확인해 주세요.');
         const distId = document.getElementById('target-district-select').value;
         if(!distId) return window.showAlert('선거구를 선택하세요.');
         if(selectedMemberIds.size === 0) return window.showAlert('조합원을 선택하세요.');
@@ -891,6 +896,7 @@ function escapeJsString(value) {
 
         // 로직 실행 함수 (중복 처리 후 실행됨)
         const executeInsert = async (finalTargets) => {
+            if (!districtVotersCurrent(voterVersion, voterKey)) return window.showAlert('선거구 명부를 다시 확인해 주세요.');
             const payload = finalTargets.map(m => withElectionVoterSnapshot({
                 election_id: newElectionId,
                 district_id: distId,
@@ -926,6 +932,7 @@ function escapeJsString(value) {
                     window.showConfirm(
                         `⚠️ ${collisions.length}명이 다른 지역구에 이미 등록되어 있습니다.\n이동하시겠습니까?`,
                         async () => {
+                            if (!districtVotersCurrent(voterVersion, voterKey)) return window.showAlert('선거구 명부를 다시 확인해 주세요.');
                             // 이동 처리: 기존 삭제
                             await scopeByTenant(supabase.from('election_voters').delete())
                                 .eq('election_id', newElectionId)
@@ -947,10 +954,13 @@ function escapeJsString(value) {
 
     // [수정] 유권자 삭제 (Confirm -> ShowConfirm)
     window.removeSelectedVoters = async () => {
+        const voterVersion = voterReadVersion, voterKey = voterReadyKey;
+        if (!districtVotersCurrent(voterVersion, voterKey)) return window.showAlert('선거구 명부를 다시 확인해 주세요.');
         if(selectedVoterIds.size === 0) return window.showAlert('삭제할 인원을 선택하세요.');
         if (!ensureTenantContext('유권자 삭제')) return;
 
         window.showConfirm('선택한 인원을 명부에서 제외하시겠습니까?', async () => {
+            if (!districtVotersCurrent(voterVersion, voterKey)) return window.showAlert('선거구 명부를 다시 확인해 주세요.');
             const idsToDelete = Array.from(selectedVoterIds);
             const { error } = await scopeByTenant(
                 supabase.from('election_voters').delete()
@@ -966,12 +976,9 @@ function escapeJsString(value) {
 
     // 필터 기능 (검색 & 버튼)
     window.filterMembers = () => {
-        const keyword = document.getElementById('search-member').value.toLowerCase();
-        const filtered = allMembers.filter(m =>
-            m.name.toLowerCase().includes(keyword) ||
-            (m.address && m.address.toLowerCase().includes(keyword)) ||
-            m.phone.includes(keyword)
-        );
+        const keyword = document.getElementById('search-member').value.trim().toLowerCase();
+        const filtered = allMembers.filter(m => ['name','member_id','address','phone']
+            .some(key => String(m[key] ?? '').toLowerCase().includes(keyword)));
         renderSourceList(filtered);
     };
 
@@ -981,11 +988,43 @@ function escapeJsString(value) {
     };
 
 // [수정] 선거구 유권자 로드 (UX 변경 대응)
+    function districtVoterKey() {
+        return JSON.stringify([currentCoopId, newElectionId, document.getElementById('target-district-select').value]);
+    }
+    function districtVotersCurrent(version = voterReadVersion, key = voterReadyKey) {
+        return voterReadPhase === 'ready' && version === voterReadVersion && key === voterReadyKey
+            && key === districtVoterKey() && !window.frameElement?.hidden;
+    }
+    function paintDistrictVoterRead(phase, message = '') {
+        voterReadPhase = phase;
+        document.getElementById('voter-list-status').textContent = message;
+        const retry = document.getElementById('voter-list-retry');
+        retry.hidden = !['error','interrupted'].includes(phase);
+        retry.disabled = phase === 'loading';
+        for (const id of ['btn-add-selected','btn-add-all-common','btn-remove-selected'])
+            document.getElementById(id).disabled = phase !== 'ready';
+        document.getElementById('target-list').setAttribute('aria-busy', String(phase === 'loading'));
+    }
+    function invalidateDistrictVoterRead() {
+        if (voterReadyKey) voterSelections.set(voterReadyKey, new Set(selectedVoterIds));
+        ++voterReadVersion; voterReadAbort?.abort(); voterReadAbort = null;
+        paintDistrictVoterRead('interrupted', '선거구 명부를 다시 확인해 주세요.');
+    }
     window.loadDistrictVoters = async () => {
         const distId = document.getElementById('target-district-select').value;
-
+        if (voterReadyKey) voterSelections.set(voterReadyKey, new Set(selectedVoterIds));
+        const key = districtVoterKey(), version = ++voterReadVersion;
+        voterReadAbort?.abort();
+        const controller = voterReadAbort = new AbortController();
+        const electionId = newElectionId, coopId = currentCoopId;
+        const current = () => version === voterReadVersion && key === districtVoterKey() && !window.frameElement?.hidden;
+        currentVoters = []; voterReadyKey = '';
+        selectedVoterIds = new Set(voterSelections.get(key) || []);
+        document.getElementById('target-list').replaceChildren();
+        document.getElementById('voter-count').innerText = '—';
         // 1. 선거구가 선택되지 않았다면 패널을 숨김
-        if(!distId) {
+        if(!distId || !electionId || !coopId) {
+            paintDistrictVoterRead('idle');
             document.getElementById('manage-panel').style.display = 'none';
             return;
         }
@@ -994,6 +1033,7 @@ function escapeJsString(value) {
         document.getElementById('manage-panel').style.display = 'block';
 
         const dist = districtsCache.find(d => d.id === distId);
+        if (!dist) { paintDistrictVoterRead('error', '선거구를 다시 선택해 주세요.'); return; }
         document.getElementById('target-dist-name').innerText = dist.name;
 
         // 버튼 텍스트/보임 여부 처리
@@ -1010,19 +1050,30 @@ function escapeJsString(value) {
             btnSel.style.background = 'var(--color-primary)'; // 초록색
         }
 
-        // 유권자 데이터 가져오기
-        const { data, error } = await scopeByTenant(
-            supabase.from('election_voters').select('*')
-        )
-            .eq('election_id', newElectionId)
-            .eq('district_id', distId)
-            .order('created_at', { ascending: false }); // 최신순
-
-        if(error) console.error(error);
-        currentVoters = (data || []).map(row => ({ ...row,
-            member: allMembers.find(member => member.id === row.member_uuid) || null }));
-        document.getElementById('voter-count').innerText = `${currentVoters.length}명`;
-        renderTargetList(currentVoters);
+        paintDistrictVoterRead('loading', '선거구 명부를 확인하고 있어요…');
+        const timer = setTimeout(() => controller.abort(), 15000);
+        try {
+            let query = scopeByTenant(supabase.from('election_voters').select('*'))
+                .eq('election_id', electionId).eq('district_id', distId)
+                .order('created_at', { ascending: false });
+            if (typeof query.abortSignal === 'function') query = query.abortSignal(controller.signal);
+            const { data, error } = await query;
+            if (!current()) return;
+            if (controller.signal.aborted || error || !Array.isArray(data)) throw error || new Error('READ_INTERRUPTED');
+            currentVoters = data.map(row => ({ ...row,
+                member: allMembers.find(member => member.id === row.member_uuid) || null }));
+            const ids = new Set(currentVoters.map(row => row.id));
+            selectedVoterIds = new Set([...selectedVoterIds].filter(id => ids.has(id)));
+            voterReadyKey = key;
+            document.getElementById('voter-count').innerText = `${currentVoters.length}명`;
+            paintDistrictVoterRead('ready', currentVoters.length ? '' : '이 선거구에 등록된 유권자가 없습니다.');
+            window.filterVoters();
+        } catch (_) {
+            if (current()) paintDistrictVoterRead('error', '명부를 불러오지 못했어요. 다시 확인해 주세요.');
+        } finally {
+            clearTimeout(timer);
+            if (voterReadAbort === controller) voterReadAbort = null;
+        }
     };
 
     // [신규 추가] 오른쪽 패널(유권자) 검색 필터 함수 (에러 원인 해결)
@@ -1072,10 +1123,13 @@ function escapeJsString(value) {
 
     // [편의 기능] 비례대표 전체 등록
     window.addAllMembersToCommon = async () => {
+        const voterVersion = voterReadVersion, voterKey = voterReadyKey;
+        if (!districtVotersCurrent(voterVersion, voterKey)) return window.showAlert('선거구 명부를 다시 확인해 주세요.');
         if (!ensureTenantContext('비례 유권자 일괄 등록')) return;
         const distId = document.getElementById('target-district-select').value;
         const ok = await window.showConfirmAsync('전체 조합원을 이 선거구(비례)에 등록하시겠습니까?\n이미 등록된 인원은 건너뛰고 신규 인원만 추가됩니다.');
         if(!ok) return;
+        if (!districtVotersCurrent(voterVersion, voterKey)) return window.showAlert('선거구 명부를 다시 확인해 주세요.');
 
         // 전체 인원 Payload 생성
         // (주의: 인원이 1000명 단위면 나눠서 보내야 할 수도 있으나, Supabase는 수천 건 정도는 한 번에 처리 가능)
@@ -1508,6 +1562,7 @@ function clearDistrictInputs() {
 
 window.resumeSetup = async (el) => {
     if(createElectionInFlight)return window.showAlert('저장 중입니다. 잠시만 기다려 주세요.');
+    invalidateDistrictVoterRead();
     // 1. 화면 전환 (대시보드 숨김 -> 설정창 표시)
     document.getElementById('dashboard-section').style.display = 'none';
     document.getElementById('setup-section').style.display = 'block';
@@ -1694,7 +1749,10 @@ window.resumeSetup = async (el) => {
             await loadDashboard();
             window.ErpWorkspaceResume.register({modules:['vote'],authorize:async()=>{
                 const result=await supabase.rpc('is_election_admin');if(result.error)throw result.error;return result.data===true;
-            },refresh:async()=>{if(document.getElementById('dashboard-section').style.display!=='none')await loadDashboard();}});
+            },refresh:async()=>{
+                if(document.getElementById('dashboard-section').style.display!=='none') await loadDashboard();
+                else if(document.getElementById('target-district-select').value) await loadDistrictVoters();
+            }});
 
         } catch (e) {
             console.error(e);
@@ -1864,6 +1922,9 @@ window.createElection = async () => {
         document.getElementById('history-modal').style.display = 'none';
     };
 
+    if (window.frameElement) new MutationObserver(() => {
+        if (window.frameElement.hidden) invalidateDistrictVoterRead();
+    }).observe(window.frameElement, {attributes:true,attributeFilter:['hidden']});
     init();
 </script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
