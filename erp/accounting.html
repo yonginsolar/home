@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.178 | Change: 2026-10-22 - Current-month and overdue tax reminder grouping. -->
+<!-- Version: v1.0.179 | Change: 2026-10-23 - Scoped accounting reads and retained review drafts. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -9,7 +9,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.178 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.179 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261022-help-1"></script>
@@ -597,9 +597,10 @@
           <div class="card p-3 border-start border-5 border-warning-subtle bg-white">
              <div class="d-flex justify-content-between align-items-center mb-2">
                <div><h6 class="fw-bold mb-1">계정과목 확인 필요</h6><small class="text-muted">연동된 지출 중 계정과목을 정하지 않은 내역</small></div>
-               <button class="btn btn-outline-secondary btn-sm" onclick="loadApprovalUnclassifiedQueue()">새로고침</button>
+               <button id="approvalQueueRetry" class="btn btn-outline-secondary btn-sm" onclick="loadApprovalUnclassifiedQueue()">다시 확인</button>
              </div>
-             <div id="approvalUnclassifiedList" class="small text-muted">조회 중...</div>
+             <p id="approvalQueueStatus" class="small text-muted" role="status"></p>
+             <div id="approvalUnclassifiedList" class="small text-muted"></div>
           </div>
           <details class="workflow-disclosure mb-0">
             <summary>연동 취소</summary>
@@ -756,6 +757,7 @@
           <input type="number" class="form-control" id="closingYearInput" min="1900" max="2100">
         </div>
         <div class="small text-muted mb-2" id="closingReadonlyInfo"></div>
+        <p class="small text-muted" id="closingReadStatus" role="status"></p>
         <div class="mb-2">
           <label class="small text-muted">법인세 차감전 당기순이익</label>
           <input type="text" class="form-control bg-light" id="closingPretaxIncome" readonly>
@@ -843,7 +845,7 @@
   </div>
 </div>
 
-<div class="modal fade" id="selectModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header p-3 bg-light"><h6 class="m-0 fw-bold">계정과목 검색</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-0"><div class="p-2 border-bottom bg-white sticky-top"><input data-erp-query-control type="text" class="form-control" id="accountSearchInput" placeholder="검색어 입력..." onkeyup="filterAccounts()"></div><div id="accountList" style="height: 350px; overflow-y: auto;"></div></div></div></div></div>
+<div class="modal fade" id="selectModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header p-3 bg-light"><h6 class="m-0 fw-bold">계정과목 검색</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-0"><div class="p-2 border-bottom bg-white sticky-top"><input data-erp-query-control type="text" class="form-control" id="accountSearchInput" placeholder="검색어 입력..." onkeyup="filterAccounts()"><div class="d-flex align-items-center gap-2 mt-2"><span id="accountMasterReadStatus" class="small text-muted" role="status"></span><button type="button" id="accountMasterRetry" class="btn btn-sm btn-outline-secondary" onclick="loadMasterData()">다시 확인</button></div></div><div id="accountList" style="height: 350px; overflow-y: auto;"></div></div></div></div></div>
 
 <div class="modal fade" id="approvalSplitReclassModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
@@ -1216,6 +1218,16 @@ let selectContext = null;
 let addContext = null;
 let permissionSet = new Set();
 let approvalUnclassifiedIndex = new Map();
+// Read state is screen memory only. Never use it in place of server authority.
+const accountingReadTasks = new Map();
+const accountingReviewOwners = new Map();
+let assetReadPhase = 'idle', approvalQueuePhase = 'idle';
+let accountingMasterLoaded = false, accountingMasterPhase = 'idle', accountingMasterOwner = '';
+let closingPreparedScope = null, closingFormBaseline = null, closingBaselineYear = null, closingFormOwner = '';
+const closingYearDrafts = new Map();
+let closingActiveYear = null, closingActionRevision = 0;
+const approvalReclassBusy = new Set();
+const assetReviewBusy = new Set();
 let approvalSplitReclassState = null;
 let durunuriSupportRowsCache = [];
 const AUTO_SYNC_UNDO_KEY = 'erp_auto_sync_last_undo_v1';
@@ -1272,6 +1284,104 @@ const SALARY_EXPENSE_ACCOUNT = '임직원급여';
 const SALARY_EXPENSE_ACCOUNT_ALIASES = [SALARY_EXPENSE_ACCOUNT, '임직원 급여', '급여'];
 const SALARY_INSURANCE_EXPENSE_ACCOUNT = '4대보험회사분';
 const SALARY_INSURANCE_EXPENSE_ACCOUNT_ALIASES = [SALARY_INSURANCE_EXPENSE_ACCOUNT, '세금과공과'];
+
+function accountingReadIdentity() {
+    return myInfo?.coop_id ? JSON.stringify([myInfo.auth_user_id || myInfo.emp_id || myInfo.id || '', myInfo.coop_id]) : '';
+}
+function accountingReadScope(pane, options = {}) {
+    return {owner:myInfo,identity:accountingReadIdentity(),pane:document.getElementById(pane || ''),allowHidden:options.allowHidden===true,
+        modal:options.modal ? document.getElementById(options.modal) : null,valid:options.valid};
+}
+function accountingReadScopeCurrent(scope) {
+    return !!scope.identity && scope.owner===myInfo && scope.identity===accountingReadIdentity()
+        && accountingDataAuthorized && (canPerform('accounting.view') || canPerform('accounting.edit'))
+        && (scope.allowHidden || !window.frameElement?.hidden)
+        && (!scope.pane || scope.pane.classList.contains('active'))
+        && (!scope.modal || scope.modal.classList.contains('show')) && (!scope.valid || scope.valid());
+}
+function cancelAccountingRead(kind) {
+    const read=accountingReadTasks.get(kind);if(!read)return;
+    accountingReadTasks.delete(kind);read.controller.abort();clearTimeout(read.timer);read.release({cancelled:true});read.cancel?.();
+}
+function runAccountingRead(kind, key, scope, work, apply, failed, options = {}) {
+    if(!accountingReadScopeCurrent(scope))return Promise.resolve(false);
+    const old=accountingReadTasks.get(kind);
+    if(old && !options.refresh && old.key===key && old.current())return old.promise;
+    cancelAccountingRead(kind);
+    const read={key,scope,controller:new AbortController(),timer:0,release:null,promise:null,cancel:options.cancel};
+    read.current=()=>accountingReadTasks.get(kind)===read && accountingReadScopeCurrent(scope);
+    accountingReadTasks.set(kind,read);options.start?.();
+    const stop=new Promise((resolve,reject)=>{read.release=resolve;read.timer=setTimeout(()=>{read.timedOut=true;read.controller.abort();reject(Error('ACCOUNTING_READ_TIMEOUT'));},15000);});
+    read.promise=(async()=>{try{
+        const result=await Promise.race([Promise.resolve().then(()=>work(read)),stop]);
+        if(!read.current() || result?.cancelled)return false;
+        apply(result,read);return true;
+    }catch(error){if(read.current())failed(read.timedOut?'조회가 지연되었습니다. 다시 확인해 주세요.':'불러오지 못했습니다. 다시 확인해 주세요.',error);return false;
+    }finally{read.controller.abort();clearTimeout(read.timer);if(accountingReadTasks.get(kind)===read){accountingReadTasks.delete(kind);options.finish?.();}}})();
+    return read.promise;
+}
+function accountingEditSnapshot(row) {
+    return JSON.stringify([...row.querySelectorAll('input,select')].map(n=>[n.id,n.type==='checkbox'?n.checked:n.matches('[data-number-group]')?ERPNumberInput.raw(n.value):n.value,n.dataset.accountType||'']));
+}
+function accountingRowDirty(row) { return row.dataset.accountingBaseline!==accountingEditSnapshot(row); }
+function prepareAccountingEditRow(row,key,source) {
+    row.dataset.accountingKey=String(key);row.dataset.accountingSource=JSON.stringify(source);row.dataset.accountingOwner=accountingReadIdentity();
+    row.dataset.accountingBaseline=accountingEditSnapshot(row);
+}
+function mergeAccountingEditRows(target, fresh, phase) {
+    const retained=new Map([...target.querySelectorAll('[data-accounting-key]')].filter(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n)).map(n=>[n.dataset.accountingKey,n]));
+    for(const next of [...fresh.querySelectorAll('[data-accounting-key]')]){
+        const prior=retained.get(next.dataset.accountingKey);if(!prior)continue;retained.delete(next.dataset.accountingKey);
+        const stale=prior.dataset.accountingSource!==next.dataset.accountingSource;
+        next.replaceWith(prior);markAccountingRetainedRow(prior,stale,next,phase);
+    }
+    for(const prior of retained.values()){fresh.append(prior);markAccountingRetainedRow(prior,true,null,phase);}
+    target.replaceChildren(...fresh.childNodes);
+}
+function markAccountingRetainedRow(row,stale,replacement,phase) {
+    row.dataset.accountingStale=stale?'1':'0';row.querySelector('[data-accounting-retained]')?.remove();if(!stale)return;
+    const note=document.createElement('div');note.dataset.accountingRetained='';note.className='small text-warning-emphasis mt-2';
+    note.append(document.createTextNode('등록된 자료가 달라져 작성 내용만 보관 중입니다. '));
+    const discard=document.createElement('button');discard.type='button';discard.className='btn btn-sm btn-outline-secondary';discard.textContent='초안 버리기';
+    discard.onclick=()=>{const owner=accountingReadIdentity(),snapshot=accountingEditSnapshot(row);
+        showConfirm('초안 버리기','이 초안을 버릴까요?',()=>{
+            if(owner!==accountingReadIdentity()||!accountingReadScopeCurrent(accountingReadScope(phase==='asset'?'tabAssets':'tabSync'))||!row.isConnected||snapshot!==accountingEditSnapshot(row)||accountingReadTasks.has(phase))return;
+            replacement ? row.replaceWith(replacement) : row.remove();syncAccountingReviewControls();
+        });};
+    note.append(discard);row.append(note);
+}
+function syncAccountingReviewControls() {
+    for(const [id,phase,busy] of [['assetPurchaseReviewRows',assetReadPhase,assetReviewBusy],['approvalUnclassifiedList',approvalQueuePhase,approvalReclassBusy]]){
+        document.getElementById(id)?.querySelectorAll('[data-accounting-key]').forEach(row=>{
+            const edit=canPerform('accounting.edit') && row.dataset.accountingOwner===accountingReadIdentity() && row.dataset.accountingStale!=='1';
+            row.querySelectorAll('input,select,button').forEach(n=>{
+                if(n.closest('[data-accounting-retained]')){n.disabled=accountingReadTasks.has(id==='assetPurchaseReviewRows'?'asset':'queue');return;}
+                n.disabled=!edit || ((n.dataset.accountingProcess==='1')&&(phase!=='loaded'||busy.has(row.dataset.accountingKey)));
+            });
+            if(id==='approvalUnclassifiedList'&&edit)refreshApprovalReclassVatToggle(row.dataset.accountingKey);
+        });
+    }
+}
+function accountingReviewReady(kind,key) {
+    const id=kind==='asset'?'assetPurchaseReviewRows':'approvalUnclassifiedList',phase=kind==='asset'?assetReadPhase:approvalQueuePhase;
+    const row=[...document.getElementById(id).querySelectorAll('[data-accounting-key]')].find(n=>n.dataset.accountingKey===String(key));
+    return phase==='loaded' && !!row && row.dataset.accountingOwner===accountingReadIdentity() && row.dataset.accountingStale!=='1';
+}
+function acceptAccountingEditRow(kind,key,snapshot) {
+    const root=document.getElementById(kind==='asset'?'assetPurchaseReviewRows':'approvalUnclassifiedList');
+    const row=[...root.querySelectorAll('[data-accounting-key]')].find(n=>n.dataset.accountingKey===String(key));
+    if(row&&snapshot===accountingEditSnapshot(row))row.dataset.accountingBaseline=snapshot;
+}
+function bindAccountingReadLifecycle() {
+    const cancelStale=()=>{for(const [kind,read] of accountingReadTasks)if(!read.current())cancelAccountingRead(kind);};
+    for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('accTab').addEventListener(name,()=>{closingActionRevision++;cancelStale();});
+    document.getElementById('closingModal').addEventListener('hidden.bs.modal',()=>{rememberClosingDraft();closingPreparedScope=null;cancelAccountingRead('closing');});
+    if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden)closingActionRevision++;cancelStale();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+    window.addEventListener('pagehide',()=>{for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
+    window.addEventListener('beforeunload',event=>{
+        if([...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
+    });
+}
 
 function parseAccountingBooleanSetting(value, fallbackValue) {
     const normalized = String(value ?? '').trim().toLowerCase();
@@ -1933,6 +2043,7 @@ window.onload = async function() {
     approvalSplitReclassModal = new bootstrap.Modal(document.getElementById('approvalSplitReclassModal'));
     cashbackModal = new bootstrap.Modal(document.getElementById('cardCashbackModal'));
     cardManageModal = new bootstrap.Modal(document.getElementById('cardManageModal'));
+    bindAccountingReadLifecycle();
 
     const blurActiveIfInside = (modalEl) => {
         const activeEl = document.activeElement;
@@ -1996,6 +2107,7 @@ window.onload = async function() {
     document.getElementById("btnClosingCalc").onclick = async function() { await refreshClosingContext(); };
     document.getElementById("btnClosingRun").onclick = async function() { await runClosingFromModal(); };
     document.getElementById("closingYearInput").addEventListener("change", refreshClosingContext);
+    document.getElementById("closingYearInput").addEventListener("input",()=>{closingActionRevision++;closingPreparedScope=null;document.getElementById('btnClosingRun').disabled=true;cancelAccountingRead('closing');});
     document.getElementById("closingLegalInput").addEventListener("input", handleClosingLegalInputChange);
     document.getElementById("closingTaxCreditInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
     document.getElementById("closingPrepaidNationalTaxInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
@@ -2100,8 +2212,8 @@ window.onload = async function() {
         if (pane === 'tabHistory') await loadHistory({allowHidden:true});
         else if (pane === 'tabStatements') await openFinancialStatements({allowHidden:true});
         else if (pane === 'tabTaxes') await openAccountingTaxTasks();
-        else if (pane === 'tabAssets') await loadAssetOverview();
-        else if (pane === 'tabSync') await loadApprovalUnclassifiedQueue();
+        else if (pane === 'tabAssets') await loadAssetOverview({allowHidden:true});
+        else if (pane === 'tabSync') await loadApprovalUnclassifiedQueue({allowHidden:true});
         else if (pane === 'tabForm' || !pane) await refreshDashboard();
     }});
 };
@@ -2744,7 +2856,7 @@ function refreshApprovalReclassVatToggle(domKey) {
         accountTypeHint ? [accountTypeHint] : APPROVAL_RECLASS_TARGET_TYPES
     );
     if (!accountRow) {
-        vatToggle.disabled = false;
+        vatToggle.disabled = !canPerform('accounting.edit');
         return;
     }
 
@@ -2761,7 +2873,7 @@ function refreshApprovalReclassVatToggle(domKey) {
     }
 
     const wasDisabled = vatToggle.disabled;
-    vatToggle.disabled = false;
+    vatToggle.disabled = !canPerform('accounting.edit');
     if (wasDisabled) vatToggle.checked = true;
 }
 
@@ -2804,11 +2916,12 @@ function openApprovalReclassAccountPicker(domKey) {
     setTimeout(() => searchInput?.focus(), 300);
 }
 
-async function loadApprovalUnclassifiedQueue() {
+function loadApprovalUnclassifiedQueue(options = {}) {
     const listEl = document.getElementById('approvalUnclassifiedList');
-    if (!listEl) return;
-    listEl.innerHTML = '<div class="text-muted">조회 중...</div>';
-
+    if (!listEl) return Promise.resolve(false);
+    const scope=accountingReadScope('tabSync',options);
+    const status=document.getElementById('approvalQueueStatus'),retry=document.getElementById('approvalQueueRetry');
+    return runAccountingRead('queue',scope.identity,scope,async read=>{
     const { data: rawRows, error: fetchError } = await _supabase
         .from('ac_journal')
         .select('Date,Trans_ID,Description,Debit,Credit,Project,Operator')
@@ -2816,11 +2929,9 @@ async function loadApprovalUnclassifiedQueue() {
         .gt('Debit', 0)
         .like('Trans_ID', 'APR-%')
         .order('Date', { ascending: false })
-        .limit(200);
-    if (fetchError) {
-        listEl.innerHTML = `<div class="text-danger">조회 실패: ${escapeHtml(fetchError.message)}</div>`;
-        return;
-    }
+        .limit(200).abortSignal(read.controller.signal);
+    if (fetchError) throw fetchError;
+    if(!read.current())return {cancelled:true};
 
     const { data: doneRows, error: doneError } = await _supabase
         .from('ac_journal')
@@ -2828,11 +2939,9 @@ async function loadApprovalUnclassifiedQueue() {
         .eq('Account', '미분류비용')
         .gt('Credit', 0)
         .like('Trans_ID', 'APR-RCLS-%')
-        .limit(500);
-    if (doneError) {
-        listEl.innerHTML = `<div class="text-danger">재분류 이력 조회 실패: ${escapeHtml(doneError.message)}</div>`;
-        return;
-    }
+        .limit(500).abortSignal(read.controller.signal);
+    if (doneError) throw doneError;
+    if(!Array.isArray(rawRows)||!Array.isArray(doneRows))throw Error('INVALID_QUEUE_RESULT');
 
     const doneSourceIds = new Set(
         (doneRows || [])
@@ -2865,13 +2974,24 @@ async function loadApprovalUnclassifiedQueue() {
         })
         .filter(Boolean);
 
-    approvalUnclassifiedIndex = new Map(pending.map((item) => [item.domKey, item]));
-    renderApprovalUnclassifiedQueue(pending);
+    return pending;
+    },pending=>{
+        renderApprovalUnclassifiedQueue(pending);
+        approvalUnclassifiedIndex = new Map(pending.map((item) => [item.domKey, item]));
+        approvalQueuePhase='loaded';status.textContent='';syncAccountingReviewControls();
+    },message=>{approvalQueuePhase='error';status.textContent=message;syncAccountingReviewControls();},{...options,
+        start:()=>{
+            if(accountingReviewOwners.get('queue')&&accountingReviewOwners.get('queue')!==scope.identity){listEl.replaceChildren();approvalUnclassifiedIndex=new Map();}
+            accountingReviewOwners.set('queue',scope.identity);approvalQueuePhase='loading';
+            status.textContent='계정과목 확인 목록을 불러오는 중입니다.';retry.setAttribute('aria-busy','true');syncAccountingReviewControls();
+        },finish:()=>{retry.setAttribute('aria-busy','false');syncAccountingReviewControls();},cancel:()=>{approvalQueuePhase='idle';status.textContent='다시 확인을 눌러 목록을 확인해 주세요.';retry.setAttribute('aria-busy','false');syncAccountingReviewControls();}
+    });
 }
 
 function renderApprovalUnclassifiedQueue(items) {
-    const listEl = document.getElementById('approvalUnclassifiedList');
-    if (!listEl) return;
+    const target = document.getElementById('approvalUnclassifiedList');
+    if (!target) return;
+    const listEl=document.createElement('div');
     const safeItems = Array.isArray(items) ? items : [];
     const editable = canPerform('accounting.edit');
     const accounts = getApprovalReclassMasterRowsByTypes(APPROVAL_RECLASS_TARGET_TYPES);
@@ -2880,6 +3000,7 @@ function renderApprovalUnclassifiedQueue(items) {
 
     if (safeItems.length === 0) {
         listEl.innerHTML = '<div class="text-muted">재분류할 미분류비용(APR) 건이 없습니다.</div>';
+        mergeAccountingEditRows(target,listEl,'queue');
         return;
     }
 
@@ -2904,7 +3025,7 @@ function renderApprovalUnclassifiedQueue(items) {
         const splitBtnId = `approvalReclassSplitBtn-${item.domKey}`;
         const disabledAttr = (!editable || !hasSelectableAccount) ? ' disabled' : '';
         return `
-            <div class="border rounded p-2 mb-2 bg-light-subtle">
+            <div class="border rounded p-2 mb-2 bg-light-subtle" data-accounting-key="${escapeHtml(item.domKey)}">
                 <div class="d-flex justify-content-between align-items-center mb-1">
                     <div class="fw-bold">${titleHtml || safeDesc}</div>
                     <span class="badge text-bg-secondary">${amountLabel}원</span>
@@ -2917,8 +3038,8 @@ function renderApprovalUnclassifiedQueue(items) {
                         <input class="form-check-input" type="checkbox" id="${vatId}" checked${disabledAttr}>
                         <label class="form-check-label small" for="${vatId}">비용 부가세 포함</label>
                     </div>
-                    <button id="${btnId}" class="btn btn-sm btn-outline-primary"${disabledAttr} onclick="submitApprovalUnclassifiedReclass('${item.domKey}')">재분류</button>
-                    <button id="${splitBtnId}" class="btn btn-sm btn-outline-dark"${disabledAttr} onclick="openApprovalSplitReclassModal('${item.domKey}')">분할 재분류</button>
+                    <button id="${btnId}" data-accounting-process="1" class="btn btn-sm btn-outline-primary"${disabledAttr} onclick="submitApprovalUnclassifiedReclass('${item.domKey}')">재분류</button>
+                    <button id="${splitBtnId}" data-accounting-process="1" class="btn btn-sm btn-outline-dark"${disabledAttr} onclick="openApprovalSplitReclassModal('${item.domKey}')">분할 재분류</button>
                 </div>
             </div>
         `;
@@ -2926,12 +3047,15 @@ function renderApprovalUnclassifiedQueue(items) {
 
     const readOnlyMsg = editable ? '' : '<div class="small text-muted mb-2">조회 전용 권한입니다. 재분류는 회계 수정 권한에서 가능합니다.</div>';
     listEl.innerHTML = `${summary}${warnNoAccount}${readOnlyMsg}${rowsHtml}`;
-    safeItems.forEach((item) => refreshApprovalReclassVatToggle(item.domKey));
+    safeItems.forEach(item=>prepareAccountingEditRow(listEl.querySelector(`[data-accounting-key="${item.domKey}"]`),item.domKey,[item.sourceId,item.transId,item.date,item.amount,item.project,item.description]));
+    mergeAccountingEditRows(target,listEl,'queue');
 }
 
 async function submitApprovalUnclassifiedReclass(rowKey) {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const key = String(rowKey || '').trim();
+    if(!accountingReviewReady('queue',key))return showAlert('목록 다시 확인','다시 확인을 눌러 목록을 확인한 뒤 진행해 주세요.');
+    if(approvalReclassBusy.has(key))return;
     const item = approvalUnclassifiedIndex.get(key);
     if (!item) {
         await loadApprovalUnclassifiedQueue();
@@ -2943,6 +3067,8 @@ async function submitApprovalUnclassifiedReclass(rowKey) {
     const actionBtn = document.getElementById(`approvalReclassBtn-${item.domKey}`);
     const targetAccount = String(inputEl?.value || '').trim();
     const targetTypeHint = String(inputEl?.dataset.accountType || '').trim();
+    const savedRow=inputEl.closest('[data-accounting-key]'),draftSnapshot=accountingEditSnapshot(savedRow),scope=accountingReadScope('tabSync');
+    const current=()=>accountingReadScopeCurrent(scope)&&canPerform('accounting.edit')&&savedRow.isConnected&&accountingReviewReady('queue',key)&&draftSnapshot===accountingEditSnapshot(savedRow);
     if (!targetAccount) return showAlert("오류", "재분류할 비용 또는 자산 계정을 선택하세요.");
     if (targetAccount === '미분류비용') return showAlert("오류", "미분류비용 외 계정을 선택하세요.");
 
@@ -2971,15 +3097,17 @@ async function submitApprovalUnclassifiedReclass(rowKey) {
     const taggedDesc = `[전자결재-재분류:${item.transId}] ${descBase}`;
 
     if (actionBtn) actionBtn.disabled = true;
+    approvalReclassBusy.add(key);syncAccountingReviewControls();
     try {
         const { data: existingRows, error: existingError } = await _supabase
             .from('ac_journal')
             .select('Trans_ID')
             .eq('Trans_ID', reclassTransId)
             .limit(1);
+        if(!current())return;
         if (existingError) return showAlert("오류", "기존 재분류 확인 실패: " + existingError.message);
         if (existingRows && existingRows.length > 0) {
-            await loadApprovalUnclassifiedQueue();
+            await loadApprovalUnclassifiedQueue({refresh:true});
             return showAlert("알림", "이미 재분류 처리된 건입니다.");
         }
 
@@ -3025,7 +3153,9 @@ async function submitApprovalUnclassifiedReclass(rowKey) {
         });
 
         const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
+        if(!accountingReadScopeCurrent(scope))return;
         if (insertError) return showAlert("오류", "재분류 저장 실패: " + insertError.message);
+        acceptAccountingEditRow('queue',key,draftSnapshot);
 
         setLastAutoSyncUndo({
             type: 'approval_reclass',
@@ -3039,11 +3169,12 @@ async function submitApprovalUnclassifiedReclass(rowKey) {
             ? ` (공급가 ${netAmount.toLocaleString()}원 / 부가세 ${vatAmount.toLocaleString()}원)`
             : '';
         showAlert("완료", `${item.transId} 건을 ${targetAccount}(으)로 재분류했습니다.${vatInfo}`);
-        await loadApprovalUnclassifiedQueue();
+        await loadApprovalUnclassifiedQueue({refresh:true});
         refreshDashboard();
         loadHistory();
     } finally {
-        if (actionBtn) actionBtn.disabled = false;
+        approvalReclassBusy.delete(key);
+        if(scope.owner===myInfo)syncAccountingReviewControls();
     }
 }
 
@@ -3197,6 +3328,7 @@ function removeApprovalSplitReclassRow(rowId) {
 function openApprovalSplitReclassModal(rowKey) {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const key = String(rowKey || '').trim();
+    if(!accountingReviewReady('queue',key))return showAlert('목록 다시 확인','다시 확인을 눌러 목록을 확인한 뒤 진행해 주세요.');
     const item = approvalUnclassifiedIndex.get(key);
     if (!item) {
         loadApprovalUnclassifiedQueue();
@@ -3214,6 +3346,9 @@ async function submitApprovalSplitReclass() {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const item = getApprovalSplitReclassItem();
     if (!item) return showAlert("알림", "대상을 다시 선택해주세요.");
+    if(!accountingReviewReady('queue',item.domKey)||approvalReclassBusy.has(item.domKey))return;
+    const scope=accountingReadScope('tabSync'),originalState=approvalSplitReclassState;
+    const snapshot=JSON.stringify(originalState),current=()=>accountingReadScopeCurrent(scope)&&canPerform('accounting.edit')&&approvalSplitReclassState===originalState&&snapshot===JSON.stringify(originalState)&&accountingReviewReady('queue',item.domKey);
     const rows = Array.isArray(approvalSplitReclassState?.rows) ? approvalSplitReclassState.rows : [];
     if (rows.length === 0) return showAlert("오류", "분할 행이 없습니다.");
 
@@ -3253,6 +3388,7 @@ async function submitApprovalSplitReclass() {
 
     const saveBtn = document.getElementById('approvalSplitReclassSaveBtn');
     if (saveBtn) saveBtn.disabled = true;
+    approvalReclassBusy.add(item.domKey);syncAccountingReviewControls();
     try {
         const reclassTransId = `APR-RCLS-${item.sourceId}`;
         const { data: existingRows, error: existingError } = await _supabase
@@ -3260,10 +3396,11 @@ async function submitApprovalSplitReclass() {
             .select('Trans_ID')
             .eq('Trans_ID', reclassTransId)
             .limit(1);
+        if(!current())return;
         if (existingError) return showAlert("오류", "기존 재분류 확인 실패: " + existingError.message);
         if (existingRows && existingRows.length > 0) {
             approvalSplitReclassModal.hide();
-            await loadApprovalUnclassifiedQueue();
+            await loadApprovalUnclassifiedQueue({refresh:true});
             return showAlert("알림", "이미 재분류 처리된 건입니다.");
         }
 
@@ -3319,6 +3456,7 @@ async function submitApprovalSplitReclass() {
         });
 
         const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
+        if(!current())return;
         if (insertError) return showAlert("오류", "분할 재분류 저장 실패: " + insertError.message);
 
         setLastAutoSyncUndo({
@@ -3331,11 +3469,12 @@ async function submitApprovalSplitReclass() {
 
         approvalSplitReclassModal.hide();
         showAlert("완료", `${item.transId} 건을 ${normalizedRows.length}개 계정으로 분할 재분류했습니다.`);
-        await loadApprovalUnclassifiedQueue();
+        await loadApprovalUnclassifiedQueue({refresh:true});
         refreshDashboard();
         loadHistory();
     } finally {
-        if (saveBtn) saveBtn.disabled = false;
+        approvalReclassBusy.delete(item.domKey);
+        if(scope.owner===myInfo){if(saveBtn)saveBtn.disabled=!canPerform('accounting.edit');syncAccountingReviewControls();}
     }
 }
 
@@ -5579,14 +5718,15 @@ function putAssetTableRows(bodyId, entries, makeValues, emptyText) {
 }
 
 function renderAssetPurchaseReviews(reviews) {
-    const wrap = document.getElementById('assetPurchaseReviewRows');
-    if (!wrap) return;
-    wrap.replaceChildren();
+    const target = document.getElementById('assetPurchaseReviewRows');
+    if (!target) return;
+    const wrap=document.createElement('div');
     if (!reviews.length) {
         const message = document.createElement('p');
         message.className = 'text-muted mb-0';
         message.textContent = '회계 확인을 기다리는 새 재고 매입이 없습니다.';
         wrap.append(message);
+        mergeAccountingEditRows(target,wrap,'asset');
         return;
     }
     reviews.forEach((review) => {
@@ -5665,6 +5805,7 @@ function renderAssetPurchaseReviews(reviews) {
             save.type = 'button';
             save.className = 'btn btn-primary btn-sm w-100';
             save.textContent = review.reviewed_at ? '확인값 수정' : '원가 확인 저장';
+            save.dataset.accountingProcess='1';
             save.disabled = !canPerform('accounting.edit');
             save.addEventListener('click', () => saveAssetInventoryReview(id,Number(review.amount)));
             saveWrap.append(save);
@@ -5677,8 +5818,10 @@ function renderAssetPurchaseReviews(reviews) {
                 row.append(note);
             }
         }
+        prepareAccountingEditRow(row,id,[id,review.amount,review.accounted,review.movement_exists,review.reviewed_at,review.input_vat,review.evidence_type]);
         wrap.append(row);
     });
+    mergeAccountingEditRows(target,wrap,'asset');
 }
 
 function renderAssetOverview(data) {
@@ -5719,48 +5862,68 @@ function renderAssetOverview(data) {
     renderAssetPurchaseReviews(Array.isArray(data.purchase_reviews) ? data.purchase_reviews : []);
 }
 
-async function loadAssetOverview() {
-    if (assetOverviewLoading) return;
-    assetOverviewLoading = true;
+function loadAssetOverview(options = {}) {
+    if(options===true)options={refresh:true};
+    const scope=accountingReadScope('tabAssets',options);
     const status = document.getElementById('assetOverviewStatus');
-    if (status) status.textContent = '자산과 재고를 불러오는 중입니다.';
-    try {
-        const { data,error } = await _supabase.rpc('accounting_asset_overview');
+    return runAccountingRead('asset',scope.identity,scope,async read=>{
+        const { data,error } = await _supabase.rpc('accounting_asset_overview').abortSignal(read.controller.signal);
         if (error) throw error;
-        assetOverviewPayload = data || {};
-        renderAssetOverview(assetOverviewPayload);
-        if (status) status.textContent = `${data?.as_of || '오늘'} 기준 · 재고는 연말 결산 전까지 장부 자산과 별도로 표시합니다.`;
-    } catch (error) {
-        if (status) status.textContent = `자산 현황을 불러오지 못했습니다: ${error.message || error}`;
-    } finally {
-        assetOverviewLoading = false;
-    }
+        if(!data||typeof data!=='object')throw Error('INVALID_ASSET_RESULT');return data;
+    },data=>{renderAssetOverview(data);assetOverviewPayload=data;assetReadPhase='loaded';status.textContent=`${data.as_of || '오늘'} 기준 · 재고는 연말 결산 전까지 장부 자산과 별도로 표시합니다.`;syncAccountingReviewControls();
+    },message=>{assetReadPhase='error';status.textContent=message;syncAccountingReviewControls();},{...options,
+        start:()=>{if(accountingReviewOwners.get('asset')&&accountingReviewOwners.get('asset')!==scope.identity)document.getElementById('assetPurchaseReviewRows').replaceChildren();accountingReviewOwners.set('asset',scope.identity);assetOverviewLoading=true;assetReadPhase='loading';status.textContent='자산과 재고를 불러오는 중입니다.';syncAccountingReviewControls();},
+        finish:()=>{assetOverviewLoading=false;syncAccountingReviewControls();},cancel:()=>{assetOverviewLoading=false;assetReadPhase='idle';status.textContent='새로고침을 눌러 자산과 재고를 확인해 주세요.';syncAccountingReviewControls();}
+    });
 }
 
 function saveAssetInventoryReview(approvalId,grossAmount) {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
+    if(!accountingReviewReady('asset',approvalId))return showAlert('목록 다시 확인','자산과 재고를 다시 확인한 뒤 진행해 주세요.');
+    if(assetReviewBusy.has(String(approvalId)))return;
     const evidence = String(document.getElementById(`assetEvidence-${approvalId}`)?.value || '');
-    const rawVat = String(document.getElementById(`assetVat-${approvalId}`)?.value || '').trim();
+    const rawVat = String(ERPNumberInput.raw(document.getElementById(`assetVat-${approvalId}`)?.value || '')).trim();
     const vat = Number(rawVat);
     if (!evidence) return showAlert('증빙·공제 여부를 선택해 주세요.');
     if (rawVat === '' || !Number.isSafeInteger(vat) || vat < 0 || vat >= grossAmount) return showAlert('증빙에 적힌 공제 매입세액을 확인해 주세요.');
     if ((evidence === '공제하지 않음') !== (vat === 0)) return showAlert('공제 여부와 매입세액이 맞지 않습니다.');
+    const row=document.getElementById(`assetVat-${approvalId}`).closest('[data-accounting-key]'),snapshot=accountingEditSnapshot(row),scope=accountingReadScope('tabAssets');
     showConfirm('재고 매입 원가 확인',
         `부가세 포함 결재금액 ${formatAssetWon(grossAmount)}\n공제할 매입세액 ${formatAssetWon(vat)}\n재고 취득원가 ${formatAssetWon(grossAmount-vat)}\n증빙: ${evidence}\n이 값으로 회계 연동을 준비할까요?`,
         async () => {
+            if(!accountingReadScopeCurrent(scope)||!canPerform('accounting.edit')||!accountingReviewReady('asset',approvalId)||!row.isConnected||snapshot!==accountingEditSnapshot(row)||assetReviewBusy.has(String(approvalId)))return;
+            assetReviewBusy.add(String(approvalId));syncAccountingReviewControls();
+            try{
             const { error } = await _supabase.rpc('accounting_inventory_review_purchase', {
                 p_approval_id: Number(approvalId),p_input_vat: vat,p_evidence_type: evidence
             });
-            if (error) return showAlert('원가 확인 실패',error.message);
-            await loadAssetOverview(true);
-            showAlert('저장 완료','매입세액과 재고 취득원가를 확인했습니다. 전자결재 연동에서 전표를 반영할 수 있습니다.');
+            if(!accountingReadScopeCurrent(scope))return;
+            if (error) return showAlert('원가 확인 실패','입력값을 확인한 뒤 다시 시도해 주세요.');
+            acceptAccountingEditRow('asset',approvalId,snapshot);
+            const refreshed=await loadAssetOverview({refresh:true});
+            if(accountingReadScopeCurrent(scope))showAlert('저장 완료',refreshed?'저장했습니다.':'저장했습니다. 목록을 다시 확인해 주세요.');
+            }catch(error){
+                if(accountingReadScopeCurrent(scope)){
+                    assetReadPhase='error';
+                    document.getElementById('assetOverviewStatus').textContent='저장 결과를 확인하지 못했습니다. 새로고침으로 목록을 먼저 확인해 주세요.';
+                    showAlert('저장 결과 확인 필요','새로고침으로 목록을 먼저 확인해 주세요.');
+                }
+            }finally{assetReviewBusy.delete(String(approvalId));if(scope.owner===myInfo)syncAccountingReviewControls();}
         });
 }
 
 // [수정] 마스터 데이터 로드 (SpecialType, Tax_Free, Usage 확인)
-async function loadMasterData() {
-    const { data } = await _supabase.from('ac_master').select('*').order('Type').order('Standard').order('Item');
-    if(data) mData = data;
+function loadMasterData(options = {}) {
+    const scope=accountingReadScope(null,options);
+    const status=document.getElementById('accountMasterReadStatus'),button=document.getElementById('accountMasterRetry');
+    const render=()=>{status.textContent=accountingMasterPhase==='loading'?'계정과목을 불러오는 중입니다.':accountingMasterPhase==='error'?'계정과목을 불러오지 못했습니다. 다시 확인해 주세요.':'';button.setAttribute('aria-busy',String(accountingMasterPhase==='loading'));if(document.getElementById('selectModal').classList.contains('show'))filterAccounts();};
+    return runAccountingRead('master',scope.identity,scope,async read=>{
+        const {data,error}=await _supabase.from('ac_master').select('*').order('Type').order('Standard').order('Item').abortSignal(read.controller.signal);
+        if(error)throw error;if(!Array.isArray(data))throw Error('INVALID_MASTER_RESULT');return data;
+    },data=>{mData=data;accountingMasterLoaded=true;accountingMasterPhase='loaded';render();},message=>{accountingMasterPhase='error';render();status.textContent=message;},{...options,
+        start:()=>{if(accountingMasterOwner!==scope.identity){mData=[];accountingMasterLoaded=false;}accountingMasterOwner=scope.identity;accountingMasterPhase='loading';render();},
+        cancel:()=>{accountingMasterPhase='error';render();},finish:()=>button.setAttribute('aria-busy','false')
+    });
 }
 
 async function loadCards() {
@@ -6498,6 +6661,11 @@ function filterAccounts() {
         ? selectContext.projectOverride
         : document.getElementById("projectSelect").value;
     const list = document.getElementById("accountList");
+
+    if(!accountingMasterLoaded || accountingMasterOwner!==accountingReadIdentity()){
+        list.textContent=accountingMasterPhase==='loading'?'계정과목을 불러오는 중입니다.':accountingMasterPhase==='error'?'계정과목을 불러오지 못했습니다. 위의 다시 확인을 눌러 주세요.':'위의 다시 확인을 눌러 계정과목을 불러와 주세요.';
+        return;
+    }
 
     list.innerHTML = "";
 
@@ -7816,6 +7984,10 @@ function openYearModal(title, desc, defaultYear, cb) {
 }
 
 async function openClosingModal() {
+    if(!accountingReadScopeCurrent(accountingReadScope(null))||!canPerform('accounting.edit'))return showAlert('결산 권한을 확인해 주세요.');
+    closingActionRevision++;
+    if(closingFormOwner!==accountingReadIdentity()){
+    closingFormOwner=accountingReadIdentity();closingYearDrafts.clear();closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;
     const defaultYear = new Date().getFullYear() - 1;
     document.getElementById("closingYearInput").value = defaultYear;
     document.getElementById("closingLegalInput").type = "text";
@@ -7827,29 +7999,36 @@ async function openClosingModal() {
     document.getElementById("closingPrepaidNationalTaxInput").value = "0";
     document.getElementById("closingPrepaidLocalTaxInput").value = "0";
     closingTaxExpenseManual = false;
-    await refreshClosingContext();
+    }
+    const modal=document.getElementById('closingModal'),revision=closingActionRevision,owner=myInfo;
+    const shown=new Promise(resolve=>modal.addEventListener('shown.bs.modal',resolve,{once:true}));
     closingModal.show();
+    if(!modal.classList.contains('show'))await shown;
+    if(revision!==closingActionRevision||owner!==myInfo||!modal.classList.contains('show'))return;
+    await refreshClosingContext();
 }
 
-async function buildClosingContext(targetYear) {
+async function buildClosingContext(targetYear, options = {}) {
     const startDate = `${targetYear}-01-01`;
     const endDate = `${targetYear}-12-31`;
 
-    const { data: journals } = await _supabase.from('ac_journal').select('*')
-        .gte('Date', startDate).lte('Date', endDate);
+    const query=q=>options.signal?q.abortSignal(options.signal):q;
+    const { data: journals,error:journalError } = await query(_supabase.from('ac_journal').select('*')
+        .gte('Date', startDate).lte('Date', endDate));
+    if(journalError)throw journalError;
 
     const baseJournals = getClosingContextBaseRows(journals || [], targetYear);
     const closingSummary = buildExistingClosingSummary(journals || [], targetYear);
-    const inventoryResult = await _supabase.rpc('accounting_inventory_valuation', { p_year: targetYear });
+    const inventoryResult = await query(_supabase.rpc('accounting_inventory_valuation', { p_year: targetYear }));
     if (inventoryResult.error) throw new Error(`재고 평가액 조회 실패: ${inventoryResult.error.message}`);
     const inventoryValuation = inventoryResult.data || {};
     const inventoryCost = Number(inventoryValuation.cost || 0);
-    const { data: inventoryJournalRows, error: inventoryJournalError } = await _supabase
+    const { data: inventoryJournalRows, error: inventoryJournalError } = await query(_supabase
         .from('ac_journal')
         .select('Debit,Credit')
         .eq('coop_id', String(myInfo?.coop_id || '00000000-0000-0000-0000-000000000000'))
         .eq('Account', '행사용재고자산')
-        .lte('Date', endDate);
+        .lte('Date', endDate));
     if (inventoryJournalError) throw new Error(`재고자산 장부 조회 실패: ${inventoryJournalError.message}`);
     const inventoryBookValue = (inventoryJournalRows || []).reduce((sum, row) =>
         sum + Number(row.Debit || 0) - Number(row.Credit || 0), 0);
@@ -7868,8 +8047,10 @@ async function buildClosingContext(targetYear) {
     const taxAdjust = buildTaxAdjustmentSummary(baseJournals);
     const prepaidTaxSummary = buildClosingPrepaidTaxSummary(baseJournals);
 
-    const { data: capRows } = await _supabase.from('ac_journal').select('*').eq('Account','출자금').lte('Date', endDate);
-    const { data: legalRows } = await _supabase.from('ac_journal').select('*').eq('Account','법정적립금').lte('Date', endDate);
+    const { data: capRows,error:capitalError } = await query(_supabase.from('ac_journal').select('*').eq('Account','출자금').lte('Date', endDate));
+    if(capitalError)throw capitalError;
+    const { data: legalRows,error:legalError } = await query(_supabase.from('ac_journal').select('*').eq('Account','법정적립금').lte('Date', endDate));
+    if(legalError)throw legalError;
     let capitalTotal = 0;
     let legalBalance = 0;
     if (capRows) capRows.forEach(r => { capitalTotal += (Number(r.Credit||0) - Number(r.Debit||0)); });
@@ -8094,23 +8275,48 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
 
     warn.classList.add("hidden");
     handleClosingLegalInputChange();
+    if(!closingPreparedScope || !accountingReadScopeCurrent(closingPreparedScope) || accountingReadTasks.has('closing') || !canPerform('accounting.edit'))runBtn.disabled=true;
 }
 
-async function refreshClosingContext() {
+function closingInputSnapshot() {
+    return Object.fromEntries(['closingLegalInput','closingVoluntaryInput','closingTaxExpenseInput','closingTaxCreditInput','closingPrepaidNationalTaxInput','closingPrepaidLocalTaxInput'].map(id=>[id,String(ERPNumberInput.raw(document.getElementById(id).value))]));
+}
+function rememberClosingDraft() {
+    if(closingFormOwner!==accountingReadIdentity()||!closingActiveYear||closingBaselineYear!==closingActiveYear||!closingFormBaseline)return;
+    const values=closingInputSnapshot(),changes=Object.fromEntries(Object.entries(values).filter(([id,value])=>value!==closingFormBaseline[id]));
+    if(Object.keys(changes).length)closingYearDrafts.set(closingActiveYear,changes);else closingYearDrafts.delete(closingActiveYear);
+}
+function refreshClosingContext() {
     const yearVal = Number(document.getElementById("closingYearInput").value);
-    if (!yearVal) return showAlert("알림", "결산 연도를 입력하세요.");
-
-    try {
-        closingContext = await buildClosingContext(yearVal);
-    } catch (error) {
-        closingContext = null;
-        return showAlert('결산 확인 실패', error.message || String(error));
-    }
-    const ctx = closingContext;
+    if (!Number.isInteger(yearVal)||yearVal<1900||yearVal>2100) {closingPreparedScope=null;cancelAccountingRead('closing');document.getElementById('btnClosingRun').disabled=true;document.getElementById('closingReadStatus').textContent='결산 연도를 확인해 주세요.';return Promise.resolve(false);}
+    const pane=document.querySelector('.tab-content.no-print>.tab-pane.active')?.id;
+    const scope=accountingReadScope(pane,{modal:'closingModal',valid:()=>Number(document.getElementById('closingYearInput').value)===yearVal});
+    if(!accountingReadScopeCurrent(scope))return Promise.resolve(false);
+    if(closingFormOwner!==scope.identity){closingFormOwner=scope.identity;closingYearDrafts.clear();closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;}
+    rememberClosingDraft();const before=closingInputSnapshot(),saved={...(closingYearDrafts.get(yearVal)||{})};closingActiveYear=yearVal;
+    const status=document.getElementById('closingReadStatus'),button=document.getElementById('btnClosingRun'),calc=document.getElementById('btnClosingCalc');
+    return runAccountingRead('closing',String(yearVal),scope,read=>buildClosingContext(yearVal,{signal:read.controller.signal}),ctx=>{
+    if(Number(ctx.year)!==yearVal)throw Error('CLOSING_YEAR_MISMATCH');
+    const latest=closingInputSnapshot(),preserve={...saved,...Object.fromEntries(Object.entries(latest).filter(([id,value])=>value!==before[id]))};
+    closingContext=ctx;closingPreparedScope=scope;
+    for(const id of Object.keys(before))document.getElementById(id).value='0';
     document.getElementById("closingPrepaidNationalTaxInput").value = String(ctx.prepaidTaxSummary?.national || 0);
     document.getElementById("closingPrepaidLocalTaxInput").value = String(ctx.prepaidTaxSummary?.local || 0);
     document.getElementById("closingCapitalInfo").innerText = `출자금 누적: ${ctx.capitalTotal.toLocaleString()}원 · 법정적립금 누적: ${ctx.legalBalance.toLocaleString()}원 · 3배 기준 ${ctx.thresholdMet ? '충족' : '미충족'}\n남은 재고: ${Number(ctx.inventoryValuation.quantity || 0).toLocaleString()}개 · 취득원가 ${Number(ctx.inventoryValuation.cost || 0).toLocaleString()}원 · 장부 조정 ${ctx.inventoryDelta.toLocaleString()}원`;
     syncClosingFormState(true);
+    closingFormBaseline=closingInputSnapshot();closingBaselineYear=yearVal;
+    if(!ctx.isClosed){
+        for(const [id,value] of Object.entries(preserve))document.getElementById(id).value=value;
+        closingTaxExpenseManual=Object.hasOwn(preserve,'closingTaxExpenseInput');syncClosingFormState(false,{preserveManualTax:true});
+        for(const [id,value] of Object.entries(preserve))document.getElementById(id).value=value;
+        handleClosingLegalInputChange();
+    }
+    status.textContent='';rememberClosingDraft();
+    },message=>{closingPreparedScope=null;button.disabled=true;status.textContent=message.replace('다시 확인','재계산');},{
+        start:()=>{closingPreparedScope=null;button.disabled=true;status.textContent=yearVal+'년 결산 자료를 불러오는 중입니다.';calc.setAttribute('aria-busy','true');},
+        finish:()=>{calc.setAttribute('aria-busy','false');button.disabled=!closingPreparedScope||!accountingReadScopeCurrent(closingPreparedScope)||!!closingContext?.isClosed||!canPerform('accounting.edit');},
+        cancel:()=>{closingPreparedScope=null;button.disabled=true;calc.setAttribute('aria-busy','false');status.textContent='재계산을 눌러 결산 자료를 확인해 주세요.';}
+    });
 }
 
 function handleClosingLegalInputChange() {
@@ -8126,10 +8332,13 @@ function handleClosingLegalInputChange() {
 }
 
 async function runClosingFromModal() {
-    if (!closingContext) await refreshClosingContext();
-    if (!closingContext) return;
+    if(!canPerform('accounting.edit'))return showAlert('수정 권한이 없습니다.');
+    if (!closingPreparedScope || !accountingReadScopeCurrent(closingPreparedScope) || accountingReadTasks.has('closing')) await refreshClosingContext();
+    if (!closingPreparedScope || !accountingReadScopeCurrent(closingPreparedScope) || accountingReadTasks.has('closing') || Number(closingContext?.year)!==Number(document.getElementById('closingYearInput').value)) return;
 
     const ctx = closingContext;
+    const actionRevision=closingActionRevision,signature=JSON.stringify(closingInputSnapshot()),scope={...closingPreparedScope,modal:null};
+    const current=()=>actionRevision===closingActionRevision&&accountingReadScopeCurrent(scope)&&canPerform('accounting.edit')&&signature===JSON.stringify(closingInputSnapshot());
     if (ctx.isClosed) return showAlert("알림", `이미 ${ctx.year}년도 결산이 완료되어 읽기 전용으로만 확인할 수 있습니다.`);
     if (Number(ctx.inventoryValuation.unpriced_quantity || 0) > 0) {
         return showAlert('재고 원가 확인', `원가가 확인되지 않은 재고 ${Number(ctx.inventoryValuation.unpriced_quantity).toLocaleString()}개가 남아 있어 결산을 진행할 수 없습니다.`);
@@ -8158,11 +8367,14 @@ async function runClosingFromModal() {
     try {
         fundSyncCheck = await checkAccountingFundSyncBeforeClosing(ctx.year);
     } catch (syncCheckError) {
+        if(!current())return;
         return showAlert(
             "결산 전 자동연동 확인 실패",
             "출자금·기부금 연동 상태를 확인하지 못해 결산을 중단했습니다.\n" + (syncCheckError?.message || '알 수 없는 오류')
         );
     }
+
+    if(!current())return;
 
     const pendingCapital = Number(fundSyncCheck?.capital?.pendingCount || 0);
     const pendingDonation = Number(fundSyncCheck?.donation?.pendingCount || 0);
@@ -8182,9 +8394,11 @@ async function runClosingFromModal() {
 
     const confirmMessage = `${ctx.year}년 결산을 진행합니다.\n남은 재고 ${Number(ctx.inventoryValuation.quantity || 0).toLocaleString()}개 · 취득원가 ${Number(ctx.inventoryValuation.cost || 0).toLocaleString()}원 · 재고자산 조정 ${ctx.inventoryDelta.toLocaleString()}원\n법인세 차감전 당기순이익: ${ctx.preTaxNetIncome.toLocaleString()}원\n추정 과세표준: ${estimate.taxBase.toLocaleString()}원\n추정 법인세(국세, 공제후): ${estimate.nationalAfterCredit.toLocaleString()}원\n추정 법인지방소득세: ${estimate.localTax.toLocaleString()}원\n세액공제/감면: ${estimate.creditApplied.toLocaleString()}원\n기납부 법인세(국세): ${estimate.prepaidNationalApplied.toLocaleString()}원\n기납부 법인지방소득세: ${estimate.prepaidLocalApplied.toLocaleString()}원\n예상 국세 납부액: ${estimate.expectedNationalPayable.toLocaleString()}원\n예상 지방세 납부액: ${estimate.expectedLocalPayable.toLocaleString()}원\n예상 합계 납부세액: ${estimate.expectedPayable.toLocaleString()}원\n반영 법인세비용: ${taxExpense.toLocaleString()}원\n법인세 차감후 당기순손익: ${ctx.netIncome.toLocaleString()}원\n법정적립: ${legal.toLocaleString()}원\n임의적립: ${vol.toLocaleString()}원`;
     const confirmAction = async () => {
+        if(!current())return;
         let latest;
         try { latest = await buildClosingContext(ctx.year); }
-        catch (error) { return showAlert('결산 확인 실패', error.message || String(error)); }
+        catch (error) { if(current())return showAlert('결산 확인 실패', error.message || String(error));return; }
+        if(!current())return;
         if (latest.isClosed || latest.inventoryDelta !== ctx.inventoryDelta ||
             Number(latest.inventoryValuation.unpriced_quantity || 0) > 0 ||
             Number(latest.inventoryValuation.pending_approval_count || 0) > 0 ||
@@ -8198,7 +8412,7 @@ async function runClosingFromModal() {
     if (closingEl && closingEl.classList.contains('show')) {
         const onClosingHidden = () => {
             closingEl.removeEventListener('hidden.bs.modal', onClosingHidden);
-            showConfirm("연말결산 실행", confirmMessage, confirmAction, { returnModalId: 'closingModal' });
+            if(current())showConfirm("연말결산 실행", confirmMessage, confirmAction, { returnModalId: 'closingModal' });
         };
         closingEl.addEventListener('hidden.bs.modal', onClosingHidden);
         closingModal.hide();
@@ -8755,7 +8969,7 @@ function confirmSync(type) {
                 window.ERPWorkflowEase.publishSyncReview({ plans: [], blockedDocs: runPlanResult.blockedDocs, done: true });
                 refreshDashboard();
                 loadHistory();
-                loadApprovalUnclassifiedQueue();
+                loadApprovalUnclassifiedQueue({refresh:true});
             });
           } catch (error) {
             showAlert('연동 확인 실패', error?.message || '전자결재 연동 내용을 확인하지 못했습니다. 다시 시도해 주세요.');
