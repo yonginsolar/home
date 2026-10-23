@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.215
-Change: 2026-10-23 - Retry incoming account reads and keep confirmation focus in place.
+Version: v1.0.216
+Change: 2026-10-23 - Continue connection request focus after retries and refreshed confirmations.
 -->
 <html lang="ko">
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-23 - Retry incoming account reads and keep confirmation focus in
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.215 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.216 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -10892,9 +10892,72 @@ retry.hidden = request.phase !== 'failed';
 retry.disabled = !!portalIncomingConnectAnswer;
 }
 
-function retryIncomingConnects(request = portalIncomingConnectRequest) {
+function captureIncomingConnectFocus(request, trigger, options = {}) {
+if (!isCurrentIncomingConnectRequest(request) || !trigger?.isConnected) return null;
+const dialog = options.dialog;
+const hostDocument = dialog?.ownerDocument || document;
+if (document.activeElement !== trigger && !dialog?.contains(hostDocument.activeElement)) return null;
+let displaced = false;
+const documents = new Set([document, hostDocument]);
+const belongs = node => node === trigger || node === window.frameElement || dialog?.contains(node);
+const onFocus = event => {
+if (!belongs(event.target) && !['BODY', 'HTML'].includes(event.target?.tagName)) displaced = true;
+};
+const onPointer = event => { if (!belongs(event.target)) displaced = true; };
+documents.forEach(doc => {
+doc.addEventListener('focusin', onFocus, true);
+doc.addEventListener('pointerdown', onPointer, true);
+});
+return {
+request, trigger, hostDocument, menuRevision: portalApplicationRequest,
+appId: options.appId, decision: options.decision, untouched: () => !displaced,
+release: () => documents.forEach(doc => {
+doc.removeEventListener('focusin', onFocus, true);
+doc.removeEventListener('pointerdown', onPointer, true);
+})
+};
+}
+
+async function restoreIncomingConnectFocus(focus) {
+if (!focus) return;
+try {
+const origin = focus.request;
+const sameScreen = () => focus.untouched() && !document.hidden &&
+origin.actor === String(curAuth?.id || '') && origin.coop === String(currentMemberCoopId || '') &&
+origin.member === String(curMem?.id || '') && origin.profileRevision === portalProfileLoadRevision &&
+focus.menuRevision === portalApplicationRequest && origin.container === document.getElementById('dashboardSection') &&
+origin.container.isConnected && !window.frameElement?.hidden;
+let current = portalIncomingConnectRequest;
+while (sameScreen() && isCurrentIncomingConnectRequest(current) && current.phase === 'loading' && current.readFinished) {
+await current.readFinished;
+const next = portalIncomingConnectRequest;
+if (next === current && current.phase === 'loading') return;
+current = next;
+}
+if (!sameScreen() || !isCurrentIncomingConnectRequest(current) || portalIncomingConnectAnswer ||
+!['ready', 'failed'].includes(current.phase)) return;
+const active = document.activeElement;
+if (active !== focus.trigger && !['BODY', 'HTML'].includes(active?.tagName)) return;
+const hostActive = focus.hostDocument.activeElement;
+if (focus.hostDocument !== document && hostActive !== window.frameElement && !['BODY', 'HTML'].includes(hostActive?.tagName)) return;
+if (focus.hostDocument.querySelector('dialog[open], .modal.show')) return;
+const panel = document.getElementById('connectRequestAlert');
+let target;
+if (current.phase === 'failed') target = panel?.querySelector('.connect-request-retry');
+else if (current.ids.size) {
+const index = [...current.ids].indexOf(Number(focus.appId));
+const row = panel?.querySelectorAll('.connect-request-row')[index >= 0 ? index : 0];
+target = row?.querySelector(`[data-connect-answer="${index >= 0 && focus.decision === 'approve' ? 'approve' : 'reject'}"]`);
+} else target = document.getElementById('btnEditProfile');
+if (target?.isConnected && !target.disabled && !target.hidden && target.getClientRects().length) target.focus({ preventScroll: true });
+} finally { focus.release(); }
+}
+
+async function retryIncomingConnects(request = portalIncomingConnectRequest) {
 if (!isCurrentIncomingConnectRequest(request) || request.phase !== 'failed' || portalIncomingConnectAnswer) return;
-return checkIncomingConnects();
+const focus = captureIncomingConnectFocus(request, document.querySelector('#connectRequestAlert .connect-request-retry'));
+try { await checkIncomingConnects(); }
+finally { await restoreIncomingConnectFocus(focus); }
 }
 
 // Reads may be retried; answering still uses the original server permission checks.
@@ -10947,6 +11010,7 @@ syncIncomingConnectStatus(request, '연결 요청을 확인하고 있어요.');
 const controller = new AbortController();
 let timer, cancel;
 const cancelled = new Promise(resolve => { cancel = () => resolve(null); });
+request.readFinished = cancelled;
 request.cancelRead = () => { clearTimeout(timer); controller.abort(); cancel(); };
 try {
 const timeout = new Promise((_, reject) => {
@@ -11010,7 +11074,7 @@ request.cancelRead();
 }
 }
 
-async function confirmIncomingConnect(actionText) {
+async function confirmIncomingConnect(actionText, request = portalIncomingConnectRequest, trigger = null, appId = null, decision = null) {
 let host = window;
 try {
 while (host.parent !== host && host.parent.location.origin === host.location.origin && host.parent.CoopDialog) host = host.parent;
@@ -11020,6 +11084,7 @@ const choice = window.CoopDialog.confirm(`이 연결 요청을 ${actionText}할�
 title: '계정 연결 요청', confirmText: actionText, cancelText: '취소'
 });
 const dialog = host.document.querySelector('dialog.coop-dialog[open]');
+const focus = captureIncomingConnectFocus(request, trigger, { dialog, appId, decision });
 const keepFocus = event => {
 if (event.key !== 'Tab' || !dialog?.open) return;
 const controls = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), a[href]')]
@@ -11032,8 +11097,14 @@ event.stopImmediatePropagation();
 controls[next].focus({ preventScroll: true });
 };
 dialog?.addEventListener('keydown', keepFocus, true);
-try { return await choice; }
-finally { dialog?.removeEventListener('keydown', keepFocus, true); }
+try {
+const confirmed = await choice;
+if (!confirmed) await restoreIncomingConnectFocus(focus);
+return confirmed;
+} finally {
+dialog?.removeEventListener('keydown', keepFocus, true);
+focus?.release();
+}
 }
 
 async function answerConnect(appId, decision, request = portalIncomingConnectRequest, trigger = null) {
@@ -11050,7 +11121,7 @@ return;
 request.confirming = true;
 try {
 if (trigger?.isConnected && !trigger.disabled) trigger.focus({ preventScroll: true });
-const confirmed = await confirmIncomingConnect(actionText);
+const confirmed = await confirmIncomingConnect(actionText, request, trigger, appId, decision);
 if (!confirmed || !current() || portalIncomingConnectAnswer) return;
 } catch (_) {
 if (isCurrentIncomingConnectRequest(request)) {
