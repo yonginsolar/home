@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.171
-Change: 2026-10-23 - Recover stalled public reads and preserve news on pagination failure.
+Version: v1.0.172
+Change: 2026-10-23 - Separate news detail cache from pagination and retain retry focus.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -11,7 +11,7 @@ Change: 2026-10-23 - Recover stalled public reads and preserve news on paginatio
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.171 | index.html');</script>
+<script>console.log('[Version] v1.0.172 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1792,7 +1792,7 @@ Change: 2026-10-23 - Recover stalled public reads and preserve news on paginatio
 <script src="shared/home_preview_editor.js?v=20261019-frame-scroll-1" defer></script>
 <script src="shared/hero_banner.js?v=1.5.0" defer></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
-<script src="shared/home_progressive.js?v=20261023-2" integrity="sha384-FR6XaYs0VN0ApRsaE5Srd+rKA4HYoxxkZgkIr8PplD6g2n4xZDWiG8chIm3YaAuN" crossorigin="anonymous" defer></script>
+<script src="shared/home_progressive.js?v=20261023-3" integrity="sha384-px6WJAuCM53uUaqxVd38tnhTQoEuGSl7o9+9m0SydxN2p6AZ2QMi52Mf9fpUuz3i" crossorigin="anonymous" defer></script>
 <link rel="stylesheet" href="shared/hero_banner.css?v=1.8.1">
   <link rel="stylesheet" href="shared/home_design.css?v=20261015-2">
 </head>
@@ -3632,8 +3632,8 @@ Change: 2026-10-23 - Recover stalled public reads and preserve news on paginatio
         if (window.CoopHomeProgressive) return;
         if (!publicHomeToolRequest) publicHomeToolRequest = new Promise((resolve,reject) => {
             const script = document.createElement('script');
-            script.src = 'shared/home_progressive.js?v=20261023-2';
-            script.integrity = 'sha384-FR6XaYs0VN0ApRsaE5Srd+rKA4HYoxxkZgkIr8PplD6g2n4xZDWiG8chIm3YaAuN';
+            script.src = 'shared/home_progressive.js?v=20261023-3';
+            script.integrity = 'sha384-px6WJAuCM53uUaqxVd38tnhTQoEuGSl7o9+9m0SydxN2p6AZ2QMi52Mf9fpUuz3i';
             script.crossOrigin = 'anonymous';
             const timer = setTimeout(() => { script.remove(); reject(Error('TOOL_UNAVAILABLE')); },15000);
             script.onload = () => { clearTimeout(timer); window.CoopHomeProgressive ? resolve() : reject(Error('TOOL_UNAVAILABLE')); };
@@ -4426,6 +4426,8 @@ const ACTIVITY_PAGE_SIZE = 3;
 const EXTERNAL_NEWS_PAGE_SIZE = 5;
 let g_activity_has_more = true;
 let g_activity_loading_more = false;
+let g_activity_next_offset = 0;
+const g_activity_detail_cache = new Map();
 const publicNewsAttempts = new Map();
 
 function beginPublicNewsRead(key, parent) {
@@ -4446,7 +4448,9 @@ function beginPublicNewsRead(key, parent) {
 function publicNewsReadFailure(key, retry) {
     const container = document.getElementById(key === 'activities' ? 'activities-container' : `${key}-news-list`);
     if (!container) return;
-    clearPublicNewsReadFailure(key);
+    // Keep the same retry button: keyboard focus stays here unless the user
+    // deliberately moves to another input, menu or window while awaiting it.
+    if (document.getElementById(`home-news-retry-${key}`)) return;
     const row = document.createElement('div');
     row.id = `home-news-retry-${key}`;
     row.className = 'home-read-status py-3';
@@ -4456,7 +4460,7 @@ function publicNewsReadFailure(key, retry) {
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'btn btn-sm btn-outline-secondary';
     button.textContent = '다시 확인';
-    button.onclick = () => { void retry(); };
+    button.onclick = () => { if (button.getAttribute('aria-disabled') !== 'true') void retry(); };
     row.append(text, button); container.after(row);
 }
 
@@ -4469,7 +4473,12 @@ function setPublicNewsReadBusy(key, busy) {
     container?.setAttribute('aria-busy', String(busy));
     container?.querySelectorAll('.activity-load-more-card,.external-news-more-btn').forEach(button => { button.disabled = busy; });
     const retry = document.querySelector(`#home-news-retry-${key} button`);
-    if (retry) retry.disabled = busy;
+    if (retry) {
+        retry.setAttribute('aria-disabled', String(busy));
+        retry.setAttribute('aria-busy', String(busy));
+        retry.classList.toggle('disabled', busy);
+        retry.textContent = busy ? '확인 중…' : '다시 확인';
+    }
 }
 const ACTIVITY_CARD_IMAGE_WIDTH = 640;
 const ACTIVITY_CARD_IMAGE_HEIGHT = 420;
@@ -4948,6 +4957,8 @@ async function fetchActivities(parent) {
         if (!attempt.isCurrent()) return false;
         if (error) throw Error('PUBLIC_READ_FAILED');
         g_activity_list = data;
+        g_activity_next_offset = data.length;
+        g_activity_detail_cache.clear();
         g_activity_has_more = hasMore;
         clearPublicNewsReadFailure('activities');
         renderActivityCards(g_activity_list);
@@ -4968,10 +4979,11 @@ async function fetchMoreActivities() {
     g_activity_loading_more = true;
     setPublicNewsReadBusy('activities', true);
     try {
-    const { data, hasMore, error } = await fetchActivityPage(g_activity_list.length, attempt);
+    const { data, hasMore, error } = await fetchActivityPage(g_activity_next_offset, attempt);
     if (!attempt.isCurrent()) return false;
     if (error) throw Error('PUBLIC_READ_FAILED');
     clearPublicNewsReadFailure('activities');
+    g_activity_next_offset += data.length;
     g_activity_has_more = hasMore;
     if (data.length === 0) {
         syncActivityLoadMoreCard(document.getElementById('activities-container'));
@@ -5002,7 +5014,7 @@ async function fetchMoreActivities() {
 async function resolveActivityDetailItem(id) {
     const safeId = String(id || '').trim();
     if (!safeId) return null;
-    const cached = g_activity_list.find((row) => String(row?.id || '') === safeId);
+    const cached = g_activity_list.find((row) => String(row?.id || '') === safeId) || g_activity_detail_cache.get(safeId);
     if (cached) return cached;
 
     const { data, error } = await (await scopePublicTenant(_client.from('site_documents')
@@ -5017,7 +5029,7 @@ async function resolveActivityDetailItem(id) {
         return null;
     }
     const row = Array.isArray(data) ? data[0] : null;
-    if (row) g_activity_list.push(row);
+    if (row) g_activity_detail_cache.set(safeId, row);
     return row || null;
 }
 

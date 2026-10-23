@@ -1,4 +1,4 @@
-/* Homepage demand loader v1.0.1. Public reads only; no persistence or Auth cache. */
+/* Homepage demand loader v1.0.2. Public reads only; no persistence or Auth cache. */
 (function (host) {
   'use strict';
   function create(options) {
@@ -31,9 +31,26 @@
       for (const node of statusNodes(job)) {
         node.dataset.homeLoadState = state;
         node.setAttribute('aria-busy', String(state === 'loading'));
-        node.querySelector(`[data-home-read-status="${job.key}"]`)?.remove();
-        if (state !== 'failed') continue;
-        const row = document.createElement('div');
+        let row = node.querySelector(`[data-home-read-status="${job.key}"]`);
+        if (state !== 'failed') {
+          if (state === 'loading' && row) {
+            const retry = row.querySelector('button');
+            retry.setAttribute('aria-disabled', 'true');
+            retry.setAttribute('aria-busy', 'true');
+            retry.classList.add('disabled');
+            retry.textContent = '확인 중…';
+          } else row?.remove();
+          continue;
+        }
+        if (row) {
+          const retry = row.querySelector('button');
+          retry.setAttribute('aria-disabled', 'false');
+          retry.setAttribute('aria-busy', 'false');
+          retry.classList.remove('disabled');
+          retry.textContent = '다시 확인';
+          continue;
+        }
+        row = document.createElement('div');
         row.dataset.homeReadStatus = job.key;
         row.className = 'home-read-status container py-3';
         const text = document.createElement('span');
@@ -41,7 +58,7 @@
         const retry = document.createElement('button');
         retry.type = 'button'; retry.className = 'btn btn-sm btn-outline-secondary';
         retry.textContent = '다시 확인';
-        retry.onclick = () => { void load(job.key, true); };
+        retry.onclick = () => { if (retry.getAttribute('aria-disabled') !== 'true') void load(job.key, true); };
         row.append(text, retry); node.append(row);
       }
     }
