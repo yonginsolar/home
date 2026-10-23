@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.9
-Change: 2026-10-20 - Preserve manually added board text annexes during regeneration.
+Version: v1.10.10
+Change: 2026-10-23 - Keep new-meeting drafts until explicitly discarded.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
@@ -75,6 +75,72 @@ let meetingDefaultsReady = false;
 let meetingHistoryPending = null;
 let meetingHistoryReady = false;
 let meetingDefaultsRevision = 0;
+const newPackageDrafts = new Map();
+let newPackageDraftOwner = '', newPackageDraftKey = '', newPackageDraftBaseline = '';
+let newPackageDialogRevision = 0;
+
+function newPackageOwnerKey() {
+  return state.session?.user?.id && state.runtime?.coop_id
+    ? JSON.stringify([state.session.user.id, state.runtime.coop_id, pdfIdentityRevision]) : '';
+}
+function newPackageValues() {
+  return JSON.stringify([$('newMeetingNumber').value, $('newMeetingTitle').value]);
+}
+function rememberNewPackageDraft() {
+  if (!newPackageDraftKey || !newPackageDraftOwner || newPackageDraftOwner !== newPackageOwnerKey()) return;
+  const values = newPackageValues();
+  if (values === newPackageDraftBaseline) newPackageDrafts.delete(newPackageDraftKey);
+  else newPackageDrafts.set(newPackageDraftKey, {values, baseline:newPackageDraftBaseline});
+  syncNewPackageDraftUi();
+}
+function hasUnsavedNewPackageDraft() {
+  if (!newPackageDraftOwner || newPackageDraftOwner !== newPackageOwnerKey()) return false;
+  return newPackageDrafts.size > 0 || (!!newPackageDraftKey && newPackageValues() !== newPackageDraftBaseline);
+}
+function syncNewPackageDraftUi() {
+  const dirty = !!newPackageDraftKey && newPackageValues() !== newPackageDraftBaseline;
+  $('discardNewPackage').disabled = !dirty || state.loading;
+  $('newPackageDraftStatus').textContent = dirty ? '작성 중' : '';
+}
+function activateNewPackageDraft() {
+  rememberNewPackageDraft();
+  const owner = newPackageOwnerKey();
+  if (owner !== newPackageDraftOwner) {
+    newPackageDrafts.clear(); newPackageDraftOwner = owner;
+  }
+  newPackageDraftKey = JSON.stringify([$('newMeetingType').value, $('newMeetingType').value === 'GENERAL_ASSEMBLY' ? $('newAssemblyKind').value : '']);
+  $('newAssemblyKindField').hidden = $('newMeetingType').value !== 'GENERAL_ASSEMBLY';
+  const draft = newPackageDrafts.get(newPackageDraftKey);
+  if (draft) {
+    const [number, title] = JSON.parse(draft.values);
+    $('newMeetingNumber').value = number; $('newMeetingTitle').value = title;
+    newPackageDraftBaseline = draft.baseline;
+  } else {
+    fillNewPackageSuggestion(); newPackageDraftBaseline = newPackageValues();
+    window.ErpWorkspaceResume?.checkpoint($('newPackageModal'));
+  }
+  syncNewPackageDraftUi();
+}
+function closeNewPackage() {
+  rememberNewPackageDraft(); newPackageDialogRevision++;
+  $('newPackageModal').classList.remove('show');
+  if (!window.frameElement?.hidden) $('newPackageButton').focus({preventScroll:true});
+}
+function clearNewPackageDrafts() {
+  newPackageDialogRevision++; newPackageDrafts.clear();
+  newPackageDraftOwner = ''; newPackageDraftKey = ''; newPackageDraftBaseline = '';
+  $('newPackageModal').classList.remove('show');
+  $('newMeetingTitle').value = ''; $('newMeetingNumber').value = '';
+}
+async function discardNewPackageDraft() {
+  if (state.loading || !newPackageDraftKey) return;
+  const owner = newPackageOwnerKey(), key = newPackageDraftKey, values = newPackageValues(), revision = newPackageDialogRevision;
+  if (!(await window.CoopDialog.confirm('이 초안을 버릴까요?'))) return;
+  if (!owner || owner !== newPackageOwnerKey() || key !== newPackageDraftKey || values !== newPackageValues()
+    || revision !== newPackageDialogRevision || state.loading || window.frameElement?.hidden || !$('newPackageModal').classList.contains('show')) return;
+  newPackageDrafts.delete(key); fillNewPackageSuggestion(); newPackageDraftBaseline = newPackageValues();
+  window.ErpWorkspaceResume?.checkpoint($('newPackageModal')); syncNewPackageDraftUi();
+}
 
 function meetingDefaultsStillCurrent(owner) {
   return state.session?.user?.id === owner.userId && state.runtime?.coop_id === owner.coopId
@@ -114,8 +180,10 @@ async function ensureMeetingDefaults({ history = false } = {}) {
 }
 
 async function openNewPackage() {
+  const revision = ++newPackageDialogRevision;
   await ensureMeetingDefaults({ history:true });
-  fillNewPackageSuggestion();
+  if (revision !== newPackageDialogRevision || window.frameElement?.hidden) return;
+  activateNewPackageDraft();
   $('newPackageModal').classList.add('show');
 }
 
@@ -378,6 +446,7 @@ function setBusy(value) {
     renderBookletSourceOptions();
     if (chapterMode()) renderChapterEditState();
   }
+  syncNewPackageDraftUi();
 }
 
 function hasUnsavedPacketChanges() {
@@ -1952,9 +2021,12 @@ async function openPackage(id, { internal = false } = {}) {
 }
 
 async function createPackage() {
+  rememberNewPackageDraft();
+  const draftOwner = newPackageOwnerKey(), draftKey = newPackageDraftKey, draftValues = newPackageValues();
   const title = $('newMeetingTitle').value.trim();
   if (!title) throw new Error('회의 제목을 입력하세요.');
   const type = $('newMeetingType').value;
+  const number = $('newMeetingNumber').value.trim(), assemblyKind = $('newAssemblyKind').value;
   const sources = type === 'BOARD' ? state.packages.filter(row => row.meeting_type === 'BOARD' && isPastPackage(row))
     .sort((a, b) => String(b.meeting_date).localeCompare(String(a.meeting_date))
       || String(b.updated_at || '').localeCompare(String(a.updated_at || ''))) : [];
@@ -1971,10 +2043,10 @@ async function createPackage() {
   const chair = chairCandidates().find(row => officialRole(row) === '이사장') || null;
   const { data, error } = await MeetingPackageService.createPackage({
     meeting_type: type,
-    assembly_kind: type === 'GENERAL_ASSEMBLY' ? $('newAssemblyKind').value : null,
+    assembly_kind: type === 'GENERAL_ASSEMBLY' ? assemblyKind : null,
     title,
-    meeting_number: $('newMeetingNumber').value.trim() || null,
-    fiscal_year: type === 'GENERAL_ASSEMBLY' && $('newAssemblyKind').value !== 'EXTRAORDINARY' ? new Date().getFullYear() - 1 : null,
+    meeting_number: number || null,
+    fiscal_year: type === 'GENERAL_ASSEMBLY' && assemblyKind !== 'EXTRAORDINARY' ? new Date().getFullYear() - 1 : null,
     eligible_count: candidates.length,
     chair_official_id: chair?.id || null
   });
@@ -1996,9 +2068,16 @@ async function createPackage() {
       throw new Error('새 회의는 만들었지만 지난 시나리오를 불러오지 못했습니다. 중복으로 새 회의를 만들지 말고 현재 회의를 확인해 주세요.');
     }
   }
-  $('newPackageModal').classList.remove('show');
-  $('newMeetingTitle').value = '';
-  $('newMeetingNumber').value = '';
+  if (draftOwner === newPackageOwnerKey()) {
+    if (newPackageDrafts.get(draftKey)?.values === draftValues) newPackageDrafts.delete(draftKey);
+    if (draftKey === newPackageDraftKey && draftValues === newPackageValues()) {
+      newPackageDraftBaseline = draftValues;
+      closeNewPackage(); newPackageDraftKey = ''; newPackageDraftBaseline = '';
+      $('newMeetingTitle').value = ''; $('newMeetingNumber').value = '';
+      window.ErpWorkspaceResume?.checkpoint($('newPackageModal'));
+    } else rememberNewPackageDraft();
+  }
+  if (draftOwner !== newPackageOwnerKey()) return;
   await loadPackages(data.id);
   showToast(type === 'GENERAL_ASSEMBLY'
     ? '새 총회 준비 공간과 자료집·시나리오 초안을 만들었습니다.'
@@ -2209,9 +2288,12 @@ async function runAction(action) {
 function bindEvents() {
   $('backToDocuments').addEventListener('click', () => { location.href = '../erp/governance.html'; });
   $('newPackageButton').addEventListener('click', () => runAction(openNewPackage));
-  $('newMeetingType').addEventListener('change', fillNewPackageSuggestion);
-  $('newAssemblyKind').addEventListener('change', fillNewPackageSuggestion);
-  $('cancelNewPackage').addEventListener('click', () => $('newPackageModal').classList.remove('show'));
+  $('newMeetingType').addEventListener('change', activateNewPackageDraft);
+  $('newAssemblyKind').addEventListener('change', activateNewPackageDraft);
+  $('newMeetingTitle').addEventListener('input', rememberNewPackageDraft);
+  $('newMeetingNumber').addEventListener('input', rememberNewPackageDraft);
+  $('cancelNewPackage').addEventListener('click', closeNewPackage);
+  $('discardNewPackage').addEventListener('click', () => void discardNewPackageDraft());
   $('createPackageButton').addEventListener('click', () => runAction(createPackage));
   $('deletePackageButton').addEventListener('click', () => runAction(deletePackage));
   $('saveInfoButton').addEventListener('click', () => runAction(saveInfo));
@@ -2361,7 +2443,7 @@ function bindEvents() {
     state.documentDirty = true;
   }));
   window.addEventListener('beforeunload', event => {
-    if (!hasUnsavedPacketChanges()) return;
+    if (!hasUnsavedPacketChanges() && !hasUnsavedNewPackageDraft()) return;
     event.preventDefault();
     event.returnValue = '';
   });
@@ -2377,6 +2459,7 @@ async function init() {
       meetingHistoryReady = false;
       meetingDefaultsPending = null;
       meetingHistoryPending = null;
+      clearNewPackageDrafts();
     }
   });
   state.session = await MinutesService.getSession();
@@ -2404,7 +2487,7 @@ async function init() {
   if (packageResult.error) throw packageResult.error;
   state.packages = packageResult.data || [];
   renderPackages();
-  window.ErpWorkspaceResume.register({modules:['minutes'],busy:()=>state.loading||hasUnsavedPacketChanges(),authorize:async runtime=>{
+  window.ErpWorkspaceResume.register({modules:['minutes'],busy:()=>state.loading||hasUnsavedPacketChanges()||hasUnsavedNewPackageDraft(),authorize:async runtime=>{
     const perms=runtime.effective_permissions||[];
     return perms.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
       || await MinutesService.isAdmin(state.session.user.id,state.session.user.email);

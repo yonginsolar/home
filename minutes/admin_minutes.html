@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.86
+Version: v1.2.87
 Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, retaining drafts and files.
 -->
 <html lang="ko">
@@ -15,7 +15,7 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.86 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.87 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -642,8 +642,10 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
                 <textarea id="edit-content" class="form-control" style="height:200px;"></textarea>
             </div>
             <div class="modal-actions">
-                <button class="btn btn-gray" onclick="closeEdit()">취소</button>
-                <button class="btn btn-blue" onclick="saveEdit()">저장</button>
+                <span id="notice-edit-status" role="status" aria-live="polite"></span>
+                <button type="button" class="btn btn-gray" id="discardNoticeEdit" onclick="discardNoticeEdit()" disabled>초안 버리기</button>
+                <button type="button" class="btn btn-gray" onclick="closeEdit()">닫기</button>
+                <button type="button" class="btn btn-blue" id="saveNoticeEdit" onclick="saveEdit()">저장</button>
             </div>
         </div>
     </div>
@@ -833,6 +835,7 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
             window.addEventListener('pagehide', invalidateMinutesList);
             supabase.auth.onAuthStateChange((event, nextSession) => {
                 if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== currentUserId)) {
+                    clearNoticeEditDrafts();
                     invalidateMinutesList();
                     currentUserId = null;
                     isAdminUser = false;
@@ -1003,6 +1006,9 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
 
         let editTargetId = null;
         let noticeEditRequest = 0;
+        const noticeEditDrafts = new Map();
+        let noticeEditOwner = '', noticeEditBaseline = '', noticeEditSaving = false;
+        let noticeEditReturnFocus = null;
         let minuteEditTargetId = null;
         let minuteEditRequest = 0;
         let minutePreviewRequest = 0;
@@ -1029,32 +1035,97 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
             return data;
         }
 
+        function getNoticeEditOwner() {
+            return currentUserId && minutesListOwner.coopId
+                ? JSON.stringify([currentUserId, minutesListOwner.coopId]) : '';
+        }
+        function noticeEditSnapshot() {
+            return JSON.stringify([document.getElementById('edit-title').value, document.getElementById('edit-content').value]);
+        }
+        function rememberNoticeEditDraft() {
+            if (editTargetId == null || !noticeEditOwner || noticeEditOwner !== getNoticeEditOwner()) return;
+            const key = JSON.stringify([noticeEditOwner, String(editTargetId)]), values = noticeEditSnapshot();
+            if (values === noticeEditBaseline) noticeEditDrafts.delete(key);
+            else noticeEditDrafts.set(key, {values, baseline:noticeEditBaseline});
+            syncNoticeEditDraftUi();
+        }
+        function hasUnsavedNoticeEditDraft() {
+            const owner = getNoticeEditOwner();
+            return !!owner && ([...noticeEditDrafts.keys()].some(key => JSON.parse(key)[0] === owner)
+                || (editTargetId != null && noticeEditOwner === owner && noticeEditSnapshot() !== noticeEditBaseline));
+        }
+        function syncNoticeEditDraftUi() {
+            const current = editTargetId != null && noticeEditOwner === getNoticeEditOwner();
+            const dirty = current && noticeEditSnapshot() !== noticeEditBaseline;
+            document.getElementById('notice-edit-status').textContent = dirty ? '작성 중' : '';
+            document.getElementById('discardNoticeEdit').disabled = !dirty || noticeEditSaving;
+            document.getElementById('saveNoticeEdit').disabled = !current || noticeEditSaving;
+        }
+        function clearNoticeEditDrafts() {
+            noticeEditRequest++; noticeEditDrafts.clear(); editTargetId = null;
+            noticeEditOwner = ''; noticeEditBaseline = ''; noticeEditReturnFocus = null;
+            document.getElementById('editModal').classList.remove('show');
+            document.getElementById('edit-title').value = ''; document.getElementById('edit-content').value = '';
+            syncNoticeEditDraftUi();
+        }
+        async function discardNoticeEdit() {
+            if (noticeEditSaving || editTargetId == null) return;
+            const owner = noticeEditOwner, id = editTargetId, request = noticeEditRequest, snapshot = noticeEditSnapshot();
+            if (!(await window.CoopDialog.confirm('이 초안을 버릴까요?'))) return;
+            if (!owner || owner !== getNoticeEditOwner() || id !== editTargetId || request !== noticeEditRequest
+                || snapshot !== noticeEditSnapshot() || noticeEditSaving || window.frameElement?.hidden
+                || !document.getElementById('editModal').classList.contains('show')) return;
+            noticeEditDrafts.delete(JSON.stringify([owner, String(id)]));
+            noticeEditBaseline = snapshot; window.closeEdit();
+            document.getElementById('edit-title').value = ''; document.getElementById('edit-content').value = '';
+            window.ErpWorkspaceResume?.checkpoint(document.getElementById('editModal'));
+        }
+        window.discardNoticeEdit = discardNoticeEdit;
+        document.getElementById('editModal').addEventListener('input', rememberNoticeEditDraft);
+        window.addEventListener('beforeunload', event => {
+            if (!hasUnsavedNoticeEditDraft() && !noticeEditSaving) return;
+            event.preventDefault(); event.returnValue = '';
+        });
+
         async function openNoticeEdit(id) {
+            rememberNoticeEditDraft();
+            const opener = document.activeElement;
+            const owner = getNoticeEditOwner();
+            if (!owner || window.frameElement?.hidden) return;
             const request = ++noticeEditRequest;
-            const baseline = JSON.stringify([document.getElementById('edit-title').value, document.getElementById('edit-content').value]);
+            const baseline = noticeEditSnapshot();
             let item;
             try { item = await readNoticeDetails(id); }
-            catch (error) { if (request === noticeEditRequest) showToast(error.message); return; }
-            if (request !== noticeEditRequest || baseline !== JSON.stringify([document.getElementById('edit-title').value, document.getElementById('edit-content').value])) return;
+            catch (error) { if (request === noticeEditRequest && owner === getNoticeEditOwner() && !window.frameElement?.hidden) showToast(error.message); return; }
+            if (request !== noticeEditRequest || owner !== getNoticeEditOwner() || window.frameElement?.hidden || baseline !== noticeEditSnapshot()) return;
             const listed = noticeItems.find(n => String(n.approval?.id) === String(id));
             if (listed) Object.assign(listed, item);
             const approval = item.approval || {};
             const notice = item.notice || null;
-            editTargetId = id;
-            document.getElementById('edit-title').value = notice?.title || approval.title || '';
-            document.getElementById('edit-content').value = notice?.content || buildNoticeContentFromApproval(approval);
+            const saved = JSON.stringify([notice?.title || approval.title || '', notice?.content || buildNoticeContentFromApproval(approval)]);
+            const draft = noticeEditDrafts.get(JSON.stringify([owner, String(id)]));
+            editTargetId = id; noticeEditOwner = owner; noticeEditBaseline = draft?.baseline ?? saved;
+            const [title, content] = JSON.parse(draft?.values ?? saved);
+            document.getElementById('edit-title').value = title;
+            document.getElementById('edit-content').value = content;
             document.getElementById('editModal').classList.add('show');
+            if (opener && !document.getElementById('editModal').contains(opener)) noticeEditReturnFocus = opener;
+            syncNoticeEditDraftUi();
         }
         window.openNoticeEdit = openNoticeEdit;
 
         window.closeEdit = () => {
+            rememberNoticeEditDraft();
             noticeEditRequest++;
             document.getElementById('editModal').classList.remove('show');
             editTargetId = null;
+            if (!window.frameElement?.hidden && noticeEditReturnFocus?.isConnected && noticeEditReturnFocus.getClientRects().length) noticeEditReturnFocus.focus({preventScroll:true});
         };
 
         window.saveEdit = async () => {
-            if (!editTargetId) return;
+            if (!editTargetId || noticeEditSaving || noticeEditOwner !== getNoticeEditOwner()) return;
+            const owner = noticeEditOwner, target = editTargetId, request = noticeEditRequest, snapshot = noticeEditSnapshot();
+            const key = JSON.stringify([owner, String(target)]);
             const item = noticeItems.find(n => String(n.approval?.id) === String(editTargetId));
             if (!item) return;
             const approval = item.approval || {};
@@ -1076,13 +1147,22 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
                 p_file_names: notice?.file_names || null,
                 p_source_approval_id: approval.id || null
             };
-            const { error } = await MinutesService.upsertNotice(payload);
-            if (error) showToast(error.message);
-            else {
-                showToast('수정되었습니다.');
-                closeEdit();
-                loadNotices();
-            }
+            noticeEditSaving = true; syncNoticeEditDraftUi();
+            try {
+                const { error } = await MinutesService.upsertNotice(payload);
+                if (error) throw error;
+                if (owner !== getNoticeEditOwner()) return;
+                if (noticeEditDrafts.get(key)?.values === snapshot) noticeEditDrafts.delete(key);
+                if (request !== noticeEditRequest || target !== editTargetId) return;
+                noticeEditBaseline = snapshot;
+                if (noticeEditSnapshot() === snapshot) window.closeEdit();
+                else rememberNoticeEditDraft();
+                if (!window.frameElement?.hidden) { showToast('저장했습니다.'); void loadNotices(); }
+            } catch (error) {
+                if (owner === getNoticeEditOwner() && request === noticeEditRequest && target === editTargetId) {
+                    rememberNoticeEditDraft(); if (!window.frameElement?.hidden) showToast(error.message || '저장하지 못했습니다. 다시 시도해 주세요.');
+                }
+            } finally { noticeEditSaving = false; syncNoticeEditDraftUi(); }
         };
 
         window.openMinuteEdit = async (id, allow = true) => {
@@ -3908,6 +3988,7 @@ Change: 2026-10-20 - Refresh the authorized read-only list on workspace return, 
             switchTab(ADMIN_MINUTES_SCOPE || 'minutes');
             window.ErpWorkspaceResume.register({modules:['minutes'],authorize:async runtime=>{
                 invalidateMinutesList();
+                if (minutesListOwner.coopId && minutesListOwner.coopId !== runtime.coop_id) clearNoticeEditDrafts();
                 minutesListOwner = { userId:currentUserId, coopId:runtime.coop_id, revision:minutesListOwner.revision + 1 };
                 return runtime.effective_permissions.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
                     || await MinutesService.isAdmin(session.user.id,session.user.email);
