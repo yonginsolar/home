@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.214
-Change: 2026-10-23 - Keep incoming account requests current and readable.
+Version: v1.0.215
+Change: 2026-10-23 - Retry incoming account reads and keep confirmation focus in place.
 -->
 <html lang="ko">
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-23 - Keep incoming account requests current and readable.
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.214 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.215 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
@@ -819,6 +819,17 @@ flex-shrink: 0;
 gap: 8px;
 }
 #connectRequestAlert .connect-request-actions .btn { white-space: nowrap; }
+#connectRequestAlert .connect-request-status {
+display: flex;
+align-items: center;
+justify-content: space-between;
+flex-wrap: wrap;
+gap: 8px 12px;
+word-break: keep-all;
+overflow-wrap: anywhere;
+}
+#connectRequestAlert .connect-request-status[hidden] { display: none; }
+#connectRequestAlert .connect-request-retry { flex-shrink: 0; white-space: nowrap; }
 html[data-theme="dark"] #connectRequestAlert {
 background: #14243a;
 border-color: #42658c;
@@ -2599,6 +2610,7 @@ let portalProfileDraftOwner = '';
 let portalProfileSaving = false;
 let portalProfileLoadRevision = 0;
 let portalIncomingConnectRequest = null;
+let portalIncomingConnectAnswer = null;
 let portalProfileValidationRevision = 0;
 let portalProfileReadFailure = null;
 let portalProfileRetryRevision = 0;
@@ -2694,6 +2706,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+portalIncomingConnectRequest?.cancelRead?.();
 portalIncomingConnectRequest = null;
 document.getElementById('connectRequestAlert')?.remove();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
@@ -4898,6 +4911,7 @@ return memberInformationPortal.refresh(member);
 
 async function loadDashboardData(uuid, options = {}) {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
+if (typeof invalidateIncomingConnects === 'function') invalidateIncomingConnects();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
 invalidatePortalModifyEditor();
@@ -10848,48 +10862,109 @@ loadBoard(currentBoardCat); // 목록 갱신
 }
 });
 }
-// [신규] 나에게 온 연결 요청 확인 및 렌더링
+function isCurrentIncomingConnectRequest(request) {
+return !!request && portalIncomingConnectRequest === request &&
+request.actor === String(curAuth?.id || '') && request.coop === String(currentMemberCoopId || '') &&
+request.member === String(curMem?.id || '') && request.profileRevision === portalProfileLoadRevision &&
+request.container === document.getElementById('dashboardSection') && request.container.isConnected && !window.frameElement?.hidden;
+}
+
+function invalidateIncomingConnects() {
+portalIncomingConnectRequest?.cancelRead?.();
+portalIncomingConnectRequest = null;
+document.getElementById('connectRequestAlert')?.remove();
+}
+
+function syncIncomingConnectStatus(request, message = null) {
+if (!isCurrentIncomingConnectRequest(request)) return;
+const panel = document.getElementById('connectRequestAlert');
+if (!panel) return;
+const ready = request.phase === 'ready';
+panel.setAttribute('aria-busy', request.phase === 'loading' || request.phase === 'processing' ? 'true' : 'false');
+panel.querySelectorAll('[data-connect-answer]').forEach(button => {
+button.disabled = !ready || !!portalIncomingConnectAnswer;
+});
+const status = panel.querySelector('.connect-request-status');
+status.hidden = ready;
+if (message !== null) status.querySelector('[role="status"]').textContent = message;
+const retry = status.querySelector('button');
+retry.hidden = request.phase !== 'failed';
+retry.disabled = !!portalIncomingConnectAnswer;
+}
+
+function retryIncomingConnects(request = portalIncomingConnectRequest) {
+if (!isCurrentIncomingConnectRequest(request) || request.phase !== 'failed' || portalIncomingConnectAnswer) return;
+return checkIncomingConnects();
+}
+
+// Reads may be retried; answering still uses the original server permission checks.
 async function checkIncomingConnects() {
 const container = document.getElementById('dashboardSection');
+const previous = portalIncomingConnectRequest;
+previous?.cancelRead?.();
 const request = {
 actor: String(curAuth?.id || ''), coop: String(currentMemberCoopId || ''),
-member: String(curMem?.id || ''), profileRevision: portalProfileLoadRevision, container
+member: String(curMem?.id || ''), profileRevision: portalProfileLoadRevision, container,
+phase: 'loading', ids: new Set(), confirming: false
 };
 portalIncomingConnectRequest = request;
-if (!container || !request.actor || !request.coop || !request.member) {
+if (!container || !request.actor || !request.coop || !request.member || window.frameElement?.hidden) {
 document.getElementById('connectRequestAlert')?.remove();
 return;
 }
-const current = () => portalIncomingConnectRequest === request &&
-request.actor === String(curAuth?.id || '') && request.coop === String(currentMemberCoopId || '') &&
-request.member === String(curMem?.id || '') && request.profileRevision === portalProfileLoadRevision &&
-container === document.getElementById('dashboardSection') && container.isConnected && !window.frameElement?.hidden;
-try {
-const { data: requests, error } = await _supabase.rpc('get_my_pending_connects');
-if (!current()) return;
-if (error) throw error;
-if (!Array.isArray(requests)) throw new Error('INCOMING_CONNECT_READ_INVALID');
-
-const existingAlert = document.getElementById('connectRequestAlert');
-if(existingAlert) existingAlert.remove();
-if (requests.length === 0) return;
-
-const alertDiv = document.createElement('div');
+let alertDiv = document.getElementById('connectRequestAlert');
+if (alertDiv && (!previous || previous.actor !== request.actor || previous.coop !== request.coop || previous.member !== request.member)) {
+alertDiv.remove(); alertDiv = null;
+}
+if (!alertDiv) {
+alertDiv = document.createElement('div');
 alertDiv.id = 'connectRequestAlert';
 alertDiv.className = 'alert d-flex flex-column gap-2 mb-4 shadow-sm';
-
 const header = document.createElement('div');
 header.className = 'connect-request-heading d-flex align-items-center fw-bold';
 const headerIcon = document.createElement('i');
 headerIcon.className = 'bi bi-link-45deg fs-3 me-2';
 header.appendChild(headerIcon);
-header.appendChild(document.createTextNode('계정 연결 요청이 도착했습니다!'));
+header.appendChild(document.createTextNode('계정 연결 요청'));
 alertDiv.appendChild(header);
-
-// JSON 배열 순회
+const status = document.createElement('div');
+status.className = 'connect-request-status';
+const statusText = document.createElement('span');
+statusText.setAttribute('role', 'status');
+statusText.setAttribute('aria-live', 'polite');
+const retry = document.createElement('button');
+retry.type = 'button';
+retry.className = 'btn btn-sm btn-outline-primary connect-request-retry';
+retry.textContent = '다시 확인';
+status.append(statusText, retry);
+alertDiv.appendChild(status);
+const banner = document.getElementById('birthdayBanner');
+if (banner && banner.nextSibling) container.insertBefore(alertDiv, banner.nextSibling);
+else container.prepend(alertDiv);
+}
+alertDiv.querySelector('.connect-request-retry').onclick = () => retryIncomingConnects(request);
+syncIncomingConnectStatus(request, '연결 요청을 확인하고 있어요.');
+const controller = new AbortController();
+let timer, cancel;
+const cancelled = new Promise(resolve => { cancel = () => resolve(null); });
+request.cancelRead = () => { clearTimeout(timer); controller.abort(); cancel(); };
+try {
+const timeout = new Promise((_, reject) => {
+timer = setTimeout(() => { controller.abort(); reject(new Error('INCOMING_CONNECT_READ_TIMEOUT')); }, 15000);
+});
+const query = _supabase.rpc('get_my_pending_connects');
+const result = await Promise.race([typeof query.abortSignal === 'function' ? query.abortSignal(controller.signal) : query, timeout, cancelled]);
+if (!isCurrentIncomingConnectRequest(request) || !result) return;
+const { data: requests, error } = result;
+if (error) throw error;
+if (!Array.isArray(requests) || requests.some(req => !Number.isSafeInteger(Number(req?.app_id)) || Number(req.app_id) <= 0)) throw new Error('INCOMING_CONNECT_READ_INVALID');
+request.phase = 'ready';
+request.ids = new Set(requests.map(req => Number(req.app_id)));
+if (requests.length === 0) { alertDiv.remove(); return; }
+alertDiv.querySelectorAll('.connect-request-row').forEach(row => row.remove());
+alertDiv.querySelector('.connect-request-heading').lastChild.textContent = '계정 연결 요청이 도착했습니다!';
 requests.forEach(req => {
 const safeAppId = Number(req?.app_id);
-if (!Number.isFinite(safeAppId) || safeAppId <= 0) return;
 const requestRow = document.createElement('div');
 requestRow.className = 'connect-request-row bg-white p-3 rounded border mt-2';
 const requestText = document.createElement('div');
@@ -10910,62 +10985,111 @@ const rejectBtn = document.createElement('button');
 rejectBtn.type = 'button';
 rejectBtn.className = 'btn btn-sm btn-outline-danger';
 rejectBtn.textContent = '거절';
-rejectBtn.addEventListener('click', () => answerConnect(safeAppId, 'reject'));
+rejectBtn.dataset.connectAnswer = 'reject';
+rejectBtn.addEventListener('click', () => answerConnect(safeAppId, 'reject', request, rejectBtn));
 const approveBtn = document.createElement('button');
 approveBtn.type = 'button';
 approveBtn.className = 'btn btn-sm btn-primary fw-bold';
 approveBtn.textContent = '수락';
-approveBtn.addEventListener('click', () => answerConnect(safeAppId, 'approve'));
+approveBtn.dataset.connectAnswer = 'approve';
+approveBtn.addEventListener('click', () => answerConnect(safeAppId, 'approve', request, approveBtn));
 requestActions.appendChild(rejectBtn);
 requestActions.appendChild(approveBtn);
 requestRow.appendChild(requestText);
 requestRow.appendChild(requestActions);
 alertDiv.appendChild(requestRow);
 });
-
-// 4. 삽입 위치: 생일 배너 다음
-const banner = document.getElementById('birthdayBanner');
-if(banner && banner.nextSibling) {
-container.insertBefore(alertDiv, banner.nextSibling);
-} else {
-container.prepend(alertDiv);
-}
+syncIncomingConnectStatus(request);
 } catch (error) {
-if (current()) CoopSafeLog.error("연결 요청 조회 실패:", error);
+if (!isCurrentIncomingConnectRequest(request)) return;
+request.phase = 'failed';
+syncIncomingConnectStatus(request, '연결 요청을 불러오지 못했습니다. 다시 확인해 주세요.');
+CoopSafeLog.error('연결 요청 조회 실패:', { code: error?.code || 'INCOMING_CONNECT_READ_FAILED' });
+} finally {
+request.cancelRead();
 }
 }
 
-// [신규] 연결 요청 응답 (수락/거절)
-// [수정] 연결 요청 응답
-async function answerConnect(appId, decision) {
+async function confirmIncomingConnect(actionText) {
+let host = window;
+try {
+while (host.parent !== host && host.parent.location.origin === host.location.origin && host.parent.CoopDialog) host = host.parent;
+} catch (_) { /* Keep the dialog in the current permitted host. */ }
+if (host.CoopDialog?.hasPending()) return false;
+const choice = window.CoopDialog.confirm(`이 연결 요청을 ${actionText}할까요?`, {
+title: '계정 연결 요청', confirmText: actionText, cancelText: '취소'
+});
+const dialog = host.document.querySelector('dialog.coop-dialog[open]');
+const keepFocus = event => {
+if (event.key !== 'Tab' || !dialog?.open) return;
+const controls = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), a[href]')]
+.filter(node => !node.hidden && node.getClientRects().length);
+if (!controls.length) return;
+const index = controls.indexOf(host.document.activeElement);
+const next = event.shiftKey ? (index <= 0 ? controls.length - 1 : index - 1) : (index + 1) % controls.length;
+event.preventDefault();
+event.stopImmediatePropagation();
+controls[next].focus({ preventScroll: true });
+};
+dialog?.addEventListener('keydown', keepFocus, true);
+try { return await choice; }
+finally { dialog?.removeEventListener('keydown', keepFocus, true); }
+}
+
+async function answerConnect(appId, decision, request = portalIncomingConnectRequest, trigger = null) {
+appId = Number(appId);
+const menuRevision = portalApplicationRequest;
+const current = () => isCurrentIncomingConnectRequest(request) && request.phase === 'ready' && request.ids.has(appId) && menuRevision === portalApplicationRequest;
+if (!current() || request.confirming || portalIncomingConnectAnswer || !['approve', 'reject'].includes(decision)) return;
 const actionText = (decision === 'approve') ? '수락' : '거절';
-
-// 모달 뎁스 효과 적용
-setModalDepth(true); 
-
-showConfirmModal(`정말 ${actionText}하시겠습니까?`, async () => {
-showLoading(true);
+if (!window.CoopDialog?.confirm) {
+request.phase = 'failed';
+syncIncomingConnectStatus(request, '확인창을 열지 못했습니다. 다시 확인해 주세요.');
+return;
+}
+request.confirming = true;
+try {
+if (trigger?.isConnected && !trigger.disabled) trigger.focus({ preventScroll: true });
+const confirmed = await confirmIncomingConnect(actionText);
+if (!confirmed || !current() || portalIncomingConnectAnswer) return;
+} catch (_) {
+if (isCurrentIncomingConnectRequest(request)) {
+request.phase = 'failed';
+syncIncomingConnectStatus(request, '확인창을 열지 못했습니다. 다시 확인해 주세요.');
+}
+return;
+} finally {
+request.confirming = false;
+}
+const answer = { request, appId, decision };
+portalIncomingConnectAnswer = answer;
+request.phase = 'processing';
+syncIncomingConnectStatus(request, `${actionText}하는 중입니다.`);
+try {
 const { error } = await _supabase.rpc('answer_connect_request', {
 p_app_id: appId, p_decision: decision
 });
-showLoading(false);
-
-if (error) showModal('오류: ' + error.message);
-else {
-showModal(`${actionText}되었습니다.`);
-
-// ★ 1번 해결: 승인했다면 내가 관리할 수 있는 프로필 목록을 갱신해야 함
-if(decision === 'approve') {
+if (!isCurrentIncomingConnectRequest(request)) return;
+if (error) throw error;
+await window.CoopDialog.alert(`${actionText}되었습니다.`);
+if (!isCurrentIncomingConnectRequest(request)) return;
+if (decision === 'approve') {
 await loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
 }
-
-// 알림 제거 및 데이터 갱신
-loadDashboardData(getPreferredDashboardProfileId());
-const alertDiv = document.getElementById('connectRequestAlert');
-if(alertDiv) alertDiv.remove();
+if (isCurrentIncomingConnectRequest(request)) await loadDashboardData(getPreferredDashboardProfileId());
+} catch (error) {
+if (isCurrentIncomingConnectRequest(request)) {
+request.phase = 'failed';
+syncIncomingConnectStatus(request, '처리 결과를 확인하지 못했습니다. 연결 요청을 다시 확인해 주세요.');
+CoopSafeLog.error('연결 요청 처리 확인 실패:', { code: error?.code || 'INCOMING_CONNECT_ANSWER_UNCONFIRMED' });
 }
-setModalDepth(false); // 뎁스 복구
-});
+} finally {
+if (portalIncomingConnectAnswer === answer) portalIncomingConnectAnswer = null;
+if (isCurrentIncomingConnectRequest(portalIncomingConnectRequest)) {
+const active = portalIncomingConnectRequest;
+syncIncomingConnectStatus(active);
+}
+}
 }
 // [수정] 화면 전환 유틸리티: style 제어 방식 폐기 -> classList 제어 방식 도입
 function showOnly(sectionId) {
