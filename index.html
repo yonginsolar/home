@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.172
-Change: 2026-10-23 - Separate news detail cache from pagination and retain retry focus.
+Version: v1.0.173
+Change: 2026-10-23 - Guard news detail transitions and share pending public detail reads.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -11,7 +11,7 @@ Change: 2026-10-23 - Separate news detail cache from pagination and retain retry
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.172 | index.html');</script>
+<script>console.log('[Version] v1.0.173 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -4428,6 +4428,9 @@ let g_activity_has_more = true;
 let g_activity_loading_more = false;
 let g_activity_next_offset = 0;
 const g_activity_detail_cache = new Map();
+// These public reads belong to this document's registered tenant, not an Auth cache.
+const g_activity_detail_requests = new Map();
+let g_activity_detail_revision = 0;
 const publicNewsAttempts = new Map();
 
 function beginPublicNewsRead(key, parent) {
@@ -4811,10 +4814,20 @@ function restoreActivityDetailFocus() {
     }
 }
 
+function invalidateActivityDetailRequest() {
+    ++g_activity_detail_revision;
+}
+
 function bindActivityDetailModalFocusGuard(modalEl) {
     if (!modalEl || modalEl.dataset.activityFocusGuardBound === '1') return;
-    modalEl.addEventListener('hide.bs.modal', restoreActivityDetailFocus);
+    modalEl.addEventListener('hide.bs.modal', () => {
+        invalidateActivityDetailRequest();
+        restoreActivityDetailFocus();
+    });
     modalEl.addEventListener('hidden.bs.modal', restoreActivityDetailFocus);
+    window.addEventListener('hashchange', invalidateActivityDetailRequest);
+    window.addEventListener('pagehide', invalidateActivityDetailRequest);
+    document.getElementById('home-news-tabs')?.addEventListener('click', invalidateActivityDetailRequest);
     modalEl.dataset.activityFocusGuardBound = '1';
 }
 
@@ -5016,21 +5029,31 @@ async function resolveActivityDetailItem(id) {
     if (!safeId) return null;
     const cached = g_activity_list.find((row) => String(row?.id || '') === safeId) || g_activity_detail_cache.get(safeId);
     if (cached) return cached;
-
-    const { data, error } = await (await scopePublicTenant(_client.from('site_documents')
-        .select('id, title, text_styles, content, event_date, file_url, is_current, access_scope, updated_at')
-        .eq('id', safeId)
-        .eq('category', 'activity')
-        .eq('is_current', true)
-        .eq('access_scope', 'PUBLIC')
-        .limit(1)));
-    if (error) {
-        console.warn('resolveActivityDetailItem failed:', error);
-        return null;
-    }
-    const row = Array.isArray(data) ? data[0] : null;
-    if (row) g_activity_detail_cache.set(safeId, row);
-    return row || null;
+    const pending = g_activity_detail_requests.get(safeId);
+    if (pending) return pending.promise;
+    const request = { promise: null };
+    g_activity_detail_requests.set(safeId, request);
+    request.promise = (async () => {
+        try {
+            const { data, error } = await readPublicHome(signal => readPublicHomeScoped(_client.from('site_documents')
+                .select('id, title, text_styles, content, event_date, file_url, is_current, access_scope, updated_at')
+                .eq('id', safeId)
+                .eq('category', 'activity')
+                .eq('is_current', true)
+                .eq('access_scope', 'PUBLIC')
+                .limit(1), signal));
+            if (error) {
+                console.warn('resolveActivityDetailItem failed:', error);
+                return null;
+            }
+            const row = Array.isArray(data) ? data[0] : null;
+            if (row) g_activity_detail_cache.set(safeId, row);
+            return row || null;
+        } finally {
+            if (g_activity_detail_requests.get(safeId) === request) g_activity_detail_requests.delete(safeId);
+        }
+    })();
+    return request.promise;
 }
 
 function getExternalNewsScopeLabel(scope) {
@@ -5356,13 +5379,19 @@ function prepareActivityArticleLinks(contentEl) {
 }
 
 async function openActivityDetail(id, triggerEl = null) {
+    const revision = ++g_activity_detail_revision;
+    const hash = window.location.hash;
+    const isCurrent = () => revision === g_activity_detail_revision && hash === window.location.hash;
+    const modalEl = document.getElementById('activityDetailModal');
+    bindActivityDetailModalFocusGuard(modalEl);
     rememberActivityDetailTrigger(triggerEl);
     let item = null;
     try {
         item = await resolveActivityDetailItem(id);
     } catch (error) {
-        console.warn('openActivityDetail failed:', error);
+        if (isCurrent()) console.warn('openActivityDetail failed:', error);
     }
+    if (!isCurrent()) return;
     if (!item) {
         console.warn('Activity detail item not found:', id);
         homeShowAlert('활동 내역을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
@@ -5373,7 +5402,6 @@ async function openActivityDetail(id, triggerEl = null) {
     const dateEl = document.getElementById('activityDetailDate');
     const contentEl = document.getElementById('activityDetailContent');
     const coverWrapEl = document.getElementById('activityDetailCoverWrap');
-    const modalEl = document.getElementById('activityDetailModal');
 
     if (titleEl) titleEl.textContent = item.title || '활동 내역';
     CoopTextStyles.paint(titleEl,item.title || '활동 내역',item.text_styles?.activityTitle);
@@ -5452,6 +5480,7 @@ async function openActivityDetail(id, triggerEl = null) {
 window.openActivityDetail = openActivityDetail;
 
 function closeActivityDetailFallback() {
+    invalidateActivityDetailRequest();
     const modalEl = document.getElementById('activityDetailModal');
     restoreActivityDetailFocus();
     if (modalEl) {
