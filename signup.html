@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.68
-Change: 2026-10-24 - Recover failed legal reads without losing input and clear completed UI on identity changes.
+Version: v1.0.69
+Change: 2026-10-25 - Accessible mobile-first consent controls and scoped terms-dialog keyboard navigation.
 -->
 <html lang="ko"> 
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-24 - Recover failed legal reads without losing input and clear c
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <script>console.log('[Version] v1.0.68 | signup.html');</script>
+  <script>console.log('[Version] v1.0.69 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -67,6 +67,21 @@ allowKakaoApp: true
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
 <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
 <style>
+.signup-consent-row{display:flex;align-items:flex-start;gap:.5rem;margin-bottom:.5rem}
+.signup-consent-choice{display:flex;align-items:flex-start;gap:.5rem;flex:1;min-width:0}
+.signup-consent-choice .form-check-input{float:none;flex:none;margin:13px 0 0;width:1.125rem;height:1.125rem}
+.signup-consent-choice label{display:flex;align-items:center;min-width:0;min-height:44px;cursor:pointer;word-break:keep-all;overflow-wrap:break-word}
+.signup-term-open{flex:none;min-height:44px;padding:.5rem .65rem;border:1px solid #64748b;border-radius:.65rem;background:#fff;color:#334155;font-size:.8125rem;white-space:nowrap}
+.signup-term-open:focus-visible,#signupTermDialog :focus-visible{outline:3px solid #2563eb;outline-offset:3px}
+#sheet-terms .bottom-sheet{display:flex;flex-direction:column;padding:0;overflow:hidden;max-height:calc(100vh - 12px);max-height:calc(100dvh - max(12px,env(safe-area-inset-top)));word-break:keep-all;overflow-wrap:break-word}
+#signupTermDialog .sheet-header{display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex:none;padding:12px 16px;border-bottom:1px solid #e2e8f0}
+#termTitle{font-size:1.0625rem;line-height:1.5;min-width:0}
+#signupTermClose{flex:none;width:44px;height:44px;padding:0;border:0;border-radius:.6rem;background:transparent;color:#475569;font-size:1.6rem;line-height:1}
+#signupTermBody{min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:16px;flex:1}
+#termContent{white-space:pre-wrap;font-size:.875rem;color:#334155;line-height:1.7}
+.signup-term-footer{flex:none;padding:12px 16px max(12px,env(safe-area-inset-bottom));border-top:1px solid #e2e8f0;background:#fff}
+#signupTermConfirm{min-height:44px;width:100%;border:0;border-radius:.65rem;padding:.65rem 1rem;background:#198754;color:white;font-weight:700}
+@media(prefers-reduced-motion:reduce){#sheet-terms .bottom-sheet{transition:none}}
 /* [CSS 추가] 가입 완료 모달 스타일 */
 .center-modal {
 display: none; /* 평소에는 숨김 */
@@ -398,21 +413,33 @@ oninput="clearFieldWarning(this)">
 </div>
 
 <div class="mt-4">
-<div class="form-check mb-2">
+<div class="signup-consent-row">
+<div class="signup-consent-choice">
 <input class="form-check-input" type="checkbox" id="agree1" required>
-<label class="form-check-label small" onclick="openTermSheet('privacy')"><u>[필수] 개인정보 수집·이용에 동의합니다.</u></label>
+<label class="form-check-label small" for="agree1">[필수] 개인정보 수집·이용에 동의합니다.</label>
 </div>
-<div class="form-check mb-2" id="agreeRrnWrap">
+<button type="button" class="signup-term-open" data-signup-term="privacy" aria-label="개인정보 수집·이용 내용 보기" aria-haspopup="dialog" aria-controls="signupTermDialog" onclick="openTermSheet('privacy',this)">내용 보기</button>
+</div>
+<div class="signup-consent-row" id="agreeRrnWrap">
+<div class="signup-consent-choice">
 <input class="form-check-input" type="checkbox" id="agreeRrn" required>
-<label class="form-check-label small" onclick="openTermSheet('rrn')"><u>[필수] 주민등록번호 처리 안내를 확인했습니다.</u></label>
+<label class="form-check-label small" for="agreeRrn">[필수] 주민등록번호 처리 안내를 확인했습니다.</label>
 </div>
-<div class="form-check mb-2">
+<button type="button" class="signup-term-open" data-signup-term="rrn" aria-label="주민등록번호 처리 안내 보기" aria-haspopup="dialog" aria-controls="signupTermDialog" onclick="openTermSheet('rrn',this)">내용 보기</button>
+</div>
+<div class="signup-consent-row">
+<div class="signup-consent-choice">
 <input class="form-check-input" type="checkbox" id="agree2" required>
-<label class="form-check-label small" onclick="openTermSheet('purpose')"><u>[필수] 조합의 설립목적에 동의하고 의무를 다하겠습니다.</u></label>
+<label class="form-check-label small" for="agree2">[필수] 조합의 설립목적에 동의하고 의무를 다하겠습니다.</label>
 </div>
-<div class="form-check mb-2">
+<button type="button" class="signup-term-open" data-signup-term="purpose" aria-label="조합의 설립목적 내용 보기" aria-haspopup="dialog" aria-controls="signupTermDialog" onclick="openTermSheet('purpose',this)">내용 보기</button>
+</div>
+<div class="signup-consent-row">
+<div class="signup-consent-choice">
 <input class="form-check-input" type="checkbox" id="agree3" required>
-<label class="form-check-label small" onclick="openTermSheet('risk')"><u>[필수] 출자금 손실 위험 및 환급 제한 등에 동의합니다.</u></label>
+<label class="form-check-label small" for="agree3">[필수] 출자금 손실 위험 및 환급 제한 등에 동의합니다.</label>
+</div>
+<button type="button" class="signup-term-open" data-signup-term="risk" aria-label="출자금 손실 위험 및 환급 제한 내용 보기" aria-haspopup="dialog" aria-controls="signupTermDialog" onclick="openTermSheet('risk',this)">내용 보기</button>
 </div>
 <div id="educationQrSignupConsent" class="border-top mt-3 pt-3" style="display:none;">
 <div class="small text-success fw-bold mb-2"><i class="bi bi-qr-code-scan me-1"></i>교육 QR 가입·출석</div>
@@ -420,9 +447,12 @@ oninput="clearFieldWarning(this)">
 <input class="form-check-input" type="checkbox" id="agreeEducationAge">
 <label class="form-check-label small" for="agreeEducationAge">[필수] 만 14세 이상입니다.</label>
 </div>
-<div class="form-check mb-2">
+<div class="signup-consent-row">
+<div class="signup-consent-choice">
 <input class="form-check-input" type="checkbox" id="agreeEducationAttendance">
-<label class="form-check-label small" onclick="openTermSheet('educationAttendance')"><u>[필수] 가입 신청과 함께 해당 교육의 출석을 기록하는 데 동의합니다.</u></label>
+<label class="form-check-label small" for="agreeEducationAttendance">[필수] 가입 신청과 함께 해당 교육의 출석을 기록하는 데 동의합니다.</label>
+</div>
+<button type="button" class="signup-term-open" data-signup-term="educationAttendance" aria-label="교육 QR 가입·출석 기록 내용 보기" aria-haspopup="dialog" aria-controls="signupTermDialog" onclick="openTermSheet('educationAttendance',this)">내용 보기</button>
 </div>
 <div class="small text-muted">가입 신청 시 해당 교육 출석이 함께 접수되며, 승인 후 조합원 참여 이력으로 자동 전환됩니다.</div>
 </div>
@@ -448,13 +478,16 @@ oninput="clearFieldWarning(this)">
 </div>
 
 <div id="sheet-terms" class="bottom-sheet-overlay" onclick="closeSheet('sheet-terms')">
-<div class="bottom-sheet" onclick="event.stopPropagation()">
+<div id="signupTermDialog" class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="termTitle" tabindex="-1" onclick="event.stopPropagation()">
 <div class="sheet-header">
-<span class="sheet-title" id="termTitle">약관 제목</span>
-<button type="button" class="btn-close" onclick="closeSheet('sheet-terms')"></button>
+<h2 class="sheet-title m-0" id="termTitle" tabindex="-1">약관 제목</h2>
+<button type="button" id="signupTermClose" aria-label="약관창 닫기" onclick="closeSheet('sheet-terms')"><span aria-hidden="true">×</span></button>
 </div>
-<div id="termContent" style="white-space: pre-wrap; font-size: 13px; color: #555; line-height: 1.6;"></div>
+<div id="signupTermBody" tabindex="0" role="document" aria-labelledby="termTitle">
+<div id="termContent"></div>
 <p id="termApplicationNotice" class="small text-muted mt-3" hidden></p>
+</div>
+<div class="signup-term-footer"><button type="button" id="signupTermConfirm" onclick="closeSheet('sheet-terms',{confirm:true})">확인했어요</button></div>
 </div>
 </div>
 
@@ -522,7 +555,7 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.68'});
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.69'});
 window.CoopSignupFailure?.observeClient(_supabase);
 const signupPublicReads=CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
 window.CoopSignupFailure?.observeClient(signupPublicReads);
@@ -1236,6 +1269,51 @@ content: "가입 신청 완료 시 현재 QR의 교육 출석도 함께 접수�
 
 // [3] UI 제어 함수
 const signupSheetContexts=new Map(),signupSheetRevisions=new Map();
+let signupTermFocusContext=null;
+function isSignupTermFocusActive(context) {
+return signupTermFocusContext===context&&isCurrentSignupIdentity(context.scope)
+ && document.getElementById('sheet-terms').style.display!=='none'
+ && !['failModal','successModal','alreadyMemberModal'].some(id=>document.getElementById(id).style.display==='flex');
+}
+function signupTermFocusable() {
+return [...document.querySelectorAll('#signupTermDialog button:not([disabled]),#signupTermDialog [tabindex="0"],#signupTermDialog a[href]')]
+ .filter(node=>!node.hidden&&!node.closest('[hidden],[inert]')&&node.offsetParent!==null);
+}
+function releaseSignupTermFocus(context,restore=false) {
+if(!context||signupTermFocusContext!==context)return;
+signupTermFocusContext=null;
+for(const [node,wasInert] of context.background||[])if(!wasInert)node.removeAttribute('inert');
+const active=document.activeElement,overlay=document.getElementById('sheet-terms');
+const canReturn=active===document.body||overlay.contains(active);
+const opener=context.opener;
+if(restore&&canReturn&&isCurrentSignupIdentity(context.scope)&&opener?.isConnected&&!opener.disabled
+ && !opener.closest('[hidden],[inert]')&&opener.offsetParent!==null
+ && !['failModal','successModal','alreadyMemberModal'].some(id=>document.getElementById(id).style.display==='flex'))opener.focus({preventScroll:true});
+}
+function activateSignupTermFocus(context,opener) {
+releaseSignupTermFocus(signupTermFocusContext);
+context.opener=opener||document.querySelector(`[data-signup-term="${context.type}"]`);
+context.background=['step-form','step-gate','sheet-postcode'].map(id=>document.getElementById(id)).filter(Boolean).map(node=>[node,node.hasAttribute('inert')]);
+signupTermFocusContext=context;
+for(const [node] of context.background)node.setAttribute('inert','');
+document.getElementById('signupTermBody').scrollTop=0;
+document.getElementById('termTitle').focus({preventScroll:true});
+}
+document.addEventListener('keydown',event=>{
+const context=signupTermFocusContext;if(!context||!isSignupTermFocusActive(context))return;
+if(event.key==='Escape'){
+ event.preventDefault();event.stopPropagation();if(!context.closing)closeSheet('sheet-terms');return;
+}
+if(event.key!=='Tab')return;
+const nodes=signupTermFocusable(),first=nodes[0],last=nodes.at(-1),active=document.activeElement;
+if(!first){event.preventDefault();document.getElementById('termTitle').focus({preventScroll:true});return;}
+if(event.shiftKey&&(active===first||!nodes.includes(active))){event.preventDefault();last.focus({preventScroll:true});}
+else if(!event.shiftKey&&(active===last||!document.getElementById('signupTermDialog').contains(active))){event.preventDefault();first.focus({preventScroll:true});}
+},true);
+document.addEventListener('focusin',event=>{
+const context=signupTermFocusContext;
+if(context&&isSignupTermFocusActive(context)&&!document.getElementById('signupTermDialog').contains(event.target))document.getElementById('termTitle').focus({preventScroll:true});
+},true);
 function nextSignupSheetRevision(id) {
 const revision=(signupSheetRevisions.get(id)||0)+1;signupSheetRevisions.set(id,revision);return revision;
 }
@@ -1243,6 +1321,7 @@ function isCurrentSignupSheet(context) {
 return !!context&&signupSheetContexts.get(context.id)===context&&isCurrentSignupIdentity(context.scope);
 }
 function clearSignupTransientUi() {
+releaseSignupTermFocus(signupTermFocusContext);
 currentTermType=null;
 signupLegalRetryTask=null;
 if(signupLegalRecovery)renderSignupLegalStatus();
@@ -1271,6 +1350,11 @@ if(input?.checked&&previous?.[type]?.fingerprint!==signupTermFingerprint(type))i
 }
 }
 function openSheet(id) {
+if(id!=='sheet-terms'&&signupTermFocusContext){
+ releaseSignupTermFocus(signupTermFocusContext);
+ nextSignupSheetRevision('sheet-terms');signupSheetContexts.delete('sheet-terms');currentTermType=null;
+ const previous=document.getElementById('sheet-terms');previous.style.display='none';previous.querySelector('.bottom-sheet').classList.remove('show');
+}
 const overlay = document.getElementById(id);
 const sheet = overlay.querySelector('.bottom-sheet');
 const context={id,revision:nextSignupSheetRevision(id),scope:signupIdentityScope()};
@@ -1279,7 +1363,7 @@ overlay.style.display = 'block';
 setTimeout(() => { if(isCurrentSignupSheet(context))sheet.classList.add('show'); }, 10);
 return context;
 }
-function closeSheet(id) {
+function closeSheet(id,options={}) {
 const context=signupSheetContexts.get(id);
 if(!context)return;
 const overlay = document.getElementById(id);
@@ -1288,18 +1372,28 @@ const valid=isCurrentSignupSheet(context);
 signupSheetContexts.delete(id);
 const revision=nextSignupSheetRevision(id);
 sheet.classList.remove('show');
-setTimeout(() => { if(signupSheetRevisions.get(id)===revision)overlay.style.display = 'none'; }, 300);
+if(id==='sheet-terms')context.closing=true;
+setTimeout(() => {
+ if(signupSheetRevisions.get(id)!==revision)return;
+ const returnFocus=valid&&isCurrentSignupIdentity(context.scope);
+ overlay.style.display='none';
+ if(id==='sheet-terms')releaseSignupTermFocus(context,returnFocus);
+},300);
 
-// 약관 시트가 닫힐 때 자동 체크 로직
+// Viewing or cancelling never changes consent. Only an explicit current-document
+// acknowledgement uses the existing per-owner/document confirmation guard.
 if (id === 'sheet-terms' && currentTermType) {
 const map = { 'privacy': 'agree1', 'rrn': 'agreeRrn', 'purpose': 'agree2', 'risk': 'agree3', 'educationAttendance': 'agreeEducationAttendance' };
 const boxId = map[currentTermType];
-if (valid && context.type===currentTermType && context.fingerprint===signupTermFingerprint(currentTermType) && boxId) document.getElementById(boxId).checked = true;
+if (options.confirm===true&&valid&&context.type===currentTermType&&context.fingerprint===signupTermFingerprint(currentTermType)&&boxId){
+ const input=document.getElementById(boxId);
+ if(!input.checked){input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));}
+}
 currentTermType = null; // 초기화
 }
 }
 
-function openTermSheet(type) {
+function openTermSheet(type,opener) {
 if(['privacy','purpose'].includes(type)&&signupLegalRecovery)return openResultModal('신청서의 「약관 다시 확인」을 눌러 주세요.',true);
 if(['privacy','purpose'].includes(type)&&signupLegalDocuments?.ready!==true)return openResultModal('가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.',true);
 CoopApplicationNotice.show(document.getElementById('termApplicationNotice'),type==='privacy'&&!!signupTenant?.coop_name);
@@ -1310,6 +1404,7 @@ if(type==='purpose'&&!signupLegalDocuments?.purpose?.content)document.getElement
 else document.getElementById('termContent').textContent=content;
 const context=openSheet('sheet-terms');
 context.type=type;context.fingerprint=signupTermFingerprint(type);
+activateSignupTermFocus(context,opener);
 }
 
 function openPostcodeSheet() {
