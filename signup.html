@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.64
+Version: v1.0.65
 Change: 2026-10-24 - Restore preparation entry and isolate member reads/drafts by current identity.
 -->
 <html lang="ko"> 
@@ -12,7 +12,7 @@ Change: 2026-10-24 - Restore preparation entry and isolate member reads/drafts b
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <script>console.log('[Version] v1.0.64 | signup.html');</script>
+  <script>console.log('[Version] v1.0.65 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -522,7 +522,7 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.64'});
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.65'});
 window.CoopSignupFailure?.observeClient(_supabase);
 const signupPublicReads=CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
 window.CoopSignupFailure?.observeClient(signupPublicReads);
@@ -1742,6 +1742,11 @@ const task = (async () => {
 try {
 await ensureSignupTenant();
 if(!isCurrentSignupIdentity(scope))return false;
+// Contact-only sites must not wait for an unrelated SDK Auth queue to show
+// their guest application. Later Auth events still pass through owner guards.
+if(isDeferredSignupProfile()&&!signupHasSession&&(signupIdentityKey===null||signupIdentityKey==='contact-only')){
+ showApplicationForm(null);return true;
+}
 const { data, error } = await _supabase.auth.getSession();
 if(!isCurrentSignupIdentity(scope))return false;
 if (error) throw error;
