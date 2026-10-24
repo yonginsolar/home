@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v2.9.2 — Preserve edits made while a cash-sale save is pending. */
+/* v2.9.3 — Protect every event draft and show the current unsaved state. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -49,7 +49,44 @@
   const loadedPanels = new Set(), pendingPanels = new Map();
   const unassigned = 'unassigned';
   const saleDrafts = new Map();
+  const saleDraftBases = new Map(), saleEditedFields = new Map();
   const saleFields = ['saleItem','saleQuantity','saleUnitPrice','saleDiscount','voucherCount','voucherUnitValue','voucherOrganizer','saleBank','saleCash','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount','overpaymentName','saleNote'];
+  const saleValues = () => Object.fromEntries(saleFields.map(id => [id, $(id).value]));
+  const saleValue = (id, value) => $(id).hasAttribute('data-number-group') ? ERPNumberInput.raw(value) : value;
+  function saleDraftChanged(id = selectedEventId) {
+    if (!id) return false;
+    const draft = saleDrafts.get(id), current = id === selectedEventId;
+    if (current ? pendingSaleRequestKey : draft?.pendingSaleRequestKey) return true;
+    const base = saleDraftBases.get(id), values = current ? saleValues() : draft?.values;
+    return Boolean(base && values && [...(saleEditedFields.get(id) || [])]
+      .some(field => saleValue(field, values[field]) !== saleValue(field, base[field])));
+  }
+  function syncSaleDraftStatus() {
+    const status = $('saleDraftStatus');
+    if (!status) return;
+    const dirty = tabsReady && saleDraftChanged();
+    status.hidden = !dirty;
+    status.textContent = !dirty ? '' : pendingSaleRequestKey
+      ? operationBusy ? '저장 결과를 확인하고 있습니다.' : '저장 결과 확인이 필요합니다.'
+      : '작성 중 · 미저장';
+  }
+  function recordSaleEdit(event) {
+    const node = event.target;
+    if (!editable || !tabsReady || !selectedEventId || !saleFields.includes(node?.id) || node.disabled || node.readOnly) return;
+    if (!saleEditedFields.has(selectedEventId)) saleEditedFields.set(selectedEventId, new Set());
+    saleEditedFields.get(selectedEventId).add(node.id);
+    // Returning to the verified baseline is clean for this form only. Other
+    // events are independently protected by the task's own unload guard.
+    if (!saleDraftChanged()) window.ErpWorkspaceResume?.checkpoint?.($('saleForm'));
+    syncSaleDraftStatus();
+  }
+  $('saleForm').addEventListener('input', recordSaleEdit);
+  $('saleForm').addEventListener('change', recordSaleEdit);
+  window.addEventListener('beforeunload', event => {
+    if (tabsReady && [...new Set([selectedEventId, ...saleDrafts.keys()])].some(id => saleDraftChanged(id))) {
+      event.preventDefault(); event.returnValue = '';
+    }
+  });
   const tabButtons = Array.from(document.querySelectorAll('.festival-tabs [role="tab"]'));
   const scopeData = (id = selectedEventId) => id === unassigned ? { unassigned: true } : { event_id: id };
   const panelKind = { salesPanel:'sales', voucherPanel:'vouchers', receiptsPanel:'receipts' };
@@ -187,6 +224,8 @@
     receiptAmountEdited = draft?.receiptAmountEdited || false;
     pendingSaleRequestKey = draft?.pendingSaleRequestKey || null;
     syncCashReceived(); syncSaleReceiptAllocation(); syncEventHeading();
+    if (id && !saleDraftBases.has(id)) saleDraftBases.set(id, saleValues());
+    syncSaleDraftStatus();
     if (!previousCanSell && eventById(id)?.is_active) showTab('salePanel');
     renderSales(); renderVouchers(); renderReceipts();
     if (!id) { $('eventWorkspace').setAttribute('aria-busy', 'false'); return; }
@@ -414,6 +453,8 @@
     });
     const active = items.filter((item) => item.is_active);
     fillItemSelect($('saleItem'), active);
+    const saleBase = saleDraftBases.get(selectedEventId);
+    if (saleBase && !saleEditedFields.get(selectedEventId)?.has('saleItem')) saleBase.saleItem = $('saleItem').value;
     fillItemSelect($('movementItem'), active);
   }
 
@@ -1080,6 +1121,7 @@
       await registerSaleRpc({ ...data, request_key: pendingSaleRequestKey.key });
       if (submitted.identity !== identityRevision || submitted.eventId !== selectedEventId) return;
       pendingSaleRequestKey = null;
+      saleDraftBases.set(selectedEventId, submitted.values);
       const additionalEdits = receiptAmountEdited !== submitted.receiptAmountEdited || saleFields.some(id => {
         const value = $(id).value, before = submitted.values[id];
         return $(id).hasAttribute('data-number-group') ? ERPNumberInput.raw(value) !== ERPNumberInput.raw(before) : value !== before;
@@ -1098,14 +1140,17 @@
         $('voucherUnitValue').value = '3000';
         receiptAmountEdited = false;
         syncSaleReceiptAllocation();
+        saleDraftBases.set(selectedEventId, saleValues());
+        saleEditedFields.delete(selectedEventId);
         window.ErpWorkspaceResume?.checkpoint?.(form);
       }
+      syncSaleDraftStatus();
       setOperationStatus(additionalEdits ? '저장했습니다. 저장 중 수정한 내용은 미저장 상태입니다.' : '저장했습니다.');
       try { await loadInventory(); }
       catch (_) {
         if (submitted.identity === identityRevision && submitted.eventId === selectedEventId) {
           setOperationStatus('저장은 완료됐지만 목록을 불러오지 못했습니다. ‘새로고침’으로 다시 확인해 주세요.'
-            + (additionalEdits ? ' 저장 중 수정한 내용은 미저장 상태입니다.' : ''), true);
+            + (saleDraftChanged() ? ' 작성 중인 내용은 미저장 상태입니다.' : ''), true);
         }
       }
     } catch (error) {
@@ -1113,6 +1158,7 @@
     } finally {
       operationBusy = false;
       if (button) button.disabled = false;
+      syncSaleDraftStatus();
     }
   });
 
