@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.62
-Change: 2026-10-24 - Distinguish exact signup preparation operations and safe failure details.
+Version: v1.0.63
+Change: 2026-10-24 - Bound and coalesce host-scoped public preparation reads without waiting on Auth.
 -->
 <html lang="ko"> 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-<script src="shared/signup_failure_reporter.js?v=1.1.0"></script>
+<script src="shared/signup_failure_reporter.js?v=1.1.1"></script>
+<script src="shared/signup_public_reads.js?v=1.0.0"></script>
 <script src="shared/signup_draft_guard.js?v=1.0.0"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
@@ -521,13 +522,15 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.62'});
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.63'});
 window.CoopSignupFailure?.observeClient(_supabase);
+const signupPublicReads=CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
+window.CoopSignupFailure?.observeClient(signupPublicReads);
 window.CoopSignupFailure?.setProvider(new URLSearchParams(window.location.search).get('auth_return'));
 let joinSubmitInFlight = false;
 let signupCapitalRules = null;
 async function loadSignupCapitalRules() {
-signupCapitalRules = await CoopMemberCapital.load(_supabase, true);
+signupCapitalRules = await CoopMemberCapital.load(signupPublicReads, true);
 const input = document.getElementById('money');
 CoopMemberCapital.applyInput(input, signupCapitalRules);
 input.disabled = false;
@@ -637,7 +640,7 @@ let signupLegalDocuments = null;
 let signupPrivacyConsentVersion = 'signup-privacy-2026.08.24';
 
 async function loadSignupLegalDocuments() {
-const {data,error}=await _supabase.rpc('get_public_signup_documents',{p_coop_code:signupTenant.coop_code});
+const {data,error}=await signupPublicReads.rpc('get_public_signup_documents',{p_coop_code:signupTenant.coop_code});
 if(error)throw error;
 signupLegalDocuments=data;
 signupPrivacyConsentVersion=data?.version||'';
@@ -661,11 +664,12 @@ async function loadSignupPublicSettings() {
 if (signupPublicSettings) return signupPublicSettings;
 if (!signupPublicSettingsPromise) {
 signupPublicSettingsPromise = (async () => {
-const { data, error } = await _supabase.rpc('get_public_home_settings');
+const { data, error } = await signupPublicReads.rpc('get_public_home_settings');
 if (error) throw error;
 signupPublicSettings = Array.isArray(data) ? (data[0] || null) : (data || null);
 try {
- const guide = await CoopCapitalDepositGuide.read();
+ const {data:guide,error:guideError}=await signupPublicReads.rpc('get_public_capital_deposit_guide');
+ if(guideError||!guide?.coop_name)throw guideError||Error('DEPOSIT_GUIDE_UNAVAILABLE');
  if (guide.coop_name === signupPublicSettings?.coop_name) Object.assign(signupPublicSettings, {member_capital_deposit_bank:guide.bank,member_capital_deposit_account:guide.account,member_capital_deposit_holder:guide.holder});
  else if(signupPublicSettings)Object.assign(signupPublicSettings,{member_capital_deposit_bank:'',member_capital_deposit_account:'',member_capital_deposit_holder:''});
 } catch (_) {
@@ -675,7 +679,7 @@ return signupPublicSettings;
 })().catch((error) => {
 signupPublicSettingsPromise = null;
 CoopSafeLog.warn("[signup] public settings lookup failed:", error);
-return null;
+throw error;
 });
 }
 return signupPublicSettingsPromise;
@@ -686,14 +690,14 @@ if(window.CoopSignupFailure?.preparationStep)return window.CoopSignupFailure.pre
 return action();
 }
 async function loadSignupPreparationDocuments(){
-await signupPreparationStep('admission_policy',()=>{if(typeof window.CoopApplicationNotice?.load!=='function')throw Error('SIGNUP_DEPENDENCY_MISSING');return CoopApplicationNotice.load(_supabase,signupTenant.coop_id);});
+await signupPreparationStep('admission_policy',()=>{if(typeof window.CoopApplicationNotice?.load!=='function')throw Error('SIGNUP_DEPENDENCY_MISSING');return CoopApplicationNotice.load(signupPublicReads,signupTenant.coop_id);});
 await signupPreparationStep('capital_rules',loadSignupCapitalRules);
 await signupPreparationStep('home_settings',loadSignupPublicSettings);
 await signupPreparationStep('legal_documents',loadSignupLegalDocuments);
 await signupPreparationStep('page_setup',applySignupTenantBranding);
 }
 const signupTenantLoader = BootGuard.createSuccessCachedTask(async () => {
-const { data: contextData, error: contextError } = await signupPreparationStep('signup_context',()=>_supabase.rpc('get_public_signup_context'));
+const { data: contextData, error: contextError } = await signupPreparationStep('signup_context',()=>signupPublicReads.rpc('get_public_signup_context'));
 const contextResolved = Array.isArray(contextData) ? contextData[0] : contextData;
 if (!contextError && contextResolved?.coop_id && contextResolved?.coop_name) {
 signupTenant = contextResolved;
@@ -704,7 +708,10 @@ return contextResolved;
 const coopCode = getSignupCoopCodeFromLocation();
 if (!coopCode) return signupPreparationStep('signup_context',()=>{throw contextError || new Error('SIGNUP_COOP_CONTEXT_MISSING');});
 
-const { data, error } = await signupPreparationStep('resolve_coop',()=>_supabase.rpc('resolve_public_signup_coop', { p_coop_code: coopCode }));
+// A failed transport/permission check is not a missing host. Do not mask it
+// with a different coop-code lookup or proceed with partially loaded settings.
+if(contextError)return signupPreparationStep('signup_context',()=>{throw contextError;});
+const { data, error } = await signupPreparationStep('resolve_coop',()=>signupPublicReads.rpc('resolve_public_signup_coop', { p_coop_code: coopCode }));
 const resolved = Array.isArray(data) ? data[0] : data;
 
 if (error || !resolved?.coop_id || !resolved?.coop_name) {
@@ -1088,7 +1095,6 @@ hideSignupRetryActions();
 
 async function ensureSignupTenant() {
 try {
-await waitForSignupAuthInitialState('ensure-signup-tenant');
 const resolved = await signupTenantLoader.run();
 clearSignupTenantRetryState();
 return resolved;

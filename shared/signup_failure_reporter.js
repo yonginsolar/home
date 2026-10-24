@@ -1,4 +1,4 @@
-/* v1.1.0 — Actionable fixed-field diagnostics, never raw applicant/error text. */
+/* v1.1.1 — Recognize the browser's fixed "Load failed" network error too. */
 (function(root){
  'use strict';
  const fallback={tenant:'TENANT_READ_FAILED',auth_start:'AUTH_START_FAILED',auth_return:'AUTH_SESSION_UNAVAILABLE',email_send:'EMAIL_SEND_FAILED',email_verify:'EMAIL_VERIFY_FAILED',member_lookup:'MEMBER_LOOKUP_FAILED',submit:'SIGNUP_SAVE_FAILED',runtime:'RUNTIME_ERROR'};
@@ -17,7 +17,7 @@
   try{const c=chain(error),e=c.at(-1)||error,code=typeof e?.code==='string'?e.code:'',message=typeof e?.message==='string'?e.message:'';
    if(expected.has(code)||expected.has(message))return '';
    if(message==='MEMBER_TENANT_ACCESS_DENIED'||code==='MEMBER_TENANT_ACCESS_DENIED')return 'MEMBER_TENANT_ACCESS_DENIED';
-   if((e?.name==='TypeError'||!code)&&/fetch|network/i.test(message))return stage==='submit'?'SIGNUP_RESULT_UNKNOWN':'NETWORK_ERROR';
+   if((e?.name==='TypeError'||!code)&&/fetch|network|load failed/i.test(message))return stage==='submit'?'SIGNUP_RESULT_UNKNOWN':'NETWORK_ERROR';
    if(['PGRST000','PGRST001','PGRST002'].includes(code))return 'DATABASE_UNAVAILABLE';
   }catch{}return fallback[stage]||'';
  }
@@ -32,7 +32,7 @@
    else if(status===401)reason='UNAUTHORIZED';else if(status===403||api_code==='42501')reason='FORBIDDEN';
    else if(status===429)reason='RATE_LIMITED';else if(status!==null&&status>=500)reason='SERVER_ERROR';
    else if(api_code)reason='API_ERROR';
-   else if(/fetch|network/i.test(inner))reason='NETWORK';
+   else if(/fetch|network|load failed/i.test(inner))reason='NETWORK';
    else if(message==='SIGNUP_DEPENDENCY_MISSING'||e?.name==='ReferenceError')reason='SCRIPT_MISSING';
    else if(['ADMISSION_READ_FAILED','CONTEXT_SHAPE_INVALID','CAPITAL_SETTINGS_INVALID'].includes(message))reason='DATA_INVALID';
    else if(['SIGNUP_COOP_CONTEXT_MISSING','SIGNUP_COOP_NOT_FOUND'].includes(message))reason='TENANT_MISMATCH';
