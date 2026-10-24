@@ -1,4 +1,4 @@
-/* v1.1.0 — Registered-host bylaw display, no main-cooperative default on read failure. */
+/* v1.1.1 — Preserve safe RPC diagnostic context through the existing error boundary. */
 (function(root){
  'use strict';
  const tail='기한 내 납입이 확인되지 않으면 가입 신청을 종결하고 신청정보를 파기할 수 있습니다. 납입 유예를 승인받은 경우 연장된 기한을 적용하며, 일부 입금·입금 확인 중인 신청은 확인 전 파기하지 않습니다.';
@@ -9,7 +9,7 @@
   text='납입기한은 조합 사무국에 확인해 주세요.';
   try{let q=client.rpc('get_public_member_admission_policy');if(q.abortSignal)q=q.abortSignal(controller.signal);
    const r=await Promise.race([q,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('ADMISSION_READ_TIMEOUT'));},15000);})]);
-   const p=r.data;if(r.error||serial!==sequence||!p?.coop_id||expectedCoop&&expectedCoop!==p.coop_id||!(p.payment_days===null||Number.isInteger(p.payment_days)&&p.payment_days>=0&&p.payment_days<=365)||!['application_completed','acceptance_notified'].includes(p.basis_kind))throw Error('ADMISSION_READ_FAILED');
+   const p=r.data;if(r.error||serial!==sequence||!p?.coop_id||expectedCoop&&expectedCoop!==p.coop_id||!(p.payment_days===null||Number.isInteger(p.payment_days)&&p.payment_days>=0&&p.payment_days<=365)||!['application_completed','acceptance_notified'].includes(p.basis_kind))throw Error('ADMISSION_READ_FAILED',{cause:r.error||undefined});
    text=format(p);return text;
   }finally{clearTimeout(timer);}
  }

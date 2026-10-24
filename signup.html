@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.61
-Change: 2026-10-24 - Send bounded non-personal signup diagnostics to the platform maintainer.
+Version: v1.0.62
+Change: 2026-10-24 - Distinguish exact signup preparation operations and safe failure details.
 -->
 <html lang="ko"> 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-<script src="shared/signup_failure_reporter.js?v=1.0.0"></script>
+<script src="shared/signup_failure_reporter.js?v=1.1.0"></script>
 <script src="shared/signup_draft_guard.js?v=1.0.0"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
-<script src="shared/application_retention_notice.js?v=1.1.0"></script>
-  <script>console.log('[Version] v1.0.61 | signup.html');</script>
+<script src="shared/application_retention_notice.js?v=1.1.1"></script>
+  <script>console.log('[Version] v1.0.62 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -521,7 +521,8 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.61'});
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.62'});
+window.CoopSignupFailure?.observeClient(_supabase);
 window.CoopSignupFailure?.setProvider(new URLSearchParams(window.location.search).get('auth_return'));
 let joinSubmitInFlight = false;
 let signupCapitalRules = null;
@@ -680,35 +681,38 @@ return null;
 return signupPublicSettingsPromise;
 }
 
+async function signupPreparationStep(operation, action) {
+if(window.CoopSignupFailure?.preparationStep)return window.CoopSignupFailure.preparationStep(operation,action);
+return action();
+}
+async function loadSignupPreparationDocuments(){
+await signupPreparationStep('admission_policy',()=>{if(typeof window.CoopApplicationNotice?.load!=='function')throw Error('SIGNUP_DEPENDENCY_MISSING');return CoopApplicationNotice.load(_supabase,signupTenant.coop_id);});
+await signupPreparationStep('capital_rules',loadSignupCapitalRules);
+await signupPreparationStep('home_settings',loadSignupPublicSettings);
+await signupPreparationStep('legal_documents',loadSignupLegalDocuments);
+await signupPreparationStep('page_setup',applySignupTenantBranding);
+}
 const signupTenantLoader = BootGuard.createSuccessCachedTask(async () => {
-const { data: contextData, error: contextError } = await _supabase.rpc('get_public_signup_context');
+const { data: contextData, error: contextError } = await signupPreparationStep('signup_context',()=>_supabase.rpc('get_public_signup_context'));
 const contextResolved = Array.isArray(contextData) ? contextData[0] : contextData;
 if (!contextError && contextResolved?.coop_id && contextResolved?.coop_name) {
 signupTenant = contextResolved;
-await CoopApplicationNotice.load(_supabase,signupTenant.coop_id);
-await loadSignupCapitalRules();
-await loadSignupPublicSettings();
-await loadSignupLegalDocuments();
-applySignupTenantBranding();
+await loadSignupPreparationDocuments();
 return contextResolved;
 }
 
 const coopCode = getSignupCoopCodeFromLocation();
-if (!coopCode) throw contextError || new Error('SIGNUP_COOP_CONTEXT_MISSING');
+if (!coopCode) return signupPreparationStep('signup_context',()=>{throw contextError || new Error('SIGNUP_COOP_CONTEXT_MISSING');});
 
-const { data, error } = await _supabase.rpc('resolve_public_signup_coop', { p_coop_code: coopCode });
+const { data, error } = await signupPreparationStep('resolve_coop',()=>_supabase.rpc('resolve_public_signup_coop', { p_coop_code: coopCode }));
 const resolved = Array.isArray(data) ? data[0] : data;
 
 if (error || !resolved?.coop_id || !resolved?.coop_name) {
-throw error || contextError || new Error('SIGNUP_COOP_NOT_FOUND');
+return signupPreparationStep('resolve_coop',()=>{throw error || contextError || new Error('SIGNUP_COOP_NOT_FOUND');});
 }
 
 signupTenant = resolved;
-await CoopApplicationNotice.load(_supabase,signupTenant.coop_id);
-await loadSignupCapitalRules();
-await loadSignupPublicSettings();
-await loadSignupLegalDocuments();
-applySignupTenantBranding();
+await loadSignupPreparationDocuments();
 return resolved;
 });
 let pendingSignupOtpEmail = '';
@@ -1100,7 +1104,7 @@ fatalMessages: ['SIGNUP_COOP_CONTEXT_MISSING', 'SIGNUP_COOP_NOT_FOUND']
 if (kind === 'fatal') {
 blockSignupTenantContext();
 } else {
-showSignupTenantRetryState('가입 대상을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+showSignupTenantRetryState(window.CoopSignupFailure?.retryMessage?.(error)||'가입 대상을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
 }
 throw error;
 }
@@ -1684,7 +1688,7 @@ return (await checkExistingMember(data.session)) !== false;
 } catch (error) {
 CoopSafeLog.warn("signup session resume failed:", error);
 window.CoopSignupFailure?.report('auth_return',error);
-showSignupAuthRetry('인증 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
+showSignupAuthRetry(window.CoopSignupFailure?.retryMessage?.(error)||'인증 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
 return false;
 } finally {
 signupSessionResumeInFlight = null;
