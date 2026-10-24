@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.66
-Change: 2026-10-24 - Scope email preparation, address/terms sheets and prior notices to the current identity.
+Version: v1.0.67
+Change: 2026-10-24 - Bind submissions to their original identity/input and reconfirm only changed terms.
 -->
 <html lang="ko"> 
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-24 - Scope email preparation, address/terms sheets and prior not
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <script>console.log('[Version] v1.0.66 | signup.html');</script>
+  <script>console.log('[Version] v1.0.67 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -522,7 +522,7 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.66'});
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.67'});
 window.CoopSignupFailure?.observeClient(_supabase);
 const signupPublicReads=CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
 window.CoopSignupFailure?.observeClient(signupPublicReads);
@@ -639,11 +639,15 @@ let signupPublicSettingsPromise = null;
 let signupLegalDocuments = null;
 let signupPrivacyConsentVersion = 'signup-privacy-2026.08.24';
 
-async function loadSignupLegalDocuments() {
+async function loadSignupLegalDocuments(scope) {
 const {data,error}=await signupPublicReads.rpc('get_public_signup_documents',{p_coop_code:signupTenant.coop_code});
+if(scope&&!isCurrentSignupIdentity(scope))return false;
 if(error)throw error;
+const previousConsents=captureSignupConsentState();
 signupLegalDocuments=data;
 signupPrivacyConsentVersion=data?.version||'';
+applyTenantTerms();
+reconcileSignupConsentState(previousConsents);
 let notice=document.getElementById('signup-legal-pending');
 if(!notice){notice=document.createElement('div');notice.id='signup-legal-pending';notice.className='alert alert-warning small';notice.setAttribute('role','status');document.getElementById('btnSubmit').before(notice);}
 notice.hidden=data?.ready===true;
@@ -1206,8 +1210,20 @@ const overlay=document.getElementById(id);overlay.style.display='none';overlay.q
 }
 for(const id of ['alreadyMemberModal','failModal'])document.getElementById(id).style.display='none';
 }
+const signupConsentFields={privacy:'agree1',purpose:'agree2',rrn:'agreeRrn',risk:'agree3',educationAttendance:'agreeEducationAttendance'};
 function signupTermFingerprint(type) {
-return JSON.stringify([signupPrivacyConsentVersion,signupLegalDocuments?.version,termsData[type]?.content]);
+const document=signupLegalDocuments?.[type];
+return JSON.stringify([signupTenant?.coop_id,type,document?.content??termsData[type]?.content,document?.effective_date??null,
+ ['privacy','purpose'].includes(type)?signupLegalDocuments?.ready:type==='rrn'?SIGNUP_RRN_NOTICE_VERSION:null]);
+}
+function captureSignupConsentState() {
+return Object.fromEntries(Object.entries(signupConsentFields).map(([type,id])=>[type,{checked:document.getElementById(id)?.checked===true,fingerprint:signupTermFingerprint(type)}]));
+}
+function reconcileSignupConsentState(previous) {
+for(const [type,id] of Object.entries(signupConsentFields)){
+const input=document.getElementById(id);
+if(input?.checked&&previous?.[type]?.fingerprint!==signupTermFingerprint(type))input.checked=false;
+}
 }
 function openSheet(id) {
 const overlay = document.getElementById(id);
@@ -1762,17 +1778,20 @@ const transfer=signupIdentityKey==='contact-only' && requiresInlineSignupEmailVe
 const ownEmailVerification=signupEmailWork?.kind==='verify'&&isCurrentSignupEmailWork(signupEmailWork)
  && signupEmailWork.email===normalizeSignupEmail(session?.user?.email)
  && (transfer||signupEmailWork.mode==='gate'&&signupIdentityKey==='contact-only');
+cancelPreviousSignupSubmission();
 clearSignupTransientUi();
 if(!ownEmailVerification)invalidateSignupEmailWork();
 if(signupApplicationSessionKey!==null)signupIdentityDrafts.set(signupApplicationSessionKey,{
  values:[...document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')].map(n=>[n.id,n.value,n.checked]),
  inline:yonginInlineEmailSelected,
+ consents:captureSignupConsentState(),
  errors:[...signupValidationErrors],
  messages:[...document.querySelectorAll('#joinForm .msg-box')].map(n=>[n.id,n.innerText??n.textContent,n.className,n.style.display]),
  invalid:[...document.querySelectorAll('#joinForm .is-invalid-field')].map(n=>n.id)
 });
 window.CoopSignupDraft?.selectOwner(next,transfer);
 signupIdentityKey=next;
+joinSubmitInFlight=signupSubmissionTasks.has(next);
 if(!first){++signupIdentityEpoch;signupSessionResumeInFlight=null;signupSessionCheckInFlight=null;}
 if(ownEmailVerification){signupEmailWork.scope=signupIdentityScope();signupEmailWork.transitioned=true;}
 signupHasSession=Boolean(session?.user?.id);
@@ -2191,6 +2210,7 @@ if(savedDraft){
  for(const n of document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')){
   const v=values.get(n.id);if(!v)continue;n.value=v[1];if(['checkbox','radio'].includes(n.type))n.checked=v[2];
  }
+ reconcileSignupConsentState(savedDraft.consents);
  syncGroupContactFromRepresentative();
  signupValidationErrors.clear();savedDraft.errors.forEach(id=>signupValidationErrors.add(id));
  for(const [id,text,classes,display] of savedDraft.messages){const n=document.getElementById(id);if(n){n.textContent=text;n.className=classes;n.style.display=display;}}
@@ -2336,12 +2356,43 @@ async function startNaverSignup() {
 }
 
 // [7] 제출 로직
+const signupSubmissionTasks=new Map();
+let signupSubmissionEditRevision=0;
+for(const event of ['input','change'])document.getElementById('joinForm').addEventListener(event,()=>{++signupSubmissionEditRevision;});
+function signupSubmissionFingerprint() {
+return JSON.stringify([...document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')]
+ .filter(n=>!['orgNo','finalCorpNo','deferred-signup-otp-input'].includes(n.id))
+ .map(n=>[n.id,n.value,['checkbox','radio'].includes(n.type)?n.checked:null]));
+}
+function isCurrentSignupSubmission(task,inputs=!task.sent) {
+return signupSubmissionTasks.get(task.owner)===task&&isCurrentSignupIdentity(task.scope)
+ &&(!inputs||(task.editRevision===signupSubmissionEditRevision&&task.fingerprint===signupSubmissionFingerprint()
+ &&task.legalVersion===signupPrivacyConsentVersion));
+}
+function finishSignupSubmission(task) {
+if(signupSubmissionTasks.get(task.owner)!==task)return;
+signupSubmissionTasks.delete(task.owner);
+joinSubmitInFlight=signupSubmissionTasks.has(signupIdentityKey);
+window.CoopSignupDraft?.setPending(signupSubmissionTasks.size>0);
+if(task.owner===signupIdentityKey){document.getElementById('btnSubmit').textContent='가입 신청하기 ☀️';refreshGuardianFields();}
+}
+function cancelPreviousSignupSubmission() {
+const task=signupSubmissionTasks.get(signupIdentityKey);
+if(task&&!task.sent)finishSignupSubmission(task);
+}
 async function handleFormSubmit(e, form) {
 e.preventDefault();
-
+if(joinSubmitInFlight)return;
+const task={owner:signupIdentityKey,scope:signupIdentityScope(),fingerprint:signupSubmissionFingerprint(),editRevision:signupSubmissionEditRevision,legalVersion:signupPrivacyConsentVersion,sent:false};
+signupSubmissionTasks.set(task.owner,task);
+joinSubmitInFlight=true;
+window.CoopSignupDraft?.setPending(true);
+try {
 try {
 await ensureSignupTenant();
+if(!isCurrentSignupSubmission(task))return;
 } catch (tenantError) {
+if(!isCurrentSignupSubmission(task))return;
 openResultModal('가입 대상을 확인할 수 없습니다.', true);
 return;
 }
@@ -2349,18 +2400,6 @@ return;
 if(signupLegalDocuments?.ready!==true){openResultModal('가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.',true);return;}
 if(signupAuthRetryPending){showSignupAuthRetry('가입 여부를 다시 확인한 뒤 신청해 주세요.');return;}
 if(signupAuthBusy)return;
-
-if (joinSubmitInFlight) {
-openResultModal(
-"이미 저장 처리 중입니다.\n잠시 후 다시 시도해 주세요.",
-true
-);
-return;
-}
-joinSubmitInFlight = true;
-window.CoopSignupDraft?.setPending(true);
-
-try {
 
 // [수정] 내부에서 정의하던 openResultModal 제거함 (전역 함수 사용)
 
@@ -2401,6 +2440,7 @@ if(userType==='개인') {
 }
 if(needsGuardian) {
  const receipt=await _supabase.rpc('guardian_signup_receipt',{p_submission_id:guardianSubmissionId});
+ if(!isCurrentSignupSubmission(task))return;
  if(receipt.error) {openResultModal('기존 신청 여부를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',true);return;}
  if(receipt.data?.member_id) {openResultModal('이미 가입 신청이 접수되어 있습니다. 법정대리인 동의와 사무국 확인 후 가입 승인이 진행됩니다.',false);return;}
  const guardianName=document.getElementById('signupGuardianName').value.trim();
@@ -2410,12 +2450,15 @@ if(needsGuardian) {
   openResultModal('법정대리인 이름과 연락처를 확인해 주세요. 신청자 본인의 번호 대신 법정대리인의 번호가 필요합니다.',true);return;
  }
  const readiness=await _supabase.rpc('guardian_signup_status');
+ if(!isCurrentSignupSubmission(task))return;
  if(readiness.error || readiness.data!==true) {openResultModal('법정대리인 동의 안내를 준비 중입니다. 가입은 사무국장 김민호(010-2513-5736)에게 문의해 주세요.',true);return;}
 }
 
 if (userType === '단체') {
 await validateBizNo();
+if(!isCurrentSignupSubmission(task))return;
 await validateCorpNo();
+if(!isCurrentSignupSubmission(task))return;
 }
 
 // 3-1. 이름/단체명 2글자 미만 체크
@@ -2491,9 +2534,11 @@ const enteredEmail = normalizeSignupEmail(document.getElementById('verifiedEmail
 let authenticatedEmail = '';
 try {
 const { data, error } = await _supabase.auth.getUser();
+if(!isCurrentSignupSubmission(task))return;
 if (error) throw error;
 authenticatedEmail = normalizeSignupEmail(data?.user?.email);
 } catch (error) {
+if(!isCurrentSignupSubmission(task))return;
 CoopSafeLog.warn("[signup] verified email check failed:", error);
 }
 if (!deferredSignupEmailVerified || !enteredEmail || enteredEmail !== deferredSignupVerifiedEmail || enteredEmail !== authenticatedEmail) {
@@ -2521,6 +2566,7 @@ const { data: isPhoneDup, error: phoneDupErr } = await _supabase.rpc(
 'check_duplicate_signup',
 { check_field: 'phone', check_value: finalPhone, p_coop_code: signupTenant.coop_code }
 );
+if(!isCurrentSignupSubmission(task))return;
 
 if (phoneDupErr) {
 CoopSafeLog.error("[signup] operation failed", phoneDupErr);
@@ -2555,6 +2601,7 @@ const { data: isRrnDup, error: rrnDupErr } = await _supabase.rpc(
 'check_duplicate_signup',
 { check_field: 'rrn', check_value: rrnCheck, p_coop_code: signupTenant.coop_code }
 );
+if(!isCurrentSignupSubmission(task))return;
 
 if (rrnDupErr) {
 CoopSafeLog.error("[signup] operation failed", rrnDupErr);
@@ -2588,6 +2635,7 @@ const { data: isBizDup, error: bizDupErr } = await _supabase.rpc(
 'check_duplicate_signup',
 { check_field: 'biz', check_value: bizCheck, p_coop_code: signupTenant.coop_code }
 );
+if(!isCurrentSignupSubmission(task))return;
 
 if (bizDupErr) {
 CoopSafeLog.error("[signup] operation failed", bizDupErr);
@@ -2616,6 +2664,7 @@ const { data: isCorpDup, error: corpDupErr } = await _supabase.rpc(
 'check_duplicate_signup',
 { check_field: 'corp_no', check_value: corpCheck, p_coop_code: signupTenant.coop_code }
 );
+if(!isCurrentSignupSubmission(task))return;
 
 if (corpDupErr) {
 CoopSafeLog.error("[signup] operation failed", corpDupErr);
@@ -2682,6 +2731,8 @@ return;
 
 // 가입 경로 및 SNS ID 확인
 const { data: { session } } = await _supabase.auth.getSession();
+if(!isCurrentSignupSubmission(task))return;
+if(String(session?.user?.id||'contact-only')!==task.owner)return;
 let joinPath = '홈페이지';
 let kakaoId = null;
 
@@ -2761,19 +2812,21 @@ const signupArguments = {
   p_education_attendance_consent: educationQrToken ? document.getElementById('agreeEducationAttendance').checked : false
 };
 const submittedDraft = window.CoopSignupDraft?.snapshot();
+if(!isCurrentSignupSubmission(task))return;
+task.sent=true;
 const { data: signupResult, error } = await _supabase.rpc(needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5', needsGuardian ? {
  p_signup:signupArguments,
  p_guardian_name:document.getElementById('signupGuardianName').value.trim(),
  p_guardian_phone:document.getElementById('signupGuardianPhone').value,
  p_submission_id:guardianSubmissionId
 }:signupArguments);
+if(!isCurrentSignupSubmission(task,false))return;
 const createdMemberUuid = signupResult?.member_id || null;
 const educationSignupResult = signupResult?.education || null;
 let finalInsertError = error;
 if(error?.message==='PRIVACY_CONSENT_VERSION_INVALID') {
-document.getElementById('agree1').checked=false;document.getElementById('agree2').checked=false;
-try {await loadSignupLegalDocuments();applyTenantTerms();openResultModal('가입 동의 내용이 변경되었습니다. 내용을 다시 확인하고 동의해 주세요.',true);}
-catch(_){signupLegalDocuments=null;openResultModal('변경된 가입 안내를 불러오지 못했습니다. 입력 내용은 그대로 있으니 다시 시도해 주세요.',true);}
+try {await loadSignupLegalDocuments(task.scope);if(!isCurrentSignupSubmission(task,false))return;openResultModal('가입 동의 내용이 변경되었습니다. 내용을 다시 확인하고 동의해 주세요.',true);}
+catch(_){if(!isCurrentSignupSubmission(task,false))return;signupLegalDocuments=null;openResultModal('변경된 가입 안내를 불러오지 못했습니다. 입력 내용은 그대로 있으니 다시 시도해 주세요.',true);}
 return;
 }
 
@@ -2788,6 +2841,7 @@ const { data: existingMember, error: existingErr } = await _supabase.rpc('check_
   check_value: insertData.email,
   p_coop_code: signupTenant.coop_code
 });
+if(!isCurrentSignupSubmission(task,false))return;
 
 if (!existingErr && existingMember === true) {
 finalInsertError = null;
@@ -2822,12 +2876,14 @@ btn.innerText = '가입 신청하기 ☀️';
       const { error } = await _supabase.functions.invoke('send-welcome-kakao', {
         body: { memberId: createdMemberUuid }
       });
+      if(!isCurrentSignupSubmission(task,false))return;
       if (error) CoopSafeLog.warn("[welcome-kakao] 가입은 완료됐지만 안내 발송을 확인하지 못했습니다.");
     } catch (_) {
       CoopSafeLog.warn("[welcome-kakao] 가입은 완료됐지만 안내 발송을 확인하지 못했습니다.");
     }
   }
 
+  if(!isCurrentSignupSubmission(task,false))return;
   const successModalCopy = document.getElementById('successModalCopy');
   if(needsGuardian && successModalCopy) successModalCopy.textContent='법정대리인 연락처로 동의 요청을 보내드립니다. 법정대리인 동의, 사무국 확인과 출자금 납입 확인 후 가입이 승인됩니다.';
   if (educationQrToken && successModalCopy && !needsGuardian) {
@@ -2848,12 +2904,11 @@ btn.innerText = '가입 신청하기 ☀️';
 }
 
 } catch (error) {
+if(!isCurrentSignupSubmission(task))return;
 window.CoopSignupFailure?.report('submit',error);
 throw error;
 } finally {
-joinSubmitInFlight = false;
-window.CoopSignupDraft?.setPending(false);
-refreshGuardianFields();
+finishSignupSubmission(task);
 }
 }
 
