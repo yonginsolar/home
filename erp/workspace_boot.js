@@ -1,4 +1,4 @@
-/* ERP persistent workspace boot v1.0.1. Canonical Pages URLs; no credentials or permission cache. */
+/* ERP persistent workspace boot v1.0.2. Ignore only cash-sale display-version aliases. */
 (() => {
   'use strict';
   const pages = new Set(['approval','mypage','accounting','admin_employee','admin_member','participation_analytics',
@@ -15,6 +15,9 @@
       if (!(path === '/erp/' + leaf && pages.has(leaf))
         && !/^\/minutes\/(?:meeting_workspace|admin_minutes)$/.test(path)
         && !/^\/vote\/(?:admin|admin_setup|poll_admin|poll_setup|results)$/.test(path)) return null;
+      // Old cash-sale menu links used v only for asset cache busting. It must
+      // not create another held editor. Keep event/work/hash and all other tasks.
+      if (path === '/erp/festival_receipts' && target.searchParams.has('v')) target.searchParams.delete('v');
       return path + '.html' + target.search + target.hash;
     } catch (_) { return null; }
   }
