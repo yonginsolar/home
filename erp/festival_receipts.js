@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v2.9.5 — Preserve pending event edits and retry confirmed registration reads only. */
+/* v2.9.6 — Bound/cancel post-registration reads without repeating the create. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -264,6 +264,7 @@
   const newEventFields = ['newEventDate', 'newEventName'];
   let newEventDraftBase = null;
   let newEventCreatePending = false, newEventResult = null, newEventError = '';
+  let newEventWork = null, newEventRead = null;
   const newEventValues = () => Object.fromEntries(newEventFields.map(id => [id, $(id).value]));
   function newEventDraftChanged() {
     return newEventCreatePending || Boolean(newEventDraftBase && newEventFields.some(id => $(id).value !== newEventDraftBase[id]));
@@ -273,15 +274,24 @@
     const retry = result?.needsReload && !result.loading;
     status.textContent = newEventCreatePending ? '행사를 등록하고 있습니다.' : result
       ? (result.loading ? '행사 등록은 완료됐습니다. 목록을 불러오고 있습니다.'
-        : result.needsReload ? '행사 등록은 완료됐지만 목록을 불러오지 못했습니다. 목록만 다시 불러와 주세요.'
+        : result.needsReload ? result.readError || '행사 등록은 완료됐습니다. 목록을 다시 불러와 주세요.'
           : '행사를 등록했습니다.')
         + (newEventDraftChanged() ? ' 추가로 작성한 내용은 미저장 상태입니다.' : '')
       : newEventError;
-    status.classList.toggle('error', Boolean(newEventError || retry));
+    status.classList.toggle('error', Boolean(newEventError || (retry && result.readError)));
     $('retryEventList').hidden = !result?.needsReload;
     $('retryEventList').disabled = !tabsReady || !editable || operationBusy || Boolean(result?.loading);
     $('eventForm').querySelector('button[type="submit"]').disabled = !tabsReady || !editable || operationBusy || Boolean(result?.needsReload);
-    $('closeEventDialog').disabled = operationBusy;
+    $('closeEventDialog').disabled = operationBusy && !newEventRead;
+  }
+  function cancelConfirmedEventRead() {
+    const read = newEventRead;
+    if (!read || !read.result.needsReload) return;
+    newEventRead = null;
+    read.result.loading = false; read.result.readError = '';
+    if (newEventWork === read.work) { newEventWork = null; operationBusy = false; }
+    read.cancel();
+    syncNewEventStatus();
   }
   function clearConfirmedEventInputs(result) {
     if (!newEventFields.every(id => $(id).value === result.values[id])) return;
@@ -290,11 +300,24 @@
     window.ErpWorkspaceResume?.checkpoint?.($('eventForm'));
   }
   async function refreshConfirmedEvent(result) {
-    const current = () => tabsReady && result === newEventResult && result.identity === identityRevision;
-    if (!current() || result.loading) return;
+    const ownerCurrent = () => tabsReady && result === newEventResult && result.identity === identityRevision;
+    if (!ownerCurrent() || result.loading) return;
+    const read = { result, work: newEventWork, controller: new AbortController() };
+    let timer;
+    const cancelled = new Promise((_, reject) => {
+      read.cancel = () => { clearTimeout(timer); read.controller.abort(); reject(new Error('EVENT_LIST_CANCELLED')); };
+      timer = setTimeout(() => { read.controller.abort(); reject(new Error('EVENT_LIST_TIMEOUT')); }, 15000);
+    });
+    newEventRead = read;
+    const current = () => ownerCurrent() && newEventRead === read;
     result.loading = true; syncNewEventStatus();
     try {
-      const context = await operationsRpc('events');
+      // Only this read has a deadline; create results are never inferred or retried.
+      let request = client.rpc('festival_operations_admin', {p_action: 'events', p_data: {}});
+      if (typeof request.abortSignal === 'function') request = request.abortSignal(read.controller.signal);
+      const response = await Promise.race([request, cancelled]);
+      if (response.error) throw new Error(response.error.message);
+      const context = response.data;
       if (!current()) return;
       if (!context?.events?.some(event => event.id === result.id)) throw new Error('EVENT_LIST_INCOMPLETE');
       eventContext = context;
@@ -304,13 +327,20 @@
       if (selectCreated) await selectEvent(result.id, false, result);
       if (!current()) return;
       result.needsReload = false;
+      result.readError = '';
       clearConfirmedEventInputs(result);
       if (!newEventDraftChanged() && eventDialog.open) eventDialog.close();
       setOperationStatus('행사를 등록했습니다. 행사 목록을 갱신했습니다.');
     } catch (error) {
-      if (current()) setOperationStatus('행사 등록은 완료됐지만 목록을 불러오지 못했습니다. 행사 등록창에서 목록만 다시 불러와 주세요.', true);
+      if (current()) {
+        result.readError = error.message === 'EVENT_LIST_TIMEOUT'
+          ? '행사 등록은 완료됐습니다. 목록 응답이 늦어지고 있어요. 목록만 다시 불러와 주세요.'
+          : '행사 등록은 완료됐지만 목록을 불러오지 못했습니다. 목록만 다시 불러와 주세요.';
+        setOperationStatus(result.readError, true);
+      }
     } finally {
-      if (current()) { result.loading = false; syncNewEventStatus(); }
+      clearTimeout(timer);
+      if (current()) { newEventRead = null; result.loading = false; syncNewEventStatus(); }
     }
   }
   function recordNewEventEdit(event) {
@@ -333,18 +363,19 @@
     eventDialog.showModal(); document.body.classList.add('event-dialog-open');
     $('newEventName').focus();
   });
-  $('closeEventDialog').addEventListener('click', () => { if (!operationBusy) eventDialog.close(); });
-  eventDialog.addEventListener('cancel', (event) => { if (operationBusy) event.preventDefault(); });
-  eventDialog.addEventListener('close', () => { document.body.classList.remove('event-dialog-open'); });
+  $('closeEventDialog').addEventListener('click', () => { cancelConfirmedEventRead(); if (!operationBusy) eventDialog.close(); });
+  eventDialog.addEventListener('cancel', (event) => { cancelConfirmedEventRead(); if (operationBusy) event.preventDefault(); });
+  eventDialog.addEventListener('close', () => { cancelConfirmedEventRead(); document.body.classList.remove('event-dialog-open'); });
   $('retryEventList').addEventListener('click', async () => {
     const result = newEventResult;
     if (!tabsReady || !editable || operationBusy || eventBusy || receiptBusy || incomeController?.isBusy()
       || workspaceTools?.isBusy() || !result?.needsReload || result.loading) return;
+    const work = newEventWork = {};
     operationBusy = true;
     try { await refreshConfirmedEvent(result); }
     finally {
-      if (result === newEventResult && result.identity === identityRevision) {
-        operationBusy = false; syncNewEventStatus();
+      if (newEventWork === work && result === newEventResult && result.identity === identityRevision) {
+        newEventWork = null; operationBusy = false; syncNewEventStatus();
       }
     }
   });
@@ -1253,6 +1284,7 @@
       || !editable || newEventResult?.needsReload) return;
     const identity = identityRevision, values = newEventValues();
     const originEvent = selectedEventId, originScope = scopeRevision;
+    const work = newEventWork = {};
     operationBusy = true;
     newEventCreatePending = true; newEventResult = null; newEventError = '';
     syncNewEventStatus();
@@ -1271,8 +1303,8 @@
     } catch (error) {
       if (identity === identityRevision && tabsReady) newEventError = readableError(error);
     } finally {
-      if (identity === identityRevision && tabsReady) {
-        operationBusy = false; newEventCreatePending = false; syncNewEventStatus();
+      if (newEventWork === work && identity === identityRevision && tabsReady) {
+        newEventWork = null; operationBusy = false; newEventCreatePending = false; syncNewEventStatus();
       }
     }
   });
@@ -1566,6 +1598,7 @@
   client.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT' || (session?.user?.id && taskUserId && session.user.id !== taskUserId)) {
       identityRevision++; scopeRevision++; tabsReady = false; loadedPanels.clear();
+      cancelConfirmedEventRead(); newEventWork = null;
       newEventResult = null; newEventCreatePending = false; newEventError = '';
       syncNewEventStatus();
       $('adminPanel').hidden = true;

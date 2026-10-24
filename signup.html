@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.58
-Change: 2026-10-18 - Keep corporate number optional for non-corporate organization signup.
+Version: v1.0.59
+Change: 2026-10-24 - Keep authentication choices hidden until return processing settles.
 -->
 <html lang="ko"> 
 <head>
@@ -9,7 +9,7 @@ Change: 2026-10-18 - Keep corporate number optional for non-corporate organizati
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.0"></script>
-  <script>console.log('[Version] v1.0.57 | signup.html');</script>
+  <script>console.log('[Version] v1.0.59 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -37,6 +37,7 @@ Change: 2026-10-18 - Keep corporate number optional for non-corporate organizati
 <script>
 const signupSocialProvidersEnabled = !Boolean(window.CoopTenantHead?.isCitizenTenant);
 document.documentElement.dataset.signupSocial = signupSocialProvidersEnabled ? 'enabled' : 'disabled';
+document.documentElement.dataset.signupAuth = 'checking';
 window.__AUTH_BROKER_CONFIG__ = {
 origin: 'https://auth.coopco.kr',
 enabledProviders: {
@@ -152,6 +153,8 @@ html[data-signup-social="disabled"] #signup-kakao-option,
 html[data-signup-social="disabled"] #signup-naver-option {
 display: none !important;
 }
+html[data-signup-auth="checking"] #step-gate { display: none !important; }
+#signupAuthStatus { padding: 3rem 1rem; text-align: center; }
 
 </style>
 
@@ -172,6 +175,10 @@ gtag('config', 'G-TR217L7JN9');
 
 <div class="mobile-view-container">
 <div class="signup-content">
+<div id="signupAuthStatus" role="status" aria-live="polite" aria-busy="true">
+<p id="signupAuthMessage">인증 상태를 확인하고 있어요.</p>
+<button id="retrySignupAuth" type="button" class="btn btn-outline-secondary" onclick="retrySignupAuthCheck()" hidden>다시 확인</button>
+</div>
 
 <div id="step-gate" class="text-center pt-5" style="display:none;">
 <span class="step-emoji">☀️</span>
@@ -543,6 +550,31 @@ const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
 const DEFAULT_SIGNUP_KAKAO_URL = 'https://invite.kakao.com/tc/cLtR3LGLQX';
 const PUBLIC_AUTH_DEST_KEY = 'public_auth_destination';
 let signupAuthInitialStateReady = false;
+let signupAuthBusy = true, signupSocialStartInFlight = false, signupHasSession = false, signupAuthRetryPending = false;
+function setSignupAuthBusy(busy, message = '인증 상태를 확인하고 있어요.') {
+signupAuthBusy = busy;
+signupAuthRetryPending = false;
+document.documentElement.dataset.signupAuth = busy ? 'checking' : 'ready';
+const status = document.getElementById('signupAuthStatus');
+status.hidden = !busy;
+status.setAttribute('aria-busy', String(busy));
+document.getElementById('signupAuthMessage').textContent = message;
+document.getElementById('retrySignupAuth').hidden = true;
+if (busy || signupHasSession) document.getElementById('step-gate').style.display = 'none';
+else if (!isDeferredSignupProfile() && document.getElementById('step-form').style.display !== 'block') document.getElementById('step-gate').style.display = '';
+}
+function showSignupAuthRetry(message) {
+setSignupAuthBusy(true, message);
+signupAuthRetryPending = true;
+document.getElementById('signupAuthStatus').setAttribute('aria-busy', 'false');
+document.getElementById('retrySignupAuth').hidden = false;
+document.getElementById('retrySignupAuth').disabled = false;
+}
+async function retrySignupAuthCheck() {
+setSignupAuthBusy(true);
+document.getElementById('retrySignupAuth').disabled = true;
+await checkCurrentSignupSessionOnLoad({ reason: 'manual-retry', showFailure: true });
+}
 let resolveSignupAuthInitialStateReady = null;
 const signupAuthInitialStateReadyPromise = new Promise((resolve) => {
 resolveSignupAuthInitialStateReady = resolve;
@@ -866,7 +898,7 @@ if (kakaoOption) kakaoOption.hidden = false;
 if (naverOption) naverOption.hidden = false;
 }
 if (privacyLink) privacyLink.hidden = deferred;
-if (gate && !deferred && document.getElementById('step-form')?.style.display !== 'block') gate.style.display = '';
+if (gate && !deferred && !signupAuthBusy && !signupHasSession && !signupSocialStartInFlight && document.getElementById('step-form')?.style.display !== 'block') gate.style.display = '';
 if (window.__AUTH_BROKER_CONFIG__?.enabledProviders) {
 window.__AUTH_BROKER_CONFIG__.enabledProviders.kakao = !deferred;
 window.__AUTH_BROKER_CONFIG__.enabledProviders['custom:naver'] = !deferred;
@@ -1588,6 +1620,8 @@ let signupSocialReturnFailureShown = false;
 
 function queueSignupAuthSessionCheck(session, reason = '') {
 if (!session) return;
+signupHasSession = true;
+setSignupAuthBusy(true, '인증을 마쳤어요. 가입 정보를 확인하고 있어요.');
 window.setTimeout(async () => {
 try {
 await ensureSignupTenant();
@@ -1599,6 +1633,7 @@ return;
 await checkExistingMember(session);
 } catch (tenantError) {
 CoopSafeLog.warn("signup auth session handling failed:", tenantError);
+showSignupAuthRetry('가입 정보를 확인하지 못했습니다. 다시 확인해 주세요.');
 openResultModal('가입 대상을 확인할 수 없습니다.', true);
 }
 }, 0);
@@ -1624,6 +1659,7 @@ try {
 await ensureSignupTenant();
 const { data, error } = await _supabase.auth.getSession();
 if (error || !data?.session) return false;
+signupHasSession = true;
 if (reason) console.debug('[signup] resuming from current session:', reason);
 if (deferredSignupFormInitialized) {
 return completeDeferredSignupEmailVerification(data.session);
@@ -1632,6 +1668,7 @@ await checkExistingMember(data.session);
 return true;
 } catch (error) {
 CoopSafeLog.warn("signup session resume failed:", error);
+showSignupAuthRetry('인증 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
 return false;
 } finally {
 signupSessionResumeInFlight = null;
@@ -1668,6 +1705,7 @@ CoopSafeLog.warn("signup session fallback failed:", error);
 return false;
 } finally {
 signupSessionCheckInFlight = null;
+if (!signupHasSession && !signupAuthRetryPending) setSignupAuthBusy(false);
 }
 })();
 return signupSessionCheckInFlight;
@@ -1681,6 +1719,7 @@ applySignupEducationQrContext();
 try {
 await ensureSignupTenant();
 } catch (tenantError) {
+showSignupAuthRetry('가입 대상을 확인하지 못했습니다. 다시 확인해 주세요.');
 return;
 }
 const manualSessionHandled = await handleManualSession();
@@ -1692,7 +1731,12 @@ return;
 await checkCurrentSignupSessionOnLoad({ reason: 'load', showFailure: true });
 };
 
-window.addEventListener('pageshow', () => {
+window.addEventListener('pageshow', (event) => {
+if (event.persisted && signupSocialStartInFlight && !isSignupSocialReturnUrl()) {
+signupSocialStartInFlight = false;
+checkCurrentSignupSessionOnLoad({ reason: 'back-from-auth', showFailure: false });
+return;
+}
 if (isSignupSocialReturnUrl()) {
 checkCurrentSignupSessionOnLoad({ reason: 'pageshow', showFailure: true });
 return;
@@ -1869,6 +1913,8 @@ matched.provider_id
 
 // [코드 2] 가입 신청서 화면 렌더링 및 UI 제어
 function showApplicationForm(session) {
+signupHasSession = Boolean(session?.user?.id) || signupHasSession;
+setSignupAuthBusy(false);
 // 1. 화면 전환 (게이트 숨김 -> 폼 표시)
 document.getElementById('step-gate').style.display = 'none';
 document.getElementById('step-form').style.display = 'block';
@@ -1922,6 +1968,10 @@ if (socialPhone) fillSignupPhoneInputs(socialPhone);
 // signup 페이지의 스크립트 부분 교체
 
 async function startKakaoSignup() {
+    if (signupAuthBusy || signupSocialStartInFlight || signupHasSession) return;
+    signupSocialStartInFlight = true;
+    let navigating = false;
+    setSignupAuthBusy(true, '카카오 인증을 준비하고 있어요.');
     try {
         await ensureSignupTenant();
         if (isDeferredSignupProfile()) {
@@ -1954,6 +2004,7 @@ async function startKakaoSignup() {
             })
             : '';
         if (brokerUrl) {
+            navigating = true;
             window.location.href = brokerUrl;
             return;
         }
@@ -1970,6 +2021,7 @@ async function startKakaoSignup() {
             }
         });
         if (error) throw error;
+        navigating = true;
     } catch (error) {
         const msg = String(error?.message || '').trim();
         if (msg === 'SIGNUP_COOP_CONTEXT_MISSING' || msg === 'SIGNUP_COOP_NOT_FOUND') {
@@ -1977,10 +2029,16 @@ async function startKakaoSignup() {
             return;
         }
         openResultModal(msg || '카카오 로그인 시작에 실패했습니다.', true);
+    } finally {
+        if (!navigating) { signupSocialStartInFlight = false; setSignupAuthBusy(false); }
     }
 }
 
 async function startNaverSignup() {
+    if (signupAuthBusy || signupSocialStartInFlight || signupHasSession) return;
+    signupSocialStartInFlight = true;
+    let navigating = false;
+    setSignupAuthBusy(true, '네이버 인증을 준비하고 있어요.');
     try {
         await ensureSignupTenant();
         if (isDeferredSignupProfile()) {
@@ -2007,6 +2065,7 @@ async function startNaverSignup() {
             })
             : '';
         if (brokerUrl) {
+            navigating = true;
             window.location.href = brokerUrl;
             return;
         }
@@ -2019,6 +2078,7 @@ async function startNaverSignup() {
             }
         });
         if (error) throw error;
+        navigating = true;
     } catch (error) {
         const msg = String(error?.message || '').trim();
         if (msg === 'SIGNUP_COOP_CONTEXT_MISSING' || msg === 'SIGNUP_COOP_NOT_FOUND') {
@@ -2026,6 +2086,8 @@ async function startNaverSignup() {
             return;
         }
         openResultModal(msg || '네이버 로그인 시작에 실패했습니다.', true);
+    } finally {
+        if (!navigating) { signupSocialStartInFlight = false; setSignupAuthBusy(false); }
     }
 }
 
@@ -2738,6 +2800,7 @@ return null;
 }
 
 function redirectLinkedSignupMember() {
+setSignupAuthBusy(true, '인증을 마쳤어요. 내 정보로 이동하고 있어요.');
 const params = new URLSearchParams(window.location.search || '');
 const provider = params.get('auth_return') || 'social';
 window.location.replace(buildSignupMemberManageUrl({
@@ -2786,6 +2849,7 @@ hasExistingMember = true;
 
 // [Case A] 이미 가입된 이메일이 존재함
 if (hasExistingMember) {
+setSignupAuthBusy(false);
 // "이미 가입된 조합원입니다" 모달 띄우기
 const modal = document.getElementById('alreadyMemberModal');
 if (modal) modal.style.display = 'flex';
@@ -2797,6 +2861,7 @@ showApplicationForm(session);
 
 } catch (err) {
 CoopSafeLog.error("스크립트 에러:", err);
+showSignupAuthRetry('기존 가입 여부를 확인하지 못했습니다. 다시 확인해 주세요.');
 openResultModal('기존 가입 여부를 확인하지 못했습니다.\n잠시 후 다시 시도해 주세요.', true);
 }
 });
