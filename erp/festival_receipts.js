@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v2.9.1 — Open the explicitly selected pending event without replacing other drafts. */
+/* v2.9.2 — Preserve edits made while a cash-sale save is pending. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -1073,16 +1073,41 @@
       };
       const fingerprint = JSON.stringify(data);
       if (pendingSaleRequestKey?.fingerprint !== fingerprint) pendingSaleRequestKey = { fingerprint, key: crypto.randomUUID() };
+      const submitted = {
+        identity: identityRevision, eventId: selectedEventId, receiptAmountEdited,
+        values: Object.fromEntries(saleFields.map(id => [id, $(id).value]))
+      };
       await registerSaleRpc({ ...data, request_key: pendingSaleRequestKey.key });
+      if (submitted.identity !== identityRevision || submitted.eventId !== selectedEventId) return;
       pendingSaleRequestKey = null;
-      setOperationStatus('매출·회계전표·재고 출고를 함께 저장했습니다. 쿠폰 금액은 정산 입금 전까지 미수금으로 표시됩니다.');
-      form.reset();
-      saleDrafts.delete(selectedEventId);
-      ['saleDiscount','saleBank','saleCash','voucherCount','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount'].forEach((id) => { $(id).value = '0'; });
-      $('voucherUnitValue').value = '3000';
-      receiptAmountEdited = false;
-      syncSaleReceiptAllocation();
-      await loadInventory();
+      const additionalEdits = receiptAmountEdited !== submitted.receiptAmountEdited || saleFields.some(id => {
+        const value = $(id).value, before = submitted.values[id];
+        return $(id).hasAttribute('data-number-group') ? ERPNumberInput.raw(value) !== ERPNumberInput.raw(before) : value !== before;
+      });
+      if (additionalEdits) {
+        // Keep the complete current row, including its price/allocation context.
+        // It is a new unsaved draft, not another retry of the completed request.
+        saleDrafts.set(selectedEventId, {
+          values: Object.fromEntries(saleFields.map(id => [id, $(id).value])),
+          receiptAmountEdited, pendingSaleRequestKey: null
+        });
+      } else {
+        form.reset();
+        saleDrafts.delete(selectedEventId);
+        ['saleDiscount','saleBank','saleCash','voucherCount','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount'].forEach((id) => { $(id).value = '0'; });
+        $('voucherUnitValue').value = '3000';
+        receiptAmountEdited = false;
+        syncSaleReceiptAllocation();
+        window.ErpWorkspaceResume?.checkpoint?.(form);
+      }
+      setOperationStatus(additionalEdits ? '저장했습니다. 저장 중 수정한 내용은 미저장 상태입니다.' : '저장했습니다.');
+      try { await loadInventory(); }
+      catch (_) {
+        if (submitted.identity === identityRevision && submitted.eventId === selectedEventId) {
+          setOperationStatus('저장은 완료됐지만 목록을 불러오지 못했습니다. ‘새로고침’으로 다시 확인해 주세요.'
+            + (additionalEdits ? ' 저장 중 수정한 내용은 미저장 상태입니다.' : ''), true);
+        }
+      }
     } catch (error) {
       setOperationStatus(readableError(error), true);
     } finally {
