@@ -1,4 +1,4 @@
-/* v1.1.1 — Recognize the browser's fixed "Load failed" network error too. */
+/* v1.1.2 — Keep known denial/rate-limit status ahead of a body timeout. */
 (function(root){
  'use strict';
  const fallback={tenant:'TENANT_READ_FAILED',auth_start:'AUTH_START_FAILED',auth_return:'AUTH_SESSION_UNAVAILABLE',email_send:'EMAIL_SEND_FAILED',email_verify:'EMAIL_VERIFY_FAILED',member_lookup:'MEMBER_LOOKUP_FAILED',submit:'SIGNUP_SAVE_FAILED',runtime:'RUNTIME_ERROR'};
@@ -27,7 +27,8 @@
    if(operations.includes(info.operation))operation=info.operation;if(operations.includes(extra?.operation))operation=extra.operation;
    if(apiCodes.has(e?.code))api_code=e.code;
    const n=Number(info.status??e?.status);if(Number.isInteger(n)&&n>=100&&n<=599)status=n;
-   if(e?.name==='TimeoutError'||/_TIMEOUT$/.test(message)||api_code==='57014')reason='TIMEOUT';
+   if(status===401)reason='UNAUTHORIZED';else if(status===403)reason='FORBIDDEN';else if(status===429)reason='RATE_LIMITED';
+   else if(e?.name==='TimeoutError'||/_TIMEOUT$/.test(message)||api_code==='57014')reason='TIMEOUT';
    else if(e?.name==='AbortError')reason='ABORTED';
    else if(status===401)reason='UNAUTHORIZED';else if(status===403||api_code==='42501')reason='FORBIDDEN';
    else if(status===429)reason='RATE_LIMITED';else if(status!==null&&status>=500)reason='SERVER_ERROR';

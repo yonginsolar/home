@@ -1,4 +1,4 @@
-/* v1.0.0 — Registered-host public signup reads, independent of the Auth queue.
+/* v1.0.1 — Preserve received HTTP status even when the response body stalls.
  * No member lookup/save, Auth, storage, or diagnostic/notification requests.
  */
 (function(root){
@@ -11,17 +11,22 @@
   const hostNow=()=>String(getHost()||'').trim().toLowerCase();
   function assertHost(host){if(!host||hostNow()!==host)throw Error('SIGNUP_COOP_CONTEXT_MISSING');}
   async function attempt(name,args,host){
-   assertHost(host);const controller=new AbortController();let timer;
+   assertHost(host);const controller=new AbortController();let timer,status=null;
    try{
     // The deadline includes reading the body, not just receipt of HTTP headers.
     const request=(async()=>{
      const response=await root.fetch(url+'/rest/v1/rpc/'+name,{method:'POST',credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer',signal:controller.signal,headers:{apikey:key,'Content-Type':'application/json','x-public-host':host},body:JSON.stringify(args)});
+     status=response.status;
      let value;
      try{value=await response.json();}catch(error){if(response.ok)throw error;value={message:'SIGNUP_PUBLIC_READ_FAILED'};}
      assertHost(host);
      return{data:response.ok?value:null,error:response.ok?null:(value&&typeof value==='object'?value:{message:'SIGNUP_PUBLIC_READ_FAILED'}),status:response.status,statusText:response.statusText};
     })();
     return await Promise.race([request,new Promise((_,reject)=>{timer=root.setTimeout(()=>{const error=Error('SIGNUP_PREPARATION_TIMEOUT');error.name='TimeoutError';reject(error);controller.abort();},6000);})]);
+   }catch(error){
+    // Preserve headers without retaining response text or applicant input.
+    if(error&&typeof error==='object'&&status!==null)error.status=status;
+    throw error;
    }finally{root.clearTimeout(timer);}
   }
   async function read(name,args,host){
@@ -34,7 +39,8 @@
     }catch(error){
      // Only a known read may be retried. Permission, data, host and 429 failures
      // never trigger an automatic retry; writes are not part of this facade.
-     if(n!==0||!(error?.name==='TimeoutError'||error?.name==='TypeError'&&/fetch|network|load failed/i.test(error.message)))throw error;
+     const knownFailure=Number(error?.status)>=400;
+     if(n!==0||knownFailure&&!delayedStatuses.has(Number(error.status))||!(error?.name==='TimeoutError'||error?.name==='TypeError'&&/fetch|network|load failed/i.test(error.message)))throw error;
      await new Promise(resolve=>root.setTimeout(resolve,250));
     }
    }

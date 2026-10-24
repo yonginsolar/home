@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.63
-Change: 2026-10-24 - Bound and coalesce host-scoped public preparation reads without waiting on Auth.
+Version: v1.0.64
+Change: 2026-10-24 - Restore preparation entry and isolate member reads/drafts by current identity.
 -->
 <html lang="ko"> 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-<script src="shared/signup_failure_reporter.js?v=1.1.1"></script>
-<script src="shared/signup_public_reads.js?v=1.0.0"></script>
-<script src="shared/signup_draft_guard.js?v=1.0.0"></script>
+<script src="shared/signup_failure_reporter.js?v=1.1.2"></script>
+<script src="shared/signup_public_reads.js?v=1.0.1"></script>
+<script src="shared/signup_draft_guard.js?v=1.0.1"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <script>console.log('[Version] v1.0.62 | signup.html');</script>
+  <script>console.log('[Version] v1.0.64 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -522,7 +522,7 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.63'});
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.64'});
 window.CoopSignupFailure?.observeClient(_supabase);
 const signupPublicReads=CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
 window.CoopSignupFailure?.observeClient(signupPublicReads);
@@ -551,7 +551,7 @@ const needed=main && age!==null && age>=14 && age<19;
 document.getElementById('guardianSignupFields').hidden=!needed;
 ['signupGuardianName','signupGuardianPhone'].forEach(id=>document.getElementById(id).required=needed);
 const ageBlocked=personal && age!==null && (main?age<14:age<19);
-document.getElementById('btnSubmit').disabled=joinSubmitInFlight || signupAuthRetryPending || signupLegalDocuments?.ready!==true || ageBlocked || [...signupValidationErrors].some(id=>id!=='rrnMsg' || personal);
+document.getElementById('btnSubmit').disabled=joinSubmitInFlight || signupAuthBusy || signupAuthRetryPending || signupLegalDocuments?.ready!==true || ageBlocked || [...signupValidationErrors].some(id=>id!=='rrnMsg' || personal);
 return needed;
 }
 const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
@@ -1352,6 +1352,7 @@ directInput.style.display = 'none'; directInput.required = false;
 
 // 사업자번호 검증 (원 코드 로직 복구)
 async function validateBizNo() {
+const scope=signupIdentityScope();
 var b1 = document.getElementById('biz1').value;
 var b2 = document.getElementById('biz2').value;
 var b3 = document.getElementById('biz3').value;
@@ -1370,6 +1371,7 @@ if (Math.floor(bizNo.charAt(9)) === remander) {
 // 서버 중복 체크
 try {
 const exists = await runSignupDuplicateCheck('biz', b1 + "-" + b2 + "-" + b3);
+if(!isCurrentSignupIdentity(scope))return;
 if(exists === true) {
 setMsg('bizMsg', "❌ 이미 가입된 사업자(고유)번호입니다.", true);
 document.getElementById('orgNo').value = "";
@@ -1378,6 +1380,7 @@ setMsg('bizMsg', "✅ 유효한 사업자(고유)번호입니다.", false);
 document.getElementById('orgNo').value = b1 + "-" + b2 + "-" + b3;
 }
 } catch (error) {
+if(!isCurrentSignupIdentity(scope))return;
 setMsg('bizMsg', "⚠️ 사업자(고유)번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
 document.getElementById('orgNo').value = "";
 }
@@ -1641,21 +1644,71 @@ btn.innerText = '코드 확인';
 let signupSessionResumeInFlight = null;
 let signupSessionCheckInFlight = null;
 let signupSocialReturnFailureShown = false;
+let signupIdentityKey = null, signupIdentityEpoch = 0;
+const signupIdentityDrafts = new Map();
+function signupIdentityScope() {
+return {epoch:signupIdentityEpoch,key:signupIdentityKey,coop:signupTenant?.coop_id};
+}
+function isCurrentSignupIdentity(scope) {
+return scope.epoch===signupIdentityEpoch && scope.key===signupIdentityKey && (!scope.coop || !signupTenant || scope.coop===signupTenant.coop_id);
+}
+function adoptSignupIdentity(session) {
+const next=String(session?.user?.id||'contact-only');
+if(next===signupIdentityKey)return signupIdentityScope();
+const first=signupIdentityKey===null;
+// A verified inline-email return continues the guest's own form, not another
+// signed-in person's form. All other identities have separate memory drafts.
+const transfer=signupIdentityKey==='contact-only' && requiresInlineSignupEmailVerification()
+ && normalizeSignupEmail(document.getElementById('verifiedEmail').value)!==''
+ && normalizeSignupEmail(document.getElementById('verifiedEmail').value)===normalizeSignupEmail(session?.user?.email);
+if(signupApplicationSessionKey!==null)signupIdentityDrafts.set(signupApplicationSessionKey,{
+ values:[...document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')].map(n=>[n.id,n.value,n.checked]),
+ inline:yonginInlineEmailSelected,
+ errors:[...signupValidationErrors],
+ messages:[...document.querySelectorAll('#joinForm .msg-box')].map(n=>[n.id,n.innerText??n.textContent,n.className,n.style.display]),
+ invalid:[...document.querySelectorAll('#joinForm .is-invalid-field')].map(n=>n.id)
+});
+window.CoopSignupDraft?.selectOwner(next,transfer);
+signupIdentityKey=next;
+if(!first){++signupIdentityEpoch;signupSessionResumeInFlight=null;signupSessionCheckInFlight=null;}
+signupHasSession=Boolean(session?.user?.id);
+if(signupApplicationSessionKey!==null && !transfer){
+ document.getElementById('joinForm').reset();
+ signupApplicationSessionKey=null;deferredSignupFormInitialized=false;yonginInlineEmailSelected=false;
+ deferredSignupEmailVerified=false;deferredSignupVerifiedEmail='';pendingSignupOtpEmail='';
+ document.getElementById('deferred-signup-otp-area')?.setAttribute('hidden','');
+ setDeferredSignupEmailStatus('','muted');
+ signupValidationErrors.clear();++signupCorpValidationRevision;
+ ['nameMsg','rrnMsg','phoneMsg','bizMsg','corpMsg'].forEach(id=>{resetMsg(id);document.getElementById(id).textContent='';});
+ document.querySelectorAll('#joinForm .is-invalid-field').forEach(n=>n.classList.remove('is-invalid-field'));
+ document.getElementById('step-form').style.display='none';
+ ['alreadyMemberModal','failModal'].forEach(id=>document.getElementById(id).style.display='none');
+}else if(transfer){
+ signupApplicationSessionKey=next;
+ signupIdentityDrafts.delete('contact-only');
+}
+setSignupAuthBusy(true);
+return signupIdentityScope();
+}
 
 function queueSignupAuthSessionCheck(session, reason = '') {
 if (!session) return;
+const scope=adoptSignupIdentity(session);
 signupHasSession = true;
 setSignupAuthBusy(true, '인증을 마쳤어요. 가입 정보를 확인하고 있어요.');
 window.setTimeout(async () => {
 try {
 await ensureSignupTenant();
+if(!isCurrentSignupIdentity(scope))return;
 if (reason) console.debug('[signup] auth session check queued:', reason);
 if (deferredSignupFormInitialized) {
 completeDeferredSignupEmailVerification(session);
+setSignupAuthBusy(false);
 return;
 }
 await checkExistingMember(session);
 } catch (tenantError) {
+if(!isCurrentSignupIdentity(scope))return;
 CoopSafeLog.warn("signup auth session handling failed:", tenantError);
 window.CoopSignupFailure?.report('auth_return',tenantError);
 showSignupAuthRetry('가입 정보를 확인하지 못했습니다. 다시 확인해 주세요.');
@@ -1669,6 +1722,11 @@ openResultModal('가입 대상을 확인할 수 없습니다.', true);
 _supabase.auth.onAuthStateChange((event, session) => {
 const eventName = event || 'unknown';
 window.setTimeout(() => markSignupAuthInitialStateReady(`auth-state:${eventName}`), 0);
+if(event==='SIGNED_OUT'){
+adoptSignupIdentity(null);
+window.setTimeout(()=>checkCurrentSignupSessionOnLoad({reason:'signed-out',showFailure:false}),0);
+return;
+}
 if (event && !['INITIAL_SESSION', 'SIGNED_IN'].includes(event)) {
 return;
 }
@@ -1679,28 +1737,40 @@ window.setTimeout(() => markSignupAuthInitialStateReady('auth-state-fallback-tim
 
 async function resumeSignupFromCurrentSession(reason = '') {
 if (signupSessionResumeInFlight) return signupSessionResumeInFlight;
-signupSessionResumeInFlight = (async () => {
+let scope=signupIdentityScope();
+const task = (async () => {
 try {
 await ensureSignupTenant();
+if(!isCurrentSignupIdentity(scope))return false;
 const { data, error } = await _supabase.auth.getSession();
+if(!isCurrentSignupIdentity(scope))return false;
 if (error) throw error;
-if (!data?.session) return false;
+scope=adoptSignupIdentity(data?.session);
+if (!data?.session) {
+ if(isDeferredSignupProfile() || signupIdentityDrafts.has('contact-only')){showApplicationForm(null);return true;}
+ if(!signupSocialStartInFlight)setSignupAuthBusy(false);
+ return false;
+}
 signupHasSession = true;
 if (reason) console.debug('[signup] resuming from current session:', reason);
 if (deferredSignupFormInitialized) {
-return completeDeferredSignupEmailVerification(data.session);
+const verified=completeDeferredSignupEmailVerification(data.session);
+setSignupAuthBusy(false);
+return verified || isDeferredSignupProfile();
 }
 return (await checkExistingMember(data.session)) !== false;
 } catch (error) {
+if(!isCurrentSignupIdentity(scope))return false;
 CoopSafeLog.warn("signup session resume failed:", error);
 window.CoopSignupFailure?.report('auth_return',error);
 showSignupAuthRetry(window.CoopSignupFailure?.retryMessage?.(error)||'인증 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
 return false;
 } finally {
-signupSessionResumeInFlight = null;
+if(signupSessionResumeInFlight===task)signupSessionResumeInFlight = null;
 }
 })();
-return signupSessionResumeInFlight;
+signupSessionResumeInFlight=task;
+return task;
 }
 
 function isSignupSocialReturnUrl() {
@@ -1710,7 +1780,8 @@ return params.has('auth_return');
 
 async function checkCurrentSignupSessionOnLoad(options = {}) {
 if (signupSessionCheckInFlight) return signupSessionCheckInFlight;
-signupSessionCheckInFlight = (async () => {
+const startEpoch=signupIdentityEpoch;
+const task = (async () => {
 const config = options || {};
 const reason = String(config.reason || 'load');
 const showFailure = config.showFailure !== false;
@@ -1719,6 +1790,7 @@ const delays = isSocialReturn ? [0, 250, 750, 1500, 2500] : [0];
 try {
 for (const delayMs of delays) {
 if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+if(signupIdentityEpoch!==startEpoch && signupIdentityKey!==null)return false;
 if (await resumeSignupFromCurrentSession(`${reason}${isSocialReturn ? ':social-return' : ''}`)) return true;
 if (signupAuthRetryPending) return false;
 }
@@ -1732,11 +1804,14 @@ return false;
 CoopSafeLog.warn("signup session fallback failed:", error);
 return false;
 } finally {
-signupSessionCheckInFlight = null;
-if (!signupHasSession && !signupAuthRetryPending) setSignupAuthBusy(false);
+if(signupSessionCheckInFlight===task){
+ signupSessionCheckInFlight = null;
+ if (!signupHasSession && !signupAuthRetryPending) setSignupAuthBusy(false);
+}
 }
 })();
-return signupSessionCheckInFlight;
+signupSessionCheckInFlight=task;
+return task;
 }
 
 // 2. 윈도우 로드 시에도 현재 세션을 한 번 확인해 모바일 인앱 브라우저의 auth 이벤트 누락을 보정
@@ -1752,10 +1827,6 @@ return;
 }
 const manualSessionHandled = await handleManualSession();
 if (manualSessionHandled) return;
-if (isDeferredSignupProfile()) {
-showApplicationForm(null);
-return;
-}
 await checkCurrentSignupSessionOnLoad({ reason: 'load', showFailure: true });
 };
 
@@ -1941,6 +2012,8 @@ matched.provider_id
 
 // [코드 2] 가입 신청서 화면 렌더링 및 UI 제어
 function showApplicationForm(session) {
+if(signupIdentityKey!==null&&signupIdentityKey!=='contact-only'&&signupIdentityKey!==String(session?.user?.id||'contact-only'))return;
+adoptSignupIdentity(session);
 signupHasSession = Boolean(session?.user?.id) || signupHasSession;
 setSignupAuthBusy(false);
 // 1. 화면 전환 (게이트 숨김 -> 폼 표시)
@@ -1951,8 +2024,13 @@ const user = session?.user || {};
 window.CoopSignupFailure?.setProvider(isSignupKakaoUser(user)?'kakao':isSignupNaverUser(user)?'naver':'email');
 const sessionKey = String(user.id || 'contact-only');
 // Session/focus events can repeat while the applicant is editing. Prefill once.
-if (signupApplicationSessionKey === sessionKey) return;
+if (signupApplicationSessionKey === sessionKey) {
+if(deferredSignupFormInitialized&&session?.user?.email)completeDeferredSignupEmailVerification(session);
+return;
+}
 signupApplicationSessionKey = sessionKey;
+const savedDraft=signupIdentityDrafts.get(sessionKey);
+if(savedDraft)yonginInlineEmailSelected=savedDraft.inline;
 const providerLabel = getSignupProviderLabel(user);
 const isPersonalOnlySocial = isSignupKakaoUser(user) || isSignupNaverUser(user);
 
@@ -1996,6 +2074,24 @@ if(typeof syncAccountHolder === 'function') syncAccountHolder();
 // 3. 전화번호 파싱 및 입력
 const socialPhone = getSignupSocialPhone(user);
 if (socialPhone) fillSignupPhoneInputs(socialPhone);
+if(savedDraft){
+ const values=new Map(savedDraft.values.map(v=>[v[0],v]));
+ // Set the type before restoring values: its existing handler normalizes
+ // related fields, but must not replace the user's saved address/account.
+ const type=savedDraft.values.find(v=>document.getElementById(v[0])?.name==='userType'&&v[2]);
+ if(type)toggleType(type[1]);
+ for(const n of document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')){
+  const v=values.get(n.id);if(!v)continue;n.value=v[1];if(['checkbox','radio'].includes(n.type))n.checked=v[2];
+ }
+ syncGroupContactFromRepresentative();
+ signupValidationErrors.clear();savedDraft.errors.forEach(id=>signupValidationErrors.add(id));
+ for(const [id,text,classes,display] of savedDraft.messages){const n=document.getElementById(id);if(n){n.textContent=text;n.className=classes;n.style.display=display;}}
+ savedDraft.invalid.forEach(id=>document.getElementById(id)?.classList.add('is-invalid-field'));
+ const bank=document.getElementById('bankName'),direct=document.getElementById('bankDirectInput');
+ direct.style.display=bank.value==='직접입력'?'block':'none';direct.required=bank.value==='직접입력';
+ if(deferredSignupFormInitialized&&session?.user?.email)completeDeferredSignupEmailVerification(session);
+ updateMoneyHint();refreshGuardianFields();
+}
 window.CoopSignupDraft?.initialize();
 }
 
@@ -2144,6 +2240,7 @@ return;
 
 if(signupLegalDocuments?.ready!==true){openResultModal('가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.',true);return;}
 if(signupAuthRetryPending){showSignupAuthRetry('가입 여부를 다시 확인한 뒤 신청해 주세요.');return;}
+if(signupAuthBusy)return;
 
 if (joinSubmitInFlight) {
 openResultModal(
@@ -2705,6 +2802,7 @@ el.classList.remove('is-invalid-field');
 // [신규/교체] 주민등록번호 3중 검증 (유효성 -> 나이 -> DB중복)
 // [수정] 주민번호 통합 검증 (사업자번호 로직 구조 차용)
 async function checkRRNFinal() {
+const scope=signupIdentityScope();
 const r1 = document.getElementById('rrn1').value;
 const r2 = document.getElementById('rrn2').value;
 if (r1.length < 6 || r2.length < 7) return; // 다 안 썼으면 조용히 리턴
@@ -2736,6 +2834,7 @@ if (type === '단체') return; // 단체면 패스
 
 try {
 const exists = await runSignupDuplicateCheck('rrn', r1 + "-" + r2);
+if(!isCurrentSignupIdentity(scope))return;
 if (exists === true) {
 setMsg('rrnMsg', "❌ 이미 가입된 주민등록번호입니다.", true);
 document.getElementById('rrn2').value = ""; // 입력값 지우기
@@ -2743,11 +2842,13 @@ document.getElementById('rrn2').value = ""; // 입력값 지우기
 setMsg('rrnMsg', "✅ 가입 가능한 번호입니다.", false);
 }
 } catch (error) {
+if(!isCurrentSignupIdentity(scope))return;
 setMsg('rrnMsg', "⚠️ 주민등록번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
 }
 }
 
 async function checkPhoneDuplicateServer() {
+const scope=signupIdentityScope();
 const type = document.querySelector('input[name="userType"]:checked').value;
 if (type === '단체') return;
 
@@ -2758,12 +2859,14 @@ if(!p1 || !p2 || !p3) return;
 
 try {
 const exists = await runSignupDuplicateCheck('phone', p1 + "-" + p2 + "-" + p3);
+if(!isCurrentSignupIdentity(scope))return;
 if (exists === true) {
 setMsg('phoneMsg', "❌ 이미 가입된 연락처입니다.", true);
 } else {
 setMsg('phoneMsg', "✅ 사용 가능한 연락처입니다.", false);
 }
 } catch (error) {
+if(!isCurrentSignupIdentity(scope))return;
 setMsg('phoneMsg', "⚠️ 연락처 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
 }
 }
@@ -2821,7 +2924,7 @@ setMsg('corpMsg', "⚠️ 법인등록번호 확인에 실패했습니다. 잠�
 document.getElementById('finalCorpNo').value = "";
 }
 }
-async function findSignupMemberByAuthUser(session) {
+async function findSignupMemberByAuthUser(session, scope = signupIdentityScope()) {
 const authUserId = String(session?.user?.id || '').trim();
 if (!authUserId) return null;
 
@@ -2842,6 +2945,7 @@ throw error;
 }
 return data || null;
 } catch (error) {
+if(!isCurrentSignupIdentity(scope))throw error;
 CoopSafeLog.warn("linked signup member lookup failed:", error);
 window.CoopSignupFailure?.report('member_lookup',error);
 throw error;
@@ -2859,10 +2963,17 @@ auth_return: provider
 }
 
 // [코드 1] 기존 회원 여부 확인 (이메일 기준)
-const runExistingMemberCheck = BootGuard.createSingleFlightAction(async function checkExistingMemberInternal(session) {
+let signupMemberCheckInFlight=null;
+async function runExistingMemberCheck(session) {
+if(signupIdentityKey!==null&&signupIdentityKey!=='contact-only'&&signupIdentityKey!==String(session?.user?.id||'contact-only'))return false;
+const scope=adoptSignupIdentity(session);
+if(signupMemberCheckInFlight?.epoch===scope.epoch)return signupMemberCheckInFlight.task;
+const task=(async()=>{
 try {
 await ensureSignupTenant();
-const linkedMember = await findSignupMemberByAuthUser(session);
+if(!isCurrentSignupIdentity(scope))return false;
+const linkedMember = await findSignupMemberByAuthUser(session,scope);
+if(!isCurrentSignupIdentity(scope))return false;
 if (linkedMember) {
 redirectLinkedSignupMember();
 return true;
@@ -2878,6 +2989,7 @@ check_field: 'email',
 check_value: email,
 p_coop_code: signupTenant.coop_code
 });
+if(!isCurrentSignupIdentity(scope))return false;
 
 if (!error && data === true) {
 hasExistingMember = true;
@@ -2891,6 +3003,7 @@ check_field: 'phone',
 check_value: phone,
 p_coop_code: signupTenant.coop_code
 });
+if(!isCurrentSignupIdentity(scope))return false;
 
 if (!error && data === true) {
 hasExistingMember = true;
@@ -2912,13 +3025,19 @@ showApplicationForm(session);
 return true;
 
 } catch (err) {
+if(!isCurrentSignupIdentity(scope))return false;
 CoopSafeLog.error("스크립트 에러:", err);
 window.CoopSignupFailure?.report('member_lookup',err);
 showSignupAuthRetry('기존 가입 여부를 확인하지 못했습니다. 다시 확인해 주세요.');
 openResultModal('기존 가입 여부를 확인하지 못했습니다.\n잠시 후 다시 시도해 주세요.', true);
 return false;
+} finally {
+if(signupMemberCheckInFlight?.task===task)signupMemberCheckInFlight=null;
 }
-});
+})();
+signupMemberCheckInFlight={epoch:scope.epoch,task};
+return task;
+}
 
 async function checkExistingMember(session) {
 return runExistingMemberCheck(session);
