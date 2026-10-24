@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v2.9.3 — Protect every event draft and show the current unsaved state. */
+/* v2.9.4 — Preserve entered prices and protect closed new-event drafts. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -83,7 +83,7 @@
   $('saleForm').addEventListener('input', recordSaleEdit);
   $('saleForm').addEventListener('change', recordSaleEdit);
   window.addEventListener('beforeunload', event => {
-    if (tabsReady && [...new Set([selectedEventId, ...saleDrafts.keys()])].some(id => saleDraftChanged(id))) {
+    if (tabsReady && (newEventDraftChanged() || [...new Set([selectedEventId, ...saleDrafts.keys()])].some(id => saleDraftChanged(id)))) {
       event.preventDefault(); event.returnValue = '';
     }
   });
@@ -220,7 +220,16 @@
       const guide=eventById(id)?.guide_settings;
       if(guide){$('saleUnitPrice').value=String(guide.unit_price);$('voucherUnitValue').value=String(guide.coupon_value||3000);}
     }
-    if(draft && !$('saleQuantity').value){const guide=eventById(id)?.guide_settings;if(guide){$('saleUnitPrice').value=String(guide.unit_price);$('voucherUnitValue').value=String(guide.coupon_value||3000);}}
+    if (draft && !$('saleQuantity').value) {
+      const guide = eventById(id)?.guide_settings, base = saleDraftBases.get(id);
+      if (guide) for (const [field, value] of [['saleUnitPrice', guide.unit_price], ['voucherUnitValue', guide.coupon_value || 3000]]) {
+        const edited = saleEditedFields.get(id)?.has(field) && (!base || saleValue(field, draft.values[field]) !== saleValue(field, base[field]));
+        if (!edited) {
+          $(field).value = String(value);
+          if (base) base[field] = $(field).value;
+        }
+      }
+    }
     receiptAmountEdited = draft?.receiptAmountEdited || false;
     pendingSaleRequestKey = draft?.pendingSaleRequestKey || null;
     syncCashReceived(); syncSaleReceiptAllocation(); syncEventHeading();
@@ -250,6 +259,19 @@
   $('saleEvent').addEventListener('change', () => { void selectEvent($('saleEvent').value); });
 
   const eventDialog = $('eventDialog');
+  const newEventFields = ['newEventDate', 'newEventName'];
+  let newEventDraftBase = null;
+  const newEventValues = () => Object.fromEntries(newEventFields.map(id => [id, $(id).value]));
+  function newEventDraftChanged() {
+    return Boolean(newEventDraftBase && newEventFields.some(id => $(id).value !== newEventDraftBase[id]));
+  }
+  function recordNewEventEdit(event) {
+    const node = event.target;
+    if (!editable || !tabsReady || !newEventDraftBase || !newEventFields.includes(node?.id) || node.disabled || node.readOnly) return;
+    if (!newEventDraftChanged()) window.ErpWorkspaceResume?.checkpoint?.($('eventForm'));
+  }
+  $('eventForm').addEventListener('input', recordNewEventEdit);
+  $('eventForm').addEventListener('change', recordNewEventEdit);
   $('openEventDialog').addEventListener('click', () => {
     if (!editable || operationBusy || eventDialog.open) return;
     if (eventBusy || receiptBusy || incomeController?.isBusy() || workspaceTools?.isBusy()) {
@@ -257,6 +279,7 @@
       return;
     }
     $('eventStatus').textContent = '';
+    if (!newEventDraftBase) newEventDraftBase = newEventValues();
     eventDialog.showModal(); document.body.classList.add('event-dialog-open');
     $('newEventName').focus();
   });
@@ -1179,6 +1202,8 @@
       operationBusy = false;
       await selectEvent(id);
       $('newEventName').value = '';
+      newEventDraftBase = newEventValues();
+      window.ErpWorkspaceResume?.checkpoint?.($('eventForm'));
       eventDialog.close();
       setOperationStatus('행사를 등록했습니다. 선택한 축제의 재료비·매출·정산을 관리할 수 있습니다.');
     } catch (error) {
