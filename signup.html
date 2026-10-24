@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.65
-Change: 2026-10-24 - Restore preparation entry and isolate member reads/drafts by current identity.
+Version: v1.0.66
+Change: 2026-10-24 - Scope email preparation, address/terms sheets and prior notices to the current identity.
 -->
 <html lang="ko"> 
 <head>
@@ -12,7 +12,7 @@ Change: 2026-10-24 - Restore preparation entry and isolate member reads/drafts b
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <script>console.log('[Version] v1.0.65 | signup.html');</script>
+  <script>console.log('[Version] v1.0.66 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -522,7 +522,7 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.65'});
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.66'});
 window.CoopSignupFailure?.observeClient(_supabase);
 const signupPublicReads=CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
 window.CoopSignupFailure?.observeClient(signupPublicReads);
@@ -1188,23 +1188,52 @@ content: "가입 신청 완료 시 현재 QR의 교육 출석도 함께 접수�
 };
 
 // [3] UI 제어 함수
+const signupSheetContexts=new Map(),signupSheetRevisions=new Map();
+function nextSignupSheetRevision(id) {
+const revision=(signupSheetRevisions.get(id)||0)+1;signupSheetRevisions.set(id,revision);return revision;
+}
+function isCurrentSignupSheet(context) {
+return !!context&&signupSheetContexts.get(context.id)===context&&isCurrentSignupIdentity(context.scope);
+}
+function clearSignupTransientUi() {
+currentTermType=null;
+pendingSignupOtpEmail='';
+document.getElementById('signup-otp-area').style.display='none';
+document.getElementById('mail-status').textContent='';
+for(const id of ['sheet-terms','sheet-postcode']){
+nextSignupSheetRevision(id);signupSheetContexts.delete(id);
+const overlay=document.getElementById(id);overlay.style.display='none';overlay.querySelector('.bottom-sheet').classList.remove('show');
+}
+for(const id of ['alreadyMemberModal','failModal'])document.getElementById(id).style.display='none';
+}
+function signupTermFingerprint(type) {
+return JSON.stringify([signupPrivacyConsentVersion,signupLegalDocuments?.version,termsData[type]?.content]);
+}
 function openSheet(id) {
 const overlay = document.getElementById(id);
 const sheet = overlay.querySelector('.bottom-sheet');
+const context={id,revision:nextSignupSheetRevision(id),scope:signupIdentityScope()};
+signupSheetContexts.set(id,context);
 overlay.style.display = 'block';
-setTimeout(() => { sheet.classList.add('show'); }, 10);
+setTimeout(() => { if(isCurrentSignupSheet(context))sheet.classList.add('show'); }, 10);
+return context;
 }
 function closeSheet(id) {
+const context=signupSheetContexts.get(id);
+if(!context)return;
 const overlay = document.getElementById(id);
 const sheet = overlay.querySelector('.bottom-sheet');
+const valid=isCurrentSignupSheet(context);
+signupSheetContexts.delete(id);
+const revision=nextSignupSheetRevision(id);
 sheet.classList.remove('show');
-setTimeout(() => { overlay.style.display = 'none'; }, 300);
+setTimeout(() => { if(signupSheetRevisions.get(id)===revision)overlay.style.display = 'none'; }, 300);
 
 // 약관 시트가 닫힐 때 자동 체크 로직
 if (id === 'sheet-terms' && currentTermType) {
 const map = { 'privacy': 'agree1', 'rrn': 'agreeRrn', 'purpose': 'agree2', 'risk': 'agree3', 'educationAttendance': 'agreeEducationAttendance' };
 const boxId = map[currentTermType];
-if (boxId) document.getElementById(boxId).checked = true;
+if (valid && context.type===currentTermType && context.fingerprint===signupTermFingerprint(currentTermType) && boxId) document.getElementById(boxId).checked = true;
 currentTermType = null; // 초기화
 }
 }
@@ -1217,20 +1246,23 @@ document.getElementById('termTitle').innerText = termsData[type].title;
 const content=termsData[type].content;
 if(type==='purpose'&&!signupLegalDocuments?.purpose?.content)document.getElementById('termContent').innerHTML=content.replace(/\n/g,'<br>');
 else document.getElementById('termContent').textContent=content;
-openSheet('sheet-terms');
+const context=openSheet('sheet-terms');
+context.type=type;context.fingerprint=signupTermFingerprint(type);
 }
 
 function openPostcodeSheet() {
-openSheet('sheet-postcode');
+const context=openSheet('sheet-postcode');
 const layer = document.getElementById('postcode-layer');
 new daum.Postcode({
 oncomplete: function(data) {
+if(!isCurrentSignupSheet(context))return;
+const active=document.activeElement,moveFocus=active===document.body||document.getElementById('sheet-postcode').contains(active);
 var addr = data.roadAddress;
 if(data.buildingName) addr += " ("+data.buildingName+")";
 document.getElementById('postcode').value = data.zonecode;
 document.getElementById('roadAddress').value = addr;
 closeSheet('sheet-postcode');
-document.getElementById('detailAddress').focus();
+if(moveFocus)document.getElementById('detailAddress').focus();
 },
 width: '100%', height: '100%'
 }).embed(layer);
@@ -1439,23 +1471,28 @@ successModal.style.display = 'flex';
 
 // [6] 초기화 및 매직링크
 async function sendMagicLink() {
+const email = document.getElementById('init-email').value;
+if(!email) return openResultModal('이메일을 입력하세요.', true);
+const task=beginSignupEmailWork('send','gate',email);
+if(!task)return;
 try {
 await ensureSignupTenant();
+if(!isCurrentSignupEmailWork(task))return;
 } catch (tenantError) {
+if(!isCurrentSignupEmailWork(task))return;
+finishSignupEmailWork(task);
 return openResultModal('가입 대상을 확인하지 못했습니다.\n새로고침 후 다시 시도해 주세요.', true);
 }
-
-const email = document.getElementById('init-email').value;
-// [수정] alert -> 모달로 변경
-if(!email) return openResultModal('이메일을 입력하세요.', true);
 
 const btn = document.getElementById('btnSendLink');
 btn.disabled = true; btn.innerText = "발송중...";
 
+try {
 const { error } = await _supabase.auth.signInWithOtp({
 email: email,
 options: window.CoopAuthEmail.withOtpOptions({ shouldCreateUser: true })
 });
+if(!isCurrentSignupEmailWork(task))return;
 
 if(error) {
 // [수정] alert -> 모달로 변경
@@ -1470,11 +1507,60 @@ document.getElementById('signup-otp-area').style.display = 'block';
 btn.innerText = "발송완료";
 btn.disabled = false;
 }
+} catch(error) {
+if(!isCurrentSignupEmailWork(task))return;
+window.CoopSignupFailure?.report('email_send',error,'email');
+openResultModal('인증코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.',true);
+} finally { finishSignupEmailWork(task); }
 }
 
 function normalizeSignupEmail(value) {
 return String(value || '').trim().toLowerCase();
 }
+
+let signupEmailWork=null,signupEmailWorkRevision=0;
+function isCurrentSignupEmailWork(task) {
+if(!task||signupEmailWork!==task||task.revision!==signupEmailWorkRevision||!isCurrentSignupIdentity(task.scope))return false;
+const input=document.getElementById(task.mode==='inline'?'verifiedEmail':'init-email');
+if(normalizeSignupEmail(input?.value)!==task.email)return false;
+if(task.mode==='inline'&&!requiresInlineSignupEmailVerification())return false;
+if(task.kind==='verify'&&!task.completed&&!task.transitioned&&document.getElementById(task.tokenId)?.value.trim()!==task.token)return false;
+return true;
+}
+function resetSignupEmailButtons() {
+for(const [id,label] of [['btnDeferredSignupOtp','인증코드 받기'],['btnVerifyDeferredSignupOtp','코드 확인'],['btnSendLink','코드 발송'],['btnVerifySignupOtp','코드 확인']]){
+const button=document.getElementById(id);if(button){button.disabled=false;button.textContent=label;}
+}
+}
+function invalidateSignupEmailWork() {
+++signupEmailWorkRevision;signupEmailWork=null;resetSignupEmailButtons();
+}
+function beginSignupEmailWork(kind,mode,email) {
+if(signupEmailWork&&isCurrentSignupEmailWork(signupEmailWork))return null;
+invalidateSignupEmailWork();
+const tokenId=mode==='inline'?'deferred-signup-otp-input':'signup-otp-input';
+const task={kind,mode,email:normalizeSignupEmail(email),revision:signupEmailWorkRevision,scope:signupIdentityScope(),tokenId,token:kind==='verify'?document.getElementById(tokenId)?.value.trim():null};
+signupEmailWork=task;
+return task;
+}
+function finishSignupEmailWork(task) {
+if(!isCurrentSignupEmailWork(task))return;
+signupEmailWork=null;
+const id=task.mode==='inline'?(task.kind==='send'?'btnDeferredSignupOtp':'btnVerifyDeferredSignupOtp'):(task.kind==='send'?'btnSendLink':'btnVerifySignupOtp');
+const button=document.getElementById(id);if(!button)return;button.disabled=false;
+if(task.kind==='verify')button.textContent='코드 확인';
+else if(['확인 중…','발송 중…','발송중...'].includes(button.textContent))button.textContent=task.mode==='inline'?'인증코드 받기':'코드 발송';
+}
+document.addEventListener('input',event=>{
+const id=event.target?.id;
+if(!['verifiedEmail','init-email','deferred-signup-otp-input','signup-otp-input'].includes(id))return;
+if(signupEmailWork?.kind==='verify'&&id===signupEmailWork.tokenId&&(signupEmailWork.transitioned||signupEmailWork.completed))invalidateSignupEmailWork();
+if(signupEmailWork&&!isCurrentSignupEmailWork(signupEmailWork))invalidateSignupEmailWork();
+if(id==='verifiedEmail'||id==='init-email'){
+pendingSignupOtpEmail='';
+if(id==='init-email'){document.getElementById('signup-otp-area').style.display='none';document.getElementById('mail-status').textContent='';}
+}
+});
 
 function setDeferredSignupEmailStatus(message, state = 'muted') {
 const status = document.getElementById('deferred-signup-email-status');
@@ -1516,11 +1602,14 @@ return true;
 }
 
 async function sendDeferredSignupOtp() {
+const email=normalizeSignupEmail(document.getElementById('verifiedEmail')?.value);
+const task=beginSignupEmailWork('send','inline',email);
+if(!task)return;
 try {
 await ensureSignupTenant();
+if(!isCurrentSignupEmailWork(task))return;
 if (!requiresInlineSignupEmailVerification()) return;
 const input = document.getElementById('verifiedEmail');
-const email = normalizeSignupEmail(input?.value);
 const button = document.getElementById('btnDeferredSignupOtp');
 if (!email || !input?.checkValidity()) {
 input?.classList.add('is-invalid-field');
@@ -1534,6 +1623,7 @@ return setDeferredSignupEmailStatus('이미 인증된 이메일입니다.', 'suc
 button.disabled = true;
 button.textContent = '확인 중…';
 const exists = await runSignupDuplicateCheck('email', email);
+if(!isCurrentSignupEmailWork(task))return;
 if (exists) {
 const modal = document.getElementById('alreadyMemberModal');
 if (modal) modal.style.display = 'flex';
@@ -1545,6 +1635,7 @@ const { error } = await _supabase.auth.signInWithOtp({
 email,
 options: window.CoopAuthEmail.withOtpOptions({ shouldCreateUser: true })
 });
+if(!isCurrentSignupEmailWork(task))return;
 if (error) throw error;
 
 pendingSignupOtpEmail = email;
@@ -1556,15 +1647,12 @@ const otpInput = document.getElementById('deferred-signup-otp-input');
 if (otpInput) otpInput.focus();
 button.textContent = '코드 다시 받기';
 } catch (error) {
+if(!isCurrentSignupEmailWork(task))return;
 CoopSafeLog.warn("[signup] deferred OTP send failed:", error);
 window.CoopSignupFailure?.report('email_send',error,'email');
 setDeferredSignupEmailStatus(error?.message || '인증코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.', 'error');
 } finally {
-const button = document.getElementById('btnDeferredSignupOtp');
-if (button) {
-button.disabled = false;
-if (button.textContent === '확인 중…' || button.textContent === '발송 중…') button.textContent = '인증코드 받기';
-}
+finishSignupEmailWork(task);
 }
 }
 
@@ -1574,23 +1662,28 @@ const token = String(document.getElementById('deferred-signup-otp-input')?.value
 const button = document.getElementById('btnVerifyDeferredSignupOtp');
 if (!email) return setDeferredSignupEmailStatus('먼저 이메일을 입력해 주세요.', 'error');
 if (!token) return setDeferredSignupEmailStatus('이메일로 받은 인증코드를 입력해 주세요.', 'error');
+const task=beginSignupEmailWork('verify','inline',email);
+if(!task||!isCurrentSignupEmailWork(task))return;
 
 button.disabled = true;
 button.textContent = '확인 중…';
 try {
 const { data, error } = await _supabase.auth.verifyOtp({ email, token, type: 'email' });
+if(!isCurrentSignupEmailWork(task))return;
 if (error) throw error;
 const session = data?.session || (await _supabase.auth.getSession()).data?.session || null;
+if(!isCurrentSignupEmailWork(task))return;
+task.completed=true;
 if (!session || !completeDeferredSignupEmailVerification(session)) {
 throw new Error('인증된 이메일과 입력한 이메일이 일치하지 않습니다.');
 }
 } catch (error) {
+if(!isCurrentSignupEmailWork(task))return;
 CoopSafeLog.warn("[signup] deferred OTP verification failed:", error);
 window.CoopSignupFailure?.report('email_verify',error,'email');
 setDeferredSignupEmailStatus(error?.message || '인증코드를 확인하지 못했습니다.', 'error');
 } finally {
-button.disabled = false;
-button.textContent = '코드 확인';
+finishSignupEmailWork(task);
 }
 }
 
@@ -1600,6 +1693,8 @@ const token = String(document.getElementById('signup-otp-input')?.value || '').t
 const btn = document.getElementById('btnVerifySignupOtp');
 if (!email) return openResultModal('먼저 인증코드를 받아주세요.', true);
 if (!token) return openResultModal('메일로 받은 인증코드를 입력하세요.', true);
+const task=beginSignupEmailWork('verify','gate',email);
+if(!task||!isCurrentSignupEmailWork(task))return;
 
 btn.disabled = true;
 btn.innerText = '확인중...';
@@ -1609,24 +1704,27 @@ email,
 token,
 type: 'email'
 });
+if(!isCurrentSignupEmailWork(task))return;
 if (error) {
 window.CoopSignupFailure?.report('email_verify',error,'email');
 openResultModal(error.message, true);
 return;
 }
 const session = data?.session || (await _supabase.auth.getSession()).data?.session || null;
+if(!isCurrentSignupEmailWork(task))return;
 if (!session) {
 openResultModal('인증은 완료되었지만 로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.', true);
 return;
 }
 await ensureSignupTenant();
+if(!isCurrentSignupEmailWork(task))return;
 checkExistingMember(session);
 } catch (error) {
+if(!isCurrentSignupEmailWork(task))return;
 window.CoopSignupFailure?.report('email_verify',error,'email');
 openResultModal(error?.message || String(error), true);
 } finally {
-btn.disabled = false;
-btn.innerText = '코드 확인';
+finishSignupEmailWork(task);
 }
 }
 
@@ -1661,6 +1759,11 @@ const first=signupIdentityKey===null;
 const transfer=signupIdentityKey==='contact-only' && requiresInlineSignupEmailVerification()
  && normalizeSignupEmail(document.getElementById('verifiedEmail').value)!==''
  && normalizeSignupEmail(document.getElementById('verifiedEmail').value)===normalizeSignupEmail(session?.user?.email);
+const ownEmailVerification=signupEmailWork?.kind==='verify'&&isCurrentSignupEmailWork(signupEmailWork)
+ && signupEmailWork.email===normalizeSignupEmail(session?.user?.email)
+ && (transfer||signupEmailWork.mode==='gate'&&signupIdentityKey==='contact-only');
+clearSignupTransientUi();
+if(!ownEmailVerification)invalidateSignupEmailWork();
 if(signupApplicationSessionKey!==null)signupIdentityDrafts.set(signupApplicationSessionKey,{
  values:[...document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')].map(n=>[n.id,n.value,n.checked]),
  inline:yonginInlineEmailSelected,
@@ -1671,6 +1774,7 @@ if(signupApplicationSessionKey!==null)signupIdentityDrafts.set(signupApplication
 window.CoopSignupDraft?.selectOwner(next,transfer);
 signupIdentityKey=next;
 if(!first){++signupIdentityEpoch;signupSessionResumeInFlight=null;signupSessionCheckInFlight=null;}
+if(ownEmailVerification){signupEmailWork.scope=signupIdentityScope();signupEmailWork.transitioned=true;}
 signupHasSession=Boolean(session?.user?.id);
 if(signupApplicationSessionKey!==null && !transfer){
  document.getElementById('joinForm').reset();
@@ -1682,7 +1786,6 @@ if(signupApplicationSessionKey!==null && !transfer){
  ['nameMsg','rrnMsg','phoneMsg','bizMsg','corpMsg'].forEach(id=>{resetMsg(id);document.getElementById(id).textContent='';});
  document.querySelectorAll('#joinForm .is-invalid-field').forEach(n=>n.classList.remove('is-invalid-field'));
  document.getElementById('step-form').style.display='none';
- ['alreadyMemberModal','failModal'].forEach(id=>document.getElementById(id).style.display='none');
 }else if(transfer){
  signupApplicationSessionKey=next;
  signupIdentityDrafts.delete('contact-only');
