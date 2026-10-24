@@ -1,15 +1,17 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.60
-Change: 2026-10-24 - Preserve signup drafts on repeated session checks and retry failed auth reads.
+Version: v1.0.61
+Change: 2026-10-24 - Send bounded non-personal signup diagnostics to the platform maintainer.
 -->
 <html lang="ko"> 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
+<script src="shared/signup_failure_reporter.js?v=1.0.0"></script>
+<script src="shared/signup_draft_guard.js?v=1.0.0"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.0"></script>
-  <script>console.log('[Version] v1.0.60 | signup.html');</script>
+  <script>console.log('[Version] v1.0.61 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -519,6 +521,8 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.61'});
+window.CoopSignupFailure?.setProvider(new URLSearchParams(window.location.search).get('auth_return'));
 let joinSubmitInFlight = false;
 let signupCapitalRules = null;
 async function loadSignupCapitalRules() {
@@ -543,7 +547,7 @@ const needed=main && age!==null && age>=14 && age<19;
 document.getElementById('guardianSignupFields').hidden=!needed;
 ['signupGuardianName','signupGuardianPhone'].forEach(id=>document.getElementById(id).required=needed);
 const ageBlocked=personal && age!==null && (main?age<14:age<19);
-document.getElementById('btnSubmit').disabled=joinSubmitInFlight || signupLegalDocuments?.ready!==true || ageBlocked || [...signupValidationErrors].some(id=>id!=='rrnMsg' || personal);
+document.getElementById('btnSubmit').disabled=joinSubmitInFlight || signupAuthRetryPending || signupLegalDocuments?.ready!==true || ageBlocked || [...signupValidationErrors].some(id=>id!=='rrnMsg' || personal);
 return needed;
 }
 const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
@@ -563,6 +567,7 @@ document.getElementById('signupAuthMessage').textContent = message;
 document.getElementById('retrySignupAuth').hidden = true;
 if (busy || signupHasSession) document.getElementById('step-gate').style.display = 'none';
 else if (!isDeferredSignupProfile() && document.getElementById('step-form').style.display !== 'block') document.getElementById('step-gate').style.display = '';
+window.refreshGuardianFields?.();
 }
 function showSignupAuthRetry(message) {
 setSignupAuthBusy(true, message);
@@ -570,6 +575,7 @@ signupAuthRetryPending = true;
 document.getElementById('signupAuthStatus').setAttribute('aria-busy', 'false');
 document.getElementById('retrySignupAuth').hidden = false;
 document.getElementById('retrySignupAuth').disabled = false;
+window.refreshGuardianFields?.();
 }
 async function retrySignupAuthCheck() {
 setSignupAuthBusy(true);
@@ -1084,6 +1090,7 @@ clearSignupTenantRetryState();
 return resolved;
 } catch (error) {
 signupTenant = null;
+window.CoopSignupFailure?.report('tenant',error);
 signupPublicSettings = null;
 signupPublicSettingsPromise = null;
 signupTenantLoader.reset();
@@ -1385,6 +1392,7 @@ hint.style.color = "red";
 
 // [6] 초기화 및 매직링크
 function showEmailInput() {
+window.CoopSignupFailure?.setProvider('email');
 yonginInlineEmailSelected = signupTenant?.coop_code === DEFAULT_SIGNUP_COOP_CODE;
 if (!yonginInlineEmailSelected) {
 document.getElementById('email-gate-input').style.display = 'block';
@@ -1438,6 +1446,7 @@ options: window.CoopAuthEmail.withOtpOptions({ shouldCreateUser: true })
 
 if(error) {
 // [수정] alert -> 모달로 변경
+window.CoopSignupFailure?.report('email_send',error,'email');
 openResultModal(error.message, true);
 btn.disabled=false; btn.innerText="코드 발송";
 }
@@ -1535,6 +1544,7 @@ if (otpInput) otpInput.focus();
 button.textContent = '코드 다시 받기';
 } catch (error) {
 CoopSafeLog.warn("[signup] deferred OTP send failed:", error);
+window.CoopSignupFailure?.report('email_send',error,'email');
 setDeferredSignupEmailStatus(error?.message || '인증코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.', 'error');
 } finally {
 const button = document.getElementById('btnDeferredSignupOtp');
@@ -1563,6 +1573,7 @@ throw new Error('인증된 이메일과 입력한 이메일이 일치하지 않�
 }
 } catch (error) {
 CoopSafeLog.warn("[signup] deferred OTP verification failed:", error);
+window.CoopSignupFailure?.report('email_verify',error,'email');
 setDeferredSignupEmailStatus(error?.message || '인증코드를 확인하지 못했습니다.', 'error');
 } finally {
 button.disabled = false;
@@ -1586,6 +1597,7 @@ token,
 type: 'email'
 });
 if (error) {
+window.CoopSignupFailure?.report('email_verify',error,'email');
 openResultModal(error.message, true);
 return;
 }
@@ -1597,6 +1609,7 @@ return;
 await ensureSignupTenant();
 checkExistingMember(session);
 } catch (error) {
+window.CoopSignupFailure?.report('email_verify',error,'email');
 openResultModal(error?.message || String(error), true);
 } finally {
 btn.disabled = false;
@@ -1634,6 +1647,7 @@ return;
 await checkExistingMember(session);
 } catch (tenantError) {
 CoopSafeLog.warn("signup auth session handling failed:", tenantError);
+window.CoopSignupFailure?.report('auth_return',tenantError);
 showSignupAuthRetry('가입 정보를 확인하지 못했습니다. 다시 확인해 주세요.');
 openResultModal('가입 대상을 확인할 수 없습니다.', true);
 }
@@ -1666,10 +1680,10 @@ if (reason) console.debug('[signup] resuming from current session:', reason);
 if (deferredSignupFormInitialized) {
 return completeDeferredSignupEmailVerification(data.session);
 }
-await checkExistingMember(data.session);
-return true;
+return (await checkExistingMember(data.session)) !== false;
 } catch (error) {
 CoopSafeLog.warn("signup session resume failed:", error);
+window.CoopSignupFailure?.report('auth_return',error);
 showSignupAuthRetry('인증 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
 return false;
 } finally {
@@ -1696,9 +1710,11 @@ try {
 for (const delayMs of delays) {
 if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
 if (await resumeSignupFromCurrentSession(`${reason}${isSocialReturn ? ':social-return' : ''}`)) return true;
+if (signupAuthRetryPending) return false;
 }
 if (isSocialReturn && showFailure && !signupSocialReturnFailureShown) {
 signupSocialReturnFailureShown = true;
+window.CoopSignupFailure?.report('auth_return',{code:'AUTH_SESSION_UNAVAILABLE'});
 openResultModal('네이버/카카오 인증 후 돌아왔지만 로그인 세션을 확인하지 못했습니다.\n브라우저가 인증 토큰을 전달하지 못한 상태입니다. 새로고침 후 다시 시도하거나 조합원 포털에서 로그인해 주세요.', true);
 }
 return false;
@@ -1922,6 +1938,7 @@ document.getElementById('step-gate').style.display = 'none';
 document.getElementById('step-form').style.display = 'block';
 
 const user = session?.user || {};
+window.CoopSignupFailure?.setProvider(isSignupKakaoUser(user)?'kakao':isSignupNaverUser(user)?'naver':'email');
 const sessionKey = String(user.id || 'contact-only');
 // Session/focus events can repeat while the applicant is editing. Prefill once.
 if (signupApplicationSessionKey === sessionKey) return;
@@ -1969,12 +1986,14 @@ if(typeof syncAccountHolder === 'function') syncAccountHolder();
 // 3. 전화번호 파싱 및 입력
 const socialPhone = getSignupSocialPhone(user);
 if (socialPhone) fillSignupPhoneInputs(socialPhone);
+window.CoopSignupDraft?.initialize();
 }
 
 // signup 페이지의 스크립트 부분 교체
 
 async function startKakaoSignup() {
     if (signupAuthBusy || signupSocialStartInFlight || signupHasSession) return;
+    window.CoopSignupFailure?.setProvider('kakao');
     signupSocialStartInFlight = true;
     let navigating = false;
     setSignupAuthBusy(true, '카카오 인증을 준비하고 있어요.');
@@ -1985,6 +2004,7 @@ async function startKakaoSignup() {
             return;
         }
         if (await resumeSignupFromCurrentSession('before-kakao-oauth')) return;
+        if (signupHasSession || signupAuthRetryPending) return;
         if (isFileSignupRuntime()) {
             openResultModal('file:// 환경에서는 카카오 간편가입을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.', true);
             return;
@@ -2034,14 +2054,16 @@ async function startKakaoSignup() {
             openResultModal('가입 대상을 확인하지 못했습니다.\n새로고침 후 다시 시도해 주세요.', true);
             return;
         }
+        window.CoopSignupFailure?.report('auth_start',error,'kakao');
         openResultModal(msg || '카카오 로그인 시작에 실패했습니다.', true);
     } finally {
-        if (!navigating) { signupSocialStartInFlight = false; setSignupAuthBusy(false); }
+        if (!navigating) { signupSocialStartInFlight = false; if (!signupAuthRetryPending) setSignupAuthBusy(false); }
     }
 }
 
 async function startNaverSignup() {
     if (signupAuthBusy || signupSocialStartInFlight || signupHasSession) return;
+    window.CoopSignupFailure?.setProvider('naver');
     signupSocialStartInFlight = true;
     let navigating = false;
     setSignupAuthBusy(true, '네이버 인증을 준비하고 있어요.');
@@ -2052,6 +2074,7 @@ async function startNaverSignup() {
             return;
         }
         if (await resumeSignupFromCurrentSession('before-naver-oauth')) return;
+        if (signupHasSession || signupAuthRetryPending) return;
         if (isFileSignupRuntime()) {
             openResultModal('file:// 환경에서는 네이버 간편가입을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.', true);
             return;
@@ -2091,9 +2114,10 @@ async function startNaverSignup() {
             openResultModal('가입 대상을 확인하지 못했습니다.\n새로고침 후 다시 시도해 주세요.', true);
             return;
         }
+        window.CoopSignupFailure?.report('auth_start',error,'naver');
         openResultModal(msg || '네이버 로그인 시작에 실패했습니다.', true);
     } finally {
-        if (!navigating) { signupSocialStartInFlight = false; setSignupAuthBusy(false); }
+        if (!navigating) { signupSocialStartInFlight = false; if (!signupAuthRetryPending) setSignupAuthBusy(false); }
     }
 }
 
@@ -2109,6 +2133,7 @@ return;
 }
 
 if(signupLegalDocuments?.ready!==true){openResultModal('가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.',true);return;}
+if(signupAuthRetryPending){showSignupAuthRetry('가입 여부를 다시 확인한 뒤 신청해 주세요.');return;}
 
 if (joinSubmitInFlight) {
 openResultModal(
@@ -2118,6 +2143,7 @@ true
 return;
 }
 joinSubmitInFlight = true;
+window.CoopSignupDraft?.setPending(true);
 
 try {
 
@@ -2519,6 +2545,7 @@ const signupArguments = {
   p_education_age_confirmed: educationQrToken ? document.getElementById('agreeEducationAge').checked : false,
   p_education_attendance_consent: educationQrToken ? document.getElementById('agreeEducationAttendance').checked : false
 };
+const submittedDraft = window.CoopSignupDraft?.snapshot();
 const { data: signupResult, error } = await _supabase.rpc(needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5', needsGuardian ? {
  p_signup:signupArguments,
  p_guardian_name:document.getElementById('signupGuardianName').value.trim(),
@@ -2554,6 +2581,7 @@ finalInsertError = null;
 }
 
 if (finalInsertError) {
+window.CoopSignupFailure?.report('submit',finalInsertError);
 CoopSafeLog.warn("[signup] 가입 신청 저장 결과 확인 필요");
 
 // ★ 변경: 실패해도 모달 띄우기 (실패 모달)
@@ -2567,6 +2595,7 @@ true
 btn.disabled = false;
 btn.innerText = '가입 신청하기 ☀️';
 } else {
+  if (!error && createdMemberUuid) window.CoopSignupDraft?.markSaved(submittedDraft);
   notifySignupRequestAdmins(createdMemberUuid).catch((notifyError) => {
     CoopSafeLog.warn("[member-request-alert] signup admin telegram skipped:", notifyError?.message || notifyError);
   });
@@ -2603,8 +2632,12 @@ btn.innerText = '가입 신청하기 ☀️';
   );
 }
 
+} catch (error) {
+window.CoopSignupFailure?.report('submit',error);
+throw error;
 } finally {
 joinSubmitInFlight = false;
+window.CoopSignupDraft?.setPending(false);
 refreshGuardianFields();
 }
 }
@@ -2795,13 +2828,13 @@ query = query.eq('coop_id', signupTenant.coop_id);
 
 const { data, error } = await query.maybeSingle();
 if (error) {
-CoopSafeLog.warn("linked signup member lookup failed:", error);
-return null;
+throw error;
 }
 return data || null;
 } catch (error) {
 CoopSafeLog.warn("linked signup member lookup failed:", error);
-return null;
+window.CoopSignupFailure?.report('member_lookup',error);
+throw error;
 }
 }
 
@@ -2822,7 +2855,7 @@ await ensureSignupTenant();
 const linkedMember = await findSignupMemberByAuthUser(session);
 if (linkedMember) {
 redirectLinkedSignupMember();
-return;
+return true;
 }
 
 const email = String(session?.user?.email || '').trim();
@@ -2839,6 +2872,7 @@ p_coop_code: signupTenant.coop_code
 if (!error && data === true) {
 hasExistingMember = true;
 }
+if(error)throw error;
 }
 
 if (!hasExistingMember && phone && (isSignupKakaoUser(session?.user) || isSignupNaverUser(session?.user))) {
@@ -2851,6 +2885,7 @@ p_coop_code: signupTenant.coop_code
 if (!error && data === true) {
 hasExistingMember = true;
 }
+if(error)throw error;
 }
 
 // [Case A] 이미 가입된 이메일이 존재함
@@ -2864,11 +2899,14 @@ if (modal) modal.style.display = 'flex';
 else {
 showApplicationForm(session);
 }
+return true;
 
 } catch (err) {
 CoopSafeLog.error("스크립트 에러:", err);
+window.CoopSignupFailure?.report('member_lookup',err);
 showSignupAuthRetry('기존 가입 여부를 확인하지 못했습니다. 다시 확인해 주세요.');
 openResultModal('기존 가입 여부를 확인하지 못했습니다.\n잠시 후 다시 시도해 주세요.', true);
+return false;
 }
 });
 

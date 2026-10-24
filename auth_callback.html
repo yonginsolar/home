@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.22
-Change: Recognize cooperative-specific social identities without borrowing other profile fields.
+Version: v1.0.23
+Change: Report bounded signup callback failures without applicant details.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.0.22 | auth_callback.html');</script>
+<script src="shared/signup_failure_reporter.js?v=1.0.0"></script>
+  <script>console.log('[Version] v1.0.23 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -92,6 +93,12 @@ Change: Recognize cooperative-specific social identities without borrowing other
             return normalizeDest(raw);
         }
 
+        try {
+            const signupDiagnosticDest = new URL(getDest(),window.location.href);
+            window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_PUBLISHABLE_KEY,page:'auth_callback',revision:'1.0.23',enabled:/^\/signup(?:\.html)?$/.test(signupDiagnosticDest.pathname)});
+            window.CoopSignupFailure?.setProvider(new URLSearchParams(window.location.search).get('auth_return'));
+        } catch (_) { /* Diagnostic setup never changes authentication. */ }
+
         function isErpDestination(rawDest) {
             return CoopRouteGuard.isErpDestination(rawDest, { fallback: '/' });
         }
@@ -156,6 +163,8 @@ Change: Recognize cooperative-specific social identities without borrowing other
         }
 
         function showCallbackRetryState(message) {
+            const diagnosticError = new URLSearchParams(window.location.search).get('error') || new URLSearchParams(window.location.hash.replace(/^#/, '')).get('error');
+            if(diagnosticError!=='access_denied')window.CoopSignupFailure?.report('auth_return',{code:'AUTH_SESSION_UNAVAILABLE'});
             const actions = document.getElementById('callbackActions');
             const loader = document.querySelector('.loader');
             if (loader) loader.style.display = 'none';
