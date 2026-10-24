@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.59
-Change: 2026-10-24 - Keep authentication choices hidden until return processing settles.
+Version: v1.0.60
+Change: 2026-10-24 - Preserve signup drafts on repeated session checks and retry failed auth reads.
 -->
 <html lang="ko"> 
 <head>
@@ -9,7 +9,7 @@ Change: 2026-10-24 - Keep authentication choices hidden until return processing 
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.0"></script>
-  <script>console.log('[Version] v1.0.59 | signup.html');</script>
+  <script>console.log('[Version] v1.0.60 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -551,6 +551,7 @@ const DEFAULT_SIGNUP_KAKAO_URL = 'https://invite.kakao.com/tc/cLtR3LGLQX';
 const PUBLIC_AUTH_DEST_KEY = 'public_auth_destination';
 let signupAuthInitialStateReady = false;
 let signupAuthBusy = true, signupSocialStartInFlight = false, signupHasSession = false, signupAuthRetryPending = false;
+let signupApplicationSessionKey = null;
 function setSignupAuthBusy(busy, message = '인증 상태를 확인하고 있어요.') {
 signupAuthBusy = busy;
 signupAuthRetryPending = false;
@@ -1658,7 +1659,8 @@ signupSessionResumeInFlight = (async () => {
 try {
 await ensureSignupTenant();
 const { data, error } = await _supabase.auth.getSession();
-if (error || !data?.session) return false;
+if (error) throw error;
+if (!data?.session) return false;
 signupHasSession = true;
 if (reason) console.debug('[signup] resuming from current session:', reason);
 if (deferredSignupFormInitialized) {
@@ -1713,7 +1715,7 @@ return signupSessionCheckInFlight;
 
 // 2. 윈도우 로드 시에도 현재 세션을 한 번 확인해 모바일 인앱 브라우저의 auth 이벤트 누락을 보정
 window.onload = async function() {
-toggleType('개인'); 
+if (signupApplicationSessionKey === null) toggleType('개인');
 applySignupEducationQrContext();
   // [추가] 페이지가 열리자마자 "배달 온 토큰 있나요?" 하고 확인
 try {
@@ -1920,6 +1922,10 @@ document.getElementById('step-gate').style.display = 'none';
 document.getElementById('step-form').style.display = 'block';
 
 const user = session?.user || {};
+const sessionKey = String(user.id || 'contact-only');
+// Session/focus events can repeat while the applicant is editing. Prefill once.
+if (signupApplicationSessionKey === sessionKey) return;
+signupApplicationSessionKey = sessionKey;
 const providerLabel = getSignupProviderLabel(user);
 const isPersonalOnlySocial = isSignupKakaoUser(user) || isSignupNaverUser(user);
 
