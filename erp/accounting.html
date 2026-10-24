@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.181 | Change: 2026-10-24 - Retain edits after failed reads and preserve explicit closing tax input intent. -->
+<!-- Version: v1.0.182 | Change: 2026-10-24 - Keep reverted closing inputs and recalculate only automatic legal reserves. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -9,7 +9,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.181 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.182 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261022-help-1"></script>
@@ -1227,6 +1227,9 @@ let accountingMasterLoaded = false, accountingMasterPhase = 'idle', accountingMa
 let closingPreparedScope = null, closingFormBaseline = null, closingBaselineYear = null, closingFormOwner = '';
 const closingYearDrafts = new Map();
 const closingYearManualTaxes = new Map();
+const closingYearExplicitInputs = new Map();
+const CLOSING_EXPLICIT_INPUT_IDS = Object.freeze(['closingLegalInput','closingVoluntaryInput','closingTaxCreditInput','closingPrepaidNationalTaxInput','closingPrepaidLocalTaxInput']);
+let closingLegalManual = false;
 let closingTaxEditRevision = 0;
 let closingActiveYear = null, closingActionRevision = 0;
 let closingPendingDraft = null;
@@ -1389,6 +1392,12 @@ function acceptAccountingEditRow(kind,key,snapshot) {
     if(row&&snapshot===accountingEditSnapshot(row))row.dataset.accountingBaseline=snapshot;
 }
 function bindAccountingReadLifecycle() {
+    for(const id of CLOSING_EXPLICIT_INPUT_IDS)document.getElementById(id).addEventListener('input',()=>{
+        const input=document.getElementById(id);
+        if(!closingActiveYear||closingFormOwner!==accountingReadIdentity()||!accountingDataAuthorized||!canPerform('accounting.edit')||input.disabled||input.readOnly)return;
+        closingYearExplicitInputs.set(closingActiveYear,{...(closingYearExplicitInputs.get(closingActiveYear)||{}),[id]:String(ERPNumberInput.raw(input.value))});
+        if(id==='closingLegalInput')closingLegalManual=true;
+    });
     const cancelStale=()=>{for(const [kind,read] of accountingReadTasks)if(!read.current())cancelAccountingRead(kind);};
     const expireDiscards=()=>{invalidateAccountingDiscard('asset');invalidateAccountingDiscard('queue');};
     for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('accTab').addEventListener(name,()=>{closingActionRevision++;if(name==='hidden.bs.tab')expireDiscards();cancelStale();});
@@ -8006,7 +8015,7 @@ async function openClosingModal() {
     if(!accountingReadScopeCurrent(accountingReadScope(null))||!canPerform('accounting.edit'))return showAlert('결산 권한을 확인해 주세요.');
     closingActionRevision++;
     if(closingFormOwner!==accountingReadIdentity()){
-    closingFormOwner=accountingReadIdentity();closingYearDrafts.clear();closingYearManualTaxes.clear();closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;closingPendingDraft=null;
+    closingFormOwner=accountingReadIdentity();closingYearDrafts.clear();closingYearManualTaxes.clear();closingYearExplicitInputs.clear();closingLegalManual=false;closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;closingPendingDraft=null;
     const defaultYear = new Date().getFullYear() - 1;
     document.getElementById("closingYearInput").value = defaultYear;
     document.getElementById("closingLegalInput").type = "text";
@@ -8269,7 +8278,7 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
     } else {
         const currentLegal = getClosingRoundedInputValue("closingLegalInput");
         const currentVol = getClosingRoundedInputValue("closingVoluntaryInput");
-        let nextLegal = resetReserveValues ? closingContext.autoLegal : currentLegal;
+        let nextLegal = resetReserveValues || !closingLegalManual ? closingContext.autoLegal : currentLegal;
         let nextVol = resetReserveValues ? 0 : currentVol;
 
         legalInput.type = "text";
@@ -8292,6 +8301,12 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
         }
     }
 
+    // Explicit reserves remain the user's draft; final minimum/maximum checks
+    // still apply. Non-positive income retains the existing disabled-zero UI.
+    if(!closingContext.isClosed&&closingContext.netIncome>0){
+        const explicit=closingYearExplicitInputs.get(closingActiveYear)||{};
+        for(const id of ['closingLegalInput','closingVoluntaryInput'])if(Object.hasOwn(explicit,id))document.getElementById(id).value=explicit[id];
+    }
     warn.classList.add("hidden");
     handleClosingLegalInputChange();
     if(!closingPreparedScope || !accountingReadScopeCurrent(closingPreparedScope) || accountingReadTasks.has('closing') || !canPerform('accounting.edit'))runBtn.disabled=true;
@@ -8306,6 +8321,11 @@ function rememberClosingDraft() {
     const baseline=closingBaselineYear===closingActiveYear?closingFormBaseline:pending?.before;
     if(!baseline)return;
     const values=closingInputSnapshot(),changes={...(closingBaselineYear===closingActiveYear?{}:pending?.saved||{}),...Object.fromEntries(Object.entries(values).filter(([id,value])=>value!==baseline[id]))};
+    const explicit=closingYearExplicitInputs.get(closingActiveYear)||{};
+    for(const id of CLOSING_EXPLICIT_INPUT_IDS){
+        if(!Object.hasOwn(explicit,id)||(closingBaselineYear===closingActiveYear&&explicit[id]===baseline[id]))delete changes[id];
+        else changes[id]=explicit[id];
+    }
     const taxEdited=!!pending&&closingTaxEditRevision!==pending.taxRevision;
     const manual=closingBaselineYear===closingActiveYear||taxEdited
         ? (closingTaxExpenseManual?values.closingTaxExpenseInput:undefined) : pending?.savedManualTax;
@@ -8321,17 +8341,19 @@ function refreshClosingContext() {
     const pane=document.querySelector('.tab-content.no-print>.tab-pane.active')?.id;
     const scope=accountingReadScope(pane,{modal:'closingModal',valid:()=>Number(document.getElementById('closingYearInput').value)===yearVal});
     if(!accountingReadScopeCurrent(scope))return Promise.resolve(false);
-    if(closingFormOwner!==scope.identity){closingFormOwner=scope.identity;closingYearDrafts.clear();closingYearManualTaxes.clear();closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;closingPendingDraft=null;}
+    if(closingFormOwner!==scope.identity){closingFormOwner=scope.identity;closingYearDrafts.clear();closingYearManualTaxes.clear();closingYearExplicitInputs.clear();closingLegalManual=false;closingActiveYear=null;closingFormBaseline=null;closingBaselineYear=null;closingPendingDraft=null;}
     rememberClosingDraft();const before=closingInputSnapshot(),saved={...(closingYearDrafts.get(yearVal)||{})},savedManualTax=closingYearManualTaxes.get(yearVal),taxRevision=closingTaxEditRevision;closingActiveYear=yearVal;
     if(savedManualTax!==undefined)saved.closingTaxExpenseInput=savedManualTax;
     const status=document.getElementById('closingReadStatus'),button=document.getElementById('btnClosingRun'),calc=document.getElementById('btnClosingCalc');
     return runAccountingRead('closing',String(yearVal),scope,read=>buildClosingContext(yearVal,{signal:read.controller.signal}),ctx=>{
     if(Number(ctx.year)!==yearVal)throw Error('CLOSING_YEAR_MISMATCH');
     const latest=closingInputSnapshot(),preserve={...saved,...Object.fromEntries(Object.entries(latest).filter(([id,value])=>value!==before[id]))};
+    const explicit=closingYearExplicitInputs.get(yearVal)||{};
+    for(const id of CLOSING_EXPLICIT_INPUT_IDS){if(Object.hasOwn(explicit,id))preserve[id]=explicit[id];else delete preserve[id];}
     const manualTax=closingTaxEditRevision!==taxRevision
         ? (closingTaxExpenseManual?latest.closingTaxExpenseInput:undefined) : savedManualTax;
     if(manualTax===undefined)delete preserve.closingTaxExpenseInput;else preserve.closingTaxExpenseInput=manualTax;
-    closingContext=ctx;closingPreparedScope=scope;
+    closingContext=ctx;closingPreparedScope=scope;closingLegalManual=false;
     for(const id of Object.keys(before))document.getElementById(id).value='0';
     document.getElementById("closingPrepaidNationalTaxInput").value = String(ctx.prepaidTaxSummary?.national || 0);
     document.getElementById("closingPrepaidLocalTaxInput").value = String(ctx.prepaidTaxSummary?.local || 0);
@@ -8340,13 +8362,13 @@ function refreshClosingContext() {
     closingFormBaseline=closingInputSnapshot();closingBaselineYear=yearVal;
     if(!ctx.isClosed){
         for(const [id,value] of Object.entries(preserve))document.getElementById(id).value=value;
-        closingTaxExpenseManual=manualTax!==undefined;syncClosingFormState(false,{preserveManualTax:true});
-        for(const [id,value] of Object.entries(preserve))document.getElementById(id).value=value;
+        closingLegalManual=Object.hasOwn(explicit,'closingLegalInput');closingTaxExpenseManual=manualTax!==undefined;syncClosingFormState(false,{preserveManualTax:true});
+        for(const [id,value] of Object.entries(preserve))if(closingContext.netIncome>0||!['closingLegalInput','closingVoluntaryInput'].includes(id))document.getElementById(id).value=value;
         handleClosingLegalInputChange();
     }
     status.textContent='';rememberClosingDraft();
     },message=>{closingPreparedScope=null;button.disabled=true;status.textContent=message.replace('다시 확인','재계산');},{
-        start:()=>{closingPendingDraft={identity:scope.identity,year:yearVal,before,saved,savedManualTax,taxRevision};closingPreparedScope=null;button.disabled=true;status.textContent=yearVal+'년 결산 자료를 불러오는 중입니다.';calc.setAttribute('aria-busy','true');},
+        start:()=>{closingPendingDraft={identity:scope.identity,year:yearVal,before,saved,savedManualTax,taxRevision};closingLegalManual=Object.hasOwn(closingYearExplicitInputs.get(yearVal)||{},'closingLegalInput');closingPreparedScope=null;button.disabled=true;status.textContent=yearVal+'년 결산 자료를 불러오는 중입니다.';calc.setAttribute('aria-busy','true');},
         finish:()=>{rememberClosingDraft();if(closingBaselineYear===yearVal)closingPendingDraft=null;calc.setAttribute('aria-busy','false');button.disabled=!closingPreparedScope||!accountingReadScopeCurrent(closingPreparedScope)||!!closingContext?.isClosed||!canPerform('accounting.edit');},
         cancel:()=>{rememberClosingDraft();if(closingBaselineYear===yearVal)closingPendingDraft=null;closingPreparedScope=null;button.disabled=true;calc.setAttribute('aria-busy','false');status.textContent='재계산을 눌러 결산 자료를 확인해 주세요.';}
     });
