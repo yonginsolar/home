@@ -1,4 +1,4 @@
-/* v1.1.13 - Scope legal confirmations/results to their original task and owner. */
+/* v1.1.14 - Preserve editable drafts and verify delayed saves without replaying them. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -6,7 +6,7 @@
   const state = new Map();
   let loaded = false, loading = false, context = null, actionInFlight = false, retryButton = null;
   let readRequest=null,readMessage='',readStatus=null;
-  let saveTicket=null;
+  let saveTicket=null,resultButton=null,focusGeneration=0;
   let selectedKind='signup_purpose',previewMode='draft';
   let signupImageOpener=null;
   const contacts = {representative:'이사장 이름',address:'조합 주소',officer_name:'개인정보 보호책임자 성명',officer_title:'직책',officer_phone:'전화번호',officer_email:'이메일'};
@@ -51,11 +51,65 @@
   }
   function saveAuthority(){const runtime=readScope().runtime;return JSON.stringify([runtime?.coop_id,runtime?.effective_permissions,runtime?.modules,runtime?.module_access]);}
   function saveActionCurrent(ticket){return saveTicket===ticket&&!ticket.departed&&saveOwnerCurrent(ticket)&&sameReadScope(ticket.scope)&&selectedKind===ticket.kind;}
-  function departSave(){const ticket=saveTicket;if(!ticket)return;ticket.departed=true;if(!ticket.sent)ticket.cancelConfirmation?.();}
+  function departSave(){const ticket=saveTicket;if(!ticket)return;ticket.departed=true;focusGeneration++;cancelResultRead(ticket);if(!ticket.sent)ticket.cancelConfirmation?.();}
+  function recoveringSave(){return saveTicket?.delayed&&saveOwnerCurrent(saveTicket);}
+  function canCheckResult(ticket){return !!ticket&&saveTicket===ticket&&ticket.delayed&&saveOwnerCurrent(ticket)&&sameReadScope(ticket.scope);}
+  function cancelResultRead(ticket){
+    const read=ticket?.resultRead;if(!read)return;ticket.resultRead=null;
+    read.controller.abort();window.clearTimeout(read.timer);read.release({cancelled:true});
+    ticket.recoveryMessage='저장 결과 확인을 눌러 현재 상태를 확인해 주세요.';syncEnabled();
+  }
+  function releaseSave(ticket){
+    window.clearTimeout(ticket.timer);cancelResultRead(ticket);
+    if(saveTicket!==ticket)return;saveTicket=null;ticket.state.busy=false;endAction();
+  }
+  function markSaveDelayed(ticket){
+    if(saveTicket!==ticket)return;ticket.delayed=true;
+    ticket.recoveryMessage='저장 응답이 지연되고 있습니다. 입력을 이어 쓰거나 저장 결과를 확인해 주세요.';
+    syncEnabled();
+  }
+  function rawForm(kind){const active=document.activeElement;return {content:el(kind,'content').value,date:el(kind,'effective-date').value,contacts:kind==='privacy'?Object.fromEntries(Object.keys(contacts).map(k=>[k,el(kind,k).value])):null,caret:active?.closest?.('#site-legal-'+kind+'-card')&&typeof active.selectionStart==='number'?{node:active,start:active.selectionStart,end:active.selectionEnd,direction:active.selectionDirection}:null};}
+  function restoreForm(kind,raw){el(kind,'content').value=raw.content;el(kind,'effective-date').value=raw.date;if(raw.contacts)for(const key of Object.keys(contacts))el(kind,key).value=raw.contacts[key];updateStatus(kind);if(raw.caret?.node===document.activeElement)raw.caret.node.setSelectionRange(raw.caret.start,raw.caret.end,raw.caret.direction);}
+  async function checkSaveResult(ticket){
+    if(!canCheckResult(ticket))return false;
+    if(ticket.resultRead)return ticket.resultRead.promise;
+    const read={controller:new AbortController(),release:null,timer:0,promise:null};ticket.resultRead=read;
+    const current=()=>ticket.resultRead===read&&canCheckResult(ticket);
+    const stopped=new Promise((resolve,reject)=>{read.release=resolve;read.timer=window.setTimeout(()=>{read.controller.abort();reject(Error('LEGAL_RESULT_TIMEOUT'));},15000);});
+    ticket.recoveryMessage='저장 결과를 확인하는 중입니다.';syncEnabled();
+    read.promise=(async()=>{
+      try{
+        const result=await Promise.race([_supabase.rpc('get_my_site_legal_documents').abortSignal(read.controller.signal),stopped]);
+        if(!current()||result?.cancelled)return false;
+        const doc=result?.data?.[ticket.kind];
+        if(result?.error||!doc||typeof doc.content!=='string'||!Number.isSafeInteger(doc.revision)||doc.revision<ticket.expectedRevision||typeof doc.is_published!=='boolean')throw Error('LEGAL_RESULT_INVALID');
+        if(doc.revision===ticket.expectedRevision){ticket.recoveryMessage='아직 저장 결과를 확인하지 못했습니다. 잠시 후 저장 결과 확인을 다시 눌러 주세요.';return false;}
+        // The server serializes this document and checks the expected revision.
+        // An advanced revision fences the original request; never replay it.
+        const raw=rawForm(ticket.kind);setForm(ticket.kind,doc);ticket.state=state.get(ticket.kind);
+        const matches=ticket.action==='unpublish'?!doc.is_published:JSON.stringify(values(ticket.kind))===ticket.signature&&(ticket.action!=='publish'||doc.is_published);
+        restoreForm(ticket.kind,raw);
+        ticket.state.resultNotice=matches?(ticket.action==='unpublish'?'현재 등록이 해제되어 있습니다.':'현재 저장된 내용이 요청한 내용과 일치합니다.'):'저장된 내용이 달라졌습니다. 현재 적용 중인 내용과 작성 내용을 확인해 주세요.';
+        updateStatus(ticket.kind);releaseSave(ticket);return true;
+      }catch(_){if(current())ticket.recoveryMessage='저장 결과를 확인하지 못했습니다. 입력을 유지한 채 다시 확인해 주세요.';return false;}
+      finally{read.controller.abort();window.clearTimeout(read.timer);if(ticket.resultRead===read){ticket.resultRead=null;if(saveTicket===ticket)syncEnabled();}}
+    })();return read.promise;
+  }
+  function restoreCancelledFocus(ticket){
+    const generation=ticket.focusGeneration;
+    window.setTimeout(()=>{
+      const button=ticket.opener,active=document.activeElement,modal=document.getElementById('customConfirmModal');
+      if(generation!==focusGeneration||ticket.departed||!saveOwnerCurrent(ticket)||!sameReadScope(ticket.scope)||selectedKind!==ticket.kind||document.visibilityState==='hidden')return;
+      if(!button?.isConnected||button.disabled||!button.getClientRects().length||button.closest('[hidden]')||document.querySelector('.modal.show,dialog[open]'))return;
+      if(active&&active!==document.body&&active!==document.documentElement&&active!==button&&!modal?.contains(active))return;
+      const r=button.getBoundingClientRect(),v=window.visualViewport,left=v?.offsetLeft||0,top=v?.offsetTop||0,width=v?.width||document.documentElement.clientWidth,height=v?.height||document.documentElement.clientHeight;
+      if(r.width>0&&r.height>0&&r.left>=left&&r.top>=top&&r.right<=left+width&&r.bottom<=top+height)button.focus({preventScroll:true});
+    },0);
+  }
   function confirmAction(message, ticket) {
     return new Promise(resolve=>{
       const modal=document.getElementById('customConfirmModal');let accepted=false,settled=false,button=null;
-      const settle=value=>{if(settled)return;settled=true;modal.removeEventListener('hidden.bs.modal',hidden);if(ticket)ticket.cancelConfirmation=null;resolve(value);};
+      const settle=value=>{if(settled)return;settled=true;modal.removeEventListener('hidden.bs.modal',hidden);if(ticket){ticket.cancelConfirmation=null;ticket.cancelled=!value;}resolve(value);};
       const hidden=()=>setTimeout(()=>{if(!accepted)settle(false);},0);
       modal.addEventListener('hidden.bs.modal',hidden,{once:true});
       myConfirm(message,()=>{accepted=true;settle(true);});
@@ -74,13 +128,15 @@
   function setEnabled(kind, enabled) { for(const b of el(kind,'card').querySelectorAll('button,input,textarea')) b.disabled=!enabled; }
   function syncEnabled() {
     for(const kind of Object.keys(labels))setEnabled(kind,loaded&&!loading&&!actionInFlight&&permitted());
+    if(loaded&&!loading&&recoveringSave())for(const kind of Object.keys(labels))for(const input of el(kind,'card').querySelectorAll('input,textarea'))input.disabled=false;
     if(retryButton){retryButton.disabled=loading||actionInFlight||!permitted();retryButton.setAttribute('aria-busy',String(loading));}
-    if(readStatus)readStatus.textContent=readMessage;
+    if(resultButton){resultButton.hidden=!recoveringSave();resultButton.disabled=!canCheckResult(saveTicket)||!!saveTicket?.resultRead;resultButton.setAttribute('aria-busy',String(!!saveTicket?.resultRead));}
+    if(readStatus)readStatus.textContent=recoveringSave()?labels[saveTicket.kind]+' · '+saveTicket.recoveryMessage:readMessage;
     refreshPreview();
   }
   function beginAction() {
     if(!loaded||loading||actionInFlight||!permitted())return false;
-    actionInFlight=true;syncEnabled();return true;
+    focusGeneration++;actionInFlight=true;syncEnabled();return true;
   }
   function endAction() { actionInFlight=false;syncEnabled(); }
   function setForm(kind, doc={}) {
@@ -124,7 +180,7 @@
     const target=document.getElementById('site-home-legal-preview');if(!target)return;
     const doc=state.get(selectedKind)?.doc;
     const active=target.querySelector('article[contenteditable="plaintext-only"]');
-    const kind=selectedKind,editable=()=>loaded&&previewMode==='draft'&&kind===selectedKind&&permitted()&&!actionInFlight&&!loading;
+    const kind=selectedKind,editable=()=>loaded&&previewMode==='draft'&&kind===selectedKind&&permitted()&&(!actionInFlight||recoveringSave())&&!loading;
     if(active&&document.activeElement===active&&editable())return;
     target.replaceChildren();
     const placement=document.createElement('div');placement.className='site-legal-placement';
@@ -190,7 +246,7 @@
       grid.append(column);setEnabled(kind,false);
       el(kind,'content').addEventListener('input',()=>updateStatus(kind));el(kind,'effective-date').addEventListener('change',()=>updateStatus(kind));
       if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).addEventListener('input',()=>updateStatus(kind));
-      column.addEventListener('click',event=>{const b=event.target.closest('[data-legal-action]');if(!b||b.disabled)return;const action=b.dataset.legalAction;if(action==='sample')loadSample(kind);else save(kind,action);});
+      column.addEventListener('click',event=>{const b=event.target.closest('[data-legal-action]');if(!b||b.disabled)return;const action=b.dataset.legalAction;if(action==='sample')loadSample(kind);else save(kind,action,b);});
     }
     mountTabs();
   }
@@ -251,7 +307,7 @@
       if(focusDraft&&current()&&permitted())document.querySelector('#site-home-legal-preview article[tabindex="0"]')?.focus({preventScroll:true});
     }
   }
-  async function save(kind, action) {
+  async function save(kind, action, opener) {
     const s=state.get(kind);if(!loaded||loading||actionInFlight||!s||s.busy||!permitted())return;
     const input=values(kind),publish=action==='publish';
     const rendered=renderText(input.content,kind);
@@ -264,27 +320,32 @@
     }
     if(publish && (!input.effective_date || rendered.trim().length<(kind==='signup_purpose'?20:100) || /\{\{[^}]+\}\}/.test(rendered)))return myAlert('시행일과 내용을 입력하고, {{ }}로 표시된 샘플 항목을 실제 내용으로 바꿔 주세요.','warning');
     if(!beginAction())return;
-    const ticket={scope:readScope(),authority:saveAuthority(),kind,state:s,signature:JSON.stringify(input),sent:false,departed:false,cancelConfirmation:null};
+    const ticket={scope:readScope(),authority:saveAuthority(),kind,state:s,signature:JSON.stringify(input),expectedRevision:s.doc.revision||0,action,opener,focusGeneration,sent:false,departed:false,cancelConfirmation:null,delayed:false,unresolved:false,timer:0,resultRead:null,recoveryMessage:''};
     saveTicket=ticket;
     s.busy=true;
     try {
       if((publish||action==='unpublish')&&!(await confirmAction(action==='unpublish'?'등록을 해제할까요? 해당 문구가 더 이상 공개되지 않습니다.':`${labels[kind]}을 등록하고 적용할까요?`,ticket)))return;
       if(!saveActionCurrent(ticket)||JSON.stringify(values(kind))!==ticket.signature)return;
       ticket.sent=true;
+      ticket.timer=window.setTimeout(()=>markSaveDelayed(ticket),15000);
       const request=action==='unpublish' ? _supabase.rpc('unpublish_site_legal_document',{p_document_type:kind,p_expected_revision:s.doc.revision||0}) : _supabase.rpc('save_site_legal_document_v2',{p_document_type:kind,p_content:input.content,p_effective_date:input.effective_date||null,p_publish:publish,p_expected_revision:s.doc.revision||0,p_contact_details:input.contact_details||null});
-      const {data,error}=await request;if(error)throw error;
+      const {data,error,status}=await request;if(error){if(status===0)ticket.unresolved=true;throw error;}
       if(saveTicket!==ticket||!saveOwnerCurrent(ticket))return;
+      if(!data||typeof data.content!=='string'||!Number.isSafeInteger(data.revision)||data.revision<=ticket.expectedRevision){ticket.unresolved=true;throw Error('LEGAL_RESULT_UNCONFIRMED');}
       // A late response must not erase a newer draft, even if an adapter changed
       // the original fields while the request was pending. The revision remains
       // the server-confirmed one; preserved edits still need an explicit save.
       const newer=JSON.stringify(values(kind))!==JSON.stringify(input)||(action==='unpublish'&&dirty(kind));
-      const raw=newer?{content:el(kind,'content').value,date:el(kind,'effective-date').value,contacts:kind==='privacy'?Object.fromEntries(Object.keys(contacts).map(k=>[k,el(kind,k).value])):null}:null;
+      const raw=newer?rawForm(kind):null;
       setForm(kind,data);
       ticket.state=state.get(kind);
-      if(raw){el(kind,'content').value=raw.content;el(kind,'effective-date').value=raw.date;if(raw.contacts)for(const key of Object.keys(contacts))el(kind,key).value=raw.contacts[key];updateStatus(kind);}
-      if(saveActionCurrent(ticket))myAlert(raw?'요청은 반영했습니다. 남아 있는 수정 내용은 아직 저장되지 않았습니다.':action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
-    } catch(error) {if(saveTicket===ticket&&saveOwnerCurrent(ticket)){const messages={LEGAL_DOCUMENT_CHANGED:'다른 사람이 수정했습니다. 편집 내용을 따로 보관한 뒤 다시 불러와 주세요.',LEGAL_CONTACT_REQUIRED:'이사장·주소와 개인정보 보호책임자의 성명·직책·전화번호·이메일을 모두 입력해 주세요.',LEGAL_CONTACT_INVALID:'개인정보 담당자 정보의 입력 형식을 확인해 주세요.',LEGAL_CONTACT_NOT_IN_CONTENT:'담당자 정보가 처리방침 본문에 반영되지 않았습니다. 본문과 등록 전 미리보기를 확인해 주세요.',LEGAL_DOCUMENT_NOT_READY:'시행일·내용과 아직 채우지 않은 샘플 항목을 확인해 주세요.'};const message=messages[error?.message]||'저장하지 못했습니다. 입력 내용은 유지됩니다.';ticket.state.resultNotice=message;updateStatus(kind);if(saveActionCurrent(ticket))myAlert(message,'warning');}}
-    finally {if(saveTicket===ticket){saveTicket=null;s.busy=false;ticket.state.busy=false;endAction();}}
+      if(raw)restoreForm(kind,raw);
+      if(saveActionCurrent(ticket)&&!ticket.delayed)myAlert(raw?'요청은 반영했습니다. 남아 있는 수정 내용은 아직 저장되지 않았습니다.':action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
+    } catch(error) {if(saveTicket===ticket&&saveOwnerCurrent(ticket)){
+      if(ticket.unresolved||error?.status===0||error?.name==='TypeError'||error?.name==='AbortError'||/fetch|network|timeout|abort/i.test(String(error?.code||'')+' '+String(error?.message||''))){ticket.unresolved=true;markSaveDelayed(ticket);ticket.recoveryMessage='저장 결과를 확인하지 못했습니다. 저장 결과 확인을 눌러 주세요.';}
+      else{const messages={LEGAL_DOCUMENT_CHANGED:'다른 사람이 수정했습니다. 편집 내용을 따로 보관한 뒤 다시 불러와 주세요.',LEGAL_CONTACT_REQUIRED:'이사장·주소와 개인정보 보호책임자의 성명·직책·전화번호·이메일을 모두 입력해 주세요.',LEGAL_CONTACT_INVALID:'개인정보 담당자 정보의 입력 형식을 확인해 주세요.',LEGAL_CONTACT_NOT_IN_CONTENT:'담당자 정보가 처리방침 본문에 반영되지 않았습니다. 본문과 등록 전 미리보기를 확인해 주세요.',LEGAL_DOCUMENT_NOT_READY:'시행일·내용과 아직 채우지 않은 샘플 항목을 확인해 주세요.'};const message=messages[error?.message]||'저장하지 못했습니다. 입력 내용은 유지됩니다.';ticket.state.resultNotice=message;updateStatus(kind);if(saveActionCurrent(ticket)&&!ticket.delayed)myAlert(message,'warning');}
+    }}
+    finally {window.clearTimeout(ticket.timer);if(saveTicket===ticket&&!ticket.unresolved){releaseSave(ticket);if(ticket.cancelled)restoreCancelledFocus(ticket);}else if(saveTicket===ticket)syncEnabled();}
   }
   window.fetchSiteLegalDocuments=fetchDocuments;
   window.CoopSiteLegalEditor=Object.freeze({select:selectKind,refreshPreview,mount:mountTabs});
@@ -298,8 +359,9 @@
     finally {endAction();}
     if(!confirmed||!sameReadScope(scope)||readSignature()!==signature)return;
     await fetchDocuments({reload:true});
-  };readStatus=document.createElement('p');readStatus.id='site-legal-read-status';readStatus.className='small text-muted';readStatus.setAttribute('role','status');readStatus.setAttribute('aria-live','polite');root.prepend(retryButton,readStatus);syncEnabled();
-    const cancelStale=()=>{if(readRequest&&!currentRead(readRequest))cancelRead();if(saveTicket&&!saveActionCurrent(saveTicket))departSave();};
+  };resultButton=document.createElement('button');resultButton.id='site-legal-result-check';resultButton.type='button';resultButton.className='btn btn-sm btn-outline-primary mb-3 ms-2';resultButton.textContent='저장 결과 확인';resultButton.hidden=true;resultButton.onclick=()=>checkSaveResult(saveTicket);
+    readStatus=document.createElement('p');readStatus.id='site-legal-read-status';readStatus.className='small text-muted';readStatus.setAttribute('role','status');readStatus.setAttribute('aria-live','polite');root.prepend(retryButton,resultButton,readStatus);syncEnabled();
+    const cancelStale=()=>{if(readRequest&&!currentRead(readRequest))cancelRead();if(saveTicket){if(!saveOwnerCurrent(saveTicket)||!sameReadScope(saveTicket.scope))departSave();syncEnabled();}};
     for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('site-content-tabs')?.addEventListener(name,cancelStale);
     if(window.frameElement)new MutationObserver(cancelStale).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
     window.addEventListener('pagehide',()=>{cancelRead();departSave();});
