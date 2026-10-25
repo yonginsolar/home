@@ -177,7 +177,8 @@
     button.textContent=source.id==='btn-save-home-settings'?(['hero','impact','contact','design','fonts'].includes(area)?'변경사항 저장':'메인 화면 변경 저장'):source.id==='btnSaveSectionChanges'?'표시 영역·순서 저장':source.textContent.trim();button.disabled=source.disabled||!allowed||flushing;
     button.onclick=async()=>{
      if(flushing||!permitted()||source.disabled)return;
-     const current=source.id==='btn-save-site-activity'?root.AdminMemberSite?.captureActivitySaveIntent?.():()=>true;
+     const current=source.id==='btn-save-site-activity'?root.AdminMemberSite?.captureActivitySaveIntent?.()
+      :source.id==='site-certification-save'?root.AdminMemberSite?.captureCertificationSaveIntent?.():()=>true;
      if(!current?.())return;
      flushing=true;sync();
      try{

@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261025-save-intent-1') return;
+    if (root.AdminMemberSite?.version === '20261025-cert-intent-1') return;
 const activityDrafts=new Map();
 let activityActiveDraft=null,activityDraftTemplate=null,activityDraftEpoch=0,activityEditRevision=0,activitySaveIntentEpoch=0;
 function captureActivitySaveIntent() {
@@ -1812,7 +1812,17 @@ if (current()) queueHomePreviewUpdate();
 }
 }
 
-let certificationDraftStore=null,certificationReadSequence=0;
+let certificationDraftStore=null,certificationReadSequence=0,certificationSaveIntentEpoch=0;
+function captureCertificationSaveIntent() {
+const store=getCertificationDraftStore(),draft=store.active;
+const context={store,draft,owner:siteModalOwner(),runtime:g_adminMemberRuntime,area:'certifications'};
+const id=document.getElementById('site-certification-id')?.value,intent=certificationSaveIntentEpoch;
+// Keep edits from the same form, never transfer a waiting click to another
+// item, a returned menu or a save already started with the lower button.
+return ()=>!!draft&&store.owner===context.owner&&intent===certificationSaveIntentEpoch
+&&siteModalScopeCurrent(context)&&isCertificationSaveCurrent(context)&&draft.body.isConnected
+&&document.getElementById('site-certification-id')?.value===id&&!g_siteCertificationSaving;
+}
 function getCertificationDraftStore() {
 if(certificationDraftStore)return certificationDraftStore;
 const pane=document.getElementById('sub-certifications');
@@ -1820,6 +1830,10 @@ const body=pane.querySelector('#site-certification-form-title').closest('.card-b
 const owner=siteModalOwner(),draft={id:'',body,baseline:siteModalSnapshot(body),uncertain:false};
 const store={pane,template:body.cloneNode(true),owner,active:draft,drafts:new Map()};
 certificationDraftStore=store;
+const invalidate=()=>{if(root.CoopHomeVisualEditor?.current()!=='certifications'||root.frameElement?.hidden)certificationSaveIntentEpoch++;};
+document.getElementById('site-content-tabs')?.addEventListener('shown.bs.tab',invalidate);
+if(root.frameElement)new MutationObserver(invalidate).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
+window.addEventListener('pagehide',()=>{certificationSaveIntentEpoch++;});
 for(const type of ['input','change'])pane.addEventListener(type,()=>captureCertificationDraft());
 window.addEventListener('beforeunload',event=>{captureCertificationDraft();if(store.owner===siteModalOwner()&&store.drafts.size){event.preventDefault();event.returnValue='';}});
 return store;
@@ -1833,6 +1847,7 @@ draft.body.querySelector('[data-certification-dirty]').hidden=!dirty;
 function mountCertificationDraft(id,force=false) {
 const owner=siteModalOwner(),store=getCertificationDraftStore();
 if(!owner||store.owner!==owner||!canAccessAdminMemberTab('site')||root.frameElement?.hidden||g_siteCertificationSaving&&!force)return null;
+certificationSaveIntentEpoch++;
 if(store.locks&&!g_siteCertificationSaving){store.locks.forEach(([el,disabled])=>{el.disabled=disabled;});store.locks=null;}
 captureCertificationDraft();
 const key=String(id||''),cached=store.drafts.get(key);
@@ -2024,6 +2039,7 @@ if (publicUrl && !/^https:\/\//i.test(publicUrl)) return myAlert('공식 안내 
 const context={store,draft:store.active,owner:siteModalOwner(),runtime:g_adminMemberRuntime,snapshot:siteModalSnapshot(store.active.body)};
 const file=document.getElementById('site-certification-image-file')?.files?.[0]||null;
 const payload={p_id:read('site-certification-id')||null,p_name:name,p_issuer:read('site-certification-issuer'),p_certificate_no:read('site-certification-number'),p_issued_on:issuedOn||null,p_valid_until:validUntil||null,p_image_url:read('site-certification-image-url')||null,p_public_url:publicUrl||null,p_is_featured:document.getElementById('site-certification-featured').checked,p_is_visible:document.getElementById('site-certification-visible').checked,p_display_order:Number(read('site-certification-order')||100)};
+certificationSaveIntentEpoch++;
 g_siteCertificationSaving = true;
 const controls=Array.from(store.pane.querySelectorAll('input,textarea,select,button'),el=>[el,el.disabled]);controls.forEach(([el])=>{el.disabled=true;});
 const button = document.getElementById('site-certification-save');
@@ -4271,5 +4287,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
-    root.AdminMemberSite = Object.freeze({ version: '20261025-save-intent-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent });
+    root.AdminMemberSite = Object.freeze({ version: '20261025-cert-intent-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
 })(window);
