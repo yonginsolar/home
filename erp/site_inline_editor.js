@@ -118,8 +118,9 @@
   function saveStatus(area){
    const kind=['hero','impact','contact','design','fonts'].includes(area)?'home':area==='about'?'about':'';
    if(kind){
-    const text=document.getElementById(`site-${kind}-save-status`)?.textContent||'';
-    const phase=/저장 중/.test(text)?'busy':/불러오지 못/.test(text)?'error':/불러오는 중|불러와 주세요/.test(text)||!text?'loading':/저장하지 않은/.test(text)?'dirty':'idle';
+    const source=document.getElementById(`site-${kind}-save-status`),text=source?.textContent||'';
+    const actual=kind==='about'?source?.dataset.siteEditorPhase:'';
+    const phase=['busy','loading','error','dirty','idle'].includes(actual)?actual:/저장 중/.test(text)?'busy':/불러오지 못/.test(text)?'error':/불러오는 중|불러와 주세요/.test(text)||!text?'loading':/저장하지 않은/.test(text)?'dirty':'idle';
     const prior=phases.get(kind);const saved=phase==='idle'&&(prior?.phase==='busy'||prior?.saved===true);phases.set(kind,{phase,saved});
     return {phase,text:phase==='idle'?(saved?'홈페이지에 반영되었습니다.':'변경사항 없음'):phase==='dirty'?'저장하지 않은 변경사항':text||'설정을 불러오는 중입니다…'};
    }
@@ -145,7 +146,7 @@
    try{const url=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(url&&url.protocol==='https:'&&!url.username&&!url.password){url.search='';url.hash='';publicLink.href=url.href;publicLink.hidden=false;}}catch(_){}
    if(!['hero','impact','about','contact','legal'].includes(area))workspace.classList.add('show-settings');else if(!explicitSettings)workspace.classList.remove('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
   }
-  document.addEventListener('coop-home-undo-change',sync);new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class','src']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
+  document.addEventListener('coop-home-undo-change',sync);new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class','src','data-site-editor-phase']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
  }
  root.addEventListener('message',event=>{
   const f=frame();if(!f?.src||event.source!==f.contentWindow||event.origin!==new URL(f.src).origin)return;
