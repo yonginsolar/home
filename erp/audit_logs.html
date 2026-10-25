@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.1.9
-Change: 2026-04-22 - Align audit log screen with PC-first ERP workspace.
+Version: v1.1.11
+Change: 2026-10-26 - Recover interrupted reads and share keyboard/button searches.
 -->
 <html lang="ko">
 <head>
@@ -14,7 +14,7 @@ Change: 2026-04-22 - Align audit log screen with PC-first ERP workspace.
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.1.10 | audit_logs.html');</script>
+  <script>console.log('[Version] v1.1.11 | audit_logs.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -58,7 +58,7 @@ Change: 2026-04-22 - Align audit log screen with PC-first ERP workspace.
       <button class="btn btn-outline-secondary btn-sm" onclick="location.href='index.html'" data-erp-home-link>🏠 메뉴로</button>
     </div>
 
-    <div class="card p-3 mb-3">
+    <form id="auditSearchForm" class="card p-3 mb-3">
       <div class="row g-2 align-items-end">
         <div class="col-12 col-md-2">
           <label class="small text-muted">로그 구분</label>
@@ -86,11 +86,15 @@ Change: 2026-04-22 - Align audit log screen with PC-first ERP workspace.
         </div>
       </div>
       <div class="d-flex justify-content-end gap-2 mt-3">
-        <button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">초기화</button>
-        <button class="btn btn-primary btn-sm" onclick="loadLogs(true)">검색</button>
-        <button class="btn btn-outline-success btn-sm" onclick="exportCsv()">CSV 다운로드</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">초기화</button>
+        <button type="submit" class="btn btn-primary btn-sm">검색</button>
+        <button type="button" class="btn btn-outline-success btn-sm" onclick="exportCsv()">CSV 다운로드</button>
       </div>
       <div class="small text-muted mt-2" id="sourceHint"></div>
+    </form>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <span id="auditReadStatus" class="small text-muted" role="status" aria-live="polite">로그를 준비하고 있습니다…</span>
+      <button id="auditRetryButton" type="button" class="btn btn-outline-primary btn-sm hidden">다시 확인</button>
     </div>
 
     <div class="table-responsive erp-desktop-scroll">
@@ -111,7 +115,7 @@ Change: 2026-04-22 - Align audit log screen with PC-first ERP workspace.
     </div>
 
     <div class="text-center mt-3">
-      <button class="btn btn-outline-secondary btn-sm" id="btnMore" onclick="loadLogs(false)">더보기</button>
+      <button class="btn btn-outline-secondary btn-sm hidden" id="btnMore" onclick="loadLogs(false)">더보기</button>
     </div>
   </div>
 
@@ -165,6 +169,42 @@ let auditReadOwner = { userId:null, coopId:null, permissions:'', revision:0 };
 let auditReadSequence = 0;
 let auditReadPending = null;
 let auditAppliedFilter = '';
+let auditReadRefreshNeeded = true;
+let auditRetryReset = true;
+let auditInputFilter = '';
+let auditBootReady = false;
+let auditBootPending = null;
+let auditAuthBound = false;
+let auditBootSequence = 0;
+
+function auditReadState(text, retry = false) {
+  document.getElementById('auditReadStatus').textContent = text;
+  document.getElementById('auditRetryButton').classList.toggle('hidden', !retry);
+}
+
+function interruptAuditRead() {
+  if (!auditReadPending) return;
+  auditReadSequence++;
+  auditReadPending.controller.abort();
+  auditReadPending = null;
+  auditReadRefreshNeeded = true;
+  document.getElementById('btnMore').disabled = false;
+  document.getElementById('logBody').removeAttribute('aria-busy');
+}
+
+async function auditReadResult(query, request) {
+  if (query?.abortSignal) query = query.abortSignal(request.controller.signal);
+  let timer;
+  try {
+    return await Promise.race([query, new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('AUDIT_READ_TIMEOUT');
+        error.code = 'AUDIT_READ_TIMEOUT';
+        reject(error);request.controller.abort();
+      }, Math.max(0, 15000 - (Date.now() - request.started)));
+    })]);
+  } finally { clearTimeout(timer); }
+}
 
 function auditFilterValues() {
   return ['filterSource','filterStart','filterEnd','filterAction','filterActor']
@@ -177,8 +217,9 @@ function auditReadCurrent(owner, sequence, filterKey, allowHidden = false) {
     && filterKey === JSON.stringify(auditFilterValues()) && !document.hidden && (allowHidden || !window.frameElement?.hidden);
 }
 
-async function auditReadAuthorized(owner) {
-  const [auth, result] = await Promise.all([_supabase.auth.getUser(), _supabase.rpc('get_my_erp_runtime')]);
+async function auditReadAuthorized(owner, request) {
+  const work = Promise.all([_supabase.auth.getUser(), _supabase.rpc('get_my_erp_runtime')]);
+  const [auth, result] = await (request ? auditReadResult(work, request) : work);
   if (auth.error || result.error) throw auth.error || result.error;
   const runtime = result.data;
   return auth.data?.user?.id === owner.userId && runtime?.coop_id === owner.coopId
@@ -207,52 +248,97 @@ function updateSourceHint() {
   hint.textContent = 'ERP 로그는 현재 조합의 전자결재, 직원관리, 조합원관리 등 일반 업무 이력만 표시합니다.';
 } // End of updateSourceHint
 
-window.onload = async function() {
-  alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
-  const auditUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
-    alertFn: function(msg) { showAlert(msg); },
+function startAudit() {
+  if (auditBootPending) return auditBootPending;
+  const epoch = ++auditBootSequence;
+  const context = {controller:new AbortController(),started:Date.now()};
+  const work = Promise.resolve().then(() => bootAudit(epoch, context)).catch(() => {
+    if (epoch === auditBootSequence) auditReadState('로그를 준비하지 못했습니다. 다시 확인해 주세요.', true);
+  }).finally(() => { if (auditBootPending === work) auditBootPending = null; });
+  auditBootPending = work;return work;
+}
+
+async function bootAudit(epoch, context) {
+  if (!alertModal) alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
+  auditReadState('조회 권한을 확인하고 있습니다…');
+  const auditUserGate = await auditReadResult(window.ErpRuntimeGuard.requireUser(_supabase, {
+    alertFn: function(msg) { if(epoch === auditBootSequence)showAlert(msg); },
     redirectUrl: 'index.html'
-  });
+  }), context);
+  if(epoch !== auditBootSequence)return;
   if (!auditUserGate.ok) return;
   myInfo = auditUserGate.user;
-  permissionSet = await loadPermissions(myInfo);
-  localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
+  const permissions = await auditReadResult(loadPermissions(myInfo), context);
+  if(epoch !== auditBootSequence)return;
+  permissionSet = permissions;
+  try { localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet))); } catch (_) {}
   const canViewAudit = permissionSet.size > 0 ? permissionSet.has('audit.view') : hasAuditViewerRoleFallback();
   if (!canViewAudit) {
+    auditReadState('감사 로그 조회 권한이 없습니다.');
     showAlert("접근 권한이 없습니다.");
     setTimeout(() => location.href = 'index.html', 1200);
     return;
   }
-  const auditRuntimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
+  const auditRuntimeGate = await auditReadResult(window.ErpRuntimeGuard.enforce(_supabase, {
     moduleKey: 'audit',
     moduleLabel: '감사 로그',
-    alertFn: function(msg) { showAlert(msg); },
+    alertFn: function(msg) { if(epoch === auditBootSequence)showAlert(msg); },
     redirectUrl: 'index.html'
-  });
+  }), context);
+  if(epoch !== auditBootSequence)return;
   if (!auditRuntimeGate.ok) return;
   auditReadOwner = { userId:auditUserGate.authUser.id, coopId:auditRuntimeGate.runtime.coop_id,
     permissions:JSON.stringify(auditRuntimeGate.runtime.effective_permissions.slice().sort()), revision:auditReadOwner.revision + 1 };
-  _supabase.auth.onAuthStateChange((event, session) => {
+  if (!auditAuthBound) {_supabase.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== auditReadOwner.userId)) {
       auditReadOwner = { userId:null, coopId:null, permissions:'', revision:auditReadOwner.revision + 1 };
       auditReadSequence++;
+      auditBootSequence++;
+      interruptAuditRead();auditReadRefreshNeeded = false;auditBootReady = false;
+      auditBootPending = null;
       cachedLogs = [];
       currentPage = 0;
       document.getElementById('logBody').innerHTML = '';
       document.getElementById('btnMore').classList.add('hidden');
+      auditReadState('로그인 상태가 바뀌었습니다. 다시 확인해 주세요.', true);
     }
-  });
-  document.getElementById('filterSource').addEventListener('change', function() {
-    updateSourceHint();
-    loadLogs(true);
-  });
+  });auditAuthBound = true;}
+  auditBootReady = true;
   updateSourceHint();
-  await loadLogs(true);
-  window.ErpWorkspaceResume.register({modules:['audit'],refresh:async()=>{
+  window.ErpWorkspaceResume.register({modules:['audit'],ownsReadRequests:true,refresh:async()=>{
     // Preserve accumulated pages and their scroll position; only requery the first page.
-    if(currentPage<=1)await loadLogs(true,{allowHidden:true});
+    if(currentPage<=1 || auditReadRefreshNeeded)await loadLogs(auditReadRefreshNeeded ? auditRetryReset : true,{allowHidden:true});
   }});
-}; // End of window.onload
+  await loadLogs(true);
+}
+window.onload = startAudit;
+
+document.getElementById('auditSearchForm').addEventListener('submit', event => {
+  event.preventDefault();if (event.isComposing) return;
+  if (auditBootReady) void loadLogs(true);else void startAudit();
+});
+document.getElementById('auditSearchForm').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && event.isComposing) event.preventDefault();
+});
+auditInputFilter = JSON.stringify(auditFilterValues());
+function auditFiltersChanged() {
+  const key = JSON.stringify(auditFilterValues());
+  if (key === auditInputFilter) return;
+  auditInputFilter = key;interruptAuditRead();auditReadRefreshNeeded = true;auditRetryReset = true;
+  auditReadState('조회 조건이 바뀌었습니다. 검색을 눌러 확인해 주세요.');
+}
+document.getElementById('auditSearchForm').addEventListener('input', auditFiltersChanged);
+document.getElementById('auditSearchForm').addEventListener('change', auditFiltersChanged);
+document.getElementById('filterSource').addEventListener('change', () => {updateSourceHint();if(auditBootReady)void loadLogs(true);});
+document.getElementById('auditRetryButton').addEventListener('click', () => {if(auditBootReady)void loadLogs(auditRetryReset);else void startAudit();});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {interruptAuditRead();return;}
+  if (auditBootReady && auditReadRefreshNeeded && !window.frameElement?.hidden) void loadLogs(auditRetryReset);
+});
+window.addEventListener('pagehide', interruptAuditRead);
+if (window.frameElement) new MutationObserver(() => {
+  if (window.frameElement.hidden && auditReadPending?.allowHidden !== true) interruptAuditRead();
+}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
 
 function showAlert(msg) {
   document.getElementById('alertBody').textContent = msg || '';
@@ -274,31 +360,44 @@ function resetFilters() {
   document.getElementById('filterAction').value = '';
   document.getElementById('filterActor').value = '';
   updateSourceHint();
+  auditFiltersChanged();
 } // End of resetFilters
 
 function loadLogs(reset, options = {}) {
   const allowHidden = options.allowHidden === true;
-  if (!auditReadOwner.userId || document.hidden || (!allowHidden && window.frameElement?.hidden)) return Promise.resolve();
+  if (!auditReadOwner.userId) return Promise.resolve();
+  if (document.hidden || (!allowHidden && window.frameElement?.hidden)) {
+    auditReadRefreshNeeded = true;auditRetryReset = !!reset;
+    auditReadState('화면으로 돌아오면 조회를 이어갑니다.', true);return Promise.resolve();
+  }
   const filterKey = JSON.stringify(auditFilterValues());
   reset = Boolean(reset || filterKey !== auditAppliedFilter);
   const offset = reset ? 0 : currentPage * pageSize;
   const key = JSON.stringify([auditReadOwner.revision, filterKey, offset, allowHidden]);
   if (auditReadPending?.key === key) return auditReadPending.promise;
+  interruptAuditRead();
   const sequence = ++auditReadSequence;
   const owner = { ...auditReadOwner };
-  const request = loadAuditPage(reset, offset, owner, sequence, filterKey, allowHidden);
-  auditReadPending = {key, promise:request};
+  const context = {controller:new AbortController(),started:Date.now()};
+  auditRetryReset = reset;auditReadRefreshNeeded = true;
+  auditReadState('목록을 확인하고 있습니다…');
+  const request = Promise.resolve().then(() => loadAuditPage(reset, offset, owner, sequence, filterKey, allowHidden, context));
+  auditReadPending = {key, promise:request, controller:context.controller, allowHidden};
   request.finally(() => {
     if (auditReadPending?.promise === request) {
       auditReadPending = null;
       document.getElementById('btnMore').disabled = false;
       document.getElementById('logBody').removeAttribute('aria-busy');
+      if (auditReadRefreshNeeded && !document.hidden && !window.frameElement?.hidden
+        && document.getElementById('auditReadStatus').textContent === '목록을 확인하고 있습니다…') {
+        auditReadState('조회가 중단되었습니다. 다시 확인해 주세요.', true);
+      }
     }
   }).catch(() => {});
   return request;
 }
 
-async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHidden) {
+async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHidden, request) {
   const isCurrent = () => auditReadCurrent(owner, sequence, filterKey, allowHidden);
   document.getElementById('btnMore').disabled = true;
   document.getElementById('logBody').setAttribute('aria-busy','true');
@@ -320,7 +419,7 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
     p_offset: offset,
     p_limit: pageSize
   };
-  const { data, error } = await _supabase.rpc('erp_get_audit_logs_unified', params);
+  const { data, error } = await auditReadResult(_supabase.rpc('erp_get_audit_logs_unified', params), request);
   if (!isCurrent()) return;
   let list = Array.isArray(data) ? data : [];
   if (error) {
@@ -329,15 +428,16 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
     const missingRpc = error?.code === 'PGRST202' || msg.includes('erp_get_audit_logs_unified');
     if (!missingRpc) throw error;
     if (source === 'admin') {
-      return showAlert("통합 감사로그 RPC가 아직 적용되지 않았습니다.\nSQL 패치를 먼저 실행해주세요.");
+      throw new Error('AUDIT_UNIFIED_READ_UNAVAILABLE');
     }
-    if (!await auditReadAuthorized(owner) || !isCurrent()) return;
+    if (!await auditReadAuthorized(owner, request)) throw {code:'42501'};
+    if (!isCurrent()) return;
     let legacyQuery = _supabase.from('erp_audit_logs').select('*').eq('coop_id', owner.coopId).order('created_at', { ascending: false });
     if (start) legacyQuery = legacyQuery.gte('created_at', `${start}T00:00:00`);
     if (end) legacyQuery = legacyQuery.lte('created_at', `${end}T23:59:59`);
     if (safeAction) legacyQuery = legacyQuery.ilike('action', `%${safeAction}%`);
     if (safeActor) legacyQuery = legacyQuery.or(`actor_name.ilike.%${safeActor}%,actor_emp_id.ilike.%${safeActor}%`);
-    const { data: legacyRows, error: legacyError } = await legacyQuery.range(offset, offset + pageSize - 1);
+    const { data: legacyRows, error: legacyError } = await auditReadResult(legacyQuery.range(offset, offset + pageSize - 1), request);
     if (legacyError) throw legacyError;
     list = (Array.isArray(legacyRows) ? legacyRows : []).map((r) => ({
       source: 'ERP',
@@ -351,11 +451,14 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
     }));
   }
   if (!isCurrent()) return;
-  if (!await auditReadAuthorized(owner)) {
+  if (!await auditReadAuthorized(owner, request)) {
     if (isCurrent()) {
       cachedLogs = [];
       document.getElementById('logBody').innerHTML = '';
-      showAlert('현재 조합과 조회 권한을 다시 확인해 주세요.');
+      currentPage = 0;
+      document.getElementById('btnMore').classList.add('hidden');
+      auditBootReady = false;
+      auditReadState('현재 조합과 조회 권한을 다시 확인해 주세요.', true);
     }
     return;
   }
@@ -364,16 +467,21 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
   auditAppliedFilter = filterKey;
   renderLogs(list, reset);
   currentPage = offset / pageSize + 1;
+  auditReadRefreshNeeded = false;
+  auditReadState(`${cachedLogs.length}건 표시`);
 
   document.getElementById('btnMore').classList.toggle('hidden', list.length < pageSize);
   } catch (error) {
     if (!isCurrent()) return;
     if (error?.code === '42501') {
+      auditBootReady = false;
       cachedLogs = [];
       document.getElementById('logBody').innerHTML = '';
       document.getElementById('btnMore').classList.add('hidden');
     }
-    showAlert('로그를 불러오지 못했습니다.\n' + (error?.message || '잠시 후 다시 시도해 주세요.'));
+    auditReadState(error?.code === '42501' ? '현재 조합과 조회 권한을 다시 확인해 주세요.' :
+      error?.code === 'AUDIT_READ_TIMEOUT' ? '조회가 지연되고 있습니다. 다시 확인해 주세요.' :
+      '목록을 불러오지 못했습니다. 다시 확인해 주세요.', true);
   }
 }
 
