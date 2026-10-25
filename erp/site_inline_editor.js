@@ -93,7 +93,7 @@
  }
  function saveButtons(area){
   const selectors={hero:'#btn-save-home-settings',impact:'#btn-save-home-settings',contact:'#btn-save-home-settings',design:'#btn-save-home-settings',fonts:'#btn-save-home-settings',about:'#btn-save-about-settings',sections:'#btnSaveSectionChanges',certifications:'#site-certification-save',activities:'#btn-save-site-activity'};
-  const buttons=area==='legal'?[...document.querySelectorAll('#sub-legal .row > :not([hidden]) [data-legal-action="draft"],#sub-legal .row > :not([hidden]) [data-legal-action="publish"]')]:[...document.querySelectorAll(selectors[area]||'#nonexistent-inline-save')];
+  const buttons=area==='activities'&&!document.getElementById('activityModal')?.classList.contains('show')?[]:area==='legal'?[...document.querySelectorAll('#sub-legal .row > :not([hidden]) [data-legal-action="draft"],#sub-legal .row > :not([hidden]) [data-legal-action="publish"]')]:[...document.querySelectorAll(selectors[area]||'#nonexistent-inline-save')];
   // A home draft may remain pending after switching to About or another area.
   // Keep its original save available in this same action zone, not a second bar.
   const pending=document.getElementById('site-home-pending-save'),homeSave=document.getElementById('btn-save-home-settings');
