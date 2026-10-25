@@ -1,4 +1,4 @@
-/* v1.1.12 - Bounded, scoped legal reads; preserve drafts across failed retries. */
+/* v1.1.13 - Scope legal confirmations/results to their original task and owner. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -6,6 +6,7 @@
   const state = new Map();
   let loaded = false, loading = false, context = null, actionInFlight = false, retryButton = null;
   let readRequest=null,readMessage='',readStatus=null;
+  let saveTicket=null;
   let selectedKind='signup_purpose',previewMode='draft';
   let signupImageOpener=null;
   const contacts = {representative:'이사장 이름',address:'조합 주소',officer_name:'개인정보 보호책임자 성명',officer_title:'직책',officer_phone:'전화번호',officer_email:'이메일'};
@@ -43,11 +44,31 @@
     readRequest=null;read.controller.abort();window.clearTimeout(read.timer);read.release({cancelled:true});loading=false;
     readMessage='다시 불러오기를 눌러 문서를 확인해 주세요.';syncEnabled();
   }
-  function confirmAction(message) {
+  function saveOwnerCurrent(ticket){
+    const scope=readScope();
+    return permitted()&&scope.runtime===ticket.scope.runtime&&scope.actor===ticket.scope.actor
+      &&saveAuthority()===ticket.authority&&state.get(ticket.kind)===ticket.state;
+  }
+  function saveAuthority(){const runtime=readScope().runtime;return JSON.stringify([runtime?.coop_id,runtime?.effective_permissions,runtime?.modules,runtime?.module_access]);}
+  function saveActionCurrent(ticket){return saveTicket===ticket&&!ticket.departed&&saveOwnerCurrent(ticket)&&sameReadScope(ticket.scope)&&selectedKind===ticket.kind;}
+  function departSave(){const ticket=saveTicket;if(!ticket)return;ticket.departed=true;if(!ticket.sent)ticket.cancelConfirmation?.();}
+  function confirmAction(message, ticket) {
     return new Promise(resolve=>{
-      const modal=document.getElementById('customConfirmModal');let accepted=false;
-      modal.addEventListener('hidden.bs.modal',()=>setTimeout(()=>{if(!accepted)resolve(false);},0),{once:true});
-      myConfirm(message,()=>{accepted=true;resolve(true);});
+      const modal=document.getElementById('customConfirmModal');let accepted=false,settled=false,button=null;
+      const settle=value=>{if(settled)return;settled=true;modal.removeEventListener('hidden.bs.modal',hidden);if(ticket)ticket.cancelConfirmation=null;resolve(value);};
+      const hidden=()=>setTimeout(()=>{if(!accepted)settle(false);},0);
+      modal.addEventListener('hidden.bs.modal',hidden,{once:true});
+      myConfirm(message,()=>{accepted=true;settle(true);});
+      button=document.getElementById('btnConfirmYes');
+      if(ticket)ticket.cancelConfirmation=()=>{
+        settle(false);
+        // Only dismiss this confirmation, including its opening transition.
+        // An older close must never dismiss a newer shared confirmation.
+        const hide=()=>{if(button&&document.getElementById('btnConfirmYes')===button)window.bootstrap?.Modal?.getInstance(modal)?.hide();};
+        modal.addEventListener('shown.bs.modal',hide,{once:true});
+        modal.addEventListener('hidden.bs.modal',()=>modal.removeEventListener('shown.bs.modal',hide),{once:true});
+        hide();
+      };
     });
   }
   function setEnabled(kind, enabled) { for(const b of el(kind,'card').querySelectorAll('button,input,textarea')) b.disabled=!enabled; }
@@ -75,6 +96,7 @@
     if(s.doc.uses_legacy_signup&&!s.doc.is_published)text+=' · 기존 가입 문구 유지 중';
     if(s.doc.has_unpublished_changes)text+=' · 수정 초안 있음';
     if(dirty(kind))text+=' · 저장하지 않은 수정 있음';
+    if(s.resultNotice)text+=' · '+s.resultNotice;
     el(kind,'status').textContent=text;el(kind,'status').className='small mt-2 '+(s.doc.is_published?'text-success':'text-muted');
     refreshPreview();
   }
@@ -144,6 +166,7 @@
   }
   function selectKind(kind){
     if(!Object.hasOwn(labels,kind))return false;
+    if(selectedKind!==kind)departSave();
     selectedKind=kind;
     for(const tab of document.querySelectorAll('[data-legal-document]')){const active=tab.dataset.legalDocument===kind;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
     for(const [key] of Object.entries(labels))el(key,'card')?.parentElement.toggleAttribute('hidden',key!==kind);
@@ -241,22 +264,27 @@
     }
     if(publish && (!input.effective_date || rendered.trim().length<(kind==='signup_purpose'?20:100) || /\{\{[^}]+\}\}/.test(rendered)))return myAlert('시행일과 내용을 입력하고, {{ }}로 표시된 샘플 항목을 실제 내용으로 바꿔 주세요.','warning');
     if(!beginAction())return;
+    const ticket={scope:readScope(),authority:saveAuthority(),kind,state:s,signature:JSON.stringify(input),sent:false,departed:false,cancelConfirmation:null};
+    saveTicket=ticket;
     s.busy=true;
     try {
-      if((publish||action==='unpublish')&&!(await confirmAction(action==='unpublish'?'등록을 해제할까요? 해당 문구가 더 이상 공개되지 않습니다.':`${labels[kind]}을 등록하고 적용할까요?`)))return;
-      if(!permitted())return;
+      if((publish||action==='unpublish')&&!(await confirmAction(action==='unpublish'?'등록을 해제할까요? 해당 문구가 더 이상 공개되지 않습니다.':`${labels[kind]}을 등록하고 적용할까요?`,ticket)))return;
+      if(!saveActionCurrent(ticket)||JSON.stringify(values(kind))!==ticket.signature)return;
+      ticket.sent=true;
       const request=action==='unpublish' ? _supabase.rpc('unpublish_site_legal_document',{p_document_type:kind,p_expected_revision:s.doc.revision||0}) : _supabase.rpc('save_site_legal_document_v2',{p_document_type:kind,p_content:input.content,p_effective_date:input.effective_date||null,p_publish:publish,p_expected_revision:s.doc.revision||0,p_contact_details:input.contact_details||null});
       const {data,error}=await request;if(error)throw error;
+      if(saveTicket!==ticket||!saveOwnerCurrent(ticket))return;
       // A late response must not erase a newer draft, even if an adapter changed
       // the original fields while the request was pending. The revision remains
       // the server-confirmed one; preserved edits still need an explicit save.
       const newer=JSON.stringify(values(kind))!==JSON.stringify(input)||(action==='unpublish'&&dirty(kind));
       const raw=newer?{content:el(kind,'content').value,date:el(kind,'effective-date').value,contacts:kind==='privacy'?Object.fromEntries(Object.keys(contacts).map(k=>[k,el(kind,k).value])):null}:null;
       setForm(kind,data);
+      ticket.state=state.get(kind);
       if(raw){el(kind,'content').value=raw.content;el(kind,'effective-date').value=raw.date;if(raw.contacts)for(const key of Object.keys(contacts))el(kind,key).value=raw.contacts[key];updateStatus(kind);}
-      myAlert(raw?'요청은 반영했습니다. 남아 있는 수정 내용은 아직 저장되지 않았습니다.':action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
-    } catch(error) {const messages={LEGAL_DOCUMENT_CHANGED:'다른 사람이 수정했습니다. 편집 내용을 따로 보관한 뒤 다시 불러와 주세요.',LEGAL_CONTACT_REQUIRED:'이사장·주소와 개인정보 보호책임자의 성명·직책·전화번호·이메일을 모두 입력해 주세요.',LEGAL_CONTACT_INVALID:'개인정보 담당자 정보의 입력 형식을 확인해 주세요.',LEGAL_CONTACT_NOT_IN_CONTENT:'담당자 정보가 처리방침 본문에 반영되지 않았습니다. 본문과 등록 전 미리보기를 확인해 주세요.',LEGAL_DOCUMENT_NOT_READY:'시행일·내용과 아직 채우지 않은 샘플 항목을 확인해 주세요.'};myAlert(messages[error?.message]||'저장하지 못했습니다. 입력 내용은 유지됩니다.','warning');}
-    finally {state.get(kind).busy=false;endAction();}
+      if(saveActionCurrent(ticket))myAlert(raw?'요청은 반영했습니다. 남아 있는 수정 내용은 아직 저장되지 않았습니다.':action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
+    } catch(error) {if(saveTicket===ticket&&saveOwnerCurrent(ticket)){const messages={LEGAL_DOCUMENT_CHANGED:'다른 사람이 수정했습니다. 편집 내용을 따로 보관한 뒤 다시 불러와 주세요.',LEGAL_CONTACT_REQUIRED:'이사장·주소와 개인정보 보호책임자의 성명·직책·전화번호·이메일을 모두 입력해 주세요.',LEGAL_CONTACT_INVALID:'개인정보 담당자 정보의 입력 형식을 확인해 주세요.',LEGAL_CONTACT_NOT_IN_CONTENT:'담당자 정보가 처리방침 본문에 반영되지 않았습니다. 본문과 등록 전 미리보기를 확인해 주세요.',LEGAL_DOCUMENT_NOT_READY:'시행일·내용과 아직 채우지 않은 샘플 항목을 확인해 주세요.'};const message=messages[error?.message]||'저장하지 못했습니다. 입력 내용은 유지됩니다.';ticket.state.resultNotice=message;updateStatus(kind);if(saveActionCurrent(ticket))myAlert(message,'warning');}}
+    finally {if(saveTicket===ticket){saveTicket=null;s.busy=false;ticket.state.busy=false;endAction();}}
   }
   window.fetchSiteLegalDocuments=fetchDocuments;
   window.CoopSiteLegalEditor=Object.freeze({select:selectKind,refreshPreview,mount:mountTabs});
@@ -271,10 +299,10 @@
     if(!confirmed||!sameReadScope(scope)||readSignature()!==signature)return;
     await fetchDocuments({reload:true});
   };readStatus=document.createElement('p');readStatus.id='site-legal-read-status';readStatus.className='small text-muted';readStatus.setAttribute('role','status');readStatus.setAttribute('aria-live','polite');root.prepend(retryButton,readStatus);syncEnabled();
-    const cancelStale=()=>{if(readRequest&&!currentRead(readRequest))cancelRead();};
+    const cancelStale=()=>{if(readRequest&&!currentRead(readRequest))cancelRead();if(saveTicket&&!saveActionCurrent(saveTicket))departSave();};
     for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('site-content-tabs')?.addEventListener(name,cancelStale);
     if(window.frameElement)new MutationObserver(cancelStale).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
-    window.addEventListener('pagehide',cancelRead);
+    window.addEventListener('pagehide',()=>{cancelRead();departSave();});
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
 })();
