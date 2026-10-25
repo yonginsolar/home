@@ -114,7 +114,40 @@
   const undo=document.createElement('button');undo.type='button';undo.id='home-inline-undo';undo.className='btn btn-sm btn-outline-secondary home-undo-button';undo.textContent='↶';undo.title='마지막 수정 되돌리기';undo.setAttribute('aria-label',undo.title);undo.disabled=true;undo.onclick=()=>{if(permitted())void root.CoopHomeEditorTools?.undo();};zone.insertBefore(undo,actions);
   const publicLink=document.createElement('a');publicLink.className='btn btn-sm btn-outline-secondary';publicLink.id='home-inline-public-link';publicLink.textContent='홈페이지 보기 ↗';publicLink.target='_blank';publicLink.rel='noopener noreferrer';publicLink.hidden=true;toolbar.insertBefore(publicLink,zone);
   workspace.classList.add('has-unified-save');
-  let signature='',flushing=false;const phases=new Map();
+  let signature='',flushing=false,retryFocus=null;const phases=new Map();
+  const retryOwner=()=>{const runtime=typeof g_adminMemberRuntime==='object'?g_adminMemberRuntime:null;return JSON.stringify([typeof adminCertificateAuthId==='string'?adminCertificateAuthId:'',runtime?.coop_id,runtime?.effective_permissions,runtime?.modules,runtime?.module_access]);};
+  const cancelRetryFocus=()=>{if(retryFocus?.timer)root.clearTimeout(retryFocus.timer);retryFocus=null;};
+  function retryFocusCurrent(ticket){
+   return ticket===retryFocus&&ticket.owner===retryOwner()&&ticket.runtime===g_adminMemberRuntime&&permitted()
+    &&CoopHomeVisualEditor.current()==='about'&&!root.frameElement?.hidden&&document.visibilityState!=='hidden'
+    &&document.getElementById('tab-site')?.classList.contains('active');
+  }
+  function restoreRetryFocus(button,state){
+   const ticket=retryFocus;if(!ticket)return;
+   if(!retryFocusCurrent(ticket)){cancelRetryFocus();return;}
+   if(state.phase==='loading')ticket.started=true;
+   if(!ticket.started||state.phase==='loading')return;
+   if(state.phase!=='error'){cancelRetryFocus();return;}
+   if(ticket.timer||!button)return;
+   // Reader catch/finally can update the same error twice. Wait until that turn
+   // settles, then find the current button rather than focusing a replaced one.
+   ticket.timer=root.setTimeout(()=>{
+    ticket.timer=0;if(!retryFocusCurrent(ticket))return;
+    const current=actions.querySelector('[data-about-retry]'),active=document.activeElement;
+    const failed=document.getElementById('site-about-save-status')?.dataset.siteEditorPhase==='error';
+    cancelRetryFocus();
+    if(failed&&current?.isConnected&&!current.disabled&&!current.closest('[hidden],.hidden')
+     &&(!active||active===document.body||active===document.documentElement||active===ticket.button)
+     &&!document.querySelector('dialog[open],.modal.show,[role="dialog"][aria-modal="true"]'))current.focus({preventScroll:true});
+   },0);
+  }
+  // Only the current retry may reclaim abandoned focus. Any deliberate move
+  // away, including an iframe/menu round trip, permanently cancels that intent.
+  for(const event of ['focusin','pointerdown','keydown','input','change','hide.bs.tab','hidden.bs.tab'])document.addEventListener(event,cancelRetryFocus,true);
+  document.addEventListener('shown.bs.tab',()=>{if(retryFocus&&CoopHomeVisualEditor.current()!=='about')cancelRetryFocus();});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')cancelRetryFocus();});
+  root.addEventListener('blur',cancelRetryFocus);root.addEventListener('pagehide',cancelRetryFocus);
+  if(root.frameElement)new MutationObserver(cancelRetryFocus).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
   function saveStatus(area){
    const kind=['hero','impact','contact','design','fonts'].includes(area)?'home':area==='about'?'about':'';
    if(kind){
@@ -130,6 +163,7 @@
   }
   function sync(){
    const area=CoopHomeVisualEditor.current(),sources=saveButtons(area),state=saveStatus(area),allowed=permitted();
+   if(retryFocus&&!retryFocusCurrent(retryFocus))cancelRetryFocus();
    const undoState=root.CoopHomeEditorTools?.undoState(area)||{supported:false,enabled:false};if(undo.hidden===undoState.supported)undo.hidden=!undoState.supported;const undoDisabled=!allowed||flushing||!undoState.enabled;if(undo.disabled!==undoDisabled)undo.disabled=undoDisabled;
    const next=JSON.stringify([area,allowed,flushing,state,sources.map(x=>[x.id,x.disabled,x.hidden,x.textContent]),document.getElementById(`btn-retry-${area==='about'?'about':'home'}-settings`)?.hidden]);
    if(next===signature)return;signature=next;actions.replaceChildren();
@@ -141,10 +175,12 @@
     button.onclick=async()=>{if(flushing||!permitted()||source.disabled)return;flushing=true;sync();try{if(!(await flush())){myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');return;}if(permitted()&&!source.disabled)source.click();}finally{flushing=false;signature='';sync();}};actions.append(button);
    }
    const retry=document.getElementById(`btn-retry-${area==='about'?'about':'home'}-settings`);
-   if(['hero','impact','contact','design','fonts','about'].includes(area)&&retry&&!retry.hidden){const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';button.textContent='다시 불러오기';button.disabled=retry.disabled||!allowed;button.onclick=()=>{if(permitted()&&!retry.disabled)retry.click();};actions.append(button);}
+   let retryButton=null;
+   if(['hero','impact','contact','design','fonts','about'].includes(area)&&retry&&!retry.hidden){const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';button.textContent='다시 불러오기';button.disabled=retry.disabled||!allowed;if(area==='about')button.dataset.aboutRetry='true';button.onclick=()=>{if(!permitted()||retry.disabled)return;cancelRetryFocus();const ticket=area==='about'&&document.activeElement===button?{owner:retryOwner(),runtime:g_adminMemberRuntime,button,started:false,timer:0}:null;retryFocus=ticket;retry.click();if(ticket&&retryFocus===ticket){ticket.started=document.getElementById('site-about-save-status')?.dataset.siteEditorPhase==='loading';if(!ticket.started)cancelRetryFocus();}};actions.append(button);retryButton=button;}
    publicLink.hidden=true;publicLink.removeAttribute('href');
    try{const url=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(url&&url.protocol==='https:'&&!url.username&&!url.password){url.search='';url.hash='';publicLink.href=url.href;publicLink.hidden=false;}}catch(_){}
    if(!['hero','impact','about','contact','legal'].includes(area))workspace.classList.add('show-settings');else if(!explicitSettings)workspace.classList.remove('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
+   restoreRetryFocus(retryButton,state);
   }
   document.addEventListener('coop-home-undo-change',sync);new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class','src','data-site-editor-phase']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
  }
