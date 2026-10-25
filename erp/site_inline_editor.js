@@ -175,7 +175,18 @@
     source.classList.add('home-inline-source-save');
     const button=document.createElement('button');button.type='button';button.className='btn btn-sm '+(source.dataset.legalAction==='draft'?'btn-outline-primary':'btn-primary');
     button.textContent=source.id==='btn-save-home-settings'?(['hero','impact','contact','design','fonts'].includes(area)?'변경사항 저장':'메인 화면 변경 저장'):source.id==='btnSaveSectionChanges'?'표시 영역·순서 저장':source.textContent.trim();button.disabled=source.disabled||!allowed||flushing;
-    button.onclick=async()=>{if(flushing||!permitted()||source.disabled)return;flushing=true;sync();try{if(!(await flush())){myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');return;}if(permitted()&&!source.disabled)source.click();}finally{flushing=false;signature='';sync();}};actions.append(button);
+    button.onclick=async()=>{
+     if(flushing||!permitted()||source.disabled)return;
+     const current=source.id==='btn-save-site-activity'?root.AdminMemberSite?.captureActivitySaveIntent?.():()=>true;
+     if(!current?.())return;
+     flushing=true;sync();
+     try{
+      const accepted=await flush();
+      if(!current())return;
+      if(!accepted){myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');return;}
+      if(permitted()&&!source.disabled)source.click();
+     }finally{flushing=false;signature='';sync();}
+    };actions.append(button);
    }
    const retry=document.getElementById(`btn-retry-${area==='about'?'about':'home'}-settings`);
    let retryButton=null;

@@ -1,9 +1,20 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261025-news-drafts-2') return;
+    if (root.AdminMemberSite?.version === '20261025-save-intent-1') return;
 const activityDrafts=new Map();
-let activityActiveDraft=null,activityDraftTemplate=null,activityDraftEpoch=0,activityEditRevision=0;
+let activityActiveDraft=null,activityDraftTemplate=null,activityDraftEpoch=0,activityEditRevision=0,activitySaveIntentEpoch=0;
+function captureActivitySaveIntent() {
+const context={runtime:g_adminMemberRuntime,owner:siteModalOwner(),draft:activityActiveDraft,epoch:activityDraftEpoch,
+modal:document.getElementById('activityModal'),id:document.getElementById('activity-id')?.value,area:'activities'};
+const intent=activitySaveIntentEpoch;
+// Preview flush may apply edits, but must never transfer a click to another
+// draft, a reopened editor or a menu/identity that returned in the meantime.
+return ()=>!!context.owner&&context.draft?.owner===context.owner&&intent===activitySaveIntentEpoch
+&&isActivityContextCurrent(context)&&context.modal?.classList.contains('show')
+&&document.getElementById('tab-site')?.classList.contains('active')
+&&!g_activityModalOpening&&!isSavingActivity&&!activitySourceRead;
+}
 function captureActivityDraft() {
 const draft=activityActiveDraft;
 if(!draft||draft.owner!==siteModalOwner())return false;
@@ -2646,8 +2657,8 @@ if(event.target.id==='activity-date')g_activityDateUserEdited=true;
 if(event.target.id==='activity-source-event-select')cancelActivitySourceRead();
 captureActivityDraft();updateActivitySaveLabel();
 });
-document.getElementById('site-content-tabs')?.addEventListener('shown.bs.tab',()=>{if(root.CoopHomeVisualEditor?.current()!=='activities')activityEditRevision++;updateActivitySaveLabel();});
-if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)activityEditRevision++;updateActivitySaveLabel();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
+document.getElementById('site-content-tabs')?.addEventListener('shown.bs.tab',()=>{if(root.CoopHomeVisualEditor?.current()!=='activities'){activityEditRevision++;activitySaveIntentEpoch++;}updateActivitySaveLabel();});
+if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden){activityEditRevision++;activitySaveIntentEpoch++;}updateActivitySaveLabel();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
 modal.addEventListener('hide.bs.modal', event => {
 if (g_activityAllowClose) { g_activityAllowClose = false;captureActivityDraft();return; }
 if (isSavingActivity) { event.preventDefault(); return; }
@@ -2848,6 +2859,7 @@ const publishedItems = new Map();
 let recordSaved = false;
 let saveRequested = false;
 
+activitySaveIntentEpoch++;
 isSavingActivity = true;
 updateActivitySaveLabel();
 showLoading(true);
@@ -4259,5 +4271,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
-    root.AdminMemberSite = Object.freeze({ version: '20261025-news-drafts-2', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261025-save-intent-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent });
 })(window);
