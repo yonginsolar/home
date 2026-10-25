@@ -1,7 +1,8 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261023-home-reads-1') return;
+    if (root.AdminMemberSite?.version === '20261025-about-reads-1') return;
+let aboutSettingsRead=null,aboutSettingsReadMessage='';
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -742,7 +743,7 @@ const controller = SiteEditorDrafts.create(() => siteEditorFormSnapshot(rootId),
 window.CoopHomeEditorTools?.observe(kind,state);
 const status = document.getElementById(`site-${kind}-save-status`);
 if (status) {
-status.textContent = state.busy ? '저장 중입니다…' : state.loading ? '설정을 불러오는 중입니다…' : !state.loaded ? '설정을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.' : state.dirty ? '저장하지 않은 변경사항이 있습니다.' : '저장된 내용입니다.';
+status.textContent = state.busy ? '저장 중입니다…' : state.loading ? '설정을 불러오는 중입니다…' : !state.loaded ? (kind === 'about' && aboutSettingsReadMessage || '설정을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.') : state.dirty ? '저장하지 않은 변경사항이 있습니다.' : '저장된 내용입니다.';
 status.classList.toggle('text-primary', state.loaded && state.dirty);
 status.classList.toggle('text-muted', !state.loaded || !state.dirty);
 }
@@ -755,7 +756,7 @@ if (pending) { pending.hidden = !state.dirty; pending.disabled = !state.loaded |
 const preview = kind === 'home' ? document.getElementById('btn-preview-home-settings') : null;
 if (preview) preview.disabled = !state.loaded || state.loading || state.busy;
 const retry = document.getElementById(`btn-retry-${kind}-settings`);
-if (retry) { retry.hidden = state.loaded || state.loading; retry.disabled = state.loading || state.busy; }
+if (retry) { retry.hidden = state.loaded || state.loading; retry.disabled = state.loading || state.busy || kind === 'about' && !canAccessAdminMemberTab('site'); }
 // Keep the first-read lock after an error too. Editing an unknown blank baseline
 // would otherwise make retries unsafe and leave the form unable to save.
 if (!state.loaded && !g_siteEditorFieldLocks.has(kind)) {
@@ -1522,13 +1523,45 @@ CoopSafeLog.warn("[deleteManagedAboutImage] cleanup failed:", error);
 }
 }
 
-async function fetchAboutSettings() {
-try {
-await getSiteEditorDraft('about').load(async () => {
-const { data, error } = await scopeAdminTenant(_supabase.from('site_about').select('*')).limit(1);
-if(error) throw error;
-return (Array.isArray(data) ? data[0] : data) || {};
+function isAboutSettingsReadCurrent(read) {
+return aboutSettingsRead===read && !read.cancelled && siteModalScopeCurrent(read)
+&& document.getElementById('sub-about')===read.body;
+}
+function cancelAboutSettingsRead() {
+const read=aboutSettingsRead;
+if(!read)return Promise.resolve(false);
+read.cancelled=true;read.controller.abort();window.clearTimeout(read.timer);
+aboutSettingsReadMessage='조합 소개를 다시 불러와 주세요.';
+read.release({cancelled:true});
+// Let the original draft controller release its pending lock before a new
+// scoped request starts. Never let an old finally release a newer request.
+return read.promise;
+}
+function fetchAboutSettings() {
+const context={owner:siteModalOwner(),runtime:g_adminMemberRuntime,area:root.CoopHomeVisualEditor?.current(),body:document.getElementById('sub-about')};
+if(!context.body||!siteModalScopeCurrent(context))return Promise.resolve(false);
+if(aboutSettingsRead){
+if(isAboutSettingsReadCurrent(aboutSettingsRead))return aboutSettingsRead.promise;
+return cancelAboutSettingsRead().then(()=>siteModalScopeCurrent(context)?fetchAboutSettings():false);
+}
+const draft=getSiteEditorDraft('about'),state=draft.refresh();
+if(state.loaded||state.dirty||state.loading||state.busy)return Promise.resolve(false);
+const read={...context,controller:new AbortController(),release:null,timer:0,promise:null,cancelled:false,timedOut:false};
+aboutSettingsRead=read;aboutSettingsReadMessage='';
+const stopped=new Promise(resolve=>{
+read.release=resolve;
+read.timer=window.setTimeout(()=>{read.timedOut=true;read.controller.abort();resolve({timedOut:true});},15000);
+});
+read.promise=draft.load(async () => {
+if(!isAboutSettingsReadCurrent(read))throw Error('ABOUT_READ_CANCELLED');
+const result=await Promise.race([scopeAdminTenant(_supabase.from('site_about').select('*')).limit(1).abortSignal(read.controller.signal),stopped]);
+if(!isAboutSettingsReadCurrent(read)||result?.cancelled)throw Error('ABOUT_READ_CANCELLED');
+if(read.timedOut||result?.timedOut)throw Error('ABOUT_READ_TIMEOUT');
+if(result.error)throw result.error;
+if(!Array.isArray(result.data))throw Error('ABOUT_READ_INVALID');
+return result.data[0] || {};
 }, row => {
+if(!isAboutSettingsReadCurrent(read))throw Error('ABOUT_READ_CANCELLED');
 const titleEl = document.getElementById('admin-about-title');
 const subtitleEl = document.getElementById('admin-about-subtitle');
 const contentEl = document.getElementById('admin-about-content');
@@ -1548,12 +1581,21 @@ imgEl.value = row.image_url || '';
 g_aboutOriginalImageUrl = imgEl.value;
 setAboutImageStatus(g_aboutOriginalImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
 if (typeof updateTotalPreview === 'function') updateTotalPreview();
-});
-queueHomePreviewUpdate(); // Publish editable field availability after the asynchronous baseline is accepted.
-} catch (error) {
-CoopSafeLog.error("[fetchAboutSettings] failed:", error);
-myAlert('조합 소개를 불러오지 못했습니다: ' + (error?.message || error), 'warning');
+}).then(applied=>{
+if(applied&&isAboutSettingsReadCurrent(read))queueHomePreviewUpdate();
+return applied;
+}).catch(error=>{
+if(isAboutSettingsReadCurrent(read)){
+CoopSafeLog.error('[fetchAboutSettings] failed:',error);
+aboutSettingsReadMessage=read.timedOut?'조회가 지연되었습니다. 다시 불러오기를 눌러 주세요.':'조합 소개를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.';
+draft.refresh();
 }
+return false;
+}).finally(()=>{
+window.clearTimeout(read.timer);
+if(aboutSettingsRead===read){aboutSettingsRead=null;draft.refresh();}
+});
+return read.promise;
 }
 
 function queueTotalPreviewUpdate() {
@@ -4114,14 +4156,15 @@ CoopHomeVisualEditor.mount(); // Mount before taking the initial draft snapshot.
 getSiteEditorDraft('home');
 getSiteEditorDraft('about');
 getCertificationDraftStore();
-window.addEventListener('pagehide',() => {cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();});
+window.addEventListener('pagehide',() => {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();});
 for (const eventName of ['hidden.bs.tab','shown.bs.tab']) document.getElementById('site-content-tabs')?.addEventListener(eventName,() => {
+if(aboutSettingsRead&&!isAboutSettingsReadCurrent(aboutSettingsRead))void cancelAboutSettingsRead();
 if(activityListRead&&!isActivityListReadCurrent(activityListRead))cancelActivityListRead();
 if (activitySourceRead && root.CoopHomeVisualEditor?.current() !== activitySourceRead.area) cancelActivitySourceRead();
 if (activityModalRead && root.CoopHomeVisualEditor?.current() !== activityModalRead.area) cancelActivityModalRead();
 });
 if (root.frameElement) new MutationObserver(() => {
-if (root.frameElement?.hidden) {cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();}
+if (root.frameElement?.hidden) {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();}
 }).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
 
 window.addEventListener('beforeunload', (event) => {
@@ -4152,5 +4195,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,openNewSiteCertificationDraft});
-    root.AdminMemberSite = Object.freeze({ version: '20261023-home-reads-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
+    root.AdminMemberSite = Object.freeze({ version: '20261025-about-reads-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete });
 })(window);
