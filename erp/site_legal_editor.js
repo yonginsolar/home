@@ -1,4 +1,4 @@
-/* v1.1.14 - Preserve editable drafts and verify delayed saves without replaying them. */
+/* v1.1.15 - Keep active editing and keyboard focus through save reconciliation. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -86,7 +86,7 @@
         if(doc.revision===ticket.expectedRevision){ticket.recoveryMessage='아직 저장 결과를 확인하지 못했습니다. 잠시 후 저장 결과 확인을 다시 눌러 주세요.';return false;}
         // The server serializes this document and checks the expected revision.
         // An advanced revision fences the original request; never replay it.
-        const raw=rawForm(ticket.kind);setForm(ticket.kind,doc);ticket.state=state.get(ticket.kind);
+        const raw=rawForm(ticket.kind);setForm(ticket.kind,doc,ticket);
         const matches=ticket.action==='unpublish'?!doc.is_published:JSON.stringify(values(ticket.kind))===ticket.signature&&(ticket.action!=='publish'||doc.is_published);
         restoreForm(ticket.kind,raw);
         ticket.state.resultNotice=matches?(ticket.action==='unpublish'?'현재 등록이 해제되어 있습니다.':'현재 저장된 내용이 요청한 내용과 일치합니다.'):'저장된 내용이 달라졌습니다. 현재 적용 중인 내용과 작성 내용을 확인해 주세요.';
@@ -130,7 +130,7 @@
     for(const kind of Object.keys(labels))setEnabled(kind,loaded&&!loading&&!actionInFlight&&permitted());
     if(loaded&&!loading&&recoveringSave())for(const kind of Object.keys(labels))for(const input of el(kind,'card').querySelectorAll('input,textarea'))input.disabled=false;
     if(retryButton){retryButton.disabled=loading||actionInFlight||!permitted();retryButton.setAttribute('aria-busy',String(loading));}
-    if(resultButton){resultButton.hidden=!recoveringSave();resultButton.disabled=!canCheckResult(saveTicket)||!!saveTicket?.resultRead;resultButton.setAttribute('aria-busy',String(!!saveTicket?.resultRead));}
+    if(resultButton){const busy=!!saveTicket?.resultRead;resultButton.hidden=!recoveringSave();resultButton.disabled=!canCheckResult(saveTicket);resultButton.classList.toggle('disabled',busy);resultButton.setAttribute('aria-disabled',String(resultButton.disabled||busy));resultButton.setAttribute('aria-busy',String(busy));}
     if(readStatus)readStatus.textContent=recoveringSave()?labels[saveTicket.kind]+' · '+saveTicket.recoveryMessage:readMessage;
     refreshPreview();
   }
@@ -139,10 +139,13 @@
     focusGeneration++;actionInFlight=true;syncEnabled();return true;
   }
   function endAction() { actionInFlight=false;syncEnabled(); }
-  function setForm(kind, doc={}) {
+  function setForm(kind, doc={}, ticket=null) {
     el(kind,'content').value=kind==='privacy'?privacyTemplate(doc.content||''):String(doc.content||'');el(kind,'effective-date').value=String(doc.effective_date||'');
     if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).value=String(doc.contact_details?.[key]??(key==='representative'||key==='address'?context?.[key]:'')??'');
     state.set(kind,{doc,baseline:JSON.stringify(values(kind)),busy:false});
+    // Connect the confirmed baseline before painting. An active inline draft
+    // must never become temporarily ineligible and lose its node/selection.
+    if(ticket&&saveTicket===ticket&&ticket.kind===kind)ticket.state=state.get(kind);
     el(kind,'unpublish').hidden=!doc.is_published;
     updateStatus(kind);
   }
@@ -337,8 +340,7 @@
       // the server-confirmed one; preserved edits still need an explicit save.
       const newer=JSON.stringify(values(kind))!==JSON.stringify(input)||(action==='unpublish'&&dirty(kind));
       const raw=newer?rawForm(kind):null;
-      setForm(kind,data);
-      ticket.state=state.get(kind);
+      setForm(kind,data,ticket);
       if(raw)restoreForm(kind,raw);
       if(saveActionCurrent(ticket)&&!ticket.delayed)myAlert(raw?'요청은 반영했습니다. 남아 있는 수정 내용은 아직 저장되지 않았습니다.':action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
     } catch(error) {if(saveTicket===ticket&&saveOwnerCurrent(ticket)){
