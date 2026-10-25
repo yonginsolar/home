@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.120 | Change: 2026-10-23 - Start necessary entry checks before optional page assets. -->
+<!-- Version: v1.0.121 | Change: 2026-10-25 - Keep email login requests single-flight and bound to the current address. -->
 <html>
 <head>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
@@ -52,6 +52,7 @@
 </script>
   <script src="/shared/route_guard.js?v=20260408-1"></script>
   <script src="/shared/auth_email_helper.js?v=1.0.0"></script>
+  <script src="/shared/login_request_guard.js?v=20261025-1" integrity="sha384-eHg/M6TxFH3HRcJFrqB3l3HTh20Xb8BZHcrVCkFftImcLYxVOApPZ+9SqK63RsoO" crossorigin="anonymous"></script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <script src="/shared/auth_broker_helper.js?v=20261006-2"></script>
   
@@ -160,7 +161,7 @@
         <span class="naver-mark me-2" aria-hidden="true">N</span> 네이버로 로그인
       </button>
       
-      <div id="statusMsg" class="mt-3 text-success small" style="display:none;"></div>
+      <div id="statusMsg" class="mt-3 text-success small" role="status" aria-live="polite" style="display:none;"></div>
       <div id="loginGuardMsg" class="mt-2 text-muted small guard-hint"></div>
     </div>
 
@@ -484,6 +485,8 @@ let kakaoLinkInFlight = false;
 let naverLoginInFlight = false;
 let naverLinkInFlight = false;
 let pendingOtpEmail = '';
+let loginOtpFlow = null;
+let magicLinkMemoryCooldown = 0;
 let currentAuthUser = null;
 let employeeMatchModalInstance = null;
 let employeeMatchCandidates = [];
@@ -1064,10 +1067,14 @@ function translateSocialLinkError(providerLabel, errorMsg) {
 
 async function launchNaverLogin() {
     if (naverLoginInFlight) return;
+    const otpFlow = getLoginOtpFlow();
+    if (otpFlow.isVerifying()) return;
+    otpFlow.invalidate();
     naverLoginInFlight = true;
+    try {
     const nextTarget = getRequestedErpNextTarget();
     const redirectUrl = buildSocialCallbackUrl({ next: nextTarget });
-    localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
+    try { localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget); } catch (_) {}
 
     const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
         ? window.AuthBrokerHelper.buildStartUrl({
@@ -1084,7 +1091,6 @@ async function launchNaverLogin() {
         return;
     }
 
-    try {
         const { error } = await _supabase.auth.signInWithOAuth({
             provider: AuthBrokerHelper.normalizeProvider("custom:naver"),
             options: {
@@ -1485,19 +1491,20 @@ function clearSupabaseAuthCache() {
 function readMagicLinkState() {
     try {
         const raw = localStorage.getItem(MAGICLINK_RATE_KEY);
-        if (!raw) return { cooldown_until: 0 };
+        if (!raw) return { cooldown_until: magicLinkMemoryCooldown };
         const parsed = JSON.parse(raw);
         const cooldownUntil = Number(parsed?.cooldown_until || 0);
-        return { cooldown_until: Number.isFinite(cooldownUntil) ? cooldownUntil : 0 };
+        return { cooldown_until: Math.max(magicLinkMemoryCooldown, Number.isFinite(cooldownUntil) ? cooldownUntil : 0) };
     } catch (_) {
-        return { cooldown_until: 0 };
+        return { cooldown_until: magicLinkMemoryCooldown };
     }
 }
 
 function writeMagicLinkState(state) {
-    localStorage.setItem(MAGICLINK_RATE_KEY, JSON.stringify({
-        cooldown_until: Number(state?.cooldown_until || 0)
-    }));
+    magicLinkMemoryCooldown = Number(state?.cooldown_until || 0);
+    try {
+        localStorage.setItem(MAGICLINK_RATE_KEY, JSON.stringify({ cooldown_until: magicLinkMemoryCooldown }));
+    } catch (_) {} // A blocked preference store must not turn a sent email into a login error.
 }
 
 function updateLoginGuardHint(text) {
@@ -1538,6 +1545,11 @@ function applyMagicLinkCooldown() {
     const tick = () => {
         const state = readMagicLinkState();
         const remainMs = Math.max(0, Number(state.cooldown_until || 0) - Date.now());
+        if (loginOtpFlow?.isBusy()) {
+            btn.disabled = true;
+            btn.innerText = loginOtpFlow.isVerifying() ? '코드 확인 중...' : '전송 중...';
+            return true;
+        }
         if (remainMs <= 0) {
             btn.disabled = false;
             btn.innerText = '📧 인증코드 받기';
@@ -1658,10 +1670,12 @@ window.onload = async function() {
     _supabase.auth.onAuthStateChange(async (event, session) => {
         if (session) {
             currentAuthUser = session.user || null;
+            loginOtpFlow?.authChanged();
             sessionStorage.removeItem(ERP_SESSION_EXPIRED_NOTICE_KEY);
             return;
         }
         currentAuthUser = null;
+        loginOtpFlow?.authChanged();
 
         const shouldRecover =
             !suppressSessionExpiredHandling &&
@@ -2648,7 +2662,36 @@ function handleConfirm() {
     if (confirmModalInstance) confirmModalInstance.hide();
 }
 
+function getLoginOtpFlow() {
+    if (!loginOtpFlow) loginOtpFlow = window.CoopLoginRequestGuard.create({
+        emailInput: document.getElementById('emailInput'), codeInput: document.getElementById('otpInput'),
+        getOwner: () => currentAuthUser?.id,
+        getScope: () => window.CoopRouteGuard?.getErpRuntimeHost(window.location) || window.location.host,
+        onReset: reason => {
+            pendingOtpEmail = '';
+            document.getElementById('otpArea').classList.add('hidden');
+            const msg = document.getElementById('statusMsg');
+            msg.textContent = ''; msg.style.display = 'none';
+            if (reason === 'email' || reason === 'send') document.getElementById('otpInput').value = '';
+        },
+        onStateChange: syncLoginOtpControls
+    });
+    return loginOtpFlow;
+}
+
+function syncLoginOtpControls() {
+    if (!loginOtpFlow) return;
+    const verifying = loginOtpFlow.isVerifying();
+    document.getElementById('emailInput').readOnly = verifying;
+    document.getElementById('otpInput').readOnly = verifying;
+    document.getElementById('btnVerifyOtp').disabled = loginOtpFlow.isBusy() || !loginOtpFlow.recipient();
+    document.getElementById('btnVerifyOtp').innerText = verifying ? '확인 중...' : '코드 확인';
+    applyMagicLinkCooldown();
+}
+
 async function sendMagicLink() {
+    const flow = getLoginOtpFlow();
+    if (flow.isBusy()) return;
     const email = String(document.getElementById('emailInput').value || '').trim().toLowerCase();
     const btn = document.getElementById('btnSend');
     const msg = document.getElementById('statusMsg');
@@ -2658,6 +2701,8 @@ async function sendMagicLink() {
         applyMagicLinkCooldown();
         return showAlert(guard.message || "보안 정책으로 요청이 제한되었습니다.");
     }
+    const request = flow.begin('send');
+    if (!request) return;
 
     updateLoginGuardHint('');
     if (msg) {
@@ -2675,13 +2720,14 @@ async function sendMagicLink() {
                 ...window.CoopAuthEmail.withOtpOptions({ shouldCreateUser: true })
             }
         });
+        recordMagicLinkAttempt(email, !error);
+        if (!flow.current(request)) return;
         if (error) {
-            recordMagicLinkAttempt(email, false);
             showAlert("전송 실패: " + error.message);
             return;
         }
 
-        recordMagicLinkAttempt(email, true);
+        if (!flow.sent(request)) return;
         pendingOtpEmail = email;
         if (otpArea) otpArea.classList.remove('hidden');
         if (msg) {
@@ -2695,20 +2741,16 @@ async function sendMagicLink() {
         }
     } catch (error) {
         recordMagicLinkAttempt(email, false);
-        showAlert("전송 실패: " + (error?.message || error));
+        if (flow.current(request)) showAlert("전송 실패: " + (error?.message || error));
     } finally {
-        const cooldownUntil = Number(readMagicLinkState()?.cooldown_until || 0);
-        if (cooldownUntil > Date.now()) {
-            applyMagicLinkCooldown();
-        } else {
-            btn.disabled = false;
-            btn.innerText = "📧 인증코드 받기";
-        }
+        flow.finish(request);
     }
 } // End of sendMagicLink
 
 async function verifyEmailOtp() {
-    const email = String(pendingOtpEmail || document.getElementById('emailInput')?.value || '').trim().toLowerCase();
+    const flow = getLoginOtpFlow();
+    if (flow.isBusy()) return;
+    const email = flow.recipient();
     const token = String(document.getElementById('otpInput')?.value || '').trim();
     const verifyBtn = document.getElementById('btnVerifyOtp');
     if (!email) {
@@ -2720,45 +2762,55 @@ async function verifyEmailOtp() {
         return;
     }
 
-    verifyBtn.disabled = true;
-    verifyBtn.innerText = '확인 중...';
+    const request = flow.begin('verify', token);
+    if (!request) return;
+    let verifiedUser = null;
     try {
         const { data, error } = await _supabase.auth.verifyOtp({
             email,
             token,
             type: 'email'
         });
+        verifiedUser = data?.user || data?.session?.user || null;
+        if (!flow.current(request, verifiedUser)) return;
         if (error) {
             showAlert('인증 실패: ' + error.message);
             return;
         }
-        const user = data?.user || (await _supabase.auth.getUser()).data?.user || null;
+        const user = verifiedUser || (await _supabase.auth.getUser()).data?.user || null;
+        verifiedUser = user;
+        if (!flow.current(request, user)) return;
         if (!user) {
             showAlert('인증은 완료되었지만 세션을 확인하지 못했습니다. 다시 시도해 주세요.');
             return;
         }
-        sessionStorage.removeItem(ERP_SESSION_EXPIRED_NOTICE_KEY);
+        if (!flow.verified(request, user)) return;
+        try { sessionStorage.removeItem(ERP_SESSION_EXPIRED_NOTICE_KEY); } catch (_) {}
         showScreen('loadingScreen');
         await loadUserInfo(user);
+        if (!flow.current(request, user)) return;
         const nextTarget = getRequestedErpNextTarget();
         const currentUrl = getCanonicalErpCurrentUrl();
         if (nextTarget && nextTarget !== ERP_INDEX_URL && nextTarget !== currentUrl) {
             window.location.replace(nextTarget);
         }
     } catch (error) {
-        showAlert('인증 실패: ' + (error?.message || error));
+        if (flow.current(request, verifiedUser)) showAlert('인증 실패: ' + (error?.message || error));
     } finally {
-        verifyBtn.disabled = false;
-        verifyBtn.innerText = '코드 확인';
+        flow.finish(request);
     }
 } // End of verifyEmailOtp
 
 async function startKakaoLogin() {
     if (kakaoLoginInFlight) return;
+    const otpFlow = getLoginOtpFlow();
+    if (otpFlow.isVerifying()) return;
+    otpFlow.invalidate();
     kakaoLoginInFlight = true;
+    try {
     const nextTarget = getRequestedErpNextTarget();
     const redirectUrl = buildSocialCallbackUrl({ next: nextTarget });
-    localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
+    try { localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget); } catch (_) {}
 
     const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
         ? window.AuthBrokerHelper.buildStartUrl({
@@ -2779,7 +2831,6 @@ async function startKakaoLogin() {
         return;
     }
 
-    try {
         const { error } = await _supabase.auth.signInWithOAuth({
             provider: AuthBrokerHelper.normalizeProvider("kakao"),
             options: {

@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.217
-Change: 2026-10-23 - Keep connection request focus usable while editing profile details.
+Version: v1.0.218
+Change: 2026-10-25 - Bind email login requests to the current address and prevent repeated verification.
 -->
 <html lang="ko">
 <head>
@@ -65,6 +65,7 @@ allowKakaoApp: true
 <script src="shared/route_guard.js?v=20260401-1"></script>
 <script src="shared/member_capital.js?v=20261008-3"></script>
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
+<script src="shared/login_request_guard.js?v=20261025-1" integrity="sha384-eHg/M6TxFH3HRcJFrqB3l3HTh20Xb8BZHcrVCkFftImcLYxVOApPZ+9SqK63RsoO" crossorigin="anonymous"></script>
 <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
 
 <link href="style.css" rel="stylesheet">
@@ -1631,7 +1632,7 @@ gtag('config', 'G-TR217L7JN9');
 <label class="form-label fw-bold small text-secondary">이메일 주소</label>
 <div class="input-group">
 <input type="email" id="emailInput" class="form-control form-control-lg" placeholder="example@email.com" onkeyup="if(event.key==='Enter') sendMagicLink()">
-<button class="btn btn-dark" type="button" onclick="sendMagicLink()">코드 받기</button>
+<button class="btn btn-dark" type="button" id="btnSendLink" onclick="sendMagicLink()">코드 받기</button>
 </div>
 
 <div class="text-end mt-2">
@@ -1642,6 +1643,7 @@ gtag('config', 'G-TR217L7JN9');
 </div>
 </div>
 
+<p id="loginOtpStatus" class="small text-secondary mt-2" role="status" aria-live="polite" hidden></p>
 <div id="sentMsgBox" class="text-center hidden mt-4 p-4 bg-light rounded">
 <i class="bi bi-envelope-check text-success" style="font-size: 3rem;"></i>
 <h4 class="fw-bold mt-2">메일함을 확인해주세요!</h4>
@@ -3116,6 +3118,7 @@ let familyRegistrationRevision = 0;
 let tempChildData = null;
 let rootMemberProfileId = null;
 let pendingLoginOtpEmail = '';
+let loginOtpFlow = null, loginOtpCooldownUntil = 0, loginOtpCooldownTimer = null;
 let currentBoardLimit = 20;
 let isBoardLoading = false;
 const portalBoardListState = { revision:0, pending:null, rows:[], offset:0, cursor:null, hasMore:false, owner:'', category:'' };
@@ -3942,6 +3945,7 @@ if (session) {
 sessionStorage.removeItem(SESSION_EXPIRED_NOTICE_KEY);
 hidePortalRetryState();
 curAuth = session.user || curAuth;
+loginOtpFlow?.authChanged();
 
 // 토큰 갱신과 사용자 메타데이터 변경은 현재 세션 정보만 교체한다.
 // 전체 조합원 대시보드는 최초 세션 또는 실제 로그인 때만 준비한다.
@@ -3965,6 +3969,7 @@ return;
 handleLoginSuccess(session.user);
 } else {
 curAuth = null;
+loginOtpFlow?.authChanged();
 portalBootReadyUserId = '';
 memberAccessContext = null;
 const shouldRecover =
@@ -4233,88 +4238,127 @@ showLoading(false);
 }
 }
 
-// [수정] 매직링크 발송 함수 (버튼 중복 클릭 방지 추가)
+function setLoginOtpStatus(message) {
+const status = document.getElementById('loginOtpStatus');
+status.textContent = String(message || '');
+status.hidden = !message;
+}
+
+function getLoginOtpFlow() {
+if (!loginOtpFlow) loginOtpFlow = window.CoopLoginRequestGuard.create({
+emailInput:document.getElementById('emailInput'), codeInput:document.getElementById('otpInput'),
+getOwner:()=>curAuth?.id,
+getScope:()=>window.CoopRouteGuard?.getPublicRuntimeHost(window.location) || window.location.host,
+onReset:reason=>{
+pendingLoginOtpEmail = '';
+document.getElementById('sentMsgBox').classList.add('hidden');
+document.getElementById('targetEmail').textContent = '';
+setLoginOtpStatus('');
+if (reason === 'email' || reason === 'send') document.getElementById('otpInput').value = '';
+},
+onStateChange:syncLoginOtpControls
+});
+return loginOtpFlow;
+}
+
+function syncLoginOtpControls() {
+if (!loginOtpFlow) return;
+const verifying = loginOtpFlow.isVerifying(), busy = loginOtpFlow.isBusy();
+document.getElementById('emailInput').readOnly = verifying;
+document.getElementById('otpInput').readOnly = verifying;
+const verify = document.getElementById('btnVerifyOtp');
+verify.disabled = busy || !loginOtpFlow.recipient();
+verify.innerText = verifying ? '확인 중...' : '코드 확인';
+const send = document.getElementById('btnSendLink');
+const remaining = Math.max(0, loginOtpCooldownUntil - Date.now());
+send.disabled = busy || remaining > 0;
+send.innerText = busy ? (verifying ? '코드 확인 중...' : '전송 중...')
+: remaining > 0 ? `재전송 대기 ${Math.ceil(remaining / 1000)}초` : '코드 받기';
+if (loginOtpCooldownTimer) clearTimeout(loginOtpCooldownTimer);
+loginOtpCooldownTimer = remaining > 0 ? setTimeout(syncLoginOtpControls, Math.min(remaining,1000)) : null;
+}
+
 async function sendMagicLink() {
+const flow = getLoginOtpFlow();
+if (flow.isBusy() || loginOtpCooldownUntil > Date.now()) return;
 const emailInput = document.getElementById('emailInput');
 const email = emailInput.value.trim().toLowerCase();
-// 버튼을 ID 없이 쿼리 셀렉터로 찾거나, HTML에 id="btnSendLink"를 추가하는 것이 좋지만
-// 현재 구조에서는 형제 요소로 찾습니다.
-const btn = emailInput.nextElementSibling; // input 바로 다음이 버튼임
-
 if(!email.includes('@')) return showModal('이메일 주소 형식이 올바르지 않습니다.\n(@가 포함되어야 합니다)');
-
-// [방어 로직] 버튼 비활성화 및 로딩 표시
-if(btn) btn.disabled = true; 
-showLoading(true, '보안 연결 초기화 및 인증코드 발송 중...');
-
-// 1. 기존 세션 로그아웃
+const request = flow.begin('send');
+if (!request) return;
+setLoginOtpStatus('이메일로 인증코드를 보내고 있습니다.');
+try {
+// Preserve the original sign-out preparation, but run it only once per request.
 await signOutSilently(_supabase);
-
-// 2. 로그인 인증코드 발송
+if (!flow.current(request)) return;
 const { error } = await _supabase.auth.signInWithOtp({
 email: email,
 options: { 
 ...window.CoopAuthEmail.withOtpOptions({ shouldCreateUser: true })
 } 
 });
-
-showLoading(false);
-
+if (!error) loginOtpCooldownUntil = Date.now() + 60000;
+if (!flow.current(request)) return;
+setLoginOtpStatus('');
 if(error) {
-// 에러 발생 시 버튼 다시 풀어줌 (사용자가 수정 후 다시 눌러야 하므로)
-if(btn) btn.disabled = false;
-
-const friendlyMsg = translateAuthError(error.message);
-showModal(friendlyMsg);
+showModal(translateAuthError(error.message));
 }
 else {
+if (!flow.sent(request)) return;
 pendingLoginOtpEmail = email;
-if(btn) {
-btn.innerText = "발송 완료";
-// 60초 뒤에 다시 활성화 (선택 사항)
-setTimeout(() => { 
-btn.disabled = false; 
-btn.innerText = "코드 받기";
-}, 60000); 
-}
-
 document.getElementById('sentMsgBox').classList.remove('hidden');
 document.getElementById('targetEmail').innerText = email;
+}
+} catch (error) {
+if (flow.current(request)) {
+setLoginOtpStatus('');
+showModal(translateAuthError(error?.message || String(error)));
+}
+} finally {
+flow.finish(request);
 }
 }
 
 async function verifyLoginOtp() {
-const email = String(pendingLoginOtpEmail || document.getElementById('emailInput')?.value || '').trim().toLowerCase();
+const flow = getLoginOtpFlow();
+if (flow.isBusy()) return;
+const email = flow.recipient();
 const token = String(document.getElementById('otpInput')?.value || '').trim();
-const btn = document.getElementById('btnVerifyOtp');
 if (!email) return showModal('먼저 인증코드를 받아주세요.');
 if (!token) return showModal('메일로 받은 인증코드를 입력해 주세요.');
-
-btn.disabled = true;
-showLoading(true, '인증 상태를 확인하는 중...');
+const request = flow.begin('verify',token);
+if (!request) return;
+let verifiedUser = null;
+setLoginOtpStatus('인증코드를 확인하고 있습니다.');
 try {
 const { data, error } = await _supabase.auth.verifyOtp({
 email,
 token,
 type: 'email'
 });
+verifiedUser = data?.user || data?.session?.user || null;
+if (!flow.current(request,verifiedUser)) return;
+setLoginOtpStatus('');
 if (error) {
-showLoading(false);
 showModal(translateAuthError(error.message));
 return;
 }
 const session = data?.session || (await _supabase.auth.getSession()).data?.session || null;
+verifiedUser = session?.user || verifiedUser;
+if (!flow.current(request,verifiedUser)) return;
 if (!session?.user) {
-showLoading(false);
 showModal('인증은 완료되었지만 로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.');
 return;
 }
+if (!flow.verified(request,session.user)) return;
 await handleLoginSuccess(session.user);
 } catch (error) {
-showLoading(false);
+if (flow.current(request,verifiedUser)) {
+setLoginOtpStatus('');
 showModal('시스템 오류: ' + (error?.message || error));
+}
 } finally {
-btn.disabled = false;
+flow.finish(request);
 }
 }
 
@@ -9012,6 +9056,9 @@ loadUserProfile();
 
 async function startKakaoLogin() {
     try {
+        const otpFlow = getLoginOtpFlow();
+        if (otpFlow.isVerifying()) return;
+        otpFlow.invalidate();
         showLoading(true, '카카오 로그인 페이지로 이동합니다...');
         if (isFilePortalRuntime()) {
             showLoading(false);
@@ -9022,7 +9069,7 @@ async function startKakaoLogin() {
         const nextTarget = window.location.href;
 
         // [백업용] 로컬 스토리지 저장 (하위 호환성 유지)
-        localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
+        try { localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget); } catch (_) {}
 
         // 2. 최종 Redirect URL 조립
         const redirectUrl = buildAuthCallbackUrl({ next: nextTarget });
@@ -9064,6 +9111,9 @@ async function startKakaoLogin() {
 
 async function startNaverLogin() {
     try {
+        const otpFlow = getLoginOtpFlow();
+        if (otpFlow.isVerifying()) return;
+        otpFlow.invalidate();
         showLoading(true, '네이버 로그인 페이지로 이동합니다...');
         if (isFilePortalRuntime()) {
             showLoading(false);
@@ -9071,7 +9121,7 @@ async function startNaverLogin() {
         }
 
         const nextTarget = window.location.href;
-        localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
+        try { localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget); } catch (_) {}
         const redirectUrl = buildAuthCallbackUrl({ next: nextTarget });
 
         const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
