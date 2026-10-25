@@ -135,8 +135,11 @@
     ticket.timer=0;if(!retryFocusCurrent(ticket))return;
     const current=actions.querySelector('[data-about-retry]'),active=document.activeElement;
     const failed=document.getElementById('site-about-save-status')?.dataset.siteEditorPhase==='error';
+    const bounds=current?.getBoundingClientRect(),view=root.visualViewport;
+    const left=view?.offsetLeft||0,top=view?.offsetTop||0,width=view?.width||document.documentElement.clientWidth||root.innerWidth,height=view?.height||document.documentElement.clientHeight||root.innerHeight;
+    const visible=bounds?.width>0&&bounds.height>0&&bounds.left>=left&&bounds.top>=top&&bounds.right<=left+width&&bounds.bottom<=top+height;
     cancelRetryFocus();
-    if(failed&&current?.isConnected&&!current.disabled&&!current.closest('[hidden],.hidden')
+    if(failed&&visible&&current?.isConnected&&!current.disabled&&!current.closest('[hidden],.hidden')
      &&(!active||active===document.body||active===document.documentElement||active===ticket.button)
      &&!document.querySelector('dialog[open],.modal.show,[role="dialog"][aria-modal="true"]'))current.focus({preventScroll:true});
    },0);
