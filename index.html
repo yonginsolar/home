@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.174
-Change: 2026-10-25 - Keep modal links clear and enable native FAQ keyboard controls.
+Version: v1.0.175
+Change: 2026-10-25 - Derive FAQ visual state from the actual collapse control.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -11,7 +11,7 @@ Change: 2026-10-25 - Keep modal links clear and enable native FAQ keyboard contr
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.174 | index.html');</script>
+<script>console.log('[Version] v1.0.175 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -115,6 +115,27 @@ Change: 2026-10-25 - Keep modal links clear and enable native FAQ keyboard contr
     .faq button.question-block:focus-visible {
       outline:3px solid var(--color-primary, #2e7d32);
       outline-offset:6px;
+    }
+    /* Bootstrap owns aria-expanded, including ignored clicks during transitions. */
+    .faq .faq-list li:has(> button.question-block[aria-expanded="true"]) {
+      border-color:var(--color-primary);
+      background-color:#fcffff;
+    }
+    .faq button.question-block[aria-expanded="true"] .toggle-icon {
+      transform:rotate(180deg);
+      color:var(--color-primary);
+    }
+    .faq .faq-list li:has(> button.question-block[aria-expanded="true"]) > .answer-block {
+      margin-top:15px;
+      padding-top:15px;
+      border-top:1px solid var(--theme-border, #eee);
+    }
+    html[data-theme="dark"][data-theme-page="index"] .faq .faq-list li:has(> button.question-block[aria-expanded="true"]) {
+      border-color:var(--color-primary)!important;
+      background-color:var(--theme-surface-alt)!important;
+    }
+    html[data-theme="dark"][data-theme-page="index"] .faq button.question-block[aria-expanded="true"] .toggle-icon {
+      color:var(--color-primary)!important;
     }
     #header > .container { min-height:42px; }
     #home-auth-controls { display:flex; align-items:center; justify-content:flex-end; position:relative; width:200px; min-height:40px; flex-shrink:0; }
@@ -6483,6 +6504,27 @@ function openPlantDetail(id) {
            .order('display_order', { ascending: true }), signal), attempt);
 
        if (error) return false;
+       // Prepare the accordion as a group before input; lazy construction during
+       // another answer's animation can reset that answer's aria-expanded.
+       const collapse = window.bootstrap?.Collapse;
+       if (!container.dataset.faqStateBound) {
+           container.dataset.faqStateBound = 'true';
+           container.addEventListener('show.bs.collapse', event => {
+               if (event.target.parentElement?.parentElement !== container) return;
+               if (container.querySelector('.answer-block.collapsing')) event.preventDefault();
+           });
+       }
+       container.querySelectorAll('.answer-block').forEach(answer => {
+           const dispose = () => {
+               answer.removeEventListener('shown.bs.collapse', dispose);
+               answer.removeEventListener('hidden.bs.collapse', dispose);
+               collapse?.getInstance(answer)?.dispose();
+           };
+           if (answer.classList.contains('collapsing')) {
+               answer.addEventListener('shown.bs.collapse', dispose, { once:true });
+               answer.addEventListener('hidden.bs.collapse', dispose, { once:true });
+           } else dispose();
+       });
        if (!faqs || faqs.length === 0) {
            container.innerHTML = '<div class="text-center text-muted py-5">등록된 질문이 없습니다.</div>';
            return;
@@ -6500,7 +6542,7 @@ function openPlantDetail(id) {
 
             html += `
              <li data-aos="fade-up" data-aos-delay="${index * 100}">
-                 <button type="button" id="faq-question-${safeFaqId}" class="question-block" data-bs-toggle="collapse" data-bs-target="#faq-content-${safeFaqId}" aria-controls="faq-content-${safeFaqId}" aria-expanded="false" onclick="toggleFaqCard(this)">
+                 <button type="button" id="faq-question-${safeFaqId}" class="question-block" data-bs-toggle="collapse" data-bs-target="#faq-content-${safeFaqId}" aria-controls="faq-content-${safeFaqId}" aria-expanded="false">
                      <span class="d-flex align-items-center">
                          <span class="q-icon" aria-hidden="true">Q.</span>
                         <span>[${safeCategory}] ${safeQuestion}</span>
@@ -6518,25 +6560,9 @@ function openPlantDetail(id) {
         });
 
        container.innerHTML = html;
+       container.querySelectorAll('.answer-block').forEach(answer => collapse?.getOrCreateInstance(answer, { toggle:false }));
     }
 
-    // [보조] 클릭 시 카드 스타일 활성화 (테두리 색상 등 변경)
-    function toggleFaqCard(element) {
-        // 모든 리스트의 active 클래스 제거 (하나만 열리게 할 경우)
-        const allItems = document.querySelectorAll('.faq-list li');
-        const parentLi = element.parentElement;
-
-        // 이미 열려있는 걸 눌렀는지 확인
-        const wasActive = parentLi.classList.contains('active');
-
-        // 일단 다 닫는 스타일로 초기화
-        allItems.forEach(li => li.classList.remove('active'));
-
-        // 방금 누른 게 닫혀있던 거라면 -> 활성화 (열림)
-        if (!wasActive) {
-            parentLi.classList.add('active');
-        }
-    }
     function getPublicSessionSocialIds(user) {
         const result = { kakao: '', naver: '' };
         const identities = Array.isArray(user?.identities) ? user.identities : [];
