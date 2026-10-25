@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.0.4 | 2026-09-29 -->
+<!-- Version: v1.0.5 | 2026-10-25 — Preserve record drafts and distinguish saved results from list refresh failures. -->
 <html lang="ko">
 <head>
   <meta name="erp-query-controls-revision" content="20261023.1">
@@ -71,6 +71,8 @@
           <div class="d-flex flex-wrap align-items-center gap-2 mt-4">
             <button id="saveButton" type="submit" class="btn btn-primary">기록 저장</button>
             <button id="newButton" type="button" class="btn btn-outline-secondary">새 기록</button>
+            <button id="discardEntryDraft" type="button" class="btn btn-outline-secondary d-none">초안 버리기</button>
+            <span id="entryDraftStatus" class="help" role="status"></span>
             <span class="help">같은 발전소·같은 달은 한 건만 기록됩니다. 여기서 저장해도 회계 전표는 생성되지 않습니다.</span>
           </div>
         </form>
@@ -79,6 +81,7 @@
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><h2 class="h5 mb-0">월별 기록</h2><div class="d-flex gap-2"><select data-erp-query-control id="plantFilter" class="form-select form-select-sm" aria-label="발전소별 보기"><option value="">전체 발전소</option></select><button id="reloadButton" type="button" class="btn btn-outline-secondary btn-sm text-nowrap">새로고침</button></div></div>
         <div class="table-wrap"><table class="table table-hover"><thead><tr><th>기준월</th><th>발전소</th><th class="money">발전량</th><th class="money">SMP</th><th class="money">REC</th><th class="money">기타</th><th>정산</th><th>수정</th></tr></thead><tbody id="rows"><tr><td colspan="8">자료를 불러오는 중입니다.</td></tr></tbody></table></div>
         <div id="rowCount" class="help"></div>
+        <div id="recordReadStatus" class="help mt-2" role="status" aria-live="polite"></div>
       </div></div>
     </section>
   </main>
@@ -95,6 +98,67 @@
     let editingPlantId = '';
     let plants = [];
     let records = [];
+    let actorId = '', contextEpoch = 0, editorEpoch = 0, entryInputRevision = 0;
+    let currentEntryDraft = null, recordReadSequence = 0, pendingRecordRead = null, recordsLoaded = false;
+    const entryDrafts = new Map();
+    const entryFields = ['plantId','monthStart','generationKwh','smpAmount','recAmount','otherAmount','note','settlementConfirmed'];
+    function entryOwner() {return JSON.stringify([actorId,coopId]);}
+    function entryKey(id) {return JSON.stringify([entryOwner(),id||'new']);}
+    function entrySnapshot() {return Object.fromEntries(entryFields.map(id=>[id,id==='settlementConfirmed'?$(id).checked:$(id).value]));}
+    function sameEntry(a,b) {return JSON.stringify(a)===JSON.stringify(b);}
+    function retainEntryDraft() {
+      if(currentEntryDraft?.owner!==entryOwner())return;
+      currentEntryDraft.value=entrySnapshot();
+    }
+    function entryDirty(draft=currentEntryDraft) {return !!draft&&!sameEntry(draft.value,draft.baseline);}
+    function syncEntryControls() {
+      const dirty=entryDirty();
+      $('entryDraftStatus').textContent=dirty?'작성 중':'';
+      $('discardEntryDraft').classList.toggle('d-none',!dirty);
+      $('discardEntryDraft').disabled=saving;
+      $('saveButton').disabled=saving||!canEdit||!plants.length||!dirty;
+      $('newButton').classList.toggle('d-none',!currentId);
+    }
+    function entryValues(row) {
+      const today=new Date();
+      return {plantId:row?.plant_id||plants[0]?.id||'',monthStart:row?.month_start?.slice(0,7)||`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`,
+        generationKwh:row?.generation_kwh??'',smpAmount:row?.smp_amount??'',recAmount:row?.rec_amount??'',otherAmount:row?.other_amount??'',note:row?.note||'',settlementConfirmed:!!row?.settlement_confirmed};
+    }
+    function mountEntryDraft(row=null) {
+      retainEntryDraft();++editorEpoch;
+      const id=row?.id||'',key=entryKey(id);
+      let draft=entryDrafts.get(key);
+      if(!draft||!entryDirty(draft)) {
+        const values=entryValues(row);
+        entryFields.forEach(field=>{if(field==='settlementConfirmed')$(field).checked=values[field];else $(field).value=values[field];});
+        const snapshot=entrySnapshot();
+        draft={id,key,owner:entryOwner(),value:snapshot,baseline:{...snapshot}};
+        entryDrafts.set(key,draft);
+      }else entryFields.forEach(field=>{if(field==='settlementConfirmed')$(field).checked=draft.value[field];else $(field).value=draft.value[field];});
+      currentEntryDraft=draft;currentId=draft.id;
+      $('formTitle').textContent=currentId?'월간 기록 수정':'월간 기록';
+      syncEntryControls();
+    }
+    function recordContext() {return {owner:entryOwner(),epoch:contextEpoch,coopId};}
+    function sameRecordContext(context) {return context.owner===entryOwner()&&context.epoch===contextEpoch;}
+    function invalidateRecordReads() {
+      ++recordReadSequence;pendingRecordRead?.controller.abort();pendingRecordRead=null;
+      $('rows').removeAttribute('aria-busy');
+    }
+    function settleEntrySaved(request,id) {
+      const draft=request.draft;
+      if(currentEntryDraft===draft&&sameRecordContext(request.context))retainEntryDraft();
+      if(entryDrafts.get(draft.key)===draft)entryDrafts.delete(draft.key);
+      draft.id=id;draft.key=JSON.stringify([draft.owner,id]);draft.baseline={...request.snapshot};
+      entryDrafts.set(draft.key,draft);
+      if(sameRecordContext(request.context)) {
+        records=[{...request.row,id},...records.filter(row=>row.id!==id)].slice(0,100);
+        recordsLoaded=true;renderRows();
+      }
+      if(currentEntryDraft===draft&&sameRecordContext(request.context)) {
+        currentId=id;$('formTitle').textContent='월간 기록 수정';syncEntryControls();
+      }
+    }
     function message(text, kind='info') {status.className=`alert alert-${kind}`;status.textContent=text;status.classList.remove('d-none');}
     function emptyToNumber(id, decimal=false) {
       const raw=ERPNumberInput.raw($(id).value).trim();
@@ -132,13 +196,10 @@
       plants.forEach(plant=>{const option=document.createElement('option');option.value=plant.id;option.textContent=plant.name;$('plantId').appendChild(option);$('plantFilter').appendChild(option.cloneNode(true));});
       if(plants.some(p=>p.id===selectedPlant))$('plantId').value=selectedPlant;
       if(plants.some(p=>p.id===selectedFilter))$('plantFilter').value=selectedFilter;
-      $('saveButton').disabled=!canEdit||!plants.length;renderPlants();
+      renderPlants();syncEntryControls();
     }
     function resetForm() {
-      currentId='';$('entryForm').reset();$('formTitle').textContent='월간 기록';
-      const today=new Date();$('monthStart').value=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
-      if (plants[0]) $('plantId').value=plants[0].id;
-      $('newButton').classList.add('d-none');
+      mountEntryDraft();
     }
     function renderRows() {
       const filter=$('plantFilter').value;
@@ -155,14 +216,43 @@
       $('rowCount').textContent=`${visible.length}건 표시 · 최근 100건까지 조회`;
     }
     function openRecord(row) {
-      currentId=row.id;$('formTitle').textContent='월간 기록 수정';$('plantId').value=row.plant_id;$('monthStart').value=row.month_start.slice(0,7);
-      $('generationKwh').value=row.generation_kwh??'';$('smpAmount').value=row.smp_amount??'';$('recAmount').value=row.rec_amount??'';$('otherAmount').value=row.other_amount??'';
-      $('note').value=row.note||'';$('settlementConfirmed').checked=!!row.settlement_confirmed;$('newButton').classList.remove('d-none');
+      mountEntryDraft(records.find(item=>item.id===row.id)||row);
       $('entryForm').scrollIntoView({behavior:'smooth',block:'start'});
     }
-    async function loadRecords() {
-      let query=db.from('sun_village_energy_monthly').select('id,plant_id,month_start,generation_kwh,smp_amount,rec_amount,other_amount,settlement_confirmed,note').eq('coop_id',coopId).order('month_start',{ascending:false}).limit(100);
-      const {data,error}=await query;if(error) throw error;records=data||[];renderRows();
+    function loadRecords(options={}) {
+      const context=recordContext(),key=JSON.stringify(context);
+      if(!options.force&&pendingRecordRead?.key===key)return pendingRecordRead.promise;
+      const sequence=++recordReadSequence;
+      pendingRecordRead?.controller.abort();
+      const controller=new AbortController();let deadline;
+      const current=()=>sameRecordContext(context)&&sequence===recordReadSequence;
+      $('rows').setAttribute('aria-busy','true');
+      $('recordReadStatus').textContent='목록을 확인하고 있습니다…';
+      const promise=Promise.resolve().then(async()=>{
+        try {
+          let query=db.from('sun_village_energy_monthly').select('id,plant_id,month_start,generation_kwh,smp_amount,rec_amount,other_amount,settlement_confirmed,note').eq('coop_id',context.coopId).order('month_start',{ascending:false}).limit(100);
+          if(query.abortSignal)query=query.abortSignal(controller.signal);
+          const {data,error}=await Promise.race([query,new Promise((_,reject)=>{
+            deadline=setTimeout(()=>{controller.abort();reject(new Error('RECORD_READ_TIMEOUT'));},15000);
+          })]);
+          if(!current())return {stale:true};
+          if(error)throw error;
+          records=data||[];recordsLoaded=true;renderRows();
+          $('recordReadStatus').textContent='';$('reloadButton').textContent='새로고침';
+          return {ok:true};
+        }catch(error){
+          if(!current())return {stale:true};
+          $('recordReadStatus').textContent='목록을 불러오지 못했습니다. 다시 확인해 주세요.';
+          $('reloadButton').textContent='다시 확인';
+          if(!recordsLoaded)$('rows').innerHTML='<tr><td colspan="8">목록을 불러오지 못했습니다.</td></tr>';
+          throw error;
+        }finally{
+          clearTimeout(deadline);
+          if(current())$('rows').removeAttribute('aria-busy');
+          if(pendingRecordRead?.promise===promise)pendingRecordRead=null;
+        }
+      });
+      pendingRecordRead={key,promise,controller};return promise;
     }
     async function boot() {
       try {
@@ -176,33 +266,72 @@
         const current=(workspace.data?.workspaces||[]).find(item=>item?.is_current===true);
         if(!current||current.is_management_coop!==false||String(current.coop_id)!==String(coop.data)){location.replace('index.html');return;}
         if(!permissions.includes('accounting.view')&&!permissions.includes('accounting.edit')){message('회계 조회 권한이 없습니다.','warning');return;}
-        coopId=String(coop.data);canEdit=permissions.includes('accounting.edit');
+        actorId=String(gate.authUser.id);coopId=String(coop.data);canEdit=permissions.includes('accounting.edit');
         canManagePlants=permissions.includes('hr.admin');
         if(canManagePlants)$('plantAddButton').classList.remove('d-none');
         await loadPlants();
         if(!canEdit)$('entryForm').classList.add('d-none');
-        resetForm();await loadRecords();$('workspace').classList.remove('d-none');status.classList.add('d-none');
-        window.ErpWorkspaceResume.register({modules:['accounting'],busy:()=>saving||savingPlant,authorize:async runtime=>{
+        resetForm();$('workspace').classList.remove('d-none');status.classList.add('d-none');
+        db.auth.onAuthStateChange((event,session)=>{
+          if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==actorId)) {
+            retainEntryDraft();++contextEpoch;++editorEpoch;invalidateRecordReads();canEdit=false;canManagePlants=false;
+            syncEntryControls();$('workspace').classList.add('d-none');message('로그인 상태가 바뀌었습니다. 다시 로그인한 뒤 확인해 주세요.','warning');
+          }
+        });
+        window.ErpWorkspaceResume.register({modules:['accounting'],busy:()=>saving||savingPlant,refreshWhenDirty:()=>true,ownsReadRequests:true,authorize:async runtime=>{
+          if(String(runtime.coop_id)!==coopId){retainEntryDraft();++contextEpoch;invalidateRecordReads();return false;}
           const result=await db.rpc('sun_village_workspace_context');if(result.error)throw result.error;
+          canEdit=runtime.effective_permissions.includes('accounting.edit');syncEntryControls();
+          if(!canEdit&&!runtime.effective_permissions.includes('accounting.view')){invalidateRecordReads();return false;}
           return result.data?.workspaces?.some(item=>item.is_current===true&&item.is_management_coop===false&&String(item.coop_id)===String(runtime.coop_id))===true;
         },refresh:loadRecords});
+        await loadRecords().catch(()=>{});
       }catch(error){message(`발전·정산 자료를 불러오지 못했습니다: ${error?.message||'다시 시도해 주세요.'}`,'danger');}
     }
     $('entryForm').addEventListener('submit',async event=>{
-      event.preventDefault();if(saving||!canEdit||!coopId)return;saving=true;$('saveButton').disabled=true;
+      event.preventDefault();if(saving||!canEdit||!coopId||!currentEntryDraft)return;
+      retainEntryDraft();if(!entryDirty())return;
+      const request={context:recordContext(),draft:currentEntryDraft,id:currentId,snapshot:entrySnapshot(),editorEpoch};
+      saving=true;syncEntryControls();
       try{
         const month=$('monthStart').value;if(!/^\d{4}-\d{2}$/.test(month))throw new Error('기준월을 확인해 주세요.');
         const plantId=$('plantId').value;if(!plants.some(p=>p.id===plantId))throw new Error('현재 조합의 발전소를 선택해 주세요.');
         const row={coop_id:coopId,plant_id:plantId,month_start:`${month}-01`,generation_kwh:emptyToNumber('generationKwh',true),smp_amount:emptyToNumber('smpAmount'),rec_amount:emptyToNumber('recAmount'),other_amount:emptyToNumber('otherAmount'),generation_source:'manual',settlement_source:'manual',settlement_confirmed:$('settlementConfirmed').checked,note:$('note').value.trim()};
         if([row.generation_kwh,row.smp_amount,row.rec_amount,row.other_amount].every(value=>value==null))throw new Error('발전량 또는 정산액을 하나 이상 입력해 주세요.');
         if(row.note.length>2000)throw new Error('메모는 2,000자 이내로 입력해 주세요.');
-        const result=currentId?await db.from('sun_village_energy_monthly').update(row).eq('id',currentId).eq('coop_id',coopId).select('id'):await db.from('sun_village_energy_monthly').insert(row).select('id');
-        if(result.error)throw result.error;if(!result.data?.length)throw new Error('저장된 기록이 없습니다. 권한과 현재 조합을 확인해 주세요.');
-        await loadRecords();resetForm();message('월간 발전·정산 기록을 저장했습니다.','success');
-      }catch(error){message(`저장하지 못했습니다: ${error?.message||'다시 시도해 주세요.'}`,'danger');}
-      finally{saving=false;$('saveButton').disabled=!plants.length;}
+        request.row={...row};
+        const result=request.id?await db.from('sun_village_energy_monthly').update(row).eq('id',request.id).eq('coop_id',request.context.coopId).select('id'):await db.from('sun_village_energy_monthly').insert(row).select('id');
+        if(result.error)throw result.error;if(!result.data?.[0]?.id)throw new Error('저장된 기록이 없습니다. 권한과 현재 조합을 확인해 주세요.');
+        settleEntrySaved(request,result.data[0].id);
+        if(!sameRecordContext(request.context))return;
+        invalidateRecordReads();
+        const currentEditor=()=>sameRecordContext(request.context)&&currentEntryDraft===request.draft&&editorEpoch===request.editorEpoch;
+        if(currentEditor())message(entryDirty()?'저장했습니다. 추가로 수정한 내용은 아직 저장되지 않았습니다.':'저장했습니다.','success');
+        try{await loadRecords({force:true});}
+        catch(error){if(currentEditor())message('저장했습니다. 목록은 다시 확인해 주세요.','warning');}
+      }catch(error){if(sameRecordContext(request.context)&&currentEntryDraft===request.draft&&editorEpoch===request.editorEpoch)message(`저장하지 못했습니다: ${error?.message||'다시 시도해 주세요.'}`,'danger');}
+      finally{saving=false;syncEntryControls();}
     });
-    $('newButton').addEventListener('click',resetForm);$('reloadButton').addEventListener('click',()=>loadRecords().catch(error=>message(`새로고침 실패: ${error?.message||error}`,'danger')));$('plantFilter').addEventListener('change',renderRows);
+    $('entryForm').addEventListener('input',()=>{++entryInputRevision;retainEntryDraft();syncEntryControls();});
+    $('entryForm').addEventListener('change',()=>{++entryInputRevision;retainEntryDraft();syncEntryControls();});
+    $('discardEntryDraft').addEventListener('click',async()=>{
+      if(saving||!entryDirty())return;
+      const draft=currentEntryDraft,epoch=editorEpoch,revision=entryInputRevision,context=recordContext(),snapshot=entrySnapshot();
+      if(!await window.CoopDialog.confirm('이 초안을 버릴까요?'))return;
+      if(saving||!sameRecordContext(context)||currentEntryDraft!==draft||editorEpoch!==epoch||entryInputRevision!==revision||!sameEntry(snapshot,entrySnapshot()))return;
+      draft.value={...draft.baseline};
+      entryFields.forEach(field=>{if(field==='settlementConfirmed')$(field).checked=draft.value[field];else $(field).value=draft.value[field];});
+      ++editorEpoch;syncEntryControls();
+    });
+    window.addEventListener('beforeunload',event=>{
+      retainEntryDraft();
+      if(saving||[...entryDrafts.values()].some(draft=>draft.owner===entryOwner()&&entryDirty(draft))){event.preventDefault();event.returnValue='';}
+    });
+    window.addEventListener('pagehide',()=>{retainEntryDraft();++editorEpoch;invalidateRecordReads();});
+    if(window.frameElement)new MutationObserver(()=>{
+      if(window.frameElement.hidden){retainEntryDraft();++editorEpoch;invalidateRecordReads();}
+    }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+    $('newButton').addEventListener('click',resetForm);$('reloadButton').addEventListener('click',()=>{void loadRecords().catch(()=>{});});$('plantFilter').addEventListener('change',renderRows);
     $('plantAddButton').addEventListener('click',()=>openPlant());
     $('plantCancelButton').addEventListener('click',closePlant);
     $('plantForm').addEventListener('submit',async event=>{
