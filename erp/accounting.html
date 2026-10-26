@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.188 | Change: 2026-10-26 - Preserve editable later asset drafts after verified recovery. -->
+<!-- Version: v1.0.189 | Change: 2026-10-26 - Keep later entry edits after successful save. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.188 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.189 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
@@ -359,6 +359,7 @@
         </div>
 
         <button type="submit" class="btn btn-primary w-100 btn-lg shadow-sm mt-4" id="submitBtn">확인 후 저장</button>
+        <p class="small text-warning-emphasis mt-2 mb-0" id="accountingEntrySaveStatus" role="status" hidden></p>
       </form>
     </div>
     <div class="tab-pane fade" id="tabPrepay">
@@ -1226,6 +1227,7 @@ let vatSummaryMode = 'half_year';
 let accountingDashboardRefreshPromise = null;
 let accountingDashboardRefreshQueued = false;
 let accountingDataAuthorized = false;
+let accountingEntrySaveContext = null, accountingEntryRetainedDraft = null;
 let selectContext = null;
 let addContext = null;
 let permissionSet = new Set();
@@ -2111,6 +2113,7 @@ window.onload = async function() {
     cashbackModal = new bootstrap.Modal(document.getElementById('cardCashbackModal'));
     cardManageModal = new bootstrap.Modal(document.getElementById('cardManageModal'));
     bindAccountingReadLifecycle();
+    bindAccountingEntryDraftProtection();
 
     const blurActiveIfInside = (modalEl) => {
         const activeEl = document.activeElement;
@@ -7717,6 +7720,70 @@ async function applyReceivableCollection() {
     renderReceivableVendorSelect();
 }
 
+function accountingEntryFields(form) {
+    return [...form.querySelectorAll('input,select,textarea')].filter(n=>n.type!=='search'&&!n.hasAttribute('data-erp-query-control'));
+}
+function accountingEntryFieldValue(n) {
+    if(n.type==='checkbox'||n.type==='radio')return n.checked;
+    if(n.type==='file')return [...n.files];
+    return n.hasAttribute('data-number-group')?ERPNumberInput.raw(n.value):n.value;
+}
+function accountingEntryFieldMatches(n,value) {
+    const current=accountingEntryFieldValue(n);
+    return Array.isArray(value)?Array.isArray(current)&&current.length===value.length&&current.every((file,i)=>file===value[i]):current===value;
+}
+function captureAccountingEntrySave(pending = true) {
+    const form=document.getElementById('erpForm');
+    const context={form,owner:myInfo,identity:accountingReadIdentity(),fields:new Map(accountingEntryFields(form).map(n=>[n,accountingEntryFieldValue(n)]))};
+    if(pending)accountingEntrySaveContext=context;
+    return context;
+}
+function accountingEntryOwnerCurrent(context) {
+    return !!context?.identity&&context.owner===myInfo&&context.identity===accountingReadIdentity()&&accountingDataAuthorized&&canPerform('accounting.edit')&&context.form===document.getElementById('erpForm');
+}
+function hasRetainedAccountingEntryDraft() {
+    const draft=accountingEntryRetainedDraft;
+    if(!accountingEntryOwnerCurrent(draft))return false;
+    const fields=accountingEntryFields(draft.form);
+    return fields.length!==draft.fields.size||fields.some(n=>!draft.fields.has(n)||!accountingEntryFieldMatches(n,draft.fields.get(n)));
+}
+function syncAccountingEntryDraftStatus() {
+    const status=document.getElementById('accountingEntrySaveStatus');
+    if(!status)return;
+    status.hidden=!hasRetainedAccountingEntryDraft();
+    status.textContent=status.hidden?'':'저장했습니다. 추가로 작성한 내용은 아직 저장되지 않았습니다.';
+}
+function bindAccountingEntryDraftProtection() {
+    const form=document.getElementById('erpForm');
+    form.addEventListener('input',syncAccountingEntryDraftStatus);
+    form.addEventListener('change',syncAccountingEntryDraftStatus);
+    window.addEventListener('beforeunload',event=>{
+        if(accountingEntryOwnerCurrent(accountingEntrySaveContext)||hasRetainedAccountingEntryDraft()){event.preventDefault();event.returnValue='';}
+    });
+}
+function finishAccountingEntrySave(context) {
+    if(accountingEntrySaveContext!==context||!accountingEntryOwnerCurrent(context))return null;
+    const fields=accountingEntryFields(context.form);
+    const changed=fields.length!==context.fields.size||fields.some(n=>!context.fields.has(n)||!accountingEntryFieldMatches(n,context.fields.get(n)));
+    if(!changed){
+        resetAccountingFormAfterSave();
+        accountingEntryRetainedDraft=null;
+        window.ErpWorkspaceResume?.checkpoint(context.form);
+    }else{
+        // Keep the current account/dynamic controls intact. Only clear unchanged entry text/amount.
+        const baseline=new Map(context.fields);
+        for(const [n,value]of context.fields)if(context.form.contains(n)&&accountingEntryFieldMatches(n,value))window.ErpWorkspaceResume?.checkpoint(n);
+        for(const id of ['inputDesc','inputAmount']){
+            const n=document.getElementById(id);
+            if(!context.fields.has(n))continue;
+            baseline.set(n,'');
+            if(accountingEntryFieldMatches(n,context.fields.get(n))){n.value='';window.ErpWorkspaceResume?.checkpoint(n);}
+        }
+        accountingEntryRetainedDraft={...context,fields:baseline};
+    }
+    syncAccountingEntryDraftStatus();
+    return changed;
+}
 function resetAccountingFormAfterSave() {
     const wasAdvanced = document.getElementById("advModeToggle").checked;
     document.getElementById("erpForm").reset();
@@ -7755,6 +7822,7 @@ async function submitBankInterestAccounting(ctx) {
 
     const submitBtn = document.getElementById('submitBtn');
     const requestKey = getBankInterestRequestKey();
+    const saveContext = captureAccountingEntrySave();
     const writer = myInfo ? myInfo.emp_name : 'WebUser';
     if (submitBtn) submitBtn.disabled = true;
 
@@ -7779,13 +7847,17 @@ async function submitBankInterestAccounting(ctx) {
             net_amount: amounts.netAmount,
             replayed: result.replayed === true
         });
-        showAlert('완료', `은행 이자수익 ${amounts.grossAmount.toLocaleString()}원과 실입금 ${amounts.netAmount.toLocaleString()}원이 저장되었습니다.`);
-        resetAccountingFormAfterSave();
-        await refreshDashboard();
+        const retained=finishAccountingEntrySave(saveContext);
+        if(retained!==null){
+            if(bankInterestRequestKey===requestKey)bankInterestRequestKey='';
+            if(!retained&&document.getElementById('tabForm').classList.contains('active')&&!window.frameElement?.hidden)showAlert('완료', `은행 이자수익 ${amounts.grossAmount.toLocaleString()}원과 실입금 ${amounts.netAmount.toLocaleString()}원이 저장되었습니다.`);
+            await refreshDashboard();
+        }
     } catch (error) {
-        showAlert('오류', getBankInterestErrorMessage(error));
+        if(accountingEntryOwnerCurrent(saveContext))showAlert('오류', getBankInterestErrorMessage(error));
     } finally {
-        if (submitBtn) submitBtn.disabled = false;
+        if(accountingEntrySaveContext===saveContext)accountingEntrySaveContext=null;
+        if (submitBtn && accountingEntryOwnerCurrent(saveContext)) submitBtn.disabled = false;
     }
 }
 
@@ -7843,6 +7915,7 @@ async function submitAccounting(ctx) {
         await submitBankInterestAccounting(ctx);
         return;
     }
+    const saveContext=captureAccountingEntrySave(false);
 
     // 부가세 계산
     let netAmount = totalAmt, vatAmount = 0;
@@ -7998,15 +8071,20 @@ async function submitAccounting(ctx) {
 
     if (!entries.length) return showAlert("알림", "전표 항목이 없습니다.");
 
+    accountingEntrySaveContext=saveContext;
+    try {
     applyTransId(entries);
     const { error } = await _supabase.from('ac_journal').insert(entries);
-    if(error) showAlert("오류", "저장 실패: " + error.message);
+    if(error){if(accountingEntryOwnerCurrent(saveContext))showAlert("오류", "저장 실패: " + error.message);}
     else {
         await logAudit('accounting.submit', null, '전표 저장', { total: totalAmt, type, project, entries: entries.length });
-        showAlert("완료", "저장되었습니다.");
-        resetAccountingFormAfterSave();
-        refreshDashboard();
+        const retained=finishAccountingEntrySave(saveContext);
+        if(retained!==null){
+            if(!retained&&document.getElementById('tabForm').classList.contains('active')&&!window.frameElement?.hidden)showAlert("완료", "저장했습니다.");
+            refreshDashboard();
+        }
     }
+    } finally {if(accountingEntrySaveContext===saveContext)accountingEntrySaveContext=null;}
 }
 // End of submitAccounting
   // ★ [신규] 2025년 급여 -> 개발비 대체 분개 (수동 실행용)
