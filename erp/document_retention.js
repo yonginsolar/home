@@ -1,4 +1,4 @@
-/* Retention review v1.1.0. Source-bound criteria and inert body preview; no source writes. */
+/* Retention review v1.2.0. Conservative defaults and keyboard-accessible passive body reader. */
 (()=>{'use strict';
 const $=id=>document.getElementById(id),R=window.CoopRetentionRules;
 const client=window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
@@ -11,7 +11,7 @@ const status=text=>$('retentionStatus').textContent=text;
 function form(){return {rules:Array.from($('retentionRuleFields').children).map(node=>({policy:node.querySelector('select').value,basis_date:node.querySelector('select').value==='permanent'?null:node.querySelector('input').value||null})),hold_reason:$('retentionHold').value.trim(),review_decision:$('retentionDecision').value};}
 function snapshot(value){return JSON.stringify({rules:value.rules||[],hold_reason:value.hold_reason||'',review_decision:value.review_decision||'pending'});}
 function capture(){if(active&&active.owner===owner){active.value=form();$('retentionReviewStatus').textContent=active.unknown?'저장 결과 확인이 필요합니다.':snapshot(active.value)!==active.baseline?'작성 중 · 아직 저장하지 않음':'';}}
-function safeMessage(error){return error?.code==='PT409'?'문서 또는 검토 내용이 변경되었습니다. 다시 확인해 주세요.':error?.code==='42501'?'현재 문서 관리 권한을 다시 확인해 주세요.':'처리 결과를 확인하지 못했습니다. 다시 확인해 주세요.';}
+function safeMessage(error){return error?.message==='RETENTION_LEGAL_BASIS_REQUIRED'?'관리기간 외에 적용되는 법정 보존 기준을 확인해 주세요.':error?.code==='PT409'?'문서 또는 검토 내용이 변경되었습니다. 다시 확인해 주세요.':error?.code==='42501'?'현재 문서 관리 권한을 다시 확인해 주세요.':'처리 결과를 확인하지 못했습니다. 다시 확인해 주세요.';}
 function current(context){return context.owner===owner&&context.epoch===epoch&&!document.hidden;}
 function modalCurrent(draft,context){return current(context)&&active===draft&&context.dialog===dialogEpoch&&$('retentionModal').classList.contains('show');}
 function stop(){epoch++;clearSource();if(pending){pending.controller.abort();pending.release?.({cancelled:true});pending=null;} $('retentionMore').disabled=false;}
@@ -55,15 +55,15 @@ function open(row,trigger,showSource=false){capture();clearSource();dialogEpoch+
  $('retentionDocumentTitle').textContent=row.title||'제목 없음';$('retentionReviewHint').textContent=row.source_confirmed?'현재 저장된 보존 기준입니다.':'이 문서의 보존 기준과 기산일을 확인해 주세요.';
  $('retentionAutomaticHint').textContent=row.automatic_reason?(row.automatic_reason+' · '+(effectiveRules(row).some(r=>r.policy!=='permanent'&&!r.basis_date)?'기산일 확인이 필요합니다.':'이 문서의 기준일로 계산합니다.')):'';
  $('retentionRuleFields').replaceChildren();draft.value.rules.forEach(ruleField);$('retentionHold').value=draft.value.hold_reason;$('retentionDecision').value=draft.value.review_decision;sync();modal.show();if(showSource){const context={owner,epoch,dialog:dialogEpoch},start=()=>{if(modalCurrent(draft,context))void viewSource();};if($('retentionModal').classList.contains('show'))start();else $('retentionModal').addEventListener('shown.bs.modal',start,{once:true});}}
-function clearSource(){sourceEpoch++;$('retentionSourcePanel').hidden=true;$('retentionSourceStatus').textContent='';$('retentionSourceFrame').removeAttribute('srcdoc');$('retentionSourceFrame').hidden=true;$('retentionSourceOriginal').hidden=true;$('retentionSourceOriginal').removeAttribute('href');$('retentionDocumentOpen').disabled=false;}
+function clearSource(){sourceEpoch++;$('retentionSourcePanel').hidden=true;$('retentionSourceStatus').textContent='';window.CoopRetentionPreview.clear($('retentionSourceFrame'));$('retentionSourceFrame').hidden=true;$('retentionSourceOriginal').hidden=true;$('retentionSourceOriginal').removeAttribute('href');$('retentionDocumentOpen').disabled=false;}
 async function viewSource(){const draft=active;if(!draft||draft.owner!==owner)return;const context={owner,epoch,dialog:dialogEpoch},generation=++sourceEpoch;
- $('retentionSourcePanel').hidden=false;$('retentionSourceFrame').removeAttribute('srcdoc');$('retentionSourceFrame').hidden=true;$('retentionSourceStatus').textContent='문서 본문을 불러오고 있습니다…';$('retentionDocumentOpen').disabled=true;
+ $('retentionSourcePanel').hidden=false;window.CoopRetentionPreview.clear($('retentionSourceFrame'));$('retentionSourceFrame').hidden=true;$('retentionSourceStatus').textContent='문서 본문을 불러오고 있습니다…';$('retentionDocumentOpen').disabled=true;
  const original=$('retentionSourceOriginal'),url=draft.kind==='approval'?'/erp/approval.html?doc='+encodeURIComponent(draft.row.document_id):draft.kind==='minutes'?'/minutes/minutes_view.html?id='+encodeURIComponent(draft.row.document_id):'';original.hidden=!url;if(url)original.href=url;
  const sourceKey=JSON.stringify([owner,draft.kind,draft.row.document_id,draft.row.source_token]);let promise=sourceReads.get(sourceKey);if(!promise){promise=read('erp_retention_document',{p_kind:draft.kind,p_document_id:draft.row.document_id,p_source_token:draft.row.source_token},{});sourceReads.set(sourceKey,promise);promise.finally(()=>{if(sourceReads.get(sourceKey)===promise)sourceReads.delete(sourceKey);}).catch(()=>{});}
  try{const doc=await promise;if(!modalCurrent(draft,context)||generation!==sourceEpoch)return;
  if(!doc||doc.document_id!==draft.row.document_id||doc.source_token!==draft.row.source_token)throw Error('SOURCE_CHANGED');
- const hasBody=doc.body?.content!=null&&String(doc.body.content).trim()!=='';$('retentionSourceFrame').hidden=!hasBody;
- if(hasBody){$('retentionSourceFrame').srcdoc=window.CoopRetentionPreview.build(doc.body,parseFloat(getComputedStyle(document.documentElement).fontSize));$('retentionSourceFrame').title=(doc.title||'문서')+' 본문';}
+ const hasBody=window.CoopRetentionPreview.render($('retentionSourceFrame'),doc.body,parseFloat(getComputedStyle(document.documentElement).fontSize));$('retentionSourceFrame').hidden=!hasBody;
+ $('retentionSourceFrame').setAttribute('aria-label',(doc.title||'문서')+' 본문');
  $('retentionSourceStatus').textContent=hasBody?doc.document_type+' · '+doc.document_status:'등록된 본문이 없습니다. 원래 문서에서 첨부를 확인해 주세요.';
  }catch(error){if(modalCurrent(draft,context)&&generation===sourceEpoch)$('retentionSourceStatus').textContent=safeMessage(error);}finally{if(modalCurrent(draft,context)&&generation===sourceEpoch)$('retentionDocumentOpen').disabled=false;}}
 function sync(){if(!active)return;const busy=!!active.pending; $('retentionSave').disabled=busy||!!active.unknown;$('retentionLatest').disabled=busy||!!active.unknown;$('retentionResult').hidden=!active.unknown;$('retentionResult').disabled=busy;capture();}
