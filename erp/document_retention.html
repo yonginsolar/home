@@ -1,19 +1,21 @@
 <!doctype html>
-<!-- Version: v1.3.0 | 2026-10-26 — Completed-only browsing and memory draft recovery. -->
+<!-- Version: v1.3.1 | 2026-10-26 — Retain drafts across workspace navigation and restore current focus. -->
 <html lang="ko"><head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive">
+<script src="/erp/workspace_boot.js?v=20261026-retention-1"></script>
+<script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <title>문서 보존·파기 검토</title>
 <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"><link rel="stylesheet" href="/erp/erp_theme.css?v=1.1.1">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
-<script src="/erp/retention_rules.js?v=1.2.0" integrity="sha384-GmD61sg5TuwdGK8IGEZVG9T7sTwhb9bzXrLR3NblUUgUzGwG4NM10M57qeFTcKkj" crossorigin="anonymous" defer></script><script src="/erp/retention_preview.js?v=1.1.0" integrity="sha384-PD9+EHm5Nctsn82vuVRYkPY4U978V0CkCpbnwxcjoa2H23mv2B2Z7GnGHtJB57aA" crossorigin="anonymous" defer></script><script src="/erp/document_retention.js?v=1.3.0" integrity="sha384-Zv7O5maunT0CGcysnbi5UHW0hhwrJLKM8pfU7Kqn902ALuOGCz9hDIShMBOlK7d7" crossorigin="anonymous" defer></script>
+<script src="/erp/retention_rules.js?v=1.2.0" integrity="sha384-GmD61sg5TuwdGK8IGEZVG9T7sTwhb9bzXrLR3NblUUgUzGwG4NM10M57qeFTcKkj" crossorigin="anonymous" defer></script><script src="/erp/retention_preview.js?v=1.1.0" integrity="sha384-PD9+EHm5Nctsn82vuVRYkPY4U978V0CkCpbnwxcjoa2H23mv2B2Z7GnGHtJB57aA" crossorigin="anonymous" defer></script><script src="/erp/document_retention.js?v=1.3.1" integrity="sha384-YKrbZSQHMQGpxYe8OtqQl1fbAnaUK4+H6/Lv+GIjAeKu1x0iSKTcBzeyMr6rEmVr" crossorigin="anonymous" defer></script>
 <style>
 body{padding:20px;background:#f8fafc;word-break:keep-all;overflow-wrap:break-word}main{max-width:1240px;margin:auto}.retention-toolbar{display:flex;flex-direction:row;flex-wrap:wrap;gap:12px;align-items:end}.retention-toolbar>label{display:flex;flex-direction:column;gap:6px;flex:1 1 180px;min-width:0}.retention-title{max-width:30rem}.retention-rules{display:grid;gap:12px}.retention-rule{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:end;gap:8px;padding:12px;border:1px solid #dce3ec;border-radius:10px}.retention-rule small{grid-column:1/-1}.modal-content{max-height:calc(100dvh - 24px);overflow:auto}.modal-body{overflow:visible}.modal-footer{flex-shrink:0}.modal-title{min-width:0}.table td{vertical-align:middle}a:focus-visible,button:focus-visible{outline:3px solid #2563eb;outline-offset:3px}[hidden]{display:none!important}@media(max-width:600px){body{padding:10px}.retention-rule{grid-template-columns:minmax(0,1fr)}.retention-toolbar{flex-direction:column;align-items:stretch}.retention-toolbar>label{flex:0 0 auto;width:100%}.modal-dialog{margin:8px}.modal-footer button{flex:1 1 140px}}
 </style></head><body class="erp-unified"><main>
-<header class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3"><h1 class="h4 m-0">📁 문서 보존·파기 검토</h1><a class="btn btn-outline-secondary" href="/erp/">ERP 메뉴</a></header>
+<header class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3"><h1 class="h4 m-0">📁 문서 보존·파기 검토</h1><button type="button" id="retentionMenu" class="btn btn-outline-secondary">ERP 메뉴</button></header>
 <p class="text-muted">문서의 보존 기준과 기산일을 확인하고, 기한이 지난 문서를 검토해 주세요. 파기 검토 기록은 실제 삭제와 구분됩니다.</p>
 <form id="retentionFilters" class="card p-3 mb-3 retention-toolbar">
 <label>문서 종류<select id="retentionKind" class="form-select" data-erp-query-control disabled><option value="approval">전자결재</option><option value="employment">근로계약서</option><option value="minutes">회의·공문</option><option value="meeting_attachment">회의 별첨 PDF</option></select></label>

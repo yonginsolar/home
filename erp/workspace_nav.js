@@ -1,4 +1,4 @@
-/* ERP workspace navigation v1.6.1 — preserve parent navigation and nested task menus. */
+/* ERP workspace navigation v1.6.2 — expose existing navigation without leaving retained tasks. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
@@ -532,6 +532,16 @@
     else if (returnFocus?.isConnected) returnFocus.focus();
   }
 
+  function showMenu() {
+    if (!state || !panel || panel.hidden) return false;
+    if (matchMedia('(max-width: 991.98px)').matches) setDrawer(true);
+    else {
+      if (document.body.classList.contains('erp-workspace-collapsed')) panel.querySelector('.erp-workspace-collapse')?.click();
+      (list.querySelector('a.active') || list.querySelector('a'))?.focus({preventScroll:true});
+    }
+    return true;
+  }
+
   function mount() {
     if (panel) {
       panel.hidden = false;
@@ -710,7 +720,7 @@
     return promise;
   }
 
-  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, updateSetupRuntime, refreshBrand:()=>state?refreshBrand(state.client,generation,state.runtime.coop_id):Promise.resolve(), closeDrawer:()=>setDrawer(false) };
+  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, updateSetupRuntime, showMenu, refreshBrand:()=>state?refreshBrand(state.client,generation,state.runtime.coop_id):Promise.resolve(), closeDrawer:()=>setDrawer(false) };
   window.addEventListener('focus', refreshSetupMenus);
   window.addEventListener('erp-workspace-runtime', event => { void connect(event.detail.client, event.detail.runtime); });
   // Used only by classic-script ERP pages with an already configured tenant-aware client.
