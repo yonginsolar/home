@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.187 | Change: 2026-10-26 - Recover asset review results and expire older confirmations. -->
+<!-- Version: v1.0.188 | Change: 2026-10-26 - Preserve editable later asset drafts after verified recovery. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,9 +10,9 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.187 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.188 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
-  <script src="accounting_asset_review.js?v=1.0.0"></script>
+  <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261022-help-1"></script>
@@ -5940,7 +5940,7 @@ function loadAssetOverview(options = {}) {
         const { data,error } = await _supabase.rpc('accounting_asset_overview').abortSignal(read.controller.signal);
         if (error) throw error;
         if(!data||typeof data!=='object')throw Error('INVALID_ASSET_RESULT');return data;
-    },data=>{renderAssetOverview(data);assetOverviewPayload=data;assetReadPhase='loaded';status.textContent=`${data.as_of || '오늘'} 기준 · 재고는 연말 결산 전까지 장부 자산과 별도로 표시합니다.`;syncAccountingReviewControls();
+    },data=>{assetReviewUI?.reconcile(data.purchase_reviews);renderAssetOverview(data);assetOverviewPayload=data;assetReadPhase='loaded';status.textContent=`${data.as_of || '오늘'} 기준 · 재고는 연말 결산 전까지 장부 자산과 별도로 표시합니다.`;syncAccountingReviewControls();
     },message=>{assetReadPhase='error';status.textContent=message;syncAccountingReviewControls();},{...options,
         start:()=>{invalidateAccountingDiscard('asset');if(accountingReviewOwners.get('asset')&&accountingReviewOwners.get('asset')!==scope.identity)document.getElementById('assetPurchaseReviewRows').replaceChildren();accountingReviewOwners.set('asset',scope.identity);assetOverviewLoading=true;assetReadPhase='loading';status.textContent='자산과 재고를 불러오는 중입니다.';syncAccountingReviewControls();},
         finish:()=>{assetOverviewLoading=false;syncAccountingReviewControls();},cancel:()=>{assetOverviewLoading=false;assetReadPhase='idle';status.textContent='새로고침을 눌러 자산과 재고를 확인해 주세요.';syncAccountingReviewControls();}

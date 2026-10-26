@@ -1,7 +1,7 @@
-/* v1.0.0 — scoped review, bounded waiting and durable same-request recovery. */
+/* v1.0.1 — keep later drafts editable after a verified save and matching reread. */
 (function(root){'use strict';
  function create(api){
-  const pending=new Map(),edits=new WeakMap();let notice='',noticeOwner='';
+  const pending=new Map(),completed=new Map(),edits=new WeakMap();let notice='',noticeOwner='';
   const key=(owner,id)=>owner+'|'+id;
   let noticeNode;
   function sync(){const box=document.getElementById('assetReviewRecovery');if(!box)return;const own=api.owner(),nodes=[];
@@ -29,7 +29,7 @@
    if(r?.verified!==true||r.found!==true||r.saved!==true||String(r.approval_id)!==t.id||r.request_key!==t.request||r.input_vat!==t.vat||r.evidence_type!==t.evidence||r.acquisition_cost!==t.gross-t.vat)throw Error('UNVERIFIED');
    if(pending.get(t.mapKey)!==t)return;release(t);
    if(t.owner!==api.owner())return;
-   api.accept(t.id,t.snapshot);say(t,'원가 확인값을 저장했습니다.');
+   completed.set(t.mapKey,t);api.accept(t.id,t.snapshot);say(t,'원가 확인값을 저장했습니다.');
    if(api.current(t.scope)){try{const loaded=await api.refresh();if(loaded===false)say(t,'원가 확인값은 저장했습니다. 목록은 다시 확인해 주세요.');}catch(_){say(t,'원가 확인값은 저장했습니다. 목록은 다시 확인해 주세요.');}}
   }
   async function send(t){t.state='working';sync();try{await settled(t,await call(t,'commit'));}catch(e){
@@ -56,8 +56,16 @@
     else throw Error('UNVERIFIED');
    }catch(_){say(t,'결과를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.');}finally{t.checking=false;sync();}
   }
+  function reconcile(reviews){
+   if(!Array.isArray(reviews))return;
+   for(const [k,t]of completed)if(t.owner===api.owner()){
+    const r=reviews.find(r=>String(r.approval_id)===t.id);completed.delete(k);
+    if(!r||r.accounted||!r.movement_exists||!r.reviewed_at||r.amount!==t.gross||r.input_vat!==t.vat||r.evidence_type!==t.evidence||!t.row.isConnected||t.row.dataset.accountingSource!==JSON.stringify(t.expected))continue;
+    t.row.dataset.accountingSource=JSON.stringify([t.id,r.amount,r.accounted,r.movement_exists,r.reviewed_at,r.input_vat,r.evidence_type]);t.row.dataset.accountingBaseline=t.snapshot;
+   }
+  }
   const list=document.getElementById('assetPurchaseReviewRows');for(const name of ['input','change'])list?.addEventListener(name,e=>{const row=e.target.closest('[data-accounting-key]');if(row)edits.set(row,(edits.get(row)||0)+1);});
-  return Object.freeze({review,sync,isBusy:()=>pending.size>0});
+  return Object.freeze({review,sync,reconcile,isBusy:()=>pending.size>0});
  }
- root.AccountingAssetReview=Object.freeze({version:'1.0.0',create});
+ root.AccountingAssetReview=Object.freeze({version:'1.0.1',create});
 })(window);
