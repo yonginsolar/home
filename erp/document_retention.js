@@ -1,8 +1,8 @@
-/* Retention review v1.3.1. Same-owner workspace retention and non-stealing focus recovery. */
+/* Retention review v1.3.2. Coalesce same-subject entry checks without resetting open drafts. */
 (()=>{'use strict';
 const $=id=>document.getElementById(id),R=window.CoopRetentionRules;
 const client=window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
-let owner='',epoch=0,dialogEpoch=0,closing=null,rows=[],after='',more=false,pending=null,active=null,booting=null,bootWanted=false,accessReady=false,accessFailure=null;
+let owner='',epoch=0,dialogEpoch=0,closing=null,rows=[],after='',more=false,pending=null,active=null,booting=null,bootWanted=false,bootEpoch=-1,authSubject=null,authEvent=0,accessReady=false,accessFailure=null;
 const drafts=new Map(),modal=bootstrap.Modal.getOrCreateInstance($('retentionModal'));
 const sourceReads=new Map();let sourceEpoch=0;
 const effectiveRules=row=>row.rules||row.automatic_rules||[];
@@ -23,21 +23,21 @@ async function read(name,args,context){const controller=context.controller||new 
  const result=await Promise.race([client.rpc(name,args).abortSignal(controller.signal),new Promise((_,reject)=>{timer=setTimeout(()=>{reject(Error('READ_TIMEOUT'));controller.abort();},15000);})]);
  if(result.error)throw result.error;return result.data;
 }finally{clearTimeout(timer);}}
-async function boot(refresh=true){if(booting){bootWanted=true;return booting;}accessReady=false;accessFailure=null;const generation=epoch;booting=(async()=>{if(refresh)status('조회 권한을 확인하고 있습니다…');try{
+async function boot(refresh=true){if(booting){if(bootEpoch!==epoch)bootWanted=true;return booting;}accessReady=false;accessFailure=null;const generation=epoch;bootEpoch=generation;booting=(async()=>{if(refresh)status('조회 권한을 확인하고 있습니다…');try{
  const context={controller:new AbortController()};
  const [user,runtime]=await Promise.all([Promise.race([client.auth.getUser(),new Promise((_,reject)=>setTimeout(()=>reject(Error('AUTH_TIMEOUT')),15000))]),read('get_my_erp_runtime',{},context)]);
- if(generation!==epoch)return;
+ if(generation!==epoch)return;if(authSubject!==null&&authSubject!==user.data?.user?.id)throw Error('AUTH_CHANGED');
  if(user.error||!user.data?.user||!runtime?.coop_id||runtime.is_active===false)throw Error('AUTH_REQUIRED');
  const next=JSON.stringify([user.data.user.id,runtime.coop_id]);
  if(next!==owner){capture();modal.hide();owner=next;rows=[];render();}
  const options=Array.from($('retentionKind').options),allowed=await Promise.all(options.map(o=>read('erp_retention_can_manage',{p_kind:o.value},context)));
- if(generation!==epoch)return;
- options.forEach((option,i)=>{option.disabled=allowed[i]!==true;});const selected=$('retentionKind').selectedOptions[0];if(selected?.disabled)$('retentionKind').value=options.find((o,i)=>allowed[i]===true)?.value||'';
+ if(generation!==epoch)return;if(authSubject!==null&&authSubject!==user.data.user.id)throw Error('AUTH_CHANGED');
+ options.forEach((option,i)=>{option.disabled=allowed[i]!==true;});const selected=$('retentionKind').selectedOptions[0];if(!selected||selected.disabled)$('retentionKind').value=options.find((o,i)=>allowed[i]===true)?.value||'';
  $('retentionKind').disabled=!allowed.some(Boolean);
  renderDrafts();if($('retentionKind').disabled){status('이 화면을 이용할 문서 관리 권한이 없습니다.');return;}
  accessReady=true;window.ErpWorkspaceResume?.register({ownsReadRequests:true,refreshWhenDirty:()=>true,authorize:authorizeWorkspace,refresh:()=>load(true,true),busy:()=>Array.from(drafts.values()).some(d=>d.owner===owner&&d.pending)});
  if(refresh)await load(true);
- }catch(error){if(generation===epoch){accessFailure=error;status('문서 관리 권한을 확인하지 못했습니다. 다시 확인해 주세요.');}}finally{booting=null;if(bootWanted){bootWanted=false;setTimeout(()=>void boot(),0);}}})();return booting;}
+ }catch(error){if(generation===epoch){accessFailure=error;status('문서 관리 권한을 확인하지 못했습니다. 다시 확인해 주세요.');}}finally{booting=null;bootEpoch=-1;if(bootWanted){bootWanted=false;setTimeout(()=>void boot(),0);}}})();return booting;}
 function render(){const body=$('retentionRows');body.replaceChildren();const search=$('retentionSearch').value.trim().toLocaleLowerCase(),filter=$('retentionFilter').value;
  const visible=rows.filter(row=>{const value=R.evaluate(row);return (!search||String(row.title||'').toLocaleLowerCase().includes(search))&&(filter==='all'||value.state===filter);});
  for(const row of visible){const state=R.evaluate(row),tr=document.createElement('tr'),name=document.createElement('td'),link=document.createElement('button'),meta=document.createElement('small');link.type='button';link.className='btn btn-link text-start p-0 retention-title';link.dataset.retentionSource=row.document_id;link.textContent=row.title||'제목 없음';link.addEventListener('click',()=>open(row,link,true));meta.className='d-block text-muted';meta.textContent=(row.document_type||'')+(row.has_attachment?' · 첨부 있음':'');name.append(link,meta);tr.append(name);
@@ -113,7 +113,13 @@ window.addEventListener('blur',()=>{if(closing)closing.interrupted=true;});
 $('retentionMenu').addEventListener('click',()=>{try{if(window.parent!==window&&window.parent.ErpWorkspace?.showMenu())return;}catch(_){}location.href='/erp/';});
 window.addEventListener('beforeunload',event=>{capture();if(Array.from(drafts.values()).some(d=>d.owner===owner&&(d.pending||d.unknown||snapshot(d.value)!==d.baseline))){event.preventDefault();event.returnValue='';}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){capture();stop();}else void boot();});
-client.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT'||event==='SIGNED_IN'||event==='USER_UPDATED')setTimeout(()=>{capture();modal.hide();stop();owner='';rows=[];render();void boot();},0);});
+client.auth.onAuthStateChange((event,session)=>{if(event!=='SIGNED_OUT'&&event!=='SIGNED_IN'&&event!=='USER_UPDATED')return;const id=session?.user?.id||null,same=event==='SIGNED_IN'&&id&&(owner?JSON.parse(owner)[0]===id:authSubject===null||authSubject===id),ticket=++authEvent;authSubject=event==='SIGNED_OUT'?'':id;
+ // An Auth event is only a stale-response boundary, never proof of permission.
+ // The same subject still uses normal getUser/runtime/can_manage checks, sharing
+ // an in-flight entry/visibility check rather than invalidating it and starting twice.
+ if(same){setTimeout(()=>{if(ticket===authEvent&&!document.hidden)void boot();},0);return;}
+ capture();modal.hide();stop();owner='';rows=[];render();
+ setTimeout(()=>{if(ticket===authEvent)void boot();},0);});
 const initialKind=new URL(location.href).searchParams.get('kind');if(Array.from($('retentionKind').options).some(option=>option.value===initialKind))$('retentionKind').value=initialKind;
 void boot();
 })();
