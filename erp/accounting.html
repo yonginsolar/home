@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.184 | Change: 2026-10-26 - Scroll payment review and defer future automatic insurance debits. -->
+<!-- Version: v1.0.185 | Change: 2026-10-26 - Review and post selected account reclassifications together. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,8 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.184 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.185 | accounting.html');</script>
+  <script src="accounting_reclass_bulk.js?v=1.0.0"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261022-help-1"></script>
@@ -148,6 +149,7 @@
   <meta name="erp-workflow-revision" content="20261010.1">
   <link rel="stylesheet" href="workflow_ease.css?v=20261010-1">
   <script src="workflow_ease.js?v=20261010-1" defer></script>
+<script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 <body class="erp-unified erp-pc-workspace erp-page-accounting">
 
@@ -602,6 +604,13 @@
              </div>
              <p id="approvalQueueStatus" class="small text-muted" role="status"></p>
              <div id="approvalUnclassifiedList" class="small text-muted"></div>
+             <div id="approvalReclassBulkBar" class="border-top pt-3 mt-2" hidden>
+               <div class="d-flex flex-wrap gap-2 align-items-center">
+                 <button type="button" id="approvalReclassBulkConfirm" class="btn btn-primary">일괄 확인</button>
+                 <button type="button" id="approvalReclassBulkResult" class="btn btn-outline-secondary" hidden>저장 결과 확인</button>
+               </div>
+               <p id="approvalReclassBulkStatus" class="small mt-2 mb-0" role="status" aria-live="polite"></p>
+             </div>
           </div>
           <details class="workflow-disclosure mb-0">
             <summary>연동 취소</summary>
@@ -1235,6 +1244,7 @@ let closingTaxEditRevision = 0;
 let closingActiveYear = null, closingActionRevision = 0;
 let closingPendingDraft = null;
 const approvalReclassBusy = new Set();
+let approvalReclassBulkUI = null;
 const assetReviewBusy = new Set();
 let approvalSplitReclassState = null;
 let durunuriSupportRowsCache = [];
@@ -1381,6 +1391,20 @@ function syncAccountingReviewControls() {
             if(id==='approvalUnclassifiedList'&&edit)refreshApprovalReclassVatToggle(row.dataset.accountingKey);
         });
     }
+    if(window.AccountingReclassBulk){
+        if(!approvalReclassBulkUI)approvalReclassBulkUI=window.AccountingReclassBulk.create({
+            owner:accountingReadIdentity,items:()=>approvalUnclassifiedIndex,snapshot:accountingEditSnapshot,
+            scope:()=>{const revision=accountingReviewRevisions.get('queue')||0;return accountingReadScope('tabSync',{valid:()=>revision===(accountingReviewRevisions.get('queue')||0)});},current:accountingReadScopeCurrent,
+            editable:()=>accountingDataAuthorized&&canPerform('accounting.edit'),
+            ready:key=>accountingReviewReady('queue',key),locked:key=>approvalReclassBusy.has(key),
+            lock:key=>approvalReclassBusy.add(key),unlock:key=>approvalReclassBusy.delete(key),sync:syncAccountingReviewControls,
+            account:(name,type)=>findApprovalReclassMasterRow(name,type?[type]:APPROVAL_RECLASS_TARGET_TYPES),
+            client:()=>_supabase,confirm:message=>window.CoopDialog.confirm(message),accept:(key,snapshot)=>acceptAccountingEditRow('queue',key,snapshot),
+            undo:ids=>setLastAutoSyncUndo({type:'approval_reclass',label:'전자결재 일괄 재분류',created_at:new Date().toISOString(),trans_ids:ids,restores:[]}),
+            refresh:async()=>{const result=await loadApprovalUnclassifiedQueue({refresh:true});refreshDashboard();loadHistory();return result;}
+        });
+        approvalReclassBulkUI.sync();
+    }
 }
 function accountingReviewReady(kind,key) {
     const id=kind==='asset'?'assetPurchaseReviewRows':'approvalUnclassifiedList',phase=kind==='asset'?assetReadPhase:approvalQueuePhase;
@@ -1406,7 +1430,7 @@ function bindAccountingReadLifecycle() {
     if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden){closingActionRevision++;expireDiscards();}cancelStale();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
     window.addEventListener('pagehide',()=>{expireDiscards();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('beforeunload',event=>{
-        if(hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
+        if(approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
     });
 }
 
@@ -2917,6 +2941,7 @@ function applyApprovalReclassAccountSelection(domKey, accountName, accountTypeVa
     inputEl.value = String(accountName || '').trim();
     inputEl.dataset.accountType = String(accountRow?.Type || accountTypeValue || '').trim();
     refreshApprovalReclassVatToggle(key);
+    approvalReclassBulkUI?.sync();
 }
 
 function openApprovalReclassAccountPicker(domKey) {
