@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.191 | Change: 2026-10-26 - Share scoped money reads and retain failed source lists. -->
+<!-- Version: v1.0.192 | Change: 2026-10-26 - Retain confirmed ledger rows during failed refreshes. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.191 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.192 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
@@ -9959,6 +9959,7 @@ function cleanHistoryDescription(value) {
 
 function deleteTxByButton(buttonEl) {
     if (!buttonEl) return;
+    if (!window.CoopAccountingHistory.isCurrent()) return showAlert('전표를 다시 조회한 뒤 진행해 주세요.');
     const id = buttonEl.getAttribute('data-id') || '';
     const transId = buttonEl.getAttribute('data-trans-id') || '';
     deleteTx(id, transId);
@@ -10166,12 +10167,12 @@ function renderHistoryDouble(rows, completePage = false) {
         }
         const idAttr = escapeHtml(item.id || '');
         const deleteButton = item.actualTransactionCount === 1 && (item.transId || item.id)
-            ? `<button class="btn btn-sm btn-outline-danger" data-id="${idAttr}" data-trans-id="${safeTransId}" onclick="deleteTxByButton(this)">전표 삭제</button>`
+            ? `<button class="btn btn-sm btn-outline-danger" data-history-process data-id="${idAttr}" data-trans-id="${safeTransId}" onclick="deleteTxByButton(this)">전표 삭제</button>`
             : '';
         const transMeta = safeRelatedTransIds || safeTransId;
         const dateTransIds = [...new Set([item.transId, ...item.relatedTransIds].filter(Boolean))];
         const dateButton = canPerform('accounting.edit') && item.transId
-            ? `<button class="btn btn-sm btn-outline-primary" data-trans-ids="${escapeHtml(JSON.stringify(dateTransIds))}" onclick="editJournalDateByButton(this)">날짜 수정</button>` : '';
+            ? `<button class="btn btn-sm btn-outline-primary" data-history-process data-trans-ids="${escapeHtml(JSON.stringify(dateTransIds))}" onclick="editJournalDateByButton(this)">날짜 수정</button>` : '';
         const transactionCountMeta = item.actualTransactionCount > 1 ? ` · 실제 전표 ${item.actualTransactionCount}건` : '';
 
         el.innerHTML += `
@@ -10218,6 +10219,7 @@ function renderHistoryDouble(rows, completePage = false) {
 
 async function editJournalDateByButton(button) {
     if (!canPerform('accounting.edit')) return showAlert('날짜 수정 권한이 없습니다.');
+    if (!window.CoopAccountingHistory.isCurrent()) return showAlert('전표를 다시 조회한 뒤 진행해 주세요.');
     let transIds;
     try { transIds = JSON.parse(button.dataset.transIds); } catch (_) { return showAlert('전표를 다시 불러와 주세요.'); }
     await window.CoopPaymentDates.edit(_supabase, transIds, async () => {
@@ -10227,9 +10229,12 @@ async function editJournalDateByButton(button) {
 
 async function deleteTx(id, transId) {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
+    const current = window.CoopAccountingHistory.guard();
+    if (!current()) return showAlert('전표를 다시 조회한 뒤 진행해 주세요.');
     if (!transId) {
         // Trans_ID가 없으면 기존처럼 ID로 삭제 (하위 호환)
         showConfirm("전표 삭제", "이 라인 1개만 삭제됩니다. 계속하시겠습니까?", async () => {
+            if (!current() || !canPerform('accounting.edit')) return showAlert('전표를 다시 조회한 뒤 진행해 주세요.');
             const { error } = await _supabase.from('ac_journal').delete().eq('id', id);
             if (!error) await logAudit('accounting.delete', id, '전표 삭제(단일)', null);
         });
@@ -10237,6 +10242,7 @@ async function deleteTx(id, transId) {
     }
 
     showConfirm("전표 삭제", "이 전표와 관련된 모든 분개(차/대변 전체)를 삭제하시겠습니까?", async function() {
+        if (!current() || !canPerform('accounting.edit')) return showAlert('전표를 다시 조회한 뒤 진행해 주세요.');
         // Trans_ID가 같은 모든 행을 삭제
         const { error } = await _supabase.from('ac_journal').delete().eq('Trans_ID', transId);
         if(error) showAlert("오류", /LINKED_MONEY_JOURNAL_LOCKED|CARD_SOURCE_HAS_CANCELLATION/.test(error.message || '') ? '취소·환급과 연결된 전표는 삭제할 수 없습니다. 업무별 입력·카드 환급에서 처리 내역을 확인해 주세요.' : "삭제 실패");
@@ -11159,7 +11165,7 @@ async function fetchLiabilitySum() {
 }
 </script>
 <script src="accounting_money_module.js?v=1.1.0"></script>
-<script src="accounting_history.js?v=20261020-3"></script>
+<script src="accounting_history.js?v=1.0.2"></script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>
