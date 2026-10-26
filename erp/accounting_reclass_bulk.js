@@ -1,7 +1,7 @@
-/* v1.0.0 — explicit review, atomic server commit, memory-only same-request recovery. */
+/* v1.0.1 — own selected row locks from preview through verified outcome. */
 (function(root){'use strict';
  function create(api){
-  let busy=false,pending=null,notice='',noticeOwner='';const edits=new WeakMap();
+  let busy=false,pending=null,notice='',noticeOwner='';const edits=new WeakMap(),rowLocks=new Map();
   const button=()=>document.getElementById('approvalReclassBulkConfirm');
   const owner=()=>api.owner();
   function selected(){
@@ -37,7 +37,12 @@
    if(e?.code==='55P03')return '다른 처리가 진행 중입니다. 잠시 후 다시 확인해 주세요.';
    return '확인하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.';
   }
-  function release(t){for(const r of t.rows)api.unlock(r.item.domKey);api.sync();}
+  function claim(t){
+   if(t.rows.some(r=>api.locked(r.item.domKey)))return false;
+   for(const r of t.rows){rowLocks.set(r.item.domKey,t);api.lock(r.item.domKey);}return true;
+  }
+  function owns(t){return t.rows.every(r=>rowLocks.get(r.item.domKey)===t&&api.locked(r.item.domKey));}
+  function release(t){let changed=false;for(const r of t.rows)if(rowLocks.get(r.item.domKey)===t){rowLocks.delete(r.item.domKey);api.unlock(r.item.domKey);changed=true;}if(changed)api.sync();}
   async function settled(t,result){
    const ids=t.rows.map(r=>'APR-RCLS-'+r.item.sourceId).sort();
    if(result?.ok!==true||result.verified!==true||result.found!==true||result.count!==ids.length||
@@ -69,19 +74,20 @@
    for(const r of rows){const a=api.account(r.input.value,r.input.dataset.accountType);if(!a||!Number.isSafeInteger(r.item.amount)||r.item.amount<=0){say('선택한 계정과목과 금액을 다시 확인해 주세요.');return;}
     const s=r.item;t.items.push({source:{source_id:String(s.sourceId),trans_id:s.transId,date:s.date,amount:s.amount,project:s.project,description:s.description},
      account:r.input.value.trim(),type:String(a.Type||'').trim(),use_vat:!!document.getElementById('approvalReclassVat-'+s.domKey)?.checked});}
-   busy=true;sync();
+   if(!claim(t)){say('다른 처리가 진행 중입니다. 잠시 후 다시 확인해 주세요.');return;}
+   busy=true;api.sync();
    try{
     const preview=await call('preview',t);
-    if(!valid(t))return;
+    if(!valid(t)||!owns(t))return;
     if(!preview?.verified||!Array.isArray(preview.items)||preview.items.length!==rows.length)throw Error('UNVERIFIED');
     t.expected=preview.items;
     const lines=preview.items.map((p,i)=>`${i+1}. ${p.source.description||'지출결의'} → ${p.account} · ${Number(p.source.amount).toLocaleString()}원${p.vat?' (부가세 '+Number(p.vat).toLocaleString()+'원)':''}`);
     const accepted=await api.confirm(`${rows.length}건 · 합계 ${Number(preview.total).toLocaleString()}원을 재분류할까요?\n\n${lines.join('\n')}`);
-    if(!accepted||!valid(t))return;
-    t.key=crypto.randomUUID();pending=t;for(const r of rows)api.lock(r.item.domKey);api.sync();
+    if(!accepted||!valid(t)||!owns(t))return;
+    t.key=crypto.randomUUID();pending=t;api.sync();
     await send(t);
    }catch(e){if(owner()===t.owner&&api.current(t.scope))say(errorText(e),t.owner);}
-   finally{busy=false;sync();}
+   finally{if(pending!==t)release(t);busy=false;sync();}
   }
   async function recover(){
    const t=pending;if(!t||busy||t.owner!==owner()||!api.editable()||!api.current(api.scope()))return;
@@ -102,5 +108,5 @@
   button()?.addEventListener('click',()=>void review());document.getElementById('approvalReclassBulkResult')?.addEventListener('click',()=>void recover());
   return Object.freeze({sync,review,recover,isBusy:()=>busy||!!pending});
  }
- root.AccountingReclassBulk=Object.freeze({version:'1.0.0',create});
+ root.AccountingReclassBulk=Object.freeze({version:'1.0.1',create});
 })(window);
