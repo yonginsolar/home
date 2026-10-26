@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.74
-Change: 2026-10-25 - Preserve Korean words in capital title and guidance at large font sizes.
+Version: v1.0.75
+Change: 2026-10-27 - Bind field validation to current input and report the current screen revision.
 -->
 <html lang="ko"> 
 <head>
@@ -13,7 +13,8 @@ Change: 2026-10-25 - Preserve Korean words in capital title and guidance at larg
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <script>console.log('[Version] v1.0.74 | signup.html');</script>
+  <meta name="signup-screen-version" content="1.0.75">
+  <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -559,7 +560,7 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:'1.0.69'});
+window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:document.querySelector('meta[name="signup-screen-version"]').content});
 window.CoopSignupFailure?.observeClient(_supabase);
 const signupPublicReads=CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
 window.CoopSignupFailure?.observeClient(signupPublicReads);
@@ -1433,6 +1434,7 @@ width: '100%', height: '100%'
 // [4] 로직: 개인/단체 토글
 let signupCorpValidationRevision = 0;
 function toggleType(type) {
+if(typeof invalidateSignupFieldChecks==='function')invalidateSignupFieldChecks();
 ++signupCorpValidationRevision;
 const isInd = (type === '개인');
 document.getElementById('lbl-name').innerText = isInd ? "이름 (실명)" : "단체명 (법인/고유명)";
@@ -3116,8 +3118,34 @@ el.classList.remove('is-invalid-field');
 }
 // [신규/교체] 주민등록번호 3중 검증 (유효성 -> 나이 -> DB중복)
 // [수정] 주민번호 통합 검증 (사업자번호 로직 구조 차용)
+const signupFieldChecks=new Map(),signupFieldEdits={rrn:0,phone:0};
+function invalidateSignupFieldChecks(field) {
+for(const name of field?[field]:['rrn','phone']){++signupFieldEdits[name];signupFieldChecks.delete(name);}
+}
+for(const eventName of ['input','change'])document.getElementById('joinForm').addEventListener(eventName,event=>{
+const id=event.target?.id;
+if(['rrn1','rrn2'].includes(id))invalidateSignupFieldChecks('rrn');
+if(['p1','p2','p3'].includes(id))invalidateSignupFieldChecks('phone');
+if(event.target?.name==='userType')invalidateSignupFieldChecks();
+});
+function beginSignupFieldCheck(field,ids) {
+const scope=signupIdentityScope(),type=document.querySelector('input[name="userType"]:checked')?.value;
+const values=ids.map(id=>document.getElementById(id).value),revision=signupFieldEdits[field];
+const old=signupFieldChecks.get(field);
+if(old?.pending&&old.revision===revision&&old.type===type&&isCurrentSignupIdentity(old.scope)&&JSON.stringify(old.values)===JSON.stringify(values))return old;
+const task={field,ids,values,revision,type,scope,pending:null};signupFieldChecks.set(field,task);return task;
+}
+function isCurrentSignupFieldCheck(task) {
+return signupFieldChecks.get(task.field)===task&&signupFieldEdits[task.field]===task.revision
+&&isCurrentSignupIdentity(task.scope)&&document.querySelector('input[name="userType"]:checked')?.value===task.type
+&&task.ids.every((id,i)=>document.getElementById(id).value===task.values[i]);
+}
+function readSignupFieldCheck(task,value) {
+if(!task.pending)task.pending=runSignupDuplicateCheck(task.field,value).finally(()=>{task.pending=null;});
+return task.pending;
+}
 async function checkRRNFinal() {
-const scope=signupIdentityScope();
+const task=beginSignupFieldCheck('rrn',['rrn1','rrn2']);
 const r1 = document.getElementById('rrn1').value;
 const r2 = document.getElementById('rrn2').value;
 if (r1.length < 6 || r2.length < 7) return; // 다 안 썼으면 조용히 리턴
@@ -3148,8 +3176,8 @@ const type = document.querySelector('input[name="userType"]:checked').value;
 if (type === '단체') return; // 단체면 패스
 
 try {
-const exists = await runSignupDuplicateCheck('rrn', r1 + "-" + r2);
-if(!isCurrentSignupIdentity(scope))return;
+const exists = await readSignupFieldCheck(task, r1 + "-" + r2);
+if(!isCurrentSignupFieldCheck(task))return;
 if (exists === true) {
 setMsg('rrnMsg', "❌ 이미 가입된 주민등록번호입니다.", true);
 document.getElementById('rrn2').value = ""; // 입력값 지우기
@@ -3157,13 +3185,13 @@ document.getElementById('rrn2').value = ""; // 입력값 지우기
 setMsg('rrnMsg', "✅ 가입 가능한 번호입니다.", false);
 }
 } catch (error) {
-if(!isCurrentSignupIdentity(scope))return;
+if(!isCurrentSignupFieldCheck(task))return;
 setMsg('rrnMsg', "⚠️ 주민등록번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
 }
 }
 
 async function checkPhoneDuplicateServer() {
-const scope=signupIdentityScope();
+const task=beginSignupFieldCheck('phone',['p1','p2','p3']);
 const type = document.querySelector('input[name="userType"]:checked').value;
 if (type === '단체') return;
 
@@ -3173,15 +3201,15 @@ const p3 = document.getElementById('p3').value;
 if(!p1 || !p2 || !p3) return;
 
 try {
-const exists = await runSignupDuplicateCheck('phone', p1 + "-" + p2 + "-" + p3);
-if(!isCurrentSignupIdentity(scope))return;
+const exists = await readSignupFieldCheck(task, p1 + "-" + p2 + "-" + p3);
+if(!isCurrentSignupFieldCheck(task))return;
 if (exists === true) {
 setMsg('phoneMsg', "❌ 이미 가입된 연락처입니다.", true);
 } else {
 setMsg('phoneMsg', "✅ 사용 가능한 연락처입니다.", false);
 }
 } catch (error) {
-if(!isCurrentSignupIdentity(scope))return;
+if(!isCurrentSignupFieldCheck(task))return;
 setMsg('phoneMsg', "⚠️ 연락처 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
 }
 }

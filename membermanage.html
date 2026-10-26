@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.218
-Change: 2026-10-25 - Bind email login requests to the current address and prevent repeated verification.
+Version: v1.0.219
+Change: 2026-10-27 - Recheck delayed email authentication while preserving input and resend limits.
 -->
 <html lang="ko">
 <head>
@@ -66,7 +66,7 @@ allowKakaoApp: true
 <script src="shared/route_guard.js?v=20260401-1"></script>
 <script src="shared/member_capital.js?v=20261008-3"></script>
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
-<script src="shared/login_request_guard.js?v=20261025-1" integrity="sha384-eHg/M6TxFH3HRcJFrqB3l3HTh20Xb8BZHcrVCkFftImcLYxVOApPZ+9SqK63RsoO" crossorigin="anonymous"></script>
+<script src="shared/login_request_guard.js?v=20261027-1" integrity="sha384-CXfKAsoPDxxm6ZSbHJpeMt25I9do8/bKsJ9EuNkaGtHboNSH5feIQR7H1xoFhEgU" crossorigin="anonymous"></script>
 <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
 
 <link href="style.css" rel="stylesheet">
@@ -3324,8 +3324,8 @@ showSessionExpiredNoticeOnce();
 
 try {
 _supabase = window.CoopRouteGuard?.createSupabaseClient
-? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
-: supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY, {global:{fetch:window.CoopLoginRequestGuard.boundedFetch(window.fetch.bind(window),SUPABASE_URL)}})
+: supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {global:{fetch:window.CoopLoginRequestGuard.boundedFetch(window.fetch.bind(window),SUPABASE_URL)}});
 window._client = _supabase;
 // [보안] 간단 HTML 이스케이프
 function escapeHtml(value = '') {
@@ -4251,6 +4251,10 @@ if (!loginOtpFlow) loginOtpFlow = window.CoopLoginRequestGuard.create({
 emailInput:document.getElementById('emailInput'), codeInput:document.getElementById('otpInput'),
 getOwner:()=>curAuth?.id,
 getScope:()=>window.CoopRouteGuard?.getPublicRuntimeHost(window.location) || window.location.host,
+statusElement:document.getElementById('loginOtpStatus'),
+readSession:()=>_supabase.auth.getSession(),
+onResume:()=>{document.getElementById('sentMsgBox').classList.remove('hidden');document.getElementById('targetEmail').textContent='';document.getElementById('sentMsgBox').querySelector('h4').textContent='인증코드를 입력해 주세요';document.getElementById('targetEmail').parentElement.hidden=true;},
+onVerified:async(user,isCurrent)=>{if(isCurrent())await handleLoginSuccess(user);},
 onReset:reason=>{
 pendingLoginOtpEmail = '';
 document.getElementById('sentMsgBox').classList.add('hidden');
@@ -4293,6 +4297,7 @@ try {
 // Preserve the original sign-out preparation, but run it only once per request.
 await signOutSilently(_supabase);
 if (!flow.current(request)) return;
+loginOtpCooldownUntil = Date.now() + 60000;
 const { error } = await _supabase.auth.signInWithOtp({
 email: email,
 options: { 
@@ -4303,6 +4308,7 @@ if (!error) loginOtpCooldownUntil = Date.now() + 60000;
 if (!flow.current(request)) return;
 setLoginOtpStatus('');
 if(error) {
+if(flow.captureFailure(request,error))return;
 showModal(translateAuthError(error.message));
 }
 else {
@@ -4310,9 +4316,12 @@ if (!flow.sent(request)) return;
 pendingLoginOtpEmail = email;
 document.getElementById('sentMsgBox').classList.remove('hidden');
 document.getElementById('targetEmail').innerText = email;
+document.getElementById('targetEmail').parentElement.hidden=false;
+document.getElementById('sentMsgBox').querySelector('h4').textContent='메일함을 확인해주세요!';
 }
 } catch (error) {
 if (flow.current(request)) {
+if(flow.captureFailure(request,error))return;
 setLoginOtpStatus('');
 showModal(translateAuthError(error?.message || String(error)));
 }
@@ -4342,6 +4351,7 @@ verifiedUser = data?.user || data?.session?.user || null;
 if (!flow.current(request,verifiedUser)) return;
 setLoginOtpStatus('');
 if (error) {
+if(flow.captureFailure(request,error))return;
 showModal(translateAuthError(error.message));
 return;
 }
@@ -4356,6 +4366,7 @@ if (!flow.verified(request,session.user)) return;
 await handleLoginSuccess(session.user);
 } catch (error) {
 if (flow.current(request,verifiedUser)) {
+if(flow.captureFailure(request,error))return;
 setLoginOtpStatus('');
 showModal('시스템 오류: ' + (error?.message || error));
 }

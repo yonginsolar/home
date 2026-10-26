@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.121 | Change: 2026-10-25 - Keep email login requests single-flight and bound to the current address. -->
+<!-- Version: v1.0.122 | Change: 2026-10-27 - Recheck delayed email authentication without repeating the original request. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -53,7 +53,7 @@
 </script>
   <script src="/shared/route_guard.js?v=20260408-1"></script>
   <script src="/shared/auth_email_helper.js?v=1.0.0"></script>
-  <script src="/shared/login_request_guard.js?v=20261025-1" integrity="sha384-eHg/M6TxFH3HRcJFrqB3l3HTh20Xb8BZHcrVCkFftImcLYxVOApPZ+9SqK63RsoO" crossorigin="anonymous"></script>
+  <script src="/shared/login_request_guard.js?v=20261027-1" integrity="sha384-CXfKAsoPDxxm6ZSbHJpeMt25I9do8/bKsJ9EuNkaGtHboNSH5feIQR7H1xoFhEgU" crossorigin="anonymous"></script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <script src="/shared/auth_broker_helper.js?v=20261006-2"></script>
   
@@ -425,6 +425,7 @@ const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const ERP_RUNTIME_HOST = window.CoopRouteGuard?.getErpRuntimeHost(window.location) || String(window.location.hostname || '').trim().toLowerCase();
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     global: {
+        fetch: window.CoopLoginRequestGuard.boundedFetch(window.fetch.bind(window), SUPABASE_URL),
         headers: {
             'x-erp-host': ERP_RUNTIME_HOST
         }
@@ -2669,6 +2670,15 @@ function getLoginOtpFlow() {
         emailInput: document.getElementById('emailInput'), codeInput: document.getElementById('otpInput'),
         getOwner: () => currentAuthUser?.id,
         getScope: () => window.CoopRouteGuard?.getErpRuntimeHost(window.location) || window.location.host,
+        statusElement: document.getElementById('statusMsg'),
+        readSession: () => _supabase.auth.getSession(),
+        onResume: () => { document.getElementById('otpArea').classList.remove('hidden'); },
+        onVerified: async (user, isCurrent) => {
+            showScreen('loadingScreen'); await loadUserInfo(user);
+            if (!isCurrent()) return;
+            const next = getRequestedErpNextTarget();
+            if (next && next !== ERP_INDEX_URL && next !== getCanonicalErpCurrentUrl()) window.location.replace(next);
+        },
         onReset: reason => {
             pendingOtpEmail = '';
             document.getElementById('otpArea').classList.add('hidden');
@@ -2725,6 +2735,7 @@ async function sendMagicLink() {
         recordMagicLinkAttempt(email, !error);
         if (!flow.current(request)) return;
         if (error) {
+            if (flow.captureFailure(request,error)) return;
             showAlert("전송 실패: " + error.message);
             return;
         }
@@ -2743,7 +2754,7 @@ async function sendMagicLink() {
         }
     } catch (error) {
         recordMagicLinkAttempt(email, false);
-        if (flow.current(request)) showAlert("전송 실패: " + (error?.message || error));
+        if (flow.current(request) && !flow.captureFailure(request,error)) showAlert("전송 실패: " + (error?.message || error));
     } finally {
         flow.finish(request);
     }
@@ -2776,6 +2787,7 @@ async function verifyEmailOtp() {
         verifiedUser = data?.user || data?.session?.user || null;
         if (!flow.current(request, verifiedUser)) return;
         if (error) {
+            if (flow.captureFailure(request,error)) return;
             showAlert('인증 실패: ' + error.message);
             return;
         }
@@ -2797,7 +2809,7 @@ async function verifyEmailOtp() {
             window.location.replace(nextTarget);
         }
     } catch (error) {
-        if (flow.current(request, verifiedUser)) showAlert('인증 실패: ' + (error?.message || error));
+        if (flow.current(request, verifiedUser) && !flow.captureFailure(request,error)) showAlert('인증 실패: ' + (error?.message || error));
     } finally {
         flow.finish(request);
     }
