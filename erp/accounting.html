@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.189 | Change: 2026-10-26 - Keep later entry edits after successful save. -->
+<!-- Version: v1.0.190 | Change: 2026-10-26 - Keep later entry edits and current outcome text. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.189 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.190 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
@@ -7736,6 +7736,7 @@ function captureAccountingEntrySave(pending = true) {
     const form=document.getElementById('erpForm');
     const context={form,owner:myInfo,identity:accountingReadIdentity(),fields:new Map(accountingEntryFields(form).map(n=>[n,accountingEntryFieldValue(n)]))};
     if(pending)accountingEntrySaveContext=context;
+    syncAccountingEntryDraftStatus();
     return context;
 }
 function accountingEntryOwnerCurrent(context) {
@@ -7747,11 +7748,11 @@ function hasRetainedAccountingEntryDraft() {
     const fields=accountingEntryFields(draft.form);
     return fields.length!==draft.fields.size||fields.some(n=>!draft.fields.has(n)||!accountingEntryFieldMatches(n,draft.fields.get(n)));
 }
-function syncAccountingEntryDraftStatus() {
+function syncAccountingEntryDraftStatus(outcome) {
     const status=document.getElementById('accountingEntrySaveStatus');
     if(!status)return;
     status.hidden=!hasRetainedAccountingEntryDraft();
-    status.textContent=status.hidden?'':'저장했습니다. 추가로 작성한 내용은 아직 저장되지 않았습니다.';
+    status.textContent=status.hidden?'':outcome==='saved'?'저장했습니다. 추가로 작성한 내용은 아직 저장되지 않았습니다.':'작성 중 · 아직 저장하지 않은 내용이 있습니다.';
 }
 function bindAccountingEntryDraftProtection() {
     const form=document.getElementById('erpForm');
@@ -7781,7 +7782,7 @@ function finishAccountingEntrySave(context) {
         }
         accountingEntryRetainedDraft={...context,fields:baseline};
     }
-    syncAccountingEntryDraftStatus();
+    syncAccountingEntryDraftStatus('saved');
     return changed;
 }
 function resetAccountingFormAfterSave() {
