@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261025-cert-intent-1') return;
+    if (root.AdminMemberSite?.version === '20261026-external-read-1') return;
 const activityDrafts=new Map();
 let activityActiveDraft=null,activityDraftTemplate=null,activityDraftEpoch=0,activityEditRevision=0,activitySaveIntentEpoch=0;
 function captureActivitySaveIntent() {
@@ -3044,36 +3044,58 @@ return `<span>${escapeHtml(scopeLabel)} ${statusBadge} <span class="text-muted">
 }).join('');
 }
 
-async function fetchExternalNewsAdmin() {
-const tbody = document.getElementById('externalNewsListBody');
-if (tbody) {
-tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">외부 소식을 불러오는 중...</td></tr>';
+let externalNewsRead=null,externalNewsOwner='';
+function externalNewsScopeCurrent(context) {
+return !!context.owner&&context.owner===siteModalOwner()&&context.runtime===g_adminMemberRuntime
+&&canAccessAdminMemberTab('site')&&!root.frameElement?.hidden
+&&document.getElementById('tab-site')?.classList.contains('active')
+&&document.getElementById('sub-external-news')?.classList.contains('active')
+&&document.getElementById('externalNewsListBody')===context.body;
 }
-
-const [feedsResult, newsResult] = await Promise.all([
-scopeAdminTenant(_supabase.from('site_external_news_feeds').select('*')).order('scope', { ascending: true }),
+function externalNewsReadCurrent(read) {
+return externalNewsRead===read&&!read.controller.signal.aborted&&externalNewsScopeCurrent(read);
+}
+function externalNewsReadStatus(text,busy=false) {
+const status=document.getElementById('external-news-read-status');if(status)status.textContent=text;
+const retry=document.getElementById('external-news-retry');if(retry)retry.disabled=busy;
+document.getElementById('externalNewsListBody')?.setAttribute('aria-busy',String(busy));
+}
+function cancelExternalNewsRead() {
+const read=externalNewsRead;if(!read)return;
+externalNewsRead=null;read.controller.abort();window.clearTimeout(read.timer);read.release({cancelled:true});
+externalNewsReadStatus('');
+}
+function fetchExternalNewsAdmin(options={}) {
+const context={owner:siteModalOwner(),runtime:g_adminMemberRuntime,body:document.getElementById('externalNewsListBody')};
+if(!externalNewsScopeCurrent(context))return Promise.resolve(false);
+if(externalNewsRead){if(!options.refresh&&externalNewsReadCurrent(externalNewsRead))return externalNewsRead.promise;cancelExternalNewsRead();}
+if(externalNewsOwner!==context.owner){context.body.replaceChildren();g_externalNewsAdmin=[];renderExternalNewsSyncStatus([]);externalNewsOwner=context.owner;}
+const read={...context,controller:new AbortController(),release:null,timer:0,promise:null};externalNewsRead=read;
+externalNewsReadStatus('외부 소식을 불러오는 중입니다.',true);
+const stopped=new Promise((resolve,reject)=>{read.release=resolve;read.timer=window.setTimeout(()=>{read.timedOut=true;reject(Error('EXTERNAL_NEWS_TIMEOUT'));read.controller.abort();},15000);});
+read.promise=(async()=>{try {
+const results=await Promise.race([Promise.all([
+scopeAdminTenant(_supabase.from('site_external_news_feeds').select('*')).order('scope', { ascending: true }).abortSignal(read.controller.signal),
 scopeAdminTenant(_supabase.from('site_external_news').select('*'))
   .order('published_at', { ascending: false, nullsFirst: false })
   .order('updated_at', { ascending: false })
-  .limit(40)
-]);
-
-if (feedsResult.error) {
-CoopSafeLog.error("[fetchExternalNewsAdmin] feed failed:", feedsResult.error);
-renderExternalNewsSyncStatus([]);
+  .limit(40).abortSignal(read.controller.signal)
+]),stopped]);
+if(!externalNewsReadCurrent(read)||results?.cancelled)return false;
+const [feedsResult,newsResult]=results;
+if(feedsResult.error||newsResult.error)throw feedsResult.error||newsResult.error;
+if(!Array.isArray(feedsResult.data)||!Array.isArray(newsResult.data))throw Error('EXTERNAL_NEWS_INVALID');
+renderExternalNewsSyncStatus(feedsResult.data);
+renderExternalNewsAdminRows(newsResult.data,context.body);externalNewsReadStatus('');return true;
+}catch(error){if(externalNewsRead===read&&externalNewsScopeCurrent(read)){
+CoopSafeLog.error('[fetchExternalNewsAdmin] failed:',error);
+externalNewsReadStatus(read.timedOut?'조회가 지연되었습니다. 다시 확인해 주세요.':'외부 소식을 불러오지 못했습니다. 다시 확인해 주세요.');
+}return false;
+}finally{window.clearTimeout(read.timer);if(externalNewsRead===read){externalNewsRead=null;const retry=document.getElementById('external-news-retry');if(retry)retry.disabled=false;read.body.setAttribute('aria-busy','false');}}})();
+return read.promise;
 }
-else {
-renderExternalNewsSyncStatus(feedsResult.data || []);
-}
-
-if (!tbody) return;
-if (newsResult.error) {
-CoopSafeLog.error("[fetchExternalNewsAdmin] news failed:", newsResult.error);
-tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-danger">외부 소식을 불러오지 못했습니다.</td></tr>';
-return;
-}
-
-g_externalNewsAdmin = Array.isArray(newsResult.data) ? newsResult.data : [];
+function renderExternalNewsAdminRows(rows,tbody) {
+g_externalNewsAdmin=rows;
 if (g_externalNewsAdmin.length === 0) {
 tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">동기화된 외부 소식이 없습니다. 우측 상단 RSS 동기화를 실행하세요.</td></tr>';
 return;
@@ -3110,12 +3132,12 @@ scopes: ['regional', 'national']
 
 if (error) {
 CoopSafeLog.error("[syncExternalNewsAdmin] failed:", error);
-await fetchExternalNewsAdmin();
+await fetchExternalNewsAdmin({refresh:true});
 const errorMessage = await getAdminMemberEdgeErrorMessage(error);
 return myAlert('RSS 동기화 실패: ' + errorMessage, 'error');
 }
 
-await fetchExternalNewsAdmin();
+await fetchExternalNewsAdmin({refresh:true});
 const totalUpserted = Number(data?.total_upserted || 0);
 const totalRemoved = Number(data?.total_removed || 0);
 myAlert(`RSS 동기화가 완료되었습니다. (${totalUpserted.toLocaleString('ko-KR')}건 반영, ${totalRemoved.toLocaleString('ko-KR')}건 비노출)`);
@@ -4248,15 +4270,19 @@ CoopHomeVisualEditor.mount(); // Mount before taking the initial draft snapshot.
 getSiteEditorDraft('home');
 getSiteEditorDraft('about');
 getCertificationDraftStore();
-window.addEventListener('pagehide',() => {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();});
+window.addEventListener('pagehide',() => {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();cancelExternalNewsRead();});
 for (const eventName of ['hidden.bs.tab','shown.bs.tab']) document.getElementById('site-content-tabs')?.addEventListener(eventName,() => {
 if(aboutSettingsRead&&!isAboutSettingsReadCurrent(aboutSettingsRead))void cancelAboutSettingsRead();
 if(activityListRead&&!isActivityListReadCurrent(activityListRead))cancelActivityListRead();
+if(externalNewsRead&&!externalNewsReadCurrent(externalNewsRead))cancelExternalNewsRead();
 if (activitySourceRead && root.CoopHomeVisualEditor?.current() !== activitySourceRead.area) cancelActivitySourceRead();
 if (activityModalRead && root.CoopHomeVisualEditor?.current() !== activityModalRead.area) cancelActivityModalRead();
 });
+for(const eventName of ['hidden.bs.tab','shown.bs.tab'])document.addEventListener(eventName,()=>{
+if(externalNewsRead&&!externalNewsReadCurrent(externalNewsRead))cancelExternalNewsRead();
+});
 if (root.frameElement) new MutationObserver(() => {
-if (root.frameElement?.hidden) {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();}
+if (root.frameElement?.hidden) {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();cancelExternalNewsRead();}
 }).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
 
 window.addEventListener('beforeunload', (event) => {
@@ -4287,5 +4313,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
-    root.AdminMemberSite = Object.freeze({ version: '20261025-cert-intent-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
+    root.AdminMemberSite = Object.freeze({ version: '20261026-external-read-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
 })(window);
