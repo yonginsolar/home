@@ -38,6 +38,28 @@
         if (text) el.textContent = text;
         return el;
     }
+    // Keep the body scrollable, but let the whole card scroll when its fixed controls cannot fit.
+    function fitDialog(root, form, body, footer) {
+        if (!root.querySelector || !window.addEventListener) return;
+        const box = root.querySelector('.modal-dialog'), content = root.querySelector('.modal-content');
+        const header = root.querySelector('.modal-header');
+        function fit() {
+            if (!root.classList.contains('show')) return;
+            const whole = header.scrollHeight + footer.scrollHeight + 100 > box.clientHeight;
+            content.style.display = whole ? 'block' : 'flex';
+            content.style.overflowY = whole ? 'auto' : 'hidden';
+            form.style.display = whole ? 'block' : 'flex';
+            form.style.overflow = whole ? 'visible' : 'hidden';
+            body.style.overflowY = whole ? 'visible' : 'auto';
+        }
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null;
+        observer?.observe(header); observer?.observe(footer);
+        root.addEventListener('shown.bs.modal', fit);
+        window.addEventListener('resize', fit);
+        root.addEventListener('hidden.bs.modal', () => {
+            observer?.disconnect(); window.removeEventListener('resize', fit);
+        }, { once: true });
+    }
     function collect(candidates, today) {
         if (!candidates.length) return Promise.resolve(new Map());
         if (active) return active;
@@ -54,7 +76,9 @@
             title.id = 'withholdingPaymentTitle';
             header.append(title);
             const form = element('form');
+            Object.assign(form.style, { display: 'flex', flexDirection: 'column', minHeight: '0', overflow: 'hidden' });
             const body = element('div', 'modal-body');
+            body.style.overflowY = 'auto';
             body.style.wordBreak = 'keep-all';
             body.append(element('p', 'text-muted', '납부한 원천세만 선택하고 실제 납부일을 입력해 주세요. 아직 납부하지 않은 건은 선택하지 않고 다음에 연동할 수 있습니다.'));
             const controls = candidates.map(({ doc, tax }, index) => {
@@ -88,6 +112,7 @@
             error.setAttribute('role', 'alert');
             body.append(error);
             const footer = element('div', 'modal-footer');
+            footer.style.flexShrink = '0';
             const cancel = element('button', 'btn btn-outline-secondary', '취소');
             cancel.type = 'button';
             const next = element('button', 'btn btn-primary', '연동 내용 확인');
@@ -98,6 +123,7 @@
             dialog.append(content);
             root.append(dialog);
             document.body.append(root);
+            fitDialog(root, form, body, footer);
             const modal = new bootstrap.Modal(root, { backdrop: 'static', keyboard: true });
             let result = null, submitted = false;
             cancel.addEventListener('click', () => modal.hide());
@@ -147,5 +173,5 @@
             });
         });
     }
-    window.CoopWithholdingPayment = Object.freeze({ validDate, validate, signature, periodError, collect, review });
+    window.CoopWithholdingPayment = Object.freeze({ validDate, validate, signature, periodError, collect, review, fitDialog });
 })();

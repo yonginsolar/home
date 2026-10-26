@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.183 | Change: 2026-10-24 - Keep explicit closing drafts separate from automatic comparison values. -->
+<!-- Version: v1.0.184 | Change: 2026-10-26 - Scroll payment review and defer future automatic insurance debits. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.183 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.184 | accounting.html');</script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261022-help-1"></script>
@@ -43,9 +43,9 @@
 </script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
-  <script src="accounting_withholding_payment.js?v=1.0.0"></script>
-  <script src="insurance_payment.js?v=1.0.0"></script>
-  <script src="accounting_payment_dates.js?v=1.2.0"></script>
+  <script src="accounting_withholding_payment.js?v=1.0.1"></script>
+  <script src="insurance_payment.js?v=1.0.1"></script>
+  <script src="accounting_payment_dates.js?v=1.2.1"></script>
 
   <style>
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
@@ -4809,7 +4809,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
         let confirmedPayment = null;
         if (window.CoopPaymentDates.eligible(doc) && !isSalaryLikeApproval(doc)) {
             const payment = options.expensePayments?.get(String(doc.id));
-            let reason = window.CoopPaymentDates.validate(payment, fallbackDate);
+            let reason = window.CoopInsurancePayment.syncPaymentError(doc, payment, fallbackDate) || window.CoopPaymentDates.validate(payment, fallbackDate);
             if (!reason && payment.signature !== window.CoopPaymentDates.signature(doc)) reason = '결재 내용이 달라졌습니다. 지출일을 다시 확인해 주세요.';
             const prepaid = doc.expense_snapshot?.execution;
             if (!reason && prepaid?.prepaid === true && payment.date !== prepaid.date) reason = '선지출은 승인 문서에 기재한 지출일을 사용해야 합니다.';

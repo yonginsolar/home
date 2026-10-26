@@ -1,4 +1,4 @@
-/* v1.2.0 — distinguish card use from bank payment; memory-only confirmation drafts. */
+/* v1.2.1 — scrollable confirmation forms; do not confirm a future automatic debit. */
 (function () {
     'use strict';
     let active = null, editing = false, draftOwner = '';
@@ -50,16 +50,20 @@
         const title = el('h5', 'modal-title fw-bold', titleText); title.id = `${id}Title`;
         header.append(title);
         const form = el('form'), body = el('div', 'modal-body'), footer = el('div', 'modal-footer');
+        Object.assign(form.style, { display: 'flex', flexDirection: 'column', minHeight: '0', overflow: 'hidden' });
+        body.style.overflowY = 'auto'; footer.style.flexShrink = '0';
         const error = el('p', 'text-danger mb-0 px-3'); error.setAttribute('role', 'alert');
         const cancel = el('button', 'btn btn-outline-secondary', '취소'); cancel.type = 'button';
         const submit = el('button', 'btn btn-primary', '확인'); submit.type = 'submit';
         footer.append(cancel, submit); form.append(body, error, footer); content.append(header, form);
         box.append(content); root.append(box); document.body.append(root);
+        window.CoopWithholdingPayment?.fitDialog(root, form, body, footer);
         const modal = new bootstrap.Modal(root, { backdrop: 'static', keyboard: false });
         cancel.addEventListener('click', () => modal.hide());
         return { root, form, body, error, cancel, submit, modal };
     }
     function collect(candidates, today, options = {}) {
+        candidates = candidates.filter(({doc}) => !window.CoopInsurancePayment.syncWaitReason(doc, today));
         if (!candidates.length) return Promise.resolve(new Map());
         if (active) return active;
         active = new Promise(resolve => {
@@ -80,10 +84,12 @@
                 if (insurance) section.append(el('p', 'small text-muted', window.CoopInsurancePayment.label(doc.expense_snapshot?.insurance)));
                 const row = el('div', 'form-check mb-2'), check = el('input', 'form-check-input');
                 check.type = 'checkbox'; check.id = `expensePaidCheck${index}`; check.checked = draft.confirmed;
-                const checkLabel = el('label', 'form-check-label', '이체 또는 카드 사용을 확인했습니다.'); checkLabel.htmlFor = check.id;
+                const automatic = insurance && window.CoopInsurancePayment.isAuto(doc.expense_snapshot?.insurance);
+                const checkLabel = el('label', 'form-check-label', automatic ? '자동이체 출금을 확인했습니다.' : insurance ? '실제 납부를 확인했습니다.' : '이체 또는 카드 사용을 확인했습니다.'); checkLabel.htmlFor = check.id;
                 row.append(check, checkLabel);
                 const date = el('input', 'form-control'); date.type = 'date'; date.id = `expensePaidDate${index}`;
                 date.max = today; date.value = draft.date;
+                if (automatic) date.min = doc.expense_snapshot.insurance.due_date;
                 date.disabled = !check.checked || prepaid; date.required = !prepaid;
                 const label = el('label', 'form-label', '실제 지출일'); label.htmlFor = date.id;
                 let method, card;
@@ -119,7 +125,7 @@
                 for (const control of controls) {
                     const payment = { ...control.draft, confirmed: control.check.checked, date: control.date.value, signature: signature(control.doc) };
                     if (payment.confirmed) {
-                        const message = validate(payment, today);
+                        const message = window.CoopInsurancePayment.syncPaymentError(control.doc, payment, today) || validate(payment, today);
                         if (message) { ui.error.textContent = message; return; }
                         try { resolvePayment(control.doc, payment, cards); } catch(error) { ui.error.textContent=error.message;return; }
                     }
@@ -193,5 +199,5 @@
             ui.modal.show();
         } catch (error) { editing = false; if (ui) ui.root.remove(); window.showAlert('날짜 수정 확인', error.message); }
     }
-    window.CoopPaymentDates = { version: '1.2.0', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, edit };
+    window.CoopPaymentDates = { version: '1.2.1', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, edit };
 })();

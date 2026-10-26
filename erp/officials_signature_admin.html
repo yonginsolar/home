@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.20 -->
+<!-- Version: v1.0.22 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.21 | officials_signature_admin.html');</script>
+  <script>console.log('[Version] v1.0.22 | officials_signature_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -249,6 +249,8 @@
     let currentSignatureFilter = 'all';
     let signatureListRequest = null;
     let signatureListSequence = 0;
+    const sealUploads = new Map();
+    let sealPreviewSequence = 0;
     let expoExampleBusy = false;
     const expoExamplePending = new Map();
     const MAX_SEAL_LONG_EDGE = 1600;
@@ -563,7 +565,7 @@
     }
 
     function hasPendingSignatureUpload() {
-      return expoExampleBusy || Array.from(document.querySelectorAll('#officialSignBody input[type="file"]')).some(input => input.files?.length > 0);
+      return expoExampleBusy || sealUploads.size > 0 || Array.from(document.querySelectorAll('#officialSignBody input[type="file"]')).some(input => input.files?.length > 0);
     }
 
     function applySignatureFilter() {
@@ -735,15 +737,28 @@
         showAlert('이미지 파일만 업로드할 수 있습니다.', 'warning');
         return;
       }
-
+      const owner = String(currentUser?.id || ''), coop = currentCoopId;
+      const key = JSON.stringify([owner, coop, groupKey]);
+      if (sealUploads.has(key)) return;
+      const ticket = {};
+      sealUploads.set(key, ticket);
+      const button = document.querySelector(`button[data-upload-key="${groupKey}"]`);
+      const wasDisabled = button?.disabled;
+      if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
+      const sameTarget = () => owner === String(currentUser?.id || '') && coop === currentCoopId &&
+        officialSignGroups[groupKey] === group && document.getElementById(`seal-file-${groupKey}`) === input;
+      const visible = () => sameTarget() && !window.frameElement?.hidden;
+      let refresh = false;
+      try {
       clearAlert();
       let prepared;
       try {
         prepared = await prepareSealUploadFile(file);
       } catch (error) {
-        showAlert('이미지 처리 실패: ' + (error?.message || 'Unknown error'), 'danger');
+        if (visible()) showAlert('이미지를 준비하지 못했습니다. 파일을 확인한 뒤 다시 시도해 주세요.', 'danger');
         return;
       }
+      if (!sameTarget()) return;
 
       const uploadFile = prepared.file;
       const ext = uploadFile.type === 'image/png'
@@ -758,9 +773,10 @@
         .from('attachments')
         .upload(fileName, uploadFile, { upsert: true, contentType: uploadFile.type || 'image/png' });
       if (uploadError) {
-        showAlert('업로드 실패: ' + uploadError.message, 'danger');
+        if (visible()) showAlert('업로드 실패: ' + uploadError.message, 'danger');
         return;
       }
+      if (!sameTarget()) return;
 
       let updateError = null;
       if (group.member_id) {
@@ -778,24 +794,39 @@
       }
 
       if (updateError) {
-        showAlert('저장 실패: ' + updateError.message, 'danger');
+        if (visible()) showAlert('저장 실패: ' + updateError.message, 'danger');
         return;
       }
-      const uploadedInput = document.getElementById(`seal-file-${groupKey}`);
-      if (uploadedInput) uploadedInput.value = '';
+      if (!sameTarget()) return;
+      group.seal_url = fileName;
+      if (input.files?.[0] === file) input.value = '';
+      refresh = true;
 
-      if (prepared.smallWarning) {
+      if (!visible()) return;
+      if (input.files?.length) {
+        showAlert('서명 이미지가 등록되었습니다. 새로 선택한 이미지는 아직 등록하지 않았습니다.', 'info');
+      } else if (prepared.smallWarning) {
         showAlert('서명 이미지가 등록되었습니다. 다만 현재 파일 해상도가 낮아 문서에서 흐릿하게 보일 수 있습니다.', 'warning');
       } else if (prepared.resized) {
         showAlert('서명 이미지가 등록되었습니다. 큰 이미지는 업로드 전에 자동으로 축소했습니다.', 'success');
       } else {
         showAlert('서명 이미지가 등록되었습니다.', 'success');
       }
-      await loadOfficialSignatures();
+      } catch (_) {
+        if (visible()) showAlert('등록 결과를 확인하지 못했습니다. 현재 목록을 다시 확인해 주세요.', 'warning');
+      } finally {
+        if (sealUploads.get(key) === ticket) sealUploads.delete(key);
+        if (button?.isConnected && sameTarget()) { button.disabled = wasDisabled; button.removeAttribute('aria-busy'); }
+        if (refresh && visible()) await loadOfficialSignatures();
+      }
     }
 
     async function previewOfficialSeal(groupKey) {
+      const sequence = ++sealPreviewSequence, owner = String(currentUser?.id || ''), coop = currentCoopId;
       const group = officialSignGroups[groupKey];
+      const path = group?.seal_url;
+      const current = () => sequence === sealPreviewSequence && owner === String(currentUser?.id || '') &&
+        coop === currentCoopId && officialSignGroups[groupKey] === group && group?.seal_url === path && !window.frameElement?.hidden;
       if (!group || !group.seal_url) {
         showAlert('미리보기할 서명 이미지가 없습니다.', 'warning');
         return;
@@ -814,7 +845,8 @@
       }
       const { data, error } = await _supabase.storage
         .from('attachments')
-        .createSignedUrl(group.seal_url, 3600);
+        .createSignedUrl(path, 3600);
+      if (!current()) return;
       if (error || !data?.signedUrl) {
         showAlert('미리보기를 열지 못했습니다: ' + (error?.message || 'signed url missing'), 'danger');
         return;
@@ -916,6 +948,8 @@
     async function init() {
       try {
         sealPreviewModal = new bootstrap.Modal(document.getElementById('sealPreviewModal'));
+        document.getElementById('sealPreviewModal').addEventListener('hide.bs.modal', () => { ++sealPreviewSequence; });
+        document.addEventListener('visibilitychange', () => { if (document.hidden) ++sealPreviewSequence; });
         const filterEl = document.getElementById('signatureFilter');
         if (filterEl) {
           filterEl.addEventListener('change', () => {
@@ -927,6 +961,7 @@
         if (!ok) return;
         await loadOfficialSignatures();
         window.ErpWorkspaceResume.register({modules:['signature'],authorize:async () => {
+          ++sealPreviewSequence;
           ++signatureListSequence;
           signatureListRequest = null;
           return ensureAccess();

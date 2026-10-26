@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* 1.6.3 · Read only explicitly shared counterpart editions; clear denied views. */
+/* 1.6.7 · Preserve edits made while an explicit reload is pending. */
 (function () {
  'use strict';
  const $=id=>document.getElementById(id), BASE='https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -10,6 +10,7 @@
  let reviewerLinkRows=[],reviewerLinkContract=null,preferredReviewer=null;
  let savedDraftReloadRequired=false;
  let endMode='termination',endQuoteSerial=0;
+ let contractOpenSequence=0;
  const stateNames={draft:'초안',review:'내부 결재·서명 준비',signed:'체결 완료',ended:'계약 종료'};
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const money=n=>Number(n||0).toLocaleString('ko-KR');
@@ -30,7 +31,18 @@
  async function reload(){const rows=await rpc('list',{},null);$('contractList').replaceChildren();if(!rows.length){$('contractList').textContent='등록된 계약이 없습니다.';return;}
   for(const r of rows){const b=document.createElement('button');b.type='button';b.className='service-contract-link';b.setAttribute('aria-current',String(current?.id===r.id));b.innerHTML=`<strong>${esc(r.client_name)}</strong><span class="service-state">${r.is_amendment?"변경합의서 · ":""}${esc(stateNames[r.state])}</span>${r.draft_review_pending?'<span class="service-review-badge">내 검토 대기</span>':''}<small class="d-block mt-2">${esc(r.start)} ~ ${esc(r.end)} · 제${Number(r.revision)}판</small>`;b.onclick=()=>task(()=>open(r.id));$('contractList').append(b);}}
  function clearDeniedContract(){current=null;editBaseline='';savedDraftReloadRequired=false;preferredReviewer=null;reviewerLinkRows=[];reviewerLinkContract=null;$('detail').replaceChildren();$('printRoot').replaceChildren();for(const id of ['signDialog','reviewDialog','reviewerLinkDialog','proposalDialog','comparisonDialog','draftHistoryDialog','resolutionDialog','endDialog']){const dialog=$(id);if(dialog?.open)dialog.close();}for(const id of ['proposalEditor','comparisonBody','draftHistoryRows','proposalHistoryRows'])$(id)?.replaceChildren();}
- async function open(id,{discard=false}={}){if(!discard&&!(await allowDiscard()))return false;let record;try{record=await rpc('get',{},id);}catch(err){if(/SERVICE_(ACCESS_DENIED|ADMIN_REQUIRED|AUTH_REQUIRED)/.test(String(err?.message||'')))clearDeniedContract();throw err;}current=record;savedDraftReloadRequired=false;render();await reload();return true;}
+ async function open(id,{discard=false}={}){
+  const sequence=++contractOpenSequence,owner=context,from=current,snapshot=draftSnapshot();
+  const same=()=>sequence===contractOpenSequence&&owner===context&&from===current;
+  if(!discard&&!(await allowDiscard()))return false;
+  if(!same())return false;
+  if(draftSnapshot()!==snapshot){message('확인하는 동안 수정한 내용이 있어 작성 내용을 유지했습니다.','warning');return false;}
+  let record;
+  try{record=await rpc('get',{},id);}catch(err){if(!same())return false;if(/SERVICE_(ACCESS_DENIED|ADMIN_REQUIRED|AUTH_REQUIRED)/.test(String(err?.message||'')))clearDeniedContract();throw err;}
+  if(!same())return false;
+  if(draftSnapshot()!==snapshot){message('불러오는 동안 수정한 내용이 있어 작성 내용을 유지했습니다. 다시 불러오려면 현재 내용을 먼저 확인해 주세요.','warning');updateDraftStatus();return false;}
+  current=record;savedDraftReloadRequired=false;render();await reload();return true;
+ }
  function input(id,label,value,type='text',extra=''){return `<div><label for="${id}" class="form-label">${esc(label)}</label><input id="${id}" class="form-control" type="${type}" ${type==='number'?'data-number-group':''} value="${esc(value)}" ${extra}></div>`;}
  const employeeContact=e=>[e.name,e.position].filter(Boolean).join(' ');
  function clientContactOptions(value){const contacts=[...new Set([value,...(current.reviewers||[]).map(employeeContact)].filter(Boolean))];return `<option value="">담당자를 선택해 주세요.</option>`+contacts.map(contact=>`<option value="${esc(contact)}"${contact===value?' selected':''}>${esc(contact)}</option>`).join('');}
