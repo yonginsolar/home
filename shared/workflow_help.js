@@ -1,4 +1,4 @@
-/* Workflow help 1.0.5. Contextual explanations only; business behavior is unchanged. */
+/* Workflow help 1.0.6. Contextual explanations only; business behavior is unchanged. */
 (function(root){
  'use strict';
  if(root.CoopWorkflowHelp)return;
@@ -222,7 +222,8 @@
   if(/^permission-bulk-/.test(id))return '선택한 직원의 이 업무 사용 여부를 정합니다. 기본 권한 따름은 역할·직급의 공통 기준으로 돌아가는 선택이며 사용·사용 안 함은 직원별 별도 설정입니다. 위의 전체 선택으로 값을 고른 뒤 필요한 업무를 조정하고 변경 내용을 확인해 저장하세요.';
   const t=labelText(label);return topics.find(([pattern])=>pattern.test(t))?.[1]||'';
  }
- function read(){try{return root.localStorage.getItem(KEY)!=='0';}catch(_){return true;}}
+ const mobile=root.matchMedia?.('(max-width:767.98px)');
+ function read(){try{const stored=root.localStorage.getItem(KEY);if(stored==='0'||stored==='1')return stored==='1';}catch(_){}return !mobile?.matches;}
  let enabled=read(),running=false;
  function apply(value){enabled=value;doc.documentElement.toggleAttribute('data-workflow-help-off',!value);doc.querySelectorAll('[data-workflow-help-toggle]').forEach(b=>{b.setAttribute('aria-pressed',String(value));b.textContent=value?'켜짐':'꺼짐';});}
  function children(){return [...doc.querySelectorAll('iframe')].flatMap(f=>{try{return f.contentWindow.location.origin===location.origin&&f.contentWindow.CoopWorkflowHelp?[f.contentWindow.CoopWorkflowHelp]:[];}catch(_){return [];}});}
@@ -245,7 +246,7 @@
   const target=pageKey()==='mypage'?doc.querySelector('#tabInfo'):pageKey()==='membermanage'?doc.querySelector('#dashboardSection'):null;
   if(!target||doc.getElementById('workflowHelpPreference'))return;
   const section=doc.createElement('section');section.id='workflowHelpPreference';section.className='coop-help-preference';section.dataset.erpQueryControl='';
-  const text=doc.createElement('div'),title=doc.createElement('strong'),p=doc.createElement('p');title.textContent='도움말 표시';p.textContent='작업·설정 옆 [?]를 표시합니다. 이 브라우저에 적용됩니다.';text.append(title,p);
+  const text=doc.createElement('div'),title=doc.createElement('strong'),p=doc.createElement('p');title.textContent='도움말 표시';p.textContent='작업·설정 옆 [?]를 표시합니다. 모바일은 기본으로 숨기며, 선택한 설정은 이 브라우저에 적용됩니다.';text.append(title,p);
   const toggle=doc.createElement('button');toggle.type='button';toggle.dataset.workflowHelpToggle='';toggle.setAttribute('aria-label','도움말 전체 표시');toggle.setAttribute('aria-pressed',String(enabled));toggle.textContent=enabled?'켜짐':'꺼짐';toggle.addEventListener('click',()=>setVisible(!enabled));section.append(text,toggle);
   if(pageKey()==='membermanage'){const heading=target.querySelector('.profile-action-bar');const row=heading?.closest('.d-flex.flex-column');if(row)row.after(section);else target.append(section);}else target.prepend(section);
  }
@@ -270,13 +271,15 @@
    label:has(+.${CLASS}){display:inline-flex!important;align-items:center;max-width:calc(100% - 32px);vertical-align:middle;margin-bottom:0!important}h1>.${CLASS},h2>.${CLASS},h3>.${CLASS}{font-size:14px!important}
    .coop-help-preference{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:100%;padding:14px 16px;margin:0 0 20px;border:1px solid #94a3b8;border-radius:10px;background:#f8fafc;color:#172033;font-size:14px;word-break:keep-all}.coop-help-preference p{margin:4px 0 0;color:#475569}.coop-help-preference button{flex-shrink:0;min-width:68px;min-height:36px;border:1px solid #64748b;border-radius:8px;background:#fff;color:#334155;font:inherit;cursor:pointer}.coop-help-preference button[aria-pressed=true]{background:#166534;border-color:#166534;color:#fff}.coop-help-preference button:focus-visible{outline:3px solid #2563eb;outline-offset:3px}
    [data-workflow-help-off] .${CLASS},[data-workflow-help-off] .home-field-help,[data-workflow-help-off] #site-home-task-help{display:none!important}
+   [data-workflow-help-off] label:has(+.${CLASS}){max-width:100%}
    @media print{.${CLASS},.home-field-help,#site-home-task-help,.coop-help-preference{display:none!important}}
   `;doc.head.append(style);apply(read());decorate();
   // Only new subtrees/changed labels; never rescan the whole business form on every keystroke.
   const pending=new Set();let queued=false;
   new MutationObserver(records=>{for(const r of records){if(r.target.closest?.('.'+CLASS+',.coop-help-preference,.coop-dialog'))continue;for(const n of r.addedNodes)if(n.nodeType===1&&!n.matches('.'+CLASS+',.coop-help-preference,.coop-dialog')&&!n.closest('.'+CLASS+',.coop-help-preference,.coop-dialog'))pending.add(n);if(r.target.matches?.('label'))pending.add(r.target);}if(!pending.size||queued)return;queued=true;queueMicrotask(()=>{queued=false;const nodes=[...pending];pending.clear();nodes.forEach(decorate);});}).observe(doc.body,{subtree:true,childList:true});
  }
- root.CoopWorkflowHelp=Object.freeze({version:'1.0.5',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
+ root.CoopWorkflowHelp=Object.freeze({version:'1.0.6',setVisible,refresh:sync,visible:()=>enabled,decorate,format});
  root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)sync(read());});root.addEventListener('pageshow',()=>sync(read()));
+ mobile?.addEventListener?.('change',()=>sync(read()));
  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })(window);

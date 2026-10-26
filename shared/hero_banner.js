@@ -65,7 +65,7 @@
   mount();if(!hero||!value||typeof value!=='object')return;
   const next=JSON.stringify([value.hero_slides_enabled,value.hero_slides,value.hero_autoplay,value.hero_content_visible,value.hero_banner_link,value.coop_name,value.hero_text_position,preview?value.mobile_editor?.slideIndex:null,value.home_display_options]);
   settings=value;if(next===signature){if(slides.length)choose(current);else{showPhoto(selectedImage({image_url:value.hero_image_url,mobile_image_url:value.hero_mobile_image_url}));linked(value.hero_banner_link,value.hero_title||value.coop_name);}return;}signature=next;gesture=null;suppressClickUntil=0;stop();
-  slides=value.hero_slides_enabled===true&&Array.isArray(value.hero_slides)?value.hero_slides.filter(s=>s&&(preview||image(s.image_url))).slice(0,4):[];hero.classList.toggle('is-slider-banner',slides.length>0);controls.hidden=preview||slides.length<2;
+  slides=value.hero_slides_enabled===true&&Array.isArray(value.hero_slides)?value.hero_slides.filter(s=>s&&(preview||image(s.image_url))).slice(0,4):[];hero.classList.toggle('is-slider-banner',slides.length>0);hero.classList.toggle('has-mobile-cover-slide',slides.length>1&&slides.some((s,i)=>value.home_display_options?.slides?.[i]?.mobile_fit==='cover'));controls.hidden=preview||slides.length<2;
   controls.querySelectorAll('[data-banner-index]').forEach(n=>n.remove());
   slides.forEach((s,i)=>{const b=document.createElement('button');b.type='button';b.dataset.bannerIndex=String(i);b.setAttribute('aria-label',(i+1)+'번째 배너 사진');b.title=b.getAttribute('aria-label');b.onclick=()=>choose(i);controls.querySelector('.hero-banner-dots').append(b);});
   manualPause=reduced?.matches===true;current=Math.min(preview?Number(value.mobile_editor?.slideIndex)||0:current,Math.max(0,slides.length-1));
@@ -74,6 +74,6 @@
  }
  // Text-only descriptors: measuring a slide must never load its picture.
  function captionLayouts(){return slides.length>1?slides.map((s,i)=>({title:String(s.title||''),subtitle:String(s.subtitle||''),button_label:String(s.button_label||''),button_url:safeLink(s.button_url),visible:settings.hero_content_visible!==false,display:settings.home_display_options?.slides?.[i]||{}})):[];}
- root.CoopHeroBanner=Object.freeze({apply,captionLayouts,version:'1.5.0'});
+ root.CoopHeroBanner=Object.freeze({apply,captionLayouts,version:'1.5.1'});
  if(root.__COOP_HERO_PENDING__){const pending=root.__COOP_HERO_PENDING__;delete root.__COOP_HERO_PENDING__;apply(pending);}
 })(window);

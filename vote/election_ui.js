@@ -1,9 +1,9 @@
-/* Election UI 1.0.4. Static contextual help only: no Auth/data requests, voting, storage of drafts or edits. */
+/* Election UI 1.0.5. Static contextual help only: no Auth/data requests, voting, storage of drafts or edits. */
 (function(root){
  'use strict';
  if(root.CoopElectionUI)return;
  const doc=root.document,page=doc.documentElement.dataset.electionUi,role=doc.documentElement.dataset.electionRole;
- const KEY='coop_workflow_help_visible_v1',fieldHelp=new WeakMap();
+ const KEY='coop_workflow_help_visible_v1',fieldHelp=new WeakMap(),mobile=root.matchMedia?.('(max-width:767.98px)');
  const context={
   hub:[['.panel h1','선거·투표 관리','사람을 선출한다면 선거, 의견을 모으는 질문이라면 선호도 투표를 선택하세요. 설정 화면에서 일정·대상을 준비하고 관리 화면에서 진행·결과를 확인합니다. 관리 권한과 본인의 참여 자격은 구분되므로 선택한 선거·투표의 대상과 기간을 먼저 살펴보세요.']],
   admin_setup:[['#dashboard-section h2','선거 현황','기존 선거를 선택하면 저장한 일정·선거구·임기 설정을 이어서 확인할 수 있습니다. 새 선거를 만들기 전에 같은 회차가 이미 있는지 제목과 기간을 확인하세요. 정기선거·결선·보궐은 임기를 연결하는 방식이 다르므로 목적에 맞게 구분합니다.'],['#setup-section h2','선거 설정','기본 일정 → 선거구·선출 인원 → 선거인 명부 순서로 준비합니다. 실제 선거 공고의 대상·기간·정원과 비교하며 입력하세요. 선거인 배정은 지역구와 공통 선거구를 구분하고, 저장한 임기는 후보 신청에도 표시되므로 날짜를 함께 확인합니다.']],
@@ -55,8 +55,8 @@
   poll_setup:[['#btnPublish','대상자 확정·공개','현재 조합의 정상 조합원을 투표 대상으로 확정하고 참여할 내용을 공개하는 단계입니다. 질문·선택지·최소/최대 선택 수와 기간을 미리 검토하세요. 초안을 저장하는 단계와 다르므로 실제 참여 대상으로 삼을 명부가 맞는지도 확인합니다.']],
   candidate_apply:[['#agree-fact','사실 확인 서약','후보 이력과 제출 증빙이 실제 사실과 일치함을 확인하는 서약입니다. 경력·기간·대상자 정보를 증빙과 대조한 뒤 선택하세요. 체크하기 전에 아래 원문에서 확인해야 할 내용과 책임을 읽어 보세요.'],['#agree-privacy','개인정보 수집·이용','후보 접수·자격 확인·선거 운영을 위해 어떤 정보를 사용할지 확인하는 동의입니다. 아래 원문에서 수집 항목·목적·보유기간을 읽어 주세요. 공개되는 후보 정보의 동의와는 항목이 다르므로 각각 확인한 뒤 선택합니다.'],['#agree-publication','후보 정보 공개','선거권자가 후보를 판단할 수 있도록 소개·공약·제출한 사진 등 원문에 적힌 정보를 공개하는 동의입니다. 아래 공개 항목과 비공개 항목을 구분해 확인하세요. 공개할 본문·사진에 불필요한 개인정보가 섞이지 않았는지도 살펴봅니다.'],['#agree-conflict','이해충돌 방지 서약','후보 등록에 필요한 이해충돌 방지 기준을 확인하는 서약입니다. 아래 원문을 읽고 본인에게 해당하는 제한이나 확인 사항이 있는지 살펴보세요. 이력의 사실 확인·개인정보 동의와는 별도 내용이므로 각각 검토합니다.']]
  };
- function storedVisible(){try{return root.localStorage.getItem(KEY)!=='0';}catch{return true;}}
- function read(){try{return root.CoopWorkflowHelp?root.CoopWorkflowHelp.visible():storedVisible();}catch{return true;}}
+ function storedVisible(){try{const value=root.localStorage.getItem(KEY);if(value==='0'||value==='1')return value==='1';}catch{}return !mobile?.matches;}
+ function read(){try{return root.CoopWorkflowHelp?root.CoopWorkflowHelp.visible():storedVisible();}catch{return storedVisible();}}
  function refresh(value){doc.documentElement.toggleAttribute('data-workflow-help-off',typeof value==='boolean'?!value:!read());}
  function format(text){return root.CoopWorkflowHelp?.format?root.CoopWorkflowHelp.format(text):String(text??'').trim().replace(/([.!?])\s+(?=\S)/gu,'$1\n\n').split(/\n{2,}/u).filter(Boolean).map((line,i)=>(i===0?'💡 ':'• ')+line).join('\n\n');}
  function help(key,title,text){
@@ -96,10 +96,11 @@
    queued=true;root.queueMicrotask(()=>{queued=false;decorate();});
   }).observe(doc.body,{childList:true,subtree:true});
  }
- root.CoopElectionUI=Object.freeze({version:'1.0.4',refresh,decorate});
+ root.CoopElectionUI=Object.freeze({version:'1.0.5',refresh,decorate});
  // Member pages share the existing display preference without loading ERP-specific page help.
- if(!root.CoopWorkflowHelp)root.CoopWorkflowHelp=Object.freeze({version:'election-1.0.4',visible:storedVisible,refresh});
- root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)refresh(e.newValue!=='0');});
+ if(!root.CoopWorkflowHelp)root.CoopWorkflowHelp=Object.freeze({version:'election-1.0.5',visible:storedVisible,refresh});
+ root.addEventListener('storage',e=>{if(e.key===KEY||e.key===null)refresh();});
+ mobile?.addEventListener?.('change',()=>refresh());
  root.addEventListener('pageshow',()=>refresh());
  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })(window);

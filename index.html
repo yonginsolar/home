@@ -1,8 +1,9 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
+<!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.176
-Change: 2026-10-25 - Reflow long FAQ questions inside narrow cards at large text sizes.
+Version: v1.0.177
+Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scrollable menus.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -11,7 +12,7 @@ Change: 2026-10-25 - Reflow long FAQ questions inside narrow cards at large text
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.176 | index.html');</script>
+<script>console.log('[Version] v1.0.177 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -152,6 +153,15 @@ Change: 2026-10-25 - Reflow long FAQ questions inside narrow cards at large text
     html[data-home-nav-state="failed"] #navbar ul { visibility:hidden; }
     #homeNavRetry { color:#fff; background:transparent; border:1px solid #7b8491; border-radius:6px; font-size:13px; }
     #header .logo { min-width:0; }
+    @media(max-width:1499px) {
+      html[data-theme-page="index"] #navbar.active ul {
+        top:var(--home-menu-top,80px);
+        max-width:calc(100vw - 30px);
+        max-height:var(--home-menu-height,calc(100vh - 96px));
+        overflow-y:auto;
+        overscroll-behavior-y:contain;
+      }
+    }
     @media(max-width:991px) {
       #home-auth-controls { width:142px; }
       #header .logo { max-width:calc(100% - 180px); }
@@ -1829,19 +1839,19 @@ Change: 2026-10-25 - Reflow long FAQ questions inside narrow cards at large text
 
   gtag('config', 'G-TR217L7JN9');
 </script>
-  <script src="shared/theme.js?v=20261009-14"></script>
+  <script src="shared/theme.js?v=20261026-mobile-ui-1"></script>
   <script src="shared/partner_logo_theme.js?v=20261012-1"></script>
-  <link href="shared/theme.css?v=20260917-2" rel="stylesheet">
+  <link href="shared/theme.css?v=20261026-mobile-ui-1" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <script src="shared/home_design.js?v=20261009-3"></script>
 <script src="shared/site_text_styles.js?v=20261009-17" defer></script>
 <script src="shared/home_display_options.js?v=1.3.1" defer></script>
 <script src="shared/site_inline_editor.js?v=20261019-shortcuts-1" defer></script>
 <script src="shared/home_preview_editor.js?v=20261019-frame-scroll-1" defer></script>
-<script src="shared/hero_banner.js?v=1.5.0" defer></script>
+<script src="shared/hero_banner.js?v=1.5.1" defer></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
 <script src="shared/home_progressive.js?v=20261023-3" integrity="sha384-px6WJAuCM53uUaqxVd38tnhTQoEuGSl7o9+9m0SydxN2p6AZ2QMi52Mf9fpUuz3i" crossorigin="anonymous" defer></script>
-<link rel="stylesheet" href="shared/hero_banner.css?v=1.8.1">
+<link rel="stylesheet" href="shared/hero_banner.css?v=1.9.0">
   <link rel="stylesheet" href="shared/home_design.css?v=20261015-2">
 </head>
 
@@ -2576,11 +2586,22 @@ Change: 2026-10-25 - Reflow long FAQ questions inside narrow cards at large text
     return Array.from(document.querySelectorAll('#navbar a[href]')).filter(link => link.getClientRects().length > 0);
   }
 
+  function syncHomeMenuBounds() {
+    const navbar = document.getElementById('navbar');
+    if (!navbar?.classList.contains('active')) return;
+    const header = document.getElementById('header');
+    const top = Math.max(0, Math.ceil(header?.getBoundingClientRect().bottom || 72)) + 8;
+    const height = window.visualViewport?.height || window.innerHeight;
+    navbar.style.setProperty('--home-menu-top', top + 'px');
+    navbar.style.setProperty('--home-menu-height', Math.max(44, Math.floor(height - top - 16)) + 'px');
+  }
+
   function setHomeMenuOpen(open, restoreFocus = false) {
     const navbar = document.getElementById('navbar');
     const button = document.querySelector('.mobile-nav-toggle');
     if (!navbar || !button) return;
     navbar.classList.toggle('active', open);
+    if (open) syncHomeMenuBounds();
     button.setAttribute('aria-expanded', String(open));
     button.setAttribute('aria-label', open ? '메뉴 닫기' : '메뉴 열기');
     const icon = button.querySelector('i');
@@ -2593,6 +2614,12 @@ Change: 2026-10-25 - Reflow long FAQ questions inside narrow cards at large text
   function toggleMobileMenu() {
     if (document.documentElement.dataset.homeNavState !== 'ready') return;
     setHomeMenuOpen(!document.getElementById('navbar')?.classList.contains('active'));
+  }
+
+  window.addEventListener('resize', syncHomeMenuBounds);
+  window.visualViewport?.addEventListener('resize', syncHomeMenuBounds);
+  if (window.ResizeObserver && document.getElementById('header')) {
+    new ResizeObserver(syncHomeMenuBounds).observe(document.getElementById('header'));
   }
 
   document.getElementById('navbar')?.addEventListener('click', function(e) {
