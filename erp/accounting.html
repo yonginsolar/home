@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.186 | Change: 2026-10-26 - Own selected reclassification locks during review. -->
+<!-- Version: v1.0.187 | Change: 2026-10-26 - Recover asset review results and expire older confirmations. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,8 +10,9 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.186 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.187 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
+  <script src="accounting_asset_review.js?v=1.0.0"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261022-help-1"></script>
@@ -222,6 +223,7 @@
         <button type="button" class="btn btn-outline-primary btn-sm" onclick="loadAssetOverview(true)">새로고침</button>
       </div>
       <p class="small text-muted" id="assetOverviewStatus" role="status">탭을 열면 현재 조합의 장부와 재고를 불러옵니다.</p>
+      <div id="assetReviewRecovery" class="border rounded p-3 mb-3" aria-live="polite" hidden></div>
       <div class="row g-2 mb-3" id="assetSummaryCards" aria-live="polite"></div>
       <section class="asset-overview-panel" aria-labelledby="assetInventoryHeading">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
@@ -1246,6 +1248,7 @@ let closingPendingDraft = null;
 const approvalReclassBusy = new Set();
 let approvalReclassBulkUI = null;
 const assetReviewBusy = new Set();
+let assetReviewUI = null;
 let approvalSplitReclassState = null;
 let durunuriSupportRowsCache = [];
 const AUTO_SYNC_UNDO_KEY = 'erp_auto_sync_last_undo_v1';
@@ -1405,6 +1408,19 @@ function syncAccountingReviewControls() {
         });
         approvalReclassBulkUI.sync();
     }
+    assetReviewUI?.sync();
+}
+function getAccountingAssetReviewUI() {
+    if(assetReviewUI)return assetReviewUI;
+    if(!window.AccountingAssetReview)return null;
+    assetReviewUI=window.AccountingAssetReview.create({
+        owner:accountingReadIdentity,snapshot:accountingEditSnapshot,
+        scope:()=>{const revision=accountingReviewRevisions.get('asset')||0;return accountingReadScope('tabAssets',{valid:()=>revision===(accountingReviewRevisions.get('asset')||0)});},current:accountingReadScopeCurrent,
+        editable:()=>accountingDataAuthorized&&canPerform('accounting.edit'),ready:id=>accountingReviewReady('asset',id),
+        locked:id=>assetReviewBusy.has(id),lock:id=>assetReviewBusy.add(id),unlock:id=>assetReviewBusy.delete(id),
+        sync:syncAccountingReviewControls,client:()=>_supabase,confirm:showConfirm,alert:showAlert,
+        accept:(id,snapshot)=>acceptAccountingEditRow('asset',id,snapshot),refresh:()=>loadAssetOverview({refresh:true})
+    });return assetReviewUI;
 }
 function accountingReviewReady(kind,key) {
     const id=kind==='asset'?'assetPurchaseReviewRows':'approvalUnclassifiedList',phase=kind==='asset'?assetReadPhase:approvalQueuePhase;
@@ -1430,7 +1446,7 @@ function bindAccountingReadLifecycle() {
     if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden){closingActionRevision++;expireDiscards();}cancelStale();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
     window.addEventListener('pagehide',()=>{expireDiscards();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('beforeunload',event=>{
-        if(approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
+        if(assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
     });
 }
 
@@ -5941,29 +5957,10 @@ function saveAssetInventoryReview(approvalId,grossAmount) {
     if (!evidence) return showAlert('증빙·공제 여부를 선택해 주세요.');
     if (rawVat === '' || !Number.isSafeInteger(vat) || vat < 0 || vat >= grossAmount) return showAlert('증빙에 적힌 공제 매입세액을 확인해 주세요.');
     if ((evidence === '공제하지 않음') !== (vat === 0)) return showAlert('공제 여부와 매입세액이 맞지 않습니다.');
-    const row=document.getElementById(`assetVat-${approvalId}`).closest('[data-accounting-key]'),snapshot=accountingEditSnapshot(row),scope=accountingReadScope('tabAssets');
-    showConfirm('재고 매입 원가 확인',
-        `부가세 포함 결재금액 ${formatAssetWon(grossAmount)}\n공제할 매입세액 ${formatAssetWon(vat)}\n재고 취득원가 ${formatAssetWon(grossAmount-vat)}\n증빙: ${evidence}\n이 값으로 회계 연동을 준비할까요?`,
-        async () => {
-            if(!accountingReadScopeCurrent(scope)||!canPerform('accounting.edit')||!accountingReviewReady('asset',approvalId)||!row.isConnected||snapshot!==accountingEditSnapshot(row)||assetReviewBusy.has(String(approvalId)))return;
-            assetReviewBusy.add(String(approvalId));syncAccountingReviewControls();
-            try{
-            const { error } = await _supabase.rpc('accounting_inventory_review_purchase', {
-                p_approval_id: Number(approvalId),p_input_vat: vat,p_evidence_type: evidence
-            });
-            if(!accountingReadScopeCurrent(scope))return;
-            if (error) return showAlert('원가 확인 실패','입력값을 확인한 뒤 다시 시도해 주세요.');
-            acceptAccountingEditRow('asset',approvalId,snapshot);
-            const refreshed=await loadAssetOverview({refresh:true});
-            if(accountingReadScopeCurrent(scope))showAlert('저장 완료',refreshed?'저장했습니다.':'저장했습니다. 목록을 다시 확인해 주세요.');
-            }catch(error){
-                if(accountingReadScopeCurrent(scope)){
-                    assetReadPhase='error';
-                    document.getElementById('assetOverviewStatus').textContent='저장 결과를 확인하지 못했습니다. 새로고침으로 목록을 먼저 확인해 주세요.';
-                    showAlert('저장 결과 확인 필요','새로고침으로 목록을 먼저 확인해 주세요.');
-                }
-            }finally{assetReviewBusy.delete(String(approvalId));if(scope.owner===myInfo)syncAccountingReviewControls();}
-        });
+    const row=document.getElementById(`assetVat-${approvalId}`).closest('[data-accounting-key]'),ui=getAccountingAssetReviewUI();
+    if(!ui)return showAlert('확인 도구 준비','원가 확인 도구를 불러오지 못했습니다. 화면을 다시 열어 주세요.');
+    if(!Number.isSafeInteger(grossAmount)||grossAmount<=0)return showAlert('금액 확인','결재 금액을 다시 확인해 주세요.');
+    ui.review({id:String(approvalId),gross:grossAmount,vat,evidence,row});
 }
 
 // [수정] 마스터 데이터 로드 (SpecialType, Tax_Free, Usage 확인)
