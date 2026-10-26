@@ -2,7 +2,7 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.177
+Version: v1.0.178
 Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scrollable menus.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
@@ -1840,7 +1840,7 @@ Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scro
 
   gtag('config', 'G-TR217L7JN9');
 </script>
-  <script src="shared/theme.js?v=20261026-mobile-ui-1"></script>
+  <script src="shared/theme.js?v=20261026-focus-2"></script>
   <script src="shared/partner_logo_theme.js?v=20261012-1"></script>
   <link href="shared/theme.css?v=20261026-mobile-ui-1" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
@@ -2595,6 +2595,15 @@ Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scro
     const height = window.visualViewport?.height || window.innerHeight;
     navbar.style.setProperty('--home-menu-top', top + 'px');
     navbar.style.setProperty('--home-menu-height', Math.max(44, Math.floor(height - top - 16)) + 'px');
+    const list = navbar.querySelector('ul');
+    const focused = document.activeElement;
+    if (!list || !list.contains(focused) || !focused.getClientRects().length ||
+        !/^(auto|scroll)$/.test(getComputedStyle(list).overflowY)) return;
+    // Keep the active link inside the resized menu, without moving the page or focus.
+    const bounds = list.getBoundingClientRect(), item = focused.getBoundingClientRect();
+    const visibleTop = Math.max(0, bounds.top), visibleBottom = Math.min(height, bounds.bottom);
+    if (item.bottom > visibleBottom) list.scrollTop += item.bottom - visibleBottom;
+    else if (item.top < visibleTop) list.scrollTop -= visibleTop - item.top;
   }
 
   function setHomeMenuOpen(open, restoreFocus = false) {

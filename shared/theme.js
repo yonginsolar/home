@@ -112,6 +112,9 @@
       '</div>'
     ].join('');
     const opener = toggleControl.querySelector('[data-theme-open]');
+    // A media query may hide the focused button before its change event runs.
+    // Remember only control-owned focus; an outside interaction immediately releases it.
+    let lastControlFocus = null;
     function closeOptions(restoreFocus) {
       const open = toggleControl.classList.contains('is-expanded');
       toggleControl.classList.remove('is-expanded');
@@ -142,16 +145,22 @@
       if (event.key !== 'Escape' || !toggleControl.classList.contains('is-expanded')) return;
       event.preventDefault();event.stopPropagation();closeOptions(true);
     });
-    document.addEventListener('pointerdown', event => { if (!toggleControl.contains(event.target)) closeOptions(false); });
-    document.addEventListener('focusin', event => { if (!toggleControl.contains(event.target)) closeOptions(false); });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) closeOptions(false); });
+    document.addEventListener('pointerdown', event => { if (!toggleControl.contains(event.target)) { lastControlFocus = null; closeOptions(false); } });
+    document.addEventListener('focusin', event => {
+      if (toggleControl.contains(event.target)) lastControlFocus = event.target;
+      else { lastControlFocus = null; closeOptions(false); }
+    });
+    window.addEventListener('blur', () => { lastControlFocus = null; });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { lastControlFocus = null; closeOptions(false); } });
     const resizeToggle = () => {
       const focused = document.activeElement;
-      const wasInside = toggleControl.contains(focused);
+      const wasInside = toggleControl.contains(focused) ||
+        (focused === document.body && lastControlFocus?.isConnected && !lastControlFocus.getClientRects().length);
       closeOptions(false);
-      if (wasInside) {
+      if (wasInside && document.hasFocus() && toggleControl.getClientRects().length) {
         const next = mobileScreen.matches ? opener : toggleControl.querySelector('[data-theme-mode].is-active');
-        if (next && next !== focused && !focused.getClientRects().length) next.focus({ preventScroll:true });
+        if (next && next !== focused && next.getClientRects().length &&
+            (focused === document.body || !focused.getClientRects().length)) next.focus({ preventScroll:true });
       }
     };
     mobileScreen.addEventListener?.('change', resizeToggle);
