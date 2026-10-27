@@ -1,12 +1,12 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.14
+Version: v1.10.15
 Change: 2026-10-27 - Preserve speech inheritance without reviving the old recording question.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.1';
-import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.8';
+import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.9';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
 let pdfRendererRequest = null;
@@ -1400,14 +1400,22 @@ function synchronizeChairSpeech(sourceHtml, targetHtml) {
   // A newly added empty turn has no secretary report to regenerate. Copy just
   // that marked heading/speech into its missing peer; keep real agenda guards.
   const closing = [...target.wrapper.querySelectorAll('.board-scenario > h2')].find(n => n.textContent.trim() === '폐회 선언');
-  if (closing) for (const [kind, label] of [['DISCUSSION', '[토의 안건]'], ['OTHER', '[기타 안건]']]) {
-    if (target.groups.has(kind) || !source.groups.has(kind)) continue;
+  if (closing) for (const [kind, label] of [['OTHER', '[기타 안건]'], ['DISCUSSION', '[토의 안건]']]) {
+    if (!source.groups.has(kind)) continue;
     const heading = source.wrapper.querySelector(`.board-scenario > h2[data-board-empty-kind="${kind}"]`);
     const line = heading?.nextElementSibling;
+    let next = line?.nextElementSibling;
+    while (next?.tagName === 'HR') next = next.nextElementSibling;
     if (heading?.textContent.trim() !== label || !line?.matches('p.speaker')
       || line.querySelector(':scope > strong')?.textContent.trim() !== '의장'
-      || line.nextElementSibling?.tagName !== 'H2' || source.groups.get(kind)?.length !== 1) continue;
-    closing.before(heading.cloneNode(true), line.cloneNode(true));
+      || next?.tagName !== 'H2' || source.groups.get(kind)?.length !== 1) continue;
+    const peerHeading = target.wrapper.querySelector(`.board-scenario > h2[data-board-empty-kind="${kind}"]`);
+    const peerLine = peerHeading?.nextElementSibling;
+    if (target.groups.has(kind) && (!peerHeading || peerHeading.textContent.trim() !== label
+      || !peerLine?.matches('p.speaker') || peerLine.firstElementChild?.textContent.trim() !== '의장'
+      || target.groups.get(kind)?.length !== 1 || target.groups.get(kind)?.[0]?.length !== 1)) continue;
+    const anchor = [...target.wrapper.querySelectorAll('.board-scenario > h2')].find(n => n.textContent.trim() === next.textContent.trim());
+    if (anchor) anchor.before(peerHeading || heading.cloneNode(true), peerLine || line.cloneNode(true));
   }
   const shape = ({ wrapper }) => [...wrapper.querySelectorAll('.board-scenario > h2')].map(heading => {
     const label = heading.textContent.trim();

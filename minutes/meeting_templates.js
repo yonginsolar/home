@@ -1,5 +1,5 @@
 /*
-Version: v1.7.8
+Version: v1.7.9
 Change: 2026-10-27 - Keep board scripts speech-only with discussion and other-business turns.
 */
 
@@ -180,10 +180,16 @@ function boardScenarioAgenda(agenda, index, facilitator, includeSecretariat) {
 function boardScenario({ row, agendas, chairName, coopName, company }, includeSecretariat) {
   const facilitator = row.facilitator_name || '사무국장';
   const agendaCounts = { REPORT: 0, DECISION: 0, DISCUSSION: 0, OTHER: 0 };
-  const body = (agendas || []).map((agenda) => {
+  const parts = (agendas || []).map((agenda) => {
     const kind = agendaCounts[agenda.agenda_kind] === undefined ? 'OTHER' : agenda.agenda_kind;
     return boardScenarioAgenda(agenda, agendaCounts[kind]++, facilitator, includeSecretariat);
-  }).join('<hr>');
+  });
+  if (!agendaCounts.DISCUSSION) {
+    const firstOther = (agendas || []).findIndex(agenda => agenda.agenda_kind === 'OTHER');
+    parts.splice(firstOther < 0 ? parts.length : firstOther, 0, '<h2 data-board-empty-kind="DISCUSSION">[토의 안건]</h2><p class="speaker"><strong>의장</strong> 다음은 토의 안건입니다. 저희가 따로 준비한 안건은 없는데, 혹시 토의하실 내용이 있으신가요?</p>');
+  }
+  if (!agendaCounts.OTHER) parts.push('<h2 data-board-empty-kind="OTHER">[기타 안건]</h2><p class="speaker"><strong>의장</strong> 다음은 기타 안건입니다. 더 하실 말씀이 있으신가요?</p>');
+  const body = parts.join('<hr>');
   const heading = includeSecretariat ? '사무국장용 진행 시나리오' : '의장용 진행 시나리오';
   return `<article class="board-scenario">
     <h1>${safe(coopName)} ${safe(row.title)} ${heading}</h1>
@@ -193,8 +199,6 @@ function boardScenario({ row, agendas, chairName, coopName, company }, includeSe
     <p class="speaker"><strong>의장</strong> 그럼 지금부터 ${safe(row.title)}를 시작하겠습니다.</p>
     <p class="speaker"><strong>의장</strong> 회의 기록 및 정확한 의사록 작성을 위해 회의 내용을 녹음하도록 하겠습니다.<br>녹음 파일은 사무국 내부 업무용으로만 활용하겠습니다.</p>
     ${body || '<p>등록된 안건이 없습니다.</p>'}
-    ${!agendaCounts.DISCUSSION ? '<h2 data-board-empty-kind="DISCUSSION">[토의 안건]</h2><p class="speaker"><strong>의장</strong> 다음은 토의 안건입니다. 저희가 따로 준비한 안건은 없는데, 혹시 토의하실 내용이 있으신가요?</p>' : ''}
-    ${!agendaCounts.OTHER ? '<h2 data-board-empty-kind="OTHER">[기타 안건]</h2><p class="speaker"><strong>의장</strong> 다음은 기타 안건입니다. 더 하실 말씀이 있으신가요?</p>' : ''}
     <h2>폐회 선언</h2>
     <p class="speaker"><strong>의장</strong> ${blocks(row.closing_message, `오늘 준비한 안건은 여기까지입니다. 혹시 마지막으로 나누실 말씀이 있으신가요? 함께 의견 나눠주셔서 고맙습니다. 이것으로 ${row.title || '이사회'}를 마치겠습니다. 폐회를 선언합니다.`)}</p>
   </article>`;
