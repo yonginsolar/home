@@ -1,12 +1,12 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.11.0
-Change: 2026-10-27 - Keep approved call-notice agendas fixed while preserving notes and scenarios.
+Version: v1.13.0
+Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.6.0';
-import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.0.0';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.0';
+import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.9';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
@@ -71,6 +71,107 @@ const state = {
   loading: false,
   autoDraftTimer: null
 };
+
+const documentEditStates = new Map(), documentSavedRows = new Map(), documentConflicts = new Set();
+let documentEditEpoch=0, documentEditRefresh=null;
+function documentEditKey(type=state.activeDocument) { return `${state.current?.id}:${type}`; }
+function documentValue(row) { return JSON.stringify([row?.title||'',row?.content_html||'']); }
+function documentEditingAllowed(type=state.activeDocument) {
+  return !!state.current && !documentConflicts.has(documentEditKey(type))
+    && MeetingPackageService.documentEdits.owned(pdfActionOwner(),type);
+}
+function renderDocumentEditState() {
+  if (!$('documentEditStatus')) return;
+  const allowed=documentEditingAllowed(), busy=state.loading, entry=documentEditStates.get(documentEditKey());
+  $('documentEditStatus').textContent = allowed ? '편집 중입니다.' : documentConflicts.has(documentEditKey())
+    ? '다른 사람이 저장한 내용이 있습니다. 최신 문서와 작성한 초안을 확인해 주세요.'
+    : entry?.busy ? `${entry.holder_name||'조합 담당자'} 님이 편집 중입니다.`
+    : entry?.failed ? '편집권을 확인하지 못했습니다. 다시 확인해 주세요.'
+    : '읽기 전용입니다. 수정하려면 편집을 눌러 주세요.';
+  $('editDocumentButton').hidden=allowed || !!entry?.busy || !!entry?.closed || documentConflicts.has(documentEditKey());
+  $('editDocumentButton').disabled=busy;
+  $('endDocumentEditButton').hidden=!MeetingPackageService.documentEdits.owned(pdfActionOwner(),state.activeDocument);
+  $('takeDocumentEditButton').hidden=!entry?.busy || !entry?.can_takeover || allowed;
+  $('refreshDocumentEditButton').disabled=busy;
+  $('documentTitle').readOnly=!allowed;
+  if(chapterMode()) renderChapterEditState();
+  else { $('documentEditor').contentEditable=allowed?'true':'false';$('documentEditor').setAttribute('aria-readonly',String(!allowed)); }
+  for(const button of document.querySelectorAll('.rich-toolbar [data-command]'))button.disabled=busy||!allowed||(chapterMode()&&activeChapterLock().locked);
+  for(const id of ['addChapterButton','moveChapterUpButton','moveChapterDownButton','deleteChapterButton','addBoardAnnexButton']) {
+    if(!allowed||busy)$(id).disabled=true;
+  }
+  $('addChapterButton').disabled=busy||!allowed;
+  $('addBoardAnnexButton').disabled=busy||!allowed;
+  $('documentEditConflict').hidden=!documentConflicts.has(documentEditKey());
+  // Viewing, printing and existing File selection are independent of body editing.
+}
+async function refreshDocumentEditState() {
+  if(!state.current || document.hidden || window.frameElement?.hidden)return;
+  if(documentEditRefresh)return documentEditRefresh;
+  const owner=pdfActionOwner(),epoch=documentEditEpoch;
+  const task=(async()=>{
+    for(const type of Object.keys(DOC_LABEL)) {
+      if(type!==state.activeDocument&&!MeetingPackageService.documentEdits.owned(owner,type))continue;
+      try{
+        const data=await MeetingPackageService.documentEdits.manage(owner,type,MeetingPackageService.documentEdits.owned(owner,type)?'renew':'status');
+        if(pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)documentEditStates.set(documentEditKey(type),data);
+      }catch(_){if(pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)documentEditStates.set(documentEditKey(type),{failed:true});}
+    }
+    if(pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)renderDocumentEditState();
+  })().finally(()=>{if(documentEditRefresh===task)documentEditRefresh=null;});
+  documentEditRefresh=task;return task;
+}
+async function beginDocumentEdit(force=false) {
+  if(!state.current)return;
+  const owner=pdfActionOwner(),type=state.activeDocument,epoch=documentEditEpoch;
+  rememberActiveDocument();
+  if(force && !(await window.CoopDialog.confirm('이 문서의 편집권을 가져올까요?')))return;
+  if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch)return;
+  const result=await MeetingPackageService.documentEdits.manage(owner,type,'acquire',force);
+  if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch)return;
+  documentEditStates.set(documentEditKey(type),result);
+  if(result.owned){
+    const current=state.documents.get(type),saved=documentSavedRows.get(type),remote=result.document;
+    if(state.pendingDocuments.has(type)&&documentValue(saved)!==documentValue(remote)){
+      documentConflicts.add(documentEditKey(type));
+      $('documentEditRemote').innerHTML=sanitizeHtml(remote?.content_html||'<p>저장된 문서가 없습니다.</p>');
+      $('documentEditConflict').open=true;
+    }else if(!state.pendingDocuments.has(type)&&remote){
+      state.documents.set(type,remote);documentSavedRows.set(type,remote);renderActiveDocument();
+    }
+  }
+  renderDocumentEditState();
+}
+async function keepDocumentDraft() {
+  const owner=pdfActionOwner(),type=state.activeDocument,epoch=documentEditEpoch;
+  if(!documentConflicts.has(documentEditKey(type)))return;
+  if(!(await window.CoopDialog.confirm('현재 작성한 초안으로 편집을 이어갈까요? 저장하면 확인한 최신 문서를 바꿉니다.')))return;
+  if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch)return;
+  if(!MeetingPackageService.documentEdits.owned(owner,type))throw new Error('편집권을 다시 확인해 주세요.');
+  documentConflicts.delete(documentEditKey(type));renderDocumentEditState();
+}
+async function endDocumentEdit() {
+  const owner=pdfActionOwner(),type=state.activeDocument;
+  rememberActiveDocument();
+  await MeetingPackageService.documentEdits.manage(owner,type,'release');
+  if(pdfActionStillCurrent(owner)){documentEditStates.delete(documentEditKey(type));renderDocumentEditState();}
+}
+function freezeDocumentEditing() {
+  if(!state.current)return;
+  rememberActiveDocument();documentEditEpoch++;
+  MeetingPackageService.documentEdits.freeze(pdfActionOwner());renderDocumentEditState();
+}
+function applySavedDocuments(owner,rows) {
+  if(!pdfActionStillCurrent(owner))return;
+  for(const row of rows||[]){
+    const type=row.document_type,current=state.documents.get(type);
+    documentSavedRows.set(type,row);
+    if(documentValue(current)===documentValue(row)){
+      state.documents.set(type,row);state.pendingDocuments.delete(type);
+      if(type===state.activeDocument)state.documentDirty=false;
+    }
+  }
+}
 
 let meetingDefaultsPending = null;
 let meetingDefaultsReady = false;
@@ -475,12 +576,14 @@ function setBusy(value) {
     renderBookletSourceOptions();
     if (chapterMode()) renderChapterEditState();
     renderAgendaLock();
+    renderDocumentEditState();
   }
   syncNewPackageDraftUi();
 }
 
 function hasUnsavedPacketChanges() {
-  return state.infoDirty || state.agendaDirty || state.documentDirty || state.auditDraftDirty || state.pendingDocuments.size > 0;
+  return state.infoDirty || state.agendaDirty || state.documentDirty || state.auditDraftDirty || state.pendingDocuments.size > 0
+    || (!!state.current && MeetingPackageService.documentEdits.hasPending(pdfActionOwner()));
 }
 
 function markFormDirty(target) {
@@ -747,18 +850,21 @@ function renderAgendaList() {
     </article>
   `).join('');
   renderAgendaLock();
+  renderDocumentEditState();
 }
 
 function renderAgendaLock() {
   const known = !!state.agendaLock, locked = !known || state.agendaLock.locked;
   if (!$('agendaLockStatus')) return;
   $('agendaLockStatus').textContent = !known ? '안건 잠금 상태를 다시 확인해 주세요.' : locked ? AGENDA_LOCK_REASON
-    : '소집 공문에 회의 내용을 불러와 상신하면, 공문 결재 완료부터 안건이 잠깁니다.';
-  $('existingNoticeLink').hidden = locked;
+    : '소집 공문에 회의 내용을 불러오면 원본이 함께 연결됩니다. 공문 결재 완료부터 기본정보와 안건 제목·구성이 자동으로 잠깁니다.';
+  for (const id of ['meetingType','assemblyKind','fiscalYear','meetingNumber','meetingTitle','noticeDate','meetingDate','meetingLocation','startTime','endTime','facilitatorName','chairOfficial','eligibleCount']) {
+    $(id).disabled = state.loading || locked;
+  }
   $('addAgendaButton').disabled = state.loading || locked;
   $('deletePackageButton').disabled = state.loading || locked;
   for (const node of document.querySelectorAll('#agendaList [data-agenda-action],#agendaList [data-field]')) {
-    if (node.dataset.agendaAction || ['agenda_kind','title','summary','background','proposal_text','decision_draft','requires_article_comparison'].includes(node.dataset.field)) node.disabled = state.loading || locked;
+    if (node.dataset.agendaAction || ['agenda_kind','title'].includes(node.dataset.field)) node.disabled = state.loading || locked;
   }
   if (state.activeDocument === 'MATERIALS' && !chapterMode()) protectMaterialAgendas($('documentEditor'), locked);
 }
@@ -772,35 +878,6 @@ async function refreshAgendaLock() {
   state.agendaLock = result.data;
   renderAgendaLock();
   if (chapterMode()) renderChapterEditState();
-}
-
-async function loadCallNotices() {
-  const owner = pdfActionOwner();
-  const result = await MeetingPackageService.listCompletedCallNotices();
-  if (!pdfActionStillCurrent(owner)) return;
-  if (result.error) throw result.error;
-  $('callNoticeSelect').replaceChildren(new Option('공문을 선택하세요', ''));
-  for (const row of result.data || []) if (!row.meeting_package_id || row.meeting_package_id === owner.packageId) {
-    $('callNoticeSelect').add(new Option(`${row.doc_no || '문서번호 없음'} · ${row.title}`, String(row.id)));
-  }
-  if ($('callNoticeSelect').options.length === 1) showToast('현재 권한으로 연결할 수 있는 완료 공문이 없습니다.');
-}
-
-async function linkCallNotice() {
-  if (!state.current || state.agendaLock?.locked) return;
-  if (hasUnsavedPacketChanges()) return showToast('작성 중인 내용을 먼저 저장한 뒤 공문을 연결해 주세요.');
-  const owner = pdfActionOwner(), id = $('callNoticeSelect').value;
-  if (!id) return showToast('이 회의를 소집한 공문을 선택해 주세요.');
-  const fingerprint = state.agendaLock?.fingerprint;
-  const label = $('callNoticeSelect').selectedOptions[0]?.textContent;
-  if (!await window.CoopDialog.confirm(`「${label}」이 「${state.current.title}」의 소집 공문이 맞나요? 연결하면 현재 안건의 수정·추가·삭제·순서 변경이 잠깁니다.`)) return;
-  if (!pdfActionStillCurrent(owner) || id !== $('callNoticeSelect').value || fingerprint !== state.agendaLock?.fingerprint || hasUnsavedPacketChanges()) return;
-  const result = await MeetingPackageService.linkCallNotice(owner.packageId, id, fingerprint);
-  if (!pdfActionStillCurrent(owner)) return;
-  if (result.error) throw result.error;
-  state.agendaLock = result.data; renderAgendaLock();
-  if (chapterMode()) renderChapterEditState();
-  showToast('소집 공문을 연결하고 안건을 확정했습니다.');
 }
 
 function collectAgendasFromDom() {
@@ -850,7 +927,7 @@ function updateDocumentModeLabels() {
     ? (regularAssembly
       ? '정기총회 기본 순서는 전차 의사록 확인 → 감사보고서 → 사업보고 및 결산 → 배당·이익처분(있을 때) → 감자·탈퇴 출자금 반환(있을 때) → 사업계획·예산 → 차입금 한도 → 추가 의안 → 기타안건입니다.'
       : '임시총회 자료집과 시나리오는 등록한 의안만으로 구성합니다.')
-    : '한 장짜리 회의자료와 두 시나리오를 준비합니다. 지난 이사회가 있으면 의장 발언을 참고하고, 없으면 기본 문구로 시작합니다.';
+    : '회의자료와 의장용·사무국장용 시나리오 초안을 만듭니다. 두 시나리오는 같은 의장 발언으로 시작하며, 이후에는 각각 수정·저장합니다.';
   if (!regularAssembly && state.currentStep === 'audit') switchStep('documents');
   if (regularAssembly) {
     renderAssemblySourceStatus();
@@ -1129,21 +1206,22 @@ function renderChapterEditState() {
   const editor = $('chapterEditor');
   const title = $('chapterTitle');
   const notice = $('chapterLockNotice');
-  editor.contentEditable = lock.locked ? 'false' : 'true';
-  editor.setAttribute('aria-readonly', lock.locked ? 'true' : 'false');
+  const editable=documentEditingAllowed();
+  editor.contentEditable = lock.locked || !editable ? 'false' : 'true';
+  editor.setAttribute('aria-readonly', String(lock.locked || !editable));
   editor.classList.toggle('is-locked', lock.locked);
   const agendaLocked = agendaBillLocked();
-  if (!lock.locked) protectMaterialAgendas(editor, agendaLocked);
-  title.readOnly = lock.locked || agendaLocked;
+  if (!lock.locked) protectMaterialAgendas(editor, state.activeDocument === 'MATERIALS' && (!state.agendaLock || state.agendaLock.locked));
+  title.readOnly = lock.locked || agendaLocked || !editable;
   title.setAttribute('aria-readonly', title.readOnly ? 'true' : 'false');
   notice.hidden = !lock.locked && !agendaLocked;
   notice.textContent = lock.locked ? lock.reason : agendaLocked ? AGENDA_LOCK_REASON : '';
   const index = activeChapterIndex();
-  $('moveChapterUpButton').disabled = lock.locked || agendaLocked || index === 0;
-  $('moveChapterDownButton').disabled = lock.locked || agendaLocked || index >= state.chapters.length-1;
-  $('deleteChapterButton').disabled = lock.locked || agendaLocked;
+  $('moveChapterUpButton').disabled = !editable || lock.locked || agendaLocked || index === 0;
+  $('moveChapterDownButton').disabled = !editable || lock.locked || agendaLocked || index >= state.chapters.length-1;
+  $('deleteChapterButton').disabled = !editable || lock.locked || agendaLocked;
   document.querySelectorAll('.rich-toolbar [data-command]').forEach((button) => {
-    button.disabled = lock.locked;
+    button.disabled = lock.locked || !editable;
   });
   return lock;
 }
@@ -1328,9 +1406,9 @@ function renderActiveChapter() {
   $('previousChapterButton').disabled = index === 0;
   $('nextChapterButton').disabled = index >= state.chapters.length - 1;
   const lock = renderChapterEditState();
-  $('moveChapterUpButton').disabled = lock.locked || agendaBillLocked() || index === 0;
-  $('moveChapterDownButton').disabled = lock.locked || agendaBillLocked() || index >= state.chapters.length - 1;
-  $('deleteChapterButton').disabled = lock.locked || agendaBillLocked();
+  $('moveChapterUpButton').disabled = !documentEditingAllowed() || lock.locked || agendaBillLocked() || index === 0;
+  $('moveChapterDownButton').disabled = !documentEditingAllowed() || lock.locked || agendaBillLocked() || index >= state.chapters.length - 1;
+  $('deleteChapterButton').disabled = !documentEditingAllowed() || lock.locked || agendaBillLocked();
   renderChapterList();
   renderPdfAttachmentList();
 }
@@ -1379,6 +1457,7 @@ function renderActiveDocument() {
   document.querySelectorAll('.doc-tab').forEach(button => button.classList.toggle('active', button.dataset.document === state.activeDocument));
   renderBoardAnnexPanel();
   renderAgendaLock();
+  renderDocumentEditState();
 }
 
 function rememberActiveDocument() {
@@ -1465,65 +1544,6 @@ function applyReusableChairStyle(html, style, row, agendas = []) {
     });
   }
   return sanitizeHtml(wrapper.innerHTML);
-}
-
-function synchronizeChairSpeech(sourceHtml, targetHtml) {
-  const source = scenarioChairGroups(sourceHtml);
-  const target = scenarioChairGroups(targetHtml);
-  // A newly added empty turn has no secretary report to regenerate. Copy just
-  // that marked heading/speech into its missing peer; keep real agenda guards.
-  const closing = [...target.wrapper.querySelectorAll('.board-scenario > h2')].find(n => n.textContent.trim() === '폐회 선언');
-  if (closing) for (const [kind, label] of [['OTHER', '[기타 안건]'], ['DISCUSSION', '[토의 안건]']]) {
-    if (!source.groups.has(kind)) continue;
-    const heading = source.wrapper.querySelector(`.board-scenario > h2[data-board-empty-kind="${kind}"]`);
-    const line = heading?.nextElementSibling;
-    let next = line?.nextElementSibling;
-    while (next?.tagName === 'HR') next = next.nextElementSibling;
-    if (heading?.textContent.trim() !== label || !line?.matches('p.speaker')
-      || line.querySelector(':scope > strong')?.textContent.trim() !== '의장'
-      || next?.tagName !== 'H2' || source.groups.get(kind)?.length !== 1) continue;
-    const peerHeading = target.wrapper.querySelector(`.board-scenario > h2[data-board-empty-kind="${kind}"]`);
-    const peerLine = peerHeading?.nextElementSibling;
-    if (target.groups.has(kind) && (!peerHeading || peerHeading.textContent.trim() !== label
-      || !peerLine?.matches('p.speaker') || peerLine.firstElementChild?.textContent.trim() !== '의장'
-      || target.groups.get(kind)?.length !== 1 || target.groups.get(kind)?.[0]?.length !== 1)) continue;
-    const anchor = [...target.wrapper.querySelectorAll('.board-scenario > h2')].find(n => n.textContent.trim() === next.textContent.trim());
-    if (anchor) anchor.before(peerHeading || heading.cloneNode(true), peerLine || line.cloneNode(true));
-  }
-  const shape = ({ wrapper }) => [...wrapper.querySelectorAll('.board-scenario > h2')].map(heading => {
-    const label = heading.textContent.trim();
-    const kind = /^\[([^\s]+)\s/.exec(label)?.[1] || label;
-    let count = 0;
-    for (let node = heading.nextElementSibling; node && node.tagName !== 'H2'; node = node.nextElementSibling) {
-      if (node.matches('p.speaker') && node.querySelector(':scope > strong')?.textContent.trim() === '의장') count++;
-    }
-    return `${kind}:${count}`;
-  });
-  if (JSON.stringify(shape(source)) !== JSON.stringify(shape(target))) {
-    throw new Error('두 시나리오의 안건 순서나 의장 발언 구조가 다릅니다. 문서를 확인한 뒤 다시 저장해 주세요.');
-  }
-  const sourceLines = [...source.wrapper.querySelectorAll('.board-scenario p.speaker')]
-    .filter(node => node.querySelector(':scope > strong')?.textContent.trim() === '의장');
-  const targetLines = [...target.wrapper.querySelectorAll('.board-scenario p.speaker')]
-    .filter(node => node.querySelector(':scope > strong')?.textContent.trim() === '의장');
-  if (!sourceLines.length || sourceLines.length !== targetLines.length) {
-    throw new Error('두 시나리오의 의장 발언 수가 달라 자동으로 맞출 수 없습니다. 안건을 확인하고 준비문서를 다시 만든 뒤 수정해 주세요.');
-  }
-  sourceLines.forEach((line, index) => { targetLines[index].innerHTML = line.innerHTML; });
-  return sanitizeHtml(target.wrapper.innerHTML);
-}
-
-function synchronizeActiveBoardScenario() {
-  if (state.current?.meeting_type !== 'BOARD' || !['SCENARIO', 'SCENARIO_SECRETARIAT'].includes(state.activeDocument)) return;
-  const source = state.documents.get(state.activeDocument);
-  const otherType = state.activeDocument === 'SCENARIO' ? 'SCENARIO_SECRETARIAT' : 'SCENARIO';
-  const target = state.documents.get(otherType);
-  if (!source?.content_html || !target?.content_html) throw new Error('두 시나리오를 먼저 준비해 주세요.');
-  state.documents.set(otherType, {
-    ...target,
-    content_html: synchronizeChairSpeech(source.content_html, target.content_html),
-    manually_edited: true
-  });
 }
 
 function generatedDocumentRows() {
@@ -1813,25 +1833,32 @@ async function saveAgendas({ quiet = false } = {}) {
 
 async function generateAllDocuments() {
   if (!state.current) return;
+  if(MeetingPackageService.documentEdits.hasPending(pdfActionOwner()))throw new Error('먼저 전체 저장 버튼으로 이전 저장 결과를 확인해 주세요.');
   if (state.current.status === 'FINAL') throw new Error('의사록으로 확정된 회의의 준비문서는 다시 만들 수 없습니다.');
   if (state.documentDirty) rememberActiveDocument();
   const hasManualDraft = [...state.documents.values()].some(doc => doc.manually_edited && doc.content_html);
   if (hasManualDraft && !(await window.CoopDialog.confirm('직접 고친 초안이 있습니다. 공통정보와 안건으로 다시 만들면 현재 문구가 바뀝니다. 계속할까요?'))) return;
-  await saveInfo({ quiet: true });
-  await saveAgendas({ quiet: true });
+  const owner=pdfActionOwner(),types=generatedDocumentRows().map(row=>row.type);
+  await acquireDocumentSet(owner,types);
+  if(!pdfActionStillCurrent(owner))return;
+  if(state.infoDirty)await saveInfo({ quiet: true });
+  if(!pdfActionStillCurrent(owner))return;
+  if(state.agendaDirty)await saveAgendas({ quiet: true });
+  if(!pdfActionStillCurrent(owner))return;
   const generatedAt = new Date().toISOString();
-  const rows = generatedDocumentRows();
-  for (const row of rows) {
+  const rows = generatedDocumentRows().map(row=> {
     const existing = state.documents.get(row.type);
-    const { data, error } = await MeetingPackageService.saveDocument(state.current.id, row.type, {
-      title: row.title,
+    return {
+      document_type:row.type,title: row.title,
       ...regeneratedDocumentPayload(row, existing),
       version: Number(existing?.version || 0) + 1,
       generated_at: generatedAt
-    });
-    if (error) throw error;
-    state.documents.set(row.type, data);
-  }
+    };
+  });
+  const {data,error}=await MeetingPackageService.saveDocuments(owner.packageId,rows,owner);
+  if(error)throw error;
+  if(!pdfActionStillCurrent(owner))return;
+  for(const row of data||[]){state.documents.set(row.document_type,row);documentSavedRows.set(row.document_type,row);documentConflicts.delete(documentEditKey(row.document_type));}
   state.activeDocument = 'MATERIALS';
   state.pendingDocuments.clear();
   renderEditorHeader();
@@ -1843,42 +1870,61 @@ async function generateAllDocuments() {
     : '이사회 회의자료와 두 시나리오를 다시 만들었습니다. 확인한 뒤 회의자료 완성을 눌러 주세요.', 4200);
 }
 
+async function acquireDocumentSet(owner,types) {
+  for(const type of types){
+    if(!pdfActionStillCurrent(owner))throw new Error('현재 회의를 다시 확인해 주세요.');
+    const result=await MeetingPackageService.documentEdits.manage(owner,type,'acquire');
+    if(!pdfActionStillCurrent(owner))throw new Error('현재 회의를 다시 확인해 주세요.');
+    documentEditStates.set(documentEditKey(type),result);
+    if(!result.owned)throw new Error(`${result.holder_name||'다른 담당자'} 님이 ${DOC_LABEL[type]}을 편집 중입니다.`);
+    if(documentValue(result.document)!==documentValue(documentSavedRows.get(type)))throw new Error(`${DOC_LABEL[type]}의 저장 내용이 바뀌었습니다. 해당 문서의 편집을 눌러 최신 내용과 초안을 확인해 주세요.`);
+  }
+}
+
 async function saveWholeMeetingDraft({ quiet = false } = {}) {
   if (!state.current) return;
   if (state.current.status === 'FINAL') throw new Error('이미 의사록으로 확정된 회의입니다.');
-  const editedType = state.activeDocument;
-  const wasDirty = state.documentDirty;
-  if (wasDirty) {
-    rememberActiveDocument();
-    if (['SCENARIO', 'SCENARIO_SECRETARIAT'].includes(editedType)) synchronizeActiveBoardScenario();
+  const owner=pdfActionOwner();
+  if(state.documentDirty)rememberActiveDocument();
+  if(MeetingPackageService.documentEdits.hasPending(owner)){
+    const result=await MeetingPackageService.saveDocuments(owner.packageId,[],owner);
+    if(result.error)throw result.error;
+    if(!pdfActionStillCurrent(owner))return;
+    if(state.documentDirty)rememberActiveDocument();
+    applySavedDocuments(owner,result.data);
+    if(!quiet)showToast('이전 저장 결과를 확인했습니다. 추가 수정은 다시 저장해 주세요.');
+    return;
   }
-  await saveInfo({ quiet: true });
-  await saveAgendas({ quiet: true });
-  refreshAutoDrafts({ render: false });
-  const generated = generatedDocumentRows();
-  const rows = generated.map(item => {
-    const existing = state.documents.get(item.type);
+  const dirtyTypes=[...state.pendingDocuments];
+  for(const type of dirtyTypes)if(!documentEditingAllowed(type))throw new Error(`${DOC_LABEL[type]}의 편집권을 먼저 확인해 주세요.`);
+  if(state.infoDirty)await saveInfo({ quiet: true });
+  if(!pdfActionStillCurrent(owner))return;
+  if(state.agendaDirty)await saveAgendas({ quiet: true });
+  if(!pdfActionStillCurrent(owner))return;
+  const rows = dirtyTypes.map(type => {
+    const existing = state.documents.get(type);
     return {
-      document_type: item.type,
-      title: existing?.title || item.title,
-      content_html: existing?.content_html ?? sanitizeHtml(item.content),
+      document_type: type,
+      title: existing?.title || defaultDocumentTitle(type),
+      content_html: existing?.content_html || '',
       version: Number(existing?.version || 1),
       manually_edited: existing?.manually_edited === true,
-      generated_at: existing?.generated_at || new Date().toISOString()
+      generated_at: existing?.generated_at || null
     };
   });
-  const { data, error } = await MeetingPackageService.saveDocuments(state.current.id, rows);
+  const { data, error } = await MeetingPackageService.saveDocuments(owner.packageId, rows, owner);
   if (error) throw error;
-  (data || []).forEach(row => state.documents.set(row.document_type, row));
-  state.documentDirty = false;
-  if (!quiet) showToast('기본정보·안건·회의자료·시나리오를 모두 저장했습니다.');
-  state.pendingDocuments.clear();
+  if(!pdfActionStillCurrent(owner))return;
+  if(state.documentDirty)rememberActiveDocument();
+  applySavedDocuments(owner,data);
+  if (!quiet) showToast('수정한 내용을 저장했습니다.');
 }
 
 async function completeMeetingMaterials() {
   if (!state.current) return;
   if (!$('meetingDate').value) throw new Error('회의일을 입력한 뒤 회의자료를 완성해 주세요.');
   await saveWholeMeetingDraft({ quiet: true });
+  if(!state.current || hasUnsavedPacketChanges() || generatedDocumentRows().some(row=>!documentSavedRows.has(row.type)))throw new Error('남아 있는 수정 내용을 저장하고 준비문서를 확인한 뒤 완성해 주세요.');
   const updated = await MeetingPackageService.updatePackage(state.current.id, { status: 'READY' });
   if (updated.error) throw updated.error;
   state.current = updated.data;
@@ -1890,44 +1936,23 @@ async function completeMeetingMaterials() {
 
 async function saveActiveDocument({ quiet = false } = {}) {
   if (!state.current) return;
-  const wasDirty = state.documentDirty;
+  const owner=pdfActionOwner(),type=state.activeDocument;
+  if(!documentEditingAllowed(type)&&!MeetingPackageService.documentEdits.hasPending(owner))throw new Error('문서의 편집권을 먼저 확인해 주세요.');
   rememberActiveDocument();
-  const row = state.documents.get(state.activeDocument);
+  const row = state.documents.get(type);
   if (!row?.content_html) throw new Error('저장할 문서 내용이 없습니다. 먼저 초안을 만들어 주세요.');
-  if (state.current.meeting_type === 'BOARD' && ['SCENARIO', 'SCENARIO_SECRETARIAT'].includes(state.activeDocument)) {
-    if (wasDirty) synchronizeActiveBoardScenario();
-    const otherType = state.activeDocument === 'SCENARIO' ? 'SCENARIO_SECRETARIAT' : 'SCENARIO';
-    const other = state.documents.get(otherType);
-    if (!other?.content_html) throw new Error('함께 저장할 다른 시나리오가 없습니다. 준비문서를 먼저 만들어 주세요.');
-    const payloads = [row, other].map(item => ({
-      document_type: item.document_type,
-      title: item.title,
-      content_html: item.content_html,
-      version: Number(item.version || 1),
-      manually_edited: item.manually_edited === true,
-      generated_at: item.generated_at || null
-    }));
-    const saved = await MeetingPackageService.saveDocuments(state.current.id, payloads);
-    if (saved.error) throw saved.error;
-    (saved.data || []).forEach(item => state.documents.set(item.document_type, item));
-    state.documentDirty = false;
-    state.pendingDocuments.delete('SCENARIO');
-    state.pendingDocuments.delete('SCENARIO_SECRETARIAT');
-    if (!quiet) showToast('의장 발언을 두 시나리오에 함께 저장했습니다.');
-    return;
-  }
-  const { data, error } = await MeetingPackageService.saveDocument(state.current.id, state.activeDocument, {
+  const { data, documents, error } = await MeetingPackageService.saveDocument(owner.packageId, type, {
     title: row.title,
     content_html: row.content_html,
     version: Number(row.version || 1),
     manually_edited: true,
     generated_at: row.generated_at || null
-  });
+  },owner);
   if (error) throw error;
-  state.documents.set(state.activeDocument, data);
-  state.documentDirty = false;
-  state.pendingDocuments.delete(state.activeDocument);
-  if (!quiet) showToast(`${DOC_LABEL[state.activeDocument]}을 저장했습니다.`);
+  if(!pdfActionStillCurrent(owner))return;
+  if(state.documentDirty)rememberActiveDocument();
+  applySavedDocuments(owner,documents||[data]);
+  if (!quiet && state.activeDocument===type) showToast(`${DOC_LABEL[type]}을 저장했습니다.`);
 }
 
 const BOOK_PRINT_CSS = `
@@ -2117,8 +2142,10 @@ async function openPackage(id, { internal = false } = {}) {
     if (state.session?.user?.id !== owner.userId || state.runtime?.coop_id !== owner.coopId
       || pdfIdentityRevision !== owner.identity || window.frameElement?.hidden) return;
     state.current = data.package;
+    documentEditEpoch++;
+    documentSavedRows.clear();
+    for(const row of data.documents||[])documentSavedRows.set(row.document_type,row);
     state.agendaLock = data.agendaLock;
-    $('callNoticeSelect').replaceChildren(new Option('공문을 선택하세요',''));
     state.agendas = data.agendas || [];
     state.documents = new Map((data.documents || []).map(row => [row.document_type, row]));
     state.inheritedChairStyle = data.package.meeting_type === 'BOARD'
@@ -2138,6 +2165,7 @@ async function openPackage(id, { internal = false } = {}) {
     await loadAssemblySources();
     refreshAutoDrafts({ render: false });
     renderActiveDocument();
+    void refreshDocumentEditState();
     renderAuditStep();
     renderPackages();
     if (isPastPackage(state.current)) $('pastMeetings').open = true;
@@ -2188,7 +2216,13 @@ async function createPackage() {
         content_html: applyReusableChairStyle(row.content, sourceStyle, data),
         version: 1, manually_edited: false, generated_at: new Date().toISOString()
       }));
-    const seeded = await MeetingPackageService.saveDocuments(data.id, seeds);
+    const seedOwner={...pdfActionOwner(),packageId:data.id};
+    for(const row of seeds){
+      const claimed=await MeetingPackageService.documentEdits.manage(seedOwner,row.document_type,'acquire');
+      if(!claimed.owned)throw new Error('새 회의의 시나리오 편집권을 다시 확인해 주세요.');
+    }
+    const seeded = await MeetingPackageService.saveDocuments(data.id, seeds,seedOwner);
+    for(const row of seeds)void MeetingPackageService.documentEdits.manage(seedOwner,row.document_type,'release').catch(()=>{});
     if (seeded.error) {
       await loadPackages(data.id);
       throw new Error('새 회의는 만들었지만 지난 시나리오를 불러오지 못했습니다. 중복으로 새 회의를 만들지 말고 현재 회의를 확인해 주세요.');
@@ -2410,14 +2444,25 @@ async function runAction(action) {
   catch (error) {
     console.error(error);
     const code = String(error?.message || '');
-    showToast(code.includes('MEETING_AGENDA_LOCKED') ? '소집 공문 결재가 완료되어 안건이 잠겼습니다. 입력을 보관한 채 잠금 상태를 다시 확인해 주세요.'
+    showToast(code.includes('MEETING_AGENDA_LOCKED') ? '소집 공문 결재가 완료되어 기본정보와 안건 제목·구성이 잠겼습니다. 입력은 보관했습니다. 잠금 상태를 다시 확인해 주세요.'
+      : code.includes('MEETING_DOCUMENT_EDIT_REQUIRED') ? '편집권이 없거나 만료되었습니다. 작성한 내용을 확인하고 편집권을 다시 확인해 주세요.'
+      : code.includes('MEETING_DOCUMENT_EDIT_IN_PROGRESS') ? '편집 중인 문서가 있습니다. 편집을 마친 뒤 다시 확인해 주세요.'
+      : code.includes('MEETING_DOCUMENT_CONFLICT') ? '저장된 문서가 바뀌었습니다. 편집권을 다시 확인해 최신 문서와 초안을 비교해 주세요.'
+      : code.includes('MEETING_EDIT_FINAL_DOCUMENT') ? '의사록으로 확정된 회의의 준비문서는 수정할 수 없습니다.'
+      : code.includes('MEETING_EDIT_ACCESS_DENIED') || code.includes('MEETING_EDIT_TAKEOVER_DENIED') ? '현재 권한으로 문서를 편집할 수 없습니다. 작성한 내용은 남아 있습니다.'
       : code.includes('MEETING_PACKAGE_DELETE_IN_PROGRESS') ? '이 회의의 삭제 작업이 진행 중입니다. 잠시 후 현재 상태를 다시 확인해 주세요.'
-      : code.includes('MEETING_AGENDA_CHANGED') ? '안건이 변경되었습니다. 현재 내용을 다시 확인한 뒤 공문을 연결해 주세요.'
+      : code.includes('MEETING_AGENDA_CHANGED') ? '회의 기본정보나 안건 제목이 변경되었습니다. 소집 공문에서 회의 내용을 다시 불러와 확인해 주세요.'
       : error?.message || '작업을 완료하지 못했습니다.', 4800);
   } finally { setBusy(false); }
 }
 
 function bindEvents() {
+  $('editDocumentButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(false)));
+  $('takeDocumentEditButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(true)));
+  $('endDocumentEditButton').addEventListener('click',()=>runAction(endDocumentEdit));
+  $('refreshDocumentEditButton').addEventListener('click',()=>void refreshDocumentEditState());
+  $('keepDocumentDraftButton').addEventListener('click',()=>runAction(keepDocumentDraft));
+  for(const id of ['documentEditor','chapterEditor'])$(id).addEventListener('beforeinput',event=>{if(!documentEditingAllowed())event.preventDefault();});
   $('backToDocuments').addEventListener('click', () => { location.href = '../erp/governance.html'; });
   $('newPackageButton').addEventListener('click', () => runAction(openNewPackage));
   $('newPackageModal').addEventListener('keydown', event => {
@@ -2450,8 +2495,6 @@ function bindEvents() {
   $('saveInfoButton').addEventListener('click', () => runAction(saveInfo));
   $('saveAgendasButton').addEventListener('click', () => runAction(saveAgendas));
   $('refreshAgendaLockButton').addEventListener('click', () => runAction(refreshAgendaLock));
-  $('loadCallNoticesButton').addEventListener('click', () => runAction(loadCallNotices));
-  $('linkCallNoticeButton').addEventListener('click', () => runAction(linkCallNotice));
   $('documentEditor').addEventListener('beforeinput', guardMaterialAgendaInput);
   $('chapterEditor').addEventListener('beforeinput', guardMaterialAgendaInput);
   $('loadPreviousBooklet').addEventListener('click', () => runAction(loadPreviousBooklet));
@@ -2507,14 +2550,11 @@ function bindEvents() {
   });
   document.querySelectorAll('.step-tab').forEach(button => button.addEventListener('click', () => switchStep(button.dataset.step)));
   document.querySelectorAll('.doc-tab').forEach(button => button.addEventListener('click', () => {
-    const wasDirty = state.documentDirty;
     rememberActiveDocument();
-    if (wasDirty) {
-      try { synchronizeActiveBoardScenario(); }
-      catch (error) { showToast(error.message, 5000); return; }
-    }
+    documentEditEpoch++;
     state.activeDocument = button.dataset.document;
     renderActiveDocument();
+    void refreshDocumentEditState();
   }));
   $('meetingType').addEventListener('change', () => {
     const candidates = currentTypeOfficials($('meetingType').value);
@@ -2609,6 +2649,7 @@ async function init() {
   bindEvents();
   supabase.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT' || (session?.user?.id && state.session?.user?.id && session.user.id !== state.session.user.id)) {
+      freezeDocumentEditing();
       pdfIdentityRevision++;
       meetingDefaultsRevision++;
       meetingDefaultsReady = false;
@@ -2656,7 +2697,15 @@ async function init() {
     await loadPackages();
   }});
   window.setInterval(renderPackages, 60_000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) renderPackages(); });
+  window.setInterval(()=>{void refreshDocumentEditState();},25000);
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden)freezeDocumentEditing();
+    else {renderPackages();void refreshDocumentEditState();}
+  });
+  if(window.frameElement)new MutationObserver(()=>{
+    if(window.frameElement.hidden)freezeDocumentEditing();else void refreshDocumentEditState();
+  }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+  window.addEventListener('pagehide',freezeDocumentEditing);
 }
 
 init().catch(error => {

@@ -1,8 +1,10 @@
 /*
-Version: v1.6.0
-Change: 2026-10-27 - Exact call-notice locks and atomic agenda saves.
+Version: v1.7.0
+Change: 2026-10-27 - Use automatic imported call-notice association without a second linking workflow.
 */
 import { supabase } from '../shared/supabase-client.js';
+import { createMeetingDocumentEdits } from './meeting_document_edits.js?v=1.0.0';
+const documentEdits = createMeetingDocumentEdits((name,body)=>supabase.rpc(name,body));
 
 export const MEETING_PACKAGE_FILE_BUCKET = 'meeting-package-files';
 
@@ -218,48 +220,16 @@ async function getAgendaState(id) {
   } finally { clearTimeout(timer); }
 }
 
-async function listCompletedCallNotices() {
-  const {coop_id} = await getRuntime();
-  return await scope(supabase.from('ref_approval').select('id,title,doc_no,status,meeting_package_id')
-    .eq('doc_type','공문').in('status',['완료','실물결재완료']),coop_id).order('id',{ascending:false}).limit(200);
+async function saveDocument(packageId, documentType, payload, owner) {
+  if(!owner || owner.packageId!==packageId)return {data:null,error:new Error('편집 대상을 다시 확인해 주세요.')};
+  const result=await documentEdits.save(owner,[{document_type:documentType,...payload}]);
+  return {...result,documents:result.data,data:result.data?.[0]||null};
 }
 
-async function linkCallNotice(id, noticeId, fingerprint) {
-  return await supabase.rpc('link_meeting_call_notice', {p_package_id:id,p_approval_id:noticeId,p_fingerprint:fingerprint});
-}
-
-async function saveDocument(packageId, documentType, payload) {
-  const { coop_id: coopId } = await getRuntime();
-  return await supabase
-    .from('meeting_package_documents')
-    .upsert(withCoop({
-      package_id: packageId,
-      document_type: documentType,
-      title: payload.title,
-      content_html: payload.content_html,
-      version: payload.version || 1,
-      manually_edited: payload.manually_edited === true,
-      generated_at: payload.generated_at || null
-    }, coopId), { onConflict: 'package_id,document_type' })
-    .select('*')
-    .single();
-}
-
-async function saveDocuments(packageId, documents) {
-  const { coop_id: coopId } = await getRuntime();
-  if (!Array.isArray(documents) || !documents.length) return { data: [], error: null };
-  const rows = documents.map(({ document_type, ...payload }) => withCoop({
-    package_id: packageId,
-    document_type,
-    title: payload.title,
-    content_html: payload.content_html,
-    version: payload.version || 1,
-    manually_edited: payload.manually_edited === true,
-    generated_at: payload.generated_at || null
-  }, coopId));
-  return await supabase.from('meeting_package_documents')
-    .upsert(rows, { onConflict: 'package_id,document_type' })
-    .select('*');
+async function saveDocuments(packageId, documents, owner) {
+  if(!owner || owner.packageId!==packageId)return {data:null,error:new Error('편집 대상을 다시 확인해 주세요.')};
+  if ((!Array.isArray(documents) || !documents.length) && !documentEdits.hasPending(owner)) return { data: [], error: null };
+  return documentEdits.save(owner,documents);
 }
 
 async function createMinuteFromPackage(packageId, payload) {
@@ -314,9 +284,8 @@ async function recordAuditChangeRequest(packageId, payload) {
 }
 
 export const MeetingPackageService = {
+  documentEdits,
   getAgendaState,
-  listCompletedCallNotices,
-  linkCallNotice,
   getRuntime,
   listPackages,
   listMeetingHistory,

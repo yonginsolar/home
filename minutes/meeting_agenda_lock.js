@@ -1,9 +1,10 @@
-/* v1.0.0 — Material-only agenda fencing. UI attributes never become document content. */
-export const AGENDA_LOCK_REASON = '소집 공문 결재가 완료되어 안건이 확정되었습니다. 진행 대사·메모·논의와 의결 결과는 계속 작성할 수 있습니다.';
+/* v1.1.0 — Announced metadata/titles only; proposal prose and independent scripts stay editable. */
+export const AGENDA_LOCK_REASON = '소집 공문 결재가 완료되어 기본정보와 안건 제목·구성이 확정되었습니다. 안건 설명·시나리오·메모·결과는 계속 작성할 수 있습니다.';
 export function materialAgendaNodes(container) {
-  if (container.classList.contains('chapter-bill')) return [...container.children].filter(n => !n.classList.contains('bill-note-card'));
-  return [...container.querySelectorAll('.source-agenda-row,.chapter-bill,.board-one-paper > h2')]
-    .filter(n => n.tagName !== 'H2' || /^[1-4]\.\s*/.test(n.textContent.trim()));
+  const nodes = [...container.querySelectorAll('.source-agenda-row > strong,.source-agenda-row > span,.chapter-bill > h1,.chapter-bill > h2,.board-one-paper > h1,.board-one-paper > .meeting-meta,.board-one-paper > h2,.assembly-cover > h1,.assembly-cover > dl')]
+    .filter(n => !n.matches('.board-one-paper > h2') || /^[1-4]\.\s*/.test(n.textContent.trim()));
+  if (container.classList.contains('chapter-bill')) nodes.push(...[...container.children].filter(n => ['H1','H2'].includes(n.tagName)));
+  return [...new Set(nodes)];
 }
 export function protectMaterialAgendas(container, locked) {
   clearMaterialAgendaUi(container);
@@ -12,7 +13,7 @@ export function protectMaterialAgendas(container, locked) {
     node.dataset.agendaUiLock = 'true';
     node.contentEditable = 'false';
     node.setAttribute('aria-readonly','true');
-    node.title = '소집 공문 결재가 완료된 안건';
+    node.title = '소집 공문 결재가 완료된 기본정보·안건 제목';
   }
 }
 export function clearMaterialAgendaUi(container) {
