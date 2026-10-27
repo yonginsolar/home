@@ -1,4 +1,4 @@
-/* Version: v1.0.1 — fence superseded ownership replies; keep durable save recovery unchanged. */
+/* Version: v1.0.2 — fence old ownership; retain confirmed release and fresh readonly status. */
 export function createMeetingDocumentEdits(rpc, uuid = () => crypto.randomUUID()) {
   const leases = new Map(), pending = new Map(), writes = new Map();
   const key = owner => JSON.stringify([owner.userId, owner.coopId, owner.packageId]);
@@ -28,8 +28,11 @@ export function createMeetingDocumentEdits(rpc, uuid = () => crypto.randomUUID()
     const token=entry.token;
     try {
       const data=await call('manage_meeting_document_edit',{...args(owner),p_type:type,p_lease_key:token,p_action:action,p_force:force});
-      if(!current() || (!authority && entry.releaseBlocked))throw stale();
+      // A confirmed old-nonce release may finish cleanup after a visibility freeze,
+      // but must never overwrite a newer local lease entry.
+      if(!current()) { if(action==='release' && data?.owned===false)return data; throw stale(); }
       if(!data || typeof data.owned!=='boolean')throw new Error('편집 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
+      if(action==='release' && data.owned)throw new Error('편집권 반납을 확인하지 못했습니다. 다시 확인해 주세요.');
       // Completion of an authority change/loss also fences reads started while it was pending.
       if(authority || !data.owned)entry.manageEpoch=(entry.manageEpoch||0)+1;
       const result=entry.releaseBlocked?{...data,owned:false}:data;
