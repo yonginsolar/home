@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.1.1. Original member writers and legacy import drafts remain separate. */
+/* Member/capital workbook 1.1.2. Member-only authority and blank-email guidance; draft/write behavior unchanged. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -270,7 +270,7 @@
       $("[data-template]").onclick = () => download(template);
       $("[data-help]").onclick = () =>
         void root.CoopDialog.alert(
-          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 신규 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역의 동명이인은 조합원번호로 구분해 주세요. 기존 회원은 납입내역 시트에만 입력하세요.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록된 행은 다운로드에서 빠집니다.",
+          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 명부에 새로 넣을 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 회원만 등록하면 조합원 시트만 사용하고, 출자금을 함께 등록할 때만 출자금 등록 권한을 추가로 확인합니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역의 동명이인은 조합원번호로 구분해 주세요. 이미 명부에 있는 회원은 납입내역 시트에만 입력하세요.\n\n이메일이 없는 기존 회원은요?\n명부 등록에서는 이메일을 비워 둘 수 있습니다. 임의의 이메일을 만들지 마세요. 명부 등록과 로그인 계정 생성은 별개이며, 이메일 로그인에는 본인의 실제 이메일 인증·계정 연결이 필요합니다.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록된 행은 다운로드에서 빠집니다.",
           { title: "회원·출자금 함께 등록" },
         );
       $("[data-export]").textContent = "남은 행 다운로드";
@@ -880,7 +880,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.1.1",
+    version: "1.1.2",
     create,
     parse,
     memberHeaders,
