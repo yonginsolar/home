@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.113 | Change: 2026-10-27 - Explain automatic meeting metadata/title lock on call-notice completion. -->
+<!-- Version: v1.2.114 | Change: 2026-10-27 - Shared preview submission and precise meeting notice confirmation. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.110 | approval.html');</script>
+  <script>console.log('[Version] v1.2.114 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1692,6 +1692,10 @@ const approvalCategoryBodyDrafts = new Map();
 let approvalCategoryBodyDraftScope = '';
 let approvalMeetingNoticeRequestSequence = 0;
 let approvalMeetingNoticeLink = null;
+let approvalSubmitAttempt = null;
+let approvalSubmitPreviewState = null;
+let approvalComposerInputRevision = 0;
+let approvalRelViewRevision = 0;
 let approvalLeaveCancelCandidates = [];
 let approvalBusinessTripCancelCandidates = [];
 let approvalExpenseAdjustmentSelectedDoc = null;
@@ -3382,6 +3386,7 @@ async function prepareApprovalSubmitAttachments(prefix = '') {
 }
 
 function resetApprovalComposerForm(options = {}) {
+    if(approvalSubmitPreviewState)relViewModal?.hide();
     if (window.CoopInsuranceNotice) {
         approvalInsuranceNoticeReader?.close();
         if (options.keepDraftIdentity !== true) approvalInsuranceNoticeEpoch++;
@@ -11098,6 +11103,7 @@ function openApprovalActionModal(docId, action) {
 } // End of openApprovalActionModal
 
 function syncRelViewActionArea(doc) {
+    invalidateApprovalSubmitPreview();
     const footerEl = document.getElementById('relViewModalFooter');
     const hintEl = document.getElementById('relViewActionHint');
     const buttonsEl = document.getElementById('relViewActionButtons');
@@ -11236,6 +11242,9 @@ function decorateTodoDelegation(doc) {
 } // End of decorateTodoDelegation
 
 function switchTab(tab, options = {}) {
+    if(activeApprovalTab !== String(tab || 'draft').trim()){
+        approvalComposerInputRevision++;approvalRelViewRevision++;invalidateApprovalSubmitPreview();
+    }
     activeApprovalTab = String(tab || 'draft').trim() || 'draft';
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
     document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
@@ -12192,20 +12201,28 @@ function buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId, options
     return wrapper;
 } // End of buildApprovalRelatedDocSectionElement
 
-async function appendApprovalRelatedDocSection(container, doc) {
+async function appendApprovalRelatedDocSection(container, doc, isCurrent = () => true) {
     const rawType = String(doc?.doc_type || '').trim();
     if (!container || !(rawType.startsWith('지출결의') || isLeaveCancelApprovalDoc(rawType) || isApprovalBusinessTripCancelDocType(rawType))) return;
     const relatedDocId = toPositiveDocId(doc?.related_doc_id);
     if (!relatedDocId) return;
     const relatedDoc = doc?._related_doc || await loadApprovalRelatedDocById(relatedDocId);
+    if(!isCurrent())return;
     container.appendChild(buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId, {
         title: getApprovalRelatedDocSectionTitle(doc)
     }));
 } // End of appendApprovalRelatedDocSection
 
 async function openApprovalSubmitPreview() {
+    let previewState;
     try {
         initializeApprovalRelatedModals();
+        if (approvalSubmitAttempt) return;
+        const modalEl=document.getElementById('relViewModal'),waitOwner=approvalSubmitOwner(),waitRevision=approvalComposerInputRevision;
+        if(modalEl?.dataset.submitPreviewClosing==='1'){
+            await waitForModalHidden(modalEl);
+            if(modalEl.dataset.submitPreviewClosing==='1' || waitOwner!==approvalSubmitOwner() || waitRevision!==approvalComposerInputRevision)return;
+        }
         const previewDoc = buildApprovalSubmitPreviewData();
         currentViewingDocId = null;
         resetRelViewObjectUrls();
@@ -12215,6 +12232,10 @@ async function openApprovalSubmitPreview() {
         modalTitleEl.textContent = "📄 상신 미리보기";
         contentEl.innerHTML = "";
         syncRelViewActionArea(null);
+        previewState = {snapshot:captureApprovalSubmitSnapshot(),ready:false,revision:++approvalRelViewRevision};
+        approvalSubmitPreviewState = previewState;
+        const isCurrent = () => approvalSubmitPreviewState === previewState
+            && previewState.revision === approvalRelViewRevision && isApprovalSubmitSnapshotCurrent(previewState.snapshot);
 
         const line = (Array.isArray(previewDoc.approval_line) ? previewDoc.approval_line : [])
             .map((l) => `${l.name || ''}(${l.status || ''})`).join(" → ");
@@ -12271,16 +12292,24 @@ async function openApprovalSubmitPreview() {
         appendApprovalWithholdingSnapshotSection(contentEl, previewDoc);
         if (previewDoc.doc_type !== CoopPermissionRequest.TYPE) contentEl.appendChild(amountEl);
         appendApprovalSalaryLedgerSnapshotSection(contentEl, previewDoc);
-        await appendApprovalRelatedDocSection(contentEl, previewDoc);
+        await appendApprovalRelatedDocSection(contentEl, previewDoc, isCurrent);
+        if (!isCurrent()) return;
         relViewModal.show();
+        renderApprovalSubmitPreviewActions(previewState);
         const attachmentPlaceholder = document.createElement("div");
         attachmentPlaceholder.className = "mt-3 p-3 border rounded bg-white small text-muted";
         attachmentPlaceholder.textContent = "첨부파일 미리보기를 준비하는 중입니다.";
         contentEl.appendChild(attachmentPlaceholder);
         const previewAttachments = await buildApprovalSubmitPreviewAttachments(previewDoc);
+        if (!isCurrent()) return;
         const attachmentViewerEl = await buildRelAttachmentViewer(previewAttachments);
+        if (!isCurrent()) return;
         attachmentPlaceholder.replaceWith(attachmentViewerEl);
+        previewState.ready = true;
+        syncApprovalSubmitControls();
     } catch (error) {
+        if (previewState && approvalSubmitPreviewState !== previewState) return;
+        invalidateApprovalSubmitPreview();
         resetRelViewObjectUrls();
         try {
             relViewModal?.hide();
@@ -12288,6 +12317,112 @@ async function openApprovalSubmitPreview() {
         showAlert(error?.message || '상신 미리보기를 불러오지 못했습니다.');
     }
 } // End of openApprovalSubmitPreview
+
+function approvalSubmitOwner() {
+    return JSON.stringify([myAuthUserId,getApprovalScopedCoopId(),myInfo?.emp_id,currentApprovalDraftId,
+        approvalInsuranceNoticeEpoch,getCurrentDraftMainType(),activeApprovalTab]);
+}
+function captureApprovalSubmitSnapshot() {
+    const form = document.getElementById('draftForm');
+    const descriptors = getApprovalOrderedAttachmentDescriptors();
+    const draft=collectApprovalDraftFormPayload();
+    if(!isSunVillageApproval())draft.approval_line=[...(draft.approval_line||[])].sort((a,b)=>Number(b.auth_level||0)-Number(a.auth_level||0));
+    return {owner:approvalSubmitOwner(),form,revision:approvalComposerInputRevision,
+        fingerprint:JSON.stringify([draft,
+            Array.from(form?.querySelectorAll('input,select,textarea') || []).filter(n=>n.type!=='file').map(n=>[n.id,n.name,n.value,n.checked]),
+            descriptors.map(n=>[n.kind,n.id,n.item?.rawRef,n.item?.displayName]),window.ServiceContractApproval?.snapshot() || null]),
+        files:descriptors.filter(n=>n.kind==='local').map(n=>n.file)};
+}
+function isApprovalSubmitSnapshotCurrent(snapshot) {
+    if (!snapshot || !snapshot.form || snapshot.form !== document.getElementById('draftForm')
+        || window.frameElement?.hidden || snapshot.owner !== approvalSubmitOwner()
+        || snapshot.revision !== approvalComposerInputRevision || !canPerform('approval.submit')) return false;
+    const now = captureApprovalSubmitSnapshot();
+    return snapshot.fingerprint === now.fingerprint && snapshot.files.length === now.files.length
+        && snapshot.files.every((file,index)=>file===now.files[index]);
+}
+function invalidateApprovalSubmitPreview() {
+    approvalSubmitPreviewState = null;
+    const button=document.getElementById('btnSubmitFromPreview');
+    if(button)button.disabled=true;
+}
+function syncApprovalSubmitControls() {
+    const button=document.getElementById('btnSubmit');
+    if(button)button.disabled=!!approvalSubmitAttempt || !canPerform('approval.submit');
+    const previewButton=document.getElementById('btnSubmitFromPreview');
+    if(!previewButton)return;
+    const preview=approvalSubmitPreviewState;
+    const current=!!preview && isApprovalSubmitSnapshotCurrent(preview.snapshot);
+    previewButton.disabled=!!approvalSubmitAttempt || !preview?.ready || !current;
+    previewButton.textContent=approvalSubmitAttempt?'상신 준비 중…':'상신하기';
+    if(preview){
+        const hint=document.getElementById('relViewActionHint');
+        if(hint)hint.textContent=!current?'작성 내용이 바뀌었습니다. 미리보기를 다시 열어 주세요.'
+            : !preview.ready?'첨부파일 미리보기를 준비하고 있습니다.':'';
+    }
+}
+function renderApprovalSubmitPreviewActions(preview) {
+    if(approvalSubmitPreviewState!==preview)return;
+    const footer=document.getElementById('relViewModalFooter'),buttons=document.getElementById('relViewActionButtons');
+    if(!footer||!buttons)return;
+    buttons.replaceChildren();
+    const close=document.createElement('button');close.type='button';close.className='btn btn-secondary btn-sm';close.textContent='닫기';close.onclick=()=>relViewModal.hide();
+    const submit=document.createElement('button');submit.type='button';submit.id='btnSubmitFromPreview';submit.className='btn btn-primary btn-sm';submit.textContent='상신하기';submit.onclick=submitApprovalFromPreview;
+    buttons.append(close,submit);buttons.classList.add('flex-wrap');footer.classList.remove('hidden');
+    syncApprovalSubmitControls();
+}
+function submitApprovalFromPreview() {
+    const preview=approvalSubmitPreviewState;
+    if(approvalSubmitAttempt || !preview?.ready || !isApprovalSubmitSnapshotCurrent(preview.snapshot)
+        || !document.getElementById('relViewModal')?.classList.contains('show'))return;
+    const form=preview.snapshot.form,button=document.getElementById('btnSubmit');
+    if(!button || button.disabled)return;
+    if(!form.checkValidity()){
+        const trigger=document.getElementById('btnSubmitFromPreview');
+        document.getElementById('relViewModal').addEventListener('hidden.bs.modal',()=>{
+            const active=document.activeElement;
+            if(isApprovalSubmitSnapshotCurrent(preview.snapshot) && (!active || active===document.body || active===trigger
+                || active.id==='btnSubmitPreview' || active.id==='tab1' || active.closest('#relViewModal')))form.reportValidity();
+        },{once:true});
+        relViewModal.hide();return;
+    }
+    // Native validation and the original explicit submitter audit remain in one path.
+    form.requestSubmit(button);
+}
+function bindApprovalSubmitPreviewControls() {
+    const form=document.getElementById('draftForm');
+    if(!form || form.dataset.submitPreviewBound==='1')return;
+    form.dataset.submitPreviewBound='1';
+    const changed=()=>{approvalComposerInputRevision++;syncApprovalSubmitControls();};
+    form.addEventListener('input',changed);form.addEventListener('change',changed);
+    form.addEventListener('reset',()=>{approvalComposerInputRevision++;invalidateApprovalSubmitPreview();});
+    if(window.frameElement)new MutationObserver(()=>{
+        if(window.frameElement.hidden){approvalComposerInputRevision++;approvalRelViewRevision++;invalidateApprovalSubmitPreview();}
+    }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+}
+async function confirmApprovalMeetingNoticeSubmission(snapshot,link) {
+    if(link){
+        if(!await window.CoopDialog.confirm('결재가 완료되면 회의 기본정보와 안건 제목·구성을 수정할 수 없습니다. 이 내용으로 상신할까요?',
+            {confirmText:'상신하기',cancelText:'취소'})){
+            if(approvalSubmitAttempt)approvalSubmitAttempt.confirmCancelled=true;
+            return false;
+        }
+    }
+    const preview=approvalSubmitAttempt?.preview;
+    if(preview && (approvalSubmitPreviewState!==preview || !document.getElementById('relViewModal')?.classList.contains('show')))return false;
+    if(!isApprovalSubmitSnapshotCurrent(snapshot)){
+        showAlert('입력이나 로그인 정보가 바뀌었습니다. 현재 내용을 확인한 뒤 다시 상신해 주세요.');return false;
+    }
+    return true;
+}
+function restoreApprovalSubmitConfirmFocus(attempt) {
+    if(!attempt.confirmCancelled || !isApprovalSubmitSnapshotCurrent(attempt.review))return;
+    const target=attempt.focusTarget,active=document.activeElement;
+    if(target?.isConnected && !target.disabled && target.getClientRects().length
+        && (!active || active===document.body || active===target || active===document.getElementById('relViewModal'))){
+        target.focus({preventScroll:true});
+    }
+}
 
 function getApprovalLeaveTargetEmpInfo() {
     const isProxy = !!document.getElementById("chkProxy")?.checked;
@@ -13129,9 +13264,15 @@ async function handleDraftSubmit(e) {
         return showAlert('상신하기 버튼을 직접 눌러야 상신할 수 있습니다.');
     }
     if (!canPerform('approval.submit')) return showAlert("상신 권한이 없습니다.");
+    if(approvalSubmitAttempt)return;
+    const submitAttempt={owner:approvalSubmitOwner(),preview:approvalSubmitPreviewState,
+        focusTarget:approvalSubmitPreviewState?document.getElementById('btnSubmitFromPreview'):e.submitter};
+    approvalSubmitAttempt=submitAttempt;
+    syncApprovalSubmitControls();
+    try {
 
     if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) {
-        return CoopPermissionRequest.submit(_supabase, createNotification, showAlert, async () => {
+        return await CoopPermissionRequest.submit(_supabase, createNotification, showAlert, async () => {
             await Promise.all([loadTodoList(), loadHistoryList()]);
             renderApprovalCategoryOptions();
         });
@@ -13485,6 +13626,14 @@ async function handleDraftSubmit(e) {
     // auth_level 숫자가 큰 사람(9) -> 작은 사람(1)
     if (!isSunVillageApproval()) finalApprovers.sort((a, b) => b.auth_level - a.auth_level);
 
+    if(submitAttempt.owner!==approvalSubmitOwner() || window.frameElement?.hidden)return;
+    if(submitAttempt.preview && !isApprovalSubmitSnapshotCurrent(submitAttempt.preview.snapshot)){
+        showAlert('상신 준비 중 결재선이나 입력이 바뀌었습니다. 미리보기를 다시 확인해 주세요.');return;
+    }
+    const submissionReview=captureApprovalSubmitSnapshot();
+    submitAttempt.review=submissionReview;
+    if(!await confirmApprovalMeetingNoticeSubmission(submissionReview,meetingNoticeSubmissionLink))return;
+
     const btn = document.getElementById("btnSubmit");
     btn.disabled = true; btn.innerText = "처리 중...";
 
@@ -13587,6 +13736,8 @@ async function handleDraftSubmit(e) {
 
     let insertedDoc = null;
     try {
+        if(!isApprovalSubmitSnapshotCurrent(submissionReview))throw new Error('입력이나 로그인 정보가 바뀌었습니다. 현재 내용을 확인한 뒤 다시 상신해 주세요.');
+        if(submitAttempt.preview && (approvalSubmitPreviewState!==submitAttempt.preview || !document.getElementById('relViewModal')?.classList.contains('show')))throw new Error('미리보기가 바뀌었습니다. 현재 내용을 다시 확인해 주세요.');
         if (isNoticeDraft && (JSON.stringify(meetingNoticeSubmissionLink) !== JSON.stringify(approvalMeetingNoticeLink)
             || meetingNoticeSubmissionOwner.coopId !== getApprovalScopedCoopId() || meetingNoticeSubmissionOwner.authId !== myAuthUserId)) throw new Error('연결된 회의나 로그인 계정이 바뀌었습니다. 현재 공문을 확인한 뒤 다시 상신해 주세요.');
         const insertResult = await insertApprovalWithDocNoRetry(approvalInsertPayload);
@@ -13629,6 +13780,7 @@ async function handleDraftSubmit(e) {
     }
     const firstApprover = finalApprovers[0];
     const firstApproverName = firstApprover ? `${firstApprover.emp_name} ${firstApprover.position || ''}`.trim() : '-';
+    if(submitAttempt.preview && approvalSubmitPreviewState===submitAttempt.preview)relViewModal?.hide();
     resetApprovalComposerForm();
     btn.disabled = false;
     btn.innerText = "상신하기";
@@ -13636,6 +13788,9 @@ async function handleDraftSubmit(e) {
     showAlert(submitNotice, () => {
         window.location.reload();
     });
+    } finally {
+        if(approvalSubmitAttempt===submitAttempt){approvalSubmitAttempt=null;syncApprovalSubmitControls();restoreApprovalSubmitConfirmFocus(submitAttempt);}
+    }
 }
 
 async function submitApprovalActionModal() {
@@ -15612,6 +15767,7 @@ const APPROVAL_REL_SEARCH_QUERY_LIMIT = 20;
 
 // 모달 초기화 (onload 밖에서도 호출 가능하도록)
 function initializeApprovalRelatedModals() {
+    bindApprovalSubmitPreviewControls();
     const relSearchModalEl = document.getElementById('relSearchModal');
     const relViewModalEl = document.getElementById('relViewModal');
     if (!relSearchModalEl || !relViewModalEl) return;
@@ -15619,7 +15775,9 @@ function initializeApprovalRelatedModals() {
     relViewModal = bootstrap.Modal.getOrCreateInstance(relViewModalEl);
     if (relViewModalEl.dataset.relatedModalBound !== '1') {
         relViewModalEl.dataset.relatedModalBound = '1';
+        relViewModalEl.addEventListener('hide.bs.modal', () => {relViewModalEl.dataset.submitPreviewClosing='1';approvalRelViewRevision++;invalidateApprovalSubmitPreview();});
         relViewModalEl.addEventListener('hidden.bs.modal', () => {
+            relViewModalEl.dataset.submitPreviewClosing='0';
             resetRelViewObjectUrls();
             currentViewingDocId = null;
             syncRelViewActionArea(null);
@@ -15954,6 +16112,9 @@ async function openRelView(docId) {
         return;
     }
     currentViewingDocId = safeDocId;
+    const viewRevision=++approvalRelViewRevision,viewOwner=approvalSubmitOwner();
+    const isCurrentView=()=>viewRevision===approvalRelViewRevision && currentViewingDocId===safeDocId
+        && viewOwner===approvalSubmitOwner() && !window.frameElement?.hidden;
     resetRelViewObjectUrls();
     const contentEl = document.getElementById("relViewContent");
     const modalTitleEl = document.getElementById("relViewModalTitle");
@@ -15963,8 +16124,10 @@ async function openRelView(docId) {
     relViewModal.show();
 
     const { data: rawDoc, error } = await scopeApprovalTenant(_supabase.from('ref_approval').select('*')).eq('id', safeDocId).maybeSingle();
+    if(!isCurrentView())return;
     if (error || !rawDoc) { contentEl.textContent = "문서를 불러올 수 없습니다."; return; }
     const [data] = await annotateApprovalBusinessTripCancelRequestState([rawDoc]);
+    if(!isCurrentView())return;
 
     // 보기 전용 템플릿 렌더링 (안전한 DOM 구성)
     const lines = (Array.isArray(data.approval_line) ? data.approval_line : [])
@@ -16017,7 +16180,8 @@ async function openRelView(docId) {
     appendApprovalWithholdingSnapshotSection(contentEl, data);
     contentEl.appendChild(amountEl);
     appendApprovalSalaryLedgerSnapshotSection(contentEl, data);
-    await appendApprovalRelatedDocSection(contentEl, data);
+    await appendApprovalRelatedDocSection(contentEl, data,isCurrentView);
+    if(!isCurrentView())return;
 
     const attachmentRefs = Array.isArray(data.file_links)
         ? data.file_links.filter(link => typeof link === 'string' && link.trim()).map(rawRef => ({ rawRef }))
@@ -16029,6 +16193,7 @@ async function openRelView(docId) {
         });
     }
     const attachmentViewerEl = await buildRelAttachmentViewer(attachmentRefs);
+    if(!isCurrentView())return;
     contentEl.appendChild(attachmentViewerEl);
     syncRelViewActionArea(data);
     void mountApprovalTaxTaskLinks(contentEl, data);
