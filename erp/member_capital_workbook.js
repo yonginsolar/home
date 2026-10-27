@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.1.0. Original member writers and legacy import drafts remain separate. */
+/* Member/capital workbook 1.1.1. Original member writers and legacy import drafts remain separate. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -112,7 +112,7 @@
     });
     if (!payload.length && !payment.length)
       errors.push("등록할 내용이 없습니다.");
-    const sources = {members: {}, payments: {}};
+    const sources = {members: {}, payments: {}, date1904: wb.Workbook?.WBProps?.date1904 === true};
     for (const [key, raw, rows] of [["members",rawMembers,payload],["payments",rawPayments,payment]])
       rows.forEach((row,i) => { sources[key][row.row_no] = {...raw[i]}; });
     return { data: { members: payload, payments: payment, mode: "groups" }, errors, sources };
@@ -815,6 +815,7 @@
       if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible() || locked(s) || !(s.data.members.length || s.data.payments.length)) return;
       if (!s.data.members.length && !s.data.payments.length) return;
       const X = root.XLSX, wb = X.utils.book_new();
+      wb.Workbook = {WBProps:{date1904:s.sources?.date1904 === true}};
       for (const k of ["members", "payments"]) {
         const rows = s.data[k].map((r) => {
           const v = s.review?.[k]?.find((v) => v.row_no === r.row_no);
@@ -879,7 +880,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.1.0",
+    version: "1.1.1",
     create,
     parse,
     memberHeaders,
