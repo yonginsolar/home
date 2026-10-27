@@ -1,20 +1,27 @@
-/* Version: v1.0.3 — compare and select using the existing document-bearing lease response. */
+/* Version: v1.0.4 — freeze pending selections and retain independent release barriers. */
 import { compareBoardChairLines, applyBoardChairSelection, labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 
 export function createBoardScriptTransfer(hooks) {
   const { state, manager, savedRows, editStates, sanitize, value, owner, isCurrent, remember, render, toast } = hooks;
   const $ = id => document.getElementById(id), SOURCE = 'SCENARIO', TARGET = 'SCENARIO_SECRETARIAT';
-  let intent = null, opening = false, closing = false, generation = 0;
+  let intent = null, opening = false, generation = 0;
+  const closingRows = new Set();
   const key = type => `${state.current?.id}:${type}`;
   function currentValue(type) { return hooks.currentValue(type); }
   function available() { return state.current?.meeting_type === 'BOARD' && state.current.status !== 'FINAL' && [SOURCE, TARGET].includes(state.activeDocument); }
   function sync() {
     const button = $('transferChairScriptButton');
     button.hidden = !available();
-    button.disabled = state.loading || opening || closing || !!intent || manager.hasPending(owner());
-    button.textContent = state.activeDocument === SOURCE ? '실무자용에 적용' : '의장용 변경 비교';
+    const releasePending = [...closingRows].some(row => !row.releaseFailed);
+    button.disabled = state.loading || opening || releasePending || !!intent || manager.hasPending(owner());
+    button.textContent = closingRows.size && !releasePending ? '편집권 반납 다시 확인'
+      : state.activeDocument === SOURCE ? '실무자용에 적용' : '의장용 변경 비교';
+    button.title = closingRows.size && !releasePending ? '편집권 반납을 다시 확인한 뒤 비교할 수 있습니다.' : '';
     if (!intent) return;
     const count = $('scriptTransferList').querySelectorAll('input:checked').length;
+    $('scriptTransferList').setAttribute('aria-busy', String(!!intent.busy));
+    for (const control of $('scriptTransferList').querySelectorAll('input')) control.disabled = !!intent.busy;
+    for (const id of ['selectAllScriptTransferButton', 'clearScriptTransferButton']) $(id).disabled = !!intent.busy;
     $('scriptTransferSelection').textContent = `${count}개 선택`;
     $('applyScriptTransferButton').disabled = !!intent.busy || intent.stale || (!count && intent.plan.changes.length > 0);
     $('applyScriptTransferButton').textContent = intent.plan.changes.length ? '선택 반영 후 실무자용 편집' : '실무자용 편집';
@@ -27,11 +34,15 @@ export function createBoardScriptTransfer(hooks) {
     return sameScope(row) && currentValue(SOURCE) === row.sourceValue && currentValue(TARGET) === row.targetValue;
   }
   function release(row) {
-    if (!row || !row.acquired || row.alreadyOwned || row.applied || !isCurrent(row.owner)) { closing = false; sync(); return Promise.resolve(); }
-    closing = true; sync();
-    return manager.manage(row.owner, TARGET, 'release').then(() => {
+    if (row?.releaseRequest) return row.releaseRequest;
+    if (!row || !row.acquired || row.alreadyOwned || row.applied || !isCurrent(row.owner)) { closingRows.delete(row); sync(); return Promise.resolve(); }
+    row.releaseFailed = false; closingRows.add(row); sync();
+    const task = Promise.resolve().then(() => manager.manage(row.owner, TARGET, 'release')).then(() => {
+      closingRows.delete(row);
       if (isCurrent(row.owner) && !intent && !opening) { editStates.delete(key(TARGET)); hooks.renderEdit(); }
-    }).catch(() => {}).finally(() => { closing = false; sync(); });
+    }).catch(() => { row.releaseFailed = true; }).finally(() => { if (row.releaseRequest === task) row.releaseRequest = null; sync(); });
+    row.releaseRequest = task;
+    return task;
   }
   function close(restore = true) {
     const row = intent, activeBefore = document.activeElement, target = $('transferChairScriptButton');
@@ -47,7 +58,7 @@ export function createBoardScriptTransfer(hooks) {
         && !window.frameElement?.hidden && target.getClientRects().length && !target.disabled
         && (!active || active === document.body || active === target || $('scriptTransferDialog').contains(active))) target.focus({ preventScroll: true });
     };
-    if (row?.busy && !row.applied) { row.cancelled = true; closing = true; }
+    if (row?.busy && !row.applied) { row.cancelled = true; closingRows.add(row); }
     else void release(row).then(restoreFocus);
     if (row) row.restoreFocus = restoreFocus;
     sync();
@@ -86,7 +97,14 @@ export function createBoardScriptTransfer(hooks) {
     $('scriptTransferError').textContent = ''; sync();
   }
   async function open() {
-    if (opening || closing || intent || !available() || manager.hasPending(owner())) return;
+    if (opening || intent || !available() || manager.hasPending(owner())) return;
+    if (closingRows.size) {
+      if ([...closingRows].some(row => !row.releaseFailed)) return;
+      opening = true; sync();
+      try { await Promise.all([...closingRows].map(release)); }
+      finally { opening = false; sync(); hooks.renderEdit(); }
+      return;
+    }
     remember();
     if (state.pendingDocuments.has(SOURCE) || (state.activeDocument === SOURCE && state.documentDirty)) throw new Error('의장용 시나리오를 먼저 저장한 뒤 실무자용에 적용해 주세요.');
     if (!savedRows.get(SOURCE)?.content_html) throw new Error('의장용 시나리오를 먼저 저장해 주세요.');
