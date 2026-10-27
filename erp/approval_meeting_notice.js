@@ -1,4 +1,4 @@
-/* v1.0.0 - Meeting call notices from the saved, tenant-scoped meeting materials. */
+/* v1.1.0 - Preserve exact meeting/fingerprint association with imported call notices. */
 (function (root) {
     'use strict';
     let rows = [], loading = false, generation = 0, loadedCoop = '', loadedKind = '';
@@ -61,13 +61,14 @@
     async function read(client, coopId, id, kind) {
         const row = rows.find(item => item.id === id);
         if (loading || !row || loadedCoop !== coopId || loadedKind !== kind) throw new Error('현재 조합의 회의꾸러미를 먼저 선택하세요.');
-        const [meeting, materials, runtime] = await Promise.all([
-            client.from('meeting_packages').select('id,title,meeting_type,meeting_date,start_time,location').eq('coop_id', coopId).eq('id', id).maybeSingle(),
-            client.from('meeting_package_documents').select('content_html').eq('coop_id', coopId).eq('package_id', id).eq('document_type','MATERIALS').maybeSingle(),
+        const [source, runtime] = await Promise.all([
+            client.rpc('get_meeting_call_notice_source',{p_package_id:id}),
             client.rpc('get_my_erp_runtime')
         ]);
-        if (meeting.error || materials.error || runtime.error || !meeting.data || meeting.data.meeting_type !== kind || runtime.data?.coop_id !== coopId) throw new Error('현재 조합의 회의꾸러미를 확인하지 못했습니다.');
-        return build(meeting.data, materials.data?.content_html, runtime.data.coop_name);
+        const meeting = source.data?.meeting, lock = source.data?.agenda_state;
+        if (source.error || runtime.error || !lock?.fingerprint || !meeting || meeting.coop_id !== coopId || meeting.meeting_type !== kind || runtime.data?.coop_id !== coopId) throw new Error('현재 조합의 회의꾸러미와 안건 상태를 확인하지 못했습니다.');
+        return { ...build(meeting, source.data.content_html, runtime.data.coop_name),
+            meetingLink:{packageId:id,fingerprint:lock.fingerprint,kind,coopId,title:meeting.title} };
     }
-    root.CoopMeetingNotice = { load, read, build, agendaGroups };
+    root.CoopMeetingNotice = { version:'1.1.0', load, read, build, agendaGroups };
 })(window);

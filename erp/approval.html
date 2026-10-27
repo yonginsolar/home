@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.110 | Change: 2026-10-26 - Open separate document retention review for existing managers. -->
+<!-- Version: v1.2.111 | Change: 2026-10-27 - Bind imported meeting call notices to their exact meeting agendas. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -50,7 +50,7 @@
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_insurance_notice.js?v=1.1.1" integrity="sha384-HmicS2Afj/aL+WJ/EA3Btpvn1y5AZA4oMHXInN+JNegvYJQwE/wjIPSoWlGXENre" crossorigin="anonymous"></script>
   <script src="approval_permission_request.js?v=1.2.1-uimodal-20261013-1"></script>
-  <script src="workflow_assets.js?v=20261022-help-1"></script>
+  <script src="workflow_assets.js?v=20261027-agenda-lock-1"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
@@ -1172,6 +1172,7 @@
             <button type="button" class="btn btn-outline-primary" id="noticeMeetingApply" onclick="applyApprovalMeetingNotice()">회의 내용 불러오기</button>
             <p id="noticeMeetingStatus" class="small text-muted mt-2 mb-0" role="status"></p>
           </div>
+          <p id="noticeMeetingLinkStatus" class="small text-muted mt-2 mb-0" role="status"></p>
         </div>
         <div class="col-12 hidden mb-3" id="divNoticeUsage">
           <label class="small text-muted fw-bold" for="noticeUsage">공문 용도</label>
@@ -1690,6 +1691,7 @@ let approvalLastCategory = '';
 const approvalCategoryBodyDrafts = new Map();
 let approvalCategoryBodyDraftScope = '';
 let approvalMeetingNoticeRequestSequence = 0;
+let approvalMeetingNoticeLink = null;
 let approvalLeaveCancelCandidates = [];
 let approvalBusinessTripCancelCandidates = [];
 let approvalExpenseAdjustmentSelectedDoc = null;
@@ -3059,6 +3061,7 @@ function collectApprovalDraftFormPayload() {
             notice_usage: OfficialNotice.normalize(document.getElementById('noticeUsage')?.value),
             notice_via: String(document.getElementById('noticeVia')?.value || '').trim(),
             notice_approval_memo: String(document.getElementById('noticeApprovalMemo')?.value || '').trim(),
+            notice_meeting_link: approvalMeetingNoticeLink ? {...approvalMeetingNoticeLink} : null,
             amount: String(ERPNumberInput.raw(document.getElementById('appAmount')?.value) || '').trim(),
             related_doc_id: String(document.getElementById('relDocId')?.value || '').trim(),
             related_doc_label: String(document.getElementById('relDocName')?.textContent || '').trim(),
@@ -3728,6 +3731,7 @@ async function loadApprovalDraftFromServer(draftId) {
         if (noticeViaEl) noticeViaEl.value = String(fields.notice_via || '').trim();
         const noticeMemoEl = document.getElementById('noticeApprovalMemo');
         if (noticeMemoEl) noticeMemoEl.value = String(fields.notice_approval_memo || '').trim();
+        setApprovalMeetingNoticeLink(fields.notice_meeting_link);
         setApprovalEditorContent(String(payload?.body || '').trim());
 
         setApprovalRelatedDocLabel(String(fields.related_doc_id || '').trim(), String(fields.related_doc_label || '').trim());
@@ -11445,6 +11449,16 @@ function resetApprovalCategoryBodyDrafts() {
     approvalCategoryBodyDrafts.clear();
     approvalCategoryBodyDraftScope = '';
     invalidateApprovalMeetingNoticeRequest();
+    setApprovalMeetingNoticeLink(null);
+}
+
+function setApprovalMeetingNoticeLink(value) {
+    approvalMeetingNoticeLink = value && value.coopId === getApprovalScopedCoopId()
+        && /^[a-f0-9-]{36}$/i.test(value.packageId || '') && /^[a-f0-9]{64}$/.test(value.fingerprint || '')
+        && ['BOARD','GENERAL_ASSEMBLY'].includes(value.kind) ? {...value} : null;
+    const status = document.getElementById('noticeMeetingLinkStatus');
+    if (status) status.textContent = approvalMeetingNoticeLink
+        ? `연결된 회의: ${approvalMeetingNoticeLink.title || '선택한 회의'} · 이 공문의 결재 완료부터 안건이 잠깁니다.` : '';
 }
 
 function prepareApprovalCategoryBodyChange(previousType, nextType) {
@@ -11754,9 +11768,13 @@ async function changeApprovalMeetingNoticeKind() {
     invalidateApprovalMeetingNoticeRequest();
     const request = approvalMeetingNoticeRequestSequence;
     const kind = document.getElementById('noticeMeetingKind').value;
+    // Merely browsing a different meeting never retargets the imported body.
+    if (!kind) setApprovalMeetingNoticeLink(null);
     const coopId = getApprovalScopedCoopId();
+    const authId = typeof myAuthUserId === 'undefined' ? '' : myAuthUserId;
     const isCurrent = () => request === approvalMeetingNoticeRequestSequence && kind === document.getElementById('noticeMeetingKind').value
-        && coopId === getApprovalScopedCoopId() && getCurrentDraftMainType() === '공문' && !window.frameElement?.hidden;
+        && coopId === getApprovalScopedCoopId() && authId === (typeof myAuthUserId === 'undefined' ? '' : myAuthUserId)
+        && getCurrentDraftMainType() === '공문' && !window.frameElement?.hidden;
     document.getElementById('noticeMeetingFields').classList.toggle('hidden', !kind);
     if (!kind) return;
     try {
@@ -11773,9 +11791,11 @@ async function applyApprovalMeetingNotice() {
     const kind = document.getElementById('noticeMeetingKind').value;
     const meetingId = document.getElementById('noticeMeetingSelect').value;
     const coopId = getApprovalScopedCoopId();
+    const authId = typeof myAuthUserId === 'undefined' ? '' : myAuthUserId;
     const isCurrent = () => request === approvalMeetingNoticeRequestSequence && getCurrentDraftMainType() === '공문'
         && kind === document.getElementById('noticeMeetingKind').value
-        && meetingId === document.getElementById('noticeMeetingSelect').value && coopId === getApprovalScopedCoopId();
+        && meetingId === document.getElementById('noticeMeetingSelect').value && coopId === getApprovalScopedCoopId()
+        && authId === (typeof myAuthUserId === 'undefined' ? '' : myAuthUserId) && !window.frameElement?.hidden;
     button.disabled = true;
     try {
         await window.ErpWorkflowAssets.load('meetingNotice');
@@ -11788,6 +11808,7 @@ async function applyApprovalMeetingNotice() {
         document.getElementById('noticeReceiver').value = data.receiver;
         markApprovalTitleInputDirty('notice');
         setApprovalEditorContent(data.content);
+        setApprovalMeetingNoticeLink(data.meetingLink);
         document.getElementById('noticeMeetingStatus').textContent = '일시·장소·안건 제목을 불러왔습니다. 필요한 내용을 편집한 뒤 결재선과 첨부를 확인하세요.';
     } catch (error) { if (isCurrent()) showAlert(error.message); }
     finally { if (request === approvalMeetingNoticeRequestSequence) button.disabled = false; }
@@ -13108,6 +13129,8 @@ async function handleDraftSubmit(e) {
     }
 
     const mainType = getCurrentDraftMainType();
+    const meetingNoticeSubmissionLink = mainType === '공문' && approvalMeetingNoticeLink ? {...approvalMeetingNoticeLink} : null;
+    const meetingNoticeSubmissionOwner = {coopId:getApprovalScopedCoopId(),authId:myAuthUserId};
     if (!isApprovalDocEnabledForCurrentProfile(mainType)) {
         return showAlert('현재 조합에서 사용하지 않는 문서유형입니다. 설정에서 사용 여부를 확인하세요.');
     }
@@ -13542,6 +13565,10 @@ async function handleDraftSubmit(e) {
         receiver: receiver || null,
         via: via || null,
         ...(isNoticeDraft ? { notice_usage: OfficialNotice.normalize(document.getElementById('noticeUsage')?.value) } : {}),
+        ...(isNoticeDraft && meetingNoticeSubmissionLink?.coopId === getApprovalScopedCoopId() ? {
+            meeting_package_id:meetingNoticeSubmissionLink.packageId,
+            meeting_agenda_fingerprint:meetingNoticeSubmissionLink.fingerprint
+        } : {}),
         ...(approvalLeaveSnapshotSupported && leaveSnapshotPayload ? { leave_snapshot: leaveSnapshotPayload } : {}),
         ...(approvalAttendanceSnapshotSupported && attendanceSnapshotPayload ? { attendance_snapshot: attendanceSnapshotPayload } : {}),
         ...(approvalBusinessTripSnapshotSupported && businessTripSnapshotPayload ? { business_trip_snapshot: businessTripSnapshotPayload } : {}),
@@ -13551,6 +13578,8 @@ async function handleDraftSubmit(e) {
 
     let insertedDoc = null;
     try {
+        if (isNoticeDraft && (JSON.stringify(meetingNoticeSubmissionLink) !== JSON.stringify(approvalMeetingNoticeLink)
+            || meetingNoticeSubmissionOwner.coopId !== getApprovalScopedCoopId() || meetingNoticeSubmissionOwner.authId !== myAuthUserId)) throw new Error('연결된 회의나 로그인 계정이 바뀌었습니다. 현재 공문을 확인한 뒤 다시 상신해 주세요.');
         const insertResult = await insertApprovalWithDocNoRetry(approvalInsertPayload);
         insertedDoc = insertResult.insertedDoc;
     } catch (error) {

@@ -1,6 +1,6 @@
 /*
-Version: v1.5.1
-Change: 2026-09-30 - Save paired board scripts in one request.
+Version: v1.6.0
+Change: 2026-10-27 - Exact call-notice locks and atomic agenda saves.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -51,7 +51,7 @@ async function listMeetingHistory() {
 
 async function getPackage(id) {
   const { coop_id: coopId } = await getRuntime();
-  const [packageResult, agendaResult, documentResult, attachmentResult] = await Promise.all([
+  const [packageResult, agendaResult, documentResult, attachmentResult, lockResult] = await Promise.all([
     scope(supabase.from('meeting_packages').select('*').eq('id', id), coopId).maybeSingle(),
     scope(supabase.from('meeting_package_agendas').select('*').eq('package_id', id), coopId)
       .order('sort_order', { ascending: true })
@@ -60,15 +60,17 @@ async function getPackage(id) {
       .order('document_type', { ascending: true }),
     scope(supabase.from('meeting_package_pdf_attachments').select('*').eq('package_id', id), coopId)
       .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: true }),
+    getAgendaState(id)
   ]);
-  const error = packageResult.error || agendaResult.error || documentResult.error || attachmentResult.error;
+  const error = packageResult.error || agendaResult.error || documentResult.error || attachmentResult.error || lockResult.error;
   return {
     data: error ? null : {
       package: packageResult.data || null,
       agendas: agendaResult.data || [],
       documents: documentResult.data || [],
-      pdfAttachments: attachmentResult.data || []
+      pdfAttachments: attachmentResult.data || [],
+      agendaLock: lockResult.data
     },
     error
   };
@@ -156,6 +158,8 @@ async function updatePackage(id, payload) {
 }
 
 async function deletePackage(id) {
+  const lock = await getAgendaState(id);
+  if (lock.error || lock.data?.locked) return { data:null, error:lock.error || new Error('소집 공문 결재가 완료되어 안건과 회의 준비 자료를 삭제할 수 없습니다.') };
   const { coop_id: coopId } = await getRuntime();
   const attachments = await scope(
     supabase.from('meeting_package_pdf_attachments').select('storage_path').eq('package_id', id),
@@ -163,11 +167,19 @@ async function deletePackage(id) {
   );
   if (attachments.error) return { data: null, error: attachments.error };
   const paths = (attachments.data || []).map(row => row.storage_path).filter(Boolean);
-  if (paths.length) {
-    const removed = await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).remove(paths);
-    if (removed.error) return { data: null, error: removed.error };
+  const requestKey=crypto.randomUUID();
+  const claimed=await supabase.rpc('prepare_meeting_package_delete',{p_package_id:id,p_request_key:requestKey,p_release:false});
+  if (claimed.error) return {data:null,error:claimed.error};
+  try {
+    if (paths.length) {
+      const removed = await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).remove(paths);
+      if (removed.error) return { data: null, error: removed.error };
+    }
+    return await scope(supabase.from('meeting_packages').delete().eq('id', id), coopId).select('id').single();
+  } finally {
+    try { await supabase.rpc('prepare_meeting_package_delete',{p_package_id:id,p_request_key:requestKey,p_release:true}); }
+    catch (_) { /* A cleanup timeout must not turn a verified parent delete into a failed delete. */ }
   }
-  return await scope(supabase.from('meeting_packages').delete().eq('id', id), coopId);
 }
 
 async function saveAgendas(packageId, agendas) {
@@ -192,42 +204,28 @@ async function saveAgendas(packageId, agendas) {
     sort_order: index
   }));
 
-  const { data: existing, error: existingError } = await scope(
-    supabase.from('meeting_package_agendas').select('id').eq('package_id', packageId),
-    coopId
-  );
-  if (existingError) return { data: null, error: existingError };
+  return await supabase.rpc('save_meeting_package_agendas', { p_package_id:packageId, p_rows:safeRows });
+}
 
-  const existingRows = safeRows.filter(row => row.id);
-  const newRows = safeRows.filter(row => !row.id);
-  let saved = [];
-  if (existingRows.length > 0) {
-    const { data, error } = await supabase
-      .from('meeting_package_agendas')
-      .upsert(existingRows, { onConflict: 'id' })
-      .select('*');
-    if (error) return { data: null, error };
-    saved = saved.concat(data || []);
-  }
-  if (newRows.length > 0) {
-    const { data, error } = await supabase
-      .from('meeting_package_agendas')
-      .insert(newRows)
-      .select('*');
-    if (error) return { data: null, error };
-    saved = saved.concat(data || []);
-  }
+async function getAgendaState(id) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    return await Promise.race([
+      supabase.rpc('get_meeting_agenda_state', {p_package_id:id}).abortSignal(controller.signal),
+      new Promise(resolve => { timer=setTimeout(() => {controller.abort();resolve({data:null,error:new Error('안건 잠금 상태 조회가 지연되었습니다. 다시 확인해 주세요.')});},12000); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
 
-  const retainedExistingIds = new Set(existingRows.map(row => row.id));
-  const removedIds = (existing || []).map(row => row.id).filter(id => !retainedExistingIds.has(id));
-  if (removedIds.length > 0) {
-    const { error: deleteError } = await scope(
-      supabase.from('meeting_package_agendas').delete().eq('package_id', packageId).in('id', removedIds),
-      coopId
-    );
-    if (deleteError) return { data: saved, error: deleteError };
-  }
-  return { data: saved.sort((a, b) => a.sort_order - b.sort_order), error: null };
+async function listCompletedCallNotices() {
+  const {coop_id} = await getRuntime();
+  return await scope(supabase.from('ref_approval').select('id,title,doc_no,status,meeting_package_id')
+    .eq('doc_type','공문').in('status',['완료','실물결재완료']),coop_id).order('id',{ascending:false}).limit(200);
+}
+
+async function linkCallNotice(id, noticeId, fingerprint) {
+  return await supabase.rpc('link_meeting_call_notice', {p_package_id:id,p_approval_id:noticeId,p_fingerprint:fingerprint});
 }
 
 async function saveDocument(packageId, documentType, payload) {
@@ -316,6 +314,9 @@ async function recordAuditChangeRequest(packageId, payload) {
 }
 
 export const MeetingPackageService = {
+  getAgendaState,
+  listCompletedCallNotices,
+  linkCallNotice,
   getRuntime,
   listPackages,
   listMeetingHistory,

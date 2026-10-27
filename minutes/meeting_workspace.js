@@ -1,11 +1,12 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.15
-Change: 2026-10-27 - Preserve speech inheritance without reviving the old recording question.
+Version: v1.11.0
+Change: 2026-10-27 - Keep approved call-notice agendas fixed while preserving notes and scenarios.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.1';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.6.0';
+import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.0.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.9';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
@@ -51,6 +52,7 @@ const state = {
   meetingHistory: [],
   packages: [],
   current: null,
+  agendaLock: null,
   agendas: [],
   documents: new Map(),
   inheritedChairStyle: null,
@@ -472,6 +474,7 @@ function setBusy(value) {
     renderAuditStep({ preserveDraft: true });
     renderBookletSourceOptions();
     if (chapterMode()) renderChapterEditState();
+    renderAgendaLock();
   }
   syncNewPackageDraftUi();
 }
@@ -743,6 +746,61 @@ function renderAgendaList() {
       </div>
     </article>
   `).join('');
+  renderAgendaLock();
+}
+
+function renderAgendaLock() {
+  const known = !!state.agendaLock, locked = !known || state.agendaLock.locked;
+  if (!$('agendaLockStatus')) return;
+  $('agendaLockStatus').textContent = !known ? '안건 잠금 상태를 다시 확인해 주세요.' : locked ? AGENDA_LOCK_REASON
+    : '소집 공문에 회의 내용을 불러와 상신하면, 공문 결재 완료부터 안건이 잠깁니다.';
+  $('existingNoticeLink').hidden = locked;
+  $('addAgendaButton').disabled = state.loading || locked;
+  $('deletePackageButton').disabled = state.loading || locked;
+  for (const node of document.querySelectorAll('#agendaList [data-agenda-action],#agendaList [data-field]')) {
+    if (node.dataset.agendaAction || ['agenda_kind','title','summary','background','proposal_text','decision_draft','requires_article_comparison'].includes(node.dataset.field)) node.disabled = state.loading || locked;
+  }
+  if (state.activeDocument === 'MATERIALS' && !chapterMode()) protectMaterialAgendas($('documentEditor'), locked);
+}
+
+async function refreshAgendaLock() {
+  if (!state.current) return;
+  const owner = pdfActionOwner();
+  const result = await MeetingPackageService.getAgendaState(owner.packageId);
+  if (!pdfActionStillCurrent(owner)) return;
+  if (result.error) { state.agendaLock = null; renderAgendaLock(); throw result.error; }
+  state.agendaLock = result.data;
+  renderAgendaLock();
+  if (chapterMode()) renderChapterEditState();
+}
+
+async function loadCallNotices() {
+  const owner = pdfActionOwner();
+  const result = await MeetingPackageService.listCompletedCallNotices();
+  if (!pdfActionStillCurrent(owner)) return;
+  if (result.error) throw result.error;
+  $('callNoticeSelect').replaceChildren(new Option('공문을 선택하세요', ''));
+  for (const row of result.data || []) if (!row.meeting_package_id || row.meeting_package_id === owner.packageId) {
+    $('callNoticeSelect').add(new Option(`${row.doc_no || '문서번호 없음'} · ${row.title}`, String(row.id)));
+  }
+  if ($('callNoticeSelect').options.length === 1) showToast('현재 권한으로 연결할 수 있는 완료 공문이 없습니다.');
+}
+
+async function linkCallNotice() {
+  if (!state.current || state.agendaLock?.locked) return;
+  if (hasUnsavedPacketChanges()) return showToast('작성 중인 내용을 먼저 저장한 뒤 공문을 연결해 주세요.');
+  const owner = pdfActionOwner(), id = $('callNoticeSelect').value;
+  if (!id) return showToast('이 회의를 소집한 공문을 선택해 주세요.');
+  const fingerprint = state.agendaLock?.fingerprint;
+  const label = $('callNoticeSelect').selectedOptions[0]?.textContent;
+  if (!await window.CoopDialog.confirm(`「${label}」이 「${state.current.title}」의 소집 공문이 맞나요? 연결하면 현재 안건의 수정·추가·삭제·순서 변경이 잠깁니다.`)) return;
+  if (!pdfActionStillCurrent(owner) || id !== $('callNoticeSelect').value || fingerprint !== state.agendaLock?.fingerprint || hasUnsavedPacketChanges()) return;
+  const result = await MeetingPackageService.linkCallNotice(owner.packageId, id, fingerprint);
+  if (!pdfActionStillCurrent(owner)) return;
+  if (result.error) throw result.error;
+  state.agendaLock = result.data; renderAgendaLock();
+  if (chapterMode()) renderChapterEditState();
+  showToast('소집 공문을 연결하고 안건을 확정했습니다.');
 }
 
 function collectAgendasFromDom() {
@@ -1061,6 +1119,11 @@ function activeChapterLock() {
   return getAssemblyChapterEditLock(chapter?.id || '', state.sourceContext);
 }
 
+function agendaBillLocked() {
+  return state.activeDocument === 'MATERIALS' && (!state.agendaLock || state.agendaLock.locked)
+    && String(state.chapters[activeChapterIndex()]?.className || '').split(/\s+/).includes('chapter-bill');
+}
+
 function renderChapterEditState() {
   const lock = activeChapterLock();
   const editor = $('chapterEditor');
@@ -1069,10 +1132,16 @@ function renderChapterEditState() {
   editor.contentEditable = lock.locked ? 'false' : 'true';
   editor.setAttribute('aria-readonly', lock.locked ? 'true' : 'false');
   editor.classList.toggle('is-locked', lock.locked);
-  title.readOnly = lock.locked;
-  title.setAttribute('aria-readonly', lock.locked ? 'true' : 'false');
-  notice.hidden = !lock.locked;
-  notice.textContent = lock.reason;
+  const agendaLocked = agendaBillLocked();
+  if (!lock.locked) protectMaterialAgendas(editor, agendaLocked);
+  title.readOnly = lock.locked || agendaLocked;
+  title.setAttribute('aria-readonly', title.readOnly ? 'true' : 'false');
+  notice.hidden = !lock.locked && !agendaLocked;
+  notice.textContent = lock.locked ? lock.reason : agendaLocked ? AGENDA_LOCK_REASON : '';
+  const index = activeChapterIndex();
+  $('moveChapterUpButton').disabled = lock.locked || agendaLocked || index === 0;
+  $('moveChapterDownButton').disabled = lock.locked || agendaLocked || index >= state.chapters.length-1;
+  $('deleteChapterButton').disabled = lock.locked || agendaLocked;
   document.querySelectorAll('.rich-toolbar [data-command]').forEach((button) => {
     button.disabled = lock.locked;
   });
@@ -1083,10 +1152,12 @@ function rememberActiveChapter() {
   if (!chapterMode() || !state.chapters.length || !$('chapterEditor')) return;
   if (activeChapterLock().locked) return;
   const index = activeChapterIndex();
+  const copy = $('chapterEditor').cloneNode(true);
+  clearMaterialAgendaUi(copy);
   state.chapters[index] = {
     ...state.chapters[index],
     title: $('chapterTitle').value.trim() || `챕터 ${index + 1}`,
-    html: sanitizeHtml(stripEphemeralSignaturePreviewUrls($('chapterEditor').innerHTML))
+    html: sanitizeHtml(stripEphemeralSignaturePreviewUrls(copy.innerHTML))
   };
 }
 
@@ -1200,6 +1271,7 @@ function decorateBoardAnnexes({ expandLast = false } = {}) {
 
 function currentBoardEditorHtml() {
   const copy = $('documentEditor').cloneNode(true);
+  clearMaterialAgendaUi(copy);
   copy.querySelectorAll('.board-annex-toggle').forEach(button => button.remove());
   copy.querySelectorAll('.board-text-annex.is-collapsed').forEach(section => section.classList.remove('is-collapsed'));
   const html = sanitizeHtml(copy.innerHTML);
@@ -1256,9 +1328,9 @@ function renderActiveChapter() {
   $('previousChapterButton').disabled = index === 0;
   $('nextChapterButton').disabled = index >= state.chapters.length - 1;
   const lock = renderChapterEditState();
-  $('moveChapterUpButton').disabled = lock.locked || index === 0;
-  $('moveChapterDownButton').disabled = lock.locked || index >= state.chapters.length - 1;
-  $('deleteChapterButton').disabled = lock.locked;
+  $('moveChapterUpButton').disabled = lock.locked || agendaBillLocked() || index === 0;
+  $('moveChapterDownButton').disabled = lock.locked || agendaBillLocked() || index >= state.chapters.length - 1;
+  $('deleteChapterButton').disabled = lock.locked || agendaBillLocked();
   renderChapterList();
   renderPdfAttachmentList();
 }
@@ -1306,6 +1378,7 @@ function renderActiveDocument() {
   state.documentDirty = false;
   document.querySelectorAll('.doc-tab').forEach(button => button.classList.toggle('active', button.dataset.document === state.activeDocument));
   renderBoardAnnexPanel();
+  renderAgendaLock();
 }
 
 function rememberActiveDocument() {
@@ -2044,6 +2117,8 @@ async function openPackage(id, { internal = false } = {}) {
     if (state.session?.user?.id !== owner.userId || state.runtime?.coop_id !== owner.coopId
       || pdfIdentityRevision !== owner.identity || window.frameElement?.hidden) return;
     state.current = data.package;
+    state.agendaLock = data.agendaLock;
+    $('callNoticeSelect').replaceChildren(new Option('공문을 선택하세요',''));
     state.agendas = data.agendas || [];
     state.documents = new Map((data.documents || []).map(row => [row.document_type, row]));
     state.inheritedChairStyle = data.package.meeting_type === 'BOARD'
@@ -2173,6 +2248,7 @@ function switchStep(step) {
 }
 
 function addAgenda() {
+  if (!state.agendaLock || state.agendaLock.locked) return showToast(AGENDA_LOCK_REASON);
   state.agendas = collectAgendasFromDom();
   state.agendas.push({ agenda_kind:'DECISION', title:'', summary:'', background:'', proposal_text:'', office_report:'', scenario_notes:'', decision_draft:'', decision_result:'', discussion_notes:'', document_notes:'', private_notes:'', requires_article_comparison:false });
   renderAgendaList();
@@ -2203,6 +2279,7 @@ function removeBudgetRow(button) {
 }
 
 async function handleAgendaAction(button) {
+  if (!state.agendaLock || state.agendaLock.locked) return showToast(AGENDA_LOCK_REASON);
   const card = button.closest('.agenda-card');
   if (!card) return;
   state.agendas = collectAgendasFromDom();
@@ -2229,7 +2306,7 @@ function selectChapter(id) {
 
 function moveChapter(offset) {
   if (!chapterMode() || !state.chapters.length) return;
-  if (activeChapterLock().locked) return showToast('연결된 확정 자료는 순서를 바꾸거나 수정할 수 없습니다.');
+  if (activeChapterLock().locked || agendaBillLocked()) return showToast('연결된 확정 자료는 순서를 바꾸거나 수정할 수 없습니다.');
   rememberActiveChapter();
   const index = activeChapterIndex();
   const target = index + offset;
@@ -2269,7 +2346,7 @@ function addChapter() {
 
 async function deleteChapter() {
   if (!chapterMode() || !state.chapters.length) return;
-  if (activeChapterLock().locked) return showToast('연결된 확정 자료는 자료집에서 수정하거나 삭제할 수 없습니다.');
+  if (activeChapterLock().locked || agendaBillLocked()) return showToast('연결된 확정 자료는 자료집에서 수정하거나 삭제할 수 없습니다.');
   const index = activeChapterIndex();
   const title = state.chapters[index].title;
   if (activeChapterPdfAttachments().length) {
@@ -2332,7 +2409,11 @@ async function runAction(action) {
   try { await action(); }
   catch (error) {
     console.error(error);
-    showToast(error?.message || '작업을 완료하지 못했습니다.', 3600);
+    const code = String(error?.message || '');
+    showToast(code.includes('MEETING_AGENDA_LOCKED') ? '소집 공문 결재가 완료되어 안건이 잠겼습니다. 입력을 보관한 채 잠금 상태를 다시 확인해 주세요.'
+      : code.includes('MEETING_PACKAGE_DELETE_IN_PROGRESS') ? '이 회의의 삭제 작업이 진행 중입니다. 잠시 후 현재 상태를 다시 확인해 주세요.'
+      : code.includes('MEETING_AGENDA_CHANGED') ? '안건이 변경되었습니다. 현재 내용을 다시 확인한 뒤 공문을 연결해 주세요.'
+      : error?.message || '작업을 완료하지 못했습니다.', 4800);
   } finally { setBusy(false); }
 }
 
@@ -2368,6 +2449,11 @@ function bindEvents() {
   $('deletePackageButton').addEventListener('click', () => runAction(deletePackage));
   $('saveInfoButton').addEventListener('click', () => runAction(saveInfo));
   $('saveAgendasButton').addEventListener('click', () => runAction(saveAgendas));
+  $('refreshAgendaLockButton').addEventListener('click', () => runAction(refreshAgendaLock));
+  $('loadCallNoticesButton').addEventListener('click', () => runAction(loadCallNotices));
+  $('linkCallNoticeButton').addEventListener('click', () => runAction(linkCallNotice));
+  $('documentEditor').addEventListener('beforeinput', guardMaterialAgendaInput);
+  $('chapterEditor').addEventListener('beforeinput', guardMaterialAgendaInput);
   $('loadPreviousBooklet').addEventListener('click', () => runAction(loadPreviousBooklet));
   $('generateAllButton').addEventListener('click', () => runAction(generateAllDocuments));
   $('completeMaterialsButton').addEventListener('click', () => runAction(completeMeetingMaterials));
