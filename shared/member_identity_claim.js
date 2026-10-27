@@ -1,4 +1,4 @@
-/* v1.0.0 — Existing personal member claim. Memory-only drafts; no automatic writes/retries. */
+/* v1.0.1 — Existing personal member claim. Memory-only drafts; no automatic writes/retries. */
 (function(root){
  'use strict';
  const messages={NOT_MATCHED:'입력한 정보와 연결할 수 있는 조합원을 찾지 못했어요. 이름·주민등록번호·전화번호를 확인해 주세요.',INVALID_INPUT:'이름·주민등록번호·전화번호를 모두 확인해 주세요.',RATE_LIMITED:'확인이 여러 번 이어졌어요. 잠시 후 다시 시도해 주세요.',REQUEST_CHANGED:'연결 요청의 정보가 달라졌어요. 내용을 다시 확인해 주세요.',CONFLICT:'연결할 정보가 변경됐어요. 내용을 다시 확인해 주세요.'};
@@ -34,7 +34,7 @@
     request={id,values:{...s.values},actor:s.key.split('|')[0],coop,running:false,generation:0};s.request=request;
    }
    if(!request||request.running)return;request.running=true;const generation=++request.generation;s.phase='saving';s.error=false;s.message='기존 조합원 계정에 연결하고 있어요…';paint();
-   const pending=Promise.resolve().then(()=>{if(s.key!==key()||epoch!==view||!active(s)){s.phase='edit';s.request=null;return null;}return options.client.rpc('claim_member_by_identity',{p_name:request.values.name,p_rrn:request.values.rrn,p_phone:request.values.phone,p_request_key:request.id,p_actor:request.actor,p_coop:request.coop});});
+   const pending=Promise.resolve().then(()=>{if(s.key!==key()||epoch!==view||!active(s)){if(s.request===request&&generation===request.generation){s.phase='edit';s.request=null;s.message='';s.error=false;request.running=false;paint();}return null;}return options.client.rpc('claim_member_by_identity',{p_name:request.values.name,p_rrn:request.values.rrn,p_phone:request.values.phone,p_request_key:request.id,p_actor:request.actor,p_coop:request.coop});});
    let timer;const timeout=new Promise(resolve=>{timer=root.setTimeout(()=>{if(s.request===request&&generation===request.generation&&request.running){request.running=false;s.phase='unknown';s.message='응답이 늦어지고 있어요. 입력을 유지한 채 연결 결과를 확인할 수 있어요.';paint();}resolve();},15000);});
    const settled=pending.then(r=>{if(r&&generation===request.generation)known(s,request,r);},()=>{if(generation===request.generation)known(s,request,{error:{}});}).finally(()=>root.clearTimeout(timer));
    await Promise.race([settled,timeout]);
