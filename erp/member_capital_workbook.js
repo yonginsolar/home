@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.1.3. Show explicit email-resolution review without changing selected files or other import paths. */
+/* Member/capital workbook 1.1.4. Optional registration progress/result dialog; preserve exact-request retries. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -124,6 +124,7 @@
     normalizeMember,
     memberPayload,
     refresh,
+    registrationProgress = false,
   }) {
     let state = null,
       modal,
@@ -135,7 +136,8 @@
       check,
       clear,
       tab = "payments",
-      opener;
+      opener,
+      activeProgress = null;
     const context = () => getContext() || {},
       same = (s) => s === state && s.owner === context().owner,
       allowed = (s) => same(s) && context().allowed === true,
@@ -148,8 +150,43 @@
         if (value !== undefined) n.textContent = value;
         return n;
       };
+    function finishProgress(handle = activeProgress) {
+      if (!handle) return;
+      if (handle.dialog.open) handle.dialog.close();
+      handle.dialog.remove();
+      if (activeProgress === handle) activeProgress = null;
+    }
+    function startProgress(s, recovering) {
+      if (!registrationProgress || !same(s) || !allowed(s) || !visible()) return null;
+      finishProgress();
+      const dialog = el('dialog');
+      dialog.className = 'member-workbook-progress';
+      dialog.setAttribute('role', 'alertdialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog.setAttribute('aria-labelledby', 'memberWorkbookProgressTitle');
+      dialog.setAttribute('aria-busy', 'true');
+      dialog.tabIndex = -1;
+      const title = el('h2', recovering ? '등록 여부 확인 중' : '등록 중');
+      title.id = 'memberWorkbookProgressTitle';
+      title.className = 'h5';
+      const spinner = el('span');
+      spinner.className = 'spinner-border text-primary';
+      spinner.setAttribute('aria-hidden', 'true');
+      const message = el('p', recovering ? '앞서 요청한 등록 결과를 확인하고 있습니다.' : '회원 정보를 등록하고 있습니다. 처리 결과가 나오면 알려드릴게요.');
+      message.className = 'mt-3 mb-0';
+      message.setAttribute('role', 'status');
+      dialog.append(title, spinner, message);
+      dialog.addEventListener('cancel', e => e.preventDefault());
+      dialog.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') e.preventDefault(); });
+      modal.append(dialog);
+      const handle = { dialog, state: s }; activeProgress = handle;
+      try { dialog.showModal(); dialog.focus({ preventScroll: true }); }
+      catch (_) { finishProgress(handle); }
+      return handle;
+    }
     function pause() {
       if (!state) return;
+      finishProgress();
       state.epoch++;
       state.ctl?.abort();
       if (state.phase === "reading") state.phase = "pending";
@@ -182,7 +219,7 @@
       modal.setAttribute("aria-labelledby", "memberWorkbookTitle");
       // The whole dialog must remain scrollable when its header/footer alone exceed a short viewport.
       const layout = el("style");
-      layout.textContent = "#memberWorkbookModal .modal-dialog-scrollable .modal-content{max-height:calc(100vh - var(--bs-modal-margin, .5rem)*2);max-height:calc(100dvh - var(--bs-modal-margin, .5rem)*2);overflow-y:auto}#memberWorkbookModal .modal-body{flex:0 0 auto;overflow:visible}@media(max-width:575.98px){#memberWorkbookModal .modal-footer{padding:8px;gap:8px}#memberWorkbookModal .modal-footer>button{flex:1 1 14rem;max-width:100%;min-width:0;min-height:44px;margin:0;padding:8px 12px;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}}";
+      layout.textContent = "#memberWorkbookModal dialog.member-workbook-progress{box-sizing:border-box;width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;margin:auto;padding:24px;border:1px solid #cbd5e1;border-radius:16px;background:#fff;color:#172033;word-break:keep-all;overflow-wrap:anywhere}#memberWorkbookModal dialog.member-workbook-progress::backdrop{background:#0f172a75}#memberWorkbookModal .modal-dialog-scrollable .modal-content{max-height:calc(100vh - var(--bs-modal-margin, .5rem)*2);max-height:calc(100dvh - var(--bs-modal-margin, .5rem)*2);overflow-y:auto}#memberWorkbookModal .modal-body{flex:0 0 auto;overflow:visible}@media(max-width:575.98px){#memberWorkbookModal .modal-footer{padding:8px;gap:8px}#memberWorkbookModal .modal-footer>button{flex:1 1 14rem;max-width:100%;min-width:0;min-height:44px;margin:0;padding:8px 12px;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}}";
       document.head.append(layout);
       modal.innerHTML =
         '<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="memberWorkbookTitle">회원·출자금 엑셀 함께 등록</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="d-flex gap-2 flex-wrap mb-3"><button type="button" class="btn btn-outline-success btn-sm" data-template>두 시트 양식 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm coop-workflow-help" data-help aria-label="회원·출자금 함께 등록 도움말">?</button></div><label class="form-label" for="memberWorkbookFile">엑셀 파일</label><input id="memberWorkbookFile" class="form-control mb-2" type="file" accept=".xlsx,.xls"><p class="small text-muted">조합원 시트에는 신규 회원을 한 줄씩, 출자금 납입내역 시트에는 실제 입금을 한 줄씩 입력하세요. 파일 10MB·시트별 500건까지 검사합니다.</p><p data-status class="small" role="status" aria-live="polite"></p><p data-summary class="small fw-bold"></p><div class="d-flex gap-2 flex-wrap mb-2"><button type="button" class="btn btn-outline-secondary btn-sm" data-check>다시 검사</button><button type="button" class="btn btn-outline-secondary btn-sm" data-export>검토 목록 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm" data-clear>검토 비우기</button></div><div class="d-flex gap-2 mb-2" role="group" aria-label="검토 시트"><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="members">조합원</button><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="payments">출자금 납입내역</button></div><div class="table-responsive border rounded" style="max-height:45vh;overflow:auto"><table class="table table-sm align-middle mb-0" style="min-width:850px;table-layout:fixed"><thead></thead><tbody></tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-submit>회원·납입내역 등록</button></div></div></div>';
@@ -462,7 +499,7 @@
       modal.querySelector('[data-export]').disabled = !can || busy || !(s?.data?.members.length || s?.data?.payments.length);
       submit.disabled = !can || (!ready(s) && s.phase !== "uncertain");
       submit.textContent =
-        s?.phase === "uncertain" ? "같은 요청 다시 확인" : "등록 가능한 묶음 등록";
+        registrationProgress ? "등록" : s?.phase === "uncertain" ? "같은 요청 다시 확인" : "등록 가능한 묶음 등록";
       status.textContent = s?.message || "";
       const eligibleMembers = s?.review?.members.filter(r => r.eligible === true).length || 0;
       const eligiblePayments = s?.review?.payments.filter(r => r.eligible === true).length || 0;
@@ -727,6 +764,8 @@
       s.phase = "saving";
       s.message = "회원과 납입 내역을 등록하는 중입니다…";
       render();
+      const progress = startProgress(s, attempt.uncertain);
+      let resultNotice = null;
       try {
         const r = await request("apply", attempt.payload, attempt.key);
         if (!same(s)) return;
@@ -758,6 +797,7 @@
         s.failures = failures;
         s.dirty = remaining > 0;
         s.message = "등록 완료: 회원 " + r.member_count + "명·납입 " + r.payment_count + "건" + (remaining ? " · 남은 " + remaining + "행은 내려받아 수정하거나 다시 검사해 주세요." : "");
+        resultNotice = (r.member_count || r.payment_count ? "회원 " + r.member_count + "명·납입 " + r.payment_count + "건을 등록했습니다." : "등록된 항목이 없습니다.") + (remaining ? "\n남은 " + remaining + "행은 검토 목록에서 확인해 주세요." : "");
         if (!remaining) {
           file.value = "";
           s.file = null;
@@ -784,9 +824,15 @@
           attempt.uncertain = true;
           s.phase = "uncertain";
           s.message =
-            "등록 결과를 확인하지 못했습니다. 같은 요청 다시 확인을 눌러 주세요.";
+            registrationProgress ? "등록 결과를 확인하지 못했습니다. ‘등록’을 눌러 처리 여부를 확인해 주세요." : "등록 결과를 확인하지 못했습니다. 같은 요청 다시 확인을 눌러 주세요.";
         }
+        resultNotice = s.message;
         render();
+      } finally {
+        finishProgress(progress);
+        if (registrationProgress && resultNotice && same(s) && allowed(s) && visible()) {
+          await root.CoopDialog.alert(resultNotice, { title: s.phase === 'saved' ? '등록 완료' : s.phase === 'uncertain' ? '등록 여부 확인 필요' : '등록 결과' });
+        }
       }
     }
     async function template() {
@@ -882,7 +928,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.1.3",
+    version: "1.1.4",
     create,
     parse,
     memberHeaders,

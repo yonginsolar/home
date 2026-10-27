@@ -1,4 +1,4 @@
-/* v1.0.1 — Review incoming email clearing and unique personal-to-organization linkage. */
+/* v1.0.2 — Show registration progress/results while keeping exact-request retries. */
 (function(root){'use strict';
   const client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{
     global:{headers:{'x-erp-host':location.hostname,'x-public-host':location.hostname}}
@@ -52,7 +52,7 @@
         controller=feature.create({client:adapter,getContext:()=>context,
           ensureSpreadsheet:()=>root.AdminMemberAssets.ensureSpreadsheet(),
           normalizeMember:root.TemporaryUploadMemberTools.normalizeMemberImportRow,
-          memberPayload:root.TemporaryUploadMemberTools.memberImportPayload,refresh:async()=>true});
+          memberPayload:root.TemporaryUploadMemberTools.memberImportPayload,refresh:async()=>true,registrationProgress:true});
       }
       controller.open();
       const modal=document.getElementById('memberWorkbookModal');

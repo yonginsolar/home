@@ -23,8 +23,8 @@
         integrity: 'sha384-5y+Dcz/wtb7Mcb+gkxBLc8A+bVs7U7Hpn1s6XjY72OgyPt9UQ/dnPhAn8RJM+Dc9'
     });
     const memberWorkbook = Object.freeze({
-        src: new URL('member_capital_workbook.js?v=1.1.3', document.baseURI).href,
-        integrity: 'sha384-jjUNRUSUI9q+pirZ3ndmBZrK/aG8tkScW6XNTA8NYukQ6JRL7Ms4lmbJdzNLHaND'
+        src: new URL('member_capital_workbook.js?v=1.1.4', document.baseURI).href,
+        integrity: 'sha384-HGBi/rCSxwggbfQ3U9+jJVHAi7Tx2/I5V5Ib1/Ewu1Ooy+lcb/8ReQEQ8kMYgL7d'
     });
     const memberExcelEntry = Object.freeze({
         src: new URL('member_excel_entry.js?v=1.0.4', document.baseURI).href,
@@ -80,7 +80,7 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261025-cert-intent-1', do
     }
     async function ensureMemberWorkbook() {
         await ensureCapitalImport();
-        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.1.3');
+        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.1.4');
         return root.MemberCapitalWorkbook;
     }
     async function ensureMemberExcelEntry() {
