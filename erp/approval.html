@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.114 | Change: 2026-10-27 - Shared preview submission and precise meeting notice confirmation. -->
+<!-- Version: v1.2.115 | Change: 2026-10-27 - Shared preview submission with retained post-submit edits. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.114 | approval.html');</script>
+  <script>console.log('[Version] v1.2.115 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -3954,7 +3954,11 @@ async function deleteApprovalDraft(draftId, options = {}) {
         .from('erp_approval_drafts')
         .delete()
         .eq('id', safeDraftId);
-    if (error) return showAlert(getApprovalDraftErrorMessage(error, '임시저장 삭제에 실패했습니다.'));
+    if (error) {
+        if (typeof options.isUiCurrent !== 'function' || options.isUiCurrent()) showAlert(getApprovalDraftErrorMessage(error, '임시저장 삭제에 실패했습니다.'));
+        return;
+    }
+    if (typeof options.isUiCurrent === 'function' && !options.isUiCurrent()) return;
 
     let cleanupWarning = '';
     try {
@@ -3963,7 +3967,7 @@ async function deleteApprovalDraft(draftId, options = {}) {
         cleanupWarning = `\n첨부 임시파일 정리는 일부 실패했습니다: ${getApprovalDraftErrorMessage(cleanupError, 'unknown error')}`;
     }
 
-    if (Number(currentApprovalDraftId || 0) === safeDraftId) {
+    if (options.preserveComposer !== true && Number(currentApprovalDraftId || 0) === safeDraftId) {
         resetApprovalComposerForm();
     }
     await fetchApprovalDraftList();
@@ -12322,6 +12326,9 @@ function approvalSubmitOwner() {
     return JSON.stringify([myAuthUserId,getApprovalScopedCoopId(),myInfo?.emp_id,currentApprovalDraftId,
         approvalInsuranceNoticeEpoch,getCurrentDraftMainType(),activeApprovalTab]);
 }
+function approvalSubmitActor() {
+    return JSON.stringify([myAuthUserId,getApprovalScopedCoopId(),myInfo?.emp_id]);
+}
 function captureApprovalSubmitSnapshot() {
     const form = document.getElementById('draftForm');
     const descriptors = getApprovalOrderedAttachmentDescriptors();
@@ -13265,7 +13272,7 @@ async function handleDraftSubmit(e) {
     }
     if (!canPerform('approval.submit')) return showAlert("상신 권한이 없습니다.");
     if(approvalSubmitAttempt)return;
-    const submitAttempt={owner:approvalSubmitOwner(),preview:approvalSubmitPreviewState,
+    const submitAttempt={owner:approvalSubmitOwner(),actor:approvalSubmitActor(),preview:approvalSubmitPreviewState,
         focusTarget:approvalSubmitPreviewState?document.getElementById('btnSubmitFromPreview'):e.submitter};
     approvalSubmitAttempt=submitAttempt;
     syncApprovalSubmitControls();
@@ -13733,6 +13740,9 @@ async function handleDraftSubmit(e) {
         ...(approvalExpenseSnapshotSupported && expenseSnapshotPayload ? { expense_snapshot: expenseSnapshotPayload } : {}),
         ...(approvalSalaryLedgerSnapshotSupported && salaryLedgerSnapshotPayload ? { salary_ledger_snapshot: salaryLedgerSnapshotPayload } : {})
     };
+    const submittedDraftId=currentApprovalDraftId;
+    const submittedFirstApprover={...finalApprovers[0]};
+    const submissionNotificationKind=isSunVillageApproval()?'검토 요청':'결재 요청';
 
     let insertedDoc = null;
     try {
@@ -13746,6 +13756,7 @@ async function handleDraftSubmit(e) {
         try {
             await deleteDraftAttachmentObjects(uploadRollbackItems);
         } catch (_) { /* noop */ }
+        if(submitAttempt.owner!==approvalSubmitOwner() || window.frameElement?.hidden)return;
         const errorText = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
         const noticeFailure = meetingNoticeFailureMessage(error, 'submit');
         if (noticeFailure) {
@@ -13761,6 +13772,7 @@ async function handleDraftSubmit(e) {
     }
 
     const docId = insertedDoc?.id;
+    if(submitAttempt.actor!==approvalSubmitActor())return;
     if (docId) {
         await logAudit('approval.submit', docId, `${title} 상신`, {
             status: initialStatus,
@@ -13768,28 +13780,57 @@ async function handleDraftSubmit(e) {
             jeongyeol_rule_code: jeongyeolDecision.applied ? jeongyeolDecision.ruleCode : null,
             submit_trigger: submitTrigger
         });
-        const notificationResult = await createNotification(finalApprovers[0]?.emp_id, isSunVillageApproval() ? '검토 요청' : '결재 요청', `${title} 문서가 상신되었습니다.`, `approval.html?doc=${docId}`, { doc_id: docId });
+        if(submitAttempt.actor!==approvalSubmitActor())return;
+        const notificationResult = await createNotification(submittedFirstApprover.emp_id, submissionNotificationKind, `${title} 문서가 상신되었습니다.`, `approval.html?doc=${docId}`, { doc_id: docId });
         insertedDoc._notificationResult = notificationResult;
-        if (currentApprovalDraftId) {
+    }
+    const originalInputStillCurrent=isApprovalSubmitSnapshotCurrent(submissionReview);
+    if(!originalInputStillCurrent){
+        btn.innerText='상신하기';
+        if(submitAttempt.owner===approvalSubmitOwner() && !window.frameElement?.hidden){
+            showAlert('상신은 완료했습니다. 이후 수정한 내용은 미저장 상태로 남아 있습니다.');
+        }
+        return;
+    }
+    if (docId && submittedDraftId) {
+        // Cleanup may reset the source form; keep it stable only for this short phase.
+        const form=submissionReview.form,wasInert=form.inert;form.inert=true;
+        try {
             try {
-                await deleteApprovalDraft(currentApprovalDraftId, { skipConfirm: true, silent: true });
+                await deleteApprovalDraft(submittedDraftId, { skipConfirm: true, silent: true, preserveComposer: true,
+                    isUiCurrent:()=>submitAttempt.actor===approvalSubmitActor() });
             } catch (cleanupError) {
                 CoopSafeLog.warn("approval draft cleanup failed after submit", cleanupError);
             }
-        }
+        } finally {form.inert=wasInert;}
     }
-    const firstApprover = finalApprovers[0];
+    if(submitAttempt.actor!==approvalSubmitActor())return;
+    if(!isApprovalSubmitSnapshotCurrent(submissionReview)){
+        const sameComposer=submitAttempt.owner===approvalSubmitOwner();
+        if(currentApprovalDraftId===submittedDraftId){
+            currentApprovalDraftId=null;currentApprovalDraftUpdatedAt='';approvalDraftSavedState='';syncApprovalDraftStatusText();
+        }
+        if(sameComposer && !window.frameElement?.hidden)
+            showAlert('상신은 완료했습니다. 이후 수정한 내용은 미저장 상태로 남아 있습니다.');
+        return;
+    }
+    const firstApprover = submittedFirstApprover;
     const firstApproverName = firstApprover ? `${firstApprover.emp_name} ${firstApprover.position || ''}`.trim() : '-';
     if(submitAttempt.preview && approvalSubmitPreviewState===submitAttempt.preview)relViewModal?.hide();
     resetApprovalComposerForm();
     btn.disabled = false;
     btn.innerText = "상신하기";
     const submitNotice = buildApprovalSubmitNotice(firstApproverName, insertedDoc?._notificationResult);
-    showAlert(submitNotice, () => {
+    if(activeApprovalTab==='draft' && !window.frameElement?.hidden)showAlert(submitNotice, () => {
         window.location.reload();
     });
     } finally {
-        if(approvalSubmitAttempt===submitAttempt){approvalSubmitAttempt=null;syncApprovalSubmitControls();restoreApprovalSubmitConfirmFocus(submitAttempt);}
+        if(approvalSubmitAttempt===submitAttempt){
+            approvalSubmitAttempt=null;
+            const submitButton=document.getElementById('btnSubmit');
+            if(submitButton?.textContent==='처리 중...')submitButton.textContent='상신하기';
+            syncApprovalSubmitControls();restoreApprovalSubmitConfirmFocus(submitAttempt);
+        }
     }
 }
 
