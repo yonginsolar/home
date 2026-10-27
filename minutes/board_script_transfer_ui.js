@@ -74,7 +74,10 @@ export function createBoardScriptTransfer(hooks) {
       card.append(columns); list.append(card);
     }
     if (!row.plan.changes.length) {
-      const message = document.createElement('p'); message.textContent = '의장 발언이 같습니다. 실무자용에서 설명과 메모를 이어서 편집해 주세요.'; list.append(message);
+      const message = document.createElement('p');
+      message.textContent = row.plan.skipped.length ? '선택 반영할 수 있는 변경이 없습니다. 아래 진행 구간을 직접 확인해 주세요.'
+        : '의장용에서 새로 반영할 변경이 없습니다. 실무자용 편집을 이어갈 수 있습니다.';
+      list.append(message);
     }
     if (row.plan.skipped.length) {
       const message = document.createElement('p'); message.className = 'script-transfer-warning';
