@@ -6162,11 +6162,14 @@ if (activePane?.id === 'sub-docs') selectAdminMemberSiteSubTab('sub-sections');
 }
 
 function applyAdminMemberRuntimeUi(runtime) {
+const oldInformationScope = g_adminMemberRuntime?.coop_id;
 g_adminMemberRuntime = runtime && typeof runtime === 'object' ? runtime : null;
+if (oldInformationScope !== g_adminMemberRuntime?.coop_id) invalidateMemberInformationList(true);
 const isSiteMemberProfile = isAdminMemberSiteProfile();
 const memberAdminEnabled = isAdminMemberRuntimeModuleEnabled('member_admin') && hasAdminMemberScopePermission('member_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
-const meetingParticipationEnabled = memberAdminEnabled && isAdminMemberRuntimeModuleEnabled('minutes');
-const voteEnabled = memberAdminEnabled && isAdminMemberRuntimeModuleEnabled('vote');
+// Cross-page shortcuts belong to the ERP's main menu, not member work tabs.
+const meetingParticipationEnabled = false;
+const voteEnabled = false;
 const documentsAdminEnabled = isAdminMemberRuntimeModuleEnabled('documents') && hasAdminMemberScopePermission('documents_admin');
 const siteAdminEnabled = isAdminMemberRuntimeModuleEnabled('site_admin') && hasAdminMemberScopePermission('site_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'member_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
 const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
@@ -6187,9 +6190,9 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-deposit', memberAdminEnabled],
 ['nav-notifications', memberAdminEnabled],
 ['nav-vote-hub', voteEnabled],
-['siteOpsCategory', siteAdminEnabled || documentsAdminEnabled],
+['siteOpsCategory', siteAdminEnabled || (documentsAdminEnabled && ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin')],
 ['nav-notices', siteAdminEnabled],
-['nav-documents-admin', documentsAdminEnabled],
+['nav-documents-admin', documentsAdminEnabled && ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin'],
 ['siteAdminCategory', siteAdminEnabled],
 ['nav-site', siteAdminEnabled]
 ].forEach(([id, enabled]) => {
@@ -6396,6 +6399,7 @@ function switchTab(tabName) {
 
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
+    if (tabName !== 'dashboard') invalidateMemberInformationList();
     if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) {
         invalidateMemberReturnSummaryRead();
         invalidateAdminDashboardRead();
@@ -6431,6 +6435,7 @@ function switchTab(tabName) {
     // 4. 탭별 데이터 로드 로직 (분기 처리)
     if (tabName === 'dashboard') {
         loadDashboard();
+        if (!document.getElementById('member-information-list-panel')?.hidden) void loadMemberInformationList(true);
     }
     else if (tabName === 'members') {
         // 회원 탭은 자동 조회 대신 '검색 유도 화면' 표시
@@ -8651,6 +8656,7 @@ function bindAdminCertificateContext(authId) {
     _supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== adminCertificateAuthId)) {
             adminCertificateAuthId = '';
+            invalidateMemberInformationList(true);
             clearMemberDetailEdits();
             window.ContributionCertPreview?.clear();
             window.MemberNotificationAdmin?.clear();
@@ -8663,6 +8669,7 @@ function bindAdminCertificateContext(authId) {
         const observer = new MutationObserver(() => {
             if (frame.hidden) {
                 invalidateDonationListRead();
+                invalidateMemberInformationList();
                 invalidateUsageLedgerRead();
                 invalidateApplicationListRead();
                 invalidateMemberReturnSummaryRead();

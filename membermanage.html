@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.220
+Version: v1.0.221
 Change: 2026-10-27 - Show the current email authentication recovery stage.
 -->
 <html lang="ko">
@@ -13,10 +13,10 @@ Change: 2026-10-27 - Show the current email authentication recovery stage.
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.217 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.221 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
-<script src="shared/member_information.js?v=20261017-email-status-1" integrity="sha384-07uwSpaYunAMizgjRa3UrfFBZWQp1VzZXag9BQuI7P3fXg6+EmpKJuq1x5twU+dy" crossorigin="anonymous"></script>
+<script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
 <script src="shared/application_retention_notice.js?v=1.1.0"></script>
 <script src="shared/child_direct_consent.js?v=1.0.3"></script>
 <meta charset="utf-8">
@@ -1727,7 +1727,8 @@ gtag('config', 'G-TR217L7JN9');
 <p id="memberInformationDialogHelp" class="text-secondary"></p>
 <div id="memberInformationFields"></div>
 <p id="memberInformationFormStatus" class="small text-danger" role="status" aria-live="polite"></p>
-<div class="d-flex justify-content-end gap-2">
+<div class="d-flex flex-wrap justify-content-end gap-2">
+<button type="button" id="memberInformationDiscard" class="btn btn-outline-danger me-auto" hidden>초안 버리기</button>
 <button type="button" id="memberInformationClose" class="btn btn-outline-secondary">닫기</button>
 <button type="submit" id="memberInformationSave" class="btn btn-success fw-bold">저장</button>
 </div>
@@ -2719,6 +2720,7 @@ window.PortalChildPreparation?.invalidate();
 window.PortalChildDrafts?.clear();
 window.PortalBoardDetail?.close(false);
 window.PortalBoardEditor?.clear();
+memberInformationPortal?.clear();
 clearPortalApplicationDrafts();
 clearPortalPartnerDrafts();
 clearPortalConnectDrafts();
@@ -4959,7 +4961,7 @@ let memberInformationPortal = null;
 function refreshMemberInformation(member) {
 if (!memberInformationPortal) {
 memberInformationPortal = MemberInformation.createPortal({
-client: _supabase, getMember: () => curMem, isSiteMember: isSiteMemberPortalProfile,
+client: _supabase, getOwner: () => curAuth?.id, getMember: () => curMem, isSiteMember: isSiteMemberPortalProfile,
 onSaved: async () => { await reloadDashboard(); }
 });
 }
@@ -4975,6 +4977,7 @@ invalidatePortalModifyEditor();
 window.PortalChildPreparation?.invalidate();
 window.PortalBoardDetail?.close(false);
 window.PortalBoardEditor?.suspend();
+memberInformationPortal?.suspend();
 retainPortalProfileEdit();
 retainPortalApplicationDraft();
 retainPortalPartnerDraft();++portalPartnerReadRevision;++portalPartnerRequestRevision;
@@ -8881,6 +8884,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 async function toggleTab(type, btn) {
 if (portalApplicationWritePending && window.__memberAppLocks?.modifyApplication) return;
+memberInformationPortal?.suspend();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
 invalidatePortalModifyEditor();
