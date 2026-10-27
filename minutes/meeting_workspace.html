@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.11.0 | Change: 2026-10-27 - Lock approved call-notice agendas without blocking notes or scenarios. -->
+<!-- Version: v1.14.0 | Change: 2026-10-27 - Compare chair changes before applying to the practical script. -->
 <html lang="ko">
 <head>
   <script>window.__COOP_ROUTE_APP__ = 'erp';</script>
@@ -14,7 +14,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>회의 꾸러미 만들기</title>
-  <script>console.log('[Version] v1.13.0 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.14.0 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
   <style>
     :root {
@@ -388,6 +388,25 @@
       .audit-change-form-grid { grid-template-columns:1fr; }
       .audit-change-form-grid .full { grid-column:auto; }
     }
+    #scriptTransferDialog { width:min(960px,calc(100vw - 24px)); max-width:calc(100vw - 24px); max-height:calc(100dvh - 24px); padding:0; border:1px solid var(--line); border-radius:16px; background:var(--card); color:var(--theme-text,var(--ink)); overflow-y:auto; }
+    #scriptTransferDialog::backdrop { background:rgba(15,23,42,.56); }
+    .script-transfer-shell { display:flex; flex-direction:column; max-height:calc(100dvh - 28px); }
+    .script-transfer-shell > header,.script-transfer-shell > footer { flex:none; padding:16px 20px; }
+    .script-transfer-shell h2 { font-size:1.25rem; margin:0 0 8px; }
+    .script-transfer-shell header p { margin:0; line-height:1.6; }
+    .script-transfer-shell > footer,.script-transfer-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .script-transfer-shell > footer { justify-content:flex-end; border-top:1px solid var(--line); }
+    .script-transfer-scroll { min-height:0; overflow-y:auto; padding:4px 20px 16px; overscroll-behavior:contain; }
+    .script-transfer-row { margin-top:16px; border:1px solid var(--line); border-radius:10px; padding:14px; }
+    .script-transfer-row > label { display:flex; gap:10px; align-items:flex-start; font-weight:800; }
+    .script-transfer-row input[type=checkbox] { width:20px; height:20px; flex:none; margin-top:2px; }
+    .script-transfer-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px; }
+    .script-transfer-columns > div { min-width:0; background:var(--bg); padding:12px; border-radius:8px; }
+    .script-transfer-columns p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.65; margin:8px 0 0; }
+    .script-transfer-warning,#scriptTransferError { color:#9a3412; font-weight:700; line-height:1.6; overflow-wrap:anywhere; }
+    html[data-theme="dark"] :is(.script-transfer-warning,#scriptTransferError) { color:#ffbc7a; }
+    #scriptTransferDialog :focus-visible { outline:3px solid #2563eb; outline-offset:3px; }
+    @media(max-width:640px) { .script-transfer-columns { grid-template-columns:1fr; } .script-transfer-shell > header,.script-transfer-shell > footer { padding:12px; } .script-transfer-scroll { padding:4px 12px 12px; } .script-transfer-shell footer .btn { white-space:normal; } }
   </style>
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
@@ -623,7 +642,7 @@
             <div class="doc-tabs">
               <button type="button" class="doc-tab active" data-document="MATERIALS" id="materialsTab">📄 이사회 회의자료</button>
               <button type="button" class="doc-tab" data-document="SCENARIO" id="scenarioTab">🎙️ 의장용 시나리오</button>
-              <button type="button" class="doc-tab" data-document="SCENARIO_SECRETARIAT" id="secretariatScenarioTab">🗒️ 사무국장용 시나리오</button>
+              <button type="button" class="doc-tab" data-document="SCENARIO_SECRETARIAT" id="secretariatScenarioTab">🗒️ 실무자용 시나리오</button>
             </div>
             <div class="document-toolbar" aria-label="문서 편집권">
               <span id="documentEditStatus" role="status">문서를 보려면 선택하고, 수정하려면 편집을 눌러 주세요.</span>
@@ -631,6 +650,7 @@
               <button type="button" class="btn" id="endDocumentEditButton" hidden>편집 마치기</button>
               <button type="button" class="btn" id="takeDocumentEditButton" hidden>편집권 가져오기</button>
               <button type="button" class="btn" id="refreshDocumentEditButton">다시 확인</button>
+              <button type="button" class="btn" id="transferChairScriptButton" hidden>실무자용에 적용</button>
             </div>
             <details id="documentEditConflict" hidden style="margin-bottom:12px;">
               <summary>다른 사람이 저장한 최신 문서 확인</summary>
@@ -706,7 +726,18 @@
       <div class="bottom-actions"><button type="button" class="btn" id="discardNewPackage" disabled>초안 버리기</button><button type="button" class="btn" id="cancelNewPackage">닫기</button><button type="button" class="btn btn-brand" id="createPackageButton">만들기</button></div>
     </div>
   </div>
+  <dialog id="scriptTransferDialog" aria-labelledby="scriptTransferTitle" aria-describedby="scriptTransferGuide">
+    <div class="script-transfer-shell">
+      <header><h2 id="scriptTransferTitle">의장 발언 비교</h2><p id="scriptTransferGuide">반영할 발언을 골라 주세요. 선택한 내용은 실무자용 초안에 반영한 뒤 저장합니다.</p></header>
+      <div class="script-transfer-scroll">
+        <div class="script-transfer-actions"><button type="button" class="btn" id="selectAllScriptTransferButton">전체 선택</button><button type="button" class="btn" id="clearScriptTransferButton">선택 해제</button><span id="scriptTransferSelection" role="status"></span></div>
+        <div id="scriptTransferList"></div>
+        <p id="scriptTransferError" role="alert"></p>
+      </div>
+      <footer><button type="button" class="btn" id="cancelScriptTransferButton">취소</button><button type="button" class="btn btn-brand" id="applyScriptTransferButton" disabled>선택 반영 후 실무자용 편집</button></footer>
+    </div>
+  </dialog>
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./meeting_workspace.js?v=1.13.0"></script>
+  <script type="module" src="./meeting_workspace.js?v=1.14.0"></script>
 </body>
 </html>

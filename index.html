@@ -2,7 +2,7 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.178
+Version: v1.0.179
 Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scrollable menus.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
@@ -13,7 +13,7 @@ Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scro
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.177 | index.html');</script>
+<script>console.log('[Version] v1.0.179 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -3755,8 +3755,42 @@ Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scro
         const selected = document.querySelector('.home-news-tab[aria-selected="true"]')?.id;
         if (selected === 'home-news-tab-regional' || selected === 'home-news-tab-national') void publicHomeLoader.load(`external-${selected.split('-').pop()}`,true);
     }
+    async function startPublicHomeContent() {
+        const retry = document.getElementById('homeContentRetry');
+        if (retry) retry.disabled = true;
+        try {
+            await ensurePublicHomeLoader();
+            preparePublicSectionLoads();
+            const row = document.getElementById('homeContentRetryStatus');
+            if (row?.contains(document.activeElement)) {
+                const main = document.getElementById('main');
+                if (main) {
+                    const hadTabIndex = main.hasAttribute('tabindex');
+                    if (!hadTabIndex) { main.tabIndex = -1; main.addEventListener('blur', () => main.removeAttribute('tabindex'), {once:true}); }
+                    main.focus({preventScroll:true});
+                }
+            }
+            row?.remove();
+            return true;
+        } catch (_) {
+            // A lower-page reading tool must not hide a ready, correctly scoped menu.
+            if (!document.getElementById('homeContentRetryStatus')) {
+                const row = document.createElement('div'), button = document.createElement('button');
+                row.id = 'homeContentRetryStatus'; row.className = 'home-read-status container py-3'; row.setAttribute('role','status');
+                button.id = 'homeContentRetry'; button.type = 'button'; button.className = 'btn btn-sm btn-outline-secondary';
+                button.textContent = '다시 확인'; button.onclick = () => { void bootPublicHome(); };
+                row.append(document.createTextNode('본문을 준비하지 못했습니다. '), button);
+                document.getElementById('main')?.prepend(row);
+            }
+            return false;
+        } finally { const currentRetry = document.getElementById('homeContentRetry'); if (currentRetry) currentRetry.disabled = false; }
+    }
     async function bootPublicHome() {
         if (publicHomeBootRequest) return publicHomeBootRequest;
+        if (document.documentElement.dataset.homeNavState === 'ready') {
+            publicHomeBootRequest = startPublicHomeContent().finally(() => { publicHomeBootRequest = null; });
+            return publicHomeBootRequest;
+        }
         document.documentElement.dataset.homeNavState = 'loading';
         document.getElementById('navbar')?.setAttribute('aria-busy','true');
         const toggle = document.querySelector('.mobile-nav-toggle');
@@ -3769,9 +3803,8 @@ Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scro
             ]);
             // Both settings and order must be settled before the menu is revealed.
             if (homeSettingsReady && homeSectionsReady) applyPublicSectionOrder(g_publicSectionsForLayout || []);
-            if (homeSettingsReady && homeSectionsReady) await ensurePublicHomeLoader();
             finishPublicTenantBoot(homeSettingsReady,homeSectionsReady);
-            if (homeSettingsReady && homeSectionsReady) preparePublicSectionLoads();
+            if (homeSettingsReady && homeSectionsReady) await startPublicHomeContent();
             window.AOS?.refresh();
         })().catch(() => {
             finishPublicTenantBoot(false,false);
@@ -3819,7 +3852,7 @@ Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scro
         const toggle = document.querySelector('.mobile-nav-toggle');
         if (toggle) toggle.disabled = !ready;
         const retry = document.getElementById('homeNavRetry');
-        if (retry) retry.hidden = Boolean(ready);
+        if (retry) { retry.hidden = Boolean(ready); retry.textContent = '다시 확인'; }
         if (!document.documentElement.hasAttribute('data-public-tenant-pending')) return;
         // A failed read must not expose another cooperative's default sections.
         if (!settingsReady || !sectionsReady) {

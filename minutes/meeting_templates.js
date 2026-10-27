@@ -1,5 +1,5 @@
 /*
-Version: v1.7.9
+Version: v1.7.10
 Change: 2026-10-27 - Keep board scripts speech-only with discussion and other-business turns.
 */
 
@@ -190,7 +190,7 @@ function boardScenario({ row, agendas, chairName, coopName, company }, includeSe
   }
   if (!agendaCounts.OTHER) parts.push('<h2 data-board-empty-kind="OTHER">[기타 안건]</h2><p class="speaker"><strong>의장</strong> 다음은 기타 안건입니다. 더 하실 말씀이 있으신가요?</p>');
   const body = parts.join('<hr>');
-  const heading = includeSecretariat ? '사무국장용 진행 시나리오' : '의장용 진행 시나리오';
+  const heading = includeSecretariat ? '실무자용 진행 시나리오' : '의장용 진행 시나리오';
   return `<article class="board-scenario">
     <h1>${safe(coopName)} ${safe(row.title)} ${heading}</h1>
     ${includeSecretariat && row.document_notes ? `<p class="action"><strong>준비 메모</strong> ${blocks(row.document_notes)}</p>` : ''}
@@ -693,7 +693,7 @@ export function buildPreMeetingDocuments(context) {
   return [
     { type: 'MATERIALS', title: `${row.title} 회의자료`, content: buildBoardMaterials({ ...context, row }) },
     { type: 'SCENARIO', title: `${row.title} 의장용 진행 시나리오`, content: buildBoardChairScenario({ ...context, row }) },
-    { type: 'SCENARIO_SECRETARIAT', title: `${row.title} 사무국장용 진행 시나리오`, content: buildBoardScenario({ ...context, row }) }
+    { type: 'SCENARIO_SECRETARIAT', title: `${row.title} 실무자용 진행 시나리오`, content: buildBoardScenario({ ...context, row }) }
   ];
 }
 

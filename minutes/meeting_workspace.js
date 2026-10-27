@@ -1,13 +1,14 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.13.0
+Version: v1.14.0
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.0';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
-import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.9';
+import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.10';
+import { createBoardScriptTransfer } from './board_script_transfer_ui.js?v=1.0.0';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
 let pdfRendererRequest = null;
@@ -41,7 +42,7 @@ function pdfActionOwner() {
 const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };
 const KIND_LABEL = { REPORT: '보고 안건', DECISION: '의결 안건', DISCUSSION: '논의 안건', OTHER: '기타 안건' };
-const DOC_LABEL = { MATERIALS: '회의 자료', SCENARIO: '의장용 진행 시나리오', SCENARIO_SECRETARIAT: '사무국장용 진행 시나리오' };
+const DOC_LABEL = { MATERIALS: '회의 자료', SCENARIO: '의장용 진행 시나리오', SCENARIO_SECRETARIAT: '실무자용 진행 시나리오' };
 const STATUS_LABEL = { DRAFT: '초안', READY: '회의자료 완성', FINAL: '완료' };
 
 const state = {
@@ -104,6 +105,7 @@ function renderDocumentEditState() {
   $('addBoardAnnexButton').disabled=busy||!allowed;
   $('documentEditConflict').hidden=!documentConflicts.has(documentEditKey());
   // Viewing, printing and existing File selection are independent of body editing.
+  scenarioTransfer.sync();
 }
 async function refreshDocumentEditState() {
   if(!state.current || document.hidden || window.frameElement?.hidden)return;
@@ -157,6 +159,7 @@ async function endDocumentEdit() {
   if(pdfActionStillCurrent(owner)){documentEditStates.delete(documentEditKey(type));renderDocumentEditState();}
 }
 function freezeDocumentEditing() {
+  scenarioTransfer.invalidate();
   if(!state.current)return;
   rememberActiveDocument();documentEditEpoch++;
   MeetingPackageService.documentEdits.freeze(pdfActionOwner());renderDocumentEditState();
@@ -172,6 +175,16 @@ function applySavedDocuments(owner,rows) {
     }
   }
 }
+
+const scenarioTransfer = createBoardScriptTransfer({
+  state, manager: MeetingPackageService.documentEdits, savedRows: documentSavedRows, editStates: documentEditStates,
+  sanitize: sanitizeHtml, value: documentValue, owner: pdfActionOwner, isCurrent: pdfActionStillCurrent,
+  remember: rememberActiveDocument, render: renderActiveDocument, renderEdit: renderDocumentEditState,
+  defaultTitle: defaultDocumentTitle, toast: showToast, epoch: () => documentEditEpoch, run: runAction,
+  currentValue: type => type === state.activeDocument
+    ? documentValue({ title: $('documentTitle').value.trim() || defaultDocumentTitle(type), content_html: currentBoardEditorHtml() })
+    : documentValue(state.documents.get(type))
+});
 
 let meetingDefaultsPending = null;
 let meetingDefaultsReady = false;
@@ -927,7 +940,7 @@ function updateDocumentModeLabels() {
     ? (regularAssembly
       ? '정기총회 기본 순서는 전차 의사록 확인 → 감사보고서 → 사업보고 및 결산 → 배당·이익처분(있을 때) → 감자·탈퇴 출자금 반환(있을 때) → 사업계획·예산 → 차입금 한도 → 추가 의안 → 기타안건입니다.'
       : '임시총회 자료집과 시나리오는 등록한 의안만으로 구성합니다.')
-    : '회의자료와 의장용·사무국장용 시나리오 초안을 만듭니다. 두 시나리오는 같은 의장 발언으로 시작하며, 이후에는 각각 수정·저장합니다.';
+    : '의장용을 먼저 편집·저장한 뒤 실무자용에 적용해 주세요. 실무자용에서 설명과 메모를 덧붙이고, 이후 의장용을 고치면 변경점을 비교해 필요한 발언만 반영할 수 있습니다.';
   if (!regularAssembly && state.currentStep === 'audit') switchStep('documents');
   if (regularAssembly) {
     renderAssemblySourceStatus();
@@ -1477,7 +1490,7 @@ function rememberActiveDocument() {
 function defaultDocumentTitle(type) {
   const title = state.current?.title || '회의';
   if (type === 'MATERIALS') return state.current?.meeting_type === 'GENERAL_ASSEMBLY' ? `${title} 자료집` : `${title} 회의자료`;
-  if (type === 'SCENARIO_SECRETARIAT') return `${title} 사무국장용 진행 시나리오`;
+  if (type === 'SCENARIO_SECRETARIAT') return `${title} 실무자용 진행 시나리오`;
   return state.current?.meeting_type === 'GENERAL_ASSEMBLY' ? `${title} 진행 시나리오` : `${title} 의장용 진행 시나리오`;
 }
 
@@ -2132,6 +2145,7 @@ async function printCurrentChapter() {
 async function openPackage(id, { internal = false } = {}) {
   if (state.loading && !internal) return;
   if (hasUnsavedPacketChanges() && !(await window.CoopDialog.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?'))) return;
+  scenarioTransfer.invalidate();
   window.clearTimeout(state.autoDraftTimer);
   setBusy(true);
   try {
@@ -2266,6 +2280,7 @@ async function deletePackage() {
 }
 
 function switchStep(step) {
+  if (step !== state.currentStep) scenarioTransfer.invalidate();
   if (step === 'audit' && $('auditStepTab').hidden) step = 'documents';
   state.currentStep = step;
   $('completeMaterialsButton').hidden = step !== 'documents' || state.current?.status === 'FINAL';
@@ -2457,6 +2472,7 @@ async function runAction(action) {
 }
 
 function bindEvents() {
+  scenarioTransfer.bind();
   $('editDocumentButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(false)));
   $('takeDocumentEditButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(true)));
   $('endDocumentEditButton').addEventListener('click',()=>runAction(endDocumentEdit));
@@ -2550,6 +2566,7 @@ function bindEvents() {
   });
   document.querySelectorAll('.step-tab').forEach(button => button.addEventListener('click', () => switchStep(button.dataset.step)));
   document.querySelectorAll('.doc-tab').forEach(button => button.addEventListener('click', () => {
+    scenarioTransfer.invalidate();
     rememberActiveDocument();
     documentEditEpoch++;
     state.activeDocument = button.dataset.document;
