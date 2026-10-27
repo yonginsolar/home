@@ -1,10 +1,11 @@
-/* Version: v1.0.5 — keep borrowed-lease documents readonly throughout release/recheck. */
+/* Version: v1.0.6 — retain hidden-frame cleanup and respect new parent-frame input focus. */
 import { compareBoardChairLines, applyBoardChairSelection, labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 
 export function createBoardScriptTransfer(hooks) {
   const { state, manager, savedRows, editStates, sanitize, value, owner, isCurrent, remember, render, toast } = hooks;
   const $ = id => document.getElementById(id), SOURCE = 'SCENARIO', TARGET = 'SCENARIO_SECRETARIAT';
-  let intent = null, opening = false, generation = 0;
+  let intent = null, opening = false, openingRow = null, generation = 0;
+  const canRelease=hooks.canRelease||isCurrent;
   const closingRows = new Set();
   const key = type => `${state.current?.id}:${type}`;
   function currentValue(type) { return hooks.currentValue(type); }
@@ -41,7 +42,9 @@ export function createBoardScriptTransfer(hooks) {
   }
   function release(row) {
     if (row?.releaseRequest) return row.releaseRequest;
-    if (!row || !row.acquired || row.alreadyOwned || row.applied || !isCurrent(row.owner)) { closingRows.delete(row); sync(); return Promise.resolve(); }
+    if (!row || !row.acquired || row.alreadyOwned || row.applied) { closingRows.delete(row); sync(); return Promise.resolve(); }
+    manager.block?.(row.owner,TARGET);
+    if(!canRelease(row.owner)){closingRows.delete(row);sync();return Promise.resolve();}
     row.releaseFailed = false; closingRows.add(row); sync();
     hooks.renderEdit();
     const task = Promise.resolve().then(() => manager.manage(row.owner, TARGET, 'release')).then(() => {
@@ -52,7 +55,7 @@ export function createBoardScriptTransfer(hooks) {
     return task;
   }
   function close(restore = true) {
-    const row = intent, activeBefore = document.activeElement, target = $('transferChairScriptButton');
+    const row = intent||openingRow, activeBefore = document.activeElement, target = $('transferChairScriptButton');
     let outside = null;
     try { if (window.frameElement && window.parent.document.activeElement !== window.frameElement) outside = window.parent.document.activeElement; } catch (_) { /* Keep cross-origin focus untouched. */ }
     const mayReturn = restore && !outside && (!activeBefore || activeBefore === document.body || activeBefore === target || $('scriptTransferDialog').contains(activeBefore));
@@ -60,12 +63,13 @@ export function createBoardScriptTransfer(hooks) {
     if ($('scriptTransferDialog').open) $('scriptTransferDialog').close();
     if (outside?.isConnected && window.parent.document.activeElement !== outside) outside.focus({preventScroll:true});
     const restoreFocus = () => {
+      try {if(window.frameElement&&window.parent.document.activeElement!==window.frameElement)return;}catch(_){return;}
       const active = document.activeElement;
       if (mayReturn && row && generation === closedGeneration && isCurrent(row.owner) && state.activeDocument === row.active && state.currentStep === row.step
         && !window.frameElement?.hidden && target.getClientRects().length && !target.disabled
         && (!active || active === document.body || active === target || $('scriptTransferDialog').contains(active))) target.focus({ preventScroll: true });
     };
-    if (row?.busy && !row.applied) { row.cancelled = true; closingRows.add(row); hooks.renderEdit(); }
+    if ((row?.busy||row?.preparing) && !row.applied) { row.cancelled = true; closingRows.add(row); if(row.acquired&&!row.alreadyOwned)manager.block?.(row.owner,TARGET); hooks.renderEdit(); }
     else void release(row).then(restoreFocus);
     if (row) row.restoreFocus = restoreFocus;
     sync();
@@ -119,13 +123,14 @@ export function createBoardScriptTransfer(hooks) {
       sourceValue: currentValue(SOURCE), targetValue: currentValue(TARGET), alreadyOwned: manager.owned(owner(), TARGET) };
     const stillOpening = () => generation === row.generation && isCurrent(row.owner) && hooks.epoch() === row.epoch
       && state.activeDocument === row.active && state.currentStep === row.step && currentValue(SOURCE) === row.sourceValue && currentValue(TARGET) === row.targetValue;
-    opening = true; sync();
+    row.preparing=true;openingRow=row;opening = true; sync();
     try {
       const source = await manager.manage(row.owner, SOURCE, 'status');
       if (!stillOpening()) return;
       if (value(source.document) !== value(savedRows.get(SOURCE))) {
         throw new Error('저장된 의장용이 바뀌었습니다. 의장용의 편집에서 최신 문서를 확인한 뒤 다시 비교해 주세요.');
       }
+      row.acquired=true;
       const target = await manager.manage(row.owner, TARGET, 'acquire');
       row.acquired = target.owned;
       if (!stillOpening()) { release(row); return; }
@@ -141,7 +146,11 @@ export function createBoardScriptTransfer(hooks) {
     } catch (error) {
       release(row);
       if (stillOpening()) throw error;
-    } finally { opening = false; sync(); hooks.renderEdit(); }
+    } finally {
+      row.preparing=false;if(openingRow===row)openingRow=null;
+      if(row.cancelled)void release(row).then(row.restoreFocus);
+      opening = false; sync(); hooks.renderEdit();
+    }
   }
   async function apply() {
     const row = intent;

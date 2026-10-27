@@ -1,4 +1,4 @@
-/* Version: v1.0.2 — fence old ownership; retain confirmed release and fresh readonly status. */
+/* Version: v1.0.3 — allow local borrowed-lease fencing before asynchronous cleanup. */
 export function createMeetingDocumentEdits(rpc, uuid = () => crypto.randomUUID()) {
   const leases = new Map(), pending = new Map(), writes = new Map();
   const key = owner => JSON.stringify([owner.userId, owner.coopId, owner.packageId]);
@@ -93,6 +93,7 @@ export function createMeetingDocumentEdits(rpc, uuid = () => crypto.randomUUID()
     writes.set(id,task);return task;
   }
   return {manage,owned,save,hasPending:owner=>pending.has(key(owner)),
+    block(owner,type){const l=leases.get(leaseId(owner,type));if(l){l.manageEpoch=(l.manageEpoch||0)+1;l.releaseBlocked=true;l.owned=false;l.checkedAt=0;}},
     inspect:(owner,type)=>leases.get(leaseId(owner,type)),
     freeze(owner){for(const type of ['MATERIALS','SCENARIO','SCENARIO_SECRETARIAT']){const l=leases.get(leaseId(owner,type));if(l){l.manageEpoch=(l.manageEpoch||0)+1;l.owned=false;l.checkedAt=0;}}}
   };

@@ -1,14 +1,14 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.14.6
+Version: v1.14.7
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.2';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.3';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.10';
-import { createBoardScriptTransfer } from './board_script_transfer_ui.js?v=1.0.5';
+import { createBoardScriptTransfer } from './board_script_transfer_ui.js?v=1.0.6';
 import { labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
@@ -31,6 +31,9 @@ function getPdfRenderer() {
   return pdfRendererRequest;
 }
 
+function pdfActionSameIdentity(owner) {
+  return state.session?.user?.id === owner.userId && state.runtime?.coop_id === owner.coopId && pdfIdentityRevision === owner.identity;
+}
 function pdfActionStillCurrent(owner, anchor) {
   return state.session?.user?.id === owner.userId && state.runtime?.coop_id === owner.coopId
     && state.current?.id === owner.packageId && pdfIdentityRevision === owner.identity && !window.frameElement?.hidden
@@ -97,6 +100,8 @@ function renderDocumentEditState() {
   $('endDocumentEditButton').hidden=!!releasing || !MeetingPackageService.documentEdits.owned(pdfActionOwner(),state.activeDocument);
   $('takeDocumentEditButton').hidden=!!releasing || !entry?.busy || !entry?.can_takeover || allowed;
   $('refreshDocumentEditButton').disabled=busy;
+  $('refreshDocumentEditButton').hidden=!!releasing || allowed || !(entry?.failed || entry?.busy || entry?.closed || documentConflicts.has(documentEditKey()));
+  $('saveCurrentDocumentButton').disabled=busy || !allowed;
   $('documentTitle').readOnly=!allowed;
   if(chapterMode()) renderChapterEditState();
   else { $('documentEditor').contentEditable=allowed?'true':'false';$('documentEditor').setAttribute('aria-readonly',String(!allowed)); }
@@ -112,18 +117,26 @@ function renderDocumentEditState() {
 }
 async function refreshDocumentEditState() {
   if(!state.current || document.hidden || window.frameElement?.hidden)return;
-  if(documentEditRefresh)return documentEditRefresh;
-  const owner=pdfActionOwner(),epoch=documentEditEpoch;
+  const owner=pdfActionOwner(),epoch=documentEditEpoch,active=state.activeDocument;
+  const scope=JSON.stringify([owner.userId,owner.coopId,owner.packageId,owner.identity,epoch,active]);
+  const current=()=>pdfActionStillCurrent(owner)&&epoch===documentEditEpoch&&active===state.activeDocument&&!document.hidden;
+  if(documentEditRefresh){
+    if(documentEditRefresh.scope===scope)return documentEditRefresh;
+    const resume=()=>{if(current())return refreshDocumentEditState();};
+    return documentEditRefresh.then(resume,resume);
+  }
   const task=(async()=>{
     for(const type of Object.keys(DOC_LABEL)) {
+      if(!current())break;
       if(type!==state.activeDocument&&!MeetingPackageService.documentEdits.owned(owner,type))continue;
       try{
         const data=await MeetingPackageService.documentEdits.manage(owner,type,MeetingPackageService.documentEdits.owned(owner,type)?'renew':'status');
-        if(pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)documentEditStates.set(documentEditKey(type),data);
-      }catch(error){if(error?.code!=='MEETING_EDIT_REQUEST_STALE'&&pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)documentEditStates.set(documentEditKey(type),{failed:true});}
+        if(current())documentEditStates.set(documentEditKey(type),data);
+      }catch(error){if(error?.code!=='MEETING_EDIT_REQUEST_STALE'&&current())documentEditStates.set(documentEditKey(type),{failed:true});}
     }
-    if(pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)renderDocumentEditState();
+    if(current())renderDocumentEditState();
   })().finally(()=>{if(documentEditRefresh===task)documentEditRefresh=null;});
+  task.scope=scope;
   documentEditRefresh=task;return task;
 }
 async function beginDocumentEdit(force=false) {
@@ -183,6 +196,7 @@ function applySavedDocuments(owner,rows) {
 const scenarioTransfer = createBoardScriptTransfer({
   state, manager: MeetingPackageService.documentEdits, savedRows: documentSavedRows, editStates: documentEditStates,
   sanitize: sanitizeHtml, value: documentValue, owner: pdfActionOwner, isCurrent: pdfActionStillCurrent,
+  canRelease: pdfActionSameIdentity,
   remember: rememberActiveDocument, render: renderActiveDocument, renderEdit: renderDocumentEditState,
   defaultTitle: defaultDocumentTitle, toast: showToast, epoch: () => documentEditEpoch, run: runAction,
   currentValue: type => type === state.activeDocument
@@ -873,8 +887,9 @@ function renderAgendaList() {
 function renderAgendaLock() {
   const known = !!state.agendaLock, locked = !known || state.agendaLock.locked;
   if (!$('agendaLockStatus')) return;
-  $('agendaLockStatus').textContent = !known ? '안건 잠금 상태를 다시 확인해 주세요.' : locked ? AGENDA_LOCK_REASON
-    : '소집 공문에 회의 내용을 불러오면 원본이 함께 연결됩니다. 공문 결재 완료부터 기본정보와 안건 제목·구성이 자동으로 잠깁니다.';
+  $('agendaLockStatus').textContent = !known ? '잠금 상태를 불러오지 못했습니다.' : locked ? '결재 완료 · 잠금' : '결재 완료 전';
+  $('agendaLockStatus').title=known&&locked?AGENDA_LOCK_REASON:'';
+  $('refreshAgendaLockButton').hidden=known;
   for (const id of ['meetingType','assemblyKind','fiscalYear','meetingNumber','meetingTitle','noticeDate','meetingDate','meetingLocation','startTime','endTime','facilitatorName','chairOfficial','eligibleCount']) {
     $(id).disabled = state.loading || locked;
   }
@@ -1913,23 +1928,28 @@ async function saveWholeMeetingDraft({ quiet = false } = {}) {
     if(!quiet)showToast('이전 저장 결과를 확인했습니다. 추가 수정은 다시 저장해 주세요.');
     return;
   }
-  const dirtyTypes=[...state.pendingDocuments];
-  for(const type of dirtyTypes)if(!documentEditingAllowed(type))throw new Error(`${DOC_LABEL[type]}의 편집권을 먼저 확인해 주세요.`);
-  if(state.infoDirty)await saveInfo({ quiet: true });
-  if(!pdfActionStillCurrent(owner))return;
-  if(state.agendaDirty)await saveAgendas({ quiet: true });
-  if(!pdfActionStillCurrent(owner))return;
+  const dirtyTypes=[...state.pendingDocuments].filter(type=>documentValue(state.documents.get(type))!==documentValue(documentSavedRows.get(type)));
+  for(const type of dirtyTypes){
+    if(scenarioTransfer.releaseStatus(owner,type))throw new Error(`${DOC_LABEL[type]}의 편집권 반납이 끝난 뒤 저장해 주세요. 작성한 내용은 남아 있습니다.`);
+    if(documentConflicts.has(documentEditKey(type)))throw new Error(`${DOC_LABEL[type]}의 최신 저장본과 작성한 초안을 먼저 확인해 주세요.`);
+  }
   const rows = dirtyTypes.map(type => {
-    const existing = state.documents.get(type);
-    return {
-      document_type: type,
-      title: existing?.title || defaultDocumentTitle(type),
-      content_html: existing?.content_html || '',
-      version: Number(existing?.version || 1),
-      manually_edited: existing?.manually_edited === true,
-      generated_at: existing?.generated_at || null
-    };
+    const existing=state.documents.get(type);
+    return {document_type:type,title:existing?.title||defaultDocumentTitle(type),content_html:existing?.content_html||'',
+      version:Number(existing?.version||1),manually_edited:existing?.manually_edited===true,generated_at:existing?.generated_at||null};
   });
+  const epoch=documentEditEpoch;
+  await acquireDocumentSet(owner,dirtyTypes.filter(type=>!documentEditingAllowed(type)));
+  if(!pdfActionStillCurrent(owner)||epoch!==documentEditEpoch)return;
+  if(state.documentDirty)rememberActiveDocument();
+  for(const type of [...state.pendingDocuments])if(!dirtyTypes.includes(type)&&documentValue(state.documents.get(type))===documentValue(documentSavedRows.get(type))){
+    state.pendingDocuments.delete(type);if(type===state.activeDocument)state.documentDirty=false;
+  }
+  if(state.infoDirty)await saveInfo({ quiet: true });
+  if(!pdfActionStillCurrent(owner)||epoch!==documentEditEpoch)return;
+  if(state.agendaDirty)await saveAgendas({ quiet: true });
+  if(!pdfActionStillCurrent(owner)||epoch!==documentEditEpoch)return;
+  if(epoch!==documentEditEpoch)return;
   const { data, error } = await MeetingPackageService.saveDocuments(owner.packageId, rows, owner);
   if (error) throw error;
   if(!pdfActionStillCurrent(owner))return;
@@ -2483,6 +2503,7 @@ function bindEvents() {
   $('takeDocumentEditButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(true)));
   $('endDocumentEditButton').addEventListener('click',()=>runAction(endDocumentEdit));
   $('refreshDocumentEditButton').addEventListener('click',()=>void refreshDocumentEditState());
+  $('saveCurrentDocumentButton').addEventListener('click',()=>runAction(saveActiveDocument));
   $('keepDocumentDraftButton').addEventListener('click',()=>runAction(keepDocumentDraft));
   for(const id of ['documentEditor','chapterEditor'])$(id).addEventListener('beforeinput',event=>{if(!documentEditingAllowed())event.preventDefault();});
   $('backToDocuments').addEventListener('click', () => { location.href = '../erp/governance.html'; });
