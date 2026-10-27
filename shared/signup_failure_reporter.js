@@ -1,4 +1,4 @@
-/* v1.1.3 — Missing required helpers are not JavaScript reference errors. */
+/* v1.1.4 — Include bounded transport evidence, never raw errors or applicant input. */
 (function(root){
  'use strict';
  const fallback={tenant:'TENANT_READ_FAILED',auth_start:'AUTH_START_FAILED',auth_return:'AUTH_SESSION_UNAVAILABLE',email_send:'EMAIL_SEND_FAILED',email_verify:'EMAIL_VERIFY_FAILED',member_lookup:'MEMBER_LOOKUP_FAILED',submit:'SIGNUP_SAVE_FAILED',runtime:'RUNTIME_ERROR'};
@@ -22,9 +22,10 @@
   }catch{}return fallback[stage]||'';
  }
  function detailFor(stage,error,extra){
-  let operation=stageOps[stage]||'unspecified',reason='UNKNOWN',api_code=null,status=null;
+  let operation=stageOps[stage]||'unspecified',reason='UNKNOWN',api_code=null,status=null,transport;
   try{const c=chain(error),e=c.at(-1)||error,info=Object.assign({},...c.map(x=>metadata.get(x)).filter(Boolean)),message=String(error?.message||''),inner=String(e?.message||'');
    if(operations.includes(info.operation))operation=info.operation;if(operations.includes(extra?.operation))operation=extra.operation;
+   transport=c.map(x=>root.CoopSignupPublicReads?.details?.(x)).find(Boolean);
    if(apiCodes.has(e?.code))api_code=e.code;
    const n=Number(info.status??e?.status);if(Number.isInteger(n)&&n>=100&&n<=599)status=n;
    if(status===401)reason='UNAUTHORIZED';else if(status===403)reason='FORBIDDEN';else if(status===429)reason='RATE_LIMITED';
@@ -38,7 +39,7 @@
    else if(['ADMISSION_READ_FAILED','CONTEXT_SHAPE_INVALID','CAPITAL_SETTINGS_INVALID'].includes(message))reason='DATA_INVALID';
    else if(['SIGNUP_COOP_CONTEXT_MISSING','SIGNUP_COOP_NOT_FOUND'].includes(message))reason='TENANT_MISMATCH';
    else if(['ReferenceError','TypeError','SyntaxError','RangeError'].includes(e?.name))reason='CLIENT_EXECUTION';
-  }catch{}return{operation,reason,api_code,status};
+  }catch{}return{operation,reason,api_code,status,...(transport?{transport}:{})};
  }
  function configure(value){
   if(!value||value.enabled===false)return;
