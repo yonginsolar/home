@@ -1,6 +1,22 @@
-/* Version: v1.0.0 — explicit chair-line comparison; no network, saving or authority changes. */
+/* Version: v1.0.1 — explicit chair-line comparison and non-persistent practical labels. */
 const BASE = 'data-chair-transfer-base';
 const normalized = value => String(value || '').replace(/\s+/g, ' ').trim();
+export function labelPracticalScript(html, sanitize) {
+  const root = document.createElement('div'); root.innerHTML = sanitize(html);
+  const heading = root.querySelector('.board-scenario > h1');
+  if (!heading || !/사무국장용 진행 시나리오\s*$/.test(heading.textContent)) return root.innerHTML;
+  const start = heading.textContent.lastIndexOf('사무국장용'), end = start + '사무국장용'.length;
+  const walker = document.createTreeWalker(heading, 4); let node, offset = 0, replaced = false;
+  while ((node = walker.nextNode())) {
+    const text = node.data, next = offset + text.length;
+    if (next > start && offset < end) {
+      node.data = text.slice(0, Math.max(0, start - offset)) + (replaced ? '' : '실무자용') + text.slice(Math.max(0, end - offset));
+      replaced = true;
+    }
+    offset = next;
+  }
+  return sanitize(root.innerHTML);
+}
 function sections(html, sanitize) {
   const root = document.createElement('div');
   root.innerHTML = sanitize(html);

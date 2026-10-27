@@ -1,5 +1,5 @@
-/* Version: v1.0.0 — compare, explicitly select, then edit an unsaved practical script. */
-import { compareBoardChairLines, applyBoardChairSelection } from './board_script_transfer.js?v=1.0.0';
+/* Version: v1.0.1 — compare, explicitly select, then edit an unsaved practical script. */
+import { compareBoardChairLines, applyBoardChairSelection, labelPracticalScript } from './board_script_transfer.js?v=1.0.1';
 
 export function createBoardScriptTransfer(hooks) {
   const { state, manager, savedRows, editStates, sanitize, value, owner, isCurrent, remember, render, toast } = hooks;
@@ -132,14 +132,11 @@ export function createBoardScriptTransfer(hooks) {
       if (!target.owned || !manager.owned(row.owner, TARGET)) throw new Error('실무자용의 편집권을 다시 확인해 주세요.');
       if (value(source.document) !== row.sourceSaved || value(target.document) !== row.targetSaved)
         throw new Error('비교하는 동안 저장된 문서가 바뀌었습니다. 닫은 뒤 최신 문서를 확인하고 다시 비교해 주세요.');
-      let html = applyBoardChairSelection(row.plan, selected, sanitize);
-      const wrapper = document.createElement('div'); wrapper.innerHTML = html;
-      const heading = wrapper.querySelector('.board-scenario > h1');
-      if (heading && /사무국장용 진행 시나리오$/.test(heading.textContent.trim())) heading.textContent = heading.textContent.replace(/사무국장용 진행 시나리오\s*$/, '실무자용 진행 시나리오');
+      const html = labelPracticalScript(applyBoardChairSelection(row.plan, selected, sanitize), sanitize);
       const existing = state.documents.get(TARGET) || {};
       state.documents.set(TARGET, { ...existing, document_type: TARGET,
         title: String(existing.title || hooks.defaultTitle(TARGET)).replace(/사무국장용 진행 시나리오$/, '실무자용 진행 시나리오'),
-        content_html: sanitize(wrapper.innerHTML), manually_edited: true });
+        content_html: html, manually_edited: true });
       state.pendingDocuments.add(TARGET); row.applied = true;
       close(false); state.activeDocument = TARGET; render(); state.documentDirty = true;
       $('documentEditor').focus({ preventScroll: true });

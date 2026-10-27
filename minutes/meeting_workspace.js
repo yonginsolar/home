@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.14.0
+Version: v1.14.1
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -8,7 +8,8 @@ import { MinutesService } from './MinutesService.js?v=1.0.60';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.0';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.10';
-import { createBoardScriptTransfer } from './board_script_transfer_ui.js?v=1.0.0';
+import { createBoardScriptTransfer } from './board_script_transfer_ui.js?v=1.0.1';
+import { labelPracticalScript } from './board_script_transfer.js?v=1.0.1';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
 let pdfRendererRequest = null;
@@ -1428,7 +1429,8 @@ function renderActiveChapter() {
 
 function renderActiveDocument() {
   const doc = state.documents.get(state.activeDocument) || {};
-  $('documentTitle').value = doc.title || defaultDocumentTitle(state.activeDocument);
+  const title = doc.title || defaultDocumentTitle(state.activeDocument);
+  $('documentTitle').value = state.activeDocument === 'SCENARIO_SECRETARIAT' ? title.replace(/사무국장용 진행 시나리오$/, '실무자용 진행 시나리오') : title;
   const useChapters = chapterMode();
   $('documentEditor').hidden = useChapters;
   $('chapterLayout').hidden = !useChapters;
@@ -1463,7 +1465,7 @@ function renderActiveDocument() {
     renderPdfAttachmentList();
     $('documentEditor').innerHTML = state.current?.meeting_type === 'BOARD' && state.activeDocument === 'MATERIALS'
       ? normalizeBoardMaterialsHtml(doc.content_html || '')
-      : sanitizeHtml(doc.content_html || '');
+      : state.activeDocument === 'SCENARIO_SECRETARIAT' ? labelPracticalScript(doc.content_html || '', sanitizeHtml) : sanitizeHtml(doc.content_html || '');
     decorateBoardAnnexes();
   }
   state.documentDirty = false;
