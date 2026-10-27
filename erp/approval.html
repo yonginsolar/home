@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.111 | Change: 2026-10-27 - Bind imported meeting call notices to their exact meeting agendas. -->
+<!-- Version: v1.2.112 | Change: 2026-10-27 - Explain confirmed meeting-agenda conflicts without uncertain retries. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11461,6 +11461,15 @@ function setApprovalMeetingNoticeLink(value) {
         ? `연결된 회의: ${approvalMeetingNoticeLink.title || '선택한 회의'} · 이 공문의 결재 완료부터 안건이 잠깁니다.` : '';
 }
 
+function meetingNoticeFailureMessage(error, context = '') {
+    const code = String(error?.message || '');
+    if (code.includes('MEETING_AGENDA_CHANGED_RELOAD_NOTICE')) return context === 'submit'
+        ? '회의 안건이 변경되었습니다. 회의 내용을 다시 불러와 공문을 확인한 뒤 상신해 주세요.'
+        : '공문 작성 후 회의 안건이 변경되어 승인하지 않았습니다. 기안자에게 현재 안건으로 소집 공문을 다시 작성해 달라고 요청해 주세요.';
+    if (code.includes('MEETING_PACKAGE_DELETE_IN_PROGRESS')) return '회의 삭제 작업이 진행 중입니다. 잠시 후 현재 상태를 다시 확인해 주세요.';
+    return '';
+}
+
 function prepareApprovalCategoryBodyChange(previousType, nextType) {
     const scope = String(getApprovalScopedCoopId() || '').trim();
     const scopeChanged = approvalCategoryBodyDraftScope && approvalCategoryBodyDraftScope !== scope;
@@ -13587,7 +13596,10 @@ async function handleDraftSubmit(e) {
             await deleteDraftAttachmentObjects(uploadRollbackItems);
         } catch (_) { /* noop */ }
         const errorText = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
-        if (expenseSubType === '원천세' && (/23505/.test(errorText) || /ref_approval_unique_withholding_payment_month/.test(errorText))) {
+        const noticeFailure = meetingNoticeFailureMessage(error, 'submit');
+        if (noticeFailure) {
+            showAlert(noticeFailure);
+        } else if (expenseSubType === '원천세' && (/23505/.test(errorText) || /ref_approval_unique_withholding_payment_month/.test(errorText))) {
             showAlert('같은 급여 지급월의 원천세 결재가 방금 먼저 등록되었습니다. 결재함에서 기존 문서를 확인하세요.');
         } else {
             showAlert("상신 실패: " + error.message);
@@ -13901,9 +13913,9 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
         approvalUpdateError=result.error;
     }
     if (approvalUpdateError) {
-        showActionAlert(approvalUpdateError.code === 'PT409'
+        showActionAlert(meetingNoticeFailureMessage(approvalUpdateError, 'process') || (approvalUpdateError.code === 'PT409'
             ? '문서 상태가 변경되었습니다. 목록을 다시 확인해 주세요.'
-            : '결재 처리 결과를 확인하지 못했습니다. 같은 내용으로 다시 확인해 주세요.');
+            : '결재 처리 결과를 확인하지 못했습니다. 같은 내용으로 다시 확인해 주세요.'));
         return { ok: false };
     }
     if (owner!==getApprovalActionOwner()) return {ok:true,keepActionMemo:true};
