@@ -1,4 +1,4 @@
-/* v1.1.0 — Bounded OTP transport and explicit result recheck; no new Auth client or persistence. */
+/* v1.1.1 — Distinguish active Auth requests from result-only recovery. */
 (function(root) {
   'use strict';
   function boundedFetch(fetcher, baseUrl) {
@@ -172,6 +172,8 @@
     return Object.freeze({begin, current, sent, verified, finish, authChanged, captureFailure, recheck,
       invalidate:() => invalidate('navigation'),
       isBusy:() => !!active || !!recovery || !!checking, isVerifying:() => active?.kind === 'verify',
+      busyLabel:() => active ? (active.kind === 'verify' ? '코드 확인 중...' : '전송 중...')
+        : checking ? '결과 확인 중...' : recovery ? '결과 확인 필요' : '',
       recipient:() => recipient});
   }
   root.CoopLoginRequestGuard = Object.freeze({create,boundedFetch});

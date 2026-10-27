@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.75
-Change: 2026-10-27 - Bind field validation to current input and report the current screen revision.
+Version: v1.0.76
+Change: 2026-10-27 - Retire superseded field checks without losing edits made during submission.
 -->
 <html lang="ko"> 
 <head>
@@ -13,7 +13,7 @@ Change: 2026-10-27 - Bind field validation to current input and report the curre
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.75">
+  <meta name="signup-screen-version" content="1.0.76">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -2963,6 +2963,8 @@ const signupArguments = {
 };
 const submittedDraft = window.CoopSignupDraft?.snapshot();
 if(!isCurrentSignupSubmission(task))return;
+// Final checks supersede earlier field reads; later edits start fresh checks.
+task.fieldCheckRevisions=typeof invalidateSignupFieldChecks==='function'?invalidateSignupFieldChecks():null;
 task.sent=true;
 const { data: signupResult, error } = await _supabase.rpc(needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5', needsGuardian ? {
  p_signup:signupArguments,
@@ -3018,7 +3020,10 @@ true
 btn.disabled = false;
 btn.innerText = '가입 신청하기 ☀️';
 } else {
-  if (!error && createdMemberUuid) window.CoopSignupDraft?.markSaved(submittedDraft);
+  if (!error && createdMemberUuid) {
+    if(task.fieldCheckRevisions)invalidateSignupFieldChecks(undefined,task.fieldCheckRevisions);
+    window.CoopSignupDraft?.markSaved(submittedDraft);
+  }
   notifySignupRequestAdmins(createdMemberUuid).catch((notifyError) => {
     CoopSafeLog.warn("[member-request-alert] signup admin telegram skipped:", notifyError?.message || notifyError);
   });
@@ -3119,8 +3124,12 @@ el.classList.remove('is-invalid-field');
 // [신규/교체] 주민등록번호 3중 검증 (유효성 -> 나이 -> DB중복)
 // [수정] 주민번호 통합 검증 (사업자번호 로직 구조 차용)
 const signupFieldChecks=new Map(),signupFieldEdits={rrn:0,phone:0};
-function invalidateSignupFieldChecks(field) {
-for(const name of field?[field]:['rrn','phone']){++signupFieldEdits[name];signupFieldChecks.delete(name);}
+function invalidateSignupFieldChecks(field,expected) {
+for(const name of field?[field]:['rrn','phone']){
+ if(expected&&expected[name]!==signupFieldEdits[name])continue;
+ ++signupFieldEdits[name];signupFieldChecks.delete(name);
+}
+return {...signupFieldEdits};
 }
 for(const eventName of ['input','change'])document.getElementById('joinForm').addEventListener(eventName,event=>{
 const id=event.target?.id;
