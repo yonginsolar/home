@@ -1,4 +1,4 @@
-/* v1.0.0 — Auth-bound, expiring target import. No member list or permission editor. */
+/* v1.0.1 — Review incoming email clearing and unique personal-to-organization linkage. */
 (function(root){'use strict';
   const client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{
     global:{headers:{'x-erp-host':location.hostname,'x-public-host':location.hostname}}

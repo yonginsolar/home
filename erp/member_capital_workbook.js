@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.1.2. Member-only authority and blank-email guidance; draft/write behavior unchanged. */
+/* Member/capital workbook 1.1.3. Show explicit email-resolution review without changing selected files or other import paths. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -332,7 +332,7 @@
                 row.name,
                 s.phase === "saved"
                   ? "등록 완료"
-                  : s.failures?.[tab]?.[row.row_no] || row._issues?.join(" / ") || r?.reason || (r ? "등록 가능" : "검사 전"),
+                  : s.failures?.[tab]?.[row.row_no] || row._issues?.filter(issue => !(r?.email_checked === true && typeof issue === "string" && issue.startsWith("이메일 중복:"))).join(" / ") || r?.reason || (r ? "등록 가능" : "검사 전"),
               ]
             : [
                 row.row_no,
@@ -702,6 +702,8 @@
           uncertain: false,
           memberCount: s.review.members.filter(r => r.eligible ?? r.status === "ready").length,
           paymentCount: s.review.payments.filter(r => r.eligible ?? r.status === "ready").length,
+          emailClearedCount: s.review.members.filter(r => r.eligible === true && r.email_resolution === "personal_cleared").length,
+          managerLinkCount: s.review.members.filter(r => r.eligible === true && r.email_resolution === "manager_link").length,
         };
       const attempt = s.attempt,
         epoch = s.epoch;
@@ -712,7 +714,7 @@
           attempt.memberCount +
           "명과 납입 " +
           attempt.paymentCount +
-          "건을 등록할까요?" + (attempt.memberCount + attempt.paymentCount < attempt.payload.members.length + attempt.payload.payments.length ? "\n확인할 묶음은 검토 목록에 남습니다." : ""),
+          "건을 등록할까요?" + (attempt.emailClearedCount ? "\n개인 " + attempt.emailClearedCount + "명의 중복 이메일은 빈칸으로 등록합니다." : "") + (attempt.managerLinkCount ? "\n단체 " + attempt.managerLinkCount + "건은 같은 이메일의 개인을 관리자로 연결하고 단체 이메일은 비워 둡니다." : "") + (attempt.memberCount + attempt.paymentCount < attempt.payload.members.length + attempt.payload.payments.length ? "\n확인할 묶음은 검토 목록에 남습니다." : ""),
         { title: "회원·출자금 등록", confirmText: "등록" },
       );
       if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible()) return;
@@ -880,7 +882,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.1.2",
+    version: "1.1.3",
     create,
     parse,
     memberHeaders,
