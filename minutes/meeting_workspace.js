@@ -1,12 +1,12 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.13
-Change: 2026-10-27 - Load spoken board scripts and keep speech blocks together in print.
+Version: v1.10.14
+Change: 2026-10-27 - Preserve speech inheritance without reviving the old recording question.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.1';
-import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.7';
+import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.8';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
 let pdfRendererRequest = null;
@@ -1373,6 +1373,8 @@ function applyReusableChairStyle(html, style, row, agendas = []) {
   for (const kind of ['OPENING', 'CLOSING', 'REPORT', 'DECISION', 'DISCUSSION', 'OTHER']) {
     const sets = kind === 'OPENING' || kind === 'CLOSING' ? [groups.get(kind) || []] : groups.get(kind) || [];
     for (const [setIndex, lines] of sets.entries()) lines.forEach((line, index) => {
+      // Recording is the approved fixed notice, not inherited consent wording.
+      if (kind === 'OPENING' && index === 2) return;
       // The introduction names a particular agenda. Always regenerate it from this meeting.
       if (['REPORT', 'DECISION', 'DISCUSSION', 'OTHER'].includes(kind) && index === 0) return;
       if (kind === 'DECISION' && index === 2
@@ -1395,6 +1397,18 @@ function applyReusableChairStyle(html, style, row, agendas = []) {
 function synchronizeChairSpeech(sourceHtml, targetHtml) {
   const source = scenarioChairGroups(sourceHtml);
   const target = scenarioChairGroups(targetHtml);
+  // A newly added empty turn has no secretary report to regenerate. Copy just
+  // that marked heading/speech into its missing peer; keep real agenda guards.
+  const closing = [...target.wrapper.querySelectorAll('.board-scenario > h2')].find(n => n.textContent.trim() === '폐회 선언');
+  if (closing) for (const [kind, label] of [['DISCUSSION', '[토의 안건]'], ['OTHER', '[기타 안건]']]) {
+    if (target.groups.has(kind) || !source.groups.has(kind)) continue;
+    const heading = source.wrapper.querySelector(`.board-scenario > h2[data-board-empty-kind="${kind}"]`);
+    const line = heading?.nextElementSibling;
+    if (heading?.textContent.trim() !== label || !line?.matches('p.speaker')
+      || line.querySelector(':scope > strong')?.textContent.trim() !== '의장'
+      || line.nextElementSibling?.tagName !== 'H2' || source.groups.get(kind)?.length !== 1) continue;
+    closing.before(heading.cloneNode(true), line.cloneNode(true));
+  }
   const shape = ({ wrapper }) => [...wrapper.querySelectorAll('.board-scenario > h2')].map(heading => {
     const label = heading.textContent.trim();
     const kind = /^\[([^\s]+)\s/.exec(label)?.[1] || label;

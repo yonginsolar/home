@@ -1,6 +1,6 @@
 /*
-Version: v1.7.7
-Change: 2026-10-27 - Add spoken board agenda transitions while retaining paired chair speech.
+Version: v1.7.8
+Change: 2026-10-27 - Keep board scripts speech-only with discussion and other-business turns.
 */
 
 const safe = (value) => String(value ?? '')
@@ -187,14 +187,14 @@ function boardScenario({ row, agendas, chairName, coopName, company }, includeSe
   const heading = includeSecretariat ? '사무국장용 진행 시나리오' : '의장용 진행 시나리오';
   return `<article class="board-scenario">
     <h1>${safe(coopName)} ${safe(row.title)} ${heading}</h1>
-    <p class="scenario-meta"><strong>일시</strong> ${dateText(row.meeting_date)} ${timeText(row)}　<strong>장소</strong> ${safe(row.location || '미정')}　<strong>의장</strong> ${safe(chairName || '의장')}</p>
-    ${organizationInfo(company, coopName)}
     ${includeSecretariat && row.document_notes ? `<p class="action"><strong>준비 메모</strong> ${blocks(row.document_notes)}</p>` : ''}
     <h2>개회 선언</h2>
     <p class="speaker"><strong>의장</strong> ${blocks(row.opening_message, `바쁜 일정 중에 시간 내주셔서 고맙습니다. 재적 이사 ${Number(row.eligible_count || 0)}명 중 ____명이 참석하셔서 이사회 성원이 되었습니다.`)}</p>
     <p class="speaker"><strong>의장</strong> 그럼 지금부터 ${safe(row.title)}를 시작하겠습니다.</p>
-    <p class="speaker"><strong>의장</strong> 회의 내용을 정확히 남기려고 오늘 회의를 녹음하려 합니다. 녹음 파일은 사무국에서 의사록을 작성하고 확인하는 데에만 쓰겠습니다. 혹시 의견 있으시면 말씀해 주세요.</p>
+    <p class="speaker"><strong>의장</strong> 회의 기록 및 정확한 의사록 작성을 위해 회의 내용을 녹음하도록 하겠습니다.<br>녹음 파일은 사무국 내부 업무용으로만 활용하겠습니다.</p>
     ${body || '<p>등록된 안건이 없습니다.</p>'}
+    ${!agendaCounts.DISCUSSION ? '<h2 data-board-empty-kind="DISCUSSION">[토의 안건]</h2><p class="speaker"><strong>의장</strong> 다음은 토의 안건입니다. 저희가 따로 준비한 안건은 없는데, 혹시 토의하실 내용이 있으신가요?</p>' : ''}
+    ${!agendaCounts.OTHER ? '<h2 data-board-empty-kind="OTHER">[기타 안건]</h2><p class="speaker"><strong>의장</strong> 다음은 기타 안건입니다. 더 하실 말씀이 있으신가요?</p>' : ''}
     <h2>폐회 선언</h2>
     <p class="speaker"><strong>의장</strong> ${blocks(row.closing_message, `오늘 준비한 안건은 여기까지입니다. 혹시 마지막으로 나누실 말씀이 있으신가요? 함께 의견 나눠주셔서 고맙습니다. 이것으로 ${row.title || '이사회'}를 마치겠습니다. 폐회를 선언합니다.`)}</p>
   </article>`;

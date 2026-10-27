@@ -1,4 +1,4 @@
-/* v1.1.2 — Keep known denial/rate-limit status ahead of a body timeout. */
+/* v1.1.3 — Missing required helpers are not JavaScript reference errors. */
 (function(root){
  'use strict';
  const fallback={tenant:'TENANT_READ_FAILED',auth_start:'AUTH_START_FAILED',auth_return:'AUTH_SESSION_UNAVAILABLE',email_send:'EMAIL_SEND_FAILED',email_verify:'EMAIL_VERIFY_FAILED',member_lookup:'MEMBER_LOOKUP_FAILED',submit:'SIGNUP_SAVE_FAILED',runtime:'RUNTIME_ERROR'};
@@ -34,10 +34,10 @@
    else if(status===429)reason='RATE_LIMITED';else if(status!==null&&status>=500)reason='SERVER_ERROR';
    else if(api_code)reason='API_ERROR';
    else if(/fetch|network|load failed/i.test(inner))reason='NETWORK';
-   else if(message==='SIGNUP_DEPENDENCY_MISSING'||e?.name==='ReferenceError')reason='SCRIPT_MISSING';
+   else if(message==='SIGNUP_DEPENDENCY_MISSING'||inner==='SIGNUP_DEPENDENCY_MISSING')reason='SCRIPT_MISSING';
    else if(['ADMISSION_READ_FAILED','CONTEXT_SHAPE_INVALID','CAPITAL_SETTINGS_INVALID'].includes(message))reason='DATA_INVALID';
    else if(['SIGNUP_COOP_CONTEXT_MISSING','SIGNUP_COOP_NOT_FOUND'].includes(message))reason='TENANT_MISMATCH';
-   else if(['TypeError','SyntaxError','RangeError'].includes(e?.name))reason='CLIENT_EXECUTION';
+   else if(['ReferenceError','TypeError','SyntaxError','RangeError'].includes(e?.name))reason='CLIENT_EXECUTION';
   }catch{}return{operation,reason,api_code,status};
  }
  function configure(value){

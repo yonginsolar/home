@@ -1,19 +1,19 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.76
-Change: 2026-10-27 - Retire superseded field checks without losing edits made during submission.
+Version: v1.0.77
+Change: 2026-10-27 - Recover missing preparation helpers on explicit retry without resetting the form.
 -->
 <html lang="ko"> 
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-<script src="shared/signup_failure_reporter.js?v=1.1.2"></script>
+<script src="shared/signup_failure_reporter.js?v=1.1.3"></script>
 <script src="shared/signup_public_reads.js?v=1.0.1"></script>
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.76">
+  <meta name="signup-screen-version" content="1.0.77">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -562,12 +562,19 @@ const _supabase = window.CoopRouteGuard?.createSupabaseClient
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 window.CoopSignupFailure?.configure({url:SUPABASE_URL,key:SUPABASE_KEY,page:'signup',revision:document.querySelector('meta[name="signup-screen-version"]').content});
 window.CoopSignupFailure?.observeClient(_supabase);
-const signupPublicReads=CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
+// Resolve this dependency when reading, so a failed script can reach the retry UI.
+let signupPublicReadClient=null;
+const signupPublicReads={rpc(){
+if(typeof window.CoopSignupPublicReads?.create!=='function')throw Error('SIGNUP_DEPENDENCY_MISSING');
+if(!signupPublicReadClient)signupPublicReadClient=window.CoopSignupPublicReads.create({url:SUPABASE_URL,key:SUPABASE_KEY,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||window.location.hostname});
+return signupPublicReadClient.rpc.apply(signupPublicReadClient,arguments);
+}};
 window.CoopSignupFailure?.observeClient(signupPublicReads);
 window.CoopSignupFailure?.setProvider(new URLSearchParams(window.location.search).get('auth_return'));
 let joinSubmitInFlight = false;
 let signupCapitalRules = null;
 async function loadSignupCapitalRules() {
+if(typeof window.CoopMemberCapital?.load!=='function')throw Error('SIGNUP_DEPENDENCY_MISSING');
 signupCapitalRules = await CoopMemberCapital.load(signupPublicReads, true);
 const input = document.getElementById('money');
 CoopMemberCapital.applyInput(input, signupCapitalRules);
@@ -620,8 +627,16 @@ document.getElementById('retrySignupAuth').disabled = false;
 window.refreshGuardianFields?.();
 }
 async function retrySignupAuthCheck() {
+const scope=signupIdentityScope();
 setSignupAuthBusy(true);
 document.getElementById('retrySignupAuth').disabled = true;
+try{await recoverSignupPreparationScripts();}catch(error){
+if(isCurrentSignupIdentity(scope)){
+ window.CoopSignupFailure?.report('tenant',error);
+ showSignupAuthRetry('가입 화면 준비 파일을 불러오지 못했습니다. 다시 확인해 주세요.');
+}return false;
+}
+if(!isCurrentSignupIdentity(scope))return false;
 await checkCurrentSignupSessionOnLoad({ reason: 'manual-retry', showFailure: true });
 }
 let resolveSignupAuthInitialStateReady = null;
@@ -1201,21 +1216,60 @@ throw error;
 }
 }
 
-async function retrySignupTenantGate() {
+// Only fixed, same-origin preparation helpers; never reload Auth or the page.
+const signupPreparationScripts=[
+{operation:'signup_context',ready:()=>typeof window.CoopSignupPublicReads?.create==='function',src:'/shared/signup_public_reads.js?v=1.0.1',integrity:'sha384-kP0rQNPZa6oVvydohU1G4MBIfq0T92C8X9wzvEdT/TtfWRB+Ed86PmtyWSR9zyw+'},
+{operation:'admission_policy',ready:()=>typeof window.CoopApplicationNotice?.load==='function',src:'/shared/application_retention_notice.js?v=1.1.1',integrity:'sha384-qK1mspndjTAm/ZJzexYSMqvuyOklr4CLeu/0d3m7xI+ytcgStSMpcJlE3PTNkp3d'},
+{operation:'capital_rules',ready:()=>typeof window.CoopMemberCapital?.load==='function',src:'/shared/member_capital.js?v=20261008-3',integrity:'sha384-8TesxQZ59x1P2zjuN4/JQV/oUprH3HngX7kJF7x3Hl3MlrOscIuUb+9a0RUxLgfK'}
+];
+let signupPreparationScriptTask=null;
+function recoverSignupPreparationScripts(){
+if(signupPreparationScriptTask)return signupPreparationScriptTask;
+const task=(async()=>{
+for(const item of signupPreparationScripts){
+if(item.ready())continue;
+await signupPreparationStep(item.operation,()=>new Promise((resolve,reject)=>{
+ const script=document.createElement('script');let settled=false;
+ const finish=()=>{if(settled)return;settled=true;clearTimeout(timer);script.onload=script.onerror=null;script.remove();item.ready()?resolve():reject(Error('SIGNUP_DEPENDENCY_MISSING'));};
+ const timer=setTimeout(finish,8000);
+ script.src=new URL(item.src,window.location.origin).href;script.integrity=item.integrity;script.crossOrigin='anonymous';script.referrerPolicy='no-referrer';script.onload=finish;script.onerror=finish;document.head.append(script);
+}));
+}
+})();
+signupPreparationScriptTask=task;
+task.finally(()=>{if(signupPreparationScriptTask===task)signupPreparationScriptTask=null;}).catch(()=>{});
+return task;
+}
+let signupTenantRetryTask=null;
+function retrySignupTenantGate() {
+if(signupTenantRetryTask&&isCurrentSignupIdentity(signupTenantRetryTask.scope))return signupTenantRetryTask.promise;
+const task={scope:signupIdentityScope(),promise:null};signupTenantRetryTask=task;
 const retryButton = document.getElementById('btnRetrySignupTenant');
 if (retryButton) {
 retryButton.disabled = true;
 retryButton.innerText = '확인 중...';
 }
-try {
+task.promise=(async()=>{try {
 showSignupTenantRetryState('가입 대상을 다시 확인하는 중입니다...');
+await recoverSignupPreparationScripts();
+if(signupTenantRetryTask!==task||!isCurrentSignupIdentity(task.scope))return false;
 await ensureSignupTenant();
+return true;
+} catch(error) {
+if(signupTenantRetryTask===task&&isCurrentSignupIdentity(task.scope)){
+ window.CoopSignupFailure?.report('tenant',error);
+ showSignupTenantRetryState(window.CoopSignupFailure?.retryMessage?.(error)||'가입 화면 준비 파일을 불러오지 못했습니다. 다시 확인해 주세요.');
+}
+return false;
 } finally {
+if(signupTenantRetryTask===task){signupTenantRetryTask=null;
 if (retryButton) {
 retryButton.disabled = false;
 retryButton.innerText = '가입 대상 다시 확인';
 }
 }
+}})();
+return task.promise;
 }
 
     // [신규] URL로 배달된 토큰(at, rt)을 받아서 로그인 처리하는 함수
