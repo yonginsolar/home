@@ -1,4 +1,4 @@
-/* Version: v1.0.2 — compare, explicitly select, then edit an unsaved practical script. */
+/* Version: v1.0.3 — compare and select using the existing document-bearing lease response. */
 import { compareBoardChairLines, applyBoardChairSelection, labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 
 export function createBoardScriptTransfer(hooks) {
@@ -125,7 +125,7 @@ export function createBoardScriptTransfer(hooks) {
     if (!selected.length && row.plan.changes.length) return;
     row.busy = true; sync();
     try {
-      const target = await manager.manage(row.owner, TARGET, 'renew');
+      const target = await manager.manage(row.owner, TARGET, 'acquire');
       if (!current(row)) return;
       const source = await manager.manage(row.owner, SOURCE, 'status');
       if (!current(row)) return;
