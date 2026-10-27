@@ -1,4 +1,4 @@
-/* Version: v1.0.1 — explicit chair-line comparison and non-persistent practical labels. */
+/* Version: v1.0.2 — explicit chair-line comparison; preserve embedded images and tables. */
 const BASE = 'data-chair-transfer-base';
 const normalized = value => String(value || '').replace(/\s+/g, ' ').trim();
 export function labelPracticalScript(html, sanitize) {
@@ -69,6 +69,9 @@ export function compareBoardChairLines(sourceHtml, targetHtml, sanitize) {
       if (before && after && markup(before) === markup(after)) { matches.push({ before, after }); continue; }
       // A previously applied line changed only in the practical script: leave it alone.
       if (before && after && before.hasAttribute(BASE) && baseline(before) === markup(after)) continue;
+      if ([before, after].some(node => node?.querySelector('img,picture,video,audio,svg,canvas,table,[data-signature-preview-path]'))) {
+        skipped.push(`${section.key} (사진·표 포함 발언)`); continue;
+      }
       changes.push({ id: changes.length, heading: section.key, before, after, destination, beforeIndex: pair.before,
         conflict: !!before && before.hasAttribute(BASE) && baseline(before) !== markup(before),
         unknown: !!before && !before.hasAttribute(BASE),

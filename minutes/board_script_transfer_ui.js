@@ -1,5 +1,5 @@
-/* Version: v1.0.1 — compare, explicitly select, then edit an unsaved practical script. */
-import { compareBoardChairLines, applyBoardChairSelection, labelPracticalScript } from './board_script_transfer.js?v=1.0.1';
+/* Version: v1.0.2 — compare, explicitly select, then edit an unsaved practical script. */
+import { compareBoardChairLines, applyBoardChairSelection, labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 
 export function createBoardScriptTransfer(hooks) {
   const { state, manager, savedRows, editStates, sanitize, value, owner, isCurrent, remember, render, toast } = hooks;
@@ -81,7 +81,7 @@ export function createBoardScriptTransfer(hooks) {
     }
     if (row.plan.skipped.length) {
       const message = document.createElement('p'); message.className = 'script-transfer-warning';
-      message.textContent = `진행 구간의 제목이나 구조가 달라 직접 확인할 부분: ${row.plan.skipped.join(' / ')}`; list.append(message);
+      message.textContent = `직접 확인할 부분: ${row.plan.skipped.join(' / ')}`; list.append(message);
     }
     $('scriptTransferError').textContent = ''; sync();
   }
