@@ -1,14 +1,14 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.14.4
+Version: v1.14.5
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.0';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.1';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.10';
-import { createBoardScriptTransfer } from './board_script_transfer_ui.js?v=1.0.4';
+import { createBoardScriptTransfer } from './board_script_transfer_ui.js?v=1.0.5';
 import { labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
@@ -79,21 +79,23 @@ let documentEditEpoch=0, documentEditRefresh=null;
 function documentEditKey(type=state.activeDocument) { return `${state.current?.id}:${type}`; }
 function documentValue(row) { return JSON.stringify([row?.title||'',row?.content_html||'']); }
 function documentEditingAllowed(type=state.activeDocument) {
-  return !!state.current && !documentConflicts.has(documentEditKey(type))
+  return !!state.current && !scenarioTransfer.releaseStatus(pdfActionOwner(),type) && !documentConflicts.has(documentEditKey(type))
     && MeetingPackageService.documentEdits.owned(pdfActionOwner(),type);
 }
 function renderDocumentEditState() {
   if (!$('documentEditStatus')) return;
   const allowed=documentEditingAllowed(), busy=state.loading, entry=documentEditStates.get(documentEditKey());
-  $('documentEditStatus').textContent = allowed ? '편집 중입니다.' : documentConflicts.has(documentEditKey())
+  const releasing=scenarioTransfer.releaseStatus(pdfActionOwner(),state.activeDocument);
+  $('documentEditStatus').textContent = releasing==='retry' ? '편집권 반납을 확인하지 못했습니다. 다시 확인해 주세요.'
+    : releasing ? '편집권을 반납하고 있습니다.' : allowed ? '편집 중입니다.' : documentConflicts.has(documentEditKey())
     ? '다른 사람이 저장한 내용이 있습니다. 최신 문서와 작성한 초안을 확인해 주세요.'
     : entry?.busy ? `${entry.holder_name||'조합 담당자'} 님이 편집 중입니다.`
     : entry?.failed ? '편집권을 확인하지 못했습니다. 다시 확인해 주세요.'
     : '읽기 전용입니다. 수정하려면 편집을 눌러 주세요.';
-  $('editDocumentButton').hidden=allowed || !!entry?.busy || !!entry?.closed || documentConflicts.has(documentEditKey());
+  $('editDocumentButton').hidden=!!releasing || allowed || !!entry?.busy || !!entry?.closed || documentConflicts.has(documentEditKey());
   $('editDocumentButton').disabled=busy;
-  $('endDocumentEditButton').hidden=!MeetingPackageService.documentEdits.owned(pdfActionOwner(),state.activeDocument);
-  $('takeDocumentEditButton').hidden=!entry?.busy || !entry?.can_takeover || allowed;
+  $('endDocumentEditButton').hidden=!!releasing || !MeetingPackageService.documentEdits.owned(pdfActionOwner(),state.activeDocument);
+  $('takeDocumentEditButton').hidden=!!releasing || !entry?.busy || !entry?.can_takeover || allowed;
   $('refreshDocumentEditButton').disabled=busy;
   $('documentTitle').readOnly=!allowed;
   if(chapterMode()) renderChapterEditState();
@@ -118,7 +120,7 @@ async function refreshDocumentEditState() {
       try{
         const data=await MeetingPackageService.documentEdits.manage(owner,type,MeetingPackageService.documentEdits.owned(owner,type)?'renew':'status');
         if(pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)documentEditStates.set(documentEditKey(type),data);
-      }catch(_){if(pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)documentEditStates.set(documentEditKey(type),{failed:true});}
+      }catch(error){if(error?.code!=='MEETING_EDIT_REQUEST_STALE'&&pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)documentEditStates.set(documentEditKey(type),{failed:true});}
     }
     if(pdfActionStillCurrent(owner)&&epoch===documentEditEpoch)renderDocumentEditState();
   })().finally(()=>{if(documentEditRefresh===task)documentEditRefresh=null;});
@@ -127,9 +129,10 @@ async function refreshDocumentEditState() {
 async function beginDocumentEdit(force=false) {
   if(!state.current)return;
   const owner=pdfActionOwner(),type=state.activeDocument,epoch=documentEditEpoch;
+  if(scenarioTransfer.releaseStatus(owner,type))return;
   rememberActiveDocument();
   if(force && !(await window.CoopDialog.confirm('이 문서의 편집권을 가져올까요?')))return;
-  if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch)return;
+  if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch||scenarioTransfer.releaseStatus(owner,type))return;
   const result=await MeetingPackageService.documentEdits.manage(owner,type,'acquire',force);
   if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch)return;
   documentEditStates.set(documentEditKey(type),result);
@@ -2459,6 +2462,7 @@ async function runAction(action) {
   setBusy(true);
   try { await action(); }
   catch (error) {
+    if(error?.code==='MEETING_EDIT_REQUEST_STALE')return;
     console.error(error);
     const code = String(error?.message || '');
     showToast(code.includes('MEETING_AGENDA_LOCKED') ? '소집 공문 결재가 완료되어 기본정보와 안건 제목·구성이 잠겼습니다. 입력은 보관했습니다. 잠금 상태를 다시 확인해 주세요.'

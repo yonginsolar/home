@@ -1,4 +1,4 @@
-/* Version: v1.0.4 — freeze pending selections and retain independent release barriers. */
+/* Version: v1.0.5 — keep borrowed-lease documents readonly throughout release/recheck. */
 import { compareBoardChairLines, applyBoardChairSelection, labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 
 export function createBoardScriptTransfer(hooks) {
@@ -9,6 +9,12 @@ export function createBoardScriptTransfer(hooks) {
   const key = type => `${state.current?.id}:${type}`;
   function currentValue(type) { return hooks.currentValue(type); }
   function available() { return state.current?.meeting_type === 'BOARD' && state.current.status !== 'FINAL' && [SOURCE, TARGET].includes(state.activeDocument); }
+  function releaseStatus(currentOwner, type) {
+    if(type!==TARGET)return null;
+    const row=[...closingRows].find(row=>row.acquired && !row.alreadyOwned && !row.applied
+      && ['userId','coopId','packageId','identity'].every(field=>row.owner[field]===currentOwner[field]));
+    return row ? row.releaseFailed ? 'retry' : 'pending' : null;
+  }
   function sync() {
     const button = $('transferChairScriptButton');
     button.hidden = !available();
@@ -37,10 +43,11 @@ export function createBoardScriptTransfer(hooks) {
     if (row?.releaseRequest) return row.releaseRequest;
     if (!row || !row.acquired || row.alreadyOwned || row.applied || !isCurrent(row.owner)) { closingRows.delete(row); sync(); return Promise.resolve(); }
     row.releaseFailed = false; closingRows.add(row); sync();
+    hooks.renderEdit();
     const task = Promise.resolve().then(() => manager.manage(row.owner, TARGET, 'release')).then(() => {
       closingRows.delete(row);
       if (isCurrent(row.owner) && !intent && !opening) { editStates.delete(key(TARGET)); hooks.renderEdit(); }
-    }).catch(() => { row.releaseFailed = true; }).finally(() => { if (row.releaseRequest === task) row.releaseRequest = null; sync(); });
+    }).catch(() => { row.releaseFailed = true; }).finally(() => { if (row.releaseRequest === task) row.releaseRequest = null; sync(); if(isCurrent(row.owner))hooks.renderEdit(); });
     row.releaseRequest = task;
     return task;
   }
@@ -58,7 +65,7 @@ export function createBoardScriptTransfer(hooks) {
         && !window.frameElement?.hidden && target.getClientRects().length && !target.disabled
         && (!active || active === document.body || active === target || $('scriptTransferDialog').contains(active))) target.focus({ preventScroll: true });
     };
-    if (row?.busy && !row.applied) { row.cancelled = true; closingRows.add(row); }
+    if (row?.busy && !row.applied) { row.cancelled = true; closingRows.add(row); hooks.renderEdit(); }
     else void release(row).then(restoreFocus);
     if (row) row.restoreFocus = restoreFocus;
     sync();
@@ -183,5 +190,5 @@ export function createBoardScriptTransfer(hooks) {
       event.preventDefault(); controls[next].focus();
     });
   }
-  return { bind, sync, invalidate: () => close(false) };
+  return { bind, sync, releaseStatus, invalidate: () => close(false) };
 }

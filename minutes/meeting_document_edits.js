@@ -1,4 +1,4 @@
-/* Version: v1.0.0 — per-document leases and durable, exact-request save recovery. */
+/* Version: v1.0.1 — fence superseded ownership replies; keep durable save recovery unchanged. */
 export function createMeetingDocumentEdits(rpc, uuid = () => crypto.randomUUID()) {
   const leases = new Map(), pending = new Map(), writes = new Map();
   const key = owner => JSON.stringify([owner.userId, owner.coopId, owner.packageId]);
@@ -19,20 +19,31 @@ export function createMeetingDocumentEdits(rpc, uuid = () => crypto.randomUUID()
     let entry=leases.get(id);
     if (!entry) { entry={token:uuid(),owned:false};leases.set(id,entry); }
     // A confirmed loss starts a new fencing token. An uncertain acquire retains its token.
-    if (action==='acquire' && (force || entry.lost || (entry.expires_at && Date.parse(entry.expires_at)<=Date.now()))) { entry={token:uuid(),owned:false};leases.set(id,entry); }
+    if (action==='acquire' && (force || entry.lost || entry.releaseBlocked || (entry.expires_at && Date.parse(entry.expires_at)<=Date.now()))) { entry={token:uuid(),owned:false};leases.set(id,entry); }
+    const authority = action==='acquire' || action==='release';
+    if(authority)entry.manageEpoch=(entry.manageEpoch||0)+1;
+    const epoch=entry.manageEpoch||0, current=()=>leases.get(id)===entry && (entry.manageEpoch||0)===epoch;
+    const stale=()=>Object.assign(new Error('편집 상태가 바뀌었습니다. 현재 문서를 다시 확인해 주세요.'),{code:'MEETING_EDIT_REQUEST_STALE'});
+    if(action==='release'){entry.releaseBlocked=true;entry.owned=false;entry.checkedAt=0;}
     const token=entry.token;
     try {
       const data=await call('manage_meeting_document_edit',{...args(owner),p_type:type,p_lease_key:token,p_action:action,p_force:force});
-      if (leases.get(id)===entry) Object.assign(entry,data,{lost:!data.owned,checkedAt:Date.now()});
-      return data;
+      if(!current() || (!authority && entry.releaseBlocked))throw stale();
+      if(!data || typeof data.owned!=='boolean')throw new Error('편집 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
+      // Completion of an authority change/loss also fences reads started while it was pending.
+      if(authority || !data.owned)entry.manageEpoch=(entry.manageEpoch||0)+1;
+      const result=entry.releaseBlocked?{...data,owned:false}:data;
+      Object.assign(entry,result,{lost:!data.owned,checkedAt:Date.now()});
+      return result;
     } catch(error) {
-      if (leases.get(id)===entry) {entry.owned=false;entry.checkedAt=0;}
+      if(error?.code==='MEETING_EDIT_REQUEST_STALE' || !current())throw stale();
+      entry.manageEpoch=(entry.manageEpoch||0)+1;entry.owned=false;entry.checkedAt=0;
       throw error;
     }
   }
   const owned = (owner,type) => {
     const l=leases.get(leaseId(owner,type));
-    return !!(l?.owned && Date.parse(l.expires_at)>Date.now() && Date.now()-l.checkedAt<60000);
+    return !!(l?.owned && !l.releaseBlocked && Date.parse(l.expires_at)>Date.now() && Date.now()-l.checkedAt<60000);
   };
   async function saveInternal(owner, documents) {
     const id=key(owner);
@@ -80,6 +91,6 @@ export function createMeetingDocumentEdits(rpc, uuid = () => crypto.randomUUID()
   }
   return {manage,owned,save,hasPending:owner=>pending.has(key(owner)),
     inspect:(owner,type)=>leases.get(leaseId(owner,type)),
-    freeze(owner){for(const type of ['MATERIALS','SCENARIO','SCENARIO_SECRETARIAT']){const l=leases.get(leaseId(owner,type));if(l){l.owned=false;l.checkedAt=0;}}}
+    freeze(owner){for(const type of ['MATERIALS','SCENARIO','SCENARIO_SECRETARIAT']){const l=leases.get(leaseId(owner,type));if(l){l.manageEpoch=(l.manageEpoch||0)+1;l.owned=false;l.checkedAt=0;}}}
   };
 }

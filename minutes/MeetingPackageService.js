@@ -1,9 +1,9 @@
 /*
-Version: v1.7.0
+Version: v1.7.1
 Change: 2026-10-27 - Use automatic imported call-notice association without a second linking workflow.
 */
 import { supabase } from '../shared/supabase-client.js';
-import { createMeetingDocumentEdits } from './meeting_document_edits.js?v=1.0.0';
+import { createMeetingDocumentEdits } from './meeting_document_edits.js?v=1.0.1';
 const documentEdits = createMeetingDocumentEdits((name,body)=>supabase.rpc(name,body));
 
 export const MEETING_PACKAGE_FILE_BUCKET = 'meeting-package-files';
