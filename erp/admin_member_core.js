@@ -2287,12 +2287,15 @@ const memberIdCounts = new Map();
 const rrnCounts = new Map();
 const businessCounts = new Map();
 const corpCounts = new Map();
-const nameCounts = new Map();
-const lacksIdentifier = row => ![row.email,row.member_id,row.rrn,row.business_number,row.corp_number].some(Boolean);
-const nameKey = row => `${row.member_type}:${row.name}`;
+const duplicateMessage = (row, key, label) => {
+  const normalize = value => key === 'email' ? String(value || '').trim().toLowerCase()
+    : ['rrn','business_number','corp_number'].includes(key) ? String(value || '').replace(/[ -]/g,'') : String(value || '').trim();
+  const value = normalize(row[key]);
+  const rowNumbers = baseValidRows.filter(other => value && normalize(other[key]) === value).map(other => other.rowNo);
+  return `중복 ${label}(파일): ${rowNumbers.join('·')}행`;
+};
 
 baseValidRows.forEach((row) => {
-  nameCounts.set(nameKey(row), (nameCounts.get(nameKey(row)) || 0) + 1);
   const emailKey = String(row.email || '').trim().toLowerCase();
   const memberIdKey = String(row.member_id || '').trim();
   const rrnKey = String(row.rrn || '').trim();
@@ -2311,12 +2314,11 @@ baseValidRows.forEach((row) => {
   const rrnKey = String(row.rrn || '').trim();
   const businessKey = String(row.business_number || '').trim();
   const corpKey = String(row.corp_number || '').trim();
-  if (emailKey && (emailCounts.get(emailKey) || 0) > 1) row.errors.push('중복 이메일(파일)');
-  if (memberIdKey && (memberIdCounts.get(memberIdKey) || 0) > 1) row.errors.push('중복 조합원번호(파일)');
-  if (rrnKey && (rrnCounts.get(rrnKey) || 0) > 1) row.errors.push('중복 주민번호(파일)');
-  if (businessKey && (businessCounts.get(businessKey) || 0) > 1) row.errors.push('중복 사업자번호(파일)');
-  if (corpKey && (corpCounts.get(corpKey) || 0) > 1) row.errors.push('중복 법인번호(파일)');
-  if (lacksIdentifier(row) && nameCounts.get(nameKey(row)) > 1) row.errors.push('중복 이름·유형 확인 필요(파일)');
+  if (emailKey && (emailCounts.get(emailKey) || 0) > 1) row.errors.push(duplicateMessage(row,'email','이메일'));
+  if (memberIdKey && (memberIdCounts.get(memberIdKey) || 0) > 1) row.errors.push(duplicateMessage(row,'member_id','조합원번호'));
+  if (rrnKey && (rrnCounts.get(rrnKey) || 0) > 1) row.errors.push(duplicateMessage(row,'rrn','주민번호'));
+  if (businessKey && (businessCounts.get(businessKey) || 0) > 1) row.errors.push(duplicateMessage(row,'business_number','사업자번호'));
+  if (corpKey && (corpCounts.get(corpKey) || 0) > 1) row.errors.push(duplicateMessage(row,'corp_number','법인번호'));
   row.valid = row.errors.length === 0;
 });
 
@@ -2324,17 +2326,6 @@ const emails = [...new Set(baseValidRows.map((row) => String(row.email || '').tr
 const memberIds = [...new Set(baseValidRows.map((row) => String(row.member_id || '').trim()).filter(Boolean))];
 const businessNumbers = [...new Set(baseValidRows.map((row) => String(row.business_number || '').trim()).filter(Boolean))];
 const corpNumbers = [...new Set(baseValidRows.map((row) => String(row.corp_number || '').trim()).filter(Boolean))];
-const names = [...new Set(baseValidRows.filter(lacksIdentifier).map(row => row.name))];
-if (names.length) {
-  const {data,error} = await scopeAdminTenant(_supabase.from('coop_members').select('name,member_type').in('name', names));
-  if (!current()) return false;
-  if (error) throw error;
-  const existing = new Set((data || []).map(nameKey));
-  rows.forEach(row => {
-    if (lacksIdentifier(row) && existing.has(nameKey(row))) row.errors.push('중복 이름·유형 확인 필요(DB)');
-    row.valid = row.errors.length === 0;
-  });
-}
 
 if (emails.length > 0) {
   const { data, error } = await scopeAdminTenant(

@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.0.3. Original member writers and legacy import drafts remain separate. */
+/* Member/capital workbook 1.1.0. Original member writers and legacy import drafts remain separate. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -59,17 +59,12 @@
       rawPayments = read(ps),
       members = rawMembers.map((r, i) => normalizeMember(r, i)),
       errors = [];
-    for (const r of members) {
-      if (!r.valid)
-        errors.push("조합원 " + r.rowNo + "행: " + r.errors.join(" · "));
-      if (r.capital_amount || r.capital_date)
-        errors.push(
-          "조합원 " + r.rowNo + "행: 출자금은 납입내역 시트에 입력해 주세요.",
-        );
-    }
-    const payload = memberPayload(members).map((r) => {
+    const payload = memberPayload(members).map((r, i) => {
       delete r.capital_amount;
       delete r.capital_date;
+      r._issues = [...(members[i].errors || [])];
+      if (members[i].capital_amount || members[i].capital_date)
+        r._issues.push("출자금은 납입내역 시트에 입력해 주세요.");
       return r;
     });
     for (const key of [
@@ -79,13 +74,14 @@
       "business_number",
       "corp_number",
     ]) {
-      const keys = payload.map((r) =>
-        text(r[key]).replace(/[ -]/g, "").toLowerCase(),
-      );
-      if (keys.some((value, i) => value && keys.indexOf(value) !== i))
-        errors.push(
-          "조합원 시트에 같은 연락·식별정보가 반복됩니다. 중복 회원인지 확인해 주세요.",
-        );
+      const normalize = value => key === "email" ? text(value).toLowerCase()
+        : ["rrn","business_number","corp_number"].includes(key) ? text(value).replace(/[ -]/g, "") : text(value);
+      const label = {email:"이메일",member_id:"조합원번호",rrn:"주민번호",business_number:"사업자번호",corp_number:"법인번호"}[key];
+      for (const r of payload) {
+        const value = normalize(r[key]);
+        const rows = payload.filter(other => value && normalize(other[key]) === value).map(other => other.row_no);
+        if (rows.length > 1) r._issues.push(label + " 중복: 조합원 " + rows.join("·") + "행");
+      }
     }
     const payment = rawPayments.map((r, i) => {
       const row = {
@@ -103,6 +99,7 @@
         note: text(r["메모"]),
         reference: text(r["거래 구분"]),
         confirmed_duplicate: false,
+        _issues: [],
       };
       if (
         !row.date ||
@@ -110,16 +107,15 @@
         (!row.member_id &&
           (!row.name || !["개인", "단체"].includes(row.member_type)))
       )
-        errors.push(
-          "납입내역 " +
-            row.row_no +
-            "행: 유형·이름 또는 조합원번호, 납입일·금액을 확인해 주세요.",
-        );
+        row._issues.push("유형·이름 또는 조합원번호, 납입일·금액을 확인해 주세요.");
       return row;
     });
     if (!payload.length && !payment.length)
       errors.push("등록할 내용이 없습니다.");
-    return { data: { members: payload, payments: payment }, errors };
+    const sources = {members: {}, payments: {}};
+    for (const [key, raw, rows] of [["members",rawMembers,payload],["payments",rawPayments,payment]])
+      rows.forEach((row,i) => { sources[key][row.row_no] = {...raw[i]}; });
+    return { data: { members: payload, payments: payment, mode: "groups" }, errors, sources };
   }
   function create({
     client,
@@ -184,6 +180,10 @@
       modal.className = "modal fade";
       modal.tabIndex = -1;
       modal.setAttribute("aria-labelledby", "memberWorkbookTitle");
+      // The whole dialog must remain scrollable when its header/footer alone exceed a short viewport.
+      const layout = el("style");
+      layout.textContent = "#memberWorkbookModal .modal-dialog-scrollable .modal-content{max-height:calc(100vh - var(--bs-modal-margin, .5rem)*2);max-height:calc(100dvh - var(--bs-modal-margin, .5rem)*2);overflow-y:auto}#memberWorkbookModal .modal-body{flex:0 0 auto;overflow:visible}@media(max-width:575.98px){#memberWorkbookModal .modal-footer{padding:8px;gap:8px}#memberWorkbookModal .modal-footer>button{flex:1 1 14rem;max-width:100%;min-width:0;min-height:44px;margin:0;padding:8px 12px;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}}";
+      document.head.append(layout);
       modal.innerHTML =
         '<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="memberWorkbookTitle">회원·출자금 엑셀 함께 등록</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="d-flex gap-2 flex-wrap mb-3"><button type="button" class="btn btn-outline-success btn-sm" data-template>두 시트 양식 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm coop-workflow-help" data-help aria-label="회원·출자금 함께 등록 도움말">?</button></div><label class="form-label" for="memberWorkbookFile">엑셀 파일</label><input id="memberWorkbookFile" class="form-control mb-2" type="file" accept=".xlsx,.xls"><p class="small text-muted">조합원 시트에는 신규 회원을 한 줄씩, 출자금 납입내역 시트에는 실제 입금을 한 줄씩 입력하세요. 파일 10MB·시트별 500건까지 검사합니다.</p><p data-status class="small" role="status" aria-live="polite"></p><p data-summary class="small fw-bold"></p><div class="d-flex gap-2 flex-wrap mb-2"><button type="button" class="btn btn-outline-secondary btn-sm" data-check>다시 검사</button><button type="button" class="btn btn-outline-secondary btn-sm" data-export>검토 목록 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm" data-clear>검토 비우기</button></div><div class="d-flex gap-2 mb-2" role="group" aria-label="검토 시트"><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="members">조합원</button><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="payments">출자금 납입내역</button></div><div class="table-responsive border rounded" style="max-height:45vh;overflow:auto"><table class="table table-sm align-middle mb-0" style="min-width:850px;table-layout:fixed"><thead></thead><tbody></tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-submit>회원·납입내역 등록</button></div></div></div>';
       document.body.append(modal);
@@ -220,6 +220,8 @@
               errors: state.errors,
               dirty: state.dirty,
               phase: state.phase,
+              sources: state.sources,
+              failures: state.failures,
             }
           : null;
         pause();
@@ -268,9 +270,10 @@
       $("[data-template]").onclick = () => download(template);
       $("[data-help]").onclick = () =>
         void root.CoopDialog.alert(
-          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 신규 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 유형·이름 또는 조합원번호로 연결하며 기존 회원은 납입내역 시트에만 입력하세요.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 하며 기존 중복 검사도 함께 적용됩니다.\n\n등록 전 확인\n미리보기의 회원·날짜·금액과 검사 결과를 대조하세요. 신규 회원과 연결된 납입은 함께 반영하므로 형식 오류·동명이인·중복 대상을 먼저 정리합니다. 이 기능은 실제 납입 내역을 추가하는 것이지 현재 잔액 전체를 덮어쓰는 방식이 아닙니다.",
+          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 신규 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역의 동명이인은 조합원번호로 구분해 주세요. 기존 회원은 납입내역 시트에만 입력하세요.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록된 행은 다운로드에서 빠집니다.",
           { title: "회원·출자금 함께 등록" },
         );
+      $("[data-export]").textContent = "남은 행 다운로드";
       $("[data-export]").onclick = () => download(exportReview);
       for (const b of modal.querySelectorAll("[data-sheet]"))
         b.onclick = () => {
@@ -329,7 +332,7 @@
                 row.name,
                 s.phase === "saved"
                   ? "등록 완료"
-                  : r?.reason || (r ? "등록 가능" : "검사 전"),
+                  : s.failures?.[tab]?.[row.row_no] || row._issues?.join(" / ") || r?.reason || (r ? "등록 가능" : "검사 전"),
               ]
             : [
                 row.row_no,
@@ -344,13 +347,14 @@
                   ? "등록 완료"
                   : s.rechecks?.has(row.row_no)
                     ? "재확인 필요"
-                    : r?.reason ||
+                    : s.failures?.[tab]?.[row.row_no] || row._issues?.join(" / ") ||
+                    (r?.status === "error" ? r.reason : "") ||
                     (r?.needs_confirmation && !row.confirmed_duplicate
                       ? "별도 입금 확인 필요"
                       : r?.needs_confirmation && row.confirmed_duplicate
                         ? "별도 입금 확인됨"
-                        : r
-                          ? "등록 가능"
+                          : r
+                            ? r.reason || "등록 가능"
                           : "검사 전"),
               ];
         for (const v of values) {
@@ -435,7 +439,8 @@
         s?.phase === "ready" &&
         s.review &&
         !s.errors?.length &&
-        ["members", "payments"].every((k) =>
+        (s.review.members.some(r => r.eligible === true) || s.review.payments.some(r => r.eligible === true) ||
+        (["members", "payments"].every((k) =>
           s.review[k].every((r) => r.status === "ready"),
         ) &&
         s.review.payments.every(
@@ -443,7 +448,7 @@
             !r.needs_confirmation ||
             s.data.payments.find((p) => p.row_no === r.row_no)
               ?.confirmed_duplicate,
-        )
+        ) && [...s.review.members,...s.review.payments].every(r => r.eligible === undefined)))
       );
     }
     function render(rows = true) {
@@ -454,20 +459,23 @@
       file.disabled = !can || busy;
       check.disabled = !can || busy || !s.file;
       clear.disabled = !can || busy || !s.file;
+      modal.querySelector('[data-export]').disabled = !can || busy || !(s?.data?.members.length || s?.data?.payments.length);
       submit.disabled = !can || (!ready(s) && s.phase !== "uncertain");
       submit.textContent =
-        s?.phase === "uncertain" ? "같은 요청 다시 확인" : "회원·납입내역 등록";
+        s?.phase === "uncertain" ? "같은 요청 다시 확인" : "등록 가능한 묶음 등록";
       status.textContent = s?.message || "";
+      const eligibleMembers = s?.review?.members.filter(r => r.eligible === true).length || 0;
+      const eligiblePayments = s?.review?.payments.filter(r => r.eligible === true).length || 0;
       summary.textContent = s?.data
         ? "신규 회원 " +
           s.data.members.length +
           "명 · 납입 " +
           s.data.payments.length +
           "건 / " +
-          s.data.payments
+          (s.data.payments.some(r => r.amount === null) ? "금액 확인 필요" : s.data.payments
             .reduce((n, r) => n + BigInt(r.amount || 0), 0n)
             .toLocaleString("ko-KR") +
-          "원"
+          "원") + (s.review ? " · 지금 등록 가능: 회원 " + eligibleMembers + "명·납입 " + eligiblePayments + "건" : "")
         : "";
       if (rows) renderRows();
     }
@@ -500,6 +508,8 @@
           memberPayload,
         );
         s.data = parsed.data;
+        s.sources = parsed.sources;
+        s.failures = null;
         s.fallback = null;
         s.errors = parsed.errors;
         s.phase = "needs_check";
@@ -595,12 +605,13 @@
           return await review();
         }
         s.review = r;
+        s.failures = null;
         s.rechecks.clear();
         s.phase = "ready";
         s.message = ["members", "payments"].some((k) =>
           r[k].some((x) => x.status === "error"),
         )
-          ? "확인할 행이 있습니다. 검사 결과를 보고 입력을 보완해 주세요."
+          ? "확인할 행은 남겨두고 등록 가능한 묶음부터 등록할 수 있습니다. 남은 행은 내려받아 수정해 주세요."
           : r.payments.some(
                 (x) =>
                   x.needs_confirmation &&
@@ -689,6 +700,8 @@
             JSON.stringify({ ...s.data, expected: s.review.expected }),
           ),
           uncertain: false,
+          memberCount: s.review.members.filter(r => r.eligible ?? r.status === "ready").length,
+          paymentCount: s.review.payments.filter(r => r.eligible ?? r.status === "ready").length,
         };
       const attempt = s.attempt,
         epoch = s.epoch;
@@ -696,10 +709,10 @@
       render();
       const yes = await root.CoopDialog.confirm(
         "신규 회원 " +
-          attempt.payload.members.length +
+          attempt.memberCount +
           "명과 납입 " +
-          attempt.payload.payments.length +
-          "건을 등록할까요?",
+          attempt.paymentCount +
+          "건을 등록할까요?" + (attempt.memberCount + attempt.paymentCount < attempt.payload.members.length + attempt.payload.payments.length ? "\n확인할 묶음은 검토 목록에 남습니다." : ""),
         { title: "회원·출자금 등록", confirmText: "등록" },
       );
       if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible()) return;
@@ -723,25 +736,38 @@
           render();
           return;
         }
-        if (
-          r?.outcome !== "saved" ||
-          r.member_count !== attempt.payload.members.length ||
-          r.payment_count !== attempt.payload.payments.length
-        )
-          throw Error("UNCONFIRMED");
-        s.phase = "saved";
+        if (!["saved","partial"].includes(r?.outcome)) throw Error("UNCONFIRMED");
+        const successes = {members:new Set(),payments:new Set()}, failures = {members:{},payments:{}};
+        for (const k of ["members","payments"]) {
+          const expectedRows = new Set(attempt.payload[k].map(row => row.row_no));
+          const results = r[k] || (r.outcome === "saved" ? attempt.payload[k].map(row => ({row_no:row.row_no,ok:true})) : null);
+          if (!Array.isArray(results) || results.length !== expectedRows.size || new Set(results.map(row => row.row_no)).size !== expectedRows.size || results.some(row => !expectedRows.has(row.row_no) || typeof row.ok !== "boolean")) throw Error("UNCONFIRMED");
+          for (const row of results) {
+            if (row.ok) successes[k].add(row.row_no);
+            else failures[k][row.row_no] = row.reason || "다시 검사해 주세요.";
+          }
+        }
+        if (r.member_count !== successes.members.size || r.payment_count !== successes.payments.size) throw Error("UNCONFIRMED");
+        for (const k of ["members","payments"]) s.data[k] = s.data[k].filter(row => !successes[k].has(row.row_no));
+        const remaining = s.data.members.length + s.data.payments.length;
+        s.phase = remaining ? "needs_check" : "saved";
         s.attempt = null;
-        s.dirty = false;
-        s.message = "등록했습니다.";
-        file.value = "";
-        s.file = null;
-        root.ErpWorkspaceResume?.checkpoint(file);
+        s.review = null;
+        s.failures = failures;
+        s.dirty = remaining > 0;
+        s.message = "등록 완료: 회원 " + r.member_count + "명·납입 " + r.payment_count + "건" + (remaining ? " · 남은 " + remaining + "행은 내려받아 수정하거나 다시 검사해 주세요." : "");
+        if (!remaining) {
+          file.value = "";
+          s.file = null;
+          root.ErpWorkspaceResume?.checkpoint(file);
+        }
         render();
         try {
+          if (!r.member_count && !r.payment_count) return;
           if ((await refresh?.()) === false) throw Error("REFRESH");
         } catch (_) {
           if (same(s)) {
-            s.message = "등록했습니다. 목록은 다시 불러와 주세요.";
+            s.message += " 목록은 다시 불러와 주세요.";
             render();
           }
         }
@@ -784,24 +810,19 @@
     async function exportReview() {
       const s = state,
         epoch = s?.epoch;
-      if (!s || !allowed(s) || !s.data) return;
+      if (!s || !allowed(s) || locked(s) || !s.data) return;
       await ensureSpreadsheet();
-      if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible()) return;
-      const X = root.XLSX,
-        wb = X.utils.book_new();
+      if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible() || locked(s) || !(s.data.members.length || s.data.payments.length)) return;
+      if (!s.data.members.length && !s.data.payments.length) return;
+      const X = root.XLSX, wb = X.utils.book_new();
       for (const k of ["members", "payments"]) {
         const rows = s.data[k].map((r) => {
           const v = s.review?.[k]?.find((v) => v.row_no === r.row_no);
           return {
-            행: r.row_no,
-            유형: r.member_type,
-            이름: r.name,
-            조합원번호: r.member_id || "",
-            납입일: r.date || "",
-            금액: r.amount ?? "",
-            거래구분: r.reference || "",
-            검사결과:
-              v?.reason ||
+            ...(s.sources?.[k]?.[r.row_no] || {}),
+            ...(k === "payments" ? {"거래 구분":r.reference || ""} : {}),
+            "원본 행": r.row_no,
+            "확인할 내용": s.failures?.[k]?.[r.row_no] || r._issues?.join(" / ") || v?.reason ||
               (s.phase === "saved"
                 ? "등록 완료"
                 : v?.needs_confirmation
@@ -816,10 +837,10 @@
         X.utils.book_append_sheet(
           wb,
           X.utils.json_to_sheet(rows),
-          k === "members" ? "조합원 검토" : "납입내역 검토",
+          k === "members" ? "조합원" : "출자금 납입내역",
         );
       }
-      X.writeFile(wb, "회원_출자금_검토목록.xlsx");
+      X.writeFile(wb, "회원_출자금_남은행.xlsx");
     }
     function open({replacementFile=null}={}) {
       build();
@@ -858,7 +879,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.0.4",
+    version: "1.1.0",
     create,
     parse,
     memberHeaders,
