@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.221
-Change: 2026-10-27 - Show the current email authentication recovery stage.
+Version: v1.0.222
+Change: 2026-10-27 - Add exact three-field linking for an existing member without an email.
 -->
 <html lang="ko">
 <head>
@@ -13,7 +13,8 @@ Change: 2026-10-27 - Show the current email authentication recovery stage.
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.221 | membermanage.html');</script>
+<script src="shared/member_identity_claim.js?v=1.0.0" integrity="sha384-+DihD9dz1lz3pI9AbdTOgH/waXqFzDgwIxpONmKiZIqnAjFzyyyjE+4fSGHV0vsb" crossorigin="anonymous" defer></script>
+    <script>console.log('[Version] v1.0.222 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2537,6 +2538,7 @@ oninput="autoHyphen(this)">
 
 <div class="d-grid gap-2">
 <button class="btn btn-success fw-bold" onclick="tryManualLink()">내 정보 찾기 & 연결</button>
+<button type="button" class="btn btn-outline-success" onclick="openPortalIdentityClaim()">이메일 없는 기존 조합원 연결</button>
 <button class="btn btn-light btn-sm text-secondary" onclick="manualMatchFail()">찾을 수 없나요? (문의하기)</button>
 </div>
 </div>
@@ -2551,6 +2553,7 @@ oninput="autoHyphen(this)">
 </p>
 <div class="d-grid gap-2">
 <button type="button" id="btnSocialEmailOtp" class="btn btn-success fw-bold" onclick="returnToEmailOtpLogin()">가입 이메일로 인증하기</button>
+<button type="button" class="btn btn-outline-success" onclick="openPortalIdentityClaim()">이메일 없는 기존 조합원 연결</button>
 <button type="button" class="btn btn-light btn-sm text-secondary" onclick="returnToEmailOtpLogin()">로그인 화면으로 돌아가기</button>
 </div>
 </div>
@@ -2607,6 +2610,14 @@ const SESSION_EXPIRED_NOTICE_KEY = 'member_session_expired_notice_v1';
 
 let _supabase = null;
 let curMem = null;
+let portalIdentityClaim = null;
+function openPortalIdentityClaim() {
+if(!window.MemberIdentityClaim)return showModal('연결 화면을 불러오지 못했어요. 잠시 후 다시 열어 주세요.');
+if(!portalIdentityClaim)portalIdentityClaim=MemberIdentityClaim.create({client:_supabase,
+getOwner:()=>curAuth?.id,getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||location.hostname,
+getCoop:()=>currentMemberCoopId,onContinue:async()=>{document.getElementById('manualMatchModal').style.display='none';closeSocialEmailVerificationModal();await handleLoginSuccess(curAuth);}});
+return portalIdentityClaim.open({name:document.getElementById('manualName').value,phone:document.getElementById('manualPhone').value});
+}
 let curAuth = null;
 // Personal drafts stay in this page's memory, keyed by authenticated owner/coop/profile.
 const portalProfileDrafts = new Map();
@@ -4969,6 +4980,7 @@ return memberInformationPortal.refresh(member);
 }
 
 async function loadDashboardData(uuid, options = {}) {
+portalIdentityClaim?.suspend();
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
 if (typeof invalidateIncomingConnects === 'function') invalidateIncomingConnects();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);

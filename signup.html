@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.78
-Change: 2026-10-27 - Report fixed per-attempt transport evidence without changing signup inputs or retries.
+Version: v1.0.79
+Change: 2026-10-27 - Connect an email-empty existing member using exact name, identity number and phone.
 -->
 <html lang="ko"> 
 <head>
@@ -11,9 +11,10 @@ Change: 2026-10-27 - Report fixed per-attempt transport evidence without changin
 <script src="shared/signup_failure_reporter.js?v=1.1.4" integrity="sha384-RE6UIQaHPwucHYx5iRp5QKH3+671bXBuPlyhLmgS1iVDRRNJao0gxXc3qZU7W/UA" crossorigin="anonymous"></script>
 <script src="shared/signup_public_reads.js?v=1.0.2" integrity="sha384-MwfxGFicfaZkW2Gk5NiaUHDIgwU/J/gcUi3/78igSI/pjR9ko+yWH2EvkR5R2/4R" crossorigin="anonymous"></script>
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
+<script src="shared/member_identity_claim.js?v=1.0.0" integrity="sha384-+DihD9dz1lz3pI9AbdTOgH/waXqFzDgwIxpONmKiZIqnAjFzyyyjE+4fSGHV0vsb" crossorigin="anonymous" defer></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.78">
+  <meta name="signup-screen-version" content="1.0.79">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -253,6 +254,9 @@ gtag('config', 'G-TR217L7JN9');
 <div id="step-form" style="display:none;">
 <div class="text-center mb-4">
 <h4 id="signupTitle" class="form-title">조합원 가입 신청서</h4>
+</div>
+<div id="signupMemberClaimEntry" class="mb-3" hidden>
+<button type="button" class="btn btn-outline-success w-100" onclick="openSignupMemberClaim()">기존 조합원 계정 연결</button>
 </div>
 
 <form id="joinForm" onsubmit="handleFormSubmit(event, this)" novalidate>
@@ -1960,6 +1964,17 @@ finishSignupEmailWork(task);
 let signupSessionResumeInFlight = null;
 let signupSessionCheckInFlight = null;
 let signupSocialReturnFailureShown = false;
+let signupMemberClaim = null;
+function openSignupMemberClaim() {
+if(!window.MemberIdentityClaim)return openResultModal('연결 화면을 불러오지 못했어요. 잠시 후 다시 열어 주세요.',true);
+if(!signupMemberClaim)signupMemberClaim=MemberIdentityClaim.create({client:_supabase,
+getOwner:()=>signupIdentityKey==='contact-only'?'':signupIdentityKey,
+getHost:()=>window.CoopRouteGuard?.getPublicRuntimeHost?.(window.location)||location.hostname,
+getCoop:()=>signupTenant?.coop_id,onContinue:()=>{location.href='/membermanage';}});
+return signupMemberClaim.open({name:document.getElementById('userName').value,
+rrn:['rrn1','rrn2'].map(id=>document.getElementById(id).value).filter(Boolean).join('-'),
+phone:['p1','p2','p3'].map(id=>document.getElementById(id).value).filter(Boolean).join('-')});
+}
 let signupIdentityKey = null, signupIdentityEpoch = 0;
 const signupIdentityDrafts = new Map();
 function signupIdentityScope() {
@@ -1971,6 +1986,8 @@ return scope.epoch===signupIdentityEpoch && scope.key===signupIdentityKey && (!s
 function adoptSignupIdentity(session) {
 const next=String(session?.user?.id||'contact-only');
 if(next===signupIdentityKey)return signupIdentityScope();
+signupMemberClaim?.suspend();
+document.getElementById('signupMemberClaimEntry').hidden=!session?.user?.id;
 const first=signupIdentityKey===null;
 // A verified inline-email return continues the guest's own form, not another
 // signed-in person's form. All other identities have separate memory drafts.
@@ -2584,6 +2601,7 @@ const task=signupSubmissionTasks.get(signupIdentityKey);
 if(task&&!task.sent)finishSignupSubmission(task);
 }
 async function handleFormSubmit(e, form) {
+if(signupMemberClaim?.busy()){e.preventDefault();openSignupMemberClaim();return;}
 e.preventDefault();
 if(joinSubmitInFlight)return;
 const task={owner:signupIdentityKey,scope:signupIdentityScope(),fingerprint:signupSubmissionFingerprint(),editRevision:signupSubmissionEditRevision,legalVersion:signupPrivacyConsentVersion,sent:false};
@@ -3242,8 +3260,9 @@ try {
 const exists = await readSignupFieldCheck(task, r1 + "-" + r2);
 if(!isCurrentSignupFieldCheck(task))return;
 if (exists === true) {
-setMsg('rrnMsg', "❌ 이미 가입된 주민등록번호입니다.", true);
-document.getElementById('rrn2').value = ""; // 입력값 지우기
+const canConnect=!document.getElementById('signupMemberClaimEntry').hidden;
+setMsg('rrnMsg',canConnect?'이미 등록된 주민등록번호예요. 위의 「기존 조합원 계정 연결」에서 확인해 주세요.':"❌ 이미 가입된 주민등록번호입니다.",true);
+if(!canConnect)document.getElementById('rrn2').value = "";
 } else {
 setMsg('rrnMsg', "✅ 가입 가능한 번호입니다.", false);
 }
