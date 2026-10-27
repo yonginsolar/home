@@ -1,6 +1,6 @@
 /*
-Version: v1.7.5
-Change: 2026-09-30 - Give board materials note space and soften spoken chair scripts.
+Version: v1.7.7
+Change: 2026-10-27 - Add spoken board agenda transitions while retaining paired chair speech.
 */
 
 const safe = (value) => String(value ?? '')
@@ -156,21 +156,24 @@ function boardScenarioAgenda(agenda, index, facilitator, includeSecretariat) {
     : agenda.decision_draft;
   if (agenda.agenda_kind === 'REPORT') {
     return `<h2>[보고 제${number}호: ${title}]</h2>
-      <p class="speaker"><strong>의장</strong> 다음은 보고 제${number}호, 「${title}」입니다. ${safe(facilitator)}님, 준비하신 내용을 말씀해 주시겠습니까?</p>
+      <p class="speaker"><strong>의장</strong> 다음은 보고 제${number}호, 「${title}」입니다. 먼저 보고를 듣고, 더 확인할 내용이 있는지 함께 살펴보겠습니다. ${safe(facilitator)}님, 주요 내용과 진행 상황을 말씀해 주세요.</p>
       ${report}
-      <p class="speaker"><strong>의장</strong> 고맙습니다. 보고 내용에 대해 궁금한 점이나 보태실 의견이 있으면 말씀해 주세요.</p>${note}${memo}`;
+      ${includeSecretariat ? '' : '<p class="action">(사무국장 보고)</p>'}
+      <p class="speaker"><strong>의장</strong> 고맙습니다. 보고 내용에 대해 궁금한 점이나 보태실 의견이 있으면 말씀해 주세요.<br><em>(질의응답)</em><br>더 확인할 내용이 없으시면 이 보고는 여기까지 듣고, 다음 순서로 넘어가겠습니다.</p>${note}${memo}`;
   }
   const kind = agenda.agenda_kind === 'DISCUSSION' ? '토의' : agenda.agenda_kind === 'OTHER' ? '기타' : '의결';
   const discussionLead = agenda.agenda_kind === 'DECISION'
-    ? '먼저 내용을 함께 듣고 의견을 나누겠습니다.'
-    : '이 안건에 대해서도 함께 의견을 나누겠습니다.';
+    ? '오늘 결정할 내용과 검토할 사항을 먼저 듣고 의견을 나누겠습니다.'
+    : '현재 상황을 함께 살펴보고, 앞으로 어떻게 추진하면 좋을지 의견을 나누겠습니다.';
   const discussionPrompt = agenda.agenda_kind === 'DECISION'
-    ? '설명 고맙습니다. 궁금한 점이나 우려되는 부분이 있으면 편하게 말씀해 주세요. 충분히 논의한 뒤 결정하겠습니다.'
-    : '설명 고맙습니다. 어떤 방향이 좋을지 편하게 의견을 말씀해 주세요.';
+    ? '설명 고맙습니다. 궁금한 점이나 우려되는 부분이 있으면 편하게 말씀해 주세요.<br>수정 의견이 있으시면 어느 부분을 어떻게 바꾸면 좋을지도 함께 말씀해 주세요. 더 확인할 사항이 있다면 그 내용부터 정리하겠습니다.'
+    : '설명 고맙습니다. 어떤 방향이 좋을지 편하게 의견을 말씀해 주세요.<br>말씀 나눈 내용을 정리하면서, 추가로 확인할 사항과 이후 준비할 일도 함께 짚어보겠습니다.';
   return `<h2>[${kind} 제${number}호: ${title}]</h2>
-    <p class="speaker"><strong>의장</strong> 다음은 ${kind} 제${number}호, 「${title}」입니다. ${discussionLead} ${safe(facilitator)}님, 설명 부탁드립니다.</p>
+    <p class="speaker"><strong>의장</strong> 다음은 ${kind} 제${number}호, 「${title}」${agenda.agenda_kind === 'DECISION' ? '을 상정합니다.' : '입니다.'} ${discussionLead} ${safe(facilitator)}님, ${agenda.agenda_kind === 'DECISION' ? '제안 취지와 주요 내용을 설명해 주세요.' : '현재 상황과 함께 논의할 사항을 설명해 주세요.'}</p>
     ${report}
+    ${includeSecretariat ? '' : '<p class="action">(사무국장 설명)</p>'}
     <p class="speaker"><strong>의장</strong> ${discussionPrompt}</p>
+    <p class="action">${agenda.agenda_kind === 'DECISION' ? '(질의·논의 후 원안 또는 수정한 의결 문안 확인)' : '(토의 후 확인할 사항과 후속 준비 내용 정리)'}</p>
     ${agenda.agenda_kind === 'DECISION' ? `<p class="speaker"><strong>의장</strong> ${blocks(voteQuestion, defaultVoteQuestion)}</p><p class="speaker"><strong>의장</strong> 이의가 없다면 본 안건은 원(수정)안대로 가결되었음을 선포합니다.</p>` : ''}${note}${memo}`;
 }
 

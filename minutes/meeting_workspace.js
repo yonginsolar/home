@@ -1,12 +1,12 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.10.12
-Change: 2026-10-23 - Keep discard confirmation keyboard focus and resume the first input.
+Version: v1.10.13
+Change: 2026-10-27 - Load spoken board scripts and keep speech blocks together in print.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.60';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.1';
-import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.6';
+import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.7';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
 let pdfRendererRequest = null;
@@ -1859,6 +1859,8 @@ const BOOK_PRINT_CSS = `
   thead{display:table-header-group}tfoot{display:table-footer-group}
   .amount,.rpt-amt{text-align:right;font-variant-numeric:tabular-nums}
   .speaker{border-left:3pt solid #fb923c;padding:6pt 8pt;margin:7pt 0;background:#fff7ed}
+  .board-scenario h2{break-after:avoid;page-break-after:avoid}
+  .board-scenario p.speaker,.board-scenario p.action{break-inside:avoid;page-break-inside:avoid}
   .action{background:#fff7ed;color:#9a3412;padding:6pt 8pt}
   .source-caption{margin:-8pt 0 18pt;padding:8pt 10pt;border-left:4pt solid #fb923c;background:#fff7ed;color:#64748b}
   .source-agenda-row{display:grid;grid-template-columns:95pt 1fr;gap:3pt 9pt;padding:5pt 0;border-bottom:.5pt solid #cbd5e1}
