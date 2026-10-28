@@ -1,4 +1,4 @@
-/* v1.1.0 — Explicit annex selection; scoped drafts and request receipts. */
+/* v1.2.0 — Agenda-linked annex defaults; scoped drafts and request receipts. */
 export function createMeetingNotHeld(hooks) {
  const d=hooks.document||document, drafts=new Map();let view=null,epoch=0;
  const key=o=>JSON.stringify([o.userId,o.coopId,o.packageId]);
@@ -12,6 +12,16 @@ export function createMeetingNotHeld(hooks) {
  $('notHeldCarry').insertAdjacentHTML('beforeend',`<fieldset class="not-held-annex-choice" id="notHeldAnnexChoice" hidden><legend>별첨 자료도 함께 가져올까요?</legend><label class="official-choice"><input type="radio" name="notHeldAnnexMode" id="notHeldAnnexNo" checked><span>안건만 가져오기</span></label><label class="official-choice"><input type="radio" name="notHeldAnnexMode" id="notHeldAnnexYes"><span>별첨도 선택하기</span></label><div id="notHeldAnnexSelection" hidden><p>안건에 필요한 별첨을 골라 주세요. 별첨 글은 회의자료 초안에 넣고, PDF는 원본과 연결해요.</p><div class="top-actions"><button type="button" class="btn" data-nh="annex-all">별첨 전체 선택</button><button type="button" class="btn" data-nh="annex-none">별첨 전체 해제</button></div><div id="notHeldAnnexList"></div></div></fieldset>`);
  const status=text=>{$('notHeldStatus').textContent=text;};
  function remember(){if(!view||view.row.pending)return;const r=view.row;r.eligible=$('notHeldEligible').value;r.attended=$('notHeldAttended').value;r.reason=$('notHeldReason').value;r.target=$('notHeldTarget').value;r.number=$('notHeldNumber').value;r.title=$('notHeldNewTitle').value;r.selected=[...root.querySelectorAll('[data-agenda]:checked')].map(n=>n.dataset.agenda);r.includeAnnex=$('notHeldAnnexYes').checked;r.annexSelected=[...root.querySelectorAll('[data-annex]:checked')].map(n=>n.dataset.annex);view.edits++;}
+ function syncLinkedAnnexes(){
+  if(!view||view.row.pending||view.busy)return;
+  const selected=new Set([...root.querySelectorAll('[data-agenda]:checked')].map(n=>n.dataset.agenda));
+  for(const input of root.querySelectorAll('[data-annex]')){
+   const a=view.annexes.find(x=>x.id===input.dataset.annex);
+   if(a?.agendaId&&a.agendaId!=='common')input.checked=selected.has(a.agendaId);
+  }
+  if(view.annexes.some(a=>a.agendaId&&selected.has(a.agendaId))){$('notHeldAnnexYes').checked=true;$('notHeldAnnexNo').checked=false;}
+  remember();paint();
+ }
  function paint(){if(!view)return;const v=view,busy=v.busy||!!v.row.pending||!!v.row.result;root.querySelectorAll('input,textarea,select,[data-nh="all"],[data-nh="none"],[data-nh^="annex-"]').forEach(n=>n.disabled=busy);
   $('notHeldAnnexSelection').hidden=!$('notHeldAnnexYes').checked;
   $('notHeldEligible').readOnly=Number(v.pack.eligible_count)>0;$('notHeldNew').hidden=!!$('notHeldTarget').value;
@@ -32,7 +42,11 @@ export function createMeetingNotHeld(hooks) {
   const k=key(owner)+':'+mode;let row=drafts.get(k);if(!row){row={eligible:String(pack.eligible_count||''),attended:'',reason:'',target:'',number:'',title:'',selected:hooks.agendas().map(x=>x.id)};drafts.set(k,row);}
   if(Number(pack.eligible_count)>0)row.eligible=String(pack.eligible_count);
   const annexes=mode==='carry'?(hooks.annexes?.()||[]).map(a=>({...a})):[];
-  if(!Array.isArray(row.annexSelected))row.annexSelected=annexes.map(a=>a.id);
+  if(!Array.isArray(row.annexSelected)){
+   const linked=annexes.some(a=>a.agendaId&&row.selected.includes(a.agendaId));
+   row.annexSelected=annexes.filter(a=>linked?row.selected.includes(a.agendaId):!a.agendaId).map(a=>a.id);
+   row.includeAnnex=linked;
+  }
   const v={owner,pack,row,mode,opener,annexes,sourceRevision:hooks.sourceRevision?.(),epoch:++epoch,busy:false,info:null,edits:0};view=v;
   $('notHeldTitle').textContent=mode==='mark'?'회의 무산 기록':'다음 회의 준비';$('notHeldMark').hidden=mode!=='mark';$('notHeldCarry').hidden=mode!=='carry';
   $('notHeldEligible').value=row.eligible;$('notHeldAttended').value=row.attended;$('notHeldReason').value=row.reason;$('notHeldNumber').value=row.number;$('notHeldNewTitle').value=row.title;
@@ -42,7 +56,7 @@ export function createMeetingNotHeld(hooks) {
   $('notHeldTarget').value=row.target;
   $('notHeldAgendas').innerHTML=hooks.agendas().map(a=>`<label class="official-choice"><input type="checkbox" data-agenda="${escape(a.id)}"${row.selected.includes(a.id)?' checked':''}><span>${escape(a.title)}</span></label>`).join('')||'<p>가져올 안건이 없습니다.</p>';
   $('notHeldAnnexChoice').hidden=!annexes.length;$('notHeldAnnexYes').checked=!!row.includeAnnex;$('notHeldAnnexNo').checked=!row.includeAnnex;
-  $('notHeldAnnexList').innerHTML=annexes.map(a=>`<label class="official-choice"><input type="checkbox" data-annex="${escape(a.id)}"${row.annexSelected.includes(a.id)?' checked':''}><span>${escape(a.title)} · ${a.kind==='TEXT'?'별첨 글':'PDF'}</span></label>`).join('');
+  $('notHeldAnnexList').innerHTML=annexes.map(a=>`<label class="official-choice"><input type="checkbox" data-annex="${escape(a.id)}"${row.annexSelected.includes(a.id)?' checked':''}><span>${escape(a.title)} · ${a.kind==='TEXT'?'별첨 글':'PDF'}${a.agendaId==='common'?' · 공통 자료':a.agendaId?' · '+escape(hooks.agendas().find(x=>x.id===a.agendaId)?.title||'연결 안건 확인 필요'):''}</span></label>`).join('');
   root.classList.add('show');paint();(mode==='mark'?$('notHeldAttended'):$('notHeldTarget')).focus({preventScroll:true});
   if(row.result){status('이전에 요청한 처리가 완료되었습니다. 처리 결과를 확인해 주세요.');return;}
   if(row.pending){status('이전에 요청한 처리 결과를 먼저 확인해 주세요.');return;}
@@ -67,6 +81,7 @@ export function createMeetingNotHeld(hooks) {
   if(!v.info)return;
   remember();const edits=v.edits,data={revision:v.info.revision};
   const chosen=v.mode==='carry'&&v.row.includeAnnex?v.annexes.filter(a=>v.row.annexSelected.includes(a.id)):[];
+  if(chosen.some(a=>a.agendaId&&a.agendaId!=='common'&&!v.row.selected.includes(a.agendaId))){status('별첨에 연결된 안건도 함께 선택해 주세요.');return;}
   if(v.mode==='carry'){data.pdf_ids=chosen.filter(a=>a.kind==='PDF').map(a=>a.pdfId);data.text_annex_ids=chosen.filter(a=>a.kind==='TEXT').map(a=>a.id);if(v.row.includeAnnex&&!chosen.length){status('가져올 별첨을 선택하거나 안건만 가져오기를 선택해 주세요.');return;}}
   if(v.mode==='mark'){data.eligible_count=v.row.eligible;data.attendee_count=v.row.attended;data.reason=v.row.reason;
    if(!/^[1-9][0-9]{0,5}$/.test(data.eligible_count)||!/^\d{1,6}$/.test(data.attendee_count)||Number(data.attendee_count)*2>Number(data.eligible_count)){status('재적 인원과 실제 참석 인원을 확인해 주세요.');return;}
@@ -79,11 +94,11 @@ export function createMeetingNotHeld(hooks) {
    if(same(v)&&(!d.activeElement||d.activeElement===d.body||d.activeElement===button('submit')))button('submit').focus({preventScroll:true});
    return;
   }
-  v.row.imports=chosen.filter(a=>a.kind==='TEXT').map(a=>({...a}));v.row.pending={action:v.mode==='mark'?'mark':'carry',data,key:(hooks.uuid||(()=>crypto.randomUUID()))()};v.row.notFound=false;await send(v);
+  v.row.imports=chosen.map(a=>({...a}));v.row.pending={action:v.mode==='mark'?'mark':'carry',data,key:(hooks.uuid||(()=>crypto.randomUUID()))()};v.row.notFound=false;await send(v);
  }
- root.addEventListener('input',remember);root.addEventListener('change',()=>{remember();paint();});
+ root.addEventListener('input',remember);root.addEventListener('change',event=>{if(event.target.matches('[data-agenda]'))syncLinkedAnnexes();else{remember();paint();}});
  root.addEventListener('click',event=>{const b=event.target.closest('[data-nh]');if(!b)return;const action=b.dataset.nh;if(action==='close'){close();return;}if(!view||view.busy)return;
-  if(action==='all'||action==='none'){if(view.row.pending)return;root.querySelectorAll('[data-agenda]').forEach(n=>n.checked=action==='all');remember();return;}
+  if(action==='all'||action==='none'){if(view.row.pending)return;root.querySelectorAll('[data-agenda]').forEach(n=>n.checked=action==='all');syncLinkedAnnexes();return;}
   if(action==='annex-all'||action==='annex-none'){if(view.row.pending)return;root.querySelectorAll('[data-annex]').forEach(n=>n.checked=action==='annex-all');remember();return;}
   if(action==='reload')void read();if(action==='submit')void submit();if(action==='retry'&&view.row.pending)void send(view);
  });
