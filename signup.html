@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.83
-Change: 2026-10-28 - Show and validate the current individual capital pledge limit.
+Version: v1.0.84
+Change: 2026-10-28 - Recheck current capital rules before submitting the unchanged owner draft.
 -->
 <html lang="ko"> 
 <head>
@@ -14,7 +14,7 @@ Change: 2026-10-28 - Show and validate the current individual capital pledge lim
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.83">
+  <meta name="signup-screen-version" content="1.0.84">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -577,14 +577,19 @@ window.CoopSignupFailure?.observeClient(signupPublicReads);
 window.CoopSignupFailure?.setProvider(new URLSearchParams(window.location.search).get('auth_return'));
 let joinSubmitInFlight = false;
 let signupCapitalRules = null;
-async function loadSignupCapitalRules() {
+async function loadSignupCapitalRules(task = null) {
 if(typeof window.CoopMemberCapital?.load!=='function')throw Error('SIGNUP_DEPENDENCY_MISSING');
-signupCapitalRules = await CoopMemberCapital.load(signupPublicReads, true);
+let rules;
+try { rules = await CoopMemberCapital.load(signupPublicReads, true); }
+catch(error) { if(task && !isCurrentSignupSubmission(task))return null; throw error; }
+if(task && !isCurrentSignupSubmission(task))return null;
+signupCapitalRules = rules;
 const input = document.getElementById('money');
 CoopMemberCapital.applyInput(input, signupCapitalRules);
 input.disabled = false;
 document.getElementById('signupCapitalLabel').textContent = `출자금 약정 (${signupCapitalRules.minimum.toLocaleString()}원 이상)`;
 updateMoneyHint();
+return rules;
 }
 let guardianSubmissionId = crypto.randomUUID();
 try { guardianSubmissionId=sessionStorage.getItem('guardian-signup-request-v1')||guardianSubmissionId;sessionStorage.setItem('guardian-signup-request-v1',guardianSubmissionId); } catch(_) {}
@@ -2946,6 +2951,14 @@ return;
 }
 
 // 출자금 최종 값 확인
+try {
+await signupPreparationStep('capital_rules',()=>loadSignupCapitalRules(task));
+} catch (_) {
+if(!isCurrentSignupSubmission(task))return;
+openResultModal('현재 출자 기준을 확인하지 못했습니다. 입력한 내용은 그대로 두고 가입 신청을 다시 눌러 주세요.', true);
+return;
+}
+if(!isCurrentSignupSubmission(task))return;
 const moneyVal = document.getElementById('money').value.replace(/,/g,'');
 if (!signupCapitalRules || !CoopMemberCapital.valid(moneyVal, signupCapitalRules)) {
 setError(document.getElementById('money'));
