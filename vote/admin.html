@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.64
-Change: 2026-10-21 - Atomic demo-only result publication; preserve operating election flow.
+Version: v1.0.65
+Change: 2026-10-28 - Scope candidate reads and retain independent administrator drafts.
 -->
 <html lang="ko" data-election-ui="admin" data-election-role="admin">
 <head>
@@ -18,7 +18,7 @@ Change: 2026-10-21 - Atomic demo-only result publication; preserve operating ele
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.64 | admin.html');</script>
+    <script>console.log('[Version] v1.0.65 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -281,7 +281,7 @@ Change: 2026-10-21 - Atomic demo-only result publication; preserve operating ele
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
   <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
   <meta name="election-ui-version" content="1.0.5">
-  <link rel="stylesheet" href="/vote/election_ui.css?v=1.0.5" integrity="sha384-EdMVFi77kANhvsjylDnC4QZF3OlPBjat0uUnrIdkHZJ5NGCim1WH3hvVGCcFIAu/" crossorigin="anonymous">
+  <link rel="stylesheet" href="/vote/election_ui.css?v=1.0.5" integrity="sha384-f7bJl9SdjwdViy9a3J70yIcLlQVhDd+jJJJYwwMiH7FiLErvARUr6YH1QAaeWGuD" crossorigin="anonymous">
   <script src="/vote/election_ui.js?v=1.0.5" integrity="sha384-QmHOErzf0uBhPtmOeFzwef0+j21aVtVDEaPgmYbiHnQf8M4Bz32U3AsNxF76E2Oh" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
@@ -689,8 +689,9 @@ Change: 2026-10-21 - Atomic demo-only result publication; preserve operating ele
                 <textarea id="new-cand-manifesto" rows="4" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; margin-top:5px;"></textarea>
             </div>
 
-            <div class="modal-actions">
-                <button onclick="closeAddCandidateModal()" class="btn btn-outline">취소</button>
+            <div class="modal-actions" style="flex-wrap:wrap;">
+                <button type="button" id="discard-new-candidate-draft" onclick="discardNewCandidateDraft()" class="btn btn-outline" disabled>초안 버리기</button>
+                <button onclick="closeAddCandidateModal()" class="btn btn-outline">닫기</button>
                 <button onclick="executeCandidateRegister()" class="btn btn-primary">등록 실행</button>
             </div>
         </div>
@@ -761,6 +762,94 @@ function safeUrl(value) {
     let cachedCandidates = [];
     let currentCandidateFilter = 'all';
     let currentUserEmail = ''; // [신규] 현재 작업자 이메일 저장용
+    let candidateAuthUserId = '', candidateDetailEpoch = 0, candidateDetailContext = null;
+    let candidateDetailReady = false, candidateDetailBaseline = '';
+    const candidateDetailDrafts = new Map(), newCandidateDrafts = new Map(), candidateDetailSaves = new Set(), newCandidateSaves = new Set();
+    let newCandidateOwner = '', newCandidateBaseline = '', newCandidateEpoch = 0;
+    const candidateDetailFields = ['cand-edit-name','cand-edit-birth','cand-edit-contact','cand-edit-address','cand-edit-career','cand-edit-manifesto','cand-edit-representative'];
+    const newCandidateFields = ['selected-cand-uuid','selected-cand-member-id','selected-cand-phone','selected-cand-address','selected-cand-birth','selected-cand-member-type','selected-cand-identity-code','selected-cand-identity-kind','new-cand-district','new-cand-name','new-cand-representative-name','new-cand-career','new-cand-manifesto'];
+    function candidateDraftKey(id) {
+        return candidateAuthUserId && currentCoopId && currentElectionId
+            ? JSON.stringify([candidateAuthUserId,currentCoopId,currentElectionId,String(id)]) : '';
+    }
+    function candidateDetailBusy() { return candidateDetailSaves.has(candidateDetailContext?.key); }
+    function newCandidateBusy() { return newCandidateSaves.has(newCandidateOwner); }
+    function candidateFieldValues(ids) { return ids.map(id=>document.getElementById(id)?.value ?? null); }
+    function restoreCandidateFields(ids,values) { ids.forEach((id,i)=>{const node=document.getElementById(id);if(node&&values[i]!==null)node.value=values[i];}); }
+    function candidateDetailCurrent(context = candidateDetailContext) {
+        return !!context && context===candidateDetailContext && context.key===candidateDraftKey(context.id)
+            && context.epoch===candidateDetailEpoch && !window.frameElement?.hidden
+            && document.getElementById('candidate-detail-modal').style.display!=='none';
+    }
+    async function boundedCandidateRead(work) {
+        let timer;
+        try { return await Promise.race([Promise.resolve().then(work),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('CANDIDATE_READ_TIMEOUT')),15000);})]); }
+        finally { clearTimeout(timer); }
+    }
+    function rememberCandidateDetailDraft() {
+        if(!candidateDetailReady||!candidateDetailContext)return;
+        const values=candidateFieldValues(candidateDetailFields),key=candidateDetailContext.key;
+        if(JSON.stringify(values)===candidateDetailBaseline)candidateDetailDrafts.delete(key);
+        else candidateDetailDrafts.set(key,{values,baseline:candidateDetailBaseline,mode:document.getElementById('cand-edit-mode')?.value});
+        syncCandidateDetailDraftUi();
+    }
+    function syncCandidateDetailDraftUi() {
+        let button=document.getElementById('discard-candidate-detail-draft');
+        if(!button){button=document.createElement('button');button.type='button';button.id='discard-candidate-detail-draft';button.className='btn btn-outline';button.textContent='초안 버리기';button.onclick=discardCandidateDetailDraft;document.getElementById('cand-action-area').append(button);}
+        document.getElementById('cand-action-area').querySelectorAll('button').forEach(node=>node.disabled=!candidateDetailReady||candidateDetailBusy());
+        button.disabled=!candidateDetailReady||candidateDetailBusy()||!candidateDetailDrafts.has(candidateDetailContext?.key);
+        document.getElementById('cand-action-area').style.flexWrap='wrap';
+    }
+    async function discardCandidateDetailDraft() {
+        const context=candidateDetailContext,values=JSON.stringify(candidateFieldValues(candidateDetailFields));
+        if(!candidateDetailReady||candidateDetailBusy()||!candidateDetailDrafts.has(context?.key))return;
+        if(!await window.CoopDialog.confirm('이 초안을 버릴까요?'))return;
+        if(!candidateDetailCurrent(context)||candidateDetailBusy()||values!==JSON.stringify(candidateFieldValues(candidateDetailFields)))return;
+        candidateDetailDrafts.delete(context.key);restoreCandidateFields(candidateDetailFields,JSON.parse(candidateDetailBaseline));
+        setCandidateDetailFieldsEditable(false);syncCandidateDetailDraftUi();
+    }
+    function newCandidateSnapshot() {
+        return {values:candidateFieldValues(newCandidateFields),files:['new-cand-photo','new-cand-proof'].map(id=>document.getElementById(id))};
+    }
+    function newCandidateFingerprint(snapshot=newCandidateSnapshot()) {
+        return JSON.stringify([snapshot.values,snapshot.files.map(node=>Array.from(node.files||[]).map(f=>[f.name,f.size,f.type,f.lastModified]))]);
+    }
+    function rememberNewCandidateDraft() {
+        if(!newCandidateOwner)return;
+        const snapshot=newCandidateSnapshot();
+        if(newCandidateFingerprint(snapshot)===newCandidateBaseline)newCandidateDrafts.delete(newCandidateOwner);
+        else newCandidateDrafts.set(newCandidateOwner,{...snapshot,baseline:newCandidateBaseline});
+        const button=document.getElementById('discard-new-candidate-draft');
+        if(button)button.disabled=newCandidateBusy()||!newCandidateDrafts.has(newCandidateOwner);
+        const submit=document.querySelector('#add-candidate-modal [onclick="executeCandidateRegister()"]');if(submit)submit.disabled=newCandidateBusy();
+    }
+    function detachNewCandidateFiles() {
+        for(const id of ['new-cand-photo','new-cand-proof']){const node=document.getElementById(id),blank=node.cloneNode(true);blank.value='';node.replaceWith(blank);}
+    }
+    async function discardNewCandidateDraft() {
+        rememberNewCandidateDraft();const owner=newCandidateOwner,epoch=newCandidateEpoch,snapshot=newCandidateSnapshot(),value=newCandidateFingerprint(snapshot);
+        if(newCandidateBusy()||!newCandidateDrafts.has(owner))return;
+        if(!await window.CoopDialog.confirm('이 초안을 버릴까요?'))return;
+        if(newCandidateBusy()||owner!==newCandidateOwner||owner!==candidateDraftKey('NEW')||epoch!==newCandidateEpoch
+            ||window.frameElement?.hidden||value!==newCandidateFingerprint()||snapshot.files.some((node,i)=>node.files[0]!==newCandidateSnapshot().files[i].files[0]))return;
+        newCandidateDrafts.delete(owner);newCandidateOwner='';openAddCandidateModal();
+    }
+    function suspendCandidateEditors() {
+        rememberCandidateDetailDraft();rememberNewCandidateDraft();candidateDetailEpoch++;newCandidateEpoch++;
+        candidateDetailReady=false;candidateDetailContext=null;
+        closeModalOverlay(document.getElementById('candidate-detail-modal'));
+        closeModalOverlay(document.getElementById('add-candidate-modal'));
+    }
+    function clearCandidateDrafts() {
+        candidateDetailEpoch++;newCandidateEpoch++;candidateDetailReady=false;candidateDetailContext=null;newCandidateOwner='';
+        candidateDetailDrafts.clear();newCandidateDrafts.clear();detachNewCandidateFiles();
+        document.getElementById('cand-detail-body').replaceChildren();document.getElementById('cand-action-area').replaceChildren();
+        restoreCandidateFields(newCandidateFields,newCandidateFields.map(()=>''));
+        closeModalOverlay(document.getElementById('candidate-detail-modal'));closeModalOverlay(document.getElementById('add-candidate-modal'));
+    }
+    document.getElementById('cand-detail-body').addEventListener('input',rememberCandidateDetailDraft);
+    for(const event of ['input','change'])document.getElementById('add-candidate-modal').addEventListener(event,()=>{newCandidateEpoch++;rememberNewCandidateDraft();});
+    window.addEventListener('beforeunload',event=>{rememberCandidateDetailDraft();rememberNewCandidateDraft();if(candidateDetailSaves.size||newCandidateSaves.size||candidateDetailDrafts.size||newCandidateDrafts.size){event.preventDefault();event.returnValue='';}});
     let currentCoopId = null;
     let currentCoopName = '';
     let currentElectionVoteSummary = null;
@@ -2234,6 +2323,12 @@ function safeUrl(value) {
 
             // 전역 변수에 이메일 저장 (로그 남길 때 사용)
             currentUserEmail = session.user.email;
+            candidateAuthUserId = session.user.id;
+            supabase.auth.onAuthStateChange((event,nextSession)=>{
+                if(event==='SIGNED_OUT'||(nextSession?.user?.id&&nextSession.user.id!==candidateAuthUserId)){
+                    clearCandidateDrafts();candidateAuthUserId=nextSession?.user?.id||'';
+                }
+            });
             if (document.getElementById('admin-email')) {
                 document.getElementById('admin-email').innerText = currentUserEmail;
             }
@@ -3926,18 +4021,25 @@ async function loadCandidates() {
         const body = document.getElementById('cand-detail-body');
         const actionArea = document.getElementById('cand-action-area');
         
+        rememberCandidateDetailDraft();
+        const key=candidateDraftKey(candidateId);
+        if(!key)return;
+        const context={key,id:String(candidateId),epoch:++candidateDetailEpoch};
+        candidateDetailContext=context;candidateDetailReady=false;
+        actionArea.replaceChildren();
         body.innerHTML = '<div style="text-align:center; padding:2rem;">데이터를 불러오는 중...</div>';
         openModalOverlay(modal);
 
         try {
             // 1. 후보자 정보 조회
-            const { data: c, error } = await scopeByTenant(
+            const { data: c, error } = await boundedCandidateRead(()=>scopeByTenant(
                 supabase.from('candidates').select('*')
             )
                 .eq('id', candidateId)
-                .single();
+                .single());
 
             if (error) throw error;
+            if(!candidateDetailCurrent(context))return;
 
             // -----------------------------------------------------------
             // [핵심 수정] 사진 URL 처리 로직 (기본 이미지 적용)
@@ -3964,10 +4066,11 @@ async function loadCandidates() {
                 if (c.proof_url.startsWith('http')) {
                     finalProofUrl = safeUrl(c.proof_url);
                 } else {
-                    const { data: proofData } = await supabase
+                    const { data: proofData } = await boundedCandidateRead(()=>supabase
                         .storage
                         .from(BUCKET_NAME)
-                        .createSignedUrl(c.proof_url, 3600);
+                        .createSignedUrl(c.proof_url, 3600));
+                    if(!candidateDetailCurrent(context))return;
                     if (proofData?.signedUrl) finalProofUrl = safeUrl(proofData.signedUrl);
                 }
 
@@ -3978,6 +4081,7 @@ async function loadCandidates() {
             // -----------------------------------------------------------
 
             // HTML 구성 (img 태그에 onerror 추가 및 배경색 스타일 추가)
+            if(!candidateDetailCurrent(context))return;
             const safeName = escapeHtml(c.name || '-');
             const safeBirth = escapeHtml(c.birth_date || '-');
             const safeContact = escapeHtml(c.contact || '-');
@@ -4070,10 +4174,18 @@ async function loadCandidates() {
                     <button onclick="confirmApprove('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-primary" style="width:100%;">🔄 재심사 (승인 처리)</button>
                 `;
             }
+            candidateDetailBaseline=JSON.stringify(candidateFieldValues(candidateDetailFields));
+            const draft=candidateDetailDrafts.get(key);candidateDetailReady=true;
+            if(draft){restoreCandidateFields(candidateDetailFields,draft.values);if(canEnterEditMode&&draft.mode==='edit')enterCandidateEditMode(c.id,c.name,true);else setCandidateDetailFieldsEditable(false);}
+            rememberCandidateDetailDraft();
 
         } catch (e) {
+            if(!candidateDetailCurrent(context))return;
             console.error(e);
-            body.innerHTML = `<p style="color:red;">정보를 불러오지 못했습니다: ${escapeHtml(e?.message || '알 수 없는 오류')}</p>`;
+            actionArea.replaceChildren();
+            body.innerHTML = '<p role="status">후보 정보를 불러오지 못했습니다. 다시 확인해 주세요.</p>';
+            const retry=document.createElement('button');retry.type='button';retry.className='btn btn-outline';retry.textContent='다시 확인';
+            retry.onclick=()=>{if(candidateDetailCurrent(context))void openCandidateDetail(candidateId);};body.append(retry);
         }
     };
     // End of openCandidateDetail
@@ -4111,7 +4223,8 @@ async function loadCandidates() {
         }
     };
 
-    window.enterCandidateEditMode = (candidateId, candidateName) => {
+    window.enterCandidateEditMode = (candidateId, candidateName, restoring = false) => {
+        if(!candidateDetailReady||!candidateDetailCurrent()||candidateDetailContext.id!==String(candidateId)||(candidateDetailBusy()&&!restoring))return;
         const status = document.getElementById('cand-edit-status')?.value || '';
         if (!(status === 'PENDING' || status === 'APPROVED')) {
             showAlert('현재 상태의 후보는 수정할 수 없습니다.');
@@ -4138,13 +4251,18 @@ async function loadCandidates() {
                 <button onclick="openRejectModal('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 승인 취소 및 반려</button>
             `;
         }
+        syncCandidateDetailDraftUi();
     };
 
     window.cancelCandidateEditMode = async (candidateId) => {
+        if(!candidateDetailReady||!candidateDetailCurrent()||candidateDetailContext.id!==String(candidateId)||candidateDetailBusy())return;
+        candidateDetailDrafts.delete(candidateDetailContext.key);
+        restoreCandidateFields(candidateDetailFields,JSON.parse(candidateDetailBaseline));
         await openCandidateDetail(candidateId);
     };
 
     window.saveCandidateDetailChanges = async (candidateId) => {
+        if(!candidateDetailReady||!candidateDetailCurrent()||candidateDetailContext.id!==String(candidateId)||candidateDetailBusy())return;
         if (!ensureTenantContext('후보 정보 수정')) return;
         const status = document.getElementById('cand-edit-status')?.value || '';
         if (!(status === 'PENDING' || status === 'APPROVED')) {
@@ -4181,6 +4299,8 @@ async function loadCandidates() {
         if (representativeEl) {
             payload.representative_name = representativeEl.value.trim() || null;
         }
+        const context=candidateDetailContext,submitted=JSON.stringify(candidateFieldValues(candidateDetailFields)),electionId=currentElectionId;
+        candidateDetailSaves.add(context.key);syncCandidateDetailDraftUi();
 
         try {
             const { error } = await scopeByTenant(
@@ -4189,19 +4309,23 @@ async function loadCandidates() {
                 .eq('id', candidateId);
 
             if (error) throw error;
-
-            showAlert('후보자 정보를 수정했습니다.');
-            loadCandidates();
-            await service.logAction(currentElectionId, 'CANDIDATE_UPDATE_ADMIN', `후보 정보 수정: ${name} (작업자: ${currentUserEmail})`);
-            loadLogs();
-            await openCandidateDetail(candidateId);
+            const draft=candidateDetailDrafts.get(context.key);
+            if(draft&&JSON.stringify(draft.values)===submitted)candidateDetailDrafts.delete(context.key);
+            if(candidateDetailCurrent(context)){
+                candidateDetailBaseline=submitted;rememberCandidateDetailDraft();
+                showAlert('후보자 정보를 수정했습니다.');loadCandidates();
+                await openCandidateDetail(candidateId);
+            }
+            await service.logAction(electionId, 'CANDIDATE_UPDATE_ADMIN', `후보 정보 수정: ${name} (작업자: ${currentUserEmail})`);
+            if(candidateDetailContext?.key===context.key&&candidateDetailCurrent())loadLogs();
         } catch (e) {
             console.error(e);
-            showAlert('수정 실패: ' + e.message);
-        }
+            if(candidateDetailCurrent(context))showAlert('수정 실패: ' + e.message);
+        } finally { candidateDetailSaves.delete(context.key);if(candidateDetailCurrent())syncCandidateDetailDraftUi(); }
     };
 
     window.closeCandidateDetail = () => {
+        rememberCandidateDetailDraft();candidateDetailEpoch++;candidateDetailReady=false;candidateDetailContext=null;
         closeModalOverlay(document.getElementById('candidate-detail-modal'));
     };
 // [신규] 기호 랜덤 추첨 및 화면 반영 함수 (DB 저장 안함, 프리뷰 용도)
@@ -4833,6 +4957,7 @@ window.finalizeNomination = async () => {
         }
     };
     window.closeAddCandidateModal = () => {
+        rememberNewCandidateDraft();newCandidateEpoch++;
         closeModalOverlay(document.getElementById('add-candidate-modal'));
     };
 
@@ -4875,6 +5000,8 @@ window.toggleAdminRepresentativeField = (memberType) => {
 
 // [수정] 후보 등록 모달 열기 및 초기화 (단일화 버전)
 window.openAddCandidateModal = () => {
+    rememberNewCandidateDraft();const owner=candidateDraftKey('NEW');if(!owner)return;
+    detachNewCandidateFiles();newCandidateEpoch++;
     // 1. 입력 필드 초기화
     document.getElementById('cand-search-input').value = '';
     const resDiv = document.getElementById('cand-search-result');
@@ -4926,13 +5053,24 @@ window.openAddCandidateModal = () => {
         }
     }
 
-    openModalOverlay(document.getElementById('add-candidate-modal'));
+    newCandidateOwner=owner;newCandidateBaseline=newCandidateFingerprint();
+    const draft=newCandidateDrafts.get(owner);
+    if(draft){
+        restoreCandidateFields(newCandidateFields,draft.values);
+        draft.files.forEach((node,i)=>document.getElementById(['new-cand-photo','new-cand-proof'][i]).replaceWith(node));
+        const memberType=document.getElementById('selected-cand-member-type').value;
+        const rep=document.getElementById('new-cand-representative-name').value;toggleAdminRepresentativeField(memberType);document.getElementById('new-cand-representative-name').value=rep;
+        const display=document.getElementById('selected-cand-display');display.textContent=document.getElementById('new-cand-name').value;display.style.display=document.getElementById('selected-cand-uuid').value?'block':'none';
+    }
+    rememberNewCandidateDraft();openModalOverlay(document.getElementById('add-candidate-modal'));
 }; // End of openAddCandidateModal
 
 // [수정] 이미 등록된 후보는 검색 결과에서 제외하는 로직 추가
 window.searchCandidateMember = async () => {
     const keyword = document.getElementById('cand-search-input').value.trim();
     const resDiv = document.getElementById('cand-search-result');
+    const owner=newCandidateOwner,epoch=newCandidateEpoch;
+    const current=()=>owner===candidateDraftKey('NEW')&&owner===newCandidateOwner&&epoch===newCandidateEpoch&&!window.frameElement?.hidden&&document.getElementById('add-candidate-modal').style.display!=='none'&&document.getElementById('cand-search-input').value.trim()===keyword;
     
     if(keyword.length < 2) { showAlert('2글자 이상 입력하세요.'); return; }
 
@@ -4947,6 +5085,7 @@ window.searchCandidateMember = async () => {
             .eq('election_id', currentElectionId);
 
         if(candError) throw candError;
+        if(!current())return;
         const registeredUuids = existingCands.map(c => c.member_uuid);
 
         // 2. 조합원 검색 (이름 또는 전화번호)
@@ -4956,6 +5095,7 @@ window.searchCandidateMember = async () => {
             return;
         }
         const members = await service.getElectionMembers(currentElectionId, { keyword });
+        if(!current())return;
 
         if(!members || members.length === 0) {
             resDiv.innerHTML = '<div style="padding:10px; color:#999;">결과 없음</div>';
@@ -5003,6 +5143,7 @@ window.searchCandidateMember = async () => {
         }
 
     } catch(e) {
+        if(!current())return;
         console.error("검색 중 오류:", e);
         resDiv.innerHTML = '<div style="padding:10px; color:red;">검색 오류 발생</div>';
     }
@@ -5011,6 +5152,7 @@ window.searchCandidateMember = async () => {
 
 // [수정] 선택된 조합원 정보 저장 함수
 window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, memberType, corpNumber, businessNumber) => {
+    if(newCandidateOwner!==candidateDraftKey('NEW')||window.frameElement?.hidden||document.getElementById('add-candidate-modal').style.display==='none')return;
     const identitySnapshot = buildCandidateIdentitySnapshot({
         memberType,
         memberId,
@@ -5039,10 +5181,12 @@ window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, 
     
     // 검색 결과창 숨김
     document.getElementById('cand-search-result').style.display = 'none';
+    newCandidateEpoch++;rememberNewCandidateDraft();
 }; // End of selectCandidateMember
 
 // [수정] 등록 직전 최종 중복 검증 로직 추가 (v1.0.3)
 window.executeCandidateRegister = async () => {
+    if(newCandidateBusy()||newCandidateOwner!==candidateDraftKey('NEW')||window.frameElement?.hidden||document.getElementById('add-candidate-modal').style.display==='none')return;
     if (!ensureTenantContext('후보 등록')) return;
     const uuid = document.getElementById('selected-cand-uuid').value;
     const name = document.getElementById('new-cand-name').value;
@@ -5062,6 +5206,10 @@ window.executeCandidateRegister = async () => {
         showAlert('단체 조합원은 대표자 이름을 입력해주세요.');
         return;
     }
+    const owner=newCandidateOwner,epoch=newCandidateEpoch,snapshot=newCandidateSnapshot(),submitted=newCandidateFingerprint(snapshot);
+    const photoFile=snapshot.files[0].files[0],proofFile=snapshot.files[1].files[0],career=document.getElementById('new-cand-career').value,manifesto=document.getElementById('new-cand-manifesto').value;
+    const current=()=>owner===candidateDraftKey('NEW')&&owner===newCandidateOwner&&epoch===newCandidateEpoch&&!window.frameElement?.hidden&&document.getElementById('add-candidate-modal').style.display!=='none';
+    newCandidateSaves.add(owner);rememberNewCandidateDraft();
 
     try {
         // [방어적 코딩] DB에 넣기 직전에 해당 선거에 이미 등록된 사람인지 한 번 더 확인
@@ -5073,19 +5221,19 @@ window.executeCandidateRegister = async () => {
             .maybeSingle();
 
         if (checkError) throw checkError;
+        if(!current())return;
         if (alreadyExists) {
             showAlert('이미 이 선거에 후보로 등록된 조합원입니다. (중복 등록 불가)');
             return;
         }
 
         // 파일 업로드 처리 (기존 로직 동일)
-        const photoFile = document.getElementById('new-cand-photo').files[0];
-        const proofFile = document.getElementById('new-cand-proof').files[0];
         let photoUrl = null; let proofUrl = null;
         const timestamp = Date.now();
         const { data: uploadAuth, error: uploadAuthError } = await supabase.auth.getUser();
         if (uploadAuthError || !uploadAuth?.user?.id) throw new Error('로그인 정보를 확인하지 못했습니다.');
         const uploaderId = uploadAuth.user.id;
+        if(!current()||uploaderId!==candidateAuthUserId)return;
 
         if(photoFile) {
             const photoPath = `${uploaderId}/${currentElectionId}_${uuid}_photo_${timestamp}.${photoFile.name.split('.').pop()}`;
@@ -5094,12 +5242,14 @@ window.executeCandidateRegister = async () => {
             photoUrl = supabase.storage.from('candidates').getPublicUrl(data.path).data.publicUrl;
         }
         if(proofFile) {
+            if(!current())return;
             const { data, error: prErr } = await supabase.storage.from('candidate_proofs')
                 .upload(`${uploaderId}/${currentElectionId}_${uuid}_proof_${timestamp}.${proofFile.name.split('.').pop()}`, proofFile);
             if(prErr) throw prErr; proofUrl = data.path;
         }
 
         // DB Insert
+        if(!current())return;
         const candidatePayload = {
             election_id: currentElectionId,
             district_id: districtId,
@@ -5108,8 +5258,8 @@ window.executeCandidateRegister = async () => {
             contact: phone,
             address: address,
             birth_date: birthDate,
-            career: document.getElementById('new-cand-career').value,
-            manifesto: document.getElementById('new-cand-manifesto').value,
+            career,
+            manifesto,
             photo_url: photoUrl,
             proof_url: proofUrl,
             status: 'APPROVED',
@@ -5130,17 +5280,23 @@ window.executeCandidateRegister = async () => {
 
         if(insertError) throw insertError;
 
-        showAlert('후보자 등록이 완료되었습니다.');
-        closeAddCandidateModal();
-        if (typeof loadCandidates === 'function') loadCandidates();
-        await service.logAction(currentElectionId, 'CANDIDATE_ADD_ADMIN', `관리자 등록: ${name}`);
+        const draft=newCandidateDrafts.get(owner);
+        if(draft&&newCandidateFingerprint(draft)===submitted&&draft.files[0].files[0]===photoFile&&draft.files[1].files[0]===proofFile)newCandidateDrafts.delete(owner);
+        if(current()){
+            if(newCandidateFingerprint()===submitted){newCandidateBaseline=submitted;newCandidateOwner='';closeModalOverlay(document.getElementById('add-candidate-modal'));}
+            else rememberNewCandidateDraft();
+            showAlert('후보자 등록이 완료되었습니다.');if(typeof loadCandidates==='function')loadCandidates();
+        }
+        await service.logAction(candidatePayload.election_id, 'CANDIDATE_ADD_ADMIN', `관리자 등록: ${name}`);
 
     } catch(e) {
         console.error("최종 등록 오류:", e);
-        showAlert('등록 실패: ' + e.message);
-    }
+        if(current())showAlert('등록 실패: ' + e.message);
+    } finally { newCandidateSaves.delete(owner);rememberNewCandidateDraft(); }
 }; // End of executeCandidateRegister
 
+if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden)suspendCandidateEditors();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+window.addEventListener('pagehide',suspendCandidateEditors);
 window.init = init; // module scope export
     init();
 </script>

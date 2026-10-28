@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.14.10
+Version: v1.14.11
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -613,10 +613,12 @@ function setBusy(value) {
     renderDocumentEditState();
   }
   syncNewPackageDraftUi();
+  rememberBoardAnnexDraft();
 }
 
-function hasUnsavedPacketChanges() {
+function hasUnsavedPacketChanges({ includeAnnex = true } = {}) {
   return state.infoDirty || state.agendaDirty || state.documentDirty || state.auditDraftDirty || state.pendingDocuments.size > 0
+    || (includeAnnex && hasUnsavedBoardAnnexDraft())
     || (!!state.current && MeetingPackageService.documentEdits.hasPending(pdfActionOwner()));
 }
 
@@ -1318,8 +1320,48 @@ function renderPdfAttachmentList() {
     : '<div class="pdf-attachment-empty">첨부한 PDF가 없습니다. 자동 자료가 없는 항목은 그대로 비워 두어도 됩니다.</div>';
 }
 
+const boardAnnexDrafts = new Map();
+let boardAnnexOwner = '', boardAnnexRevision = 0;
+function boardAnnexKey() {
+  return state.session?.user?.id && state.runtime?.coop_id && state.current?.id
+    ? JSON.stringify([state.session.user.id,state.runtime.coop_id,state.current.id]) : '';
+}
+function boardAnnexValues() { return ['boardAnnexKind','boardAnnexTitle','boardAnnexBody'].map(id=>$(id).value); }
+function rememberBoardAnnexDraft() {
+  if(!boardAnnexOwner)return;
+  const values=boardAnnexValues();
+  if(JSON.stringify(values)===JSON.stringify(['RULE','','']))boardAnnexDrafts.delete(boardAnnexOwner);
+  else boardAnnexDrafts.set(boardAnnexOwner,values);
+  $('discardBoardAnnexDraft').disabled=state.loading||!boardAnnexDrafts.has(boardAnnexOwner);
+}
+function activateBoardAnnexDraft() {
+  const key=boardAnnexKey();if(key===boardAnnexOwner)return;
+  rememberBoardAnnexDraft();boardAnnexOwner=key;boardAnnexRevision++;
+  const values=boardAnnexDrafts.get(key)||['RULE','',''];
+  ['boardAnnexKind','boardAnnexTitle','boardAnnexBody'].forEach((id,i)=>$(id).value=values[i]);
+  rememberBoardAnnexDraft();
+}
+function hasUnsavedBoardAnnexDraft() {
+  return boardAnnexDrafts.size>0 || (!!boardAnnexOwner && JSON.stringify(boardAnnexValues())!==JSON.stringify(['RULE','','']));
+}
+function clearBoardAnnexDrafts() {
+  boardAnnexDrafts.clear();boardAnnexOwner='';boardAnnexRevision++;
+  ['boardAnnexKind','boardAnnexTitle','boardAnnexBody'].forEach((id,i)=>$(id).value=i===0?'RULE':'');
+  $('discardBoardAnnexDraft').disabled=true;
+}
+async function discardBoardAnnexDraft() {
+  const key=boardAnnexOwner,revision=boardAnnexRevision,values=JSON.stringify(boardAnnexValues());
+  if(state.loading||!key||!boardAnnexDrafts.has(key))return;
+  if(!await window.CoopDialog.confirm('이 초안을 버릴까요?'))return;
+  if(state.loading||key!==boardAnnexOwner||key!==boardAnnexKey()||revision!==boardAnnexRevision||values!==JSON.stringify(boardAnnexValues())||window.frameElement?.hidden)return;
+  boardAnnexDrafts.delete(key);boardAnnexOwner='';activateBoardAnnexDraft();
+  window.ErpWorkspaceResume?.checkpoint($('boardAnnexPanel'));
+  $('boardAnnexTitle').focus({preventScroll:true});
+}
 function renderBoardAnnexPanel() {
+  activateBoardAnnexDraft();
   $('boardAnnexPanel').hidden = state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS';
+  rememberBoardAnnexDraft();
 }
 
 function normalizeBoardMaterialsHtml(value) {
@@ -1406,6 +1448,7 @@ async function addBoardTextAnnex() {
   state.documentDirty = true;
   $('boardAnnexTitle').value = '';
   $('boardAnnexBody').value = '';
+  $('boardAnnexKind').value = 'RULE';boardAnnexRevision++;rememberBoardAnnexDraft();
   editor.querySelector('.board-text-annex:last-child')?.scrollIntoView({ block: 'nearest' });
   try {
     await saveActiveDocument({ quiet: true });
@@ -2171,7 +2214,8 @@ async function printCurrentChapter() {
 
 async function openPackage(id, { internal = false } = {}) {
   if (state.loading && !internal) return;
-  if (hasUnsavedPacketChanges() && !(await window.CoopDialog.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?'))) return;
+  rememberBoardAnnexDraft();
+  if (hasUnsavedPacketChanges({includeAnnex:false}) && !(await window.CoopDialog.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?'))) return;
   window.clearTimeout(state.autoDraftTimer);
   setBusy(true);
   try {
@@ -2567,6 +2611,8 @@ function bindEvents() {
   $('moveChapterDownButton').addEventListener('click', () => moveChapter(1));
   $('deleteChapterButton').addEventListener('click', deleteChapter);
   $('addBoardAnnexButton').addEventListener('click', () => runAction(addBoardTextAnnex));
+  $('discardBoardAnnexDraft').addEventListener('click',()=>void discardBoardAnnexDraft());
+  for(const event of ['input','change'])$('boardAnnexPanel').addEventListener(event,()=>{boardAnnexRevision++;rememberBoardAnnexDraft();});
   $('addPdfAttachmentButton').addEventListener('click', () => $('pdfAttachmentInput').click());
   $('pdfAttachmentInput').addEventListener('change', () => {
     const file = $('pdfAttachmentInput').files?.[0] || null;
@@ -2638,10 +2684,12 @@ function bindEvents() {
     if (event.target.closest('.budget-row')) updateBudgetSummary();
   });
   $('editorBody').addEventListener('input', event => {
+    if(event.target.closest('#boardAnnexPanel'))return;
     if (event.target === $('documentEditor') || event.target === $('documentTitle') || event.target === $('chapterEditor') || event.target === $('chapterTitle') || event.target.closest('#documentEditor,#chapterEditor')) return;
     if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh(event);
   });
   $('editorBody').addEventListener('change', event => {
+    if(event.target.closest('#boardAnnexPanel'))return;
     if (event.target === $('documentTitle') || event.target === $('chapterTitle')) return;
     if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh(event);
   });
@@ -2700,6 +2748,7 @@ async function init() {
       meetingDefaultsPending = null;
       meetingHistoryPending = null;
       clearNewPackageDrafts();
+      clearBoardAnnexDrafts();
     }
   });
   state.session = await MinutesService.getSession();
