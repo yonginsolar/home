@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.82
-Change: 2026-10-28 - Shorten signup notices and keep the payment deadline outside the terms sheet.
+Version: v1.0.83
+Change: 2026-10-28 - Show and validate the current individual capital pledge limit.
 -->
 <html lang="ko"> 
 <head>
@@ -14,7 +14,7 @@ Change: 2026-10-28 - Shorten signup notices and keep the payment deadline outsid
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.82">
+  <meta name="signup-screen-version" content="1.0.83">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -66,7 +66,7 @@ allowKakaoApp: true
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260421-1"></script>
-<script src="shared/member_capital.js?v=20261008-3"></script>
+<script src="shared/member_capital.js?v=1.1.0" integrity="sha384-p3cegbVRt8ddO+8doukcdykjj3nqM87Aocz9GU+S0q5EEYYu+0FuXAi6toU0G5y9" crossorigin="anonymous"></script>
 <script src="shared/signup_amount_input.js?v=1.0.0" integrity="sha384-S8nHo/cUnM3DmPHmMkVvmyxoK8lztWDXOrogZpE83w7LsvI5i4wyEV16twauw9o/" crossorigin="anonymous" defer></script>
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
 <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
@@ -1224,7 +1224,7 @@ throw error;
 const signupPreparationScripts=[
 {operation:'signup_context',ready:()=>typeof window.CoopSignupPublicReads?.create==='function',src:'/shared/signup_public_reads.js?v=1.0.2',integrity:'sha384-MwfxGFicfaZkW2Gk5NiaUHDIgwU/J/gcUi3/78igSI/pjR9ko+yWH2EvkR5R2/4R'},
 {operation:'admission_policy',ready:()=>typeof window.CoopApplicationNotice?.load==='function',src:'/shared/application_retention_notice.js?v=1.1.1',integrity:'sha384-qK1mspndjTAm/ZJzexYSMqvuyOklr4CLeu/0d3m7xI+ytcgStSMpcJlE3PTNkp3d'},
-{operation:'capital_rules',ready:()=>typeof window.CoopMemberCapital?.load==='function',src:'/shared/member_capital.js?v=20261008-3',integrity:'sha384-8TesxQZ59x1P2zjuN4/JQV/oUprH3HngX7kJF7x3Hl3MlrOscIuUb+9a0RUxLgfK'}
+{operation:'capital_rules',ready:()=>typeof window.CoopMemberCapital?.withinLimit==='function',src:'/shared/member_capital.js?v=1.1.0',integrity:'sha384-p3cegbVRt8ddO+8doukcdykjj3nqM87Aocz9GU+S0q5EEYYu+0FuXAi6toU0G5y9'}
 ];
 let signupPreparationScriptTask=null;
 function recoverSignupPreparationScripts(){
@@ -1647,11 +1647,17 @@ function updateMoneyHint() {
 var v = document.getElementById('money').value.replace(/,/g,'');
 var hint = document.getElementById('moneyHint');
 if (!signupCapitalRules) { hint.textContent = '출자 기준을 불러오는 중입니다.'; return; }
+const limit = CoopMemberCapital.limitGuidance(signupCapitalRules);
+if (CoopMemberCapital.valid(v, signupCapitalRules) && !CoopMemberCapital.withinLimit(v, signupCapitalRules)) {
+hint.textContent = CoopMemberCapital.limitWarning(signupCapitalRules);
+hint.style.color = 'red';
+return;
+}
 if(CoopMemberCapital.valid(v, signupCapitalRules)) {
-hint.textContent = Number(v).toLocaleString() + '원 (' + (v/signupCapitalRules.unit).toLocaleString() + '좌)';
+hint.textContent = Number(v).toLocaleString() + '원 (' + (v/signupCapitalRules.unit).toLocaleString() + '좌)' + (limit ? ' · ' + limit : '');
 hint.style.color = "green";
 } else {
-hint.textContent = CoopMemberCapital.guidance(signupCapitalRules);
+hint.textContent = CoopMemberCapital.guidance(signupCapitalRules) + (limit ? ' ' + limit : '');
 hint.style.color = "red";
 }
 }
@@ -2951,6 +2957,11 @@ return;
 }
 
 // 가입 경로 및 SNS ID 확인
+if (!CoopMemberCapital.withinLimit(moneyVal, signupCapitalRules)) {
+setError(document.getElementById('money'));
+openResultModal(CoopMemberCapital.limitWarning(signupCapitalRules), true);
+return;
+}
 const { data: { session } } = await _supabase.auth.getSession();
 if(!isCurrentSignupSubmission(task))return;
 if(String(session?.user?.id||'contact-only')!==task.owner)return;
@@ -3077,6 +3088,12 @@ finalInsertError = null;
 }
 
 if (finalInsertError) {
+if (CoopMemberCapital.errorMessage(finalInsertError)) {
+openResultModal(CoopMemberCapital.errorMessage(finalInsertError), true);
+btn.disabled = false;
+btn.innerText = '가입 신청하기 ☀️';
+return;
+}
 window.CoopSignupFailure?.report('submit',finalInsertError);
 CoopSafeLog.warn("[signup] 가입 신청 저장 결과 확인 필요");
 
@@ -3135,6 +3152,10 @@ btn.innerText = '가입 신청하기 ☀️';
 
 } catch (error) {
 if(!isCurrentSignupSubmission(task))return;
+if (CoopMemberCapital.errorMessage(error)) {
+openResultModal(CoopMemberCapital.errorMessage(error), true);
+return;
+}
 window.CoopSignupFailure?.report('submit',error);
 throw error;
 } finally {

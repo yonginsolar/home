@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.223
-Change: 2026-10-27 - Add exact three-field linking for an existing member without an email.
+Version: v1.0.224
+Change: 2026-10-28 - Validate individual capital pledges without changing existing drafts.
 -->
 <html lang="ko">
 <head>
@@ -14,12 +14,12 @@ Change: 2026-10-27 - Add exact three-field linking for an existing member withou
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.223 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.224 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
 <script src="shared/application_retention_notice.js?v=1.1.0"></script>
-<script src="shared/child_direct_consent.js?v=1.0.3"></script>
+<script src="shared/child_direct_consent.js?v=1.0.4"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -65,7 +65,7 @@ allowKakaoApp: true
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260401-1"></script>
-<script src="shared/member_capital.js?v=20261008-3"></script>
+<script src="shared/member_capital.js?v=1.1.0" integrity="sha384-p3cegbVRt8ddO+8doukcdykjj3nqM87Aocz9GU+S0q5EEYYu+0FuXAi6toU0G5y9" crossorigin="anonymous"></script>
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
 <script src="shared/login_request_guard.js?v=20261027-2" integrity="sha384-cCS2ZhdA9A6u7aN6BvtdihFJhmnRbS6WorVVEHSr2SOk0EkPrCEfvKOOFaQkKBTC" crossorigin="anonymous"></script>
 <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
@@ -2009,7 +2009,8 @@ NO. <span id="infoMemberId">-</span>
 </div>
 <div class="mb-3">
 <label class="form-label small">약정 금액</label>
-<input type="number" id="exAmount" class="form-control" placeholder="금액 입력">
+<input type="number" id="exAmount" class="form-control" placeholder="금액 입력" oninput="refreshPortalCapitalLimit()" aria-describedby="extraCapitalLimitHint">
+<div id="extraCapitalLimitHint" class="form-text small" aria-live="polite"></div>
 </div>
 <button class="btn btn-success w-100 fw-bold" onclick="submitApplication('extra')">신청하기</button>
 </div>
@@ -2958,6 +2959,7 @@ const reduction = document.getElementById('redAmount');
 if (reduction) { reduction.disabled = false; reduction.oninput = null; reduction.placeholder = '금액 입력'; }
 const limit = document.getElementById('redLimitDisplay');if (limit) limit.textContent = '';
 portalApplicationState = {owner,key,member:String(member?.id || ''),generation:portalApplicationGeneration};
+refreshPortalCapitalLimit();
 renderPortalModifyDrafts();
 const tab = draft?.tab || '';
 ['extra','reduction','withdraw','cert','partner'].forEach(type => document.getElementById('tab'+type[0].toUpperCase()+type.slice(1))?.classList.toggle('hidden',type !== tab));
@@ -5701,9 +5703,20 @@ return currentMemberCoopName;
 }
 }
 
+let portalCapitalRules = null;
+function refreshPortalCapitalLimit() {
+const rules = portalCapitalRules, hint = document.getElementById('extraCapitalLimitHint');
+if (!rules || !hint) return;
+const existing = Math.max(Number(curMem?.total_capital || 0),0), amount = document.getElementById('exAmount').value;
+const exceeded = amount && !CoopMemberCapital.withinLimit(amount,rules,existing);
+hint.textContent = exceeded ? CoopMemberCapital.limitWarning(rules,existing,true) : CoopMemberCapital.limitGuidance(rules,existing,true);
+hint.classList.toggle('text-danger',!!exceeded);
+}
 async function loadMemberCapitalRules() {
 const rules = await CoopMemberCapital.load(_supabase, true);
-document.getElementById('childCapitalHint').textContent = CoopMemberCapital.guidance(rules);
+portalCapitalRules = rules;
+document.getElementById('childCapitalHint').textContent = [CoopMemberCapital.guidance(rules),CoopMemberCapital.limitGuidance(rules)].filter(Boolean).join(' ');
+refreshPortalCapitalLimit();
 document.getElementById('capitalReductionHint').textContent = `최소 ${rules.minimum.toLocaleString()}원 이상의 출자금은 유지해야 합니다.`;
 CoopMemberCapital.applyInput(document.getElementById('newFamCapital'), rules);
 CoopMemberCapital.applyInput(document.getElementById('formerRejoinAmount'), rules);
@@ -8499,6 +8512,7 @@ if (!currentPortalApplicationRequest(request)) return;
 if(type === 'extra') {
 amount = Number(document.getElementById('exAmount').value);
 if(!CoopMemberCapital.valid(amount, rules, false)) return showModal(`${rules.unit.toLocaleString()}원 단위로 입력해주세요.`);
+if(!CoopMemberCapital.withinLimit(amount,rules,Math.max(totalCap,0))) return showModal(CoopMemberCapital.limitWarning(rules,Math.max(totalCap,0),true));
 } 
 else if(type === 'reduction') {
 amount = Number(document.getElementById('redAmount').value);
@@ -8928,6 +8942,7 @@ if(targetEl) targetEl.classList.remove('hidden');
 
 if(type === 'extra') {
 loadExtraCapitalDepositAccount();
+refreshPortalCapitalLimit();
 }
 
 if(type === 'withdraw') {
@@ -9892,6 +9907,7 @@ try { rules = await loadMemberCapitalRules(); }
 catch (_) { if (current()) showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
 if (!current()) return;
 if (!CoopMemberCapital.valid(capital, rules)) return showModal(CoopMemberCapital.guidance(rules));
+if (!CoopMemberCapital.withinLimit(capital, rules)) return showModal(CoopMemberCapital.limitWarning(rules));
 
 // 5. 동의서 모달 띄우기 (데이터 전달)
 return openConsentModal(data,request);
@@ -11537,7 +11553,7 @@ if (draftOwner !== familyRegistrationOwner || draftOwner !== getFamilyRegistrati
     || (preparation && !window.PortalChildPreparation.current(preparation))) return;
 
 if (error) {
-showModal('가입 실패: ' + error.message);
+showModal(CoopMemberCapital.errorMessage(error) || ('가입 실패: ' + error.message));
 } else {
 showModal('🎉 가입이 완료되었습니다!\n(출자금 입금 및 관리자 승인 후 정식 조합원이 됩니다.)');
 resetFamilyRegistrationDraft();
@@ -12013,6 +12029,14 @@ if(!Number.isSafeInteger(newAmount) || newAmount <= 0) return showModal('금액�
 const snapshot = JSON.stringify(portalModifySnapshot()), revision = ++portalModifyRevision;
 const current = () => currentPortalModifyEditor(state) && revision === portalModifyRevision
     && snapshot === JSON.stringify(portalModifySnapshot());
+if (type === 'extra' || type === 'rejoin') {
+let rules;
+try { rules = await loadMemberCapitalRules(); }
+catch (_) { if(current()) showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
+if (!current()) return;
+const existing = Math.max(Number(curMem?.total_capital || 0),0);
+if (!CoopMemberCapital.withinLimit(newAmount,rules,existing)) return showModal(CoopMemberCapital.limitWarning(rules,existing,true));
+}
 
 // 2. 실행
 showConfirmModal('신청 내용을 수정하시겠습니까?', async () => {
@@ -12051,7 +12075,7 @@ if (state.owner === portalApplicationOwner() && state.member === String(curMem?.
 } catch (error) {
 // DB에서 10만원 미만 등 에러가 발생하면 여기서 잡힘
 // alert 대신 커스텀 모달 사용 권장
-if (currentPortalModifyEditor(state)) showModal('수정하지 못했습니다.\n' + error.message);
+if (currentPortalModifyEditor(state)) showModal(CoopMemberCapital.errorMessage(error) || ('수정하지 못했습니다.\n' + error.message));
 } finally {
 showLoading(false);
 portalApplicationWritePending = false;

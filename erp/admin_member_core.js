@@ -14957,7 +14957,9 @@ async function submitProxyData() {
       }));
 
       if (error) {
-        if (error.message === 'CAPITAL_AMOUNT_INVALID' && rules) {
+        if (window.CoopMemberCapital.errorMessage(error)) {
+          myAlert(window.CoopMemberCapital.errorMessage(error), 'warning');
+        } else if (error.message === 'CAPITAL_AMOUNT_INVALID' && rules) {
           myAlert(`금액은 ${rules.unit.toLocaleString()}원 단위로 입력해주세요. 출자 기준이 변경되었다면 창을 다시 열어 확인해주세요.`, 'warning');
         } else if (error.message === 'CAPITAL_MINIMUM_BALANCE_REQUIRED' && rules) {
           myAlert(`감자 후 출자금은 최소 ${rules.minimum.toLocaleString()}원 이상 남아 있어야 합니다. 전액 반환을 원하시면 탈퇴 신청을 선택해주세요.`, 'warning');

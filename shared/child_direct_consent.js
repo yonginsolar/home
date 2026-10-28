@@ -1,4 +1,4 @@
-/* v1.0.3 — Read the registered cooperative's bylaw notice without losing child input. */
+/* v1.0.4 — Keep child input when the server confirms a changed capital limit. */
 (function () {
   'use strict';
   let opening = false, submitting = false, current = null, dialog = null;
@@ -17,7 +17,7 @@
     DUPLICATE_CHILD_EMAIL: '이미 사용 중인 이메일입니다. 기존 계정 연결을 확인해 주세요.',
     CHILD_CAPITAL_INVALID: '출자금은 10만원 이상, 1만원 단위로 입력해 주세요.'
   };
-  function errorText(error) { return messages[error?.message] || '접수 결과를 확인하지 못했습니다. 같은 화면에서 다시 확인하면 중복 접수되지 않습니다.'; }
+  function errorText(error) { return window.CoopMemberCapital?.errorMessage(error) || messages[error?.message] || '접수 결과를 확인하지 못했습니다. 같은 화면에서 다시 확인하면 중복 접수되지 않습니다.'; }
   function close() {
     if (submitting) return;
     clear();
