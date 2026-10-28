@@ -1,4 +1,4 @@
-/* v1.0.0 — Explicit non-meeting record/carry-over, scoped drafts and request receipts. */
+/* v1.0.1 — Explicit non-meeting record/carry-over, scoped drafts and request receipts. */
 export function createMeetingNotHeld(hooks) {
  const d=hooks.document||document, drafts=new Map();let view=null,epoch=0;
  const key=o=>JSON.stringify([o.userId,o.coopId,o.packageId]);
@@ -47,13 +47,13 @@ export function createMeetingNotHeld(hooks) {
   if(await hooks.done(v.owner,result,stillCurrent)!==false){drafts.delete(key(v.owner)+':'+v.mode);if(!view)hooks.checkpoint?.(root);}
  }
  async function send(v){const p=v.row.pending;if(!p||!same(v))return;v.busy=true;status('처리 중입니다…');paint();try{
-  const r=await hooks.call(p.action,v.owner,p.data,p.key);if(r.error)throw r.error;v.row.result=r.data;await complete(v,r.data);
- }catch(e){if(/^(22|23|42|PT)/.test(String(e.code||''))){v.row.pending=null;v.info=null;}
+  const r=await hooks.call(p.action,v.owner,p.data,p.key);if(r.error)throw r.error;if(!r.data?.verified)throw new Error('MEETING_OUTCOME_RESULT_UNKNOWN');v.row.result=r.data;await complete(v,r.data);
+ }catch(e){if(/^(22|23|42|PT)/.test(String(e.code||''))&&!p.uncertain){v.row.pending=null;v.info=null;}else p.uncertain=true;
   if(same(v))status(labels[e.message]|| (v.row.pending?'처리 결과를 확인하지 못했습니다. 결과 다시 확인을 눌러 주세요.':'처리하지 못했습니다. 입력과 회의 상태를 다시 확인해 주세요.'));
  }finally{if(same(v)){v.busy=false;paint();}}}
  async function submit(){const v=view;if(!v||v.busy)return;
   if(v.row.result){await complete(v,v.row.result);return;}
-  if(v.row.pending){v.busy=true;paint();status('처리 결과를 확인하고 있습니다…');try{const r=await hooks.call('receipt',v.owner,{},v.row.pending.key);if(r.error)throw r.error;if(r.data?.found)await complete(v,r.data);else {v.row.notFound=true;if(same(v))status('아직 처리 결과가 확인되지 않았습니다. 다시 확인하거나 같은 내용으로 다시 시도해 주세요.');}}
+  if(v.row.pending){v.busy=true;paint();status('처리 결과를 확인하고 있습니다…');try{const r=await hooks.call('receipt',v.owner,{},v.row.pending.key);if(r.error)throw r.error;if(r.data?.found&&r.data?.verified)await complete(v,r.data);else if(r.data?.found===false){v.row.notFound=true;if(same(v))status('아직 처리 결과가 확인되지 않았습니다. 다시 확인하거나 같은 내용으로 다시 시도해 주세요.');}else throw new Error('MEETING_OUTCOME_RESULT_UNKNOWN');}
    catch(_){if(same(v))status('처리 결과를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.');}finally{if(same(v)){v.busy=false;paint();}}return;
   }
   if(!v.info)return;
