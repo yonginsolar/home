@@ -1,4 +1,4 @@
-/* Annual insurance/common settings v1.1.0. Drafts stay in owner-scoped memory. */
+/* Annual insurance/common settings v1.1.1. Drafts stay in owner-scoped memory. */
 (function(global){
  'use strict';
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -111,9 +111,10 @@
   document.getElementById('annualSettingsNav').addEventListener('click',e=>{const b=e.target.closest('[data-year]');if(b)navigate(b.dataset.year);});document.getElementById('settingTargetYear').addEventListener('change',e=>navigate(e.target.value));document.getElementById('annualPeriod').addEventListener('change',e=>navigate(year,e.target.value));
   document.getElementById('annualMonth').innerHTML=Array.from({length:12},(_,i)=>`<option value="${String(i+1).padStart(2,'0')}">${i+1}월</option>`).join('');document.getElementById('annualAddPeriod').addEventListener('click',()=>navigate(year,`${year}-${document.getElementById('annualMonth').value}-01`));document.getElementById('annualPastEdit').addEventListener('click',()=>{pastEdit=true;years();sync();});
   const modal=document.getElementById('settingsModal');modal.addEventListener('click',async e=>{if(e.target.closest('[data-annual-read]')){if(pending||reading)return;const ctx=context(),op={};pending=op;lock();let approved=false;try{approved=!dirty()||await api.confirm('작성한 변경사항을 유지하고 최신 기준을 다시 불러올까요?');}finally{if(pending===op){pending=null;lock();}}if(approved&&isCurrent(ctx)&&ctx.signature===JSON.stringify(state()))load(year,period,true).catch(()=>{});return;}const b=e.target.closest('[data-annual-action]');if(b)void save(b.dataset.annualAction);});
-  modal.addEventListener('input',e=>{const el=e.target;if(!el.matches('[data-annual-value],[data-annual-control],#annualSource'))return;const g=Object.keys(groups).find(g=>groups[g].includes(el.dataset.annualValue));if(g&&el.dataset.scope==='common')document.getElementById('annual-confirm-'+g).checked=false;sync();stash();});
-  modal.addEventListener('change',e=>{if(e.target.matches('select[data-annual-control],input[type=checkbox][data-annual-control]')){sync();stash();}});modal.addEventListener('hide.bs.modal',e=>{if(pending){e.preventDefault();return;}stash();++generation;});
+  const checkpointRestored=()=>{if(snapshot&&same(state(),baseline)){global.ErpWorkspaceResume?.checkpoint(root);global.ErpWorkspaceResume?.checkpoint(tenantRoot);}};
+  modal.addEventListener('input',e=>{const el=e.target;if(!el.matches('[data-annual-value],[data-annual-control],#annualSource'))return;const g=Object.keys(groups).find(g=>groups[g].includes(el.dataset.annualValue));if(g&&el.dataset.scope==='common')document.getElementById('annual-confirm-'+g).checked=false;sync();stash();checkpointRestored();});
+  modal.addEventListener('change',e=>{if(e.target.matches('select[data-annual-control],input[type=checkbox][data-annual-control]')){sync();stash();checkpointRestored();}});modal.addEventListener('hide.bs.modal',e=>{if(pending){e.preventDefault();return;}stash();++generation;});
   if(global.frameElement)new MutationObserver(()=>{if(global.frameElement.hidden){stash();++generation;}}).observe(global.frameElement,{attributes:true,attributeFilter:['hidden']});
  }
- global.ERPAnnualSettings={init,load,save,isDirty:dirty,isBusy:()=>!!pending,errorMessage:message,currentYear,selection:()=>({year,period}),version:'1.1.0'};
+ global.ERPAnnualSettings={init,load,save,isDirty:dirty,isBusy:()=>!!pending,errorMessage:message,currentYear,selection:()=>({year,period}),version:'1.1.1'};
 })(window);
