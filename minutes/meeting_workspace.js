@@ -1,11 +1,12 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.14.11
+Version: v1.15.0
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
-import { MinutesService } from './MinutesService.js?v=1.0.60';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.3';
+import { MinutesService } from './MinutesService.js?v=1.0.61';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.8.0';
+import { createMeetingNotHeld } from './meeting_not_held.js?v=1.0.0';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.10';
 import { labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
@@ -43,7 +44,7 @@ const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };
 const KIND_LABEL = { REPORT: '보고 안건', DECISION: '의결 안건', DISCUSSION: '논의 안건', OTHER: '기타 안건' };
 const DOC_LABEL = { MATERIALS: '회의 자료', SCENARIO: '의장용 진행 시나리오', SCENARIO_SECRETARIAT: '실무자용 진행 시나리오' };
-const STATUS_LABEL = { DRAFT: '초안', READY: '회의자료 완성', FINAL: '완료' };
+const STATUS_LABEL = { DRAFT: '초안', READY: '회의자료 완성', FINAL: '완료', CANCELLED: '회의 무산' };
 
 const state = {
   session: null,
@@ -54,6 +55,7 @@ const state = {
   packages: [],
   current: null,
   agendaLock: null,
+  notHeld: null,
   agendas: [],
   documents: new Map(),
   inheritedChairStyle: null,
@@ -73,12 +75,37 @@ const state = {
   autoDraftTimer: null
 };
 
+const meetingNotHeld=createMeetingNotHeld({document,owner:pdfActionOwner,current:pdfActionStillCurrent,
+ hidden:()=>document.hidden||!!window.frameElement?.hidden,pack:()=>state.current,agendas:()=>state.agendas,packages:()=>state.packages,
+ dirty:()=>hasUnsavedPacketChanges(),notice:showToast,confirm:message=>window.CoopDialog.confirm(message),
+ checkpoint:root=>window.ErpWorkspaceResume?.checkpoint(root),
+ call:(action,owner,payload,key)=>MeetingPackageService.notHeld(action,owner,payload,key),
+ done:async(owner,result,current)=>{if(!pdfActionStillCurrent(owner)||!current())return false;try{await loadPackages();if(!pdfActionStillCurrent(owner)||!current()||hasUnsavedPacketChanges())return false;await openPackage(result.target_package||owner.packageId,{internal:true});return true;}catch(_){if(pdfActionStillCurrent(owner)&&current())showToast('처리는 완료했지만 목록을 불러오지 못했습니다. 같은 창을 다시 열어 처리 결과를 확인해 주세요.',4800);return false;}}
+});
+const notHeldDisabled=new Map();
+function restoreNotHeldControls(){for(const[node,prior]of notHeldDisabled){if(node.isConnected)node.disabled=prior;}notHeldDisabled.clear();}
+function renderNotHeldState(){
+ const closed=state.current?.status==='CANCELLED';
+ $('markNotHeldButton').hidden=state.current?.meeting_type!=='BOARD'||closed||!!state.current?.published_minute_id;
+ $('carryAgendasButton').hidden=!closed;$('notHeldPanel').hidden=!closed&&!state.notHeld?.carryovers?.length&&!state.notHeld?.inheritedAttachments?.length;
+ const record=state.notHeld?.record;
+ $('notHeldSummary').textContent=closed?`성원 미달 · 재적 ${record?.eligible_count??'—'}명 / 참석 ${record?.attendee_count??'—'}명 · 안건 미심의`:state.notHeld?.carryovers?.length?'이전 회의의 미심의 안건을 가져온 초안입니다.':'';
+ $('viewNotHeldButton').hidden=!closed||!state.current?.published_minute_id;
+ const sources=[...new Map((state.notHeld?.carryovers||[]).map(x=>[x.source_package,x.source_title])).entries()];
+ $('notHeldSources').replaceChildren();for(const[id,title]of sources){const b=document.createElement('button');b.type='button';b.className='btn btn-small';b.textContent='원본 회의 · '+title;b.onclick=()=>void openPackage(id).catch(e=>showToast(e.message));$('notHeldSources').append(b);}
+ $('inheritedPdfList').replaceChildren();for(const row of state.pdfAttachments.filter(x=>x.inherited)){const b=document.createElement('button');b.type='button';b.className='btn btn-small';b.textContent='📎 '+row.title+' · 원본 연결';b.onclick=()=>void runAction(async()=>{const owner=pdfActionOwner(),r=await MeetingPackageService.createPdfAttachmentSignedUrl(row.storage_path);if(r.error)throw r.error;if(pdfActionStillCurrent(owner)&&r.data?.signedUrl)window.open(r.data.signedUrl,'_blank','noopener');});$('inheritedPdfList').append(b);}
+ if(!closed)return;
+ const nodes=[...document.querySelectorAll('#editorBody input,#editorBody select,#editorBody textarea,#agendaList [data-agenda-action]'),...['deletePackageButton','saveInfoButton','saveAgendasButton','generateAllButton','saveDocumentButton','completeMaterialsButton','addAgendaButton','addPdfAttachmentButton','addChapterButton','deleteChapterButton','moveChapterUpButton','moveChapterDownButton','addBoardAnnexButton','discardBoardAnnexDraft','editDocumentButton','takeDocumentEditButton'].map($).filter(Boolean)];
+ for(const node of nodes){if(!notHeldDisabled.has(node))notHeldDisabled.set(node,node.disabled);node.disabled=true;}
+ $('documentEditor').contentEditable='false';$('chapterEditor').contentEditable='false';
+}
+
 const documentEditStates = new Map(), documentSavedRows = new Map(), documentConflicts = new Set();
 let documentEditEpoch=0, documentEditRefresh=null;
 function documentEditKey(type=state.activeDocument) { return `${state.current?.id}:${type}`; }
 function documentValue(row) { return JSON.stringify([row?.title||'',row?.content_html||'']); }
 function documentEditingAllowed(type=state.activeDocument) {
-  return !!state.current && !documentConflicts.has(documentEditKey(type))
+  return !!state.current && state.current.status!=='CANCELLED' && !documentConflicts.has(documentEditKey(type))
     && MeetingPackageService.documentEdits.owned(pdfActionOwner(),type);
 }
 function renderDocumentEditState() {
@@ -106,6 +133,7 @@ function renderDocumentEditState() {
   $('addChapterButton').disabled=busy||!allowed;
   $('addBoardAnnexButton').disabled=busy||!allowed;
   $('documentEditConflict').hidden=!documentConflicts.has(documentEditKey());
+  renderNotHeldState();
   // Viewing, printing and existing File selection are independent of body editing.
 }
 async function refreshDocumentEditState() {
@@ -168,6 +196,7 @@ async function endDocumentEdit() {
   if(pdfActionStillCurrent(owner)){documentEditStates.delete(documentEditKey(type));renderDocumentEditState();}
 }
 function freezeDocumentEditing() {
+  meetingNotHeld.invalidate();
   if(!state.current)return;
   rememberActiveDocument();documentEditEpoch++;
   MeetingPackageService.documentEdits.freeze(pdfActionOwner());renderDocumentEditState();
@@ -446,6 +475,9 @@ async function injectPdfAttachmentPages(wrapper, attachments = state.pdfAttachme
   const { renderPdfUrlToImages } = await getPdfRenderer();
   if (!pdfActionStillCurrent(owner)) throw new Error('현재 회의 화면에서 다시 인쇄해 주세요.');
   const insertionPoints = new Map();
+  if(rows.some(row=>row.inherited)&&!wrapper.querySelector('[data-chapter-id="carryover-appendix"]')){
+    const appendix=document.createElement('section');appendix.dataset.chapterId='carryover-appendix';appendix.innerHTML='<h2>이전 회의 첨부 자료</h2>';wrapper.append(appendix);
+  }
   for (const attachment of rows) {
     const chapterId = String(attachment.insert_after_chapter_id || '');
     const anchor = insertionPoints.get(chapterId)
@@ -678,6 +710,7 @@ function todayInSeoul(now = new Date()) {
 }
 
 function isPastPackage(row, today = todayInSeoul()) {
+  if(row?.status==='CANCELLED')return true;
   return ['READY', 'FINAL'].includes(row?.status)
     && /^\d{4}-\d{2}-\d{2}$/.test(String(row?.meeting_date || ''))
     && row.meeting_date < today;
@@ -722,7 +755,8 @@ function renderEditorHeader() {
   $('editorMeta').textContent = `${typeLabel} · ${formatDateTimeShort(row)}${row?.location ? ` · ${row.location}` : ''}`;
   $('editorStatus').className = `status ${row?.status || 'DRAFT'}`;
   $('editorStatus').textContent = STATUS_LABEL[row?.status] || '초안';
-  $('completeMaterialsButton').hidden = state.currentStep !== 'documents' || row?.status === 'FINAL';
+  $('completeMaterialsButton').hidden = state.currentStep !== 'documents' || ['FINAL','CANCELLED'].includes(row?.status);
+  renderNotHeldState();
 }
 
 function renderChairOptions(selectedId = null) {
@@ -1675,14 +1709,14 @@ function collectPackageDraftPayload() {
 }
 
 function syncWorkingStateFromForms() {
-  if (!state.current || $('editorBody').hidden) return;
+  if (!state.current || state.current.status==='CANCELLED' || $('editorBody').hidden) return;
   state.current = { ...state.current, ...collectPackageDraftPayload() };
   state.agendas = collectAgendasFromDom();
   renderEditorHeader();
 }
 
 function refreshAutoDrafts({ force = false, render = true } = {}) {
-  if (!state.current) return;
+  if (!state.current || state.current.status==='CANCELLED') return;
   const activeExisting = state.documents.get(state.activeDocument) || {};
   const activeProtected = !force && (state.documentDirty || activeExisting.manually_edited === true);
   for (const row of generatedDocumentRows()) {
@@ -2217,6 +2251,7 @@ async function openPackage(id, { internal = false } = {}) {
   rememberBoardAnnexDraft();
   if (hasUnsavedPacketChanges({includeAnnex:false}) && !(await window.CoopDialog.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?'))) return;
   window.clearTimeout(state.autoDraftTimer);
+  meetingNotHeld.invalidate();
   setBusy(true);
   try {
     const owner = { userId:state.session?.user?.id, coopId:state.runtime?.coop_id, identity:pdfIdentityRevision };
@@ -2225,11 +2260,13 @@ async function openPackage(id, { internal = false } = {}) {
     if (!data?.package) throw new Error('회의 준비 자료를 찾을 수 없습니다.');
     if (state.session?.user?.id !== owner.userId || state.runtime?.coop_id !== owner.coopId
       || pdfIdentityRevision !== owner.identity || window.frameElement?.hidden) return;
+    restoreNotHeldControls();
     state.current = data.package;
     documentEditEpoch++;
     documentSavedRows.clear();
     for(const row of data.documents||[])documentSavedRows.set(row.document_type,row);
     state.agendaLock = data.agendaLock;
+    state.notHeld = data.notHeld || null;
     state.agendas = data.agendas || [];
     state.documents = new Map((data.documents || []).map(row => [row.document_type, row]));
     state.inheritedChairStyle = data.package.meeting_type === 'BOARD'
@@ -2252,6 +2289,7 @@ async function openPackage(id, { internal = false } = {}) {
     void refreshDocumentEditState();
     renderAuditStep();
     renderPackages();
+    renderNotHeldState();
     if (isPastPackage(state.current)) $('pastMeetings').open = true;
   } finally {
     setBusy(false);
@@ -2353,7 +2391,7 @@ function switchStep(step) {
   if (step === 'audit' && $('auditStepTab').hidden) step = 'documents';
   if (step !== state.currentStep) scenarioReviewEpoch++;
   state.currentStep = step;
-  $('completeMaterialsButton').hidden = step !== 'documents' || state.current?.status === 'FINAL';
+  $('completeMaterialsButton').hidden = step !== 'documents' || ['FINAL','CANCELLED'].includes(state.current?.status);
   document.querySelectorAll('.step-tab').forEach(button => button.classList.toggle('active', button.dataset.step === step));
   document.querySelectorAll('.step-panel').forEach(panel => panel.classList.toggle('active', panel.dataset.panel === step));
   if (step === 'audit') {
@@ -2364,6 +2402,7 @@ function switchStep(step) {
     syncWorkingStateFromForms();
     refreshAutoDrafts();
   }
+  renderNotHeldState();
 }
 
 function addAgenda() {
@@ -2543,6 +2582,9 @@ async function runAction(action) {
 }
 
 function bindEvents() {
+  $('markNotHeldButton').addEventListener('click',e=>void meetingNotHeld.open('mark',e.currentTarget));
+  $('carryAgendasButton').addEventListener('click',e=>void meetingNotHeld.open('carry',e.currentTarget));
+  $('viewNotHeldButton').addEventListener('click',()=>{if(state.current?.published_minute_id)window.open('/minutes/minutes_view?minuteId='+encodeURIComponent(state.current.published_minute_id),'_blank','noopener');});
   $('editDocumentButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(false)));
   $('takeDocumentEditButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(true)));
   $('endDocumentEditButton').addEventListener('click',()=>runAction(endDocumentEdit));
@@ -2644,6 +2686,7 @@ function bindEvents() {
     state.activeDocument = button.dataset.document;
     renderActiveDocument();
     void refreshDocumentEditState();
+    renderNotHeldState();
   }));
   $('meetingType').addEventListener('change', () => {
     const candidates = currentTypeOfficials($('meetingType').value);
@@ -2730,7 +2773,7 @@ function bindEvents() {
     state.documentDirty = true;
   }));
   window.addEventListener('beforeunload', event => {
-    if (!hasUnsavedPacketChanges() && !hasUnsavedNewPackageDraft()) return;
+    if (!hasUnsavedPacketChanges() && !hasUnsavedNewPackageDraft() && !meetingNotHeld.hasDraft()) return;
     event.preventDefault();
     event.returnValue = '';
   });
@@ -2776,7 +2819,7 @@ async function init() {
   if (packageResult.error) throw packageResult.error;
   state.packages = packageResult.data || [];
   renderPackages();
-  window.ErpWorkspaceResume.register({modules:['minutes'],busy:()=>state.loading||hasUnsavedPacketChanges()||hasUnsavedNewPackageDraft(),authorize:async runtime=>{
+  window.ErpWorkspaceResume.register({modules:['minutes'],busy:()=>state.loading||hasUnsavedPacketChanges()||hasUnsavedNewPackageDraft()||meetingNotHeld.hasDraft(),authorize:async runtime=>{
     const perms=runtime.effective_permissions||[];
     return perms.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
       || await MinutesService.isAdmin(state.session.user.id,state.session.user.email);

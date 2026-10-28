@@ -1,5 +1,5 @@
 /*
-Version: v1.0.60
+Version: v1.0.61
 Change: 2026-10-21 - Exhibition member branding, own read receipts and signature-status previews.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -372,7 +372,7 @@ async function getCompanyInfo() {
 async function listMinutesAdmin(options = {}) {
     const coopId = await getVisibleCoopId({ signal:options.signal });
     if (options.metadataOnly) {
-        const columns='id,title,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids';
+        const columns='id,title,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids,meeting_outcome';
         const rows=[];
         // Metadata pages preserve complete counts without downloading every document body.
         for(let offset=0;;offset+=500){
@@ -387,7 +387,7 @@ async function listMinutesAdmin(options = {}) {
     }
     const { data, error } = await scopeByCoop(supabase
         .from('minutes')
-        .select('id,title,content,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids')
+        .select('id,title,content,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids,meeting_outcome')
         .order('created_at', { ascending: false }), coopId);
     return { data: data || [], error };
 }
@@ -396,7 +396,7 @@ async function listPublishedMinutes() {
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('minutes')
-        .select('id,title,created_at,doc_type,published_at,visibility,file_urls,signer_ids')
+        .select('id,title,created_at,doc_type,published_at,visibility,file_urls,signer_ids,meeting_outcome')
         .not('published_at', 'is', null)
         .order('created_at', { ascending: false }), coopId);
     return { data: data || [], error };

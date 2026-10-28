@@ -1,5 +1,5 @@
 /*
-Version: v1.7.3
+Version: v1.8.0
 Change: 2026-10-27 - Use automatic imported call-notice association without a second linking workflow.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -53,7 +53,7 @@ async function listMeetingHistory() {
 
 async function getPackage(id) {
   const { coop_id: coopId } = await getRuntime();
-  const [packageResult, agendaResult, documentResult, attachmentResult, lockResult] = await Promise.all([
+  const [packageResult, agendaResult, documentResult, attachmentResult, lockResult, outcomeResult] = await Promise.all([
     scope(supabase.from('meeting_packages').select('*').eq('id', id), coopId).maybeSingle(),
     scope(supabase.from('meeting_package_agendas').select('*').eq('package_id', id), coopId)
       .order('sort_order', { ascending: true })
@@ -63,15 +63,17 @@ async function getPackage(id) {
     scope(supabase.from('meeting_package_pdf_attachments').select('*').eq('package_id', id), coopId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true }),
-    getAgendaState(id)
+    getAgendaState(id),
+    notHeld('state', {packageId:id,coopId}, {}, null)
   ]);
-  const error = packageResult.error || agendaResult.error || documentResult.error || attachmentResult.error || lockResult.error;
+  const error = packageResult.error || agendaResult.error || documentResult.error || attachmentResult.error || lockResult.error || outcomeResult.error;
   return {
     data: error ? null : {
       package: packageResult.data || null,
       agendas: agendaResult.data || [],
       documents: documentResult.data || [],
-      pdfAttachments: attachmentResult.data || [],
+      pdfAttachments: [...(attachmentResult.data || []),...(outcomeResult.data?.inheritedAttachments||[])],
+      notHeld: outcomeResult.data,
       agendaLock: lockResult.data
     },
     error
@@ -220,6 +222,16 @@ async function getAgendaState(id) {
   } finally { clearTimeout(timer); }
 }
 
+async function notHeld(action, owner, payload = {}, requestKey = null) {
+  const actor=owner.userId||(await supabase.auth.getSession()).data?.session?.user?.id;
+  if(!actor||!owner.coopId||!owner.packageId)return {data:null,error:new Error('현재 조합과 회의를 다시 확인해 주세요.')};
+  const controller=new AbortController();let timer;
+  try{return await Promise.race([
+    supabase.rpc('meeting_not_held',{p_action:action,p_package:owner.packageId,p_data:payload,p_request_key:requestKey,p_actor:actor,p_coop:owner.coopId}).abortSignal(controller.signal),
+    new Promise(resolve=>{timer=setTimeout(()=>{controller.abort();resolve({data:null,error:new Error('MEETING_OUTCOME_RESULT_UNKNOWN')});},15000);})
+  ]);}finally{clearTimeout(timer);}
+}
+
 async function saveDocument(packageId, documentType, payload, owner) {
   if(!owner || owner.packageId!==packageId)return {data:null,error:new Error('편집 대상을 다시 확인해 주세요.')};
   const result=await documentEdits.save(owner,[{document_type:documentType,...payload}]);
@@ -284,6 +296,7 @@ async function recordAuditChangeRequest(packageId, payload) {
 }
 
 export const MeetingPackageService = {
+  notHeld,
   documentEdits,
   getAgendaState,
   getRuntime,
