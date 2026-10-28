@@ -1,4 +1,4 @@
-/* v1.2.0 — Agenda-linked annex defaults; scoped drafts and request receipts. */
+/* v1.2.1 — Preserve explicit annex exclusions and agendas-only choices. */
 export function createMeetingNotHeld(hooks) {
  const d=hooks.document||document, drafts=new Map();let view=null,epoch=0;
  const key=o=>JSON.stringify([o.userId,o.coopId,o.packageId]);
@@ -17,9 +17,9 @@ export function createMeetingNotHeld(hooks) {
   const selected=new Set([...root.querySelectorAll('[data-agenda]:checked')].map(n=>n.dataset.agenda));
   for(const input of root.querySelectorAll('[data-annex]')){
    const a=view.annexes.find(x=>x.id===input.dataset.annex);
-   if(a?.agendaId&&a.agendaId!=='common')input.checked=selected.has(a.agendaId);
+   if(a?.agendaId&&a.agendaId!=='common')input.checked=selected.has(a.agendaId)&&view.row.annexChoices.get(a.id)!==false;
   }
-  if(view.annexes.some(a=>a.agendaId&&selected.has(a.agendaId))){$('notHeldAnnexYes').checked=true;$('notHeldAnnexNo').checked=false;}
+  if(!view.row.annexModeChosen&&view.annexes.some(a=>a.agendaId&&selected.has(a.agendaId))){$('notHeldAnnexYes').checked=true;$('notHeldAnnexNo').checked=false;}
   remember();paint();
  }
  function paint(){if(!view)return;const v=view,busy=v.busy||!!v.row.pending||!!v.row.result;root.querySelectorAll('input,textarea,select,[data-nh="all"],[data-nh="none"],[data-nh^="annex-"]').forEach(n=>n.disabled=busy);
@@ -41,6 +41,7 @@ export function createMeetingNotHeld(hooks) {
   if(hooks.dirty()){hooks.notice('작성 중인 회의 내용은 먼저 저장해 주세요.');return;}
   const k=key(owner)+':'+mode;let row=drafts.get(k);if(!row){row={eligible:String(pack.eligible_count||''),attended:'',reason:'',target:'',number:'',title:'',selected:hooks.agendas().map(x=>x.id)};drafts.set(k,row);}
   if(Number(pack.eligible_count)>0)row.eligible=String(pack.eligible_count);
+  row.annexChoices ||= new Map();
   const annexes=mode==='carry'?(hooks.annexes?.()||[]).map(a=>({...a})):[];
   if(!Array.isArray(row.annexSelected)){
    const linked=annexes.some(a=>a.agendaId&&row.selected.includes(a.agendaId));
@@ -96,10 +97,16 @@ export function createMeetingNotHeld(hooks) {
   }
   v.row.imports=chosen.map(a=>({...a}));v.row.pending={action:v.mode==='mark'?'mark':'carry',data,key:(hooks.uuid||(()=>crypto.randomUUID()))()};v.row.notFound=false;await send(v);
  }
- root.addEventListener('input',remember);root.addEventListener('change',event=>{if(event.target.matches('[data-agenda]'))syncLinkedAnnexes();else{remember();paint();}});
+ root.addEventListener('input',remember);root.addEventListener('change',event=>{if(event.target.matches('[data-agenda]'))syncLinkedAnnexes();else{
+  if(view&&!view.busy&&!view.row.pending){
+   if(event.target.matches('[data-annex]'))view.row.annexChoices.set(event.target.dataset.annex,event.target.checked);
+   if(event.target.matches('[name="notHeldAnnexMode"]'))view.row.annexModeChosen=true;
+  }
+  remember();paint();
+ }});
  root.addEventListener('click',event=>{const b=event.target.closest('[data-nh]');if(!b)return;const action=b.dataset.nh;if(action==='close'){close();return;}if(!view||view.busy)return;
   if(action==='all'||action==='none'){if(view.row.pending)return;root.querySelectorAll('[data-agenda]').forEach(n=>n.checked=action==='all');syncLinkedAnnexes();return;}
-  if(action==='annex-all'||action==='annex-none'){if(view.row.pending)return;root.querySelectorAll('[data-annex]').forEach(n=>n.checked=action==='annex-all');remember();return;}
+  if(action==='annex-all'||action==='annex-none'){if(view.row.pending)return;root.querySelectorAll('[data-annex]').forEach(n=>{n.checked=action==='annex-all';view.row.annexChoices.set(n.dataset.annex,n.checked);});remember();return;}
   if(action==='reload')void read();if(action==='submit')void submit();if(action==='retry'&&view.row.pending)void send(view);
  });
  root.addEventListener('keydown',e=>{if(!view||e.defaultPrevented||e.isComposing)return;

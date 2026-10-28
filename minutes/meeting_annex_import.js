@@ -1,4 +1,4 @@
-/* v1.1.0 — Agenda-linked annexes remain part of the lease-checked MATERIALS document. */
+/* v1.1.1 — Preserve the saved mixed text/PDF annex order when carrying forward. */
 const topAnnexes = root => [...root.querySelectorAll('.board-text-annex,.board-pdf-annex')]
   .filter(node => !node.parentElement.closest('.board-text-annex,.board-pdf-annex'));
 
@@ -43,17 +43,23 @@ export function moveMeetingAnnex(root, annexId, direction, agendas = []) {
 export function listMeetingAnnexes(html, pdfs = [], { document, sanitizeHtml = value => value } = {}) {
   const wrapper = document.createElement('div');
   wrapper.innerHTML = sanitizeHtml(html || '');
-  const text = [...wrapper.querySelectorAll('.board-text-annex')]
-    .filter(node => !node.parentElement.closest('.board-text-annex'))
-    .map((node, index) => {
+  const rows = new Map(pdfs.map(row => [row.id, row])), seenPdfs = new Set(), result = [];
+  const pdf = (row, node) => ({ id:`pdf:${row.id}`, agendaId:node?.dataset.boardAgendaId || '', kind:'PDF', title:row.title || row.original_filename || '첨부 PDF', pdfId:row.id });
+  let textIndex = 0;
+  for (const node of topAnnexes(wrapper)) {
+    if (node.classList.contains('board-text-annex')) {
+      const index = textIndex++;
       node.querySelectorAll('.board-annex-toggle').forEach(button => button.remove());
       node.classList.remove('is-collapsed');
-      return { id:node.dataset.boardAnnexId || `text:${index}`, agendaId:node.dataset.boardAgendaId || '', kind:'TEXT', title:node.querySelector('.board-annex-heading h1,h1')?.textContent.trim() || `별첨 ${index + 1}`, html:node.outerHTML };
-    });
-  return [...text, ...pdfs.map(row => {
-    const node = [...wrapper.querySelectorAll('.board-pdf-annex')].find(n => n.dataset.boardPdfId === row.id);
-    return { id:`pdf:${row.id}`, agendaId:node?.dataset.boardAgendaId || '', kind:'PDF', title:row.title || row.original_filename || '첨부 PDF', pdfId:row.id };
-  })];
+      result.push({ id:node.dataset.boardAnnexId || `text:${index}`, agendaId:node.dataset.boardAgendaId || '', kind:'TEXT', title:node.querySelector('.board-annex-heading h1,h1')?.textContent.trim() || `별첨 ${index + 1}`, html:node.outerHTML });
+    } else {
+      const row = rows.get(node.dataset.boardPdfId);
+      if (row && !seenPdfs.has(row.id)) { result.push(pdf(row, node)); seenPdfs.add(row.id); }
+    }
+  }
+  // Older PDFs without an in-document position remain after the ordered annexes.
+  for (const row of pdfs) if (!seenPdfs.has(row.id)) { result.push(pdf(row)); seenPdfs.add(row.id); }
+  return result;
 }
 
 export function appendMeetingTextAnnexes(html, annexes, sourceId, { document, sanitizeHtml = value => value, agendaMap = {}, agendas = [], pdfs = [], uuid = () => crypto.randomUUID() } = {}) {
