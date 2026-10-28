@@ -1,4 +1,4 @@
-/* v1.1.15 - Keep active editing and keyboard focus through save reconciliation. */
+/* v1.1.16 - Checkpoint only the confirmed legal document, before restoring later edits. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -155,6 +155,9 @@
     if(s.doc.uses_legacy_signup&&!s.doc.is_published)text+=' · 기존 가입 문구 유지 중';
     if(s.doc.has_unpublished_changes)text+=' · 수정 초안 있음';
     if(dirty(kind))text+=' · 저장하지 않은 수정 있음';
+    // Only clear this card when it equals the confirmed baseline, including
+    // undo back to that value. Later edits and every other draft stay guarded.
+    else window.ErpWorkspaceResume?.checkpoint(el(kind,'card'));
     if(s.resultNotice)text+=' · '+s.resultNotice;
     el(kind,'status').textContent=text;el(kind,'status').className='small mt-2 '+(s.doc.is_published?'text-success':'text-muted');
     refreshPreview();
