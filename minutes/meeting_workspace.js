@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.14.8
+Version: v1.14.9
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -962,7 +962,7 @@ function updateDocumentModeLabels() {
     ? (regularAssembly
       ? '정기총회 기본 순서는 전차 의사록 확인 → 감사보고서 → 사업보고 및 결산 → 배당·이익처분(있을 때) → 감자·탈퇴 출자금 반환(있을 때) → 사업계획·예산 → 차입금 한도 → 추가 의안 → 기타안건입니다.'
       : '임시총회 자료집과 시나리오는 등록한 의안만으로 구성합니다.')
-    : '의장용을 먼저 편집·저장한 뒤 실무자용에 적용해 주세요. 실무자용에서 설명과 메모를 덧붙이고, 이후 의장용을 고치면 변경점을 비교해 필요한 발언만 반영할 수 있습니다.';
+    : '의장용과 실무자용은 각각 편집합니다. 전체 저장이나 인쇄 전에 두 시나리오를 모두 확인해 주세요.';
   if (!regularAssembly && state.currentStep === 'audit') switchStep('documents');
   if (regularAssembly) {
     renderAssemblySourceStatus();
