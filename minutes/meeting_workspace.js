@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.14.9
+Version: v1.14.10
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -184,11 +184,11 @@ function applySavedDocuments(owner,rows) {
   }
 }
 
-let scenarioReviewPending = null;
+let scenarioReviewPending = null, scenarioReviewEpoch = 0;
 async function reviewedMeetingAction(action) {
   if (!state.current || state.loading || scenarioReviewPending) return;
-  const owner=pdfActionOwner(),epoch=documentEditEpoch,type=state.activeDocument,step=state.currentStep,request={},focus=document.activeElement;
-  const current=()=>pdfActionStillCurrent(owner)&&epoch===documentEditEpoch&&type===state.activeDocument&&step===state.currentStep;
+  const owner=pdfActionOwner(),epoch=documentEditEpoch,reviewEpoch=scenarioReviewEpoch,type=state.activeDocument,step=state.currentStep,request={},focus=document.activeElement;
+  const current=()=>pdfActionStillCurrent(owner)&&epoch===documentEditEpoch&&reviewEpoch===scenarioReviewEpoch&&type===state.activeDocument&&step===state.currentStep;
   scenarioReviewPending=request;
   try {
     // A result lookup resumes the original save, not a new document submission.
@@ -2307,6 +2307,7 @@ async function deletePackage() {
 
 function switchStep(step) {
   if (step === 'audit' && $('auditStepTab').hidden) step = 'documents';
+  if (step !== state.currentStep) scenarioReviewEpoch++;
   state.currentStep = step;
   $('completeMaterialsButton').hidden = step !== 'documents' || state.current?.status === 'FINAL';
   document.querySelectorAll('.step-tab').forEach(button => button.classList.toggle('active', button.dataset.step === step));
@@ -2738,6 +2739,7 @@ async function init() {
     meetingHistoryPending = null;
     await loadPackages();
   }});
+  window.ErpWorkspaceTask.requestPrint = () => state.current?.meeting_type === 'BOARD' ? reviewedMeetingAction(printActiveDocument) : window.print();
   window.setInterval(renderPackages, 60_000);
   window.setInterval(()=>{void refreshDocumentEditState();},25000);
   document.addEventListener('visibilitychange', () => {

@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.11 — bind the initial contract employee without replacing drafts. */
+/* Persistent ERP workspace v1.2.12 — honor an active task's explicit print-request workflow. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -80,7 +80,10 @@
     for (const entry of new Set([activeEntry,...retained.values()])) setPrintLock(entry,true);
   }
   function printTask(entry = activeEntry) {
-    if (canPrint(entry)) entry.frame.contentWindow.print();
+    if (!canPrint(entry)) return;
+    const adapter = task(entry);
+    if (typeof adapter?.requestPrint === 'function') return adapter.requestPrint();
+    entry.frame.contentWindow.print();
   }
   async function canLeave() {
     return leaving || canRetain(activeEntry) || !changed() || await window.CoopDialog.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 이동할까요?');
@@ -449,6 +452,12 @@
       event.preventDefault(); printTask();
     }
   });
+  window.addEventListener('keydown', event => {
+    // A modal stops bubbling; repeated meeting print shortcuts must not fall
+    // through to the browser's native print while its choice is still pending.
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p'
+      && typeof task(activeEntry)?.requestPrint === 'function' && window.CoopDialog?.hasPending()) event.preventDefault();
+  }, true);
   // Browser-menu print needs a paginated document, not a clipped screen-height iframe.
   // A transient, script-free snapshot uses the task's exact styles; it is never saved or cached.
   let printCopy, printStyles = [], printClasses;
