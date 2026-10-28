@@ -1,4 +1,4 @@
-/* Annual insurance/common settings v1.3.0. Explicit employer totals override shared defaults. */
+/* Annual insurance/common settings v1.3.1. Explicit employer totals override shared defaults. */
 (function(global){
  'use strict';
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -43,7 +43,7 @@
  function override(k,values,label){
   return `<div class="annual-override">${field('tenant',k,values,label)}<span id="annual-origin-${k}" class="small text-secondary"></span></div>`;
  }
- function review(g){const ref=snapshot.insurance_reference?.[g];return `<div class="annual-review" data-review="${g}"><span id="annual-review-state-${g}"></span>${ref?.source_url?` <a href="${esc(ref.source_url)}" target="_blank" rel="noopener noreferrer">공식 근거 보기</a>`:''}<div id="annual-proof-${g}" class="mt-2"><label class="d-flex gap-2 align-items-start"><input id="annual-confirm-${g}" type="checkbox" data-annual-control data-scope="common"><span>해당 연도의 공식 자료와 입력 요율이 일치함을 확인했습니다.</span></label><label for="annual-proof-source-${g}">확인한 근거</label><input id="annual-proof-source-${g}" class="form-control form-control-sm" maxlength="3000" data-annual-control data-scope="common" placeholder="공식 고시·안내 자료의 제목 또는 주소"></div></div>`;}
+ function review(g){const ref=snapshot.insurance_reference?.[g];return `<div class="annual-review" data-review="${g}"><span id="annual-review-state-${g}"></span>${ref?.source_url?` <a href="${esc(ref.source_url)}" target="_blank" rel="noopener noreferrer">공식 근거 보기</a>`:''}<div id="annual-proof-${g}" class="mt-2"><label class="d-flex gap-2 align-items-start"><input id="annual-confirm-${g}" type="checkbox" data-annual-control data-scope="common"><span>${g==='employ'?'근로자 요율이':'입력 요율이'} 해당 연도의 공식 자료와 일치함을 확인했습니다.</span></label><label for="annual-proof-source-${g}">확인한 근거</label><input id="annual-proof-source-${g}" class="form-control form-control-sm" maxlength="3000" data-annual-control data-scope="common" placeholder="공식 고시·안내 자료의 제목 또는 주소"></div></div>`;}
  function render(){
   years();const c={...(snapshot.common?.values_json||snapshot.common_template||{})},t={...(snapshot.tenant?.values_json||snapshot.tenant_template||{})};
   if(c.worker_comp_rate==null)c.worker_comp_rate=snapshot.catalog.common.worker_comp_rate.default??0.007;
@@ -77,7 +77,7 @@
   for(const k of ['employ_rate_biz','worker_comp_rate']){const own=number('tenant',k),common=number('common',k),el=document.getElementById('annual-tenant-'+k);el.placeholder=common==null?'공통 기준 미설정':`기본 ${pct(common)}`;document.getElementById('annual-origin-'+k).textContent=own!=null?'조합별 입력값 적용':`공통 기준: ${pct(common)}`;}
   const base=number('common','employ_rate_emp'),defaultBiz=number('common','employ_rate_biz'),biz=number('tenant','employ_rate_biz')??defaultBiz;
   put('employ-emp',pct(base));put('employ-default-total',pct(sum(base,defaultBiz)));put('employ-biz',pct(biz));put('employ-total',pct(sum(base,biz)));put('worker-emp','부담 없음');put('worker-default-total',pct(number('common','worker_comp_rate')));put('worker-total',pct(number('tenant','worker_comp_rate')??number('common','worker_comp_rate')));
-  for(const g of Object.keys(groups)){const ref=snapshot.insurance_reference?.[g],official=ref?.confirmed&&same(groupValues(g),ref.values);document.getElementById('annual-review-state-'+g).textContent=official?'공식 확정 요율과 일치':document.getElementById('annual-confirm-'+g).checked?'입력 요율 확인됨':'확인 필요 · 해당 연도 공식 자료를 확인해 주세요.';document.getElementById('annual-proof-'+g).hidden=!!official;}lock();
+  for(const g of Object.keys(groups)){const ref=snapshot.insurance_reference?.[g],official=ref?.confirmed&&same(groupValues(g),ref.values);document.getElementById('annual-review-state-'+g).textContent=(g==='employ'?'근로자 요율 · ':'')+(official?'공식 확정 요율과 일치':document.getElementById('annual-confirm-'+g).checked?'입력 요율 확인됨':'확인 필요 · 해당 연도 공식 자료를 확인해 주세요.');document.getElementById('annual-proof-'+g).hidden=!!official;}lock();
  }
  function restore(values){for(const [id,v] of Object.entries(values)){const el=document.getElementById(id);if(el){if(el.type==='checkbox')el.checked=v;else el.value=v;}}global.ERPNumberInput.refresh(root);global.ERPNumberInput.refresh(tenantRoot);sync();}
  function readRpc(args){const k=key(owner(),args.p_year,args.p_effective_on);if(reads.has(k))return reads.get(k);let timer;const p=Promise.race([Promise.resolve().then(()=>api.rpc(args)),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('ANNUAL_READ_TIMEOUT')),15000);})]).finally(()=>{clearTimeout(timer);if(reads.get(k)===p)reads.delete(k);});reads.set(k,p);return p;}
@@ -114,5 +114,5 @@
   modal.addEventListener('change',e=>{if(e.target.matches('select[data-annual-control],input[type=checkbox][data-annual-control]')){sync();stash();checkpointRestored();}});modal.addEventListener('hide.bs.modal',e=>{if(pending){e.preventDefault();return;}stash();++generation;});
   if(global.frameElement)new MutationObserver(()=>{if(global.frameElement.hidden){stash();++generation;}}).observe(global.frameElement,{attributes:true,attributeFilter:['hidden']});
  }
- global.ERPAnnualSettings={init,load,save,isDirty:dirty,isBusy:()=>!!pending,errorMessage:message,currentYear,selection:()=>({year,period}),version:'1.3.0'};
+ global.ERPAnnualSettings={init,load,save,isDirty:dirty,isBusy:()=>!!pending,errorMessage:message,currentYear,selection:()=>({year,period}),version:'1.3.1'};
 })(window);
