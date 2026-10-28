@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.14.7
+Version: v1.14.8
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -8,7 +8,6 @@ import { MinutesService } from './MinutesService.js?v=1.0.60';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.7.3';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.10';
-import { createBoardScriptTransfer } from './board_script_transfer_ui.js?v=1.0.6';
 import { labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
@@ -31,9 +30,6 @@ function getPdfRenderer() {
   return pdfRendererRequest;
 }
 
-function pdfActionSameIdentity(owner) {
-  return state.session?.user?.id === owner.userId && state.runtime?.coop_id === owner.coopId && pdfIdentityRevision === owner.identity;
-}
 function pdfActionStillCurrent(owner, anchor) {
   return state.session?.user?.id === owner.userId && state.runtime?.coop_id === owner.coopId
     && state.current?.id === owner.packageId && pdfIdentityRevision === owner.identity && !window.frameElement?.hidden
@@ -82,25 +78,23 @@ let documentEditEpoch=0, documentEditRefresh=null;
 function documentEditKey(type=state.activeDocument) { return `${state.current?.id}:${type}`; }
 function documentValue(row) { return JSON.stringify([row?.title||'',row?.content_html||'']); }
 function documentEditingAllowed(type=state.activeDocument) {
-  return !!state.current && !scenarioTransfer.releaseStatus(pdfActionOwner(),type) && !documentConflicts.has(documentEditKey(type))
+  return !!state.current && !documentConflicts.has(documentEditKey(type))
     && MeetingPackageService.documentEdits.owned(pdfActionOwner(),type);
 }
 function renderDocumentEditState() {
   if (!$('documentEditStatus')) return;
   const allowed=documentEditingAllowed(), busy=state.loading, entry=documentEditStates.get(documentEditKey());
-  const releasing=scenarioTransfer.releaseStatus(pdfActionOwner(),state.activeDocument);
-  $('documentEditStatus').textContent = releasing==='retry' ? '편집권 반납을 확인하지 못했습니다. 다시 확인해 주세요.'
-    : releasing ? '편집권을 반납하고 있습니다.' : allowed ? '편집 중입니다.' : documentConflicts.has(documentEditKey())
+  $('documentEditStatus').textContent = allowed ? '편집 중입니다.' : documentConflicts.has(documentEditKey())
     ? '다른 사람이 저장한 내용이 있습니다. 최신 문서와 작성한 초안을 확인해 주세요.'
     : entry?.busy ? `${entry.holder_name||'조합 담당자'} 님이 편집 중입니다.`
     : entry?.failed ? '편집권을 확인하지 못했습니다. 다시 확인해 주세요.'
     : '읽기 전용입니다. 수정하려면 편집을 눌러 주세요.';
-  $('editDocumentButton').hidden=!!releasing || allowed || !!entry?.busy || !!entry?.closed || documentConflicts.has(documentEditKey());
+  $('editDocumentButton').hidden=allowed || !!entry?.busy || !!entry?.closed || documentConflicts.has(documentEditKey());
   $('editDocumentButton').disabled=busy;
-  $('endDocumentEditButton').hidden=!!releasing || !MeetingPackageService.documentEdits.owned(pdfActionOwner(),state.activeDocument);
-  $('takeDocumentEditButton').hidden=!!releasing || !entry?.busy || !entry?.can_takeover || allowed;
+  $('endDocumentEditButton').hidden=!MeetingPackageService.documentEdits.owned(pdfActionOwner(),state.activeDocument);
+  $('takeDocumentEditButton').hidden=!entry?.busy || !entry?.can_takeover || allowed;
   $('refreshDocumentEditButton').disabled=busy;
-  $('refreshDocumentEditButton').hidden=!!releasing || allowed || !(entry?.failed || entry?.busy || entry?.closed || documentConflicts.has(documentEditKey()));
+  $('refreshDocumentEditButton').hidden=allowed || !(entry?.failed || entry?.busy || entry?.closed || documentConflicts.has(documentEditKey()));
   $('saveCurrentDocumentButton').disabled=busy || !allowed;
   $('documentTitle').readOnly=!allowed;
   if(chapterMode()) renderChapterEditState();
@@ -113,7 +107,6 @@ function renderDocumentEditState() {
   $('addBoardAnnexButton').disabled=busy||!allowed;
   $('documentEditConflict').hidden=!documentConflicts.has(documentEditKey());
   // Viewing, printing and existing File selection are independent of body editing.
-  scenarioTransfer.sync();
 }
 async function refreshDocumentEditState() {
   if(!state.current || document.hidden || window.frameElement?.hidden)return;
@@ -142,10 +135,9 @@ async function refreshDocumentEditState() {
 async function beginDocumentEdit(force=false) {
   if(!state.current)return;
   const owner=pdfActionOwner(),type=state.activeDocument,epoch=documentEditEpoch;
-  if(scenarioTransfer.releaseStatus(owner,type))return;
   rememberActiveDocument();
   if(force && !(await window.CoopDialog.confirm('이 문서의 편집권을 가져올까요?')))return;
-  if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch||scenarioTransfer.releaseStatus(owner,type))return;
+  if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch)return;
   const result=await MeetingPackageService.documentEdits.manage(owner,type,'acquire',force);
   if(!pdfActionStillCurrent(owner)||type!==state.activeDocument||epoch!==documentEditEpoch)return;
   documentEditStates.set(documentEditKey(type),result);
@@ -176,7 +168,6 @@ async function endDocumentEdit() {
   if(pdfActionStillCurrent(owner)){documentEditStates.delete(documentEditKey(type));renderDocumentEditState();}
 }
 function freezeDocumentEditing() {
-  scenarioTransfer.invalidate();
   if(!state.current)return;
   rememberActiveDocument();documentEditEpoch++;
   MeetingPackageService.documentEdits.freeze(pdfActionOwner());renderDocumentEditState();
@@ -193,16 +184,28 @@ function applySavedDocuments(owner,rows) {
   }
 }
 
-const scenarioTransfer = createBoardScriptTransfer({
-  state, manager: MeetingPackageService.documentEdits, savedRows: documentSavedRows, editStates: documentEditStates,
-  sanitize: sanitizeHtml, value: documentValue, owner: pdfActionOwner, isCurrent: pdfActionStillCurrent,
-  canRelease: pdfActionSameIdentity,
-  remember: rememberActiveDocument, render: renderActiveDocument, renderEdit: renderDocumentEditState,
-  defaultTitle: defaultDocumentTitle, toast: showToast, epoch: () => documentEditEpoch, run: runAction,
-  currentValue: type => type === state.activeDocument
-    ? documentValue({ title: $('documentTitle').value.trim() || defaultDocumentTitle(type), content_html: currentBoardEditorHtml() })
-    : documentValue(state.documents.get(type))
-});
+let scenarioReviewPending = null;
+async function reviewedMeetingAction(action) {
+  if (!state.current || state.loading || scenarioReviewPending) return;
+  const owner=pdfActionOwner(),epoch=documentEditEpoch,type=state.activeDocument,step=state.currentStep,request={},focus=document.activeElement;
+  const current=()=>pdfActionStillCurrent(owner)&&epoch===documentEditEpoch&&type===state.activeDocument&&step===state.currentStep;
+  scenarioReviewPending=request;
+  try {
+    // A result lookup resumes the original save, not a new document submission.
+    const recovering=action===saveWholeMeetingDraft&&MeetingPackageService.documentEdits.hasPending(owner);
+    if(state.current.meeting_type==='BOARD'&&!recovering){
+      const accepted=await window.CoopDialog.confirm('의장용·실무자용 시나리오를 모두 확인하셨나요?',{confirmText:'확인',cancelText:'취소'});
+      if(!accepted){
+        let parentFocused=true;try{parentFocused=!window.frameElement||window.parent.document.activeElement===window.frameElement;}catch(_){parentFocused=false;}
+        if(current()&&parentFocused&&focus?.isConnected&&!focus.disabled
+          && [document.body,focus,$('documentEditor'),$('chapterEditor')].includes(document.activeElement))focus.focus({preventScroll:true});
+        return;
+      }
+    }
+    if(!current())return;
+    return await runAction(action);
+  } finally { if(scenarioReviewPending===request)scenarioReviewPending=null; }
+}
 
 let meetingDefaultsPending = null;
 let meetingDefaultsReady = false;
@@ -1930,7 +1933,6 @@ async function saveWholeMeetingDraft({ quiet = false } = {}) {
   }
   const dirtyTypes=[...state.pendingDocuments].filter(type=>documentValue(state.documents.get(type))!==documentValue(documentSavedRows.get(type)));
   for(const type of dirtyTypes){
-    if(scenarioTransfer.releaseStatus(owner,type))throw new Error(`${DOC_LABEL[type]}의 편집권 반납이 끝난 뒤 저장해 주세요. 작성한 내용은 남아 있습니다.`);
     if(documentConflicts.has(documentEditKey(type)))throw new Error(`${DOC_LABEL[type]}의 최신 저장본과 작성한 초안을 먼저 확인해 주세요.`);
   }
   const rows = dirtyTypes.map(type => {
@@ -2170,7 +2172,6 @@ async function printCurrentChapter() {
 async function openPackage(id, { internal = false } = {}) {
   if (state.loading && !internal) return;
   if (hasUnsavedPacketChanges() && !(await window.CoopDialog.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?'))) return;
-  scenarioTransfer.invalidate();
   window.clearTimeout(state.autoDraftTimer);
   setBusy(true);
   try {
@@ -2305,7 +2306,6 @@ async function deletePackage() {
 }
 
 function switchStep(step) {
-  if (step !== state.currentStep) scenarioTransfer.invalidate();
   if (step === 'audit' && $('auditStepTab').hidden) step = 'documents';
   state.currentStep = step;
   $('completeMaterialsButton').hidden = step !== 'documents' || state.current?.status === 'FINAL';
@@ -2498,7 +2498,6 @@ async function runAction(action) {
 }
 
 function bindEvents() {
-  scenarioTransfer.bind();
   $('editDocumentButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(false)));
   $('takeDocumentEditButton').addEventListener('click',()=>runAction(()=>beginDocumentEdit(true)));
   $('endDocumentEditButton').addEventListener('click',()=>runAction(endDocumentEdit));
@@ -2542,7 +2541,7 @@ function bindEvents() {
   $('chapterEditor').addEventListener('beforeinput', guardMaterialAgendaInput);
   $('loadPreviousBooklet').addEventListener('click', () => runAction(loadPreviousBooklet));
   $('generateAllButton').addEventListener('click', () => runAction(generateAllDocuments));
-  $('completeMaterialsButton').addEventListener('click', () => runAction(completeMeetingMaterials));
+  $('completeMaterialsButton').addEventListener('click', () => reviewedMeetingAction(completeMeetingMaterials));
   $('refreshAssemblySourcesButton').addEventListener('click', () => runAction(async () => {
     await loadAssemblySources();
     refreshAutoDrafts({ render: state.currentStep === 'documents' });
@@ -2557,8 +2556,8 @@ function bindEvents() {
   $('requestAuditReviewButton').addEventListener('click', () => runAction(requestAuditReview));
   $('openAuditButton').addEventListener('click', openAuditReport);
   $('recordAuditChangeButton').addEventListener('click', () => runAction(recordAuditChangeRequest));
-  $('saveDocumentButton').addEventListener('click', () => runAction(saveWholeMeetingDraft));
-  $('printDocumentButton').addEventListener('click', () => runAction(printActiveDocument));
+  $('saveDocumentButton').addEventListener('click', () => reviewedMeetingAction(saveWholeMeetingDraft));
+  $('printDocumentButton').addEventListener('click', () => reviewedMeetingAction(printActiveDocument));
   $('printChapterButton').addEventListener('click', () => runAction(printCurrentChapter));
   $('previousChapterButton').addEventListener('click', () => stepChapter(-1));
   $('nextChapterButton').addEventListener('click', () => stepChapter(1));
@@ -2593,7 +2592,6 @@ function bindEvents() {
   });
   document.querySelectorAll('.step-tab').forEach(button => button.addEventListener('click', () => switchStep(button.dataset.step)));
   document.querySelectorAll('.doc-tab').forEach(button => button.addEventListener('click', () => {
-    scenarioTransfer.invalidate();
     rememberActiveDocument();
     documentEditEpoch++;
     state.activeDocument = button.dataset.document;
