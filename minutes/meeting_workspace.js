@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.15.0
+Version: v1.15.1
 Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -95,6 +95,9 @@ function renderNotHeldState(){
  $('notHeldSources').replaceChildren();for(const[id,title]of sources){const b=document.createElement('button');b.type='button';b.className='btn btn-small';b.textContent='원본 회의 · '+title;b.onclick=()=>void openPackage(id).catch(e=>showToast(e.message));$('notHeldSources').append(b);}
  $('inheritedPdfList').replaceChildren();for(const row of state.pdfAttachments.filter(x=>x.inherited)){const b=document.createElement('button');b.type='button';b.className='btn btn-small';b.textContent='📎 '+row.title+' · 원본 연결';b.onclick=()=>void runAction(async()=>{const owner=pdfActionOwner(),r=await MeetingPackageService.createPdfAttachmentSignedUrl(row.storage_path);if(r.error)throw r.error;if(pdfActionStillCurrent(owner)&&r.data?.signedUrl)window.open(r.data.signedUrl,'_blank','noopener');});$('inheritedPdfList').append(b);}
  if(!closed)return;
+ $('agendaLockStatus').textContent='회의 무산 · 기록 보관';$('agendaLockStatus').title='미심의 안건은 다음 회의 준비에서 가져올 수 있습니다.';
+ $('documentEditStatus').textContent='무산된 회의의 원본 자료입니다.';
+ for(const id of ['editDocumentButton','takeDocumentEditButton','refreshDocumentEditButton'])$(id).hidden=true;
  const nodes=[...document.querySelectorAll('#editorBody input,#editorBody select,#editorBody textarea,#agendaList [data-agenda-action]'),...['deletePackageButton','saveInfoButton','saveAgendasButton','generateAllButton','saveDocumentButton','completeMaterialsButton','addAgendaButton','addPdfAttachmentButton','addChapterButton','deleteChapterButton','moveChapterUpButton','moveChapterDownButton','addBoardAnnexButton','discardBoardAnnexDraft','editDocumentButton','takeDocumentEditButton'].map($).filter(Boolean)];
  for(const node of nodes){if(!notHeldDisabled.has(node))notHeldDisabled.set(node,node.disabled);node.disabled=true;}
  $('documentEditor').contentEditable='false';$('chapterEditor').contentEditable='false';
