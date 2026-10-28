@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.17.0
-Change: 2026-10-27 - Independent board scripts and automatic notice locks for announced basics/titles.
+Version: v1.17.1
+Change: 2026-10-28 - Acquire the existing document lease when explicitly adding a board annex.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
@@ -144,7 +144,7 @@ function renderDocumentEditState() {
     if(!allowed||busy)$(id).disabled=true;
   }
   $('addChapterButton').disabled=busy||!allowed;
-  $('addBoardAnnexButton').disabled=busy||!allowed;
+  $('addBoardAnnexButton').disabled=busy||!['DRAFT','READY'].includes(state.current?.status);
   document.querySelectorAll('#boardAnnexLinks select,#boardAnnexLinks button').forEach(n=>n.disabled=busy||!allowed||n.dataset.edge==='true');
   $('documentEditConflict').hidden=!documentConflicts.has(documentEditKey());
   renderNotHeldState();
@@ -1547,7 +1547,19 @@ function currentBoardEditorHtml() {
 
 async function addBoardTextAnnex() {
   if (state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS') return;
-  if(!documentEditingAllowed())throw new Error('문서의 편집권을 먼저 확인해 주세요.');
+  if(!['DRAFT','READY'].includes(state.current.status))throw new Error('완료되거나 무산된 회의의 원본에는 별첨을 추가할 수 없습니다.');
+  const owner=pdfActionOwner(),epoch=documentEditEpoch,revision=boardAnnexRevision,values=JSON.stringify(boardAnnexValues());
+  const current=()=>pdfActionStillCurrent(owner)&&epoch===documentEditEpoch&&state.activeDocument==='MATERIALS'&&revision===boardAnnexRevision&&values===JSON.stringify(boardAnnexValues());
+  if(MeetingPackageService.documentEdits.hasPending(owner))throw new Error('이전 저장 결과를 먼저 확인한 뒤 별첨을 넣어 주세요.');
+  if(!$('boardAnnexTitle').value.trim()||!$('boardAnnexBody').value.trim())throw new Error('별첨 제목과 본문을 입력해 주세요.');
+  if(!documentEditingAllowed()){
+    await beginDocumentEdit(false);
+    if(!current())return;
+    if(!documentEditingAllowed())throw new Error(documentConflicts.has(documentEditKey())
+      ? '저장된 회의자료와 작성 중인 초안을 먼저 확인해 주세요.'
+      : '다른 담당자가 회의자료를 편집 중입니다. 편집이 끝나면 다시 넣어 주세요.');
+  }
+  if(!current())return;
   const editor = $('documentEditor');
   const title = $('boardAnnexTitle').value.trim();
   const body = $('boardAnnexBody').value.trim();
