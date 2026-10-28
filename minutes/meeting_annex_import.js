@@ -1,4 +1,4 @@
-/* v1.1.1 — Preserve the saved mixed text/PDF annex order when carrying forward. */
+/* v1.1.2 — Insert incremental imports using frozen source-relative positions. */
 const topAnnexes = root => [...root.querySelectorAll('.board-text-annex,.board-pdf-annex')]
   .filter(node => !node.parentElement.closest('.board-text-annex,.board-pdf-annex'));
 
@@ -59,14 +59,23 @@ export function listMeetingAnnexes(html, pdfs = [], { document, sanitizeHtml = v
   }
   // Older PDFs without an in-document position remain after the ordered annexes.
   for (const row of pdfs) if (!seenPdfs.has(row.id)) { result.push(pdf(row)); seenPdfs.add(row.id); }
-  return result;
+  return result.map((annex, sourceOrder) => ({ ...annex, sourceOrder }));
 }
 
-export function appendMeetingTextAnnexes(html, annexes, sourceId, { document, sanitizeHtml = value => value, agendaMap = {}, agendas = [], pdfs = [], uuid = () => crypto.randomUUID() } = {}) {
+export function appendMeetingTextAnnexes(html, annexes, sourceId, { document, sanitizeHtml = value => value, agendaMap = {}, agendas = [], pdfs = [], sourceOrder = [], uuid = () => crypto.randomUUID() } = {}) {
   const wrapper = document.createElement('div');
   wrapper.innerHTML = sanitizeHtml(html || '');
   const seen = new Set([...wrapper.querySelectorAll('[data-board-carry-source]')].map(node => node.dataset.boardCarrySource));
-  let number = Math.max(0, ...[...wrapper.querySelectorAll('.board-text-annex')].map(node => Number(node.dataset.boardAnnexNumber) || 0)), added = 0;
+  const positions = new Map(sourceOrder.map((id, index) => [id, index])), prefix = `${sourceId}:`;
+  for (const annex of annexes || []) if (!positions.has(annex.id) && Number.isSafeInteger(annex.sourceOrder) && annex.sourceOrder >= 0) positions.set(annex.id, annex.sourceOrder);
+  const position = node => {
+    const marker = node.dataset.boardCarrySource || '';
+    if (!marker.startsWith(prefix)) return undefined;
+    if (positions.has(marker.slice(prefix.length))) return positions.get(marker.slice(prefix.length));
+    const value = node.dataset.boardCarryOrder;
+    return /^\d+$/.test(value || '') && Number.isSafeInteger(Number(value)) ? Number(value) : undefined;
+  };
+  let number = Math.max(0, ...[...wrapper.querySelectorAll('.board-text-annex')].map(node => Number(node.dataset.boardAnnexNumber) || 0)), added = 0, orderReview = false;
   for (const annex of annexes || []) {
     const marker = `${sourceId}:${annex.id}`;
     if (seen.has(marker)) continue;
@@ -82,6 +91,8 @@ export function appendMeetingTextAnnexes(html, annexes, sourceId, { document, sa
     if (!node) continue;
     node.querySelectorAll('.board-annex-toggle').forEach(button => button.remove());node.classList.remove('is-collapsed');
     node.dataset.boardCarrySource = marker;node.dataset.boardAnnexNumber = String(++number);
+    delete node.dataset.boardCarryOrder;
+    if (positions.has(annex.id)) node.dataset.boardCarryOrder = String(positions.get(annex.id));
     // A source agenda ID is never valid as a target relationship by itself.
     const linked = annex.agendaId === 'common' ? 'common' : agendaMap[annex.agendaId];
     delete node.dataset.boardAgendaId;
@@ -93,8 +104,15 @@ export function appendMeetingTextAnnexes(html, annexes, sourceId, { document, sa
       if (!label) { label = document.createElement('span');heading.prepend(label); }
       label.textContent = `별첨 ${number}`;
     }
-    wrapper.append(node);seen.add(marker);added++;
+    const peers = topAnnexes(wrapper).filter(peer => (peer.dataset.boardCarrySource || '').startsWith(prefix) && (peer.dataset.boardAgendaId || '') === (node.dataset.boardAgendaId || ''));
+    const ranks = peers.map(position), at = position(node);
+    const ordered = at !== undefined && ranks.every((rank, i) => rank !== undefined && (!i || ranks[i - 1] <= rank));
+    if (ordered && peers.length) {
+      const after = peers.find((_, i) => ranks[i] > at);
+      if (after) after.before(node); else peers[peers.length - 1].after(node);
+    } else { wrapper.append(node);if (peers.length) orderReview = true; }
+    seen.add(marker);added++;
   }
   if (added && agendas.length) orderMeetingAnnexes(wrapper, agendas);
-  return { html:added ? wrapper.innerHTML : html, added };
+  return { html:added ? wrapper.innerHTML : html, added, orderReview };
 }

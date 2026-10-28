@@ -1,13 +1,13 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.17.2
-Change: 2026-10-28 - Acquire the existing document lease when explicitly adding a board annex.
+Version: v1.17.3
+Change: 2026-10-28 - Protect changed carry drafts and preserve incremental annex order.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.8.0';
-import { createMeetingNotHeld } from './meeting_not_held.js?v=1.2.1';
-import { listMeetingAnnexes, appendMeetingTextAnnexes, orderMeetingAnnexes, setMeetingAnnexLink, moveMeetingAnnex } from './meeting_annex_import.js?v=1.1.1';
+import { createMeetingNotHeld } from './meeting_not_held.js?v=1.2.2';
+import { listMeetingAnnexes, appendMeetingTextAnnexes, orderMeetingAnnexes, setMeetingAnnexLink, moveMeetingAnnex } from './meeting_annex_import.js?v=1.1.2';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.10';
 import { labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
@@ -82,14 +82,15 @@ const meetingNotHeld=createMeetingNotHeld({document,owner:pdfActionOwner,current
  dirty:()=>hasUnsavedPacketChanges(),notice:showToast,confirm:message=>window.CoopDialog.confirm(message),
  checkpoint:root=>window.ErpWorkspaceResume?.checkpoint(root),
  call:(action,owner,payload,key)=>MeetingPackageService.notHeld(action,owner,payload,key),
- done:async(owner,result,current,annexes)=>{if(!pdfActionStillCurrent(owner)||!current())return false;try{await loadPackages();if(!pdfActionStillCurrent(owner)||!current()||hasUnsavedPacketChanges())return false;const targetId=result.target_package||owner.packageId;await openPackage(targetId,{internal:true});if(state.current?.id!==targetId||state.session?.user?.id!==owner.userId||state.runtime?.coop_id!==owner.coopId||pdfIdentityRevision!==owner.identity||window.frameElement?.hidden)return false;const added=result.target_package?applyCarriedTextAnnexes(annexes,owner.packageId):0;if(added)showToast('선택한 별첨을 회의자료 초안에 넣었습니다. 내용을 확인하고 저장해 주세요.',4500);return true;}catch(_){if(pdfActionStillCurrent(owner)&&current())showToast('처리는 완료했지만 목록을 불러오지 못했습니다. 같은 창을 다시 열어 처리 결과를 확인해 주세요.',4800);return false;}}
+ done:async(owner,result,current,annexes,sourceOrder)=>{if(!pdfActionStillCurrent(owner)||!current())return false;try{await loadPackages();if(!pdfActionStillCurrent(owner)||!current()||hasUnsavedPacketChanges())return false;const targetId=result.target_package||owner.packageId;await openPackage(targetId,{internal:true});if(state.current?.id!==targetId||state.session?.user?.id!==owner.userId||state.runtime?.coop_id!==owner.coopId||pdfIdentityRevision!==owner.identity||window.frameElement?.hidden)return false;if(result.target_package)applyCarriedTextAnnexes(annexes,owner.packageId,sourceOrder);return true;}catch(_){if(pdfActionStillCurrent(owner)&&current())showToast('처리는 완료했지만 목록을 불러오지 못했습니다. 같은 창을 다시 열어 처리 결과를 확인해 주세요.',4800);return false;}}
 });
-function applyCarriedTextAnnexes(annexes,sourceId){
+function applyCarriedTextAnnexes(annexes,sourceId,sourceOrder=[]){
  const agendaMap=Object.fromEntries((state.notHeld?.carryovers||[]).filter(x=>x.source_package===sourceId).map(x=>[x.source_agenda,x.target_agenda]));
- const row=state.documents.get('MATERIALS')||{},next=appendMeetingTextAnnexes(row.content_html||'',annexes,sourceId,{document,sanitizeHtml,agendaMap,agendas:state.agendas,pdfs:state.pdfAttachments});
+ const row=state.documents.get('MATERIALS')||{},next=appendMeetingTextAnnexes(row.content_html||'',annexes,sourceId,{document,sanitizeHtml,agendaMap,agendas:state.agendas,pdfs:state.pdfAttachments,sourceOrder});
  if(!next.added)return 0;
  state.documents.set('MATERIALS',{...row,document_type:'MATERIALS',content_html:next.html,manually_edited:true});state.pendingDocuments.add('MATERIALS');
  if(state.activeDocument==='MATERIALS'){renderActiveDocument();state.documentDirty=true;}
+ showToast(next.orderReview?'별첨을 초안에 넣었습니다. 기존 순서는 유지했으니 별첨 연결·순서에서 추가된 위치를 확인해 주세요.':'선택한 별첨을 회의자료 초안에 넣었습니다. 내용을 확인하고 저장해 주세요.',next.orderReview?6000:4500);
  return next.added;
 }
 const notHeldDisabled=new Map();

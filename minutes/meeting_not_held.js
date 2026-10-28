@@ -1,4 +1,4 @@
-/* v1.2.1 — Preserve explicit annex exclusions and agendas-only choices. */
+/* v1.2.2 — Compare scoped draft values with their initial defaults. */
 export function createMeetingNotHeld(hooks) {
  const d=hooks.document||document, drafts=new Map();let view=null,epoch=0;
  const key=o=>JSON.stringify([o.userId,o.coopId,o.packageId]);
@@ -11,6 +11,8 @@ export function createMeetingNotHeld(hooks) {
  d.body.append(root);const $=id=>root.querySelector('#'+id),button=action=>root.querySelector('[data-nh="'+action+'"]');
  $('notHeldCarry').insertAdjacentHTML('beforeend',`<fieldset class="not-held-annex-choice" id="notHeldAnnexChoice" hidden><legend>별첨 자료도 함께 가져올까요?</legend><label class="official-choice"><input type="radio" name="notHeldAnnexMode" id="notHeldAnnexNo" checked><span>안건만 가져오기</span></label><label class="official-choice"><input type="radio" name="notHeldAnnexMode" id="notHeldAnnexYes"><span>별첨도 선택하기</span></label><div id="notHeldAnnexSelection" hidden><p>안건에 필요한 별첨을 골라 주세요. 별첨 글은 회의자료 초안에 넣고, PDF는 원본과 연결해요.</p><div class="top-actions"><button type="button" class="btn" data-nh="annex-all">별첨 전체 선택</button><button type="button" class="btn" data-nh="annex-none">별첨 전체 해제</button></div><div id="notHeldAnnexList"></div></div></fieldset>`);
  const status=text=>{$('notHeldStatus').textContent=text;};
+ const snapshot=r=>JSON.stringify(r.mode==='mark'?[r.eligible,r.attended,r.reason]:[r.target,r.number,r.title,[...r.selected].sort(),!!r.includeAnnex,[...(r.annexSelected||[])].sort()]);
+ const changed=r=>!!r.pending||!!r.result||(r.baseline!==undefined&&snapshot(r)!==r.baseline);
  function remember(){if(!view||view.row.pending)return;const r=view.row;r.eligible=$('notHeldEligible').value;r.attended=$('notHeldAttended').value;r.reason=$('notHeldReason').value;r.target=$('notHeldTarget').value;r.number=$('notHeldNumber').value;r.title=$('notHeldNewTitle').value;r.selected=[...root.querySelectorAll('[data-agenda]:checked')].map(n=>n.dataset.agenda);r.includeAnnex=$('notHeldAnnexYes').checked;r.annexSelected=[...root.querySelectorAll('[data-annex]:checked')].map(n=>n.dataset.annex);view.edits++;}
  function syncLinkedAnnexes(){
   if(!view||view.row.pending||view.busy)return;
@@ -40,6 +42,7 @@ export function createMeetingNotHeld(hooks) {
  async function open(mode,opener){close(false);const owner=hooks.owner(),pack=hooks.pack();if(!owner?.packageId||!pack||hooks.hidden())return;
   if(hooks.dirty()){hooks.notice('작성 중인 회의 내용은 먼저 저장해 주세요.');return;}
   const k=key(owner)+':'+mode;let row=drafts.get(k);if(!row){row={eligible:String(pack.eligible_count||''),attended:'',reason:'',target:'',number:'',title:'',selected:hooks.agendas().map(x=>x.id)};drafts.set(k,row);}
+  const wasClean=!changed(row);row.mode=mode;
   if(Number(pack.eligible_count)>0)row.eligible=String(pack.eligible_count);
   row.annexChoices ||= new Map();
   const annexes=mode==='carry'?(hooks.annexes?.()||[]).map(a=>({...a})):[];
@@ -48,6 +51,7 @@ export function createMeetingNotHeld(hooks) {
    row.annexSelected=annexes.filter(a=>linked?row.selected.includes(a.agendaId):!a.agendaId).map(a=>a.id);
    row.includeAnnex=linked;
   }
+  if(wasClean)row.baseline=snapshot(row);
   const v={owner,pack,row,mode,opener,annexes,sourceRevision:hooks.sourceRevision?.(),epoch:++epoch,busy:false,info:null,edits:0};view=v;
   $('notHeldTitle').textContent=mode==='mark'?'회의 무산 기록':'다음 회의 준비';$('notHeldMark').hidden=mode!=='mark';$('notHeldCarry').hidden=mode!=='carry';
   $('notHeldEligible').value=row.eligible;$('notHeldAttended').value=row.attended;$('notHeldReason').value=row.reason;$('notHeldNumber').value=row.number;$('notHeldNewTitle').value=row.title;
@@ -67,7 +71,7 @@ export function createMeetingNotHeld(hooks) {
   if(!same(v))return;status(v.mode==='mark'?'회의 무산 기록을 남겼습니다.':'미심의 안건을 다음 회의로 가져왔습니다.');
   close();const closedEpoch=epoch;
   const stillCurrent=()=>!view&&epoch===closedEpoch&&hooks.current(v.owner)&&!hooks.hidden();
-  if(await hooks.done(v.owner,result,stillCurrent,v.row.imports||[])!==false){drafts.delete(key(v.owner)+':'+v.mode);if(!view)hooks.checkpoint?.(root);}
+  if(await hooks.done(v.owner,result,stillCurrent,v.row.imports||[],v.row.importOrder||[])!==false){drafts.delete(key(v.owner)+':'+v.mode);if(!view)hooks.checkpoint?.(root);}
  }
  async function send(v){const p=v.row.pending;if(!p||!same(v))return;v.busy=true;status('처리 중입니다…');paint();try{
   const r=await hooks.call(p.action,v.owner,p.data,p.key);if(r.error)throw r.error;if(!r.data?.verified)throw new Error('MEETING_OUTCOME_RESULT_UNKNOWN');v.row.result=r.data;await complete(v,r.data);
@@ -95,7 +99,7 @@ export function createMeetingNotHeld(hooks) {
    if(same(v)&&(!d.activeElement||d.activeElement===d.body||d.activeElement===button('submit')))button('submit').focus({preventScroll:true});
    return;
   }
-  v.row.imports=chosen.map(a=>({...a}));v.row.pending={action:v.mode==='mark'?'mark':'carry',data,key:(hooks.uuid||(()=>crypto.randomUUID()))()};v.row.notFound=false;await send(v);
+  v.row.imports=chosen.map(a=>({...a}));v.row.importOrder=v.annexes.map(a=>a.id);v.row.pending={action:v.mode==='mark'?'mark':'carry',data,key:(hooks.uuid||(()=>crypto.randomUUID()))()};v.row.notFound=false;await send(v);
  }
  root.addEventListener('input',remember);root.addEventListener('change',event=>{if(event.target.matches('[data-agenda]'))syncLinkedAnnexes();else{
   if(view&&!view.busy&&!view.row.pending){
@@ -114,5 +118,5 @@ export function createMeetingNotHeld(hooks) {
   if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();close();return;}
   if(e.key==='Tab'){const list=[...root.querySelectorAll('button,input,select,textarea,a[href]')].filter(n=>!n.disabled&&!n.hidden&&!n.closest('[hidden]')&&n.getClientRects().length);if(!list.length)return;const at=list.indexOf(d.activeElement);e.preventDefault();e.stopPropagation();list[at<0?(e.shiftKey?list.length-1:0):(at+(e.shiftKey?-1:1)+list.length)%list.length].focus();}
  });
- return Object.freeze({open,close,invalidate:()=>close(false),hasDraft:()=>[...drafts.values()].some(r=>!!r.pending||r.attended!==''||r.reason!==''||r.title!==''||r.includeAnnex),root});
+ return Object.freeze({open,close,invalidate:()=>close(false),hasDraft:()=>[...drafts.values()].some(changed),root});
 }
