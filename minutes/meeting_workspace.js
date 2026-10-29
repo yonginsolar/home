@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.17.4
-Change: 2026-10-29 - Gate first entry and recover stalled meeting preparation reads.
+Version: v1.17.5
+Change: 2026-10-29 - Cancel stale New-meeting UI preparation and retain entry locks.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
@@ -279,6 +279,19 @@ function setMeetingEntryStatus(message = '', retry = false) {
 const newPackageDrafts = new Map();
 let newPackageDraftOwner = '', newPackageDraftKey = '', newPackageDraftBaseline = '';
 let newPackageDialogRevision = 0;
+let newPackagePreparation = null;
+
+function invalidateNewPackagePreparation() {
+  const request = newPackagePreparation;
+  if (!request) return;
+  newPackagePreparation = null;
+  newPackageDialogRevision++;
+  // Only a cancelled New read is invalidated; drafts and business writes stay intact.
+  meetingDefaultsRevision++;
+  meetingDefaultsReady = false; meetingHistoryReady = false;
+  meetingDefaultsPending = null; meetingHistoryPending = null;
+  request.cancel();
+}
 
 function newPackageOwnerKey() {
   return state.session?.user?.id && state.runtime?.coop_id
@@ -407,12 +420,25 @@ async function ensureMeetingDefaults({ history = false } = {}) {
 
 async function openNewPackage() {
   const revision = ++newPackageDialogRevision;
-  await ensureMeetingDefaults({ history:true });
-  if (revision !== newPackageDialogRevision || window.frameElement?.hidden) return;
-  activateNewPackageDraft();
-  const modal = $('newPackageModal'), wasOpen = modal.classList.contains('show');
-  modal.classList.add('show');
-  if (!wasOpen) $('newMeetingType').focus();
+  const owner = newPackageOwnerKey();
+  let cancel;
+  const cancelled = new Promise(resolve => { cancel = () => resolve(false); });
+  const request = {cancel};
+  newPackagePreparation = request;
+  const current = () => newPackagePreparation === request && revision === newPackageDialogRevision
+    && owner === newPackageOwnerKey() && !document.hidden && !window.frameElement?.hidden;
+  try {
+    const prepared = await Promise.race([ensureMeetingDefaults({history:true}).then(() => true), cancelled]);
+    if (!prepared || !current()) return;
+    activateNewPackageDraft();
+    const modal = $('newPackageModal'), wasOpen = modal.classList.contains('show');
+    modal.classList.add('show');
+    if (!wasOpen) $('newMeetingType').focus();
+  } catch (error) {
+    if (current()) throw error;
+  } finally {
+    if (newPackagePreparation === request) newPackagePreparation = null;
+  }
 }
 
 function numberFromMoney(value) {
@@ -685,6 +711,7 @@ function setBusy(value) {
   }
   syncNewPackageDraftUi();
   rememberBoardAnnexDraft();
+  $('newPackageButton').disabled = !meetingEntryReady || state.loading;
 }
 
 function hasUnsavedPacketChanges({ includeAnnex = true } = {}) {
@@ -2913,13 +2940,14 @@ function bindMeetingLifecycle() {
   window.setInterval(renderPackages, 60_000);
   window.setInterval(()=>{void refreshDocumentEditState();},25000);
   document.addEventListener('visibilitychange', () => {
-    if(document.hidden)freezeDocumentEditing();
+    if(document.hidden){invalidateNewPackagePreparation();freezeDocumentEditing();}
     else {renderPackages();void refreshDocumentEditState();}
   });
-  if(window.frameElement)new MutationObserver(()=>{
+  if(window.frameElement)new MutationObserver(records=>{
+    if(window.frameElement.hidden || records.some(record=>record.oldValue===null))invalidateNewPackagePreparation();
     if(window.frameElement.hidden)freezeDocumentEditing();else void refreshDocumentEditState();
-  }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
-  window.addEventListener('pagehide',freezeDocumentEditing);
+  }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+  window.addEventListener('pagehide',()=>{invalidateNewPackagePreparation();freezeDocumentEditing();});
 }
 
 function bindMeetingEntry() {
@@ -2931,6 +2959,7 @@ function bindMeetingEntry() {
     if (event === 'SIGNED_OUT' || (session?.user?.id && expected && session.user.id !== expected)) {
       meetingEntryRevision++; meetingEntryReady = false;
       setMeetingEntryStatus('로그인 상태가 바뀌었습니다. 다시 불러오기를 눌러 주세요.', true);
+      invalidateNewPackagePreparation();
       freezeDocumentEditing();
       pdfIdentityRevision++;
       meetingDefaultsRevision++;
