@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.65
-Change: 2026-10-28 - Scope candidate reads and retain independent administrator drafts.
+Version: v1.0.66
+Change: 2026-10-29 - Keyboard access for candidate member search results.
 -->
 <html lang="ko" data-election-ui="admin" data-election-role="admin">
 <head>
@@ -18,7 +18,7 @@ Change: 2026-10-28 - Scope candidate reads and retain independent administrator 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.65 | admin.html');</script>
+    <script>console.log('[Version] v1.0.66 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -618,6 +618,11 @@ Change: 2026-10-28 - Scope candidate reads and retain independent administrator 
         </div>
     </div>
 </div>
+<style>
+    #cand-search-result .candidate-member-result { display:block; width:100%; box-sizing:border-box; padding:10px; border:0; border-bottom:1px solid #eee; background:white; color:inherit; font:inherit; text-align:left; cursor:pointer; white-space:normal; word-break:keep-all; overflow-wrap:anywhere; }
+    #cand-search-result .candidate-member-result:hover { background:#eff6ff; }
+    #cand-search-result .candidate-member-result:focus-visible { outline:3px solid #2563eb; outline-offset:-3px; }
+</style>
 <div id="add-candidate-modal" class="modal-overlay">
         <div class="modal-content" style="max-width: 600px; text-align: left;">
             <span class="modal-title">➕ 후보자 직접 등록 (관리자 권한)</span>
@@ -5129,11 +5134,11 @@ window.searchCandidateMember = async () => {
             const memberTypeBadge = `<span style="display:inline-block; margin-left:6px; padding:1px 6px; border-radius:10px; font-size:0.75rem; background:${isOrganizationMemberType(m.member_type) ? '#dbeafe' : '#f3f4f6'}; color:${isOrganizationMemberType(m.member_type) ? '#1d4ed8' : '#4b5563'};">${memberTypeText}</span>`;
 
             html += `
-                <div style="padding:10px; border-bottom:1px solid #eee; cursor:pointer;" 
-                     onclick="selectCandidateMember('${safeUuid}', '${safeName}', '${safePhone}', '${safeAddr}', '${safeBirth}', '${safeMemberId}', '${safeMemberType}', '${safeCorpNumber}', '${safeBusinessNumber}')">
+                <button type="button" class="candidate-member-result"
+                     onclick="selectCandidateMember('${safeUuid}', '${safeName}', '${safePhone}', '${safeAddr}', '${safeBirth}', '${safeMemberId}', '${safeMemberType}', '${safeCorpNumber}', '${safeBusinessNumber}', event)">
                     <strong>${safeNameText}</strong>${memberTypeBadge} (${safePhoneText})<br>
                     <span style="font-size:0.8rem; color:#666;">조합원번호: ${safeMemberIdText} | ${safeAddrText}</span>
-                </div>`;
+                </button>`;
         });
 
         if (showCount === 0) {
@@ -5151,7 +5156,7 @@ window.searchCandidateMember = async () => {
 
 
 // [수정] 선택된 조합원 정보 저장 함수
-window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, memberType, corpNumber, businessNumber) => {
+window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, memberType, corpNumber, businessNumber, activationEvent) => {
     if(newCandidateOwner!==candidateDraftKey('NEW')||window.frameElement?.hidden||document.getElementById('add-candidate-modal').style.display==='none')return;
     const identitySnapshot = buildCandidateIdentitySnapshot({
         memberType,
@@ -5182,6 +5187,7 @@ window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, 
     // 검색 결과창 숨김
     document.getElementById('cand-search-result').style.display = 'none';
     newCandidateEpoch++;rememberNewCandidateDraft();
+    if(activationEvent?.detail===0&&activationEvent.currentTarget===document.activeElement)document.getElementById('new-cand-district').focus();
 }; // End of selectCandidateMember
 
 // [수정] 등록 직전 최종 중복 검증 로직 추가 (v1.0.3)

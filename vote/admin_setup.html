@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.23
-Change: 2026-10-21 - Published result view and unique-person turnout.
+Version: v1.0.24
+Change: 2026-10-29 - Current unassigned reads and keyboard member selection.
 -->
 <html lang="ko" data-election-ui="admin_setup" data-election-role="admin">
 <head>
@@ -21,7 +21,7 @@ Change: 2026-10-21 - Published result view and unique-person turnout.
     <meta name="election-term-version" content="1.1.0">
     <link rel="modulepreload" href="/vote/election_term.js?v=1.1.0" integrity="sha384-jO+llWE0vA0SmVki/uznt+LVFTYVYgDRHfP3nSN1GkYUnlgE39tn58cAsw58jLNt" crossorigin="anonymous">
     <link rel="modulepreload" href="/vote/election_term_planner.js?v=1.0.2" integrity="sha384-5ntbPvSwWChjLB0UPSeXH60paWFAK8CikRLl4+0DYbBm1yYNM33GmpFI1WVx3ogq" crossorigin="anonymous">
-    <script>console.log('[Version] v1.0.23 | admin_setup.html');</script>
+    <script>console.log('[Version] v1.0.24 | admin_setup.html');</script>
 
 <style>
     /* [기본 변수] */
@@ -131,6 +131,10 @@ Change: 2026-10-21 - Published result view and unique-person turnout.
     .member-item { display: flex; align-items: flex-start; /* 위쪽 정렬로 변경 */ padding: 10px; border-bottom: 1px solid #f3f4f6; cursor: pointer; transition: background 0.1s; }
     .member-item:hover { background: #f0f9ff; }
     .member-item.selected { background: #dbeafe; border-left: 4px solid var(--color-primary); }
+    button.member-item { width:100%; min-height:44px; box-sizing:border-box; border:0; border-bottom:1px solid #f3f4f6; background:white; color:inherit; font:inherit; text-align:left; }
+    button.member-item.selected { border-left:4px solid var(--color-primary); background:#dbeafe; }
+    button.member-item:focus-visible { outline:3px solid #2563eb; outline-offset:-3px; }
+    button.member-item .member-info { min-width:0; word-break:keep-all; overflow-wrap:anywhere; }
 
     .member-info { flex: 1; font-size: 0.9rem; line-height: 1.4; }
     .member-info strong { font-size: 0.95rem; color: #333; }
@@ -321,7 +325,7 @@ Change: 2026-10-21 - Published result view and unique-person turnout.
                                 <span id="total-member-count" style="font-size:0.8rem; color:#666;">0명</span>
                             </div>
                             <div style="padding:10px 10px 0 10px;">
-                                <input data-erp-query-control type="text" id="search-member" placeholder="이름, 번호, 주소..." class="search-box" onkeyup="filterMembers()">
+                                <input data-erp-query-control type="text" id="search-member" placeholder="이름, 번호, 주소..." class="search-box" oninput="filterMembers()">
                                 <div style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:5px;">
                                     <button onclick="filterUnassigned()" class="btn-control" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca;">⚡ 미배정 인원만</button>
                                     <button onclick="setFilter('수지')" class="btn-control" style="background:#eff6ff; color:#1d4ed8;">#수지</button>
@@ -329,6 +333,7 @@ Change: 2026-10-21 - Published result view and unique-person turnout.
                                     <button onclick="setFilter('처인')" class="btn-control" style="background:#eff6ff; color:#1d4ed8;">#처인</button>
                                     <button onclick="setFilter('')" class="btn-control" style="background:#f3f4f6; color:#333;">전체</button>
                                 </div>
+                                <div><span id="source-list-status" role="status" aria-live="polite"></span> <button id="source-list-retry" type="button" class="btn-control" onclick="filterUnassigned()" hidden>다시 확인</button></div>
                             </div>
                             <div id="source-list" class="panel-body"></div>
                             <div style="padding:10px; border-top:1px solid #eee;">
@@ -788,7 +793,7 @@ function escapeJsString(value) {
         allMembers = data;
         allMembersElectionId = requestedElectionId;
         document.getElementById('total-member-count').innerText = `${data.length}명 (정조합원)`;
-        renderSourceList(data);
+        window.filterMembers();
     }
 
 // [변수 추가] 현재 화면에 렌더링된 소스 리스트 (전체 선택용)
@@ -804,7 +809,9 @@ function escapeJsString(value) {
         document.getElementById('cb-select-all').checked = false;
 
         list.forEach(m => {
-            const div = document.createElement('div');
+            const div = document.createElement('button');
+            div.type = 'button';
+            div.setAttribute('aria-pressed', String(selectedMemberIds.has(m.id)));
             // 이미 선택된 상태면 클래스 추가
             div.className = `member-item ${selectedMemberIds.has(m.id) ? 'selected' : ''}`;
             div.onclick = () => toggleSelection(m.id, 'source', div);
@@ -817,10 +824,10 @@ function escapeJsString(value) {
             const addrStyle = m.address ? '' : ' style="color:#bbb;"';
 
             div.innerHTML = `
-                <div class="member-info">
+                <span class="member-info">
                     <strong>${safeName}</strong> <small>(${safeMemberId})</small>
                     <span class="member-address"${addrStyle}>🏠 ${safeAddr}</span>
-                </div>
+                </span>
             `;
             container.appendChild(div);
         });
@@ -835,51 +842,82 @@ function escapeJsString(value) {
 
             if (isChecked) {
                 selectedMemberIds.add(m.id);
-                if(el) el.classList.add('selected');
+                if(el) { el.classList.add('selected'); el.setAttribute('aria-pressed','true'); }
             } else {
                 selectedMemberIds.delete(m.id);
-                if(el) el.classList.remove('selected');
+                if(el) { el.classList.remove('selected'); el.setAttribute('aria-pressed','false'); }
             }
         });
     };
 
 // [수정] 미배정 인원 필터링 (비례대표 등록 여부는 무시하고, '지역구' 미배정만 찾음)
-    window.filterUnassigned = async () => {
-        // 1. 현재 선거구 캐시(districtsCache)에서 '지역구(is_common: false)'인 것들의 ID만 추출
-        const regionalDistIds = districtsCache
-            .filter(d => !d.is_common) // 비례대표 제외
-            .map(d => d.id);
-
-        if (regionalDistIds.length === 0) {
-            return window.showAlert('등록된 지역구가 없습니다.\n선거구 설정에서 지역구를 먼저 등록해 주세요.');
-        }
-
-        // 2. '지역구'에 등록된 유권자만 DB에서 조회 (비례대표 등록자는 조회 안 함)
-        const { data: assigned, error } = await scopeByTenant(
-            supabase.from('election_voters').select('member_uuid')
-        )
-            .eq('election_id', newElectionId)
-            .in('district_id', regionalDistIds); // 지역구 ID 목록에 포함된 사람만
-
-        if(error) return window.showAlert('데이터 조회 실패: ' + error.message);
-
-        // 3. Set으로 변환 (지역구 배정된 사람들의 ID 집합)
-        const assignedIds = new Set(assigned.map(v => v.member_uuid));
-
-        // 4. 전체 조합원 중 '지역구 배정자'가 아닌 사람만 필터링
-        // (비례대표에 있든 없든, 지역구에 없으면 뜹니다)
-        const unassignedMembers = allMembers.filter(m => !assignedIds.has(m.id));
-
-        // 5. 렌더링
-        renderSourceList(unassignedMembers);
-
-        // 안내 메시지
-        if (unassignedMembers.length === 0) {
-            window.showAlert("모든 조합원이 지역구에 배정되었습니다! 🎉");
-        } else {
-            window.showAlert(`지역구 미배정 인원: ${unassignedMembers.length}명 조회됨\n(비례대표 등록 여부는 무관합니다)`);
-        }
-    };
+    window.filterUnassigned = (() => {
+        let revision = 0, pending = null, identity = '';
+        const regions = () => [...new Set(districtsCache.filter(d=>!d.is_common).map(d=>d.id))].sort();
+        const keyword = () => document.getElementById('search-member').value.trim().toLowerCase();
+        const paint = (message = '', retry = false, busy = false) => {
+            const status=document.getElementById('source-list-status'),button=document.getElementById('source-list-retry');
+            if(status)status.textContent=message;
+            if(button){button.hidden=!retry;button.disabled=busy;}
+            document.getElementById('source-list').setAttribute('aria-busy',String(busy));
+        };
+        const invalidate = (interrupted = false) => {
+            revision++;
+            const old=pending;pending=null;old?.controller.abort();old?.stop?.();
+            if(!interrupted)paint();
+            else if(old)paint('미배정 명단을 다시 확인해 주세요.',true);
+        };
+        const read = () => {
+            const electionId=newElectionId,coopId=currentCoopId,members=allMembers,ids=regions(),term=keyword(),user=identity;
+            if(!user||!electionId||!coopId||document.hidden||window.frameElement?.hidden)return Promise.resolve();
+            if(!ids.length){invalidate();paint('등록된 지역구가 없습니다. 선거구를 먼저 등록해 주세요.');return Promise.resolve();}
+            const key=JSON.stringify([user,coopId,electionId,ids,term]);
+            if(pending?.key===key&&pending.members===members)return pending.promise;
+            invalidate();
+            const request={key,members,revision,controller:new AbortController(),timer:null,stop:null};
+            pending=request;
+            const current=()=>request.revision===revision&&user===identity&&coopId===currentCoopId&&electionId===newElectionId
+                &&members===allMembers&&term===keyword()&&JSON.stringify(ids)===JSON.stringify(regions())
+                &&!document.hidden&&!window.frameElement?.hidden&&document.getElementById('setup-section').style.display!=='none';
+            paint('미배정 인원을 확인하고 있어요…',false,true);
+            request.promise=(async()=>{
+                try {
+                    const deadline=new Promise((_,reject)=>{
+                        request.stop=()=>reject(new Error('READ_INTERRUPTED'));
+                        request.timer=setTimeout(()=>{request.controller.abort();reject(new Error('READ_TIMEOUT'));},15000);
+                    });
+                    const work=Promise.resolve().then(()=>{
+                        let query=scopeByTenant(supabase.from('election_voters').select('member_uuid'))
+                            .eq('election_id',electionId).in('district_id',ids);
+                        if(typeof query.abortSignal==='function')query=query.abortSignal(request.controller.signal);
+                        return query;
+                    });
+                    const {data:assigned,error}=await Promise.race([work,deadline]);
+                    if(!current())return;
+                    if(error||!Array.isArray(assigned))throw error||new Error('READ_FAILED');
+                    const assignedIds=new Set(assigned.map(v=>v.member_uuid));
+                    const unassigned=members.filter(m=>!assignedIds.has(m.id));
+                    const list=unassigned.filter(m=>['name','member_id','address','phone'].some(k=>String(m[k]??'').toLowerCase().includes(term)));
+                    renderSourceList(list);
+                    paint(list.length?`지역구 미배정 ${list.length}명`:unassigned.length?'검색 조건에 맞는 미배정 인원이 없습니다.':'모든 조합원이 지역구에 배정되어 있습니다.');
+                } catch (_) {
+                    if(current())paint('미배정 명단을 불러오지 못했어요. 다시 확인해 주세요.',true);
+                } finally {
+                    clearTimeout(request.timer);
+                    if(pending===request){pending=null;document.getElementById('source-list').setAttribute('aria-busy','false');}
+                }
+            })();
+            return request.promise;
+        };
+        read.invalidate=invalidate;
+        read.setIdentity=id=>{if(identity!==id){invalidate();identity=id||'';}};
+        supabase.auth?.onAuthStateChange?.((event,session)=>{
+            if(event==='SIGNED_OUT'||(session?.user?.id&&identity&&session.user.id!==identity))read.setIdentity('');
+        });
+        document.addEventListener('visibilitychange',()=>{if(document.hidden)invalidate(true);});
+        window.addEventListener('pagehide',()=>invalidate(true));
+        return read;
+    })();
 
     // [수정] 유권자 등록 (Alert -> ShowAlert, Confirm -> ShowConfirm 교체)
     window.addSelectedVoters = async () => {
@@ -979,6 +1017,7 @@ function escapeJsString(value) {
 
     // 필터 기능 (검색 & 버튼)
     window.filterMembers = () => {
+        window.filterUnassigned?.invalidate?.();
         const keyword = document.getElementById('search-member').value.trim().toLowerCase();
         const filtered = allMembers.filter(m => ['name','member_id','address','phone']
             .some(key => String(m[key] ?? '').toLowerCase().includes(keyword)));
@@ -1009,6 +1048,7 @@ function escapeJsString(value) {
         document.getElementById('target-list').setAttribute('aria-busy', String(phase === 'loading'));
     }
     function invalidateDistrictVoterRead() {
+        window.filterUnassigned?.invalidate?.(true);
         if (voterReadyKey) voterSelections.set(voterReadyKey, new Set(selectedVoterIds));
         ++voterReadVersion; voterReadAbort?.abort(); voterReadAbort = null;
         paintDistrictVoterRead('interrupted', '선거구 명부를 다시 확인해 주세요.');
@@ -1096,7 +1136,9 @@ function escapeJsString(value) {
         const container = document.getElementById('target-list');
         container.innerHTML = '';
         list.forEach(v => {
-            const div = document.createElement('div');
+            const div = document.createElement('button');
+            div.type = 'button';
+            div.setAttribute('aria-pressed', String(selectedVoterIds.has(v.id)));
             div.className = `member-item ${selectedVoterIds.has(v.id) ? 'selected' : ''}`;
             div.onclick = () => toggleSelection(v.id, 'target', div);
             const safeName = escapeHtml(v.member?.name || v.voter_name || '이름 미등록');
@@ -1104,9 +1146,9 @@ function escapeJsString(value) {
             const safeMemberType = escapeHtml(v.member?.member_type || v.voter_type || '');
             const memberTypeBadge = safeMemberType ? ` <small style="color:#6b7280;">[${safeMemberType}]</small>` : '';
             div.innerHTML = `
-                <div class="member-info">
+                <span class="member-info">
                     <strong>${safeName}</strong> <small>(${safeMemberId})</small>${memberTypeBadge}
-                </div>
+                </span>
             `;
             container.appendChild(div);
         });
@@ -1122,6 +1164,7 @@ function escapeJsString(value) {
             set.add(id);
             el.classList.add('selected');
         }
+        el.setAttribute('aria-pressed',String(set.has(id)));
     }
 
     // [편의 기능] 비례대표 전체 등록
@@ -1669,6 +1712,7 @@ window.resumeSetup = async (el) => {
             window.location.href = getErpIndexUrl(window.location.href);
             return;
         }
+        window.filterUnassigned.setIdentity(session.user.id);
 
         const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
             moduleKey: 'vote',
