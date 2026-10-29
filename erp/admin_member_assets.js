@@ -19,12 +19,12 @@
         integrity: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk'
     });
     const capitalImport = Object.freeze({
-        src: new URL('capital_excel_import.js?v=1.0.1', document.baseURI).href,
-        integrity: 'sha384-Wcp9ylSlUYVvCivA0TnfhgrWkDw7fu1QAxyj+avUZjzwcepmm0tSfgJAnStzQxyT'
+        src: new URL('capital_excel_import.js?v=1.0.2', document.baseURI).href,
+        integrity: 'sha384-XrWtBtzmRwAbX0DN2tR1ESwAk4iaDSTXspHSZm/kt+rufHCFBWadiampBxuyKP67'
     });
     const memberWorkbook = Object.freeze({
-        src: new URL('member_capital_workbook.js?v=1.1.5', document.baseURI).href,
-        integrity: 'sha384-RD/RVrHLiWKBiYrLEPb3xEUJCSqwbvUkNhc/MRgsky66KA+D+4FD5NxkGfLg6M84'
+        src: new URL('member_capital_workbook.js?v=1.1.6', document.baseURI).href,
+        integrity: 'sha384-do+lEjUs4rp/QpBFSV66Y3dwEyTTH5jNzOn3Q3PkFDY2oQlKqo/qCKJSkO/DBa2P'
     });
     const memberExcelEntry = Object.freeze({
         src: new URL('member_excel_entry.js?v=1.0.4', document.baseURI).href,
@@ -75,12 +75,12 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261025-cert-intent-1', do
     }
     function ensureSpreadsheet() { return ensureAsset('SPREADSHEET', spreadsheet, ready); }
     async function ensureCapitalImport() {
-        await ensureAsset('CAPITAL_IMPORT', capitalImport, () => root.CapitalExcelImport?.version === '1.0.1');
+        await ensureAsset('CAPITAL_IMPORT', capitalImport, () => root.CapitalExcelImport?.version === '1.0.2');
         return root.CapitalExcelImport;
     }
     async function ensureMemberWorkbook() {
         await ensureCapitalImport();
-        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.1.5');
+        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.1.6');
         return root.MemberCapitalWorkbook;
     }
     async function ensureMemberExcelEntry() {

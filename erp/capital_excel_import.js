@@ -1,4 +1,4 @@
-/* Capital Excel import v1.0.1. Distinguish denied checks, rejected writes and unresolved prior outcomes. */
+/* Capital Excel import v1.0.2. Preserve rejected-file reviews and scope late result guidance. */
 (function (root) {
  'use strict';
  const MAX_ROWS=500,MAX_BYTES=10*1024*1024;
@@ -115,16 +115,24 @@
    }
    if(focusedRow)Array.from(tbody.querySelectorAll('input')).find(n=>n.dataset.rowNo===focusedRow&&!n.disabled)?.focus({preventScroll:true});
   }
+  function restoreSelection(file) {
+   try{const transfer=new root.DataTransfer();if(file)transfer.items.add(file);input.files=transfer.files;}
+   catch(_){input.value='';}
+  }
   async function readFile() {
    const s=state;if(!s||!allowed(s)||blocked(s))return;
-   const file=input.files?.[0]||s.file;if(!file)return;stopRead();s.file=file;s.rows=[];s.attempt=null;s.phase='reading';s.message='파일을 읽는 중입니다…';s.dirty=true;const epoch=s.epoch;render();
+   const file=input.files?.[0]||s.file;if(!file)return;
+   if(file.size>MAX_BYTES||!/\.(xlsx|csv)$/i.test(file.name)){
+    stopRead();restoreSelection(s.file);s.message='10MB 이하의 엑셀(.xlsx) 또는 CSV 파일을 선택해 주세요.';render();return;
+   }
+   if(file!==s.file&&s.rows.length)s.fallback={file:s.file,rows:s.rows,phase:['reading','checking'].includes(s.phase)?'needs_check':s.phase,dirty:s.dirty};
+   stopRead();s.file=file;s.rows=[];s.attempt=null;s.phase='reading';s.message='파일을 읽는 중입니다…';s.dirty=true;const epoch=s.epoch;render();
    try {
-    if(file.size>MAX_BYTES||!/\.(xlsx|csv)$/i.test(file.name))throw Error('10MB 이하의 엑셀(.xlsx) 또는 CSV 파일을 선택해 주세요.');
     await ensureSpreadsheet();if(!same(s)||!allowed(s)||s.epoch!==epoch||!visible())return;
     const bytes=await file.arrayBuffer();if(!same(s)||!allowed(s)||s.epoch!==epoch||!visible())return;
     const wb=root.XLSX.read(bytes,{type:'array',raw:true,cellFormula:true,cellDates:false,sheetRows:10002});
-    s.rows=normalizeWorkbook(wb,root.XLSX);s.phase='needs_check';await checkRows(true);
-   } catch(error){if(same(s)&&s.epoch===epoch){s.phase='error';s.message=error.message||'파일을 읽지 못했습니다. 다시 선택해 주세요.';render();}}
+    s.rows=normalizeWorkbook(wb,root.XLSX);s.fallback=null;s.phase='needs_check';await checkRows(true);
+   } catch(error){if(same(s)&&s.epoch===epoch){if(s.fallback){Object.assign(s,s.fallback);s.fallback=null;restoreSelection(s.file);}else s.phase='error';s.message=/[가-힣]/.test(error.message||'')?error.message:'파일을 읽지 못했습니다. 양식과 파일을 확인하고 다시 선택해 주세요.';render();}}
   }
   async function checkRows(first=false) {
    const s=state;if(!s||!allowed(s)||blocked(s)||!visible())return;
@@ -165,7 +173,7 @@
     if(data?.outcome!=='saved'||data.count!==attempt.rows.length)throw Error('UNCONFIRMED');
     const completed=new Set(attempt.rows.map(r=>r.row_no));for(const r of s.rows)if(completed.has(r.input.row_no)){r.status='done';r.selected=false;}
     s.phase='saved';s.attempt=null;s.dirty=s.rows.some(r=>r.status!=='done');s.message=`출자금 ${data.count}건을 등록했습니다.`+(Number(data.pending_activation_count)>0?' 승인 대기 조합원은 가입 승인 목록에서 확인해 주세요.':'');if(!s.dirty)root.ErpWorkspaceResume?.checkpoint(input);render();
-    if(allowed(s)&&visible())try{if(await refresh?.()===false)throw Error('REFRESH');}catch(_){if(same(s)){s.message='출자금은 등록했습니다. 목록을 다시 불러와 주세요.';render();}}
+    if(allowed(s)&&visible())try{if(await refresh?.()===false)throw Error('REFRESH');}catch(_){if(same(s)&&s.epoch===epoch&&allowed(s)&&visible()){s.message='출자금은 등록했습니다. 목록을 다시 불러와 주세요.';render();}}
    }catch(error){if(same(s)){s.phase='uncertain';s.message=errorMessage(error,{action:'apply',uncertain:wasUncertain});render();}}
   }
   async function template() {
@@ -201,5 +209,5 @@
   }
   return '등록 결과를 확인하지 못했습니다. ‘등록 결과 확인’에서 이전 요청의 처리 여부를 확인하고 이어가 주세요.';
  }
- root.CapitalExcelImport=Object.freeze({version:'1.0.1',create,normalizeWorkbook,parseAmount,parseDate,errorMessage});
+ root.CapitalExcelImport=Object.freeze({version:'1.0.2',create,normalizeWorkbook,parseAmount,parseDate,errorMessage});
 })(window);

@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.1.5. Explicit permission/outcome guidance; preserve unresolved original requests. */
+/* Member/capital workbook 1.1.6. Keep late list/result guidance in its original review context. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -813,7 +813,7 @@
           if (!r.member_count && !r.payment_count) return;
           if ((await refresh?.()) === false) throw Error("REFRESH");
         } catch (_) {
-          if (same(s)) {
+          if (same(s) && s.epoch === epoch && allowed(s) && visible()) {
             s.message += " 목록은 다시 불러와 주세요.";
             render();
           }
@@ -836,7 +836,7 @@
         render();
       } finally {
         finishProgress(progress);
-        if (registrationProgress && resultNotice && same(s) && allowed(s) && visible()) {
+        if (registrationProgress && resultNotice && same(s) && s.epoch === epoch && allowed(s) && visible()) {
           await root.CoopDialog.alert(resultNotice, { title: s.phase === 'saved' ? '등록 완료' : s.phase === 'uncertain' ? '등록 여부 확인 필요' : '등록 결과' });
         }
       }
@@ -934,7 +934,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.1.5",
+    version: "1.1.6",
     create,
     parse,
     memberHeaders,
