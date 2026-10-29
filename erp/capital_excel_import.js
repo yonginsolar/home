@@ -1,4 +1,4 @@
-/* Capital Excel import v1.0.0. Local draft/preview only until explicit, server-checked confirmation. */
+/* Capital Excel import v1.0.1. Distinguish denied checks, rejected writes and unresolved prior outcomes. */
 (function (root) {
  'use strict';
  const MAX_ROWS=500,MAX_BYTES=10*1024*1024;
@@ -56,6 +56,11 @@
   const same=s=>state===s&&s.owner===context().owner;
   const allowed=s=>same(s)&&context().allowed===true;
   const visible=()=>!!modal?.classList.contains('show')&&!root.frameElement?.hidden;
+  function restoreSubmitFocus(wasFocused) {
+   if(!wasFocused||submit.disabled||!visible()||document.visibilityState==='hidden'||![document.body,modal,submit].includes(document.activeElement))return;
+   try{if(root.frameElement&&root.parent.document.activeElement!==root.frameElement)return;}catch(_){return;}
+   submit.focus({preventScroll:true});
+  }
   const blocked=s=>['confirming','saving','uncertain'].includes(s.phase);
   function stopRead() {
    if(!state)return;state.epoch++;state.abort?.abort();state.abort=null;
@@ -95,7 +100,7 @@
    const s=state,can=!!s&&allowed(s),busy=!!s&&blocked(s),reading=s&&['reading','checking'].includes(s.phase),ready=s?.rows.filter(r=>r.status==='ready')||[],selected=ready.filter(r=>r.selected);
    input.disabled=!can||busy;recheck.disabled=!can||busy||reading||!s?.file;clear.disabled=!can||busy||reading||!s?.file;filter.disabled=!s?.rows.length;
    all.disabled=!can||s?.phase!=='ready'||!ready.length;all.checked=!!ready.length&&selected.length===ready.length;all.indeterminate=!!selected.length&&selected.length<ready.length;
-   submit.textContent=s?.phase==='uncertain'?'같은 요청 다시 시도':'선택한 내역 등록';submit.disabled=!can||!['ready','uncertain'].includes(s?.phase)||(!selected.length&&s?.phase!=='uncertain');
+   submit.textContent=s?.phase==='uncertain'?'등록 결과 확인':'선택한 내역 등록';submit.disabled=!can||!['ready','uncertain'].includes(s?.phase)||(!selected.length&&s?.phase!=='uncertain');
    exportButton.disabled=!s?.rows.length||reading||s?.phase==='saving';
    status.textContent=s?.message||'';status.className='small mb-2 '+(s?.phase==='error'?'text-danger':s?.phase==='saved'?'text-success':'text-muted');
    const total=selected.reduce((sum,r)=>sum+BigInt(r.input.amount),0n);
@@ -138,26 +143,30 @@
     const byNo=new Map(data.rows.map(r=>[r.row_no,r]));
     for(const row of rows){const r=byNo.get(row.input.row_no);if(!r||!['ready','error','duplicate'].includes(r.status)||r.status==='ready'&&!r.expected)throw Error('검사 결과를 확인하지 못했습니다. 다시 검사해 주세요.');row.review=r;row.status=r.status;row.reason=r.reason||'';row.selected=r.status==='ready'&&(first||row.selected);}
     s.phase='ready';s.message='대상과 납입일·금액을 확인한 뒤 등록할 내역을 선택해 주세요.';
-   } catch(error){if(same(s)&&s.epoch===epoch){s.phase='error';s.message=error.code==='42501'?'현재 권한으로는 출자금을 일괄등록할 수 없습니다.':'검사 결과를 불러오지 못했습니다. 다시 검사해 주세요.';}}
+   } catch(error){if(same(s)&&s.epoch===epoch){s.phase='error';s.message=error.code==='42501'?errorMessage(error,{action:'preview'}):'검사 결과를 불러오지 못했습니다. 다시 검사해 주세요.';}}
    finally {clearTimeout(timer);if(same(s)&&s.epoch===epoch){s.abort=null;render();}}
   }
   async function save() {
    const s=state;if(!s||!allowed(s)||!visible()||!['ready','uncertain'].includes(s.phase))return;
    if(!s.attempt){const selected=s.rows.filter(r=>r.status==='ready'&&r.selected);if(!selected.length)return;s.attempt={key:root.crypto.randomUUID(),rows:selected.map(r=>({...r.input,member_id:r.review.member_id,name:r.review.name,expected:r.review.expected})),total:selected.reduce((sum,r)=>sum+BigInt(r.input.amount),0n).toString()};}
-   const attempt=s.attempt,epoch=s.epoch,wasUncertain=s.phase==='uncertain';s.retrying=wasUncertain;s.phase='confirming';render();
-   const yes=await root.CoopDialog.confirm(`${attempt.rows.length}건 / ${BigInt(attempt.total).toLocaleString('ko-KR')}원을 등록할까요?`,{title:'출자금 일괄등록',confirmText:'등록'});
+   const attempt=s.attempt,epoch=s.epoch,wasUncertain=s.phase==='uncertain',submitFocused=document.activeElement===submit;s.retrying=wasUncertain;s.phase='confirming';render();
+   const yes=await root.CoopDialog.confirm(wasUncertain?'이전 등록 결과를 확인하고, 아직 처리되지 않았다면 같은 요청으로 등록을 이어갈까요?':`${attempt.rows.length}건 / ${BigInt(attempt.total).toLocaleString('ko-KR')}원을 등록할까요?`,{title:'출자금 일괄등록',confirmText:wasUncertain?'확인 후 이어가기':'등록'});
    if(!same(s)||s.epoch!==epoch||!allowed(s)||!visible())return;
-   if(!yes){s.phase=wasUncertain?'uncertain':'ready';if(!wasUncertain)s.attempt=null;render();return;}
+   if(!yes){s.phase=wasUncertain?'uncertain':'ready';if(!wasUncertain)s.attempt=null;render();restoreSubmitFocus(submitFocused);return;}
    s.phase='saving';s.message='선택한 출자금을 등록하는 중입니다…';render();
    try {
     const {data,error}=await client.rpc('capital_import_admin',{p_action:'apply',p_coop_id:context().coopId,p_rows:attempt.rows,p_request_key:attempt.key});
     if(!same(s))return;
-    if(error){if(['PT409','22023','42501','55000'].includes(error.code)){s.phase='needs_check';s.attempt=null;s.message=error.code==='42501'?'현재 권한으로는 등록할 수 없습니다.': '내역이 달라졌습니다. 다시 검사해 주세요.';}else{s.phase='uncertain';s.message='등록 결과를 확인하지 못했습니다. 같은 요청으로 다시 시도해 주세요.';}render();return;}
+    if(error){
+     if(!wasUncertain&&['PT409','22023','42501','55000'].includes(error.code)){s.phase='needs_check';s.attempt=null;s.message=error.code==='42501'?errorMessage(error,{action:'apply'}):error.hint||'내역이 달라졌습니다. 다시 검사해 주세요.';}
+     else{s.phase='uncertain';s.message=errorMessage(error,{action:'apply',uncertain:wasUncertain});}
+     render();return;
+    }
     if(data?.outcome!=='saved'||data.count!==attempt.rows.length)throw Error('UNCONFIRMED');
     const completed=new Set(attempt.rows.map(r=>r.row_no));for(const r of s.rows)if(completed.has(r.input.row_no)){r.status='done';r.selected=false;}
     s.phase='saved';s.attempt=null;s.dirty=s.rows.some(r=>r.status!=='done');s.message=`출자금 ${data.count}건을 등록했습니다.`+(Number(data.pending_activation_count)>0?' 승인 대기 조합원은 가입 승인 목록에서 확인해 주세요.':'');if(!s.dirty)root.ErpWorkspaceResume?.checkpoint(input);render();
     if(allowed(s)&&visible())try{if(await refresh?.()===false)throw Error('REFRESH');}catch(_){if(same(s)){s.message='출자금은 등록했습니다. 목록을 다시 불러와 주세요.';render();}}
-   }catch(_){if(same(s)){s.phase='uncertain';s.message='등록 결과를 확인하지 못했습니다. 같은 요청으로 다시 시도해 주세요.';render();}}
+   }catch(error){if(same(s)){s.phase='uncertain';s.message=errorMessage(error,{action:'apply',uncertain:wasUncertain});render();}}
   }
   async function template() {
    const s=state;if(!s||!allowed(s))return;const epoch=s.epoch;
@@ -179,5 +188,18 @@
   }
   return Object.freeze({open,syncContext,clear:clearDraft});
  }
- root.CapitalExcelImport=Object.freeze({version:'1.0.0',create,normalizeWorkbook,parseAmount,parseDate});
+ function errorMessage(error,{action='preview',uncertain=false,subject='출자금'}={}) {
+  if(uncertain)return error?.code==='42501'
+   ?'현재 권한으로 이전 등록 결과를 확인할 수 없습니다. 조합 관리자에게 확인을 요청해 주세요.'
+   :'이전 등록 결과를 아직 확인하지 못했습니다. ‘등록 결과 확인’에서 같은 요청으로 이어가 주세요.';
+  if(error?.code==='42501'){
+   const reason=error.message==='ERP_OVERVIEW_FORBIDDEN'?'현재 조합의 ERP 접근 권한이 확인되지 않아'
+    :error.message==='MEMBER_WORKBOOK_FORBIDDEN'?'조합원 등록 권한이 없어'
+    :error.message==='CAPITAL_IMPORT_FORBIDDEN'?'출자금 등록 권한이 없어':subject+' 등록 권한을 확인하지 못해';
+   return reason+(action==='preview'?' 파일 검사를 진행하지 못했습니다. 조합 관리자에게 권한을 확인한 뒤 다시 검사해 주세요.'
+    :' 이번 등록 요청은 처리되지 않았습니다. 조합 관리자에게 권한을 확인한 뒤 다시 검사해 주세요.');
+  }
+  return '등록 결과를 확인하지 못했습니다. ‘등록 결과 확인’에서 이전 요청의 처리 여부를 확인하고 이어가 주세요.';
+ }
+ root.CapitalExcelImport=Object.freeze({version:'1.0.1',create,normalizeWorkbook,parseAmount,parseDate,errorMessage});
 })(window);

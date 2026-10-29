@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.1.4. Optional registration progress/result dialog; preserve exact-request retries. */
+/* Member/capital workbook 1.1.5. Explicit permission/outcome guidance; preserve unresolved original requests. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -499,7 +499,7 @@
       modal.querySelector('[data-export]').disabled = !can || busy || !(s?.data?.members.length || s?.data?.payments.length);
       submit.disabled = !can || (!ready(s) && s.phase !== "uncertain");
       submit.textContent =
-        registrationProgress ? "등록" : s?.phase === "uncertain" ? "같은 요청 다시 확인" : "등록 가능한 묶음 등록";
+        s?.phase === "uncertain" ? "등록 결과 확인" : registrationProgress ? "등록" : "등록 가능한 묶음 등록";
       status.textContent = s?.message || "";
       const eligibleMembers = s?.review?.members.filter(r => r.eligible === true).length || 0;
       const eligiblePayments = s?.review?.payments.filter(r => r.eligible === true).length || 0;
@@ -662,7 +662,7 @@
           s.phase = "needs_check";
           s.message =
             e.code === "42501"
-              ? "현재 권한으로는 등록할 수 없습니다."
+              ? root.CapitalExcelImport.errorMessage(e,{action:'preview',subject:s.data.payments.length?'출자금':'조합원'})
               : e.message || "다시 검사해 주세요.";
         }
       } finally {
@@ -743,22 +743,27 @@
           managerLinkCount: s.review.members.filter(r => r.eligible === true && r.email_resolution === "manager_link").length,
         };
       const attempt = s.attempt,
-        epoch = s.epoch;
+        epoch = s.epoch, wasUncertain=attempt.uncertain, submitFocused=document.activeElement===submit;
       s.phase = "confirming";
       render();
       const yes = await root.CoopDialog.confirm(
-        "신규 회원 " +
+        wasUncertain ? "이전 등록 결과를 확인하고, 아직 처리되지 않았다면 같은 요청으로 등록을 이어갈까요?" : "신규 회원 " +
           attempt.memberCount +
           "명과 납입 " +
           attempt.paymentCount +
           "건을 등록할까요?" + (attempt.emailClearedCount ? "\n개인 " + attempt.emailClearedCount + "명의 중복 이메일은 빈칸으로 등록합니다." : "") + (attempt.managerLinkCount ? "\n단체 " + attempt.managerLinkCount + "건은 같은 이메일의 개인을 관리자로 연결하고 단체 이메일은 비워 둡니다." : "") + (attempt.memberCount + attempt.paymentCount < attempt.payload.members.length + attempt.payload.payments.length ? "\n확인할 묶음은 검토 목록에 남습니다." : ""),
-        { title: "회원·출자금 등록", confirmText: "등록" },
+        { title: "회원·출자금 등록", confirmText: wasUncertain ? "확인 후 이어가기" : "등록" },
       );
       if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible()) return;
       if (!yes) {
         s.phase = attempt.uncertain ? "uncertain" : "ready";
         if (!attempt.uncertain) s.attempt = null;
         render();
+        if(submitFocused&&!submit.disabled&&visible()&&document.visibilityState!=='hidden'&&[document.body,modal,submit].includes(document.activeElement)){
+          let activeFrame=true;
+          try{if(root.frameElement)activeFrame=root.parent.document.activeElement===root.frameElement;}catch(_){activeFrame=false;}
+          if(activeFrame)submit.focus({preventScroll:true});
+        }
         return;
       }
       s.phase = "saving";
@@ -815,16 +820,17 @@
         }
       } catch (e) {
         if (!same(s)) return;
-        if (["22023", "PT409", "42501", "55000"].includes(e.code)) {
+        if (!wasUncertain && ["22023", "PT409", "42501", "55000"].includes(e.code)) {
           s.attempt = null;
           s.phase = "needs_check";
           s.review = null;
-          s.message = e.hint || "입력이나 현재 상태를 다시 검사해 주세요.";
+          s.message = e.code==='42501'?root.CapitalExcelImport.errorMessage(e,{action:'apply',subject:s.data.payments.length?'출자금':'조합원'})
+            :e.hint || "입력이나 현재 상태를 다시 검사해 주세요.";
         } else {
           attempt.uncertain = true;
           s.phase = "uncertain";
           s.message =
-            registrationProgress ? "등록 결과를 확인하지 못했습니다. ‘등록’을 눌러 처리 여부를 확인해 주세요." : "등록 결과를 확인하지 못했습니다. 같은 요청 다시 확인을 눌러 주세요.";
+            root.CapitalExcelImport.errorMessage(e,{action:'apply',uncertain:wasUncertain});
         }
         resultNotice = s.message;
         render();
@@ -928,7 +934,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.1.4",
+    version: "1.1.5",
     create,
     parse,
     memberHeaders,
