@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.17.5
-Change: 2026-10-29 - Cancel stale New-meeting UI preparation and retain entry locks.
+Version: v1.17.6
+Change: 2026-10-29 - Bound and recover current meeting detail reads while preserving drafts.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
@@ -258,6 +258,23 @@ let meetingHistoryReady = false;
 let meetingDefaultsRevision = 0;
 let meetingEntryPending = null, meetingEntryRevision = 0, meetingEntryReady = false;
 let meetingEventsBound = false, meetingLifecycleBound = false;
+let meetingDetailRead = null, meetingDetailRevision = 0, meetingDetailRetry = null;
+
+function meetingDetailOwner() {
+  return JSON.stringify([state.session?.user?.id,state.runtime?.coop_id,pdfIdentityRevision]);
+}
+function setMeetingDetailStatus(message = '', retry = null) {
+  meetingDetailRetry = retry;
+  $('meetingDetailStatus').hidden = !message;
+  $('meetingDetailMessage').textContent = message;
+  $('retryMeetingDetail').hidden = !retry;
+  $('retryMeetingDetail').disabled = !retry || !meetingEntryReady || state.loading;
+}
+function invalidateMeetingDetailRead() {
+  meetingDetailRevision++;
+  meetingDetailRead?.cancel();
+  setMeetingDetailStatus();
+}
 
 function boundedMeetingRead(work) {
   let timer;
@@ -2390,19 +2407,43 @@ async function printCurrentChapter() {
 }
 
 async function openPackage(id, { internal = false } = {}) {
+  if(meetingDetailRead){
+    if(meetingDetailRead.id===id&&meetingDetailRead.owner===meetingDetailOwner())return meetingDetailRead.promise;
+    if(!internal)return;
+    invalidateMeetingDetailRead();await meetingDetailRead?.promise;
+  }
   if (state.loading && !internal) return;
+  const openingOwner=meetingDetailOwner(),openingRevision=meetingDetailRevision;
   rememberBoardAnnexDraft();
   if (hasUnsavedPacketChanges({includeAnnex:false}) && !(await window.CoopDialog.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?'))) return;
+  if(openingOwner!==meetingDetailOwner()||openingRevision!==meetingDetailRevision||window.frameElement?.hidden)return;
   window.clearTimeout(state.autoDraftTimer);
   meetingNotHeld.invalidate();
+  const request={id,owner:openingOwner,revision:++meetingDetailRevision,promise:null,cancel:null};
+  const cancelled=Symbol('cancelled'),stop=new Promise(resolve=>{request.cancel=()=>resolve(cancelled);});
+  const current=()=>meetingDetailRead===request&&request.revision===meetingDetailRevision
+    &&request.owner===meetingDetailOwner()&&!window.frameElement?.hidden&&!document.hidden;
+  meetingDetailRead=request;
+  setMeetingDetailStatus('회의 자료를 불러오고 있어요…');
   setBusy(true);
+  request.promise=(async()=>{
   try {
-    const owner = { userId:state.session?.user?.id, coopId:state.runtime?.coop_id, identity:pdfIdentityRevision };
-    const [{ data, error }] = await Promise.all([MeetingPackageService.getPackage(id), ensureMeetingDefaults()]);
-    if (error) throw error;
-    if (!data?.package) throw new Error('회의 준비 자료를 찾을 수 없습니다.');
-    if (state.session?.user?.id !== owner.userId || state.runtime?.coop_id !== owner.coopId
-      || pdfIdentityRevision !== owner.identity || window.frameElement?.hidden) return;
+    const result=await Promise.race([boundedMeetingRead(async()=>{
+      const [{data,error}]=await Promise.all([MeetingPackageService.getPackage(id),ensureMeetingDefaults()]);
+      if(!current())return null;
+      if(error)throw error;
+      if(!data?.package)throw new Error('회의 준비 자료를 찾을 수 없습니다.');
+      // Prepare all read-only sources before replacing the last confirmed editor.
+      let sourceContext=null,auditChangeRequests=[];
+      if(data.package.meeting_type==='GENERAL_ASSEMBLY'&&data.package.assembly_kind!=='EXTRAORDINARY'){
+        const [source,changes]=await Promise.all([MeetingPackageService.getAssemblySources(id),MeetingPackageService.listAuditChangeRequests(id)]);
+        if(source.error||changes.error)throw source.error||changes.error;
+        sourceContext=source.data||null;auditChangeRequests=changes.data||[];
+      }
+      return {data,sourceContext,auditChangeRequests};
+    }),stop]);
+    if(result===cancelled||!current())return;
+    const {data,sourceContext,auditChangeRequests}=result;
     restoreNotHeldControls();
     state.current = data.package;
     documentEditEpoch++;
@@ -2416,8 +2457,8 @@ async function openPackage(id, { internal = false } = {}) {
       ? reusableChairStyle(state.documents.get('SCENARIO')?.content_html || state.documents.get('SCENARIO_SECRETARIAT')?.content_html, data.package)
       : null;
     state.pdfAttachments = data.pdfAttachments || [];
-    state.sourceContext = null;
-    state.auditChangeRequests = [];
+    state.sourceContext = sourceContext;
+    state.auditChangeRequests = auditChangeRequests;
     state.activeDocument = 'MATERIALS';
     resetPacketDirty();
     state.auditDraftDirty = false;
@@ -2426,7 +2467,6 @@ async function openPackage(id, { internal = false } = {}) {
     renderEditorHeader();
     fillInfoForm();
     renderAgendaList();
-    await loadAssemblySources();
     refreshAutoDrafts({ render: false });
     renderActiveDocument();
     void refreshDocumentEditState();
@@ -2434,9 +2474,19 @@ async function openPackage(id, { internal = false } = {}) {
     renderPackages();
     renderNotHeldState();
     if (isPastPackage(state.current)) $('pastMeetings').open = true;
+    setMeetingDetailStatus();
+  } catch(error) {
+    if(current())setMeetingDetailStatus(error?.code==='MEETING_READ_TIMEOUT'
+      ?'조회 시간이 길어지고 있어요. 다시 확인해 주세요.'
+      :'회의 자료를 불러오지 못했어요. 다시 확인해 주세요.',{id,owner:request.owner,revision:request.revision});
   } finally {
-    setBusy(false);
+    if(meetingDetailRead===request){
+      meetingDetailRead=null;setBusy(false);
+      $('retryMeetingDetail').disabled=!meetingDetailRetry||!meetingEntryReady;
+    }
   }
+  })();
+  return request.promise;
 }
 
 async function createPackage() {
@@ -2734,6 +2784,11 @@ async function runAction(action) {
 }
 
 function bindEvents() {
+  $('retryMeetingDetail').addEventListener('click',()=>{
+    const retry=meetingDetailRetry;
+    if(!retry||state.loading||!meetingEntryReady||retry.owner!==meetingDetailOwner()||retry.revision!==meetingDetailRevision)return;
+    void openPackage(retry.id);
+  });
   $('markNotHeldButton').addEventListener('click',e=>void meetingNotHeld.open('mark',e.currentTarget));
   $('carryAgendasButton').addEventListener('click',e=>void meetingNotHeld.open('carry',e.currentTarget));
   $('viewNotHeldButton').addEventListener('click',()=>{if(state.current?.published_minute_id)window.open('/minutes/minutes_view?minuteId='+encodeURIComponent(state.current.published_minute_id),'_blank','noopener');});
@@ -2940,14 +2995,14 @@ function bindMeetingLifecycle() {
   window.setInterval(renderPackages, 60_000);
   window.setInterval(()=>{void refreshDocumentEditState();},25000);
   document.addEventListener('visibilitychange', () => {
-    if(document.hidden){invalidateNewPackagePreparation();freezeDocumentEditing();}
+    if(document.hidden){invalidateNewPackagePreparation();invalidateMeetingDetailRead();freezeDocumentEditing();}
     else {renderPackages();void refreshDocumentEditState();}
   });
   if(window.frameElement)new MutationObserver(records=>{
-    if(window.frameElement.hidden || records.some(record=>record.oldValue===null))invalidateNewPackagePreparation();
+    if(window.frameElement.hidden || records.some(record=>record.oldValue===null)){invalidateNewPackagePreparation();invalidateMeetingDetailRead();}
     if(window.frameElement.hidden)freezeDocumentEditing();else void refreshDocumentEditState();
   }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
-  window.addEventListener('pagehide',()=>{invalidateNewPackagePreparation();freezeDocumentEditing();});
+  window.addEventListener('pagehide',()=>{invalidateNewPackagePreparation();invalidateMeetingDetailRead();freezeDocumentEditing();});
 }
 
 function bindMeetingEntry() {
@@ -2960,6 +3015,7 @@ function bindMeetingEntry() {
       meetingEntryRevision++; meetingEntryReady = false;
       setMeetingEntryStatus('로그인 상태가 바뀌었습니다. 다시 불러오기를 눌러 주세요.', true);
       invalidateNewPackagePreparation();
+      invalidateMeetingDetailRead();
       freezeDocumentEditing();
       pdfIdentityRevision++;
       meetingDefaultsRevision++;

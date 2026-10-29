@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.24
-Change: 2026-10-29 - Current unassigned reads and keyboard member selection.
+Version: v1.0.25
+Change: 2026-10-29 - Preserve newer district input after delayed saves.
 -->
 <html lang="ko" data-election-ui="admin_setup" data-election-role="admin">
 <head>
@@ -293,6 +293,7 @@ Change: 2026-10-29 - Current unassigned reads and keyboard member selection.
                             <button onclick="addDistrict()" id="btn-add-dist" style="width:100%; padding:10px; background:#4b5563; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
                                 + 선거구 추가
                             </button>
+                            <p id="district-save-status" role="status" aria-live="polite" style="line-height:1.6;overflow-wrap:anywhere;"></p>
                         </div>
                     </div>
                 </div>
@@ -482,6 +483,28 @@ function escapeJsString(value) {
     const adminService = new AdminService();
     let isAuthChecking = false;
     let editingDistrictId = null;
+    let districtSavePending = null, districtSaveIdentity = '', districtSaveEpoch = 0, districtFormRevision = 0;
+    function districtSaveOwner() {
+        return JSON.stringify([districtSaveIdentity,currentCoopId,newElectionId,districtSaveEpoch]);
+    }
+    function districtFormValues() {
+        return JSON.stringify(['dist-name','dist-code','dist-quota','dist-type'].map(id=>document.getElementById(id).value)
+            .concat(document.getElementById('dist-is-common').checked));
+    }
+    function invalidateDistrictSaveView() {
+        districtSaveEpoch++;
+        document.getElementById('district-save-status').textContent = '';
+    }
+    for(const id of ['dist-name','dist-code','dist-quota','dist-type','dist-is-common']){
+        for(const event of ['input','change'])document.getElementById(id).addEventListener(event,()=>{districtFormRevision++;});
+    }
+    supabase.auth?.onAuthStateChange?.((event,session)=>{
+        if(event==='SIGNED_OUT'||(session?.user?.id&&districtSaveIdentity&&session.user.id!==districtSaveIdentity)){
+            districtSaveIdentity='';invalidateDistrictSaveView();
+        }
+    });
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)invalidateDistrictSaveView();});
+    window.addEventListener('pagehide',invalidateDistrictSaveView);
     // [전역 변수 추가]
     let allMembers = [];      // 전체 조합원 캐시
     let allMembersElectionId = null;
@@ -622,9 +645,11 @@ function escapeJsString(value) {
     // -----------------------------------------------------------
 
     // 선거구 추가/수정 함수
-    window.addDistrict = async () => {
+    window.addDistrict = () => {
+        if(districtSavePending)return districtSavePending.promise;
         if(!newElectionId) return window.showAlert('먼저 선거 기본 설정을 저장해 주세요.');
         if (!ensureTenantContext('선거구 저장')) return;
+        if(!districtSaveIdentity)return window.showAlert('로그인 상태를 다시 확인해 주세요.');
 
         const name = document.getElementById('dist-name').value.trim();
         const code = document.getElementById('dist-code').value.trim();
@@ -641,17 +666,22 @@ function escapeJsString(value) {
             is_common: isCommon
         };
 
-        let resultData = null;
-
+        const target=editingDistrictId,owner=districtSaveOwner(),revision=districtFormRevision,values=districtFormValues();
+        const current=()=>owner===districtSaveOwner()&&!document.hidden&&!window.frameElement?.hidden
+            &&document.getElementById('setup-section').style.display!=='none';
+        const sameInput=()=>target===editingDistrictId&&revision===districtFormRevision&&values===districtFormValues();
+        const request={promise:null};districtSavePending=request;
+        const button=document.getElementById('btn-add-dist');button.disabled=true;
+        document.getElementById('district-save-status').textContent='저장하고 있어요…';
+        request.promise=Promise.resolve().then(async()=>{
+        try {
         // [수정 모드]
-        if (editingDistrictId) {
+        if (target) {
             const { data, error } = await scopeByTenant(
                 supabase.from('districts').update(withTenantPayload(payload))
-            ).eq('id', editingDistrictId).select().single();
-            if(error) return window.showAlert('수정 실패: ' + error.message);
-            resultData = data;
-            window.showAlert('수정되었습니다.');
-            clearDistrictInputs(); // 초기화
+            ).eq('id', target).select().single();
+            if(error) throw error;
+            if(!data)throw new Error('저장 결과를 확인하지 못했습니다.');
         }
         // [추가 모드]
         else {
@@ -659,17 +689,35 @@ function escapeJsString(value) {
             const duplicate = districtsCache.find(d => d.code === code);
             if (duplicate) {
                 if (!editingDistrictId || (editingDistrictId && duplicate.id !== editingDistrictId)) {
-                    return window.showAlert('이미 존재하는 코드입니다.');
+                    throw new Error('이미 존재하는 코드입니다.');
                 }
             }
 
             const { data, error } = await supabase.from('districts')
                 .insert(withTenantPayload(payload)).select().single();
-            if(error) return window.showAlert('추가 실패: ' + error.message);
-            resultData = data;
+            if(error) throw error;
+            if(!data)throw new Error('저장 결과를 확인하지 못했습니다.');
         }
-
-        await loadDistrictsList(); // 리스트 갱신
+        if(!current())return;
+        if(sameInput()){
+            if(target)clearDistrictInputs();
+            document.getElementById('district-save-status').textContent='저장했어요.';
+        }else if(target===editingDistrictId){
+            document.getElementById('district-save-status').textContent='저장했어요. 이후에 수정한 내용은 아직 저장되지 않았어요.';
+        }else document.getElementById('district-save-status').textContent='';
+        try{await loadDistrictsList(current);}catch(_){
+            if(current()&&target===editingDistrictId)document.getElementById('district-save-status').textContent=
+                '저장했지만 목록을 불러오지 못했어요. 목록을 다시 확인해 주세요.';
+        }
+        }catch(error){
+            if(current()&&target===editingDistrictId)document.getElementById('district-save-status').textContent=
+                error?.code==='23505'||error?.message==='이미 존재하는 코드입니다.'?'이미 존재하는 선거구 코드입니다. 코드를 확인해 주세요.'
+                :'저장을 확인하지 못했어요. 입력을 유지했으니 결과를 확인해 주세요.';
+        }finally{
+            if(districtSavePending===request){districtSavePending=null;button.disabled=!districtSaveIdentity;}
+        }
+        });
+        return request.promise;
     };
 
 
@@ -678,7 +726,8 @@ function escapeJsString(value) {
         const d = districtsCache.find(x => x.id === id);
         if(!d) return;
 
-        editingDistrictId = id;
+        districtFormRevision++;editingDistrictId = id;
+        document.getElementById('district-save-status').textContent='';
         document.getElementById('dist-name').value = d.name;
         document.getElementById('dist-code').value = d.code;
         document.getElementById('dist-quota').value = d.quota;
@@ -704,10 +753,10 @@ function escapeJsString(value) {
     };
 
     // [수정] 선거구 리스트 조회 및 렌더링 (Step 3 연동 강화)
-    async function loadDistrictsList() {
+    async function loadDistrictsList(stillCurrent = () => true) {
         if(!newElectionId) return;
         const electionId=newElectionId,coopId=currentCoopId,ticket=++districtReadVersion;
-        const current=()=>ticket===districtReadVersion&&electionId===newElectionId&&coopId===currentCoopId;
+        const current=()=>stillCurrent()&&ticket===districtReadVersion&&electionId===newElectionId&&coopId===currentCoopId;
         const { data, error } = await scopeByTenant(
             supabase.from('districts').select('*')
         ).eq('election_id', electionId).order('created_at');
@@ -1492,6 +1541,7 @@ function addButtonsToLi(container, id, name, code, quota, type) {
 
 // [전역 함수] 입력창 및 수정 모드 초기화 헬퍼
 function clearDistrictInputs() {
+    districtFormRevision++;
     document.getElementById('dist-name').value = '';
     document.getElementById('dist-code').value = '';
     document.getElementById('dist-quota').value = '1';
@@ -1766,6 +1816,7 @@ window.resumeSetup = async (el) => {
                 goToErpVoteHub();
                 return;
             }
+            districtSaveIdentity=session.user.id;
 
             // 3. [성공] 대시보드 화면 표시
             if (globalThis.ExpoRuntimeBridge) {
@@ -1969,9 +2020,11 @@ window.createElection = async () => {
         document.getElementById('history-modal').style.display = 'none';
     };
 
-    if (window.frameElement) new MutationObserver(() => {
+    if (window.frameElement) new MutationObserver(records => {
         if (window.frameElement.hidden) invalidateDistrictVoterRead();
-    }).observe(window.frameElement, {attributes:true,attributeFilter:['hidden']});
+        if(window.frameElement.hidden||records.some(record=>record.oldValue===null))invalidateDistrictSaveView();
+    }).observe(window.frameElement, {attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+    new MutationObserver(()=>invalidateDistrictSaveView()).observe(document.getElementById('setup-section'),{attributes:true,attributeFilter:['style']});
     init();
 </script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
