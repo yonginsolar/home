@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.17.3
-Change: 2026-10-28 - Protect changed carry drafts and preserve incremental annex order.
+Version: v1.17.4
+Change: 2026-10-29 - Gate first entry and recover stalled meeting preparation reads.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
@@ -256,6 +256,26 @@ let meetingDefaultsReady = false;
 let meetingHistoryPending = null;
 let meetingHistoryReady = false;
 let meetingDefaultsRevision = 0;
+let meetingEntryPending = null, meetingEntryRevision = 0, meetingEntryReady = false;
+let meetingEventsBound = false, meetingLifecycleBound = false;
+
+function boundedMeetingRead(work) {
+  let timer;
+  return Promise.race([Promise.resolve().then(work), new Promise((_, reject) => {
+    timer = window.setTimeout(() => {
+      const error = new Error('조회 시간이 길어지고 있습니다. 다시 시도해 주세요.');
+      error.code = 'MEETING_READ_TIMEOUT'; reject(error);
+    }, 15000);
+  })]).finally(() => window.clearTimeout(timer));
+}
+
+function setMeetingEntryStatus(message = '', retry = false) {
+  $('meetingEntryStatus').hidden = !message;
+  $('meetingEntryMessage').textContent = message;
+  $('retryMeetingEntry').hidden = !retry;
+  $('retryMeetingEntry').disabled = !retry;
+  $('newPackageButton').disabled = !meetingEntryReady || state.loading;
+}
 const newPackageDrafts = new Map();
 let newPackageDraftOwner = '', newPackageDraftKey = '', newPackageDraftBaseline = '';
 let newPackageDialogRevision = 0;
@@ -358,9 +378,9 @@ async function ensureMeetingDefaults({ history = false } = {}) {
     identity:pdfIdentityRevision, revision:meetingDefaultsRevision };
   if (!meetingDefaultsReady && !meetingDefaultsPending) {
     const request = (async () => {
-      const [officials, company] = await Promise.all([
+      const [officials, company] = await boundedMeetingRead(() => Promise.all([
         MinutesService.getOfficials({ strict:true }), MinutesService.getCompanyInfo()
-      ]);
+      ]));
       if (company.error) throw company.error;
       if (!meetingDefaultsStillCurrent(owner)) throw new Error('현재 회의 화면에서 다시 불러와 주세요.');
       state.officials = officials || [];
@@ -372,7 +392,7 @@ async function ensureMeetingDefaults({ history = false } = {}) {
   }
   if (history && !meetingHistoryReady && !meetingHistoryPending) {
     const request = (async () => {
-      const result = await MeetingPackageService.listMeetingHistory();
+      const result = await boundedMeetingRead(() => MeetingPackageService.listMeetingHistory());
       if (result.error) throw result.error;
       if (!meetingDefaultsStillCurrent(owner)) throw new Error('현재 회의 화면에서 다시 불러와 주세요.');
       state.meetingHistory = result.data || [];
@@ -2698,7 +2718,8 @@ function bindEvents() {
   $('keepDocumentDraftButton').addEventListener('click',()=>runAction(keepDocumentDraft));
   for(const id of ['documentEditor','chapterEditor'])$(id).addEventListener('beforeinput',event=>{if(!documentEditingAllowed())event.preventDefault();});
   $('backToDocuments').addEventListener('click', () => { location.href = '../erp/governance.html'; });
-  $('newPackageButton').addEventListener('click', () => runAction(openNewPackage));
+  $('newPackageButton').addEventListener('click', () => { if (meetingEntryReady) void runAction(openNewPackage); });
+  $('retryMeetingEntry').addEventListener('click', () => { void init(); });
   $('newPackageModal').addEventListener('keydown', event => {
     const modal = $('newPackageModal');
     if (!modal.classList.contains('show') || window.frameElement?.hidden || event.defaultPrevented
@@ -2886,10 +2907,30 @@ function bindEvents() {
   });
 }
 
-async function init() {
+function bindMeetingLifecycle() {
+  if (meetingLifecycleBound) return;
+  meetingLifecycleBound = true;
+  window.setInterval(renderPackages, 60_000);
+  window.setInterval(()=>{void refreshDocumentEditState();},25000);
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden)freezeDocumentEditing();
+    else {renderPackages();void refreshDocumentEditState();}
+  });
+  if(window.frameElement)new MutationObserver(()=>{
+    if(window.frameElement.hidden)freezeDocumentEditing();else void refreshDocumentEditState();
+  }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+  window.addEventListener('pagehide',freezeDocumentEditing);
+}
+
+function bindMeetingEntry() {
+  if (meetingEventsBound) return;
+  meetingEventsBound = true;
   bindEvents();
   supabase.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT' || (session?.user?.id && state.session?.user?.id && session.user.id !== state.session.user.id)) {
+    const expected = meetingEntryPending?.userId || state.session?.user?.id;
+    if (event === 'SIGNED_OUT' || (session?.user?.id && expected && session.user.id !== expected)) {
+      meetingEntryRevision++; meetingEntryReady = false;
+      setMeetingEntryStatus('로그인 상태가 바뀌었습니다. 다시 불러오기를 눌러 주세요.', true);
       freezeDocumentEditing();
       pdfIdentityRevision++;
       meetingDefaultsRevision++;
@@ -2901,18 +2942,43 @@ async function init() {
       clearBoardAnnexDrafts();
     }
   });
-  state.session = await MinutesService.getSession();
-  if (!state.session) {
+}
+
+function init() {
+  bindMeetingEntry();
+  if (meetingEntryPending?.revision === meetingEntryRevision) return meetingEntryPending.promise;
+  const request = {revision:++meetingEntryRevision, userId:null, failed:false, promise:null};
+  meetingEntryReady = false;
+  setMeetingEntryStatus('회의 준비 화면을 불러오는 중…');
+  meetingEntryPending = request;
+  request.promise = boundedMeetingRead(() => initializeMeetingPage(request)).catch(error => {
+    if (meetingEntryPending !== request || request.revision !== meetingEntryRevision) return;
+    request.failed = true;
+    setMeetingEntryStatus(error?.code === 'MEETING_READ_TIMEOUT' ? '조회 시간이 길어지고 있습니다. 다시 불러오기를 눌러 주세요.' : '회의 준비 화면을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.', true);
+  }).finally(() => { if (meetingEntryPending === request) meetingEntryPending = null; });
+  return request.promise;
+}
+
+async function initializeMeetingPage(request) {
+  const current = () => meetingEntryPending === request && request.revision === meetingEntryRevision && !request.failed;
+  const session = await MinutesService.getSession();
+  if (!current()) return;
+  if (!session) {
     showToast('로그인이 필요합니다.');
     location.href = `/erp/?next=${encodeURIComponent(location.href)}`;
     return;
   }
+  request.userId = session.user.id;
+  state.session = session;
   const runtimeGate = await window.ErpRuntimeGuard.enforce(supabase, {
-    moduleKey:'minutes', moduleLabel:'회의 꾸러미', redirectUrl:`/erp/?next=${encodeURIComponent(location.href)}`, alertFn:showToast
+    moduleKey:'minutes', moduleLabel:'회의 꾸러미', redirectUrl:`/erp/?next=${encodeURIComponent(location.href)}`, alertFn:message=>{if(current())showToast(message);}
   });
-  if (!runtimeGate.ok) return;
-  state.runtime = runtimeGate.runtime || await MeetingPackageService.getRuntime();
+  if (!current() || !runtimeGate.ok) return;
+  const runtime = runtimeGate.runtime || await MeetingPackageService.getRuntime();
+  if (!current()) return;
+  state.runtime = runtime;
   const isAdmin = hasLocalAdminHint() || await MinutesService.isAdmin(state.session?.user?.id, state.session?.user?.email);
+  if (!current()) return;
   if (!isAdmin) {
     showToast('관리자 권한이 필요합니다.');
     window.setTimeout(() => { location.href = '/erp/'; }, 1000);
@@ -2921,16 +2987,14 @@ async function init() {
   // Resolve the existing service scope once before its two independent list reads.
   // This is not a replacement for the entry or workspace-resume permission gates.
   const packageRuntime = await MeetingPackageService.getRuntime();
+  if (!current()) return;
   if (packageRuntime.coop_id !== state.runtime.coop_id) throw new Error('현재 조합을 다시 확인해 주세요.');
-  const packageResult = await MeetingPackageService.listPackages();
-  if (packageResult.error) throw packageResult.error;
-  state.packages = packageResult.data || [];
-  renderPackages();
   window.ErpWorkspaceResume.register({modules:['minutes'],busy:()=>state.loading||hasUnsavedPacketChanges()||hasUnsavedNewPackageDraft()||meetingNotHeld.hasDraft(),authorize:async runtime=>{
     const perms=runtime.effective_permissions||[];
     return perms.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
       || await MinutesService.isAdmin(state.session.user.id,state.session.user.email);
   },refresh:async () => {
+    if (!meetingEntryReady) { await init(); return; }
     meetingDefaultsRevision++;
     meetingDefaultsReady = false;
     meetingHistoryReady = false;
@@ -2938,17 +3002,15 @@ async function init() {
     meetingHistoryPending = null;
     await loadPackages();
   }});
-  window.ErpWorkspaceTask.requestPrint = () => state.current?.meeting_type === 'BOARD' ? reviewedMeetingAction(printActiveDocument) : window.print();
-  window.setInterval(renderPackages, 60_000);
-  window.setInterval(()=>{void refreshDocumentEditState();},25000);
-  document.addEventListener('visibilitychange', () => {
-    if(document.hidden)freezeDocumentEditing();
-    else {renderPackages();void refreshDocumentEditState();}
-  });
-  if(window.frameElement)new MutationObserver(()=>{
-    if(window.frameElement.hidden)freezeDocumentEditing();else void refreshDocumentEditState();
-  }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
-  window.addEventListener('pagehide',freezeDocumentEditing);
+  window.ErpWorkspaceTask.requestPrint = () => { if (!meetingEntryReady) return; return state.current?.meeting_type === 'BOARD' ? reviewedMeetingAction(printActiveDocument) : window.print(); };
+  const packageResult = await MeetingPackageService.listPackages();
+  if (!current()) return;
+  if (packageResult.error) throw packageResult.error;
+  state.packages = packageResult.data || [];
+  renderPackages();
+  bindMeetingLifecycle();
+  meetingEntryReady = true;
+  setMeetingEntryStatus();
 }
 
 init().catch(error => {
