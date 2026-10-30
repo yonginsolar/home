@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.225
+Version: v1.0.226
 Change: 2026-10-30 - Manage own login methods and connect existing blank-email members.
 -->
 <html lang="ko">
@@ -15,7 +15,7 @@ Change: 2026-10-30 - Manage own login methods and connect existing blank-email m
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.0" integrity="sha384-D8ICL0IGz8nDSncAtvyMapaxDtRfTGcLQVWFCh1UkxQ8lF4a6Hy3HtVNqZBajGJo" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.225 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.226 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -4582,13 +4582,20 @@ return dest.href;
 			showLoading(true, '정보 확인 중...');
 
 		try {
+		if(existingMemberConnectRequested()){
+		const linked=await _supabase.rpc('get_my_member_access_context');
+		if(linked.error)throw linked.error;
+		if(curAuth?.id!==user?.id)return;
+		if(!linked.data?.found){
+		if(isDirectSocialPortalSession(user)&&!user.email_confirmed_at)openSocialEmailVerificationModal();
+		else{document.getElementById('manualMatchModal').style.display='none';openPortalIdentityClaim();}
+		return;
+		}
+		}
 		const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
 		if (claimErr) throw claimErr;
 
 		if (!claimRes || !claimRes.success) {
-		if(existingMemberConnectRequested()&&(!isDirectSocialPortalSession(user)||user.email_confirmed_at)){
-		document.getElementById('manualMatchModal').style.display='none';openPortalIdentityClaim();return;
-		}
 		if (isDirectSocialPortalSession(user)) {
 		openSocialEmailVerificationModal();
 		return;
