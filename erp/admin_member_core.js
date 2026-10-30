@@ -1038,19 +1038,29 @@ let g_member_total_count = 0;
 let g_member_fetch_revision = 0;
 let memberRosterRead = null;
 
-function setMemberRosterReadBusy(busy) {
+function setMemberRosterReadBusy(busy, message = '', retryable = false) {
     document.getElementById('memberListBody')?.setAttribute('aria-busy', String(busy));
     const status = document.getElementById('member-list-read-status');
-    if (status) status.hidden = !busy;
+    if (status) status.hidden = !busy && !message;
+    const text = document.getElementById('member-list-read-message');
+    if (text) text.textContent = message || '조합원 명부를 불러오는 중입니다.';
+    const retry = document.getElementById('member-list-read-retry');
+    if (retry) {
+        retry.hidden = !retryable;
+        retry.disabled = false;
+        retry.setAttribute('aria-disabled', String(busy));
+    }
 }
 
-function invalidateMemberRosterRead() {
+function invalidateMemberRosterRead(preserveStatus = false) {
     const read = memberRosterRead;
     if (!read) return;
     memberRosterRead = null;
     ++g_member_fetch_revision;
+    clearTimeout(read.timer);
+    read.cancelWait?.();
     read.controller.abort();
-    setMemberRosterReadBusy(false);
+    if (preserveStatus !== true) setMemberRosterReadBusy(false);
 }
 
 function isCurrentMemberRosterRead(read) {
@@ -1059,6 +1069,12 @@ function isCurrentMemberRosterRead(read) {
         && read.coop === String(g_adminMemberRuntime?.coop_id || '')
         && read.pane === document.querySelector('.main-content > .tab-pane.active')?.id
         && !window.frameElement?.hidden && canAccessAdminMemberTab('members');
+}
+
+function retryMemberRosterRead() {
+    const read = memberRosterRead;
+    if (!read || read.pending || !read.failed || !read.retryable || !isCurrentMemberRosterRead(read)) return Promise.resolve(false);
+    return fetchMembers({ retry: true });
 }
 const ADMIN_MEMBER_SELECT_COLUMNS = [
     'id',
@@ -6052,6 +6068,10 @@ function goToPendingMembers() {
   if (!canAccessAdminMemberTab('members')) { switchTab('members'); return; }
   const statusEl = document.getElementById('filter-status');
   if (statusEl) statusEl.value = '승인대기';
+  const type = document.getElementById('filter-type');
+  const keyword = document.getElementById('search-keyword');
+  if (type) type.value = 'all';
+  if (keyword) keyword.value = '';
   switchTab('members');
   resetMemberPageAndFetch();
 }
@@ -6789,7 +6809,7 @@ async function openCapitalImportModal() {
     } finally { capitalImportOpening = false; }
 }
 
-async function fetchMembers() {
+async function fetchMembers(options = {}) {
     const actor = String(adminCertificateAuthId || '');
     const coop = String(g_adminMemberRuntime?.coop_id || '');
     const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
@@ -6821,17 +6841,24 @@ async function fetchMembers() {
     };
     const queryKey = JSON.stringify(params);
     if (memberRosterRead?.pending && isCurrentMemberRosterRead(memberRosterRead) && memberRosterRead.queryKey === queryKey) return memberRosterRead.promise;
-    invalidateMemberRosterRead();
-    const read = { actor, coop, pane, queryKey, revision: ++g_member_fetch_revision, controller: new AbortController(), pending: true, promise: null };
+    invalidateMemberRosterRead(options.retry === true);
+    const read = { actor, coop, pane, queryKey, revision: ++g_member_fetch_revision, controller: new AbortController(), pending: true, failed: false, retryable: false, message: '', timer: null, cancelWait: null, promise: null };
     memberRosterRead = read;
-    setMemberRosterReadBusy(true);
+    setMemberRosterReadBusy(true, '', options.retry === true);
     read.promise = (async () => {
     try {
+        const deadline = new Promise((_, reject) => {
+            read.cancelWait = () => reject(Object.assign(new Error('ROSTER_READ_CANCELLED'), { code: 'ROSTER_READ_CANCELLED' }));
+            read.timer = setTimeout(() => {
+                reject(Object.assign(new Error('ROSTER_READ_TIMEOUT'), { code: 'ROSTER_READ_TIMEOUT' }));
+                read.controller.abort();
+            }, 15000);
+        });
         let request = _supabase.rpc('get_admin_member_page_v3', params);
         if (typeof request.abortSignal === 'function') request = request.abortSignal(read.controller.signal);
-        const { data, error } = await request;
+        const { data, error, status } = await Promise.race([request, deadline]);
         if (!isCurrentMemberRosterRead(read)) return false;
-        if (error) throw error;
+        if (error) throw Object.assign(new Error(error.message || 'ROSTER_READ_FAILED'), { code: error.code, status: status || error.status });
 
         const list = Array.isArray(data?.rows) ? data.rows : [];
         g_member_total_count = Number(data?.total_count || 0);
@@ -6859,15 +6886,26 @@ async function fetchMembers() {
         return true;
     } catch (err) {
         if (!isCurrentMemberRosterRead(read)) return false;
-        CoopSafeLog.error("[erp/admin_member] operation failed", err);
-        // Alert 대신 모달 사용 권장 (기존 myAlert 함수가 있다면)
-        if (typeof myAlert === 'function') {
-            myAlert('데이터를 불러오지 못했습니다: ' + (err?.message || err), 'error');
-        }
+        const denied = [401, 403].includes(Number(err?.status)) || ['42501', 'PGRST301', 'PGRST302'].includes(String(err?.code || ''));
+        const limited = Number(err?.status) === 429 || String(err?.code || '') === '429';
+        read.failed = true;
+        read.retryable = !denied && !limited;
+        read.message = denied ? '현재 권한으로 명부를 조회할 수 없습니다. 로그인 상태와 권한을 확인해 주세요.'
+            : limited ? '조회 요청이 많습니다. 잠시 후 다시 검색해 주세요.'
+            : err?.code === 'ROSTER_READ_TIMEOUT' ? '명부 조회가 지연되고 있습니다. 다시 확인해 주세요.'
+            : '명부를 불러오지 못했습니다. 다시 확인해 주세요.';
+        CoopSafeLog.error('[erp/admin_member] roster read failed', { code: err?.code || 'ROSTER_READ_FAILED', status: Number(err?.status) || null });
         return false;
     } finally {
+        clearTimeout(read.timer);
+        read.cancelWait = null;
         read.pending = false;
-        if (isCurrentMemberRosterRead(read)) setMemberRosterReadBusy(false);
+        if (isCurrentMemberRosterRead(read)) {
+            const retry = document.getElementById('member-list-read-retry');
+            const focusSearch = !read.failed && document.activeElement === retry;
+            setMemberRosterReadBusy(false, read.message, read.retryable);
+            if (focusSearch) document.getElementById('member-search-button')?.focus({ preventScroll: true });
+        }
     }
     })();
     return read.promise;
