@@ -371,7 +371,7 @@ async function loadDashboard(context = {}) {
     }
 
     // 로그 기록
-    logAdminAction('VIEW', '대시보드', '메인 화면 조회');
+    logAdminAction('view_dashboard');
 }
 
 function loadMemberDemographicCharts() {

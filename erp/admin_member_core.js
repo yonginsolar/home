@@ -1175,27 +1175,23 @@ if (path?.endsWith('.screen.webp')) await _supabase.storage.from('assets').remov
 
 
 // [신규] 관리자 활동 로그 기록
-async function logAdminAction(type, target, details) {
-    // site_member 조합은 조합별 erp_audit_logs를 사용한다.
-    // 주 조합 전용 legacy admin_logs에 기록을 시도하면 RLS 오류와 교차 조합 혼동이 생긴다.
-    if (isAdminMemberSiteProfile()) return;
-
-    // 1. 현재 접속자 확인
-    const userEmail = document.getElementById('adminProfile')
-        ? document.getElementById('adminProfile').innerText
-        : 'unknown';
-
-    // 2. 로그 테이블에 Insert
-    // (에러가 나도 사용자 흐름을 막지 않기 위해 await 없이 실행하거나 catch 처리)
-    _supabase.from('admin_logs').insert({
-        admin_email: userEmail,
-        action_type: type, // VIEW, EDIT, DOWNLOAD, LOGIN
-        target: target,
-        details: details,
-        ip_address: 'client-side' // 클라이언트에서 IP 확인은 어려우므로 일단 마킹
-    }).then(({ error }) => {
-        if(error) CoopSafeLog.error("로그 기록 실패:", error);
-    });
+async function logAdminAction(event, detail = {}) {
+    // The narrow site profile already has its own server activity paths.
+    if (isAdminMemberSiteProfile()) return false;
+    const actor = String(adminCertificateAuthId || '');
+    const coop = String(g_adminMemberRuntime?.coop_id || '');
+    if (!actor || !coop || g_adminMemberRuntime?.is_active === false || !canAccessAdminMemberTab('members')) return false;
+    try {
+        const { error } = await _supabase.rpc('erp_record_member_admin_activity', {
+            p_coop_id: coop, p_actor_uid: actor, p_event: event,
+            p_format: detail.format ?? null, p_count: detail.count ?? null, p_cutoff: detail.cutoff ?? null
+        });
+        if (error) throw error;
+        return true;
+    } catch (error) {
+        CoopSafeLog.error('활동 기록을 남기지 못했습니다.', { code: error?.code || 'MEMBER_ACTIVITY_FAILED' });
+        return false;
+    }
 }
 
 
@@ -2781,7 +2777,7 @@ async function downloadMemberSmsExcel(attempt) {
         const wb=XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb,window.CoopMemberSmsExport.worksheet(XLSX,rows),'문자 발송용');
         XLSX.writeFile(wb,`조합원명부_문자발송용_${cutoffDate}.xlsx`);
-        logAdminAction('DOWNLOAD','조합원명부',`문자 발송용 다운로드 ${rows.length}건 (기준일 ${cutoffDate})`);
+        logAdminAction('export_roster', { format: 'sms', count: rows.length, cutoff: cutoffDate });
         bootstrap.Modal.getInstance(document.getElementById('excelModal'))?.hide();
     } catch (_) {
         if(current())myAlert('문자 발송용 명부를 불러오지 못했습니다. 다시 시도해 주세요.','error');
@@ -2870,7 +2866,7 @@ async function downloadExcel() {
         fileName = `조합원명부_보안_${cutoffDate}.xlsx`;
 
         // 로그 기록
-        logAdminAction('DOWNLOAD', '조합원명부', `보안용 다운로드 (기준일 ${cutoffDate})`);
+        logAdminAction('export_roster', { format: 'secure', count: dataToExport.length, cutoff: cutoffDate });
         if (exportResult.overLimitMembers.length > 0) {
             CoopSafeLog.warn("30% 초과 조합원", exportResult.overLimitMembers);
         }
@@ -2900,7 +2896,7 @@ async function downloadExcel() {
         fileName = type === 'city-report'
             ? `조합원명부_시청신고용_${cutoffDate}.xlsx`
             : `조합원명부_일반_${cutoffDate}.xlsx`;
-        logAdminAction('DOWNLOAD', '조합원명부', type === 'city-report' ? `시청 신고용 다운로드 (기준일 ${cutoffDate})` : `일반용 다운로드 (기준일 ${cutoffDate})`);
+        logAdminAction('export_roster', { format: type === 'city-report' ? 'city-report' : 'general', count: dataToExport.length, cutoff: cutoffDate });
 
         if (exportResult.overLimitMembers.length > 0) {
             attempt.releaseLoading();
@@ -3745,6 +3741,7 @@ function getFundPaymentMethodLabel(value) {
 } // End of getFundPaymentMethodLabel
 
 function getCapitalNotificationStatusMeta(item) {
+    if (item?.capital_notification_read_failed) return { label: '알림 상태 조회 실패', className: 'text-bg-warning', canSend: false };
     const status = String(item?.capital_notification_status || '').trim();
     const errorCode = String(item?.capital_notification_error_code || '').trim();
     if (!status) return null;
@@ -3808,6 +3805,10 @@ function renderMemberHistoryContent(type) {
         summaryEl.innerText = from || to
             ? `${from || '최초'} ~ ${to || '현재'} · ${data.length.toLocaleString('ko-KR')}건 · 기간 내 변동 ${total.toLocaleString('ko-KR')}원`
             : `현재 출자금 ${total.toLocaleString('ko-KR')}원 · 총 ${data.length.toLocaleString('ko-KR')}건`;
+        const notificationRead = globalHistoryData.capitalNotificationRead;
+        if (notificationRead?.failed && isCurrentMemberDetailRead(notificationRead.read)) {
+            html = '<div class="alert alert-warning d-flex flex-wrap align-items-center gap-2" role="status">알림 상태를 불러오지 못했습니다. <button type="button" class="btn btn-sm btn-outline-dark" onclick="retryMemberCapitalNotificationStatus(this)">다시 확인</button></div>' + html;
+        }
 
     } else if(type === 'donation') {
         title = '기부금 납부 내역';
@@ -9800,6 +9801,16 @@ function updateMemberFundSummary(type, rows) {
 } // End of updateMemberFundSummary
 
 // 조합원 자금 요약과 상세 모달이 같은 조회 결과를 재사용한다.
+async function retryMemberCapitalNotificationStatus(button) {
+    const state = globalHistoryData.capitalNotificationRead;
+    if (!state?.failed || !isCurrentMemberDetailRead(state.read)
+        || state.actor !== String(adminCertificateAuthId || '')
+        || state.coop !== String(g_adminMemberRuntime?.coop_id || '')
+        || window.frameElement?.hidden || !canAccessAdminMemberTab('members')) return;
+    if (button) button.disabled = true;
+    await loadMemberFunds(state.uuid, state.textId);
+}
+
 async function loadMemberFunds(uuid, textId, reset=false) {
     const read = beginMemberDetailRead('funds', uuid);
     if (!isCurrentMemberDetailRead(read)) return;
@@ -9851,12 +9862,17 @@ async function loadMemberFunds(uuid, textId, reset=false) {
     if (capitalResult.error) CoopSafeLog.error("출자금 로드 실패:", capitalResult.error);
     if (donationResult.error) CoopSafeLog.error("기부금 로드 실패:", donationResult.error);
     if (capitalNotificationResult.error) CoopSafeLog.error("출자금 알림 상태 로드 실패:", capitalNotificationResult.error);
+    globalHistoryData.capitalNotificationRead = {
+        read, uuid, textId: safeTextId, failed: !!capitalNotificationResult.error,
+        actor: String(adminCertificateAuthId || ''), coop: String(g_adminMemberRuntime?.coop_id || '')
+    };
 
     const capitalNotificationMap = new Map();
     (Array.isArray(capitalNotificationResult.data) ? capitalNotificationResult.data : []).forEach(function (row) {
         capitalNotificationMap.set(String(row?.capital_id || ''), row);
     });
     globalHistoryData.ledger = (Array.isArray(capitalResult.data) ? capitalResult.data : []).map(function (row) {
+        if (capitalNotificationResult.error) return { ...row, capital_notification_read_failed: true };
         const notification = capitalNotificationMap.get(String(row?.id || ''));
         if (!notification) return row;
         return {
@@ -9878,6 +9894,8 @@ async function loadMemberFunds(uuid, textId, reset=false) {
         globalHistoryData.donations = [];
         setMemberFundReadState('donation', 'error', '자산수증이익 조회 실패');
     } else if (!isAdminMemberSiteProfile()) updateMemberFundSummary('donation', globalHistoryData.donations);
+
+    if (activeMemberHistoryType === 'ledger' && document.getElementById('memberHistoryModal')?.classList.contains('show')) renderMemberHistoryContent('ledger');
 
     if (!isAdminMemberSiteProfile()) await loadMemberRewardAndDividendSummary(uuid, textId);
 } // End of loadMemberFunds
