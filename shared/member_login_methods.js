@@ -1,4 +1,4 @@
-/* v1.0.1 — Contextual unlink verification and per-provider shared-connection notice. */
+/* v1.0.2 — Preserve reconnections and distinguish verified email from status-read failure. */
 (function(root){
  'use strict';
  function create(options){
@@ -21,28 +21,30 @@
     if(item?.linked&&item.shared_with_other_coops===true){const note=doc.createElement('p');note.className='method-shared-notice';note.textContent='같은 연결을 쓰는 다른 조합에서도 함께 해제돼요.';body.append(note);}
     const action=button(item?.linked?'연결 해제':'연결하기',()=>item?.linked?unlink(kind):link(kind));action.className='method-action'+(item?.linked?'':' method-primary');action.dataset.kind=kind;if(item?.linked){action.setAttribute('aria-controls','login-methods-auth');action.setAttribute('aria-expanded',String(state.unlinkKind===kind));}action.disabled=!data||!!loading||opPending||!!op;section.append(action);
    }
-   send.disabled=!state.user?.email||!!loading||opPending||cooldown>Date.now();verify.disabled=!state.sent||!!loading||opPending;code.readOnly=!!loading||opPending;refresh.disabled=!!loading||opPending;
+   send.disabled=!state.user?.email||state.verifiedReadPending||!!loading||opPending||cooldown>Date.now();verify.disabled=!state.sent||!!loading||opPending;code.readOnly=!!loading||opPending;refresh.disabled=!!loading||opPending;
    refresh.textContent=op?'연결 상태 다시 확인':'다시 확인';
    authSection.hidden=!state.unlinkKind;authTitle.textContent=(state.unlinkKind==='naver'?'네이버':'카카오')+' 연결 해제';continueUnlink.disabled=!!loading||opPending||!data?.email_ready||!data?.recent_otp;cancelUnlink.disabled=opPending;
    if(focusKind&&doc.activeElement===doc.body){const next=list.querySelector('[data-kind="'+focusKind+'"]');if(next&&!next.disabled)next.focus({preventScroll:true});}
   }
   async function rpc(action,s,extra){const r=await options.client.rpc('member_login_methods',params(action,s,extra));if(r.error)throw r.error;return r.data;}
-  async function read(){const s=state,t=view;if(!active(s,t)||loading)return;if(opPending){message('연결 처리를 기다리고 있어요…');return;}const flight={};loading=flight;message('로그인 방법을 확인하고 있어요…');paint();
+  async function read(){const s=state,t=view;if(!active(s,t)||loading)return;if(opPending){message('연결 처리를 기다리고 있어요…');return;}const recovering=s.verifiedReadPending,focusAfter=doc.activeElement===refresh,flight={};loading=flight;message('로그인 방법을 확인하고 있어요…');paint();
    try{
     const [user,result]=await bounded(Promise.all([options.client.auth.getUser(),rpc('status',s)]));
     if(!active(s,t))return;if(user.error||user.data?.user?.id!==s.actor)throw Error('ACTOR_CHANGED');
-    s.user=user.data.user;s.data=result;
+    s.user=user.data.user;s.data=result;s.verifiedReadPending=false;
     if(op?.key===s.key){
      const method=result.methods.find(m=>m.kind===op.kind);
      if(!method?.linked){
       const synced=await bounded(rpc('sync',s,{p_kind:op.kind,p_identity:op.identityId,p_expected:op.cacheRevision}));
       if(!active(s,t))return;
-      if(synced.outcome!=='unlinked')throw Error('SYNC_UNCONFIRMED');
-      options.onUpdated?.(op.kind,s.user);op=null;s.unlinkKind=null;s.sent=false;code.value='';message('연결을 해제했어요.');
+      if(!['linked','unlinked'].includes(synced.outcome))throw Error('SYNC_UNCONFIRMED');
+      s.data=synced;
+      if(synced.outcome==='unlinked')options.onUpdated?.(op.kind,s.user);
+      op=null;s.unlinkKind=null;s.sent=false;code.value='';message(synced.outcome==='unlinked'?'연결을 해제했어요.':'새 연결이 확인됐어요. 현재 연결 상태를 표시했어요.');
      }else{op=null;message('아직 연결되어 있어요. 해제하려면 다시 선택해 주세요.');}
-    }else message('');
-   }catch(e){if(active(s,t))message(op?'처리 결과를 확인하지 못했어요. 이메일 인증 후 연결 상태를 다시 확인해 주세요.':'로그인 방법을 불러오지 못했어요. 다시 확인해 주세요.');}
-   finally{if(loading===flight)loading=null;if(active(s,t))paint();}
+    }else message(recovering?'이메일 인증과 연결 상태를 확인했어요.':'');
+   }catch(e){if(active(s,t))message(s.verifiedReadPending?'이메일 인증은 완료됐어요. 연결 상태를 불러오지 못했으니 ‘다시 확인’을 눌러 주세요.':op?'처리 결과를 확인하지 못했어요. 연결 상태를 다시 확인해 주세요.':'로그인 방법을 불러오지 못했어요. 다시 확인해 주세요.');}
+   finally{if(loading===flight)loading=null;if(active(s,t)){paint();if(recovering&&focusAfter&&!continueUnlink.disabled&&doc.activeElement===refresh)continueUnlink.focus({preventScroll:true});}}
   }
   async function link(kind){const s=state,t=view;if(!active(s,t)||loading||opPending||op)return;const flight={};loading=flight;paint();
    try{const current=await bounded(rpc('prepare_link',s,{p_kind:kind}));if(!active(s,t))return;
@@ -62,13 +64,14 @@
   }
   async function verifyCode(){const s=state,t=view;if(!active(s,t)||!s.unlinkKind||loading||opPending||!s.sent)return;
    const token=code.value.trim();if(!/^[0-9]{6,10}$/.test(token)){message('메일로 받은 인증코드를 입력해 주세요.');return;}
-   const focusAfter=[verify,code].includes(doc.activeElement),flight={};loading=flight;paint();message('인증코드를 확인하고 있어요…');
+   const focusAfter=[verify,code].includes(doc.activeElement),flight={};let verified=false;loading=flight;paint();message('인증코드를 확인하고 있어요…');
    try{
     const r=await bounded(options.client.auth.verifyOtp({email:s.user.email,token,type:'email'}));
     if(!active(s,t))return;if(r.error||r.data?.user?.id!==s.actor)throw Error('AUTH_NOT_CONFIRMED');
-    code.value='';s.sent=false;const data=await bounded(rpc('status',s));if(!active(s,t))return;s.data=data;message('이메일을 인증했어요.');
-   }catch{if(active(s,t))message('인증을 확인하지 못했어요. 코드와 로그인 계정을 확인해 주세요.');}
-   finally{if(loading===flight)loading=null;if(active(s,t)){paint();if(focusAfter&&!continueUnlink.disabled&&[verify,code,doc.body,authSection].includes(doc.activeElement))continueUnlink.focus({preventScroll:true});}}
+    verified=true;code.value='';s.sent=false;s.verifiedReadPending=true;s.data=null;
+    const data=await bounded(rpc('status',s));if(!active(s,t))return;s.data=data;s.verifiedReadPending=false;message('이메일을 인증했어요.');
+   }catch{if(active(s,t))message(verified?'이메일 인증은 완료됐어요. 연결 상태를 불러오지 못했으니 ‘다시 확인’을 눌러 주세요.':'인증을 확인하지 못했어요. 코드와 로그인 계정을 확인해 주세요.');}
+   finally{if(loading===flight)loading=null;if(active(s,t)){paint();if(focusAfter&&[verify,code,doc.body,authSection].includes(doc.activeElement)){const target=s.verifiedReadPending?refresh:continueUnlink;if(!target.disabled)target.focus({preventScroll:true});}}}
   }
   async function unlink(kind){const s=state,t=view;if(!active(s,t)||loading||opPending||op)return;
    const method=s.data?.methods?.find(m=>m.kind===kind);if(!method?.linked)return;
@@ -106,5 +109,5 @@
   }
   return Object.freeze({open,suspend:()=>hide(false)});
  }
- root.MemberLoginMethods=Object.freeze({version:'1.0.1',create});
+ root.MemberLoginMethods=Object.freeze({version:'1.0.2',create});
 })(window);

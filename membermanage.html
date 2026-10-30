@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.227
-Change: 2026-10-30 - Manage own login methods and connect existing blank-email members.
+Version: v1.0.228
+Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 -->
 <html lang="ko">
 <head>
@@ -14,8 +14,8 @@ Change: 2026-10-30 - Manage own login methods and connect existing blank-email m
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
-<script src="shared/member_login_methods.js?v=1.0.1" integrity="sha384-u0+t/Zz9QooYQjAJlA05dQrvMRVwqIjqxp9xjKMk482vbjjy00hQl9YlPqGUQviU" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.227 | membermanage.html');</script>
+<script src="shared/member_login_methods.js?v=1.0.2" integrity="sha384-jz4/CRSHFp2wgwTOd5DleNmnyNWx7jhysPdeVE3velQualbQpyTEThWmCGzKPzvu" crossorigin="anonymous" defer></script>
+    <script>console.log('[Version] v1.0.228 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2640,8 +2640,44 @@ if(method==='kakao')return startKakaoLogin();
 if(method==='naver')return startNaverLogin();
 }
 function canManageActivePortalLoginMethods(){return canLinkActivePortalProfile()&&curMem?.member_type==='개인';}
+const PortalLoginToolRecovery=(()=>{
+ let dialog,notice,retry,close,owner=null,epoch=0,flight=null,trigger=null;
+ const key=()=>canManageActivePortalLoginMethods()?[curAuth?.id,currentMemberCoopId,curMem?.id].join('|'):'';
+ function cancel(restore=false){++epoch;owner=null;if(!dialog?.open)return;const focus=document.activeElement,mayRestore=dialog.contains(focus)||focus===document.body;dialog.close();if(restore&&mayRestore&&trigger?.isConnected&&!trigger.disabled)trigger.focus({preventScroll:true});trigger=null;}
+ function ensure(){
+  if(window.MemberLoginMethods?.version==='1.0.2')return Promise.resolve();
+  if(flight)return flight;
+  const pending=new Promise((resolve,reject)=>{
+   const script=document.createElement('script');let done=false;
+   const settle=error=>{if(done)return;done=true;clearTimeout(timer);script.onload=script.onerror=null;if(error){script.remove();reject(error);}else resolve();};
+   const timer=setTimeout(()=>settle(Error('LOGIN_TOOL_TIMEOUT')),15000);
+   script.src='/shared/member_login_methods.js?v=1.0.2';script.integrity='sha384-jz4/CRSHFp2wgwTOd5DleNmnyNWx7jhysPdeVE3velQualbQpyTEThWmCGzKPzvu';script.crossOrigin='anonymous';script.async=true;
+   script.onload=()=>settle(window.MemberLoginMethods?.version==='1.0.2'?null:Error('LOGIN_TOOL_VERSION'));
+   script.onerror=()=>settle(Error('LOGIN_TOOL_LOAD'));document.head.append(script);
+  });
+  flight=pending;pending.finally(()=>{if(flight===pending)flight=null;}).catch(()=>{});return pending;
+ }
+ function build(){if(dialog)return;
+  dialog=document.createElement('dialog');dialog.className='portal-login-tool-recovery';dialog.setAttribute('aria-labelledby','portal-login-tool-title');
+  const style=document.createElement('style');style.textContent='.portal-login-tool-recovery{box-sizing:border-box;width:min(520px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;border:1px solid var(--theme-border,#cbd5e1);border-radius:16px;padding:22px;background:var(--theme-surface,#fff);color:var(--theme-text,#172033);font:inherit;word-break:keep-all;overflow-wrap:anywhere}.portal-login-tool-recovery::backdrop{background:#0f172a75}.portal-login-tool-recovery h2{margin:0 0 14px;font-size:1.2em}.portal-login-tool-recovery footer{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}.portal-login-tool-recovery button{min-height:44px;max-width:100%;font:inherit;padding:9px 16px;border:1px solid #94a3b8;border-radius:9px;white-space:normal;background:var(--theme-surface,#fff);color:inherit}.portal-login-tool-recovery button:focus-visible{outline:3px solid #328a51;outline-offset:3px}';document.head.append(style);
+  const title=document.createElement('h2');title.id='portal-login-tool-title';title.textContent='로그인 방법 관리';notice=document.createElement('p');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');close=document.createElement('button');close.type='button';close.textContent='닫기';close.onclick=()=>cancel(true);retry=document.createElement('button');retry.type='button';retry.textContent='다시 불러오기';retry.onclick=async()=>{
+   if(retry.disabled||!owner)return;const current=owner,t=epoch;retry.disabled=true;notice.textContent='로그인 관리 화면을 불러오고 있어요…';
+   const active=()=>dialog.open&&owner===current&&epoch===t&&current===key()&&!document.hidden;
+   try{await ensure();if(!active())return;const focus=document.activeElement,mayOpen=dialog.contains(focus)||focus===document.body;cancel(false);if(mayOpen)openPortalLoginMethods();}
+   catch{if(active())notice.textContent='로그인 관리 화면을 불러오지 못했어요. 연결 상태를 확인한 뒤 다시 불러와 주세요.';}
+   finally{if(active())retry.disabled=false;}
+  };
+  const footer=document.createElement('footer');footer.append(close,retry);dialog.append(title,notice,footer);document.body.append(dialog);
+  dialog.addEventListener('cancel',e=>{e.preventDefault();cancel(true);});dialog.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Tab'){const nodes=[close,retry].filter(n=>!n.disabled);if((e.shiftKey&&document.activeElement===nodes[0])||(!e.shiftKey&&document.activeElement===nodes.at(-1))){e.preventDefault();(e.shiftKey?nodes.at(-1):nodes[0]).focus({preventScroll:true});}}});
+  window.addEventListener('pagehide',()=>cancel());document.addEventListener('visibilitychange',()=>{if(document.hidden)cancel();});new MutationObserver(()=>{if(owner&&owner!==key())cancel();}).observe(document.body,{childList:true,subtree:true});
+ }
+ function open(){const current=key();if(!current||document.hidden)return;build();if(dialog.open)return;owner=current;++epoch;trigger=document.activeElement;notice.textContent='로그인 관리 화면을 불러오지 못했어요. 다시 불러와 주세요.';retry.disabled=false;dialog.showModal();retry.focus({preventScroll:true});}
+ return Object.freeze({open,cancel});
+})();
+window.PortalLoginToolRecovery=PortalLoginToolRecovery;
 function openPortalLoginMethods(){
-if(!canManageActivePortalLoginMethods()||!window.MemberLoginMethods)return;
+if(!canManageActivePortalLoginMethods())return;
+if(!window.MemberLoginMethods)return PortalLoginToolRecovery.open();
 if(!portalLoginMethods)portalLoginMethods=MemberLoginMethods.create({client:_supabase,
  getContext:()=>({actor:curAuth?.id,coopId:currentMemberCoopId,memberId:curMem?.id,allowed:canManageActivePortalLoginMethods()}),
  onLink:kind=>kind==='kakao'?startKakaoLinking():startNaverLinking(),
@@ -2760,6 +2796,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+window.PortalLoginToolRecovery?.cancel();
 portalIncomingConnectRequest?.cancelRead?.();
 portalIncomingConnectRequest = null;
 document.getElementById('connectRequestAlert')?.remove();
@@ -5033,6 +5070,7 @@ return memberInformationPortal.refresh(member);
 }
 
 async function loadDashboardData(uuid, options = {}) {
+window.PortalLoginToolRecovery?.cancel();
 portalIdentityClaim?.suspend();
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
 if (typeof invalidateIncomingConnects === 'function') invalidateIncomingConnects();
@@ -8960,6 +8998,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 async function toggleTab(type, btn) {
+window.PortalLoginToolRecovery?.cancel();
 if (portalApplicationWritePending && window.__memberAppLocks?.modifyApplication) return;
 memberInformationPortal?.suspend();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
@@ -11314,6 +11353,7 @@ syncIncomingConnectStatus(active);
 }
 // [수정] 화면 전환 유틸리티: style 제어 방식 폐기 -> classList 제어 방식 도입
 function showOnly(sectionId) {
+window.PortalLoginToolRecovery?.cancel();
 // 제어할 대상 섹션 ID 목록 (명시적으로 지정하여 안전성 확보)
 const sections = ['loginSection', 'dashboardSection', 'formerMemberSection'];
 
