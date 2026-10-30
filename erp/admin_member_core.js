@@ -1036,6 +1036,30 @@ let g_member_page = 0;
 let g_member_page_size = 25;
 let g_member_total_count = 0;
 let g_member_fetch_revision = 0;
+let memberRosterRead = null;
+
+function setMemberRosterReadBusy(busy) {
+    document.getElementById('memberListBody')?.setAttribute('aria-busy', String(busy));
+    const status = document.getElementById('member-list-read-status');
+    if (status) status.hidden = !busy;
+}
+
+function invalidateMemberRosterRead() {
+    const read = memberRosterRead;
+    if (!read) return;
+    memberRosterRead = null;
+    ++g_member_fetch_revision;
+    read.controller.abort();
+    setMemberRosterReadBusy(false);
+}
+
+function isCurrentMemberRosterRead(read) {
+    return memberRosterRead === read && read.revision === g_member_fetch_revision
+        && read.actor === String(adminCertificateAuthId || '')
+        && read.coop === String(g_adminMemberRuntime?.coop_id || '')
+        && read.pane === document.querySelector('.main-content > .tab-pane.active')?.id
+        && !window.frameElement?.hidden && canAccessAdminMemberTab('members');
+}
 const ADMIN_MEMBER_SELECT_COLUMNS = [
     'id',
     'member_id',
@@ -3763,7 +3787,7 @@ function renderCapitalNotificationHistoryControl(item) {
     if (!statusMeta) return '';
     const capitalId = Number(item?.id || 0);
     const badgeHtml = `<span class="badge ${statusMeta.className}">${escapeHtml(statusMeta.label)}</span>`;
-    if (!statusMeta.canSend || !Number.isInteger(capitalId) || capitalId <= 0) return badgeHtml;
+    if (!statusMeta.canSend || !canSendCurrentCapitalNotification() || !Number.isInteger(capitalId) || capitalId <= 0) return badgeHtml;
     const buttonLabel = String(item?.capital_notification_status || '') === 'deferred' ? '알림톡 보내기' : '다시 보내기';
     return `${badgeHtml}<button class="btn btn-sm btn-outline-primary" type="button" onclick="openCapitalNotificationFromHistory(${capitalId})">${buttonLabel}</button>`;
 } // End of renderCapitalNotificationHistoryControl
@@ -3806,8 +3830,9 @@ function renderMemberHistoryContent(type) {
             ? `${from || '최초'} ~ ${to || '현재'} · ${data.length.toLocaleString('ko-KR')}건 · 기간 내 변동 ${total.toLocaleString('ko-KR')}원`
             : `현재 출자금 ${total.toLocaleString('ko-KR')}원 · 총 ${data.length.toLocaleString('ko-KR')}건`;
         const notificationRead = globalHistoryData.capitalNotificationRead;
-        if (notificationRead?.failed && isCurrentMemberDetailRead(notificationRead.read)) {
-            html = '<div class="alert alert-warning d-flex flex-wrap align-items-center gap-2" role="status">알림 상태를 불러오지 못했습니다. <button type="button" class="btn btn-sm btn-outline-dark" onclick="retryMemberCapitalNotificationStatus(this)">다시 확인</button></div>' + html;
+        if ((notificationRead?.failed || notificationRead?.sendPermissionFailed) && isCurrentMemberDetailRead(notificationRead.read)) {
+            const message = notificationRead.failed ? '알림 상태를 불러오지 못했습니다.' : '알림 발송 권한을 확인하지 못했습니다.';
+            html = `<div class="alert alert-warning d-flex flex-wrap align-items-center gap-2" role="status">${message} <button type="button" class="btn btn-sm btn-outline-dark" onclick="retryMemberCapitalNotificationStatus(this)">다시 확인</button></div>` + html;
         }
 
     } else if(type === 'donation') {
@@ -6024,15 +6049,11 @@ function goToRegularMembers() {
 
 // 승인 대기 카드 클릭 시 조합원 탭으로 이동
 function goToPendingMembers() {
-  // 이 페이지는 Bootstrap Tab이 아니라 switchTab 기반
+  if (!canAccessAdminMemberTab('members')) { switchTab('members'); return; }
+  const statusEl = document.getElementById('filter-status');
+  if (statusEl) statusEl.value = '승인대기';
   switchTab('members');
-
-  // 필터 적용 후 조회
-  setTimeout(() => {
-    const statusEl = document.getElementById('filter-status');
-    if (statusEl) statusEl.value = '승인대기';
-    fetchMembers();
-  }, 80);
+  resetMemberPageAndFetch();
 }
 
 function openCapitalReturnManagement() {
@@ -6156,6 +6177,7 @@ if (activePane?.id === 'sub-docs') selectAdminMemberSiteSubTab('sub-sections');
 function applyAdminMemberRuntimeUi(runtime) {
 const oldInformationScope = g_adminMemberRuntime?.coop_id;
 g_adminMemberRuntime = runtime && typeof runtime === 'object' ? runtime : null;
+if (oldInformationScope !== g_adminMemberRuntime?.coop_id || !canAccessAdminMemberTab('members')) invalidateMemberRosterRead();
 if (oldInformationScope !== g_adminMemberRuntime?.coop_id) invalidateMemberInformationList(true);
 const isSiteMemberProfile = isAdminMemberSiteProfile();
 const memberAdminEnabled = isAdminMemberRuntimeModuleEnabled('member_admin') && hasAdminMemberScopePermission('member_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
@@ -6389,6 +6411,7 @@ function switchTab(tabName) {
         return;
     }
 
+    if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) invalidateMemberRosterRead();
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
     if (tabName !== 'dashboard') invalidateMemberInformationList();
@@ -6767,7 +6790,10 @@ async function openCapitalImportModal() {
 }
 
 async function fetchMembers() {
-    const requestRevision = ++g_member_fetch_revision;
+    const actor = String(adminCertificateAuthId || '');
+    const coop = String(g_adminMemberRuntime?.coop_id || '');
+    const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
+    if (!actor || !coop || !pane || window.frameElement?.hidden || !canAccessAdminMemberTab('members')) return false;
     // ✅ DOM 요소 단축 선택자
     const $ = (id) => document.getElementById(id);
 
@@ -6785,19 +6811,26 @@ async function fetchMembers() {
     const sort = sortEl ? sortEl.value : 'name'; // 정렬 기준 (기본 이름순)
     const page = g_member_page;
     const pageSize = g_member_page_size;
-
-    try {
-        if (typeof showLoading === 'function') showLoading(true);
-
-        const { data, error } = await _supabase.rpc('get_admin_member_page_v3', {
+    const params = {
             p_keyword: keyword || null,
             p_status: status === 'all' ? null : status,
             p_member_type: type === 'all' ? null : type,
             p_sort: sort,
             p_page: page,
             p_page_size: pageSize
-        });
-        if (requestRevision !== g_member_fetch_revision) return;
+    };
+    const queryKey = JSON.stringify(params);
+    if (memberRosterRead?.pending && isCurrentMemberRosterRead(memberRosterRead) && memberRosterRead.queryKey === queryKey) return memberRosterRead.promise;
+    invalidateMemberRosterRead();
+    const read = { actor, coop, pane, queryKey, revision: ++g_member_fetch_revision, controller: new AbortController(), pending: true, promise: null };
+    memberRosterRead = read;
+    setMemberRosterReadBusy(true);
+    read.promise = (async () => {
+    try {
+        let request = _supabase.rpc('get_admin_member_page_v3', params);
+        if (typeof request.abortSignal === 'function') request = request.abortSignal(read.controller.signal);
+        const { data, error } = await request;
+        if (!isCurrentMemberRosterRead(read)) return false;
         if (error) throw error;
 
         const list = Array.isArray(data?.rows) ? data.rows : [];
@@ -6810,7 +6843,7 @@ async function fetchMembers() {
 
         // 3. 화면 렌더링
         if (!g_members.length) {
-             void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:g_adminMemberRuntime?.coop_id,actor:adminCertificateAuthId}),current:()=>requestRevision===g_member_fetch_revision,refresh:()=>fetchMembers()});
+             void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:read.coop,actor:read.actor}),current:()=>isCurrentMemberRosterRead(read),refresh:()=>fetchMembers()});
              if (!keyword && status === 'all' && type === 'all') {
                  renderNoMembersState();
              } else if (typeof renderMemberTable === 'function') {
@@ -6822,10 +6855,10 @@ async function fetchMembers() {
 
         renderMemberTable(g_members);
         renderMemberPagination();
-        void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:g_adminMemberRuntime?.coop_id,actor:adminCertificateAuthId}),current:()=>requestRevision===g_member_fetch_revision,refresh:()=>fetchMembers()});
+        void window.MemberAdmissionAdmin?.list({client:_supabase,rows:g_members,context:()=>({coop_id:read.coop,actor:read.actor}),current:()=>isCurrentMemberRosterRead(read),refresh:()=>fetchMembers()});
         return true;
     } catch (err) {
-        if (requestRevision !== g_member_fetch_revision) return;
+        if (!isCurrentMemberRosterRead(read)) return false;
         CoopSafeLog.error("[erp/admin_member] operation failed", err);
         // Alert 대신 모달 사용 권장 (기존 myAlert 함수가 있다면)
         if (typeof myAlert === 'function') {
@@ -6833,8 +6866,11 @@ async function fetchMembers() {
         }
         return false;
     } finally {
-        if (requestRevision === g_member_fetch_revision && typeof showLoading === 'function') showLoading(false);
+        read.pending = false;
+        if (isCurrentMemberRosterRead(read)) setMemberRosterReadBusy(false);
     }
+    })();
+    return read.promise;
 }
 
 
@@ -8647,6 +8683,7 @@ function bindAdminCertificateContext(authId) {
     adminCertificateAuthId = String(authId || '');
     _supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== adminCertificateAuthId)) {
+            invalidateMemberRosterRead();
             adminCertificateAuthId = '';
             invalidateMemberInformationList(true);
             clearMemberDetailEdits();
@@ -8659,6 +8696,7 @@ function bindAdminCertificateContext(authId) {
     const frame = window.frameElement;
     if (frame) {
         const observer = new MutationObserver(() => {
+            invalidateMemberRosterRead();
             if (frame.hidden) {
                 invalidateDonationListRead();
                 invalidateMemberInformationList();
@@ -8693,8 +8731,10 @@ function bindAdminCertificateContext(authId) {
             }
         });
         observer.observe(frame, { attributes: true, attributeFilter: ['hidden'] });
-        window.addEventListener('pagehide', () => {observer.disconnect();memberFundListResume=null;memberFundRefreshSequence++;}, { once: true });
+        window.addEventListener('pagehide', () => {invalidateMemberRosterRead();observer.disconnect();memberFundListResume=null;memberFundRefreshSequence++;}, { once: true });
     }
+    window.addEventListener('pagehide', invalidateMemberRosterRead);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) invalidateMemberRosterRead(); });
 }
 
 async function hideIssueDocForPreview() {
@@ -9801,9 +9841,31 @@ function updateMemberFundSummary(type, rows) {
 } // End of updateMemberFundSummary
 
 // 조합원 자금 요약과 상세 모달이 같은 조회 결과를 재사용한다.
+async function readCapitalNotificationSendPermission() {
+    const controller = new AbortController();
+    let timer;
+    try {
+        let request = _supabase.rpc('is_admin');
+        if (typeof request.abortSignal === 'function') request = request.abortSignal(controller.signal);
+        return await Promise.race([request, new Promise((_, reject) => {
+            timer = setTimeout(() => { controller.abort(); reject(new Error('CAPITAL_SEND_PERMISSION_TIMEOUT')); }, 15000);
+        })]);
+    } catch (error) { return { data: false, error }; }
+    finally { clearTimeout(timer); }
+}
+
+function canSendCurrentCapitalNotification() {
+    const state = globalHistoryData.capitalNotificationRead;
+    return !isAdminMemberSiteProfile() && !!state && !state.busy && state.sendAllowed === true
+        && !state.sendPermissionFailed && isCurrentMemberDetailRead(state.read)
+        && state.actor === String(adminCertificateAuthId || '')
+        && state.coop === String(g_adminMemberRuntime?.coop_id || '')
+        && !window.frameElement?.hidden && canAccessAdminMemberTab('members');
+}
+
 async function retryMemberCapitalNotificationStatus(button) {
     const state = globalHistoryData.capitalNotificationRead;
-    if (!state?.failed || state.busy || !isCurrentMemberDetailRead(state.read)
+    if (!(state?.failed || state?.sendPermissionFailed) || state.busy || !isCurrentMemberDetailRead(state.read)
         || state.actor !== String(adminCertificateAuthId || '')
         || state.coop !== String(g_adminMemberRuntime?.coop_id || '')
         || window.frameElement?.hidden || !canAccessAdminMemberTab('members')) return;
@@ -9811,11 +9873,11 @@ async function retryMemberCapitalNotificationStatus(button) {
     if (button) button.disabled = true;
     const read = beginMemberDetailRead('capitalNotifications', state.uuid);
     const controller = new AbortController();
-    let timer, result;
+    let timer, result, sendPermission;
     try {
         let request = _supabase.rpc('admin_list_member_capital_notification_status', { p_member_text_id: state.textId });
         if (typeof request.abortSignal === 'function') request = request.abortSignal(controller.signal);
-        result = await Promise.race([request, new Promise((_, reject) => {
+        [result, sendPermission] = await Promise.race([Promise.all([request, readCapitalNotificationSendPermission()]), new Promise((_, reject) => {
             timer = setTimeout(() => { controller.abort(); reject(new Error('CAPITAL_STATUS_READ_TIMEOUT')); }, 15000);
         })]);
     } catch (error) { result = { error }; }
@@ -9838,12 +9900,13 @@ async function retryMemberCapitalNotificationStatus(button) {
             capital_notification_requested_at: status.requested_at, capital_notification_accepted_at: status.accepted_at,
             capital_notification_attempt_count: status.attempt_count };
     });
-    globalHistoryData.capitalNotificationRead = { ...state, failed };
+    globalHistoryData.capitalNotificationRead = { ...state, failed, sendAllowed: !sendPermission?.error && sendPermission?.data === true, sendPermissionFailed: !!sendPermission?.error };
     if (activeMemberHistoryType === 'ledger' && document.getElementById('memberHistoryModal')?.classList.contains('show')) renderMemberHistoryContent('ledger');
 }
 
 async function loadMemberFunds(uuid, textId, reset=false) {
     const read = beginMemberDetailRead('funds', uuid);
+    const actor = String(adminCertificateAuthId || ''), coop = String(g_adminMemberRuntime?.coop_id || '');
     if (!isCurrentMemberDetailRead(read)) return;
     if (reset) resetMemberFundsSummaryCards();
     else {
@@ -9884,17 +9947,19 @@ async function loadMemberFunds(uuid, textId, reset=false) {
     }
     const donationPromise = Promise.resolve(donationQuery || { data: [], error: null }).catch(readFailure);
 
-    const [capitalResult, donationResult, capitalNotificationResult] = await Promise.all([
+    const [capitalResult, donationResult, capitalNotificationResult, sendPermission] = await Promise.all([
         capitalPromise,
         donationPromise,
-        capitalNotificationPromise
+        capitalNotificationPromise,
+        hasTextId && !isAdminMemberSiteProfile() ? readCapitalNotificationSendPermission() : Promise.resolve({data:false,error:null})
     ]);
-    if (!isCurrentMemberDetailRead(read)) return;
+    if (!isCurrentMemberDetailRead(read) || actor !== String(adminCertificateAuthId || '') || coop !== String(g_adminMemberRuntime?.coop_id || '')) return;
     if (capitalResult.error) CoopSafeLog.error("출자금 로드 실패:", capitalResult.error);
     if (donationResult.error) CoopSafeLog.error("기부금 로드 실패:", donationResult.error);
     if (capitalNotificationResult.error) CoopSafeLog.error("출자금 알림 상태 로드 실패:", capitalNotificationResult.error);
     globalHistoryData.capitalNotificationRead = {
         read, uuid, textId: safeTextId, failed: !!capitalNotificationResult.error,
+        sendAllowed: !sendPermission.error && sendPermission.data === true, sendPermissionFailed: !!sendPermission.error,
         actor: String(adminCertificateAuthId || ''), coop: String(g_adminMemberRuntime?.coop_id || '')
     };
 
@@ -10078,6 +10143,10 @@ function openCapitalNotificationPrompt(context, onComplete) {
         if (typeof onComplete === 'function') onComplete({ outcome: 'unavailable' });
         return;
     }
+    if (!canSendCurrentCapitalNotification()) {
+        if (typeof onComplete === 'function') onComplete({ outcome: 'deferred', notificationKind: normalized.notificationKind });
+        return;
+    }
 
     capitalNotificationPromptState.context = normalized;
     capitalNotificationPromptState.onComplete = typeof onComplete === 'function' ? onComplete : null;
@@ -10133,8 +10202,8 @@ function getCapitalNotificationOutcomeMessage(result) {
     }
     return {
         message: result?.notificationKind === 'membership_complete'
-            ? '조합원 상태는 정상으로 변경되었으며 가입 완료 알림톡은 나중에 출자금 내역에서 발송할 수 있습니다.'
-            : '출자금은 저장되었으며 알림톡은 나중에 출자금 내역에서 발송할 수 있습니다.',
+            ? (canSendCurrentCapitalNotification() ? '조합원 상태는 정상으로 변경되었으며 가입 완료 알림톡은 나중에 출자금 내역에서 발송할 수 있습니다.' : '조합원 상태가 정상으로 변경되었습니다.')
+            : (canSendCurrentCapitalNotification() ? '출자금은 저장되었으며 알림톡은 나중에 출자금 내역에서 발송할 수 있습니다.' : '출자금은 저장되었습니다.'),
         type: 'success'
     };
 } // End of getCapitalNotificationOutcomeMessage
@@ -10245,6 +10314,10 @@ async function sendApprovedExtraCapitalNotification(capitalId) {
 
 async function sendCapitalReflectionNotification() {
     if (capitalNotificationPromptState.sending) return;
+    if (!canSendCurrentCapitalNotification()) {
+        setCapitalNotificationFeedback('현재 권한으로는 알림을 보낼 수 없습니다.', 'warning');
+        return;
+    }
     const context = capitalNotificationPromptState.context;
     if (!context?.capitalId) {
         setCapitalNotificationFeedback('발송할 출자금 내역을 확인할 수 없습니다.', 'danger');
@@ -10302,6 +10375,7 @@ async function sendCapitalReflectionNotification() {
 } // End of sendCapitalReflectionNotification
 
 function openCapitalNotificationFromHistory(capitalId) {
+    if (!canSendCurrentCapitalNotification()) return;
     const numericCapitalId = Number(capitalId || 0);
     const item = (Array.isArray(globalHistoryData.ledger) ? globalHistoryData.ledger : []).find(function (row) {
         return Number(row?.id || 0) === numericCapitalId;
@@ -10362,7 +10436,7 @@ function promptMemberActivationAfterCapitalSave(memberTextId, memberUid, capital
     }
 
     const memberName = String(document.getElementById('md-name')?.value || '해당 조합원').trim() || '해당 조합원';
-    const message = isAdminMemberSiteProfile()
+    const message = !canSendCurrentCapitalNotification()
         ? `${memberName} 조합원의 첫 출자금이 저장되었습니다.\n조합원 상태를 정상(정조합원)으로 변경할까요?`
         : `${memberName} 조합원의 첫 출자금이 저장되었습니다.\n조합원 상태를 정상(정조합원)으로 변경할까요?\n\n정상 전환 후 가입 완료 알림톡 발송 여부를 선택할 수 있습니다.`;
 
@@ -10390,7 +10464,7 @@ function promptMemberActivationAfterCapitalSave(memberTextId, memberUid, capital
             }
             loadDashboard();
 
-            if (!isAdminMemberSiteProfile() && data?.notification_available === true && Number(data?.capital_id || 0) > 0) {
+            if (canSendCurrentCapitalNotification() && data?.notification_available === true && Number(data?.capital_id || 0) > 0) {
                 openCapitalNotificationPrompt(data, async function (result) {
                     showLoading(true);
                     try {
@@ -10405,7 +10479,7 @@ function promptMemberActivationAfterCapitalSave(memberTextId, memberUid, capital
             }
 
             myAlert(
-                isAdminMemberSiteProfile()
+                !canSendCurrentCapitalNotification()
                     ? '조합원 상태가 정상(정조합원)으로 변경되었습니다.'
                     : (data.message || '조합원 상태가 정상(정조합원)으로 변경되었습니다. 가입 완료 알림은 출자금 내역에서 확인해주세요.'),
                 isAdminMemberSiteProfile() ? 'success' : 'warning'
@@ -10490,7 +10564,7 @@ async function saveFundData() {
         memberFundFields().forEach(node=>window.ErpWorkspaceResume?.checkpoint(node));
         if(type==='capital' && data?.member_join_date) acceptMemberFundJoinDate(state,data.member_join_date);
         const requiresActivation = isNewCapital && data?.requires_activation === true;
-        const hasCapitalNotificationPrompt = !isAdminMemberSiteProfile()
+        const hasCapitalNotificationPrompt = canSendCurrentCapitalNotification()
             && isNewCapital
             && !requiresActivation
             && Boolean(data?.capital_id)
@@ -11033,6 +11107,7 @@ window.onload = async function() {
                 gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
             } catch (error) {
                 if (sequence === memberFundRefreshSequence) {
+                    invalidateMemberRosterRead();
                     invalidateApplicationListRead();
                     invalidateMemberReturnSummaryRead();
                     invalidateAdminDashboardRead();
@@ -11041,6 +11116,7 @@ window.onload = async function() {
             }
             if (sequence !== memberFundRefreshSequence) return;
             if (!gate.ok || String(gate.runtime?.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')) {
+                invalidateMemberRosterRead();
                 invalidateApplicationListRead();
                 invalidateMemberReturnSummaryRead();
                 invalidateAdminDashboardRead();
