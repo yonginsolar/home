@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.193 | Change: 2026-10-27 - Wrap accounting summaries and ledger controls at large text sizes. -->
+<!-- Version: v1.0.194 | Change: 2026-10-30 - Read and verify complete same-cooperative closing report sources. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -214,7 +214,7 @@
   <div class="input-group no-print shadow-sm">
       <select data-erp-query-control class="form-select" id="reportYearSelect" style="max-width: 120px; font-weight:bold;">
           </select>
-      <button class="btn btn-outline-dark btn-report flex-fill" type="button" onclick="printReport()">
+      <button id="btnClosingReport" class="btn btn-outline-dark btn-report flex-fill" type="button" onclick="printReport()">
           🖨️ 결산 보고서 생성
       </button>
   </div>
@@ -1238,6 +1238,7 @@ let bankInterestRequestKey = '';
 let closingContext = null;
 let yearModalCallback = null;
 let lastReportParts = null;
+let accountingReportAction = null;
 let prepayCache = { vendors: [], balances: {}, costMap: {} };
 let prepayVatManual = false;
 let receivableCache = { vendors: [], balances: {}, incomeMap: {}, summary: { balance: 0, vat: 0 } };
@@ -2280,6 +2281,7 @@ window.onload = async function() {
         opt.value = y; opt.text = y + "년"; yearSel.add(opt);
     }
     yearSel.addEventListener("change", () => {
+        cancelAccountingRead('report');
         refreshDashboard();
     });
 
@@ -10564,33 +10566,72 @@ function downloadClosingCsv() {
 }
 
 async function printReport() {
-    const selYear = Number(document.getElementById("reportYearSelect").value);
+    const year = Number(document.getElementById('reportYearSelect').value);
+    const end = year === new Date().getFullYear() ? formatAccountingKstDate(new Date()) : `${year}-12-31`;
+    const coop = String(myInfo?.coop_id || '').trim();
+    const revision = closingActionRevision;
+    const scope = accountingReadScope('', { valid: () => closingActionRevision === revision && Number(document.getElementById('reportYearSelect').value) === year });
+    if (!Number.isInteger(year) || !accountingReadScopeCurrent(scope)) return;
+    if (accountingReportAction) return accountingReportAction.promise;
+    const action = { scope, year, end, coop, cancelled: false, promise: null };
+    accountingReportAction = action;
+    const button = document.getElementById('btnClosingReport'), caption = button?.innerHTML;
+    action.current = () => !action.cancelled && accountingReportAction === action && accountingReadScopeCurrent(scope);
+    action.promise = (async () => {
+        if (button) { button.disabled = true; button.textContent = '전체 자료 확인 중…'; }
+        let source;
+        const loaded = await runAccountingRead('report', JSON.stringify([coop, year, end]), scope, async (read) => {
+            let request = _supabase.rpc('get_accounting_closing_report_source', { p_coop_id: coop, p_fiscal_year: year, p_period_end: end });
+            if (typeof request.abortSignal === 'function') request = request.abortSignal(read.controller.signal);
+            const { data, error } = await request;
+            if (error) throw error;
+            return validateAccountingReportSource(data, { coop, year, end });
+        }, data => { source = data; }, message => {
+            if (action.current()) showAlert('조회 실패', message + ' 결산 보고서 생성을 다시 눌러 주세요.');
+        }, { cancel: () => { action.cancelled = true; } });
+        if (!loaded || !action.current()) return;
+        if (button) button.textContent = '보고서 준비 중…';
+        await prepareAccountingClosingReport(source, action);
+    })();
+    try { return await action.promise; }
+    catch (_) { if (action.current()) showAlert('보고서 확인 필요', '보고서를 준비하지 못했습니다. 결산 보고서 생성을 다시 눌러 주세요.'); }
+    finally {
+        if (accountingReportAction === action) {
+            accountingReportAction = null;
+            if (button) { button.innerHTML = caption; button.disabled = !accountingDataAuthorized || !(canPerform('accounting.view') || canPerform('accounting.edit')); }
+        }
+    }
+}
+
+function validateAccountingReportSource(data, selection) {
+    const fail = () => { throw Error('ACCOUNTING_REPORT_SOURCE_INCOMPLETE'); };
+    if (!data || data.schema_version !== 1 || data.coop_id !== selection.coop || data.fiscal_year !== selection.year || data.period_end !== selection.end) fail();
+    const proof = data.proof;
+    if (!proof || !Number.isSafeInteger(data.member_count) || data.member_count < 0) fail();
+    for (const [field, count] of [['journal_rows', 'journal_count'], ['company_rows', 'company_count'], ['master_rows', 'master_count'], ['salary_rows', 'salary_count']]) {
+        if (!Array.isArray(data[field]) || !Number.isSafeInteger(proof[count]) || data[field].length !== proof[count]) fail();
+    }
+    const start = `${selection.year}-01-01`, totals = { debit: 0, credit: 0, period: 0 };
+    for (const row of data.journal_rows) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(row.Date) || row.Date > selection.end) fail();
+        for (const side of ['Debit', 'Credit']) if (!Number.isSafeInteger(Number(row[side] || 0))) fail();
+        totals.debit += Number(row.Debit || 0); totals.credit += Number(row.Credit || 0);
+        if (row.Date >= start) totals.period++;
+    }
+    if (!Number.isSafeInteger(totals.debit) || !Number.isSafeInteger(totals.credit) || totals.debit !== Number(proof.debit) || totals.credit !== Number(proof.credit) || totals.period !== proof.period_count) fail();
+    return data;
+}
+
+async function prepareAccountingClosingReport(source, selection) {
+    const selYear = selection.year;
     const currYear = new Date().getFullYear();
-    const todayStr = formatAccountingKstDate(new Date());
     const startDate = `${selYear}-01-01`;
-    const endDate = (selYear === currYear) ? todayStr : `${selYear}-12-31`;
-    const endYm = endDate.slice(0, 7);
-    const coopId = String(myInfo?.coop_id || '').trim();
+    const endDate = selection.end;
     let rangeText = (selYear === currYear) ? `${startDate} ~ ${endDate} (가결산)` : `${startDate} ~ ${endDate} (확정)`;
 
-    const [
-        { data: periodData, error: periodError },
-        { data: closingData, error: closingError },
-        { data: infoData, error: infoError },
-        { data: masterData, error: masterError },
-        { data: salaryData, error: salaryError },
-        { count: memberCountRaw, error: memberError }
-    ] = await Promise.all([
-        _supabase.from('ac_journal').select('*').gte('Date', startDate).lte('Date', endDate),
-        _supabase.from('ac_journal').select('*').lte('Date', endDate),
-        _supabase.from('ref_company_info').select('*').eq('coop_id', coopId),
-        _supabase.from('ac_master').select('Type, Standard, Item, Code'),
-        _supabase.from('hr_salary').select('year_month,ded_pension,ded_health,ded_care,ded_employ,ded_income,ded_local,ded_advance,ded_capital,ded_total').lte('year_month', endYm),
-        _supabase.from('coop_members').select('*', { count: 'exact', head: true }).eq('coop_id', coopId).eq('status', '정상')
-    ]);
-
-    const fetchError = periodError || closingError || infoError || masterError || salaryError || memberError;
-    if (fetchError) return showAlert("오류", "결산 데이터를 불러오지 못했습니다: " + fetchError.message);
+    if (!selection.current()) return;
+    const closingData = source.journal_rows, periodData = closingData.filter(row => row.Date >= startDate);
+    const infoData = source.company_rows, masterData = source.master_rows, salaryData = source.salary_rows, memberCountRaw = source.member_count;
 
     const info = {}; if(infoData) infoData.forEach(i=>info[i.key]=i.value);
     const memberCount = memberCountRaw || 0;
@@ -10927,12 +10968,14 @@ async function printReport() {
             surplus_html: surplusHtml
         }
     };
+    if (!selection.current()) return;
     const snapshotResult = await _supabase.rpc('save_accounting_closing_report_snapshot', {
         p_fiscal_year: selYear,
         p_period_start: startDate,
         p_period_end: endDate,
         p_report_payload: reportPayload
     });
+    if (!selection.current()) return;
     const snapshotWarning = snapshotResult.error
         ? `<div class="alert alert-danger"><strong>총회 자료집 연동 저장 실패</strong><br>${e(snapshotResult.error.message || '결산보고서 스냅샷을 저장하지 못했습니다.')}</div>`
         : `<div class="alert alert-success no-print"><strong>총회 자료집 연동 완료</strong><br>${selYear}년도 결산보고서 생성 결과를 그대로 저장했습니다.</div>`;
