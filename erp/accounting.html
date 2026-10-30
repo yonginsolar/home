@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.195 | Change: 2026-10-30 - Verify complete closing report sources after accounting authorization. -->
+<!-- Version: v1.0.196 | Change: 2026-10-30 - Recover report snapshot outcomes without duplicate saves. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -13,6 +13,7 @@
   <script>console.log('[Version] v1.0.193 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
+  <script src="accounting_report_save.js?v=1.0.0" integrity="sha384-AzLhwgwH2GCLUoGPmH84klNCeErIK1TS80qvB89ZFoXhSOEMec79STufobsxF1kw" crossorigin="anonymous"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261022-help-1"></script>
@@ -1166,7 +1167,7 @@ function toggleLabor(target) {
         <h5 class="modal-title">보고서 미리보기</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body bg-white" id="reportContent"></div>
+      <div class="modal-body bg-white"><div id="closingReportSaveStatus"></div><div id="reportContent"></div></div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
         <button class="btn btn-outline-success" onclick="downloadClosingCsv()">⬇ CSV</button>
@@ -1239,6 +1240,8 @@ let closingContext = null;
 let yearModalCallback = null;
 let lastReportParts = null;
 let accountingReportAction = null;
+let accountingReportSaveUI = null;
+let accountingReportActorUid = '';
 let prepayCache = { vendors: [], balances: {}, costMap: {} };
 let prepayVatManual = false;
 let receivableCache = { vendors: [], balances: {}, incomeMap: {}, summary: { balance: 0, vat: 0 } };
@@ -1462,14 +1465,15 @@ function bindAccountingReadLifecycle() {
         closingYearExplicitInputs.set(closingActiveYear,{...(closingYearExplicitInputs.get(closingActiveYear)||{}),[id]:String(ERPNumberInput.raw(input.value))});
         if(id==='closingLegalInput')closingLegalManual=true;
     });
-    const cancelStale=()=>{for(const [kind,read] of accountingReadTasks)if(!read.current())cancelAccountingRead(kind);};
+    const cancelStale=()=>{for(const [kind,read] of accountingReadTasks)if(!read.current())cancelAccountingRead(kind);accountingReportSaveUI?.leave();};
     const expireDiscards=()=>{invalidateAccountingDiscard('asset');invalidateAccountingDiscard('queue');};
     for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('accTab').addEventListener(name,()=>{closingActionRevision++;if(name==='hidden.bs.tab')expireDiscards();cancelStale();});
     document.getElementById('closingModal').addEventListener('hidden.bs.modal',()=>{rememberClosingDraft();closingPreparedScope=null;cancelAccountingRead('closing');});
+    document.getElementById('reportModal').addEventListener('hidden.bs.modal',()=>accountingReportSaveUI?.leave());
     if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden){closingActionRevision++;expireDiscards();}cancelStale();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
-    window.addEventListener('pagehide',()=>{expireDiscards();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
+    window.addEventListener('pagehide',()=>{expireDiscards();accountingReportSaveUI?.leave();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('beforeunload',event=>{
-        if(assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
+        if(accountingReportSaveUI?.hasUnresolved()||assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
     });
 }
 
@@ -2215,6 +2219,7 @@ window.onload = async function() {
     });
     if (!accountingUserGate.ok) return;
     myInfo = accountingUserGate.user;
+    accountingReportActorUid = String(accountingUserGate.authUser?.id || '');
     permissionSet = await loadPermissions(myInfo);
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
     try {
@@ -2283,6 +2288,7 @@ window.onload = async function() {
     }
     yearSel.addEventListener("change", () => {
         cancelAccountingRead('report');
+        accountingReportSaveUI?.leave();
         refreshDashboard();
     });
 
@@ -10566,6 +10572,25 @@ function downloadClosingCsv() {
     URL.revokeObjectURL(url);
 }
 
+function getAccountingReportSaveUI() {
+    if (accountingReportSaveUI) return accountingReportSaveUI;
+    if (!window.AccountingReportSave) return null;
+    accountingReportSaveUI = window.AccountingReportSave.create({
+        owner: accountingReadIdentity,
+        actor: () => accountingReportActorUid || myInfo?.auth_user_id || '',
+        current: context => context?.current?.() === true,
+        editable: () => accountingDataAuthorized && canPerform('accounting.edit'),
+        client: () => _supabase,
+        status: () => document.getElementById('closingReportSaveStatus'),
+        display: prepared => {
+            lastReportParts = prepared;
+            document.getElementById('reportContent').innerHTML = prepared.reportHtml;
+            reportModal.show();
+        }
+    });
+    return accountingReportSaveUI;
+}
+
 async function printReport() {
     const year = Number(document.getElementById('reportYearSelect').value);
     const end = year === new Date().getFullYear() ? formatAccountingKstDate(new Date()) : `${year}-12-31`;
@@ -10574,6 +10599,10 @@ async function printReport() {
     const scope = accountingReadScope('', { valid: () => closingActionRevision === revision && Number(document.getElementById('reportYearSelect').value) === year });
     if (!Number.isInteger(year) || !accountingReadScopeCurrent(scope)) return;
     if (accountingReportAction) return accountingReportAction.promise;
+    const saveUI = getAccountingReportSaveUI();
+    if (!saveUI) return showAlert('보고서 준비 필요', '보고서 저장 도구를 불러오지 못했습니다. 화면을 다시 열어 주세요.');
+    const context = { coop, current: () => accountingReadScopeCurrent(scope) };
+    if (saveUI.openPending(year, context)) return;
     const action = { scope, year, end, coop, cancelled: false, promise: null };
     accountingReportAction = action;
     const button = document.getElementById('btnClosingReport'), caption = button?.innerHTML;
@@ -10592,7 +10621,8 @@ async function printReport() {
         }, { cancel: () => { action.cancelled = true; } });
         if (!loaded || !action.current()) return;
         if (button) button.textContent = '보고서 준비 중…';
-        await prepareAccountingClosingReport(source, action);
+        const prepared = await prepareAccountingClosingReport(source, action);
+        if (action.current() && prepared) await saveUI.start(prepared, context);
     })();
     try { return await action.promise; }
     catch (_) { if (action.current()) showAlert('보고서 확인 필요', '보고서를 준비하지 못했습니다. 결산 보고서 생성을 다시 눌러 주세요.'); }
@@ -10970,31 +11000,19 @@ async function prepareAccountingClosingReport(source, selection) {
         }
     };
     if (!selection.current()) return;
-    const snapshotResult = await _supabase.rpc('save_accounting_closing_report_snapshot', {
-        p_fiscal_year: selYear,
-        p_period_start: startDate,
-        p_period_end: endDate,
-        p_report_payload: reportPayload
-    });
-    if (!selection.current()) return;
-    const snapshotWarning = snapshotResult.error
-        ? `<div class="alert alert-danger"><strong>총회 자료집 연동 저장 실패</strong><br>${e(snapshotResult.error.message || '결산보고서 스냅샷을 저장하지 못했습니다.')}</div>`
-        : `<div class="alert alert-success no-print"><strong>총회 자료집 연동 완료</strong><br>${selYear}년도 결산보고서 생성 결과를 그대로 저장했습니다.</div>`;
-
-    lastReportParts = {
+    return {
+        reportHtml,
         headerHtml,
         bsHtml,
         plHtml,
         surplusHtml,
         taxHtml,
         reportPayload,
-        snapshot: snapshotResult.data || null,
+        snapshot: null,
         csvHeaders,
         csvRows,
         csvFileName: `closing_report_${selYear}.csv`
     };
-    document.getElementById("reportContent").innerHTML = snapshotWarning + reportHtml;
-    reportModal.show();
 }
 
 const CLOSING_REPORT_PRINT_CSS = `
