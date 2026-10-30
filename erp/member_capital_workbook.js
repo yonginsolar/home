@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.1.6. Keep late list/result guidance in its original review context. */
+/* Member/capital workbook 1.2.0. Existing-member capital references and acknowledged file rows. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -115,7 +115,7 @@
     const sources = {members: {}, payments: {}, date1904: wb.Workbook?.WBProps?.date1904 === true};
     for (const [key, raw, rows] of [["members",rawMembers,payload],["payments",rawPayments,payment]])
       rows.forEach((row,i) => { sources[key][row.row_no] = {...raw[i]}; });
-    return { data: { members: payload, payments: payment, mode: "groups" }, errors, sources };
+    return { data: { members: payload, payments: payment, mode: "groups", protocol: "existing-capital-1" }, errors, sources };
   }
   function create({
     client,
@@ -222,7 +222,7 @@
       layout.textContent = "#memberWorkbookModal dialog.member-workbook-progress{box-sizing:border-box;width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;margin:auto;padding:24px;border:1px solid #cbd5e1;border-radius:16px;background:#fff;color:#172033;word-break:keep-all;overflow-wrap:anywhere}#memberWorkbookModal dialog.member-workbook-progress::backdrop{background:#0f172a75}#memberWorkbookModal .modal-dialog-scrollable .modal-content{max-height:calc(100vh - var(--bs-modal-margin, .5rem)*2);max-height:calc(100dvh - var(--bs-modal-margin, .5rem)*2);overflow-y:auto}#memberWorkbookModal .modal-body{flex:0 0 auto;overflow:visible}@media(max-width:575.98px){#memberWorkbookModal .modal-footer{padding:8px;gap:8px}#memberWorkbookModal .modal-footer>button{flex:1 1 14rem;max-width:100%;min-width:0;min-height:44px;margin:0;padding:8px 12px;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}}";
       document.head.append(layout);
       modal.innerHTML =
-        '<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="memberWorkbookTitle">회원·출자금 엑셀 함께 등록</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="d-flex gap-2 flex-wrap mb-3"><button type="button" class="btn btn-outline-success btn-sm" data-template>두 시트 양식 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm coop-workflow-help" data-help aria-label="회원·출자금 함께 등록 도움말">?</button></div><label class="form-label" for="memberWorkbookFile">엑셀 파일</label><input id="memberWorkbookFile" class="form-control mb-2" type="file" accept=".xlsx,.xls"><p class="small text-muted">조합원 시트에는 신규 회원을 한 줄씩, 출자금 납입내역 시트에는 실제 입금을 한 줄씩 입력하세요. 파일 10MB·시트별 500건까지 검사합니다.</p><p data-status class="small" role="status" aria-live="polite"></p><p data-summary class="small fw-bold"></p><div class="d-flex gap-2 flex-wrap mb-2"><button type="button" class="btn btn-outline-secondary btn-sm" data-check>다시 검사</button><button type="button" class="btn btn-outline-secondary btn-sm" data-export>검토 목록 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm" data-clear>검토 비우기</button></div><div class="d-flex gap-2 mb-2" role="group" aria-label="검토 시트"><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="members">조합원</button><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="payments">출자금 납입내역</button></div><div class="table-responsive border rounded" style="max-height:45vh;overflow:auto"><table class="table table-sm align-middle mb-0" style="min-width:850px;table-layout:fixed"><thead></thead><tbody></tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-submit>회원·납입내역 등록</button></div></div></div>';
+        '<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="memberWorkbookTitle">회원·출자금 엑셀 함께 등록</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="d-flex gap-2 flex-wrap mb-3"><button type="button" class="btn btn-outline-success btn-sm" data-template>두 시트 양식 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm coop-workflow-help" data-help aria-label="회원·출자금 함께 등록 도움말">?</button></div><label class="form-label" for="memberWorkbookFile">엑셀 파일</label><input id="memberWorkbookFile" class="form-control mb-2" type="file" accept=".xlsx,.xls"><p class="small text-muted">조합원 시트에는 회원 정보를, 출자금 납입내역 시트에는 실제 입금을 한 줄씩 입력하세요. 기존 회원이 확인되면 출자금만 추가합니다. 파일 10MB·시트별 500건까지 검사합니다.</p><p data-status class="small" role="status" aria-live="polite"></p><p data-summary class="small fw-bold"></p><div class="d-flex gap-2 flex-wrap mb-2"><button type="button" class="btn btn-outline-secondary btn-sm" data-check>다시 검사</button><button type="button" class="btn btn-outline-secondary btn-sm" data-export>검토 목록 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm" data-clear>검토 비우기</button></div><div class="d-flex gap-2 mb-2" role="group" aria-label="검토 시트"><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="members">조합원</button><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="payments">출자금 납입내역</button></div><div class="table-responsive border rounded" style="max-height:45vh;overflow:auto"><table class="table table-sm align-middle mb-0" style="min-width:850px;table-layout:fixed"><thead></thead><tbody></tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-submit>회원·납입내역 등록</button></div></div></div>';
       document.body.append(modal);
       const $ = (s) => modal.querySelector(s);
       file = $("input[type=file]");
@@ -307,7 +307,7 @@
       $("[data-template]").onclick = () => download(template);
       $("[data-help]").onclick = () =>
         void root.CoopDialog.alert(
-          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 명부에 새로 넣을 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 회원만 등록하면 조합원 시트만 사용하고, 출자금을 함께 등록할 때만 출자금 등록 권한을 추가로 확인합니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역의 동명이인은 조합원번호로 구분해 주세요. 이미 명부에 있는 회원은 납입내역 시트에만 입력하세요.\n\n이메일이 없는 기존 회원은요?\n명부 등록에서는 이메일을 비워 둘 수 있습니다. 임의의 이메일을 만들지 마세요. 명부 등록과 로그인 계정 생성은 별개이며, 이메일 로그인에는 본인의 실제 이메일 인증·계정 연결이 필요합니다.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록된 행은 다운로드에서 빠집니다.",
+          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 명부에 새로 넣을 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 회원만 등록하면 조합원 시트만 사용하고, 출자금을 함께 등록할 때만 출자금 등록 권한을 추가로 확인합니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역의 동명이인은 조합원번호로 구분해 주세요. 이미 명부에 있는 회원은 납입내역 시트만 사용해도 됩니다. 두 시트에 함께 들어 있다면 조합원번호·주민번호 등으로 같은 회원인지 확인한 뒤 기존 회원의 출자금만 추가합니다. 회원 정보는 덮어쓰지 않습니다.\n\n이메일이 없는 기존 회원은요?\n명부 등록에서는 이메일을 비워 둘 수 있습니다. 임의의 이메일을 만들지 마세요. 명부 등록과 로그인 계정 생성은 별개이며, 이메일 로그인에는 본인의 실제 이메일 인증·계정 연결이 필요합니다.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록한 납입은 다시 등록하지 않고 건너뜁니다. 남은 납입에 필요한 기존 회원 정보는 다운로드에 함께 남습니다.",
           { title: "회원·출자금 함께 등록" },
         );
       $("[data-export]").textContent = "남은 행 다운로드";
@@ -367,7 +367,7 @@
                 row.row_no,
                 row.member_type,
                 row.name,
-                s.phase === "saved"
+                r?.existing ? "기존 조합원 · 출자금 연결" : r?.skipped ? "이 파일에서 등록 완료" : s.phase === "saved"
                   ? "등록 완료"
                   : s.failures?.[tab]?.[row.row_no] || row._issues?.filter(issue => !(r?.email_checked === true && typeof issue === "string" && issue.startsWith("이메일 중복:"))).join(" / ") || r?.reason || (r ? "등록 가능" : "검사 전"),
               ]
@@ -380,7 +380,7 @@
                 row.amount == null
                   ? "금액 확인"
                   : row.amount.toLocaleString("ko-KR") + "원",
-                s.phase === "saved"
+                r?.skipped ? "이 파일에서 등록 완료" : s.phase === "saved"
                   ? "등록 완료"
                   : s.rechecks?.has(row.row_no)
                     ? "재확인 필요"
@@ -409,7 +409,7 @@
           input.setAttribute("aria-label", row.row_no + "행 거래 구분");
           input.placeholder = "통장 거래번호·입금 시각";
           input.disabled =
-            s.phase === "saved" ||
+            r?.skipped === true || s.phase === "saved" ||
             !allowed(s) ||
             locked(s) ||
             ["reading", "checking"].includes(s.phase);
@@ -503,16 +503,19 @@
       status.textContent = s?.message || "";
       const eligibleMembers = s?.review?.members.filter(r => r.eligible === true).length || 0;
       const eligiblePayments = s?.review?.payments.filter(r => r.eligible === true).length || 0;
+      const existingMembers = s?.review?.members.filter(r => r.existing === true).length || 0;
+      const skippedMembers = s?.review?.members.filter(r => r.skipped === true).length || 0;
+      const skippedPayments = s?.review?.payments.filter(r => r.skipped === true).length || 0;
       summary.textContent = s?.data
         ? "신규 회원 " +
-          s.data.members.length +
+          (s.data.members.length - existingMembers - skippedMembers) +
           "명 · 납입 " +
-          s.data.payments.length +
+          (s.data.payments.length - skippedPayments) +
           "건 / " +
-          (s.data.payments.some(r => r.amount === null) ? "금액 확인 필요" : s.data.payments
+          (s.data.payments.some(r => r.amount === null) ? "금액 확인 필요" : s.data.payments.filter(row => !s.review?.payments.some(r => r.row_no === row.row_no && r.skipped))
             .reduce((n, r) => n + BigInt(r.amount || 0), 0n)
             .toLocaleString("ko-KR") +
-          "원") + (s.review ? " · 지금 등록 가능: 회원 " + eligibleMembers + "명·납입 " + eligiblePayments + "건" : "")
+          "원") + (existingMembers ? " · 기존 조합원 연결 " + existingMembers + "명" : "") + (skippedMembers + skippedPayments ? " · 이미 등록 " + (skippedMembers + skippedPayments) + "행 제외" : "") + (s.review ? " · 지금 등록 가능: 회원 " + eligibleMembers + "명·납입 " + eligiblePayments + "건" : "")
         : "";
       if (rows) renderRows();
     }
@@ -617,10 +620,13 @@
           r.members.length !== s.data.members.length ||
           r.payments.length !== s.data.payments.length ||
           ["members", "payments"].some((k) =>
-            r[k].some(
+            new Set(r[k].map(x => x.row_no)).size !== s.data[k].length || r[k].some(
               (x) =>
                 !s.data[k].some((v) => v.row_no === x.row_no) ||
-                !["ready", "error"].includes(x.status),
+                !["ready", "error", "existing", "done"].includes(x.status) ||
+                (x.status === "existing" && (k !== "members" || x.existing !== true || x.eligible !== false || x.skipped)) ||
+                (x.status === "done" && (x.skipped !== true || x.eligible !== false || x.existing)) ||
+                (!["existing", "done"].includes(x.status) && (x.existing || x.skipped)),
             ),
           )
         )
@@ -741,17 +747,16 @@
           paymentCount: s.review.payments.filter(r => r.eligible ?? r.status === "ready").length,
           emailClearedCount: s.review.members.filter(r => r.eligible === true && r.email_resolution === "personal_cleared").length,
           managerLinkCount: s.review.members.filter(r => r.eligible === true && r.email_resolution === "manager_link").length,
+          hasUnresolved: [...s.review.members,...s.review.payments].some(r => !r.existing && !r.skipped && (r.eligible === false || r.status === "error")),
         };
       const attempt = s.attempt,
         epoch = s.epoch, wasUncertain=attempt.uncertain, submitFocused=document.activeElement===submit;
       s.phase = "confirming";
       render();
       const yes = await root.CoopDialog.confirm(
-        wasUncertain ? "이전 등록 결과를 확인하고, 아직 처리되지 않았다면 같은 요청으로 등록을 이어갈까요?" : "신규 회원 " +
-          attempt.memberCount +
-          "명과 납입 " +
+        wasUncertain ? "이전 등록 결과를 확인하고, 아직 처리되지 않았다면 같은 요청으로 등록을 이어갈까요?" : (attempt.memberCount ? "신규 회원 " + attempt.memberCount + "명과 납입 " : "납입 ") +
           attempt.paymentCount +
-          "건을 등록할까요?" + (attempt.emailClearedCount ? "\n개인 " + attempt.emailClearedCount + "명의 중복 이메일은 빈칸으로 등록합니다." : "") + (attempt.managerLinkCount ? "\n단체 " + attempt.managerLinkCount + "건은 같은 이메일의 개인을 관리자로 연결하고 단체 이메일은 비워 둡니다." : "") + (attempt.memberCount + attempt.paymentCount < attempt.payload.members.length + attempt.payload.payments.length ? "\n확인할 묶음은 검토 목록에 남습니다." : ""),
+          "건을 등록할까요?" + (attempt.emailClearedCount ? "\n개인 " + attempt.emailClearedCount + "명의 중복 이메일은 빈칸으로 등록합니다." : "") + (attempt.managerLinkCount ? "\n단체 " + attempt.managerLinkCount + "건은 같은 이메일의 개인을 관리자로 연결하고 단체 이메일은 비워 둡니다." : "") + (attempt.hasUnresolved ? "\n확인할 묶음은 검토 목록에 남습니다." : ""),
         { title: "회원·출자금 등록", confirmText: wasUncertain ? "확인 후 이어가기" : "등록" },
       );
       if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible()) return;
@@ -783,22 +788,27 @@
           return;
         }
         if (!["saved","partial"].includes(r?.outcome)) throw Error("UNCONFIRMED");
-        const successes = {members:new Set(),payments:new Set()}, failures = {members:{},payments:{}};
+        const successes = {members:new Set(),payments:new Set()}, failures = {members:{},payments:{}}, existing = new Set(), skipped = {members:new Set(),payments:new Set()};
         for (const k of ["members","payments"]) {
           const expectedRows = new Set(attempt.payload[k].map(row => row.row_no));
           const results = r[k] || (r.outcome === "saved" ? attempt.payload[k].map(row => ({row_no:row.row_no,ok:true})) : null);
           if (!Array.isArray(results) || results.length !== expectedRows.size || new Set(results.map(row => row.row_no)).size !== expectedRows.size || results.some(row => !expectedRows.has(row.row_no) || typeof row.ok !== "boolean")) throw Error("UNCONFIRMED");
           for (const row of results) {
-            if (row.ok) successes[k].add(row.row_no);
+            if ((row.existing !== undefined && typeof row.existing !== "boolean") || (row.skipped !== undefined && typeof row.skipped !== "boolean") || (row.existing && (k !== "members" || !row.ok || row.skipped)) || (row.skipped && !row.ok)) throw Error("UNCONFIRMED");
+            if (row.existing) existing.add(row.row_no);
+            else if (row.skipped) skipped[k].add(row.row_no);
+            else if (row.ok) successes[k].add(row.row_no);
             else failures[k][row.row_no] = row.reason || "다시 검사해 주세요.";
           }
         }
-        if (r.member_count !== successes.members.size || r.payment_count !== successes.payments.size) throw Error("UNCONFIRMED");
-        for (const k of ["members","payments"]) s.data[k] = s.data[k].filter(row => !successes[k].has(row.row_no));
-        const remaining = s.data.members.length + s.data.payments.length;
+        if (r.member_count !== successes.members.size || r.payment_count !== successes.payments.size || (r.member_existing_count ?? 0) !== existing.size || (r.member_skipped_count ?? 0) !== skipped.members.size || (r.payment_skipped_count ?? 0) !== skipped.payments.size) throw Error("UNCONFIRMED");
+        for (const k of ["members","payments"]) s.data[k] = s.data[k].filter(row => !successes[k].has(row.row_no) && !skipped[k].has(row.row_no));
+        // Keep strong member references with unresolved payments, without re-registering them.
+        if (!s.data.payments.length) s.data.members = s.data.members.filter(row => !existing.has(row.row_no));
+        const remaining = s.data.members.filter(row => !existing.has(row.row_no)).length + s.data.payments.length;
         s.phase = remaining ? "needs_check" : "saved";
         s.attempt = null;
-        s.review = null;
+        s.review = existing.size && remaining ? {members:s.data.members.filter(row => existing.has(row.row_no)).map(row => ({row_no:row.row_no,existing:true,eligible:false,reason:"기존 조합원 · 출자금 연결"})),payments:[]} : null;
         s.failures = failures;
         s.dirty = remaining > 0;
         s.message = "등록 완료: 회원 " + r.member_count + "명·납입 " + r.payment_count + "건" + (remaining ? " · 남은 " + remaining + "행은 내려받아 수정하거나 다시 검사해 주세요." : "");
@@ -871,13 +881,13 @@
       const X = root.XLSX, wb = X.utils.book_new();
       wb.Workbook = {WBProps:{date1904:s.sources?.date1904 === true}};
       for (const k of ["members", "payments"]) {
-        const rows = s.data[k].map((r) => {
+        const rows = s.data[k].filter(r => !s.review?.[k]?.some(v => v.row_no === r.row_no && v.skipped)).map((r) => {
           const v = s.review?.[k]?.find((v) => v.row_no === r.row_no);
           return {
             ...(s.sources?.[k]?.[r.row_no] || {}),
             ...(k === "payments" ? {"거래 구분":r.reference || ""} : {}),
             "원본 행": r.row_no,
-            "확인할 내용": s.failures?.[k]?.[r.row_no] || r._issues?.join(" / ") || v?.reason ||
+            "확인할 내용": v?.existing ? "기존 조합원 · 남은 납입 연결용" : s.failures?.[k]?.[r.row_no] || r._issues?.join(" / ") || v?.reason ||
               (s.phase === "saved"
                 ? "등록 완료"
                 : v?.needs_confirmation
@@ -934,7 +944,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.1.6",
+    version: "1.2.0",
     create,
     parse,
     memberHeaders,
