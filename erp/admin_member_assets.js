@@ -19,12 +19,14 @@
         integrity: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk'
     });
     const capitalImport = Object.freeze({
-        src: new URL('capital_excel_import.js?v=1.0.2', document.baseURI).href,
-        integrity: 'sha384-XrWtBtzmRwAbX0DN2tR1ESwAk4iaDSTXspHSZm/kt+rufHCFBWadiampBxuyKP67'
+        src: new URL('capital_excel_import.js?v=1.1.0', document.baseURI).href,
+        integrity: 'sha384-PExRdIa15COrKe2bJOyMh+bDwThz6ph4J+PmfT0xqERFnWqBKokj9P5YY6d0VEJy'
     });
+    const capitalMatching=Object.freeze({src:new URL('capital_member_matching.js?v=1.0.0',document.baseURI).href,
+        integrity:'sha384-hjV/oKOplGPUOFoX+gRmEwXPfWjB7d/5xua0PqlDAv1wuzu5KLpvNS02M2IsN7nO'});
     const memberWorkbook = Object.freeze({
-        src: new URL('member_capital_workbook.js?v=1.2.0', document.baseURI).href,
-        integrity: 'sha384-aGPcLuNsBSHwGsA4nsL2+/b53iLdWf+uTsrZ2A2Efy/OcEL3S7jAIqC12Y7jE0/Y'
+        src: new URL('member_capital_workbook.js?v=1.3.0', document.baseURI).href,
+        integrity: 'sha384-CQGWi4h+n715X7fMTJAHtG/AKIovtUNUkkGGMaYV5ux6syh0MsZCck79rdGJXFcw'
     });
     const memberExcelEntry = Object.freeze({
         src: new URL('member_excel_entry.js?v=1.0.4', document.baseURI).href,
@@ -75,12 +77,13 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261025-cert-intent-1', do
     }
     function ensureSpreadsheet() { return ensureAsset('SPREADSHEET', spreadsheet, ready); }
     async function ensureCapitalImport() {
-        await ensureAsset('CAPITAL_IMPORT', capitalImport, () => root.CapitalExcelImport?.version === '1.0.2');
+        await ensureAsset('CAPITAL_MATCHING',capitalMatching,()=>root.CapitalMemberMatching?.version==='1.0.0');
+        await ensureAsset('CAPITAL_IMPORT', capitalImport, () => root.CapitalExcelImport?.version === '1.1.0');
         return root.CapitalExcelImport;
     }
     async function ensureMemberWorkbook() {
         await ensureCapitalImport();
-        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.2.0');
+        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.3.0');
         return root.MemberCapitalWorkbook;
     }
     async function ensureMemberExcelEntry() {

@@ -1,9 +1,9 @@
-/* Capital Excel import v1.0.2. Preserve rejected-file reviews and scope late result guidance. */
+/* Capital Excel import v1.1.0. Optional name/phone matching and explicit target selection. */
 (function (root) {
  'use strict';
  const MAX_ROWS=500,MAX_BYTES=10*1024*1024;
- const headers=['조합원번호','이름·단체명','납입일','금액','입금자명','메모'];
- const aliases=[['조합원번호','회원번호','member_id'],['이름·단체명','이름','성명','단체명','name'],['납입일','입금일','날짜','deposit_date'],['금액','입금액','출자금액','출자금','amount'],['입금자명','입금자','depositor'],['메모','비고','note']];
+ const headers=['조합원번호','이름·단체명','납입일','금액','입금자명','메모','전화번호'];
+ const aliases=[['조합원번호','회원번호','member_id'],['이름·단체명','이름','성명','단체명','name'],['납입일','입금일','날짜','deposit_date'],['금액','입금액','출자금액','출자금','amount'],['입금자명','입금자','depositor'],['메모','비고','note'],['전화번호','연락처','휴대전화','휴대전화번호','휴대폰','phone']];
  const text=v=>String(v??'').trim();
  function parseAmount(value) {
   if(typeof value==='number')return Number.isSafeInteger(value)&&value>0?value:null;
@@ -36,13 +36,14 @@
    const source=data[i];if(!source.some(v=>text(v)))continue;
    if(result.length===MAX_ROWS)throw Error('한 번에 500건까지 검사할 수 있습니다.');
    const values=columns.map(c=>c.length?source[c[0]]:'');
-   const row={row_no:i+1,member_id:text(values[0]),name:text(values[1]),date:parseDate(values[2],XLSX,wb.Workbook?.WBProps?.date1904===true),amount:parseAmount(values[3]),depositor:text(values[4]),note:text(values[5])};
+   const row={row_no:i+1,member_id:text(values[0]),name:text(values[1]),date:parseDate(values[2],XLSX,wb.Workbook?.WBProps?.date1904===true),amount:parseAmount(values[3]),depositor:text(values[4]),note:text(values[5]),...(text(values[6])?{phone:text(values[6])}:{})};
    const formula=columns.some(c=>c.length&&sheet[XLSX.utils.encode_cell({r:i,c:c[0]})]?.f);
    let reason='';
    if(formula)reason='수식 대신 계산된 값을 붙여넣어 주세요.';
    else if(!row.member_id&&!row.name)reason='조합원번호 또는 이름·단체명을 입력해 주세요.';
    else if(!row.date)reason='납입일을 실제 날짜로 입력해 주세요.';
    else if(row.amount===null)reason='금액은 1원 이상의 정수로 입력해 주세요.';
+   else if(row.phone&&!/^[0-9 ()+.-]+$/.test(row.phone))reason='전화번호 형식을 확인해 주세요.';
    else if(row.member_id.length>100||row.name.length>100||row.depositor.length>100||row.note.length>2000)reason='조합원번호·이름·입금자명은 100자, 메모는 2,000자 이내로 입력해 주세요.';
    result.push({input:row,source:values.map(v=>v??''),status:reason?'error':'unchecked',reason,selected:false});
   }
@@ -80,7 +81,7 @@
    if(modal)return;
    const style=document.createElement('style');style.textContent='#capitalImportModal .capital-import-table{min-width:760px;table-layout:fixed}#capitalImportModal th,#capitalImportModal td{word-break:keep-all;overflow-wrap:break-word}#capitalImportModal .capital-import-scroll{max-height:45vh;overflow:auto}#capitalImportModal .capital-import-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}';document.head.append(style);
    modal=document.createElement('div');modal.className='modal fade';modal.id='capitalImportModal';modal.tabIndex=-1;modal.setAttribute('aria-labelledby','capitalImportTitle');
-   modal.innerHTML='<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="capitalImportTitle">출자금 엑셀 일괄등록</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="capital-import-tools mb-3"><button type="button" class="btn btn-sm btn-outline-success" data-action="template">양식 다운로드</button><button type="button" class="btn btn-sm btn-outline-secondary" data-action="help" aria-label="출자금 엑셀 도움말" data-workflow-help="기존 조합원에게 실제 납입 내역을 추가할 때 사용합니다. 조합원번호 또는 이름·단체명으로 대상을 찾고 납입일·금액을 한 줄씩 입력하세요. 동명이인은 조합원번호로 구분하고 미리보기의 대상·날짜·금액을 통장과 대조합니다. 이 단독 등록은 같은 조합원·날짜·금액을 중복으로 제외합니다. 실제 별도 입금을 같은 날 두 번 기록해야 한다면 회원·출자금 함께 등록의 거래 구분·별도 입금 확인을 이용하세요. 감자·반환은 해당 업무에서 처리하고 현재 잔액 전체를 납입 금액으로 넣지 않도록 확인합니다.">?</button><span class="small text-muted">납입 내역을 한 줄씩 입력하세요. 엑셀(.xlsx)·CSV, 10MB·500건까지 검사합니다.</span></div><label for="capitalImportFile" class="form-label fw-bold">출자금 파일</label><input id="capitalImportFile" type="file" class="form-control mb-2" accept=".xlsx,.csv"><div id="capitalImportStatus" class="small mb-2" role="status" aria-live="polite"></div><div class="capital-import-tools mb-2"><button type="button" class="btn btn-sm btn-outline-primary" data-action="check">다시 검사</button><select class="form-select form-select-sm" style="width:auto" aria-label="검토 목록 범위" data-erp-query-control><option value="all">전체</option><option value="ready">등록 가능</option><option value="review">확인 필요·중복</option></select><button type="button" class="btn btn-sm btn-outline-secondary" data-action="export">검토 목록 다운로드</button><button type="button" class="btn btn-sm btn-outline-secondary" data-action="clear">검토 비우기</button></div><p class="small fw-bold mb-2" id="capitalImportSummary"></p><div class="table-responsive border rounded capital-import-scroll"><table class="table table-sm align-middle capital-import-table"><thead class="table-light"><tr><th style="width:44px"><input type="checkbox" class="form-check-input" aria-label="등록 가능한 내역 전체 선택" data-erp-query-control></th><th style="width:50px">행</th><th>조합원번호</th><th>이름·단체명</th><th style="width:100px">납입일</th><th style="width:110px">금액</th><th style="width:30%">검사 결과</th></tr></thead><tbody></tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-action="submit">선택한 내역 등록</button></div></div></div>';
+   modal.innerHTML='<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="capitalImportTitle">출자금 엑셀 일괄등록</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="capital-import-tools mb-3"><button type="button" class="btn btn-sm btn-outline-success" data-action="template">양식 다운로드</button><button type="button" class="btn btn-sm btn-outline-secondary" data-action="help" aria-label="출자금 엑셀 도움말" data-workflow-help="기존 조합원에게 실제 납입 내역을 추가할 때 사용합니다. 조합원번호가 없어도 이름·단체명과 전화번호로 대상을 찾을 수 있습니다. 여러 명이 일치하거나 자동으로 찾지 못하면 검토 목록에서 조합원을 직접 선택하세요. 납입일·금액을 한 줄씩 입력하고, 미리보기의 대상·날짜·금액을 통장과 대조합니다. 이 단독 등록은 같은 조합원·날짜·금액을 중복으로 제외합니다. 실제 별도 입금을 같은 날 두 번 기록해야 한다면 회원·출자금 함께 등록의 거래 구분·별도 입금 확인을 이용하세요. 감자·반환은 해당 업무에서 처리하고 현재 잔액 전체를 납입 금액으로 넣지 않도록 확인합니다.">?</button><span class="small text-muted">납입 내역을 한 줄씩 입력하세요. 엑셀(.xlsx)·CSV, 10MB·500건까지 검사합니다.</span></div><label for="capitalImportFile" class="form-label fw-bold">출자금 파일</label><input id="capitalImportFile" type="file" class="form-control mb-2" accept=".xlsx,.csv"><div id="capitalImportStatus" class="small mb-2" role="status" aria-live="polite"></div><div class="capital-import-tools mb-2"><button type="button" class="btn btn-sm btn-outline-primary" data-action="check">다시 검사</button><select class="form-select form-select-sm" style="width:auto" aria-label="검토 목록 범위" data-erp-query-control><option value="all">전체</option><option value="ready">등록 가능</option><option value="review">확인 필요·중복</option></select><button type="button" class="btn btn-sm btn-outline-secondary" data-action="export">검토 목록 다운로드</button><button type="button" class="btn btn-sm btn-outline-secondary" data-action="clear">검토 비우기</button></div><p class="small fw-bold mb-2" id="capitalImportSummary"></p><div class="table-responsive border rounded capital-import-scroll"><table class="table table-sm align-middle capital-import-table"><thead class="table-light"><tr><th style="width:44px"><input type="checkbox" class="form-check-input" aria-label="등록 가능한 내역 전체 선택" data-erp-query-control></th><th style="width:50px">행</th><th>조합원번호</th><th>이름·단체명</th><th style="width:100px">납입일</th><th style="width:110px">금액</th><th style="width:30%">검사 결과</th></tr></thead><tbody></tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-action="submit">선택한 내역 등록</button></div></div></div>';
    document.body.append(modal);modal.querySelector('[data-action=help]').classList.add('coop-workflow-help');input=modal.querySelector('input[type=file]');status=modal.querySelector('#capitalImportStatus');summary=modal.querySelector('#capitalImportSummary');tbody=modal.querySelector('tbody');submit=modal.querySelector('[data-action=submit]');recheck=modal.querySelector('[data-action=check]');filter=modal.querySelector('select');all=modal.querySelector('thead input');clear=modal.querySelector('[data-action=clear]');exportButton=modal.querySelector('[data-action=export]');
    input.addEventListener('change',readFile);filter.onchange=render;
    all.onchange=()=>{if(!state||!allowed(state)||state.phase!=='ready')return;state.rows.filter(r=>r.status==='ready').forEach(r=>r.selected=all.checked);render();};
@@ -111,9 +112,16 @@
     const tr=document.createElement('tr'),td=document.createElement('td'),box=document.createElement('input');box.type='checkbox';box.className='form-check-input';box.dataset.erpQueryControl='';box.dataset.rowNo=String(row.input.row_no);box.setAttribute('aria-label',`${row.input.row_no}행 선택`);box.checked=!!row.selected;box.disabled=!can||s.phase!=='ready'||row.status!=='ready';box.onchange=()=>{if(!same(s)||!allowed(s)||s.phase!=='ready')return;row.selected=box.checked;render();};td.append(box);tr.append(td);
     const v=row.review||row.input;
     for(const val of [row.input.row_no,v.member_id||'-',v.name||'-',row.input.date||row.source[2],row.input.amount==null?String(row.source[3]):Number(row.input.amount).toLocaleString('ko-KR')+'원',row.status==='ready'?'등록 가능':row.status==='done'?'등록 완료':row.reason||'검사 전']){const cell=document.createElement('td');cell.textContent=String(val??'');tr.append(cell);}
+    root.CapitalMemberMatching?.render(tr.lastElementChild,row.match,{source:row.input,enabled:can&&s.phase==='ready'&&row.status!=='done',
+     onChoose:id=>changeMatch(row,id),onSearch:value=>changeMatch(row,'',value)});
     tbody.append(tr);
    }
    if(focusedRow)Array.from(tbody.querySelectorAll('input')).find(n=>n.dataset.rowNo===focusedRow&&!n.disabled)?.focus({preventScroll:true});
+  }
+  function changeMatch(row,id,lookup){
+   const s=state;if(!s||!allowed(s)||s.phase!=='ready'||!visible())return;
+   s.choices=root.CapitalMemberMatching.choose(s.choices,'rows',row.input.row_no,id,lookup);s.attempt=null;s.dirty=true;row.selected=!!id;
+   void checkRows();
   }
   function restoreSelection(file) {
    try{const transfer=new root.DataTransfer();if(file)transfer.items.add(file);input.files=transfer.files;}
@@ -131,7 +139,7 @@
     await ensureSpreadsheet();if(!same(s)||!allowed(s)||s.epoch!==epoch||!visible())return;
     const bytes=await file.arrayBuffer();if(!same(s)||!allowed(s)||s.epoch!==epoch||!visible())return;
     const wb=root.XLSX.read(bytes,{type:'array',raw:true,cellFormula:true,cellDates:false,sheetRows:10002});
-    s.rows=normalizeWorkbook(wb,root.XLSX);s.fallback=null;s.phase='needs_check';await checkRows(true);
+    s.rows=normalizeWorkbook(wb,root.XLSX);s.choices={};s.matching=false;s.fallback=null;s.phase='needs_check';await checkRows(true);
    } catch(error){if(same(s)&&s.epoch===epoch){if(s.fallback){Object.assign(s,s.fallback);s.fallback=null;restoreSelection(s.file);}else s.phase='error';s.message=/[가-힣]/.test(error.message||'')?error.message:'파일을 읽지 못했습니다. 양식과 파일을 확인하고 다시 선택해 주세요.';render();}}
   }
   async function checkRows(first=false) {
@@ -144,26 +152,35 @@
    if(!rows.length){s.phase='ready';s.message='파일에서 확인이 필요한 항목을 수정해 주세요.';render();return;}
    const controller=new AbortController();s.abort=controller;const timer=setTimeout(()=>controller.abort(),15000);
    try {
-    let query=client.rpc('capital_import_admin',{p_action:'preview',p_coop_id:context().coopId,p_rows:rows.map(r=>r.input),p_request_key:null});
+    const M=root.CapitalMemberMatching,source=rows.map(r=>r.input);s.matching=!!M&&(M.needed('capital',source)||!!s.choices?.rows?.length);
+    let query=s.matching?client.rpc('capital_member_matching_admin',{p_action:'preview',p_coop_id:context().coopId,p_kind:'capital',p_data:M.envelope(source,s.choices),p_request_key:null})
+     :client.rpc('capital_import_admin',{p_action:'preview',p_coop_id:context().coopId,p_rows:source,p_request_key:null});
     if(typeof query.abortSignal==='function')query=query.abortSignal(controller.signal);
     const {data,error}=await query;if(!same(s)||s.epoch!==epoch||!allowed(s)||!visible())return;
     if(error)throw error;if(data?.outcome!=='preview'||!Array.isArray(data.rows)||data.rows.length!==rows.length)throw Error('검사 결과를 확인하지 못했습니다. 다시 검사해 주세요.');
-    const byNo=new Map(data.rows.map(r=>[r.row_no,r]));
-    for(const row of rows){const r=byNo.get(row.input.row_no);if(!r||!['ready','error','duplicate'].includes(r.status)||r.status==='ready'&&!r.expected)throw Error('검사 결과를 확인하지 못했습니다. 다시 검사해 주세요.');row.review=r;row.status=r.status;row.reason=r.reason||'';row.selected=r.status==='ready'&&(first||row.selected);}
+    const byNo=new Map(data.rows.map(r=>[r.row_no,r])),matches=new Map((data.matches?.rows||[]).map(r=>[r.row_no,r]));
+    if(s.matching){if(matches.size!==rows.length)throw Error('연결 대상을 확인하지 못했습니다. 다시 검사해 주세요.');s.choices=M.accept(s.choices,data.matches);}
+    for(const row of rows){const r=byNo.get(row.input.row_no);if(!r||!['ready','error','duplicate'].includes(r.status)||r.status==='ready'&&!r.expected)throw Error('검사 결과를 확인하지 못했습니다. 다시 검사해 주세요.');row.review=r;row.match=matches.get(row.input.row_no);row.status=r.status;row.reason=r.reason||'';row.selected=r.status==='ready'&&(first||row.selected);}
     s.phase='ready';s.message='대상과 납입일·금액을 확인한 뒤 등록할 내역을 선택해 주세요.';
    } catch(error){if(same(s)&&s.epoch===epoch){s.phase='error';s.message=error.code==='42501'?errorMessage(error,{action:'preview'}):'검사 결과를 불러오지 못했습니다. 다시 검사해 주세요.';}}
    finally {clearTimeout(timer);if(same(s)&&s.epoch===epoch){s.abort=null;render();}}
   }
   async function save() {
    const s=state;if(!s||!allowed(s)||!visible()||!['ready','uncertain'].includes(s.phase))return;
-   if(!s.attempt){const selected=s.rows.filter(r=>r.status==='ready'&&r.selected);if(!selected.length)return;s.attempt={key:root.crypto.randomUUID(),rows:selected.map(r=>({...r.input,member_id:r.review.member_id,name:r.review.name,expected:r.review.expected})),total:selected.reduce((sum,r)=>sum+BigInt(r.input.amount),0n).toString()};}
+   if(!s.attempt){const selected=s.rows.filter(r=>r.status==='ready'&&r.selected);if(!selected.length)return;
+    const rows=selected.map(r=>({...r.input,...(!s.matching?{member_id:r.review.member_id,name:r.review.name}:{}),expected:r.review.expected}));
+    s.attempt={key:root.crypto.randomUUID(),rows,matching:s.matching,total:selected.reduce((sum,r)=>sum+BigInt(r.input.amount),0n).toString()};
+    if(s.matching)s.attempt.matchData=root.CapitalMemberMatching.envelope(rows,{rows:(s.choices?.rows||[]).filter(c=>selected.some(r=>r.input.row_no===c.row_no))});
+   }
    const attempt=s.attempt,epoch=s.epoch,wasUncertain=s.phase==='uncertain',submitFocused=document.activeElement===submit;s.retrying=wasUncertain;s.phase='confirming';render();
    const yes=await root.CoopDialog.confirm(wasUncertain?'이전 등록 결과를 확인하고, 아직 처리되지 않았다면 같은 요청으로 등록을 이어갈까요?':`${attempt.rows.length}건 / ${BigInt(attempt.total).toLocaleString('ko-KR')}원을 등록할까요?`,{title:'출자금 일괄등록',confirmText:wasUncertain?'확인 후 이어가기':'등록'});
    if(!same(s)||s.epoch!==epoch||!allowed(s)||!visible())return;
    if(!yes){s.phase=wasUncertain?'uncertain':'ready';if(!wasUncertain)s.attempt=null;render();restoreSubmitFocus(submitFocused);return;}
    s.phase='saving';s.message='선택한 출자금을 등록하는 중입니다…';render();
    try {
-    const {data,error}=await client.rpc('capital_import_admin',{p_action:'apply',p_coop_id:context().coopId,p_rows:attempt.rows,p_request_key:attempt.key});
+    const {data,error}=await client.rpc(attempt.matching?'capital_member_matching_admin':'capital_import_admin',attempt.matching?
+     {p_action:'apply',p_coop_id:context().coopId,p_kind:'capital',p_data:attempt.matchData,p_request_key:attempt.key}:
+     {p_action:'apply',p_coop_id:context().coopId,p_rows:attempt.rows,p_request_key:attempt.key});
     if(!same(s))return;
     if(error){
      if(!wasUncertain&&['PT409','22023','42501','55000'].includes(error.code)){s.phase='needs_check';s.attempt=null;s.message=error.code==='42501'?errorMessage(error,{action:'apply'}):error.hint||'내역이 달라졌습니다. 다시 검사해 주세요.';}
@@ -209,5 +226,5 @@
   }
   return '등록 결과를 확인하지 못했습니다. ‘등록 결과 확인’에서 이전 요청의 처리 여부를 확인하고 이어가 주세요.';
  }
- root.CapitalExcelImport=Object.freeze({version:'1.0.2',create,normalizeWorkbook,parseAmount,parseDate,errorMessage});
+ root.CapitalExcelImport=Object.freeze({version:'1.1.0',create,normalizeWorkbook,parseAmount,parseDate,errorMessage});
 })(window);

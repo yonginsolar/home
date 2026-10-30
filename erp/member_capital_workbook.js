@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.2.0. Existing-member capital references and acknowledged file rows. */
+/* Member/capital workbook 1.3.0. Optional phone matching without looking up member numbers. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -29,6 +29,7 @@
     "입금자명",
     "메모",
     "거래 구분",
+    "전화번호",
   ];
   const text = (v) => String(v ?? "").trim();
   function parse(wb, X, normalizeMember, memberPayload) {
@@ -98,6 +99,7 @@
         depositor: text(r["입금자명"]),
         note: text(r["메모"]),
         reference: text(r["거래 구분"]),
+        ...(text(r["전화번호"]||r["연락처"]||r["휴대전화번호"]||r["휴대전화"]||r["휴대폰"]||r.phone)?{phone:text(r["전화번호"]||r["연락처"]||r["휴대전화번호"]||r["휴대전화"]||r["휴대폰"]||r.phone)}:{}),
         confirmed_duplicate: false,
         _issues: [],
       };
@@ -108,6 +110,7 @@
           (!row.name || !["개인", "단체"].includes(row.member_type)))
       )
         row._issues.push("유형·이름 또는 조합원번호, 납입일·금액을 확인해 주세요.");
+      if(row.phone&&!/^[0-9 ()+.-]+$/.test(row.phone))row._issues.push('전화번호 형식을 확인해 주세요.');
       return row;
     });
     if (!payload.length && !payment.length)
@@ -307,7 +310,7 @@
       $("[data-template]").onclick = () => download(template);
       $("[data-help]").onclick = () =>
         void root.CoopDialog.alert(
-          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 명부에 새로 넣을 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 회원만 등록하면 조합원 시트만 사용하고, 출자금을 함께 등록할 때만 출자금 등록 권한을 추가로 확인합니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역의 동명이인은 조합원번호로 구분해 주세요. 이미 명부에 있는 회원은 납입내역 시트만 사용해도 됩니다. 두 시트에 함께 들어 있다면 조합원번호·주민번호 등으로 같은 회원인지 확인한 뒤 기존 회원의 출자금만 추가합니다. 회원 정보는 덮어쓰지 않습니다.\n\n이메일이 없는 기존 회원은요?\n명부 등록에서는 이메일을 비워 둘 수 있습니다. 임의의 이메일을 만들지 마세요. 명부 등록과 로그인 계정 생성은 별개이며, 이메일 로그인에는 본인의 실제 이메일 인증·계정 연결이 필요합니다.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록한 납입은 다시 등록하지 않고 건너뜁니다. 남은 납입에 필요한 기존 회원 정보는 다운로드에 함께 남습니다.",
+          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 명부에 새로 넣을 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 회원만 등록하면 조합원 시트만 사용하고, 출자금을 함께 등록할 때만 출자금 등록 권한을 추가로 확인합니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역은 이름·전화번호로 기존 조합원을 찾고, 여러 명이 겹치면 검토 목록에서 직접 선택합니다. 조합원번호를 아는 경우에는 그대로 사용할 수 있습니다. 이미 명부에 있는 회원은 납입내역 시트만 사용해도 됩니다. 두 시트에 함께 들어 있다면 조합원번호·주민번호 등으로 같은 회원인지 확인한 뒤 기존 회원의 출자금만 추가합니다. 회원 정보는 덮어쓰지 않습니다.\n\n이메일이 없는 기존 회원은요?\n명부 등록에서는 이메일을 비워 둘 수 있습니다. 임의의 이메일을 만들지 마세요. 명부 등록과 로그인 계정 생성은 별개이며, 이메일 로그인에는 본인의 실제 이메일 인증·계정 연결이 필요합니다.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록한 납입은 다시 등록하지 않고 건너뜁니다. 남은 납입에 필요한 기존 회원 정보는 다운로드에 함께 남습니다.",
           { title: "회원·출자금 함께 등록" },
         );
       $("[data-export]").textContent = "남은 행 다운로드";
@@ -468,8 +471,19 @@
           }
           tr.append(td);
         }
+        const match=(s.matches?.[tab]||[]).find(x=>x.row_no===row.row_no);
+        root.CapitalMemberMatching?.render(tr.children[tab==='members'?3:4],match,{
+          source:row,enabled:allowed(s)&&s.phase==='ready'&&!r?.skipped,
+          onChoose:id=>changeMatch(tab,row,id),onSearch:value=>changeMatch(tab,row,'',value)
+        });
         body.append(tr);
       }
+    }
+    function changeMatch(sheet,row,id,lookup){
+      const s=state;if(!s||!allowed(s)||s.phase!=='ready'||!visible())return;
+      s.choices=root.CapitalMemberMatching.choose(s.choices,sheet,row.row_no,id,lookup);
+      for(const p of s.data.payments){p.confirmed_duplicate=false;s.acks.delete(p.row_no);}
+      s.attempt=null;s.dirty=true;void review();
     }
     function ready(s) {
       return (
@@ -548,6 +562,7 @@
           memberPayload,
         );
         s.data = parsed.data;
+        s.choices={};s.matches=null;
         s.sources = parsed.sources;
         s.failures = null;
         s.fallback = null;
@@ -573,8 +588,12 @@
         }
       }
     }
-    async function request(action, payload, key, signal) {
-      let q = client.rpc("member_workbook_admin", {
+    async function request(action, payload, key, signal, frozenMatch) {
+      const M=root.CapitalMemberMatching;
+      const matching=frozenMatch||(M?.needed('workbook',payload)?M.envelope(payload,state?.choices):null);
+      let q = matching?client.rpc('capital_member_matching_admin',{
+        p_action:action,p_coop_id:context().coopId,p_kind:'workbook',p_data:matching,p_request_key:key||null
+      }):client.rpc("member_workbook_admin", {
         p_action: action,
         p_coop_id: context().coopId,
         p_data: payload,
@@ -612,6 +631,7 @@
           }),
         ]);
         if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible()) return;
+        if(r.matches){s.matches=r.matches;s.choices=root.CapitalMemberMatching.accept(s.choices,r.matches);}
         if (
           r?.outcome !== "preview" ||
           !r.expected ||
@@ -751,6 +771,7 @@
         };
       const attempt = s.attempt,
         epoch = s.epoch, wasUncertain=attempt.uncertain, submitFocused=document.activeElement===submit;
+      if(!attempt.matchData&&root.CapitalMemberMatching?.needed('workbook',attempt.payload))attempt.matchData=root.CapitalMemberMatching.envelope(attempt.payload,s.choices);
       s.phase = "confirming";
       render();
       const yes = await root.CoopDialog.confirm(
@@ -777,7 +798,7 @@
       const progress = startProgress(s, attempt.uncertain);
       let resultNotice = null;
       try {
-        const r = await request("apply", attempt.payload, attempt.key);
+        const r = await request("apply", attempt.payload, attempt.key,null,attempt.matchData);
         if (!same(s)) return;
         if (!allowed(s)) {
           attempt.uncertain = true;
@@ -944,7 +965,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.2.0",
+    version: "1.3.0",
     create,
     parse,
     memberHeaders,
