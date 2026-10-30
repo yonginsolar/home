@@ -9803,12 +9803,43 @@ function updateMemberFundSummary(type, rows) {
 // 조합원 자금 요약과 상세 모달이 같은 조회 결과를 재사용한다.
 async function retryMemberCapitalNotificationStatus(button) {
     const state = globalHistoryData.capitalNotificationRead;
-    if (!state?.failed || !isCurrentMemberDetailRead(state.read)
+    if (!state?.failed || state.busy || !isCurrentMemberDetailRead(state.read)
         || state.actor !== String(adminCertificateAuthId || '')
         || state.coop !== String(g_adminMemberRuntime?.coop_id || '')
         || window.frameElement?.hidden || !canAccessAdminMemberTab('members')) return;
+    state.busy = true;
     if (button) button.disabled = true;
-    await loadMemberFunds(state.uuid, state.textId);
+    const read = beginMemberDetailRead('capitalNotifications', state.uuid);
+    const controller = new AbortController();
+    let timer, result;
+    try {
+        let request = _supabase.rpc('admin_list_member_capital_notification_status', { p_member_text_id: state.textId });
+        if (typeof request.abortSignal === 'function') request = request.abortSignal(controller.signal);
+        result = await Promise.race([request, new Promise((_, reject) => {
+            timer = setTimeout(() => { controller.abort(); reject(new Error('CAPITAL_STATUS_READ_TIMEOUT')); }, 15000);
+        })]);
+    } catch (error) { result = { error }; }
+    finally { clearTimeout(timer); state.busy = false; }
+    if (globalHistoryData.capitalNotificationRead !== state || !isCurrentMemberDetailRead(state.read)
+        || !isCurrentMemberDetailRead(read) || window.frameElement?.hidden
+        || state.actor !== String(adminCertificateAuthId || '') || state.coop !== String(g_adminMemberRuntime?.coop_id || '')
+        || !canAccessAdminMemberTab('members')) return;
+    const failed = !!result?.error;
+    if (failed) CoopSafeLog.error('출자금 알림 상태 로드 실패:', { code: result.error?.code || 'CAPITAL_STATUS_READ_FAILED' });
+    const statuses = new Map((Array.isArray(result?.data) ? result.data : []).map(row => [String(row.capital_id), row]));
+    globalHistoryData.ledger = globalHistoryData.ledger.map(row => {
+        const clean = { ...row };
+        Object.keys(clean).filter(key => key.startsWith('capital_notification_')).forEach(key => { delete clean[key]; });
+        if (failed) return { ...clean, capital_notification_read_failed: true };
+        const status = statuses.get(String(row.id));
+        if (!status) return clean;
+        return { ...clean, capital_notification_event_type: status.notification_event_type,
+            capital_notification_status: status.delivery_status, capital_notification_error_code: status.error_code,
+            capital_notification_requested_at: status.requested_at, capital_notification_accepted_at: status.accepted_at,
+            capital_notification_attempt_count: status.attempt_count };
+    });
+    globalHistoryData.capitalNotificationRead = { ...state, failed };
+    if (activeMemberHistoryType === 'ledger' && document.getElementById('memberHistoryModal')?.classList.contains('show')) renderMemberHistoryContent('ledger');
 }
 
 async function loadMemberFunds(uuid, textId, reset=false) {

@@ -11,7 +11,7 @@
         integrity: 'sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ'
     });
     const dashboard = Object.freeze({
-        src: new URL('admin_member_dashboard.js?v=20261030-member-duty-1', document.baseURI).href,
+        src: new URL('admin_member_dashboard.js?v=20261030-member-duty-2', document.baseURI).href,
         integrity: 'sha384-7AnCKvyJwEWXRHW6gjAGFKJ5glq1agB+/AbnPJfxa1DTaHAJdDdGQKQZAqZkPgvz'
     });
     const pdf = Object.freeze({
