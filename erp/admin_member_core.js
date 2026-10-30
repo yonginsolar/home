@@ -6431,6 +6431,8 @@ function switchTab(tabName) {
         return;
     }
 
+    if (tabName === 'members' && document.getElementById('tab-members')?.classList.contains('active')) return;
+
     if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) invalidateMemberRosterRead();
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
