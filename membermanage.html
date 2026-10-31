@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.231
+Version: v1.0.232
 Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 -->
 <html lang="ko">
@@ -15,12 +15,12 @@ Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.2" integrity="sha384-jz4/CRSHFp2wgwTOd5DleNmnyNWx7jhysPdeVE3velQualbQpyTEThWmCGzKPzvu" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.231 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.232 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
 <script src="shared/application_retention_notice.js?v=1.1.0"></script>
-<script src="shared/child_direct_consent.js?v=1.0.4"></script>
+<script src="shared/child_direct_consent.js?v=1.0.5"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -9653,13 +9653,15 @@ text.textContent=r.phase==='saving'?'자녀 가입 신청을 처리하고 있습
 button.hidden=r.phase==='saving'||r.phase==='failed';button.disabled=false;button.setAttribute('aria-disabled',String(!!r.readPromise));button.setAttribute('aria-busy',String(!!r.readPromise));
 button.textContent=r.phase==='registered'?'확인':r.phase==='not_recorded'&&!r.writePending?'입력 내용 다시 확인':'결과 다시 확인';
 button.onclick=()=>{if(r.readPromise)return;return r.phase==='registered'?accept(r,true):r.phase==='not_recorded'&&!r.writePending?submitNewChild():check(r);};
+reviewPrevious();
 }
 function accept(r,manual=false){
 if(!current(r)||(!manual&&r.modalRevision!==familyRegistrationRevision))return;
 const same=r.snapshot===snapshot()&&r.bodyMatches!==false;
 tasks.delete(r.owner);keepNonce(r,true);render();
 if(same)resetFamilyRegistrationDraft();
-showModal(same?'🎉 가입 신청이 접수되었습니다. 출자금 입금과 관리자 확인 후 승인됩니다.':'이전 가입 신청이 접수되었습니다. 추가로 작성한 내용은 그대로 두었습니다.');
+showModal(same?'🎉 가입 신청이 접수되었습니다. 출자금 입금과 관리자 확인 후 승인됩니다.':'이전 가입 신청이 접수되었습니다. 현재 작성한 신청은 아직 제출하지 않았습니다.');
+document.getElementById('btnModalYes').textContent='확인';
 if(same){Promise.resolve(loadDashboardData(getPreferredDashboardProfileId())).catch(()=>CoopSafeLog.error('자녀 목록 재조회 실패',{code:'CHILD_LIST_REFRESH_FAILED'}));if(typeof loadManagedProfiles==='function')Promise.resolve(loadManagedProfiles(getRootMemberProfileId()||curAuth?.id)).catch(()=>CoopSafeLog.error('프로필 목록 재조회 실패',{code:'CHILD_PROFILE_REFRESH_FAILED'}));}
 }
 async function write(r){
@@ -9686,9 +9688,23 @@ r.readPromise=Promise.race([Promise.resolve().then(()=>_supabase.rpc('get_child_
  else if(value?.state==='not_recorded'&&!r.writePending)r.phase='not_recorded';else r.phase='unknown';
 },()=>{if((r.writeRevision||0)===writeRevision)r.phase='unknown';}).finally(()=>{clearTimeout(timer);r.readPromise=null;render();});render();return r.readPromise;
 }
+function reviewPrevious(){
+const r=tasks.get(owner()),overlay=document.getElementById('customModalOverlay'),host=document.getElementById('customModalMsg');
+if(!r||r.phase!=='registered'||!current(r)||overlay?.style.display!=='flex'||!host?.querySelector('#consentCheck1'))return false;
+const revision=familyRegistrationRevision,values=snapshot(),data=tempChildData,same=r.snapshot===values&&r.bodyMatches!==false;
+let notice=host.querySelector('[data-child-prior-receipt]');if(!notice){notice=document.createElement('p');notice.dataset.childPriorReceipt='';notice.className='alert alert-info small';notice.setAttribute('role','status');host.prepend(notice);}
+notice.textContent=same?'이 신청은 이미 접수되었습니다.': '이전 신청이 접수되었습니다. 현재 신청을 제출하기 전에 이전 접수를 확인해 주세요.';
+const yes=document.getElementById('btnModalYes');yes.textContent=same?'접수 결과 확인':'이전 접수 확인';
+yes.onclick=()=>{
+ if(!current(r)||r.phase!=='registered'||revision!==familyRegistrationRevision||values!==snapshot()||data!==tempChildData||overlay.style.display!=='flex')return;
+ if(same)return accept(r,true);
+ tasks.delete(r.owner);keepNonce(r,true);render();notice.textContent='이전 접수를 확인했습니다. 현재 신청은 아직 제출하지 않았습니다.';
+ yes.textContent='새 신청 제출';yes.onclick=executeChildJoin;
+};return true;
+}
 function submit(params,consents){
 const key=owner();let r=tasks.get(key)||restore();
-if(r?.phase==='registered'){accept(r,true);return;}
+if(r?.phase==='registered'){if(!reviewPrevious())accept(r,true);return;}
 if(r&&['saving','unknown','not_recorded'].includes(r.phase)){
  if(r.phase==='not_recorded'&&!r.writePending){
   if(r.readPromise)return r.readPromise;
@@ -9704,7 +9720,7 @@ r={id:crypto.randomUUID(),owner:key,actor:String(curAuth?.id||''),coop:String(cu
 }
 function clear(){for(const [key,r]of tasks){if(['saving','unknown','not_recorded'].includes(r.phase)){r.params=null;r.consents=null;r.snapshot=null;r.bodyMatches=false;}else tasks.delete(key);}const panel=document.getElementById('legacyChildRequestStatus');if(panel)panel.hidden=true;}
 window.addEventListener('beforeunload',event=>{if([...tasks.values()].some(r=>r.actor===String(curAuth?.id||'')&&r.coop===String(currentMemberCoopId||curMem?.coop_id||'')&&['saving','unknown','not_recorded'].includes(r.phase))){event.preventDefault();event.returnValue='';}});
-return Object.freeze({submit,check,render,clear,current:()=>tasks.get(owner())||restore()||null});
+return Object.freeze({submit,check,render,clear,reviewPrevious,current:()=>tasks.get(owner())||restore()||null});
 })();
 window.PortalChildDrafts = (() => {
 const ids = ['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelSelect','newFamRelInput','newFamCapital','newFamBank','newFamAcc'];
@@ -11630,7 +11646,7 @@ if (preparation && !window.PortalChildPreparation.current(preparation)) return;
 if (preparation) { data = preparation.data;preparation.stage = 'consent'; }
 const directHost = String(window.CoopRouteGuard?.getPublicRuntimeHost?.() || window.location.hostname || '').toLowerCase();
 if (['www.yonginsolar.kr','yonginsolar.kr','localhost','127.0.0.1'].includes(directHost) && !isSiteMemberPortalProfile()) {
-return window.ChildDirectConsent.open({client:_supabase,data,loadApplicationNotice:()=>CoopApplicationNotice.load(_supabase),applicationNotice:CoopApplicationNotice.text,isCurrent:()=>draftOwner===familyRegistrationOwner&&draftOwner===getFamilyRegistrationOwner()&&draftRevision===familyRegistrationRevision&&(!preparation||window.PortalChildPreparation.current(preparation)),onError:showModal,onSuccess:async()=>{
+return window.ChildDirectConsent.open({client:_supabase,data,owner:draftOwner,parentId:getActiveMemberProfileId(),getOwner:()=>getFamilyRegistrationOwner(),loadApplicationNotice:()=>CoopApplicationNotice.load(_supabase),applicationNotice:CoopApplicationNotice.text,isCurrent:()=>draftOwner===familyRegistrationOwner&&draftOwner===getFamilyRegistrationOwner()&&draftRevision===familyRegistrationRevision&&(!preparation||window.PortalChildPreparation.current(preparation)),onError:showModal,onSuccess:async()=>{
 resetFamilyRegistrationDraft();
 showModal('가입 신청이 접수되었습니다.\n\n'+CoopApplicationNotice.text+'\n\n신협 131-022-855516 (용인모두의햇빛협동조합)');
 await loadDashboardData(getPreferredDashboardProfileId());
@@ -11686,6 +11702,7 @@ btnYes.innerText = '동의 및 가입완료';
 btnYes.onclick = executeChildJoin; // 클릭 시 실행할 함수 연결
 
 overlay.style.display = 'flex';
+window.PortalLegacyChildRequests?.reviewPrevious();
 }
 
 // [신규] 최종 DB 저장 함수
@@ -11695,6 +11712,7 @@ const preparation = window.PortalChildPreparation?.forData(tempChildData);
 if (window.PortalChildPreparation && !preparation) return;
 const chk1 = document.getElementById('consentCheck1'), chk2 = document.getElementById('consentCheck2');
 if (!chk1?.checked || !chk2?.checked) return showModal('모든 필수 항목에 동의 체크해 주세요.');
+if(window.PortalLegacyChildRequests.reviewPrevious())return;
 const params = {
 p_manager_id:getActiveMemberProfileId(),p_name:tempChildData.name,
 p_rrn_display:tempChildData.rrn1+'-'+String(tempChildData.rrn2||'').charAt(0)+'******',
