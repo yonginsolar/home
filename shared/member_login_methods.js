@@ -1,10 +1,11 @@
-/* v1.0.2 — Preserve reconnections and distinguish verified email from status-read failure. */
+/* v1.0.3 — Preserve verified state; require a successful current read before link/unlink. */
 (function(root){
  'use strict';
  function create(options){
   const doc=root.document;let dialog,status,list,code,verify,send,refresh,close,authSection,authTitle,continueUnlink,cancelUnlink,view=0,opened=false,loading=null,state=null,op=null,opPending=false,returnTo=null,cooldown=0;
   const context=()=>options.getContext()||{},key=()=>{const c=context();return c.allowed&&c.actor&&c.coopId&&c.memberId?[c.actor,c.coopId,c.memberId].join('|'):'';};
   const active=(s,t)=>opened&&dialog.open&&state===s&&s.key===key()&&t===view;
+  const statusReady=data=>Array.isArray(data?.methods)&&['kakao','naver'].every(kind=>data.methods.some(m=>m.kind===kind&&typeof m.linked==='boolean'));
   const params=(action,s,extra={})=>({p_action:action,p_coop_id:s.coopId,p_member_uid:s.memberId,...extra});
   function bounded(promise){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=root.setTimeout(()=>reject(Error('READ_TIMEOUT')),15000);})]).finally(()=>root.clearTimeout(timer));}
   function message(value){if(opened&&state?.key===key()){status.textContent=value;status.hidden=!value;}}
@@ -19,34 +20,35 @@
    for(const kind of ['kakao','naver']){
     const item=data?.methods?.find(m=>m.kind===kind),{section,body}=card(kind,kind==='kakao'?'카카오':'네이버'),text=doc.createElement('p');text.className='method-state';text.textContent=item?(item.linked?'연결됨':'연결되지 않음'):'확인 중';section.classList.toggle('is-connected',!!item?.linked);body.append(text);
     if(item?.linked&&item.shared_with_other_coops===true){const note=doc.createElement('p');note.className='method-shared-notice';note.textContent='같은 연결을 쓰는 다른 조합에서도 함께 해제돼요.';body.append(note);}
-    const action=button(item?.linked?'연결 해제':'연결하기',()=>item?.linked?unlink(kind):link(kind));action.className='method-action'+(item?.linked?'':' method-primary');action.dataset.kind=kind;if(item?.linked){action.setAttribute('aria-controls','login-methods-auth');action.setAttribute('aria-expanded',String(state.unlinkKind===kind));}action.disabled=!data||!!loading||opPending||!!op;section.append(action);
+    const action=button(item?.linked?'연결 해제':'연결하기',()=>item?.linked?unlink(kind):link(kind));action.className='method-action'+(item?.linked?'':' method-primary');action.dataset.kind=kind;if(item?.linked){action.setAttribute('aria-controls','login-methods-auth');action.setAttribute('aria-expanded',String(state.unlinkKind===kind));}action.disabled=!state.readReady||!data||!!loading||opPending||!!op;section.append(action);
    }
    send.disabled=!state.user?.email||state.verifiedReadPending||!!loading||opPending||cooldown>Date.now();verify.disabled=!state.sent||!!loading||opPending;code.readOnly=!!loading||opPending;refresh.disabled=!!loading||opPending;
    refresh.textContent=op?'연결 상태 다시 확인':'다시 확인';
-   authSection.hidden=!state.unlinkKind;authTitle.textContent=(state.unlinkKind==='naver'?'네이버':'카카오')+' 연결 해제';continueUnlink.disabled=!!loading||opPending||!data?.email_ready||!data?.recent_otp;cancelUnlink.disabled=opPending;
+   authSection.hidden=!state.unlinkKind;authTitle.textContent=(state.unlinkKind==='naver'?'네이버':'카카오')+' 연결 해제';continueUnlink.disabled=!state.readReady||!!loading||opPending||!data?.email_ready||!data?.recent_otp;cancelUnlink.disabled=opPending;
    if(focusKind&&doc.activeElement===doc.body){const next=list.querySelector('[data-kind="'+focusKind+'"]');if(next&&!next.disabled)next.focus({preventScroll:true});}
   }
   async function rpc(action,s,extra){const r=await options.client.rpc('member_login_methods',params(action,s,extra));if(r.error)throw r.error;return r.data;}
-  async function read(){const s=state,t=view;if(!active(s,t)||loading)return;if(opPending){message('연결 처리를 기다리고 있어요…');return;}const recovering=s.verifiedReadPending,focusAfter=doc.activeElement===refresh,flight={};loading=flight;message('로그인 방법을 확인하고 있어요…');paint();
+  async function read(){const s=state,t=view;if(!active(s,t)||loading)return;if(opPending){message('연결 처리를 기다리고 있어요…');return;}const recovering=s.verifiedReadPending,focusAfter=doc.activeElement===refresh,flight={};loading=flight;s.readReady=false;message('로그인 방법을 확인하고 있어요…');paint();
    try{
     const [user,result]=await bounded(Promise.all([options.client.auth.getUser(),rpc('status',s)]));
-    if(!active(s,t))return;if(user.error||user.data?.user?.id!==s.actor)throw Error('ACTOR_CHANGED');
+    if(!active(s,t))return;if(user.error||user.data?.user?.id!==s.actor)throw Error('ACTOR_CHANGED');if(!statusReady(result))throw Error('STATUS_UNCONFIRMED');
     s.user=user.data.user;s.data=result;s.verifiedReadPending=false;
     if(op?.key===s.key){
      const method=result.methods.find(m=>m.kind===op.kind);
      if(!method?.linked){
       const synced=await bounded(rpc('sync',s,{p_kind:op.kind,p_identity:op.identityId,p_expected:op.cacheRevision}));
       if(!active(s,t))return;
-      if(!['linked','unlinked'].includes(synced.outcome))throw Error('SYNC_UNCONFIRMED');
+      if(!['linked','unlinked'].includes(synced.outcome)||!statusReady(synced))throw Error('SYNC_UNCONFIRMED');
       s.data=synced;
       if(synced.outcome==='unlinked')options.onUpdated?.(op.kind,s.user);
       op=null;s.unlinkKind=null;s.sent=false;code.value='';message(synced.outcome==='unlinked'?'연결을 해제했어요.':'새 연결이 확인됐어요. 현재 연결 상태를 표시했어요.');
      }else{op=null;message('아직 연결되어 있어요. 해제하려면 다시 선택해 주세요.');}
     }else message(recovering?'이메일 인증과 연결 상태를 확인했어요.':'');
+    s.readReady=true;
    }catch(e){if(active(s,t))message(s.verifiedReadPending?'이메일 인증은 완료됐어요. 연결 상태를 불러오지 못했으니 ‘다시 확인’을 눌러 주세요.':op?'처리 결과를 확인하지 못했어요. 연결 상태를 다시 확인해 주세요.':'로그인 방법을 불러오지 못했어요. 다시 확인해 주세요.');}
    finally{if(loading===flight)loading=null;if(active(s,t)){paint();if(recovering&&focusAfter&&!continueUnlink.disabled&&doc.activeElement===refresh)continueUnlink.focus({preventScroll:true});}}
   }
-  async function link(kind){const s=state,t=view;if(!active(s,t)||loading||opPending||op)return;const flight={};loading=flight;paint();
+  async function link(kind){const s=state,t=view;if(!active(s,t)||!s.readReady||!s.data||loading||opPending||op)return;const flight={};loading=flight;paint();
    try{const current=await bounded(rpc('prepare_link',s,{p_kind:kind}));if(!active(s,t))return;
     if(current.methods.find(m=>m.kind===kind)?.linked){s.data=current;return;}
     hide(false);await options.onLink(kind);
@@ -68,12 +70,12 @@
    try{
     const r=await bounded(options.client.auth.verifyOtp({email:s.user.email,token,type:'email'}));
     if(!active(s,t))return;if(r.error||r.data?.user?.id!==s.actor)throw Error('AUTH_NOT_CONFIRMED');
-    verified=true;code.value='';s.sent=false;s.verifiedReadPending=true;s.data=null;
-    const data=await bounded(rpc('status',s));if(!active(s,t))return;s.data=data;s.verifiedReadPending=false;message('이메일을 인증했어요.');
+    verified=true;code.value='';s.sent=false;s.verifiedReadPending=true;s.readReady=false;s.data=null;
+    const data=await bounded(rpc('status',s));if(!active(s,t))return;if(!statusReady(data))throw Error('STATUS_UNCONFIRMED');s.data=data;s.verifiedReadPending=false;s.readReady=true;message('이메일을 인증했어요.');
    }catch{if(active(s,t))message(verified?'이메일 인증은 완료됐어요. 연결 상태를 불러오지 못했으니 ‘다시 확인’을 눌러 주세요.':'인증을 확인하지 못했어요. 코드와 로그인 계정을 확인해 주세요.');}
    finally{if(loading===flight)loading=null;if(active(s,t)){paint();if(focusAfter&&[verify,code,doc.body,authSection].includes(doc.activeElement)){const target=s.verifiedReadPending?refresh:continueUnlink;if(!target.disabled)target.focus({preventScroll:true});}}}
   }
-  async function unlink(kind){const s=state,t=view;if(!active(s,t)||loading||opPending||op)return;
+  async function unlink(kind){const s=state,t=view;if(!active(s,t)||!s.readReady||!s.data||loading||opPending||op)return;
    const method=s.data?.methods?.find(m=>m.kind===kind);if(!method?.linked)return;
    if(!s.data.email_ready||!s.data.recent_otp){s.unlinkKind=kind;paint();message('연결을 해제하려면 이메일을 인증해 주세요.');authSection.scrollIntoView?.({block:'nearest'});send.focus({preventScroll:true});return;}
    const origin=doc.activeElement,fromContinue=origin===continueUnlink,flight={};let cancelled=false;loading=flight;paint();
@@ -105,9 +107,9 @@
    new MutationObserver(()=>{if(opened&&state?.key!==key())hide(false);}).observe(doc.body,{childList:true,subtree:true});
   }
   function open(){const k=key();if(!k)return false;build();if(opened)return true;const c=context();if(!state||state.key!==k){state={key:k,actor:c.actor,coopId:c.coopId,memberId:c.memberId,sent:false};if(op?.key!==k)op=null;}
-   opened=true;++view;returnTo=doc.activeElement;dialog.showModal();paint();close.focus({preventScroll:true});void read();return true;
+   opened=true;++view;state.readReady=false;returnTo=doc.activeElement;dialog.showModal();paint();close.focus({preventScroll:true});void read();return true;
   }
   return Object.freeze({open,suspend:()=>hide(false)});
  }
- root.MemberLoginMethods=Object.freeze({version:'1.0.2',create});
+ root.MemberLoginMethods=Object.freeze({version:'1.0.3',create});
 })(window);

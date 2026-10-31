@@ -1,4 +1,4 @@
-/* v1.0.1 — Existing personal member claim. Memory-only drafts; no automatic writes/retries. */
+/* v1.0.2 — Keep uncertain original claims through denied retries. Memory-only; no automatic writes/retries. */
 (function(root){
  'use strict';
  const messages={NOT_MATCHED:'입력한 정보와 연결할 수 있는 조합원을 찾지 못했어요. 이름·주민등록번호·전화번호를 확인해 주세요.',INVALID_INPUT:'이름·주민등록번호·전화번호를 모두 확인해 주세요.',RATE_LIMITED:'확인이 여러 번 이어졌어요. 잠시 후 다시 시도해 주세요.',REQUEST_CHANGED:'연결 요청의 정보가 달라졌어요. 내용을 다시 확인해 주세요.',CONFLICT:'연결할 정보가 변경됐어요. 내용을 다시 확인해 주세요.'};
@@ -20,23 +20,24 @@
   function known(s,request,response){if(s.request!==request||s.phase==='success'&&response?.data?.ok!==true)return;request.running=false;
    const data=response?.data;
    if(response?.error){const code=String(response.error.code||''),http=Number(response.status||response.error.status);if([401,403,429].includes(http)||/^PT40[1359]$|^42501$/.test(code)){
-    s.phase='edit';s.request=null;s.error=true;s.message=code==='PT401'?'로그인한 이메일을 다시 인증한 뒤 연결해 주세요.':'현재 계정에서 연결을 진행할 수 없어요. 로그인 상태를 확인해 주세요.';
-   }else{s.phase='unknown';s.message='연결 결과를 확인하지 못했어요. 결과 다시 확인을 눌러 주세요.';s.error=true;}
+    s.phase=request.uncertain?'unknown':'edit';if(!request.uncertain)s.request=null;s.error=true;
+    s.message=(http===429||code==='PT429'?'확인이 여러 번 이어졌어요. 잠시 후 다시 확인해 주세요.':http===401||code==='PT401'?'로그인한 이메일을 다시 인증한 뒤 확인해 주세요.':'현재 계정에서 확인할 수 없어요. 로그인 상태를 확인해 주세요.')+(request.uncertain?' 이전 연결 결과는 아직 확인되지 않았어요. 결과 다시 확인을 눌러 주세요.':'');
+   }else{request.uncertain=true;s.phase='unknown';s.message='연결 결과를 확인하지 못했어요. 결과 다시 확인을 눌러 주세요.';s.error=true;}
    }else if(data?.ok===true){s.phase='success';s.result=data;s.message='계정을 연결했어요.';s.error=false;
    }else if(data?.ok===false){s.phase='edit';s.request=null;s.message=messages[data.code]||'연결을 완료하지 못했어요. 잠시 후 다시 확인해 주세요.';s.error=true;
-   }else{s.phase='unknown';s.message='연결 결과를 확인하지 못했어요. 결과 다시 확인을 눌러 주세요.';s.error=true;}
+   }else{request.uncertain=true;s.phase='unknown';s.message='연결 결과를 확인하지 못했어요. 결과 다시 확인을 눌러 주세요.';s.error=true;}
    paint();
   }
   async function send(s,retry=false){if(s.key!==key()||!active(s)||s.phase!==(retry?'retry':'review'))return;saved();const view=epoch;
    let request=s.request;
    if(!retry){let id,coop;const preparation={};s.preparation=preparation;try{id=root.crypto.randomUUID();coop=options.getCoop?.();if(!coop){s.phase='preparing';s.message='가입한 조합을 확인하고 있어요…';paint();let deadline;try{const r=await Promise.race([Promise.resolve(options.client.rpc('get_public_signup_context')),new Promise((_,reject)=>{deadline=root.setTimeout(()=>reject(Error('CLAIM_CONTEXT_TIMEOUT')),8000);})]);if(r.error)throw Error('CLAIM_CONTEXT_FAILED');coop=(Array.isArray(r.data)?r.data[0]:r.data)?.coop_id;}finally{root.clearTimeout(deadline);}}if(!coop)throw Error('CLAIM_CONTEXT_FAILED');}catch{if(s.preparation!==preparation||s.key!==key()||view!==epoch||!active(s))return;s.preparation=null;s.phase='edit';s.error=true;s.message='연결 요청을 준비하지 못했어요. 다시 확인해 주세요.';paint();return;}
     if(s.preparation!==preparation||s.key!==key()||view!==epoch||!active(s))return;s.preparation=null;
-    request={id,values:{...s.values},actor:s.key.split('|')[0],coop,running:false,generation:0};s.request=request;
+    request={id,values:{...s.values},actor:s.key.split('|')[0],coop,running:false,generation:0,uncertain:false};s.request=request;
    }
    if(!request||request.running)return;request.running=true;const generation=++request.generation;s.phase='saving';s.error=false;s.message='기존 조합원 계정에 연결하고 있어요…';paint();
-   const pending=Promise.resolve().then(()=>{if(s.key!==key()||epoch!==view||!active(s)){if(s.request===request&&generation===request.generation){s.phase='edit';s.request=null;s.message='';s.error=false;request.running=false;paint();}return null;}return options.client.rpc('claim_member_by_identity',{p_name:request.values.name,p_rrn:request.values.rrn,p_phone:request.values.phone,p_request_key:request.id,p_actor:request.actor,p_coop:request.coop});});
-   let timer;const timeout=new Promise(resolve=>{timer=root.setTimeout(()=>{if(s.request===request&&generation===request.generation&&request.running){request.running=false;s.phase='unknown';s.message='응답이 늦어지고 있어요. 입력을 유지한 채 연결 결과를 확인할 수 있어요.';paint();}resolve();},15000);});
-   const settled=pending.then(r=>{if(r&&generation===request.generation)known(s,request,r);},()=>{if(generation===request.generation)known(s,request,{error:{}});}).finally(()=>root.clearTimeout(timer));
+   const pending=Promise.resolve().then(()=>{if(s.key!==key()||epoch!==view||!active(s)){if(s.request===request&&generation===request.generation&&s.phase!=='success'){s.phase=request.uncertain?'unknown':'edit';if(!request.uncertain)s.request=null;s.message=request.uncertain?'이전 연결 결과는 아직 확인되지 않았어요. 결과 다시 확인을 눌러 주세요.':'';s.error=false;request.running=false;paint();}return null;}return options.client.rpc('claim_member_by_identity',{p_name:request.values.name,p_rrn:request.values.rrn,p_phone:request.values.phone,p_request_key:request.id,p_actor:request.actor,p_coop:request.coop});});
+   let timer;const timeout=new Promise(resolve=>{timer=root.setTimeout(()=>{if(s.request===request&&generation===request.generation&&request.running&&s.phase!=='success'){request.running=false;request.uncertain=true;s.phase='unknown';s.message='응답이 늦어지고 있어요. 입력을 유지한 채 연결 결과를 확인할 수 있어요.';paint();}resolve();},15000);});
+   const settled=pending.then(r=>{if(r&&(generation===request.generation||r.data?.ok===true))known(s,request,r);},()=>{if(generation===request.generation)known(s,request,{error:{}});}).finally(()=>root.clearTimeout(timer));
    await Promise.race([settled,timeout]);
   }
   async function check(){const s=opened;if(!active(s)||!s.request||s.phase==='checking')return;const request=s.request,view=epoch;s.phase='checking';s.message='이전 연결 결과를 확인하고 있어요…';paint();
