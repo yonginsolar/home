@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.233
+Version: v1.0.234
 Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 -->
 <html lang="ko">
@@ -15,12 +15,12 @@ Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.2" integrity="sha384-jz4/CRSHFp2wgwTOd5DleNmnyNWx7jhysPdeVE3velQualbQpyTEThWmCGzKPzvu" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.233 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.234 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
 <script src="shared/application_retention_notice.js?v=1.1.0"></script>
-<script src="shared/child_direct_consent.js?v=1.0.6"></script>
+<script src="shared/child_direct_consent.js?v=1.0.7"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -9692,15 +9692,19 @@ function reviewPrevious(){
 const r=tasks.get(owner()),overlay=document.getElementById('customModalOverlay'),host=document.getElementById('customModalMsg');
 if(!r||r.phase!=='registered'||!current(r)||overlay?.style.display!=='flex'||!host?.querySelector('#consentCheck1'))return false;
 const revision=familyRegistrationRevision,values=snapshot(),data=tempChildData,same=r.snapshot===values&&r.bodyMatches!==false;
-let notice=host.querySelector('[data-child-prior-receipt]');if(!notice){notice=document.createElement('p');notice.dataset.childPriorReceipt='';notice.className='alert alert-info small';notice.setAttribute('role','status');host.prepend(notice);}
-notice.textContent=same?'이 신청은 이미 접수되었습니다.': '이전 신청이 접수되었습니다. 현재 신청을 제출하기 전에 이전 접수를 확인해 주세요.';
-const yes=document.getElementById('btnModalYes');yes.textContent=same?'접수 결과 확인':'이전 접수 확인';
-yes.onclick=()=>{
- if(!current(r)||r.phase!=='registered'||revision!==familyRegistrationRevision||values!==snapshot()||data!==tempChildData||overlay.style.display!=='flex')return;
- if(same)return accept(r,true);
- tasks.delete(r.owner);keepNonce(r,true);render();notice.textContent='이전 접수를 확인했습니다. 현재 신청은 아직 제출하지 않았습니다.';
- yes.textContent='새 신청 제출';yes.onclick=executeChildJoin;
-};return true;
+let notice=host.querySelector('[data-child-prior-receipt]');if(!notice){notice=document.createElement('div');notice.dataset.childPriorReceipt='';notice.className='alert alert-info small';host.prepend(notice);}
+const yes=document.getElementById('btnModalYes');
+const unchanged=()=>tasks.get(r.owner)===r&&current(r)&&r.phase==='registered'&&revision===familyRegistrationRevision&&values===snapshot()&&data===tempChildData&&overlay.style.display==='flex';
+if(same){notice.textContent='이 신청은 이미 접수되었습니다.';notice.setAttribute('role','status');yes.textContent='접수 결과 확인';yes.onclick=()=>{if(unchanged())return accept(r,true);};return true;}
+// Acknowledgement never becomes submission; keep its position and keyboard focus.
+if(!notice.querySelector('#legacyChildPriorAcknowledge')){
+ notice.removeAttribute('role');const text=document.createElement('p');text.textContent='이전 신청이 접수되었습니다. 현재 작성한 신청은 아직 제출하지 않았습니다.';
+ const acknowledge=document.createElement('button');acknowledge.id='legacyChildPriorAcknowledge';acknowledge.type='button';acknowledge.className='btn btn-sm btn-outline-primary';acknowledge.textContent='이전 접수 확인';Object.assign(acknowledge.style,{minHeight:'44px',maxWidth:'100%',whiteSpace:'normal'});
+ const status=document.createElement('span');status.dataset.childPriorAcknowledged='';status.setAttribute('role','status');status.textContent='이전 접수를 확인했습니다.';Object.assign(status.style,{display:'block',visibility:'hidden',marginTop:'8px'});notice.replaceChildren(text,acknowledge,status);
+}
+const acknowledge=notice.querySelector('#legacyChildPriorAcknowledge');acknowledge.setAttribute('aria-disabled','false');
+acknowledge.onclick=()=>{if(!unchanged())return;tasks.delete(r.owner);keepNonce(r,true);render();acknowledge.setAttribute('aria-disabled','true');notice.querySelector('[data-child-prior-acknowledged]').style.visibility='visible';};
+yes.textContent='새 신청 제출';yes.onclick=executeChildJoin;return true;
 }
 function submit(params,consents){
 const key=owner();let r=tasks.get(key)||restore();

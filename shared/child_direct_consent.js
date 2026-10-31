@@ -1,4 +1,4 @@
-/* v1.0.6 — Bound UI waits; retain only opaque recovery after owner cleanup. */
+/* v1.0.7 — Refresh the current owned request after a shared result read. */
 (function () {
   'use strict';
   let opening = false, current = null, dialog = null;
@@ -66,7 +66,7 @@
     tasks.delete(r.owner);keep(r,true);clear();
     if(same)await ctx.onSuccess();else{const family=document.getElementById('familyModalOverlay');if(family)family.style.display='flex';ctx.onError('이전 신청이 접수되었습니다. 현재 작성한 신청은 아직 제출하지 않았습니다.');const b=document.getElementById('btnModalYes');if(b)b.textContent='확인';}
   }
-  function check(r){if(r.readPromise)return r.readPromise;const writeRevision=r.writeRevision||0,ctx=current;let timer;
+  function check(r){if(r.readPromise)return r.readPromise;const writeRevision=r.writeRevision||0;let timer;
     const request=Promise.race([Promise.resolve().then(()=>r.client.rpc('get_child_direct_request_result',{p_request_id:r.id,p_manager_id:r.manager})),new Promise(resolve=>{timer=setTimeout(()=>resolve({error:{message:'RESULT_TIMEOUT'},status:0}),15000);})]).then(response=>{
       if((r.writeRevision||0)!==writeRevision)return;
       if(r.phase==='registered')return;
@@ -75,7 +75,7 @@
       if(value?.state==='registered')r.phase='registered';
       else if(value?.state==='not_recorded'&&!r.pending){r.phase='not_recorded';r.request=value.request||r.request;}
       else if(value?.state==='unavailable'&&!r.pending)r.phase='unavailable';else r.phase='unknown';
-    },()=>{if((r.writeRevision||0)===writeRevision){r.phase='unknown';r.everUnknown=true;}}).finally(()=>{clearTimeout(timer);if(r.readPromise===request)r.readPromise=null;if(current===ctx)render(r);});
+    },()=>{if((r.writeRevision||0)===writeRevision&&r.phase!=='registered'){r.phase='unknown';r.everUnknown=true;}}).finally(()=>{clearTimeout(timer);if(r.readPromise===request)r.readPromise=null;render(r);});
     r.readPromise=request;render(r);return request;
   }
   async function open(options) {
@@ -147,9 +147,9 @@
     const operation=Promise.resolve().then(()=>owned(ctx)?ctx.client.rpc('child_direct_registration',{p_action:'submit',p_data:{request_id:r.id,version:ctx.request.version,name:d.name,rrn_display:`${d.rrn1}-${d.rrn2}******`,email:d.email||'',capital:d.capital,relationship:d.relationship,bank:d.bank||'',acc:d.acc||'',privacy_agreed:true,membership_agreed:true,guardian_declared:true}}):{error:{code:'CHILD_REQUEST_CONTEXT_CHANGED',message:'CHILD_REQUEST_CONTEXT_CHANGED'},status:409}).then(async response=>{
       r.pending=false;
       if(response?.data?.ok&&!response.error){r.phase='registered';r.bodyMatches=true;}else if(r.phase!=='registered'){r.everUnknown=r.everUnknown||ambiguous(response);r.phase=r.everUnknown?'unknown':'failed';r.message=errorText(response?.error);if(r.phase==='failed')keep(r,true);}
-      if(owned(ctx)){render(r);if(r.phase==='registered'&&document.activeElement===focus&&!focus?.matches('input,textarea,select,[contenteditable="true"]'))await finish(ctx);}
-    },()=>{r.pending=false;r.everUnknown=true;if(r.phase!=='registered')r.phase='unknown';if(owned(ctx))render(r);});
-    r.waiter=Promise.race([operation,new Promise(resolve=>{timer=setTimeout(()=>{if(r.pending&&r.phase!=='registered'){r.everUnknown=true;r.phase='unknown';if(owned(ctx))render(r);}resolve();},15000);})]).finally(()=>clearTimeout(timer));return r.waiter;
+      render(r);if(owned(ctx)&&r.phase==='registered'&&document.activeElement===focus&&!focus?.matches('input,textarea,select,[contenteditable="true"]'))await finish(ctx);
+    },()=>{r.pending=false;r.everUnknown=true;if(r.phase!=='registered')r.phase='unknown';render(r);});
+    r.waiter=Promise.race([operation,new Promise(resolve=>{timer=setTimeout(()=>{if(r.pending&&r.phase!=='registered'){r.everUnknown=true;r.phase='unknown';render(r);}resolve();},15000);})]).finally(()=>clearTimeout(timer));return r.waiter;
   }
   document.addEventListener('keydown',event=>{
     if(!dialog||document.getElementById('customModalOverlay')?.style.display==='flex')return;
