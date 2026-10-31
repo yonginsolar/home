@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.230
+Version: v1.0.231
 Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 -->
 <html lang="ko">
@@ -15,7 +15,7 @@ Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.2" integrity="sha384-jz4/CRSHFp2wgwTOd5DleNmnyNWx7jhysPdeVE3velQualbQpyTEThWmCGzKPzvu" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.230 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.231 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -9628,6 +9628,12 @@ window.PortalLegacyChildRequests = (() => {
 const tasks=new Map(),ids=['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelSelect','newFamRelInput','newFamCapital','newFamBank','newFamAcc'];
 const snapshot=()=>JSON.stringify(ids.map(id=>[id,document.getElementById(id)?.value]));
 const owner=()=>getFamilyRegistrationOwner();
+const bodyKey=(params,consents)=>JSON.stringify([Object.entries(params||{}).sort(([a],[b])=>a.localeCompare(b)),consents]);
+const captureView=()=>({revision:familyRegistrationRevision,values:snapshot(),data:typeof tempChildData==='undefined'?null:tempChildData,notice:document.getElementById('customModalMsg')?.firstChild,focus:document.activeElement});
+const canNotice=view=>view.revision===familyRegistrationRevision&&view.values===snapshot()
+ &&view.data===(typeof tempChildData==='undefined'?null:tempChildData)&&view.notice===document.getElementById('customModalMsg')?.firstChild
+ &&document.getElementById('customModalOverlay')?.style.display!=='flex'&&view.focus===document.activeElement
+ &&!document.activeElement?.matches('input,textarea,select,[contenteditable="true"]');
 const storageKey=key=>'coop-child-request:v1:'+key;
 function keepNonce(r,remove=false){try{const key=storageKey(r.owner);if(remove){if(sessionStorage.getItem(key)===r.id)sessionStorage.removeItem(key);}else sessionStorage.setItem(key,r.id);}catch(_){/* Restricted storage: in-memory recovery and beforeunload protection remain. */}}
 function restore(){const key=owner();if(!key||familyRegistrationOwner!==key)return null;try{const id=sessionStorage.getItem(storageKey(key));if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id||''))return null;
@@ -9645,8 +9651,8 @@ if(!panel){panel=document.createElement('div');panel.id='legacyChildRequestStatu
 panel.hidden=false;const text=panel.querySelector('span'),button=panel.querySelector('button');
 text.textContent=r.phase==='saving'?'자녀 가입 신청을 처리하고 있습니다.':r.phase==='registered'?'이전 자녀 가입 신청이 접수되었습니다.':r.phase==='not_recorded'?'이전 신청의 접수 내역이 확인되지 않았습니다.':r.phase==='failed'?r.message:'신청 처리 결과를 확인하지 못했습니다. 입력한 내용은 유지됩니다.';
 button.hidden=r.phase==='saving'||r.phase==='failed';button.disabled=false;button.setAttribute('aria-disabled',String(!!r.readPromise));button.setAttribute('aria-busy',String(!!r.readPromise));
-button.textContent=r.phase==='registered'?'확인':r.phase==='not_recorded'&&!r.writePending&&r.params?'이전 신청 다시 등록':'결과 다시 확인';
-button.onclick=()=>{if(r.readPromise)return;return r.phase==='registered'?accept(r,true):r.phase==='not_recorded'&&!r.writePending&&r.params?write(r):check(r);};
+button.textContent=r.phase==='registered'?'확인':r.phase==='not_recorded'&&!r.writePending?'입력 내용 다시 확인':'결과 다시 확인';
+button.onclick=()=>{if(r.readPromise)return;return r.phase==='registered'?accept(r,true):r.phase==='not_recorded'&&!r.writePending?submitNewChild():check(r);};
 }
 function accept(r,manual=false){
 if(!current(r)||(!manual&&r.modalRevision!==familyRegistrationRevision))return;
@@ -9657,32 +9663,40 @@ showModal(same?'🎉 가입 신청이 접수되었습니다. 출자금 입금과
 if(same){Promise.resolve(loadDashboardData(getPreferredDashboardProfileId())).catch(()=>CoopSafeLog.error('자녀 목록 재조회 실패',{code:'CHILD_LIST_REFRESH_FAILED'}));if(typeof loadManagedProfiles==='function')Promise.resolve(loadManagedProfiles(getRootMemberProfileId()||curAuth?.id)).catch(()=>CoopSafeLog.error('프로필 목록 재조회 실패',{code:'CHILD_PROFILE_REFRESH_FAILED'}));}
 }
 async function write(r){
-if(r.writePending)return r.waiter;if(!r.params)return;const revision=familyRegistrationRevision;
+if(r.writePending)return r.waiter;if(!r.params)return;const view=captureView(),params=r.params,consents=r.consents;
+r.writeRevision=(r.writeRevision||0)+1;
 r.phase='saving';r.writePending=true;render();let timer;
-const operation=Promise.resolve().then(()=>r.owner===owner()&&r.params?_supabase.rpc('create_full_child_member',{...r.params,p_request_id:r.id,p_consents:r.consents}):{error:{code:'CHILD_REQUEST_CONTEXT_CHANGED',message:'CHILD_REQUEST_CONTEXT_CHANGED'},status:409}).then(response=>{
+const operation=Promise.resolve().then(()=>r.owner===owner()&&r.params===params?_supabase.rpc('create_full_child_member',{...params,p_request_id:r.id,p_consents:consents}):{error:{code:'CHILD_REQUEST_CONTEXT_CHANGED',message:'CHILD_REQUEST_CONTEXT_CHANGED'},status:409}).then(response=>{
  r.writePending=false;
  if(response?.error){r.everUnknown=r.everUnknown||unknown(response.error,response.status);r.phase=r.everUnknown?'unknown':'failed';if(r.phase==='failed')keepNonce(r,true);r.message=CoopMemberCapital.errorMessage(response.error)||('가입 신청을 처리하지 못했습니다. '+response.error.message);}
  else if(typeof response?.data==='string'&&/^\d{4}-\d{4}-\d{4}$/.test(response.data)){r.phase='registered';r.number=response.data;r.bodyMatches=true;}
  else{r.phase='unknown';r.everUnknown=true;}
- if(current(r)){render();if(r.phase==='registered'&&revision===familyRegistrationRevision)accept(r);else if(r.phase==='failed'&&revision===familyRegistrationRevision)showModal(r.message);}
+ if(current(r)){render();if(canNotice(view)){if(r.phase==='registered')accept(r);else if(r.phase==='failed')showModal(r.message);}}
  return r;
 },()=>{r.writePending=false;r.everUnknown=true;r.phase='unknown';render();return r;});
 r.waiter=Promise.race([operation,new Promise(resolve=>{timer=setTimeout(()=>{if(r.writePending){r.everUnknown=true;r.phase='unknown';render();}resolve(r);},15000);})]).finally(()=>clearTimeout(timer));return r.waiter;
 }
 async function check(r=tasks.get(owner())||restore()){
-if(!r||!current(r)||r.readPromise)return r?.readPromise;const revision=familyRegistrationRevision;let timer;
+if(!r||!current(r)||r.readPromise)return r?.readPromise;const view=captureView(),writeRevision=r.writeRevision||0;let timer;
 r.readPromise=Promise.race([Promise.resolve().then(()=>_supabase.rpc('get_child_join_request_result',{p_request_id:r.id,p_manager_id:r.manager})),new Promise(resolve=>{timer=setTimeout(()=>resolve({error:{message:'RESULT_TIMEOUT'},status:0}),15000);})]).then(response=>{
+ if((r.writeRevision||0)!==writeRevision)return;
  if(response?.error){r.phase='unknown';return;}
  const value=response?.data;
- if(value?.state==='registered'&&/^\d{4}-\d{4}-\d{4}$/.test(value.result?.member_number||'')){r.phase='registered';r.number=value.result.member_number;if(current(r)&&revision===familyRegistrationRevision)accept(r,true);}
+ if(value?.state==='registered'&&/^\d{4}-\d{4}-\d{4}$/.test(value.result?.member_number||'')){r.phase='registered';r.number=value.result.member_number;if(current(r)&&canNotice(view))accept(r,true);}
  else if(value?.state==='not_recorded'&&!r.writePending)r.phase='not_recorded';else r.phase='unknown';
-},()=>{r.phase='unknown';}).finally(()=>{clearTimeout(timer);r.readPromise=null;render();});render();return r.readPromise;
+},()=>{if((r.writeRevision||0)===writeRevision)r.phase='unknown';}).finally(()=>{clearTimeout(timer);r.readPromise=null;render();});render();return r.readPromise;
 }
 function submit(params,consents){
 const key=owner();let r=tasks.get(key)||restore();
 if(r?.phase==='registered'){accept(r,true);return;}
 if(r&&['saving','unknown','not_recorded'].includes(r.phase)){
- if(r.phase==='not_recorded'&&!r.writePending){if(!r.params){r.params={...params};r.consents={...consents};r.snapshot=snapshot();r.bodyMatches=false;}return write(r);}
+ if(r.phase==='not_recorded'&&!r.writePending){
+  if(r.readPromise)return r.readPromise;
+  const values=snapshot();
+  if(!r.params||bodyKey(r.params,r.consents)!==bodyKey(params,consents)||r.snapshot!==values)r.bodyMatches=false;
+  r.params={...params};r.consents={...consents};r.snapshot=values;r.modalRevision=familyRegistrationRevision;
+  return write(r);
+ }
  return r.writePending?r.waiter:check(r);
 }
 if(!key||familyRegistrationOwner!==key)return;
