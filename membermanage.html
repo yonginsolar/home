@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.229
+Version: v1.0.230
 Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 -->
 <html lang="ko">
@@ -15,7 +15,7 @@ Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.2" integrity="sha384-jz4/CRSHFp2wgwTOd5DleNmnyNWx7jhysPdeVE3velQualbQpyTEThWmCGzKPzvu" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.229 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.230 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -9622,15 +9622,21 @@ document.getElementById('newFamRelInput')?.classList.add('hidden');
 window.addEventListener('pagehide', resetFamilyRegistrationDraft);
 
 /* CHILD_PROFILE_DRAFTS_START */
-// Memory-only drafts are not an authorization source. Consent/request state is never restored.
+// Drafts stay in memory. Only an opaque request nonce survives a tab reload;
+// it never restores consent or authorizes a registration.
 window.PortalLegacyChildRequests = (() => {
 const tasks=new Map(),ids=['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelSelect','newFamRelInput','newFamCapital','newFamBank','newFamAcc'];
 const snapshot=()=>JSON.stringify(ids.map(id=>[id,document.getElementById(id)?.value]));
 const owner=()=>getFamilyRegistrationOwner();
+const storageKey=key=>'coop-child-request:v1:'+key;
+function keepNonce(r,remove=false){try{const key=storageKey(r.owner);if(remove){if(sessionStorage.getItem(key)===r.id)sessionStorage.removeItem(key);}else sessionStorage.setItem(key,r.id);}catch(_){/* Restricted storage: in-memory recovery and beforeunload protection remain. */}}
+function restore(){const key=owner();if(!key||familyRegistrationOwner!==key)return null;try{const id=sessionStorage.getItem(storageKey(key));if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id||''))return null;
+ const r={id,owner:key,actor:String(curAuth?.id||''),coop:String(currentMemberCoopId||curMem?.coop_id||''),manager:getActiveMemberProfileId(),params:null,consents:null,snapshot:null,modalRevision:familyRegistrationRevision,bodyMatches:false,phase:'unknown',everUnknown:true,writePending:false};tasks.set(key,r);return r;
+}catch(_){return null;}}
 const current=r=>tasks.get(r.owner)===r&&r.owner===owner()&&familyRegistrationOwner===r.owner&&document.getElementById('familyModalOverlay')?.style.display==='flex'&&!document.getElementById('famTabNew')?.classList.contains('hidden');
 const unknown=(error,status)=>status===0||status>=500||/fetch|network|timeout|timed.?out|abort|통신/i.test(String(error?.message||error?.name||''))||(!status&&!error?.code&&!/^[A-Z][A-Z0-9_]{3,}$/.test(String(error?.message||'')));
 function render(){
-const r=tasks.get(owner()),host=document.getElementById('famTabNew');if(!host)return;
+const r=tasks.get(owner())||restore(),host=document.getElementById('famTabNew');if(!host)return;
 let panel=document.getElementById('legacyChildRequestStatus');
 if(!r){if(panel)panel.hidden=true;return;}if(!current(r))return;
 if(!panel){panel=document.createElement('div');panel.id='legacyChildRequestStatus';panel.className='alert alert-info small';
@@ -9645,7 +9651,7 @@ button.onclick=()=>{if(r.readPromise)return;return r.phase==='registered'?accept
 function accept(r,manual=false){
 if(!current(r)||(!manual&&r.modalRevision!==familyRegistrationRevision))return;
 const same=r.snapshot===snapshot()&&r.bodyMatches!==false;
-tasks.delete(r.owner);render();
+tasks.delete(r.owner);keepNonce(r,true);render();
 if(same)resetFamilyRegistrationDraft();
 showModal(same?'🎉 가입 신청이 접수되었습니다. 출자금 입금과 관리자 확인 후 승인됩니다.':'이전 가입 신청이 접수되었습니다. 추가로 작성한 내용은 그대로 두었습니다.');
 if(same){Promise.resolve(loadDashboardData(getPreferredDashboardProfileId())).catch(()=>CoopSafeLog.error('자녀 목록 재조회 실패',{code:'CHILD_LIST_REFRESH_FAILED'}));if(typeof loadManagedProfiles==='function')Promise.resolve(loadManagedProfiles(getRootMemberProfileId()||curAuth?.id)).catch(()=>CoopSafeLog.error('프로필 목록 재조회 실패',{code:'CHILD_PROFILE_REFRESH_FAILED'}));}
@@ -9655,7 +9661,7 @@ if(r.writePending)return r.waiter;if(!r.params)return;const revision=familyRegis
 r.phase='saving';r.writePending=true;render();let timer;
 const operation=Promise.resolve().then(()=>r.owner===owner()&&r.params?_supabase.rpc('create_full_child_member',{...r.params,p_request_id:r.id,p_consents:r.consents}):{error:{code:'CHILD_REQUEST_CONTEXT_CHANGED',message:'CHILD_REQUEST_CONTEXT_CHANGED'},status:409}).then(response=>{
  r.writePending=false;
- if(response?.error){r.everUnknown=r.everUnknown||unknown(response.error,response.status);r.phase=r.everUnknown?'unknown':'failed';r.message=CoopMemberCapital.errorMessage(response.error)||('가입 신청을 처리하지 못했습니다. '+response.error.message);}
+ if(response?.error){r.everUnknown=r.everUnknown||unknown(response.error,response.status);r.phase=r.everUnknown?'unknown':'failed';if(r.phase==='failed')keepNonce(r,true);r.message=CoopMemberCapital.errorMessage(response.error)||('가입 신청을 처리하지 못했습니다. '+response.error.message);}
  else if(typeof response?.data==='string'&&/^\d{4}-\d{4}-\d{4}$/.test(response.data)){r.phase='registered';r.number=response.data;r.bodyMatches=true;}
  else{r.phase='unknown';r.everUnknown=true;}
  if(current(r)){render();if(r.phase==='registered'&&revision===familyRegistrationRevision)accept(r);else if(r.phase==='failed'&&revision===familyRegistrationRevision)showModal(r.message);}
@@ -9663,7 +9669,7 @@ const operation=Promise.resolve().then(()=>r.owner===owner()&&r.params?_supabase
 },()=>{r.writePending=false;r.everUnknown=true;r.phase='unknown';render();return r;});
 r.waiter=Promise.race([operation,new Promise(resolve=>{timer=setTimeout(()=>{if(r.writePending){r.everUnknown=true;r.phase='unknown';render();}resolve(r);},15000);})]).finally(()=>clearTimeout(timer));return r.waiter;
 }
-async function check(r=tasks.get(owner())){
+async function check(r=tasks.get(owner())||restore()){
 if(!r||!current(r)||r.readPromise)return r?.readPromise;const revision=familyRegistrationRevision;let timer;
 r.readPromise=Promise.race([Promise.resolve().then(()=>_supabase.rpc('get_child_join_request_result',{p_request_id:r.id,p_manager_id:r.manager})),new Promise(resolve=>{timer=setTimeout(()=>resolve({error:{message:'RESULT_TIMEOUT'},status:0}),15000);})]).then(response=>{
  if(response?.error){r.phase='unknown';return;}
@@ -9673,18 +9679,18 @@ r.readPromise=Promise.race([Promise.resolve().then(()=>_supabase.rpc('get_child_
 },()=>{r.phase='unknown';}).finally(()=>{clearTimeout(timer);r.readPromise=null;render();});render();return r.readPromise;
 }
 function submit(params,consents){
-const key=owner();let r=tasks.get(key);
+const key=owner();let r=tasks.get(key)||restore();
 if(r?.phase==='registered'){accept(r,true);return;}
 if(r&&['saving','unknown','not_recorded'].includes(r.phase)){
  if(r.phase==='not_recorded'&&!r.writePending){if(!r.params){r.params={...params};r.consents={...consents};r.snapshot=snapshot();r.bodyMatches=false;}return write(r);}
  return r.writePending?r.waiter:check(r);
 }
 if(!key||familyRegistrationOwner!==key)return;
-r={id:crypto.randomUUID(),owner:key,actor:String(curAuth?.id||''),coop:String(currentMemberCoopId||curMem?.coop_id||''),manager:params.p_manager_id,params:{...params},consents:{...consents},snapshot:snapshot(),modalRevision:familyRegistrationRevision,bodyMatches:true,phase:'ready',everUnknown:false,writePending:false};tasks.set(key,r);return write(r);
+r={id:crypto.randomUUID(),owner:key,actor:String(curAuth?.id||''),coop:String(currentMemberCoopId||curMem?.coop_id||''),manager:params.p_manager_id,params:{...params},consents:{...consents},snapshot:snapshot(),modalRevision:familyRegistrationRevision,bodyMatches:true,phase:'ready',everUnknown:false,writePending:false};tasks.set(key,r);keepNonce(r);return write(r);
 }
 function clear(){for(const [key,r]of tasks){if(['saving','unknown','not_recorded'].includes(r.phase)){r.params=null;r.consents=null;r.snapshot=null;r.bodyMatches=false;}else tasks.delete(key);}const panel=document.getElementById('legacyChildRequestStatus');if(panel)panel.hidden=true;}
 window.addEventListener('beforeunload',event=>{if([...tasks.values()].some(r=>r.actor===String(curAuth?.id||'')&&r.coop===String(currentMemberCoopId||curMem?.coop_id||'')&&['saving','unknown','not_recorded'].includes(r.phase))){event.preventDefault();event.returnValue='';}});
-return Object.freeze({submit,check,render,clear,current:()=>tasks.get(owner())||null});
+return Object.freeze({submit,check,render,clear,current:()=>tasks.get(owner())||restore()||null});
 })();
 window.PortalChildDrafts = (() => {
 const ids = ['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelSelect','newFamRelInput','newFamCapital','newFamBank','newFamAcc'];
