@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.234
+Version: v1.0.235
 Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 -->
 <html lang="ko">
@@ -15,7 +15,7 @@ Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.2" integrity="sha384-jz4/CRSHFp2wgwTOd5DleNmnyNWx7jhysPdeVE3velQualbQpyTEThWmCGzKPzvu" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.234 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.235 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -9596,7 +9596,7 @@ retainPortalConnectDraft();++portalConnectSearchRevision;portalConnectPending = 
 tempChildData = null;
 window.ChildDirectConsent?.clear();
 const legacyConsent = document.querySelector('#customModalMsg #consentCheck1');
-if (legacyConsent && document.getElementById('btnModalYes')?.onclick === executeChildJoin) {
+if (legacyConsent && (legacyConsent.closest('[data-child-consent]') || document.getElementById('btnModalYes')?.onclick === executeChildJoin)) {
 document.getElementById('customModalOverlay').style.display = 'none';
 document.getElementById('customModalMsg').replaceChildren();
 document.getElementById('btnModalYes').onclick = null;
@@ -9670,23 +9670,24 @@ r.writeRevision=(r.writeRevision||0)+1;
 r.phase='saving';r.writePending=true;render();let timer;
 const operation=Promise.resolve().then(()=>r.owner===owner()&&r.params===params?_supabase.rpc('create_full_child_member',{...params,p_request_id:r.id,p_consents:consents}):{error:{code:'CHILD_REQUEST_CONTEXT_CHANGED',message:'CHILD_REQUEST_CONTEXT_CHANGED'},status:409}).then(response=>{
  r.writePending=false;
- if(response?.error){r.everUnknown=r.everUnknown||unknown(response.error,response.status);r.phase=r.everUnknown?'unknown':'failed';if(r.phase==='failed')keepNonce(r,true);r.message=CoopMemberCapital.errorMessage(response.error)||('가입 신청을 처리하지 못했습니다. '+response.error.message);}
+ if(response?.error){if(r.phase!=='registered'){r.everUnknown=r.everUnknown||unknown(response.error,response.status);r.phase=r.everUnknown?'unknown':'failed';if(r.phase==='failed')keepNonce(r,true);r.message=CoopMemberCapital.errorMessage(response.error)||('가입 신청을 처리하지 못했습니다. '+response.error.message);}}
  else if(typeof response?.data==='string'&&/^\d{4}-\d{4}-\d{4}$/.test(response.data)){r.phase='registered';r.number=response.data;r.bodyMatches=true;}
- else{r.phase='unknown';r.everUnknown=true;}
+ else if(r.phase!=='registered'){r.phase='unknown';r.everUnknown=true;}
  if(current(r)){render();if(canNotice(view)){if(r.phase==='registered')accept(r);else if(r.phase==='failed')showModal(r.message);}}
  return r;
-},()=>{r.writePending=false;r.everUnknown=true;r.phase='unknown';render();return r;});
-r.waiter=Promise.race([operation,new Promise(resolve=>{timer=setTimeout(()=>{if(r.writePending){r.everUnknown=true;r.phase='unknown';render();}resolve(r);},15000);})]).finally(()=>clearTimeout(timer));return r.waiter;
+},()=>{r.writePending=false;r.everUnknown=true;if(r.phase!=='registered')r.phase='unknown';render();return r;});
+r.waiter=Promise.race([operation,new Promise(resolve=>{timer=setTimeout(()=>{if(r.writePending&&r.phase!=='registered'){r.everUnknown=true;r.phase='unknown';render();}resolve(r);},15000);})]).finally(()=>clearTimeout(timer));return r.waiter;
 }
 async function check(r=tasks.get(owner())||restore()){
 if(!r||!current(r)||r.readPromise)return r?.readPromise;const view=captureView(),writeRevision=r.writeRevision||0;let timer;
 r.readPromise=Promise.race([Promise.resolve().then(()=>_supabase.rpc('get_child_join_request_result',{p_request_id:r.id,p_manager_id:r.manager})),new Promise(resolve=>{timer=setTimeout(()=>resolve({error:{message:'RESULT_TIMEOUT'},status:0}),15000);})]).then(response=>{
  if((r.writeRevision||0)!==writeRevision)return;
+ if(r.phase==='registered')return;
  if(response?.error){r.phase='unknown';return;}
  const value=response?.data;
  if(value?.state==='registered'&&/^\d{4}-\d{4}-\d{4}$/.test(value.result?.member_number||'')){r.phase='registered';r.number=value.result.member_number;if(current(r)&&canNotice(view))accept(r,true);}
  else if(value?.state==='not_recorded'&&!r.writePending)r.phase='not_recorded';else r.phase='unknown';
-},()=>{if((r.writeRevision||0)===writeRevision)r.phase='unknown';}).finally(()=>{clearTimeout(timer);r.readPromise=null;render();});render();return r.readPromise;
+},()=>{if((r.writeRevision||0)===writeRevision&&r.phase!=='registered')r.phase='unknown';}).finally(()=>{clearTimeout(timer);r.readPromise=null;render();});render();return r.readPromise;
 }
 function reviewPrevious(){
 const r=tasks.get(owner()),overlay=document.getElementById('customModalOverlay'),host=document.getElementById('customModalMsg');
@@ -9800,8 +9801,8 @@ const previous = active;
 active = null;++revision;tempChildData = null;
 // Clear only a superseded preparation, not an already submitted request.
 if (previous?.pending && previous.stage === 'consent') window.ChildDirectConsent?.clear();
-if (document.querySelector('#customModalMsg #consentCheck1')
-    && document.getElementById('btnModalYes')?.onclick === executeChildJoin) {
+const legacyConsent = document.querySelector('#customModalMsg #consentCheck1');
+if (legacyConsent && (legacyConsent.closest('[data-child-consent]') || document.getElementById('btnModalYes')?.onclick === executeChildJoin)) {
 document.getElementById('customModalOverlay').style.display = 'none';
 document.getElementById('customModalMsg').replaceChildren();
 document.getElementById('btnModalYes').onclick = null;
@@ -11677,7 +11678,7 @@ const content = `
            <p class="small text-muted">수집 항목: 이름, 주민등록번호, 전화번호, 이메일, 주소, 관계<br>보유 기간: 수집·이용 목적 달성 시까지. 단, 관련 법령의 규정에 의하여 개인정보를 보유할 필요가 있는 경우, 해당 법령에서 정한 기간까지.</p>
        </div>
        
-       <div class="form-check mb-2 text-start">
+       <div class="form-check mb-2 text-start" data-child-consent>
            <input class="form-check-input" type="checkbox" id="consentCheck1">
            <label class="form-check-label small fw-bold" for="consentCheck1">
                (필수) 위 1, 2, 3번의 동의서 내용을 모두 확인하였으며, 법정대리인으로서 신청인의 가입에 동의합니다.
