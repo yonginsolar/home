@@ -1,4 +1,4 @@
-/* v1.0.5 — Bound UI waits; recover only the original scoped request. */
+/* v1.0.6 — Bound UI waits; retain only opaque recovery after owner cleanup. */
 (function () {
   'use strict';
   let opening = false, current = null, dialog = null;
@@ -29,7 +29,15 @@
   }
   function clear() {
     ++revision; opening = false;
+    for(const r of tasks.values()){let same=false;try{const a=JSON.parse(r.owner),b=JSON.parse(r.getOwner?.()||'null');same=Array.isArray(a)&&Array.isArray(b)&&a[0]===b[0]&&a[1]===b[1];}catch(_){}if(!same){r.data=null;r.lastBodyKey=null;r.consented=false;r.bodyMatches=false;}}
     dialog?.remove(); dialog = null; current = null;
+  }
+  function clearScope(){
+    for(const [owner,r]of tasks){
+      if(r.pending||['saving','unknown','not_recorded','registered'].includes(r.phase)){r.data=null;r.lastBodyKey=null;r.consented=false;r.bodyMatches=false;}
+      else tasks.delete(owner);
+    }
+    clear();
   }
   function node(tag, text, className) {
     const el = document.createElement(tag); if (text) el.textContent = text; if (className) el.className = className; return el;
@@ -71,6 +79,10 @@
     r.readPromise=request;render(r);return request;
   }
   async function open(options) {
+    // Cached older portal HTML also loads this versioned helper. Its existing
+    // owner/profile functions provide the same boundary, never a shared key.
+    options={...options,owner:options.owner||(typeof getFamilyRegistrationOwner==='function'?getFamilyRegistrationOwner():''),parentId:options.parentId||(typeof getActiveMemberProfileId==='function'?getActiveMemberProfileId():null),getOwner:options.getOwner||(()=>typeof getFamilyRegistrationOwner==='function'?getFamilyRegistrationOwner():'')};
+    if(!options.owner||!options.parentId){if(valid(options))options.onError('로그인 정보를 다시 확인해 주세요.');return;}
     if (opening || dialog || !valid(options)) return;
     const serial = ++revision;
     opening = true;
@@ -145,7 +157,7 @@
     if(event.key==='Tab'){const nodes=[...dialog.querySelectorAll('button,input')].filter(n=>!n.disabled&&!n.hidden),first=nodes[0],last=nodes.at(-1);if(!first)return;if(event.shiftKey&&(!nodes.includes(document.activeElement)||document.activeElement===first)){event.preventDefault();last.focus();}else if(!event.shiftKey&&(!nodes.includes(document.activeElement)||document.activeElement===last)){event.preventDefault();first.focus();}}
   });
   window.addEventListener('beforeunload',event=>{if([...tasks.values()].some(r=>r.getOwner?.()===r.owner&&(r.pending||['saving','unknown','not_recorded'].includes(r.phase)))){event.preventDefault();event.returnValue='';}});
-  window.ChildDirectConsent=Object.freeze({open,clear});
+  window.ChildDirectConsent=Object.freeze({open,clear,clearScope});
   document.addEventListener('DOMContentLoaded',()=>{
     const host=String(window.CoopRouteGuard?.getPublicRuntimeHost?.()||location.hostname||'').toLowerCase();
     if(!['www.yonginsolar.kr','yonginsolar.kr','localhost','127.0.0.1'].includes(host))return;
