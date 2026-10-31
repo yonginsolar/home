@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.84
+Version: v1.0.85
 Change: 2026-10-28 - Recheck current capital rules before submitting the unchanged owner draft.
 -->
 <html lang="ko"> 
@@ -14,7 +14,7 @@ Change: 2026-10-28 - Recheck current capital rules before submitting the unchang
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.84">
+  <meta name="signup-screen-version" content="1.0.85">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -1679,13 +1679,16 @@ showApplicationForm(null);
 }
 
 // [수정] 성공/실패 모달 제어 함수 (전역 사용을 위해 함수로 분리)
-function openResultModal(message, isError = false) {
+function openResultModal(message, isError = false, outcome = 'error') {
 if (isError) {
 // 1. 에러 상황: 실패 전용 모달(failModal)을 띄움
 const failModal = document.getElementById('failModal');
 const msgBox = document.getElementById('failModalMsg');
 
 if (failModal && msgBox) {
+const title=failModal.querySelector('h3'),icon=failModal.querySelector('.modal-content > div');
+if(title){title.textContent=outcome==='unknown'?'처리 결과 확인':'확인 필요';title.classList.toggle('text-danger',outcome!=='unknown');title.classList.toggle('text-warning',outcome==='unknown');}
+if(icon)icon.textContent=outcome==='unknown'?'⏳':'❌';
 msgBox.textContent = message; 
 failModal.style.display = 'flex'; // 실패 모달 보이기
 } else {
@@ -2587,6 +2590,13 @@ async function startNaverSignup() {
 
 // [7] 제출 로직
 const signupSubmissionTasks=new Map();
+function isUnknownSignupSaveError(error,status) {
+return status===0||status>=500||/fetch|network|timeout|timed.?out|abort|통신/i.test(String(error?.message||error?.name||''))
+ ||(!status&&!error?.code&&!/^[A-Z][A-Z0-9_]{3,}$/.test(String(error?.message||'')));
+}
+function showUnknownSignupOutcome() {
+openResultModal('신청 처리 결과를 확인하지 못했습니다.\n입력한 내용은 유지됩니다.\n잠시 후 가입 신청을 다시 눌러 접수 여부를 확인해 주세요.',true,'unknown');
+}
 let signupSubmissionEditRevision=0;
 for(const event of ['input','change'])document.getElementById('joinForm').addEventListener(event,()=>{++signupSubmissionEditRevision;});
 function signupSubmissionFingerprint() {
@@ -3061,7 +3071,7 @@ if(!isCurrentSignupSubmission(task))return;
 // Final checks supersede earlier field reads; later edits start fresh checks.
 task.fieldCheckRevisions=typeof invalidateSignupFieldChecks==='function'?invalidateSignupFieldChecks():null;
 task.sent=true;
-const { data: signupResult, error } = await _supabase.rpc(needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5', needsGuardian ? {
+const { data: signupResult, error, status: signupSaveStatus } = await _supabase.rpc(needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5', needsGuardian ? {
  p_signup:signupArguments,
  p_guardian_name:document.getElementById('signupGuardianName').value.trim(),
  p_guardian_phone:document.getElementById('signupGuardianPhone').value,
@@ -3111,7 +3121,8 @@ window.CoopSignupFailure?.report('submit',finalInsertError);
 CoopSafeLog.warn("[signup] 가입 신청 저장 결과 확인 필요");
 
 // ★ 변경: 실패해도 모달 띄우기 (실패 모달)
-openResultModal(
+if(isUnknownSignupSaveError(finalInsertError,signupSaveStatus))showUnknownSignupOutcome();
+else openResultModal(
 "❌ 저장에 실패했습니다.\n" +
 "다시 시도해 주세요.\n\n" +
 "상세 오류: " + finalInsertError.message,
@@ -3170,6 +3181,7 @@ openResultModal(CoopMemberCapital.errorMessage(error), true);
 return;
 }
 window.CoopSignupFailure?.report('submit',error);
+if(task.sent){showUnknownSignupOutcome();return;}
 throw error;
 } finally {
 finishSignupSubmission(task);

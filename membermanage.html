@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.228
+Version: v1.0.229
 Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 -->
 <html lang="ko">
@@ -15,7 +15,7 @@ Change: 2026-10-30 - Recover login tools and preserve reconnected login status.
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.1" integrity="sha384-vFYofDV1pOAP5TRK/LoSmVDWu19538Yb/fvcrjXL6FfaCsQF7iIM+zFiFju0qgRr" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.2" integrity="sha384-jz4/CRSHFp2wgwTOd5DleNmnyNWx7jhysPdeVE3velQualbQpyTEThWmCGzKPzvu" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.228 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.229 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -9623,6 +9623,69 @@ window.addEventListener('pagehide', resetFamilyRegistrationDraft);
 
 /* CHILD_PROFILE_DRAFTS_START */
 // Memory-only drafts are not an authorization source. Consent/request state is never restored.
+window.PortalLegacyChildRequests = (() => {
+const tasks=new Map(),ids=['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelSelect','newFamRelInput','newFamCapital','newFamBank','newFamAcc'];
+const snapshot=()=>JSON.stringify(ids.map(id=>[id,document.getElementById(id)?.value]));
+const owner=()=>getFamilyRegistrationOwner();
+const current=r=>tasks.get(r.owner)===r&&r.owner===owner()&&familyRegistrationOwner===r.owner&&document.getElementById('familyModalOverlay')?.style.display==='flex'&&!document.getElementById('famTabNew')?.classList.contains('hidden');
+const unknown=(error,status)=>status===0||status>=500||/fetch|network|timeout|timed.?out|abort|통신/i.test(String(error?.message||error?.name||''))||(!status&&!error?.code&&!/^[A-Z][A-Z0-9_]{3,}$/.test(String(error?.message||'')));
+function render(){
+const r=tasks.get(owner()),host=document.getElementById('famTabNew');if(!host)return;
+let panel=document.getElementById('legacyChildRequestStatus');
+if(!r){if(panel)panel.hidden=true;return;}if(!current(r))return;
+if(!panel){panel=document.createElement('div');panel.id='legacyChildRequestStatus';panel.className='alert alert-info small';
+ const text=document.createElement('span');text.className='d-block';text.setAttribute('role','status');text.setAttribute('aria-live','polite');
+ const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-primary mt-2';button.style.minHeight='44px';button.style.maxWidth='100%';button.style.overflowWrap='anywhere';panel.append(text,button);host.prepend(panel);}
+panel.hidden=false;const text=panel.querySelector('span'),button=panel.querySelector('button');
+text.textContent=r.phase==='saving'?'자녀 가입 신청을 처리하고 있습니다.':r.phase==='registered'?'이전 자녀 가입 신청이 접수되었습니다.':r.phase==='not_recorded'?'이전 신청의 접수 내역이 확인되지 않았습니다.':r.phase==='failed'?r.message:'신청 처리 결과를 확인하지 못했습니다. 입력한 내용은 유지됩니다.';
+button.hidden=r.phase==='saving'||r.phase==='failed';button.disabled=false;button.setAttribute('aria-disabled',String(!!r.readPromise));button.setAttribute('aria-busy',String(!!r.readPromise));
+button.textContent=r.phase==='registered'?'확인':r.phase==='not_recorded'&&!r.writePending&&r.params?'이전 신청 다시 등록':'결과 다시 확인';
+button.onclick=()=>{if(r.readPromise)return;return r.phase==='registered'?accept(r,true):r.phase==='not_recorded'&&!r.writePending&&r.params?write(r):check(r);};
+}
+function accept(r,manual=false){
+if(!current(r)||(!manual&&r.modalRevision!==familyRegistrationRevision))return;
+const same=r.snapshot===snapshot()&&r.bodyMatches!==false;
+tasks.delete(r.owner);render();
+if(same)resetFamilyRegistrationDraft();
+showModal(same?'🎉 가입 신청이 접수되었습니다. 출자금 입금과 관리자 확인 후 승인됩니다.':'이전 가입 신청이 접수되었습니다. 추가로 작성한 내용은 그대로 두었습니다.');
+if(same){Promise.resolve(loadDashboardData(getPreferredDashboardProfileId())).catch(()=>CoopSafeLog.error('자녀 목록 재조회 실패',{code:'CHILD_LIST_REFRESH_FAILED'}));if(typeof loadManagedProfiles==='function')Promise.resolve(loadManagedProfiles(getRootMemberProfileId()||curAuth?.id)).catch(()=>CoopSafeLog.error('프로필 목록 재조회 실패',{code:'CHILD_PROFILE_REFRESH_FAILED'}));}
+}
+async function write(r){
+if(r.writePending)return r.waiter;if(!r.params)return;const revision=familyRegistrationRevision;
+r.phase='saving';r.writePending=true;render();let timer;
+const operation=Promise.resolve().then(()=>r.owner===owner()&&r.params?_supabase.rpc('create_full_child_member',{...r.params,p_request_id:r.id,p_consents:r.consents}):{error:{code:'CHILD_REQUEST_CONTEXT_CHANGED',message:'CHILD_REQUEST_CONTEXT_CHANGED'},status:409}).then(response=>{
+ r.writePending=false;
+ if(response?.error){r.everUnknown=r.everUnknown||unknown(response.error,response.status);r.phase=r.everUnknown?'unknown':'failed';r.message=CoopMemberCapital.errorMessage(response.error)||('가입 신청을 처리하지 못했습니다. '+response.error.message);}
+ else if(typeof response?.data==='string'&&/^\d{4}-\d{4}-\d{4}$/.test(response.data)){r.phase='registered';r.number=response.data;r.bodyMatches=true;}
+ else{r.phase='unknown';r.everUnknown=true;}
+ if(current(r)){render();if(r.phase==='registered'&&revision===familyRegistrationRevision)accept(r);else if(r.phase==='failed'&&revision===familyRegistrationRevision)showModal(r.message);}
+ return r;
+},()=>{r.writePending=false;r.everUnknown=true;r.phase='unknown';render();return r;});
+r.waiter=Promise.race([operation,new Promise(resolve=>{timer=setTimeout(()=>{if(r.writePending){r.everUnknown=true;r.phase='unknown';render();}resolve(r);},15000);})]).finally(()=>clearTimeout(timer));return r.waiter;
+}
+async function check(r=tasks.get(owner())){
+if(!r||!current(r)||r.readPromise)return r?.readPromise;const revision=familyRegistrationRevision;let timer;
+r.readPromise=Promise.race([Promise.resolve().then(()=>_supabase.rpc('get_child_join_request_result',{p_request_id:r.id,p_manager_id:r.manager})),new Promise(resolve=>{timer=setTimeout(()=>resolve({error:{message:'RESULT_TIMEOUT'},status:0}),15000);})]).then(response=>{
+ if(response?.error){r.phase='unknown';return;}
+ const value=response?.data;
+ if(value?.state==='registered'&&/^\d{4}-\d{4}-\d{4}$/.test(value.result?.member_number||'')){r.phase='registered';r.number=value.result.member_number;if(current(r)&&revision===familyRegistrationRevision)accept(r,true);}
+ else if(value?.state==='not_recorded'&&!r.writePending)r.phase='not_recorded';else r.phase='unknown';
+},()=>{r.phase='unknown';}).finally(()=>{clearTimeout(timer);r.readPromise=null;render();});render();return r.readPromise;
+}
+function submit(params,consents){
+const key=owner();let r=tasks.get(key);
+if(r?.phase==='registered'){accept(r,true);return;}
+if(r&&['saving','unknown','not_recorded'].includes(r.phase)){
+ if(r.phase==='not_recorded'&&!r.writePending){if(!r.params){r.params={...params};r.consents={...consents};r.snapshot=snapshot();r.bodyMatches=false;}return write(r);}
+ return r.writePending?r.waiter:check(r);
+}
+if(!key||familyRegistrationOwner!==key)return;
+r={id:crypto.randomUUID(),owner:key,actor:String(curAuth?.id||''),coop:String(currentMemberCoopId||curMem?.coop_id||''),manager:params.p_manager_id,params:{...params},consents:{...consents},snapshot:snapshot(),modalRevision:familyRegistrationRevision,bodyMatches:true,phase:'ready',everUnknown:false,writePending:false};tasks.set(key,r);return write(r);
+}
+function clear(){for(const [key,r]of tasks){if(['saving','unknown','not_recorded'].includes(r.phase)){r.params=null;r.consents=null;r.snapshot=null;r.bodyMatches=false;}else tasks.delete(key);}const panel=document.getElementById('legacyChildRequestStatus');if(panel)panel.hidden=true;}
+window.addEventListener('beforeunload',event=>{if([...tasks.values()].some(r=>r.actor===String(curAuth?.id||'')&&r.coop===String(currentMemberCoopId||curMem?.coop_id||'')&&['saving','unknown','not_recorded'].includes(r.phase))){event.preventDefault();event.returnValue='';}});
+return Object.freeze({submit,check,render,clear,current:()=>tasks.get(owner())||null});
+})();
 window.PortalChildDrafts = (() => {
 const ids = ['newFamName','newFamRrn1','newFamRrn2','newFamEmail','newFamRelSelect','newFamRelInput','newFamCapital','newFamBank','newFamAcc'];
 const drafts = new Map();
@@ -9636,6 +9699,7 @@ const current = () => active && scope && scope === currentScope()
     && active.owner === getFamilyRegistrationOwner() && familyRegistrationOwner === active.owner;
 function clear() {
 drafts.clear();active = null;scope = '';
+window.PortalLegacyChildRequests?.clear();
 resetFamilyRegistrationDraft();
 }
 function syncScope() {
@@ -9750,6 +9814,7 @@ familyRegistrationOwner = draftOwner;
 const draftRevision = ++familyRegistrationRevision;
 const overlay = document.getElementById('familyModalOverlay');
 overlay.style.display = 'flex';
+window.PortalLegacyChildRequests?.render();
 
 // 2. [수정] 탭 버튼 제어 (성인 개인만 자녀 신규등록 가능)
 const tabNewBtn = document.querySelectorAll('#famModalTabs .nav-item')[0]; // 자녀 탭
@@ -9763,6 +9828,7 @@ switchFamTab('connect');
 } else {
 tabNewBtn.style.display = 'block';
 switchFamTab('new');
+window.PortalLegacyChildRequests?.render();
 }
 
 // 3. [추가] 연결 상태 확인 (비동기 로직)
@@ -11605,56 +11671,18 @@ overlay.style.display = 'flex';
 // [신규] 최종 DB 저장 함수
 async function executeChildJoin() {
 if (!tempChildData || !familyRegistrationOwner || familyRegistrationOwner !== getFamilyRegistrationOwner()) return;
-const draftOwner = familyRegistrationOwner, draftRevision = familyRegistrationRevision;
 const preparation = window.PortalChildPreparation?.forData(tempChildData);
 if (window.PortalChildPreparation && !preparation) return;
-const chk1 = document.getElementById('consentCheck1');
-const chk2 = document.getElementById('consentCheck2');
-
-if (!chk1?.checked || !chk2?.checked) {
-// 여기서 alert 대신 기존 텍스트나 스타일로 경고를 줄 수도 있지만,
-// 간단히 브라우저 알림으로 막습니다. (모달 위에 모달 띄우기 복잡함 방지)
-showModal('모든 필수 항목에 동의 체크해주세요.'); 
-return;
-}
-
-// 로딩 시작 (모달 닫고 로딩)
-document.getElementById('customModalOverlay').style.display = 'none';
-showLoading(true, '가입 처리 중...');
-
+const chk1 = document.getElementById('consentCheck1'), chk2 = document.getElementById('consentCheck2');
+if (!chk1?.checked || !chk2?.checked) return showModal('모든 필수 항목에 동의 체크해 주세요.');
 const params = {
-p_manager_id: getActiveMemberProfileId(), // 부모 UUID
-p_name: tempChildData.name,
-p_rrn_display: `${tempChildData.rrn1}-${String(tempChildData.rrn2 || '').charAt(0)}******`,
-p_email: tempChildData.email || '',
-p_phone: null,   // 자녀 폰번호 없음 (독립 시 입력)
-p_address: curMem.address, // 부모 주소 상속
-p_initial_capital: tempChildData.capital,
-p_bank_name: tempChildData.bank,
-p_account_number: tempChildData.acc,
-p_account_holder: tempChildData.name
-// p_relationship 등은 RPC가 지원한다면 추가, 아니면 DB 트리거가 처리한다고 가정
+p_manager_id:getActiveMemberProfileId(),p_name:tempChildData.name,
+p_rrn_display:tempChildData.rrn1+'-'+String(tempChildData.rrn2||'').charAt(0)+'******',
+p_email:tempChildData.email||'',p_phone:null,p_address:curMem.address,p_initial_capital:tempChildData.capital,
+p_bank_name:tempChildData.bank,p_account_number:tempChildData.acc,p_account_holder:tempChildData.name
 };
-
-// RPC 호출
-const { data, error } = await _supabase.rpc('create_full_child_member', params);
-
-showLoading(false);
-if (draftOwner !== familyRegistrationOwner || draftOwner !== getFamilyRegistrationOwner() || draftRevision !== familyRegistrationRevision
-    || (preparation && !window.PortalChildPreparation.current(preparation))) return;
-
-if (error) {
-showModal(CoopMemberCapital.errorMessage(error) || ('가입 실패: ' + error.message));
-} else {
-showModal('🎉 가입이 완료되었습니다!\n(출자금 입금 및 관리자 승인 후 정식 조합원이 됩니다.)');
-resetFamilyRegistrationDraft();
-
-// 목록 갱신
-loadDashboardData(getPreferredDashboardProfileId());
-if (typeof loadManagedProfiles === 'function') {
-loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
-}
-}
+document.getElementById('customModalOverlay').style.display='none';
+return window.PortalLegacyChildRequests.submit(params,{privacy:true,membership:true});
 }
 
 
