@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.239
-Change: 2026-11-01 - Show actual purpose sections, capital history and scoped document lists directly.
+Version: v1.0.240
+Change: 2026-11-01 - Summary cards and document/dividend dialogs; collapsible activity and funding withdrawal.
 -->
 <html lang="ko">
 <head>
@@ -15,9 +15,9 @@ Change: 2026-11-01 - Show actual purpose sections, capital history and scoped do
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
-<script src="shared/member_portal_documents.js?v=1.0.0" integrity="sha384-zGw2COoO/LzyE0Sy8r7fkfzU0mdXZofh24yyc7LAcsvjWwvFo6j6SrOPigt/Mr+L" crossorigin="anonymous" defer></script>
-<script src="shared/member_portal_layout.js?v=1.1.0" integrity="sha384-J1rnDQACl3W3rvLUx1Ni9HGrV69JPS0JgDpzcGBgBZMI5hKldqFMcaeffzhKsv8s" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.239 | membermanage.html');</script>
+<script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
+<script src="shared/member_portal_layout.js?v=1.2.0" integrity="sha384-q1zifF/qSoyQBn0nEekuRkT8hLYg+NNj+/p+VQ/zy6nOvNOpVRWXnBcI/VYhH4nR" crossorigin="anonymous" defer></script>
+    <script>console.log('[Version] v1.0.240 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2653,7 +2653,8 @@ document.getElementById('btnModalYes').onclick=null;document.getElementById('btn
 return true;
 },
 openApplication: type => toggleTab(type,null,{direct:true}),
-renderHistory: (title,summary,list) => renderMemberHistory('ledger',title,summary,list),
+renderHistory: (type,title,summary,list) => renderMemberHistory(type,title,summary,list),
+canViewDividends: () => !isSiteMemberPortalProfile(),
 documents: {
 getClient: () => _supabase,
 getContext: () => getFamilyRegistrationOwner() ? {owner:getFamilyRegistrationOwner(),actor:String(curAuth.id),coop:String(currentMemberCoopId),profile:String(curMem.id),role:curMem.role,officials:portalDocumentRoles,documents:isCoopRuntimeModuleEnabled('documents'),notices:isCoopRuntimeModuleEnabled('site_admin')} : null,
@@ -2668,10 +2669,11 @@ const owner=getFamilyRegistrationOwner(),revision=++portalDirectRevision;
 const current=()=>owner&&owner===getFamilyRegistrationOwner()&&revision===portalDirectRevision&&window.MemberPortalPurposeController?.getSelected()===key;
 void loadPortalPurposeExtras(key);
 if(key==='funds') {
+syncWithdrawRefundAccountUi();
 await toggleTab('extra',null,{restore:true,direct:true});
 if(current()) await toggleTab('reduction',null,{restore:true,direct:true});
 } else if(key==='profile') {
-setProfileDetailsExpanded(true);syncWithdrawRefundAccountUi();
+setProfileDetailsExpanded(true);
 if(current()&&canUsePortalPartner())void toggleTab('partner',null,{restore:true});
 }
 }
@@ -9066,7 +9068,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 async function toggleTab(type, btn, navigation = {}) {
 window.PortalLoginToolRecovery?.cancel();
 if (portalApplicationWritePending && window.__memberAppLocks?.modifyApplication) return;
-if (!navigation.restore && window.MemberPortalPurposeController && !window.MemberPortalPurposeController.show(window.MemberPortalPurposeController.isDirect&&['withdraw','partner'].includes(type)?'profile':'funds', {reason:'application'})) return;
+if (!navigation.restore && window.MemberPortalPurposeController && !window.MemberPortalPurposeController.show(window.MemberPortalPurposeController.isDirect&&type==='partner'?'profile':'funds', {reason:'application'})) return;
 memberInformationPortal?.suspend();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
