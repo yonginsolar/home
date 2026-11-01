@@ -102,11 +102,11 @@ const splitParagraph=function(t,e,r){r||(r={});var n,i,a,o,s,c,u,l=[],h=[l],f=r.
         if (logoDataUrl && logoRatio > 0) {
             doc.saveGraphicsState();
             doc.setGState(new doc.GState({ opacity: 0.1 })); // 투명도 10% (아주 연하게)
-            
+
             const logoW = 140; // 가로 140mm 고정
             const logoH = logoW * logoRatio; // 세로 자동 계산
             const logoY = (297 - logoH) / 2; // 종이 중앙 정렬
-            
+
             doc.addImage(logoDataUrl, 'PNG', 35, logoY, logoW, logoH, '', 'CENTER');
             doc.restoreGraphicsState();
         }
@@ -119,7 +119,7 @@ const splitParagraph=function(t,e,r){r||(r={});var n,i,a,o,s,c,u,l=[],h=[l],f=r.
 
         // [데이터 가공]
         const dateStr = formatKoreanDateLabel(options.issueDate) || formatKoreanDateLabel(new Date());
-        
+
         // [UPDATE] 개인/단체 구분에 따른 라벨 및 값 설정
         let displayLabel = "생 년 월 일"; // 기본값 (개인)
         let displayValue = "";          // 표시될 값
@@ -160,7 +160,7 @@ const splitParagraph=function(t,e,r){r||(r={});var n,i,a,o,s,c,u,l=[],h=[l],f=r.
         doc.setFontSize(20);
         const moneyText = `일금${numberToKorean(totalAmount)}원정 (₩${totalAmount.toLocaleString()})`;
         doc.text(moneyText, 105, 80, { align: "center" });
-        
+
         // 금액 밑줄
         doc.setLineWidth(0.5);
         const textWidth = doc.getTextWidth(moneyText);
@@ -168,10 +168,10 @@ const splitParagraph=function(t,e,r){r||(r={});var n,i,a,o,s,c,u,l=[],h=[l],f=r.
 
         // [표 그리기] (6줄)
         const startY = 100;
-        const rowH = 14; 
-        
+        const rowH = 14;
+
         doc.rect(20, startY, 170, rowH * 6); // 전체 박스
-        
+
         // 가로선 5개
         for(let i=1; i<6; i++) doc.line(20, startY+(rowH*i), 190, startY+(rowH*i));
         // 세로선
