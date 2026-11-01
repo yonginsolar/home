@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.253
+Version: v1.0.254
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -16,8 +16,8 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
-<script src="shared/member_portal_layout.js?v=1.3.2" integrity="sha384-of0mW3vTFuZBfEGPVIByxFHUMOPA1ObklffWf6iwWoejUMjVzwqSK1XsyuFhrs5O" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.253 | membermanage.html');</script>
+<script src="shared/member_portal_layout.js?v=1.3.3" integrity="sha384-//kW6Kw570ydE6HQ66SJ7P9c54jcTxp7knNWDYBtWUpCcLHhZ3t/AhMJrErCS/mP" crossorigin="anonymous" defer></script>
+    <script>console.log('[Version] v1.0.254 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2110,6 +2110,8 @@ NO. <span id="infoMemberId">-</span>
 <input type="file" id="ptLogoFile" class="form-control form-control-sm" accept="image/*" aria-describedby="ptLogoHelp ptLogoFileError ptSelectedFile">
 <div id="ptLogoHelp" class="form-text small text-muted">이미지 파일 5MB 이하. 권장: 가로형 600x300px 또는 최소 300x150px, PNG/JPG. 투명 배경은 PNG를 권장합니다.</div>
 <div id="ptLogoFileError" class="small text-danger mt-1" role="alert" hidden></div>
+<div id="ptPhotoStatus" class="small text-muted mt-2" role="status" aria-live="polite" hidden></div>
+<button type="button" id="ptPhotoRetry" class="btn btn-sm btn-outline-secondary mt-2" onclick="recheckPortalPartnerPhoto()" aria-controls="ptPhotoStatus" hidden>사진 전송 다시 확인</button>
 <input type="hidden" id="ptLogoUrl"> 
 <div id="ptLogoPreview" class="mt-2 p-2 border rounded text-center bg-light hidden">
 <img src="" style="max-height: 80px; max-width: 100%;">
@@ -3178,6 +3180,91 @@ event.preventDefault();event.returnValue = '';
 const portalPartnerDrafts = new Map();
 let portalPartnerState = null, portalPartnerReadRevision = 0, portalPartnerRequestRevision = 0;
 let portalPartnerWritePending = false;
+let portalPartnerConfirmation = null;
+function closePortalPartnerConfirmation(restore = false) { portalPartnerConfirmation?.(restore); }
+function showPortalPartnerConfirmation(request, callback) {
+closePortalPartnerConfirmation(false);
+const overlay = document.getElementById('customModalOverlay'),trigger = document.getElementById('partnerSubmitButton');
+const message = '협력 단체 신청(수정)을 제출하시겠습니까?';
+let active = true,observer;
+const attrs = new Map(['role','aria-modal','aria-labelledby'].map(k=>[k,overlay.getAttribute(k)]));
+const cleanup = restore => {
+if(!active) return;active = false;observer?.disconnect();overlay.removeEventListener('keydown',keydown,true);
+if(portalPartnerConfirmation === cleanup) portalPartnerConfirmation = null;
+for(const [k,v] of attrs) { if(v === null) overlay.removeAttribute(k);else overlay.setAttribute(k,v); }
+if(restore && currentPortalPartnerState(request.state) && canUsePortalPartner() && request.revision === portalPartnerRequestRevision
+    && overlay.contains(document.activeElement) && trigger.isConnected && !trigger.disabled)
+    trigger.focus({preventScroll:true});
+};
+const cancel = () => { cleanup(true);closeCustomModal(); };
+const focusInside = node => {
+node.focus({preventScroll:true});
+const box = overlay.querySelector('.custom-modal-box'),item = node.getBoundingClientRect(),area = box.getBoundingClientRect();
+if(item.bottom > area.bottom) box.scrollTop += item.bottom - area.bottom + 8;
+else if(item.top < area.top) box.scrollTop -= area.top - item.top + 8;
+};
+const keydown = event => {
+if(!active) return;
+if(event.key === 'Escape') { event.preventDefault();event.stopImmediatePropagation();cancel(); }
+if(event.key !== 'Tab') return;
+const nodes = ['btnModalNo','btnModalYes'].map(id=>document.getElementById(id)).filter(n=>!n.disabled && n.style.display !== 'none');
+const first = nodes[0],last = nodes.at(-1);
+if(first && ((!event.shiftKey && document.activeElement === last) || (event.shiftKey && document.activeElement === first) || !overlay.contains(document.activeElement))) {
+event.preventDefault();event.stopImmediatePropagation();focusInside(event.shiftKey ? last : first);
+}
+};
+showConfirmModal(message,()=>{ if(!active) return;cleanup(false);return callback(); });
+document.getElementById('btnModalNo').onclick = cancel;
+overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-labelledby','customModalMsg');
+overlay.addEventListener('keydown',keydown,true);portalPartnerConfirmation = cleanup;
+observer = new MutationObserver(()=>{
+if(overlay.style.display !== 'flex' || document.getElementById('customModalMsg').textContent !== message) cleanup(false);
+});observer.observe(overlay,{attributes:true,attributeFilter:['style'],childList:true,subtree:true});
+focusInside(document.getElementById('btnModalNo'));
+}
+function currentPortalPartnerPhoto(state = portalPartnerState) {
+return currentPortalPartnerState(state) ? state.photoTasks?.get(state.file) || null : null;
+}
+function renderPortalPartnerPhoto(task) {
+if(currentPortalPartnerPhoto() === task) renderPortalPartnerState(portalPartnerState);
+}
+async function waitPortalPartnerPhoto(task) {
+if(!task.pending) return task.result;
+let timer;
+try {
+const result = await Promise.race([task.promise,new Promise(resolve=>{timer=setTimeout(()=>resolve({pending:true}),15000);})]);
+if(result.pending) { task.offered = true;task.detached = true; }
+return result;
+} finally { clearTimeout(timer); }
+}
+async function preparePortalPartnerPhoto(request) {
+const state = request.state,file = request.snapshot.file;
+state.photoTasks ||= new Map();
+let task = state.photoTasks.get(file);
+if(!task || (!task.pending && task.result.error)) {
+task = {file,owner:state.owner,key:state.key,feedbackRevision:request.feedbackRevision,pending:true,offered:false,detached:false,checking:false,result:null};
+state.photoTasks.set(file,task);
+task.promise = Promise.resolve().then(()=>uploadPartnerLogoFile(file,request)).then(url=>({url}),error=>({error})).then(result=>{
+task.pending = false;task.result = result;
+// A detached photo preparation can update its inline status, never submit.
+if(task.detached) renderPortalPartnerPhoto(task);
+return result;
+});
+}
+return waitPortalPartnerPhoto(task);
+}
+async function recheckPortalPartnerPhoto() {
+const state = portalPartnerState,task = currentPortalPartnerPhoto(state);
+if(!task || !task.offered || task.checking || !canUsePortalPartner() || portalPartnerWritePending) return;
+const feedback = state.feedbackRevision || 0;
+task.checking = true;renderPortalPartnerState(state);
+try { await waitPortalPartnerPhoto(task); }
+finally {
+task.checking = false;
+if(currentPortalPartnerPhoto() === task && (portalPartnerState.feedbackRevision || 0) === feedback) task.reviewRevision = feedback;
+renderPortalPartnerPhoto(task);
+}
+}
 function portalPartnerFields() { return ['ptName','ptDesc','ptLink','ptLogoUrl'].map(id => document.getElementById(id)); }
 function portalPartnerSnapshot() {
 return {values:portalPartnerFields().map(n => [n.id,n.value]),file:portalPartnerState?.file || null};
@@ -3196,6 +3283,7 @@ state.current = portalPartnerSnapshot();state.file = state.current.file;
 portalPartnerDrafts.set(state.key,state);
 }
 function clearPortalPartnerDrafts() {
+closePortalPartnerConfirmation(false);
 for (const state of portalPartnerDrafts.values()) {
 state.cancelRead?.();
 if(state.previewUrl) URL.revokeObjectURL(state.previewUrl);
@@ -3236,6 +3324,7 @@ portalPartnerState.file = file;
 retainPortalPartnerDraft();renderPortalPartnerState(portalPartnerState);
 }
 function initializePortalPartnerDraft(member) {
+closePortalPartnerConfirmation(false);
 portalPartnerState?.cancelRead?.();
 const owner = portalApplicationOwner(member);
 if (portalPartnerState && portalPartnerState.owner !== owner) clearPortalPartnerDrafts();
@@ -3257,7 +3346,17 @@ retry.classList.toggle('hidden',!state.readError && !state.retryOffered);
 retry.textContent = state.pending ? '확인 중…' : '다시 확인';
 retry.setAttribute('aria-disabled',String(!!state.pending || portalPartnerWritePending || !canUsePortalPartner()));
 retry.setAttribute('aria-busy',String(!!state.pending));
-document.getElementById('partnerSubmitButton').disabled = !!state.pending || !state.loaded || portalPartnerWritePending || !canUsePortalPartner();
+const photo = currentPortalPartnerPhoto(state),photoStatus = document.getElementById('ptPhotoStatus'),photoRetry = document.getElementById('ptPhotoRetry');
+photoStatus.hidden = !photo?.offered;photoRetry.hidden = !photo?.offered;
+photoStatus.textContent = !photo?.offered ? '' : photo.pending
+    ? '사진 전송 결과를 기다리고 있어요. 입력과 파일은 유지됩니다. 신청은 아직 제출하지 않았어요.'
+    : photo.result.error ? ((photo.feedbackRevision === (state.feedbackRevision || 0) || photo.reviewRevision === (state.feedbackRevision || 0))
+        ? '사진 준비가 완료되지 않았어요. 신청/수정 하기를 눌러 다시 시도해 주세요. 입력과 파일은 유지됩니다.'
+        : '선택한 사진의 준비 상태를 다시 확인해 주세요. 입력과 파일은 유지됩니다. 신청은 아직 제출하지 않았어요.')
+    : '사진 준비가 끝났어요. 신청은 아직 제출하지 않았어요. 내용을 확인한 뒤 신청/수정 하기를 눌러 주세요.';
+photoRetry.setAttribute('aria-busy',String(!!photo?.checking));photoRetry.setAttribute('aria-disabled',String(!!photo?.checking || portalPartnerWritePending || !canUsePortalPartner()));
+photoRetry.textContent = photo?.checking ? '사진 전송 확인 중…' : '사진 전송 다시 확인';
+document.getElementById('partnerSubmitButton').disabled = !!state.pending || !state.loaded || portalPartnerWritePending || !!photo?.pending || !canUsePortalPartner();
 document.getElementById('ptSelectedFile').textContent = current.file ? '선택한 사진: '+current.file.name : '';
 const fileError = document.getElementById('ptLogoFileError');
 fileError.textContent = state.fileError || '';fileError.hidden = !state.fileError;
@@ -3271,7 +3370,7 @@ const src = state.previewUrl || (storedUrl ? safeUrl(storedUrl) : '');
 preview.querySelector('img').src = src || '';preview.classList.toggle('hidden',!src);
 }
 function capturePortalPartnerRequest() {
-if (!currentPortalPartnerState() || !canUsePortalPartner() || !portalPartnerState.loaded || portalPartnerState.pending || portalPartnerWritePending) return null;
+if (!currentPortalPartnerState() || !canUsePortalPartner() || !portalPartnerState.loaded || portalPartnerState.pending || portalPartnerWritePending || currentPortalPartnerPhoto()?.pending) return null;
 return {state:portalPartnerState,revision:++portalPartnerRequestRevision,snapshot:portalPartnerSnapshot(),
     memberId:portalPartnerState.memberId,member:portalPartnerState.member,coop:String(currentMemberCoopId),
     feedbackRevision:portalPartnerState.feedbackRevision || 0,fileChoiceRevision:portalPartnerState.fileChoiceRevision || 0};
@@ -3290,7 +3389,7 @@ acceptPortalPartnerFile(event.target);
 });
 window.addEventListener('beforeunload',event => {
 retainPortalPartnerDraft();const owner = portalApplicationOwner();
-if(portalPartnerWritePending || (owner && [...portalPartnerDrafts.values()].some(s => s.owner === owner && !samePortalPartnerSnapshot(s.current,s.baseline)))) {
+if(portalPartnerWritePending || (owner && [...portalPartnerDrafts.values()].some(s => s.owner === owner && (!samePortalPartnerSnapshot(s.current,s.baseline) || [...(s.photoTasks?.values() || [])].some(task=>task.pending))))) {
 event.preventDefault();event.returnValue = '';
 }
 });
@@ -12168,7 +12267,7 @@ let logoUrl = values.get('ptLogoUrl');
 
 if(!name || !desc) return showModal('단체명과 소개를 입력해주세요.');
 
-showConfirmModal('협력 단체 신청(수정)을 제출하시겠습니까?', async () => {
+showPortalPartnerConfirmation(request, async () => {
 if (!currentPortalPartnerRequest(request) || portalPartnerWritePending) return;
 portalPartnerWritePending = true;renderPortalPartnerState(request.state);
 showLoading(true, '처리 중...');
@@ -12180,7 +12279,10 @@ try {
 if(request.snapshot.file) {
 failureStage = 'logo_upload';
 attempted = true;
-logoUrl = await uploadPartnerLogoFile(request.snapshot.file,request);
+const photo = await preparePortalPartnerPhoto(request);
+if(photo.pending) return;
+if(photo.error) throw photo.error;
+logoUrl = photo.url;
 }
 if (!currentPortalPartnerRequest(request)) return;
 
@@ -12210,6 +12312,7 @@ state.baseline = submitted;state.loaded = true;state.status = '공개 승인 대
 if ((state.fileChoiceRevision || 0) === request.fileChoiceRevision) state.fileError = '';
 if(samePortalPartnerSnapshot(current,request.snapshot)) {
 state.current = submitted;state.file = null;applyPortalPartnerSnapshot(submitted);
+state.photoTasks?.delete(request.snapshot.file);
 }
 retainPortalPartnerDraft();showModal(result.message);
 }

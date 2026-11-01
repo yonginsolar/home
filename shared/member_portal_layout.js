@@ -1,4 +1,4 @@
-/* v1.3.2 — Equal purpose tabs on wider screens; preserve mobile forms. */
+/* v1.3.3 — Match purpose navigation to the capital summary width. */
 (function(root){
  'use strict';
  function create(options){
@@ -37,6 +37,7 @@
   #dashboardSection.portal-purpose-layout .portal-purpose-shortcuts strong{font-size:1.1rem}.portal-purpose-shortcuts small{color:var(--theme-muted,#586a5d)}
   #dashboardSection.portal-purpose-layout .portal-shortcut-link{margin-top:auto;font-size:.85rem;color:var(--theme-muted,#586a5d)}
   #dashboardSection.portal-purpose-layout .portal-purpose-overview{max-width:900px;margin:0 auto}
+  #dashboardSection.portal-purpose-layout .portal-purpose-nav{box-sizing:border-box;max-width:900px;width:100%;margin-left:auto;margin-right:auto}
   #dashboardSection.portal-purpose-layout .portal-purpose-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px}
   #dashboardSection.portal-purpose-layout .portal-purpose-heading h3{font-size:1.1rem;font-weight:700;margin:0}
   #dashboardSection.portal-purpose-layout .portal-purpose-heading button{min-height:44px;white-space:normal}
@@ -122,7 +123,7 @@
    const panel=element('section','portal-purpose-panel');panel.id='portalPurposePanel-'+key;panel.dataset.purposePanel=key;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);panels[key]=panel;
   }
   shell.append(top);const directory=doc.getElementById('profileDirectoryStatus');if(directory)shell.append(directory);shell.append(nav,...Object.values(panels));dashboard.append(shell);
-  const overview=element('div','portal-purpose-overview'),summaryAssets=element('div'),fundAssets=element('div');
+  const overview=element('div','portal-purpose-overview'),summaryAssets=element('div'),fundAssets=element('div','portal-purpose-overview');
   panels.summary.append(overview);overview.append(summaryAssets);
   panels.funds.append(fundAssets,nodes.portalApplicationColumn);
   panels.activity.append(nodes.quickLinksRow,nodes.portalTimelineColumn,nodes.memberFreeBoardCard,nodes.memberBadgeCollectionCard,nodes.hallOfFameCard);
@@ -202,5 +203,5 @@
   dashboard.classList.add('portal-purpose-layout');dashboard.dataset.purposeMounted='true';refresh();
   return Object.freeze({isDirect:true,show,refresh,suspend,getSelected:()=>selected});
  }
- root.MemberPortalLayout=Object.freeze({version:'1.3.2',create});
+ root.MemberPortalLayout=Object.freeze({version:'1.3.3',create});
 })(window);
