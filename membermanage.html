@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.249
+Version: v1.0.250
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.1" integrity="sha384-WcPwZeSpbtFs8ONHUNTfsWGKvwdVHqaRqOw66iLtErZ27RowhxtU+gmoEa+p2a21" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.249 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.250 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2091,24 +2091,25 @@ NO. <span id="infoMemberId">-</span>
 </div>
 
 <div class="mb-2">
-<label class="small text-muted fw-bold">단체/기업명</label>
+<label class="small text-muted fw-bold" for="ptName">단체/기업명</label>
 <input type="text" id="ptName" class="form-control form-control-sm" placeholder="예: (주)용인햇빛">
 </div>
 
 <div class="mb-2">
-<label class="small text-muted fw-bold">한 줄 소개</label>
+<label class="small text-muted fw-bold" for="ptDesc">한 줄 소개</label>
 <input type="text" id="ptDesc" class="form-control form-control-sm" placeholder="예: 태양광 유지보수 전문 기업">
 </div>
 
 <div class="mb-2">
-<label class="small text-muted fw-bold">홈페이지 링크</label>
+<label class="small text-muted fw-bold" for="ptLink">홈페이지 링크</label>
 <input type="text" id="ptLink" class="form-control form-control-sm" placeholder="https://...">
 </div>
 
 <div class="mb-3">
-<label class="small text-muted fw-bold">로고 이미지</label>
-<input type="file" id="ptLogoFile" class="form-control form-control-sm" accept="image/*">
-<div class="form-text small text-muted">권장: 가로형 600x300px 또는 최소 300x150px, PNG/JPG. 투명 배경은 PNG를 권장합니다.</div>
+<label class="small text-muted fw-bold" for="ptLogoFile">로고 이미지</label>
+<input type="file" id="ptLogoFile" class="form-control form-control-sm" accept="image/*" aria-describedby="ptLogoHelp ptLogoFileError ptSelectedFile">
+<div id="ptLogoHelp" class="form-text small text-muted">이미지 파일 5MB 이하. 권장: 가로형 600x300px 또는 최소 300x150px, PNG/JPG. 투명 배경은 PNG를 권장합니다.</div>
+<div id="ptLogoFileError" class="small text-danger mt-1" role="alert" hidden></div>
 <input type="hidden" id="ptLogoUrl"> 
 <div id="ptLogoPreview" class="mt-2 p-2 border rounded text-center bg-light hidden">
 <img src="" style="max-height: 80px; max-width: 100%;">
@@ -2116,7 +2117,7 @@ NO. <span id="infoMemberId">-</span>
 </div>
 
 <div id="ptStatusMsg" class="mb-3 text-end small fw-bold" aria-live="polite"></div>
-<button type="button" id="ptRetry" class="btn btn-sm btn-outline-secondary mb-3 hidden" onclick="loadPartnerInfo(curMem?.member_id)">다시 시도</button>
+<button type="button" id="ptRetry" class="btn btn-sm btn-outline-secondary mb-3 hidden" onclick="loadPartnerInfo(curMem?.member_id)" aria-controls="tabPartner">다시 확인</button>
 <div id="ptSelectedFile" class="small text-muted mb-2"></div>
 <div id="ptBadgePreview" class="mb-3 small text-muted"></div>
 
@@ -3195,26 +3196,51 @@ state.current = portalPartnerSnapshot();state.file = state.current.file;
 portalPartnerDrafts.set(state.key,state);
 }
 function clearPortalPartnerDrafts() {
-for (const state of portalPartnerDrafts.values()) if(state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+for (const state of portalPartnerDrafts.values()) {
+state.cancelRead?.();
+if(state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+}
 portalPartnerDrafts.clear();portalPartnerState = null;++portalPartnerReadRevision;++portalPartnerRequestRevision;
 portalPartnerFields().forEach(n => { if(n) n.value = ''; });
 const file = document.getElementById('ptLogoFile');if(file) file.value = '';
 document.getElementById('ptLogoPreview')?.classList.add('hidden');
 }
+function restorePortalPartnerFileInput(file) {
+const input = document.getElementById('ptLogoFile');input.value = '';
+if(file && typeof DataTransfer === 'function') {
+try { const files = new DataTransfer();files.items.add(file);input.files = files.files; } catch(_) { /* The memory File remains the submission source. */ }
+}
+}
 function applyPortalPartnerSnapshot(snapshot) {
 const values = new Map(snapshot.values);portalPartnerFields().forEach(n => { n.value = values.get(n.id) || ''; });
-const input = document.getElementById('ptLogoFile');input.value = '';
-if(snapshot.file && typeof DataTransfer === 'function') {
-try { const files = new DataTransfer();files.items.add(snapshot.file);input.files = files.files; } catch(_) { /* The memory File remains the submission source. */ }
+restorePortalPartnerFileInput(snapshot.file);
 }
+function getPortalPartnerFileError(file) {
+if (!file) return '';
+if (!String(file.type || '').startsWith('image/')) return '이미지 파일만 선택해 주세요.';
+if (Number(file.size || 0) > 5 * 1024 * 1024) return '로고 이미지는 5MB 이하로 선택해 주세요.';
+return '';
+}
+function acceptPortalPartnerFile(input) {
+if (!currentPortalPartnerState()) return;
+const file = input.files?.[0] || null, error = getPortalPartnerFileError(file);
+if (error) {
+portalPartnerState.fileError = error + (portalPartnerState.file ? ' 이전에 선택한 사진은 유지했어요.' : ' 기존 작성 내용은 유지했어요.');
+restorePortalPartnerFileInput(portalPartnerState.file);
+} else {
+portalPartnerState.fileError = '';
+portalPartnerState.file = file;
+}
+retainPortalPartnerDraft();renderPortalPartnerState(portalPartnerState);
 }
 function initializePortalPartnerDraft(member) {
+portalPartnerState?.cancelRead?.();
 const owner = portalApplicationOwner(member);
 if (portalPartnerState && portalPartnerState.owner !== owner) clearPortalPartnerDrafts();
 const key = JSON.stringify([owner,String(member?.id || '')]), old = portalPartnerDrafts.get(key);
 const blank = {values:portalPartnerFields().map(n => [n.id,'']),file:null};
 const state = {...(old || {}),owner,key,member:String(member?.id || ''),memberId:String(member?.member_id || ''),
-    current:old?.current || blank,baseline:old?.baseline || blank,pending:null,badgeRead:null,badgeRetry:false};
+    current:old?.current || blank,baseline:old?.baseline || blank,pending:null,cancelRead:null,badgeRead:null,badgeRetry:false};
 portalPartnerState = state;portalPartnerDrafts.set(key,state);state.file = state.current.file;
 document.getElementById('ptBadgePreview').textContent = '';
 applyPortalPartnerSnapshot(state.current);renderPortalPartnerState(state);
@@ -3223,10 +3249,16 @@ function renderPortalPartnerState(state) {
 if (!currentPortalPartnerState(state)) return;
 const current = portalPartnerSnapshot(),dirty = !samePortalPartnerSnapshot(current,state.baseline);
 const status = document.getElementById('ptStatusMsg');
-status.textContent = state.readError ? '정보를 불러오지 못했습니다.' : (state.pending ? '불러오는 중...' : (dirty ? '작성 중' : state.status || ''));
-document.getElementById('ptRetry').classList.toggle('hidden',!state.readError);
+status.textContent = state.pending ? '불러오는 중...' : state.readError ? (state.readTimedOut ? '조회가 오래 걸리고 있어요. 작성 내용은 유지됩니다. 다시 확인해 주세요.' : '정보를 불러오지 못했습니다. 다시 확인해 주세요.') : (dirty ? '작성 중' : state.status || '');
+const retry = document.getElementById('ptRetry');
+retry.classList.toggle('hidden',!state.readError && !state.retryOffered);
+retry.textContent = state.pending ? '확인 중…' : '다시 확인';
+retry.setAttribute('aria-disabled',String(!!state.pending || portalPartnerWritePending || !canUsePortalPartner()));
+retry.setAttribute('aria-busy',String(!!state.pending));
 document.getElementById('partnerSubmitButton').disabled = !!state.pending || !state.loaded || portalPartnerWritePending || !canUsePortalPartner();
 document.getElementById('ptSelectedFile').textContent = current.file ? '선택한 사진: '+current.file.name : '';
+const fileError = document.getElementById('ptLogoFileError');
+fileError.textContent = state.fileError || '';fileError.hidden = !state.fileError;
 const preview = document.getElementById('ptLogoPreview');
 if (state.previewFile !== current.file) {
 if(state.previewUrl) URL.revokeObjectURL(state.previewUrl);
@@ -3246,13 +3278,11 @@ return !!request && currentPortalPartnerState(request.state) && canUsePortalPart
     && request.revision === portalPartnerRequestRevision && samePortalPartnerSnapshot(request.snapshot,portalPartnerSnapshot());
 }
 document.addEventListener('input',event => {
-if (!currentPortalPartnerState() || !['ptName','ptDesc','ptLink','ptLogoFile'].includes(event.target?.id)) return;
-if(event.target.id === 'ptLogoFile') portalPartnerState.file = event.target.files?.[0] || null;
+if (!currentPortalPartnerState() || !['ptName','ptDesc','ptLink'].includes(event.target?.id)) return;
 retainPortalPartnerDraft();renderPortalPartnerState(portalPartnerState);
 });
 document.getElementById('ptLogoFile').addEventListener('change',event => {
-if (!currentPortalPartnerState()) return;
-portalPartnerState.file = event.target.files?.[0] || null;retainPortalPartnerDraft();renderPortalPartnerState(portalPartnerState);
+acceptPortalPartnerFile(event.target);
 });
 window.addEventListener('beforeunload',event => {
 retainPortalPartnerDraft();const owner = portalApplicationOwner();
@@ -11993,13 +12023,23 @@ if (!currentPortalPartnerState(state) || !canUsePortalPartner() || String(member
 if (state.pending) return state.pending;
 const revision = ++portalPartnerReadRevision;
 const owned = () => currentPortalPartnerState(state) && revision === portalPartnerReadRevision;
-const current = () => owned() && canUsePortalPartner();
-state.readError = false;
+let cancelled = false, timer, cancelWait;
+const controller = typeof AbortController === 'function' ? new AbortController() : null;
+const current = () => !cancelled && owned() && canUsePortalPartner();
+const interrupted = new Promise(resolve => { cancelWait = resolve; });
+state.cancelRead = () => { cancelled = true;controller?.abort();cancelWait({cancelled:true}); };
+state.readError = false;state.readTimedOut = false;
 state.loaded = false;
 const pending = Promise.resolve().then(async () => {
 try {
 if(!current()) return;
-const {data,error} = await scopeMemberTenant(_supabase.from('site_partners').select('*')).eq('member_id',state.memberId).maybeSingle();
+let query = scopeMemberTenant(_supabase.from('site_partners').select('*')).eq('member_id',state.memberId);
+if(controller && typeof query.abortSignal === 'function') query = query.abortSignal(controller.signal);
+const limit = new Promise(resolve => { timer = setTimeout(() => resolve({timedOut:true}),15000); });
+const response = await Promise.race([Promise.resolve(query.maybeSingle()),limit,interrupted]);
+if(response?.cancelled || !current()) return;
+if(response?.timedOut) { controller?.abort();throw {code:'PARTNER_READ_TIMEOUT'}; }
+const {data,error} = response;
 if (!current()) return;
 if(error) throw error;
 if (data?.member_id && String(data.member_id) !== state.memberId) throw new Error('PARTNER_SCOPE_MISMATCH');
@@ -12012,13 +12052,14 @@ state.current = changed ? snapshot : baseline;state.file = state.current.file;
 if(!changed) applyPortalPartnerSnapshot(state.current);
 void renderPartnerBadgePreview(data?.badges || [],current,owned);
 } catch(error) {
-if(current()) { state.readError = true;CoopSafeLog.warn('파트너 정보 조회 실패',error?.code || 'PARTNER_READ_FAILED'); }
+if(current()) { state.readError = true;state.retryOffered = true;state.readTimedOut = error?.code === 'PARTNER_READ_TIMEOUT';CoopSafeLog.warn('파트너 정보 조회 실패',error?.code || 'PARTNER_READ_FAILED'); }
 } finally {
+clearTimeout(timer);
 // Release only this read, even when the module was disabled while it settled.
 if(state.pending === pending) {
-state.pending = null;
+state.pending = null;state.cancelRead = null;
 if(currentPortalPartnerState(state) && revision === portalPartnerReadRevision) {
-if(!canUsePortalPartner()) { state.loaded = false;state.readError = true; }
+if(!canUsePortalPartner()) { state.loaded = false;state.readError = true;state.retryOffered = true; }
 retainPortalPartnerDraft();renderPortalPartnerState(state);
 }
 }
@@ -12076,12 +12117,8 @@ return raw;
 async function uploadPartnerLogoFile(file, request) {
 if (!file) return '';
 if (!currentPortalPartnerRequest(request)) throw new Error('신청 대상이 변경되었습니다.');
-if (!String(file.type || '').startsWith('image/')) {
-throw new Error('이미지 파일만 업로드할 수 있습니다.');
-}
-if (Number(file.size || 0) > 5 * 1024 * 1024) {
-throw new Error('로고 이미지는 5MB 이하로 업로드해주세요.');
-}
+const fileError = getPortalPartnerFileError(file);
+if(fileError) throw new Error(fileError);
 
 const coopId = request.coop;
 const profileId = request.member;
