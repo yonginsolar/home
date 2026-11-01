@@ -1,4 +1,4 @@
-/* v1.0.2 — Prepare optional PDF dependencies before requesting a membership certificate. */
+/* v1.0.3 — Parallel read-only preparation; issuance/context checks remain mandatory. */
 (function (root) {
   'use strict';
   let busy = false;
@@ -78,20 +78,21 @@
       const check=async()=>{
         if(!isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
         await authorize?.();
-        const who=await client.auth.getUser();
+        const [who,response]=await Promise.all([
+          client.auth.getUser(),read(client,'get_member_confirmation_context',{p_member_id:memberId})
+        ]);
         if(who.error||who.data?.user?.id!==actor||!isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
-        const response=await read(client,'get_member_confirmation_context',{p_member_id:memberId});
         if(response.error)throw response.error;
         if(response.data?.coop_id!==coopId||!isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
         return response.data;
       };
-      let context=await check();
       if(!root.ContributionCertPreview)throw new Error('PDF_NOT_READY');
       let issued;
       preview=root.ContributionCertPreview.start({title:'조합원 확인서',isCurrent,authorize:async()=>{
         const latest=await check();
         if(issued && latest.revision!==issued.revision)throw new Error('MEMBERSHIP_CONTEXT_CHANGED');
       }});
+      let context=await check();
       const key=actor+'|'+coopId+'|'+memberId;
       const existing=pending.get(key);
       const request=existing || {p_member_id:memberId,p_request_key:crypto.randomUUID(),p_expected_revision:context.revision};
@@ -100,8 +101,10 @@
       if(!preview.isCurrent())return;
       if(typeof root.jspdf?.jsPDF!=='function')throw new Error('PDF_NOT_READY');
       // Prepare the font and the existing private display seal before allocating a number.
-      await getCertPretendardFontBase64();
-      const seal=await downloadCertStorageAssetDataUrl(client,'attachments',context.snapshot.seal_path);
+      const [,seal]=await Promise.all([
+        getCertPretendardFontBase64(),
+        downloadCertStorageAssetDataUrl(client,'attachments',context.snapshot.seal_path)
+      ]);
       if(!preview.isCurrent())return;
       await check();if(!preview.isCurrent())return;
       pending.set(key,request);

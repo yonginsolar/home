@@ -1,4 +1,4 @@
-/* v1.2.0 — Summary cards, scoped document/dividend dialogs and collapsible activity. */
+/* v1.3.0 — Stable responsive dialogs and summary-only documents/dividends. */
 (function(root){
  'use strict';
  function create(options){
@@ -7,7 +7,7 @@
   const ids=['portalProfileGroup','assetSummaryRow','quickLinksRow','portalApplicationColumn','portalTimelineColumn','portalApplicationsAndHistory','memberBadgeCollectionCard','hallOfFameCard','memberFreeBoardCard','memberFamilyAccountCard'];
   const nodes=Object.fromEntries(ids.map(id=>[id,doc.getElementById(id)]));if(ids.some(id=>!nodes[id]))return null;
   let verified='',selected='summary';const choices=new Map(),expanded=new Map(),panels={},buttons={},dialogs=[];
-  const names={summary:'요약',funds:'출자·신청',activity:'활동·문서',profile:'내 정보'},icons={summary:'grid',funds:'wallet2',activity:'journal-text',profile:'person'};
+  const names={summary:'요약',funds:'출자·신청',activity:'활동·내역',profile:'내 정보'},icons={summary:'grid',funds:'wallet2',activity:'journal-text',profile:'person'};
   const context=()=>String(options.getContext?.()||''),current=()=>!!verified&&verified===context();
   const element=(tag,className,text)=>{const n=doc.createElement(tag);if(className)n.className=className;if(text)n.textContent=text;return n;};
   const action=(text,handler,className='btn btn-outline-success')=>{const n=element('button',className,text);n.type='button';n.onclick=handler;return n;};
@@ -63,7 +63,7 @@
   #dashboardSection.portal-purpose-layout .portal-direct-card>[data-direct-section]{display:block!important}
   #dashboardSection.portal-purpose-layout .portal-direct-card[hidden]{display:none!important}
   #dashboardSection.portal-purpose-layout .portal-direct-history-list{max-height:30rem;overflow:auto;word-break:keep-all;overflow-wrap:anywhere}
-  #dashboardSection.portal-purpose-layout #portalInlineDividendHistory{grid-column:1/-1}
+  #dashboardSection.portal-purpose-layout #tabCert>:is(#memberContributionCertificateTitle,#memberContributionCertificateView,hr),#dashboardSection.portal-purpose-layout #memberContributionCertificateTitle+p{display:none!important}
   #dashboardSection.portal-purpose-layout .portal-activity-accordion{margin-bottom:24px;border:1px solid var(--theme-border,#dae5dd);border-radius:16px;background:var(--theme-surface,#fff);color:var(--theme-text,#233b2a);overflow:hidden}
   #dashboardSection.portal-purpose-layout .portal-activity-accordion>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none;min-height:64px;padding:18px 22px}
   #dashboardSection.portal-purpose-layout .portal-activity-accordion>summary::-webkit-details-marker{display:none}
@@ -91,10 +91,15 @@
   .portal-document-reader{width:min(1100px,calc(100vw - 24px));height:calc(100dvh - 24px);padding:14px}
   .portal-document-reader[open]{display:flex;flex-direction:column;gap:12px}.portal-document-reader::backdrop{background:#0f172a80}
   .portal-document-reader .portal-dialog-heading{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px}.portal-document-reader h3{font-size:1.1rem;margin:0}.portal-document-reader button{font:inherit;min-height:44px;white-space:normal}.portal-document-reader iframe{width:100%;min-height:0;flex:1;border:0;background:var(--theme-surface,#fff)}
-  .portal-purpose-dialog{width:min(920px,calc(100vw - 24px));padding:0;overflow:hidden;margin:auto}.portal-purpose-dialog[open]{display:flex;flex-direction:column}.portal-purpose-dialog::backdrop{background:#0f172a80}
+  .portal-purpose-dialog{width:min(920px,calc(100vw - 24px));height:min(780px,calc(100dvh - 24px));padding:0;overflow:hidden;margin:auto}.portal-purpose-dialog[open]{display:flex;flex-direction:column}.portal-purpose-dialog::backdrop{background:#0f172a80}
   .portal-purpose-dialog>.portal-dialog-heading{display:flex;flex:none;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:16px 20px;border-bottom:1px solid var(--theme-border,#d4e1d7)}
   .portal-purpose-dialog h2{font-size:1.2rem;margin:0;word-break:keep-all}.portal-purpose-dialog button{min-height:44px;white-space:normal;font:inherit}
-  .portal-purpose-dialog>.portal-dialog-body{padding:20px;min-height:0;overflow:auto;word-break:keep-all;overflow-wrap:anywhere}.portal-purpose-dialog .portal-documents-surface{border:0;box-shadow:none;padding:0;margin:0!important;background:transparent}
+  .portal-purpose-dialog>.portal-dialog-body{padding:20px;min-height:0;flex:1;overflow:auto;word-break:keep-all;overflow-wrap:anywhere}.portal-purpose-dialog .portal-documents-surface{border:0;box-shadow:none;padding:0;margin:0!important;background:transparent}
+  body:has(#dashboardSection.portal-purpose-layout) :is(#memberInformationDialog,.member-login-methods,.member-identity-claim){height:min(760px,calc(100dvh - 24px));max-height:calc(100dvh - 24px);overflow:auto;box-sizing:border-box}
+  body:has(#dashboardSection.portal-purpose-layout) .custom-modal-overlay .custom-modal-box{height:min(720px,calc(100dvh - 32px));max-height:calc(100dvh - 32px);overflow:auto;box-sizing:border-box}
+  body:has(#dashboardSection.portal-purpose-layout) :is(#customModalOverlay,#findEmailModalOverlay,#modifyAppModal,#socialEmailVerifyModal) .custom-modal-box{height:min(440px,calc(100dvh - 32px))}
+  body:has(#dashboardSection.portal-purpose-layout) dialog.coop-dialog{height:min(400px,calc(100dvh - 40px));overflow:auto}
+  body:has(#dashboardSection.portal-purpose-layout) .portal-login-tool-recovery{height:min(400px,calc(100dvh - 24px))}
   .portal-purpose-dialog .portal-documents-surface .portal-purpose-heading h3{display:none}
   .portal-purpose-dialog .portal-dividend-content{min-width:0}.portal-dividend-content .row{--bs-gutter-x:.75rem}
   @media(max-width:575px){.portal-documents-surface .portal-document-controls{grid-template-columns:1fr}.portal-purpose-dialog>.portal-dialog-body{padding:14px}#dashboardSection.portal-purpose-layout .portal-purpose-shortcuts{grid-template-columns:1fr}#dashboardSection.portal-purpose-layout .portal-purpose-shortcuts button{min-height:132px}.portal-dividend-content .col-6{width:100%}}
@@ -122,13 +127,12 @@
   const directGrid=element('div','portal-direct-grid'),sectionCards=new Map();panels.funds.append(directGrid);
   function directSection(type,parent){const node=doc.getElementById('tab'+type[0].toUpperCase()+type.slice(1)),card=element('section','portal-direct-card dashboard-card');node.dataset.directSection=type;node.classList.remove('py-3');card.append(node);parent.append(card);sectionCards.set(type,card);return card;}
   directSection('extra',directGrid);
-  const history=element('section','portal-direct-card dashboard-card portal-dividend-content'),historyTitle=element('h3','','배당 내역'),historySummary=element('div','mb-3 small'),historyList=element('div','portal-direct-history-list');history.id='portalInlineDividendHistory';historyList.tabIndex=0;historyList.setAttribute('aria-label','배당 내역');const dividendHeading=element('div','portal-purpose-heading'),dividendDetail=action('상세 보기',event=>openDividends(event.currentTarget),'btn btn-sm btn-outline-success');dividendHeading.append(historyTitle,dividendDetail);history.append(dividendHeading,historySummary,historyList);panels.funds.append(history);
-  directSection('cert',directGrid);const reductionCard=directSection('reduction',directGrid),redRetry=action('다시 확인',()=>options.openApplication?.('reduction'),'btn btn-sm btn-outline-secondary');redRetry.id='portalDirectRedRetry';redRetry.hidden=true;reductionCard.append(redRetry);
+  const reductionCard=directSection('reduction',directGrid),redRetry=action('다시 확인',()=>options.openApplication?.('reduction'),'btn btn-sm btn-outline-secondary');redRetry.id='portalDirectRedRetry';redRetry.hidden=true;reductionCard.append(redRetry);
   const modify=doc.getElementById('portalModifyDraftList');if(modify)panels.funds.append(modify);
-  directSection('partner',panels.profile);directSection('withdraw',directGrid);
-  const docHost=element('section','dashboard-card mb-4');docHost.id='portalInlineDocuments';panels.activity.prepend(docHost);
-  const docDialog=makeDialog('문서함','portalDocumentsDialog',()=>{documents?.close(false);panels.activity.prepend(docHost);syncDirectSections();});
-  const documents=root.MemberPortalDocuments&&options.documents?root.MemberPortalDocuments.create({...options.documents,container:docHost,isActive:()=>current()&&(selected==='activity'||docDialog.node.open)}):null;
+  directSection('partner',panels.profile);directSection('withdraw',directGrid);directSection('cert',directGrid);
+  const docHost=element('section','dashboard-card mb-4');docHost.id='portalInlineDocuments';
+  const docDialog=makeDialog('문서함','portalDocumentsDialog',()=>{documents?.close(false);syncDirectSections();});docDialog.body.append(docHost);
+  const documents=root.MemberPortalDocuments&&options.documents?root.MemberPortalDocuments.create({...options.documents,container:docHost,isActive:()=>current()&&docDialog.node.open}):null;
   const dividendDialog=makeDialog('배당 내역','portalDividendDialog',()=>{dividendModalSummary.replaceChildren();dividendModalList.replaceChildren();}),dividendModalTitle=element('h3'),dividendModalSummary=element('div','mb-3 small'),dividendModalList=element('div','portal-dividend-content');dividendModalTitle.hidden=true;dividendDialog.body.append(dividendModalTitle,dividendModalSummary,dividendModalList);
   if(documents)dashboard.dataset.inlineDocuments='true';else docHost.hidden=true;
   nodes.portalApplicationsAndHistory.hidden=true;
@@ -151,7 +155,7 @@
   function openDividends(trigger){if(!canDividends())return;options.renderHistory?.('dividend_net',dividendModalTitle,dividendModalSummary,dividendModalList);dividendDialog.open(trigger);}
   function openDocuments(trigger){if(!current()||!allowed(doc.getElementById('quickMinutesViewCard')))return;if(!documents){options.documents?.openFull?.();return;}docDialog.body.append(docHost);docHost.hidden=false;docDialog.open(trigger);documents.activate(true);}
   function invokeCertificate(id){const button=doc.getElementById(id);if(!current()||!allowed(doc.querySelector('.menu-btn[onclick*="cert"]'))||button?.disabled)return;button.click();}
-  function syncDirectSections(){for(const [type,card]of sectionCards){const menu=doc.querySelector('.menu-btn[onclick*="'+type+'"]');card.hidden=!current()||!allowed(menu);}history.hidden=!canDividends();const docCard=doc.getElementById('quickMinutesViewCard'),canRead=!!documents&&current()&&allowed(docCard);if(!canRead)docDialog.close(false);docHost.hidden=!canRead;if(documents)documents.activate(canRead&&(selected==='activity'||docDialog.node.open));}
+  function syncDirectSections(){for(const [type,card]of sectionCards){const menu=doc.querySelector('.menu-btn[onclick*="'+type+'"]');card.hidden=!current()||!allowed(menu);}const docCard=doc.getElementById('quickMinutesViewCard'),canRead=!!documents&&current()&&allowed(docCard);if(!canRead)docDialog.close(false);docHost.hidden=!canRead;if(documents)documents.activate(canRead&&docDialog.node.open);}
   function updateOverview(){
    cert.hidden=!allowed(doc.querySelector('.menu-btn[onclick*="cert"]'));documentShortcut.hidden=!allowed(doc.getElementById('quickMinutesViewCard'));dividendShortcut.hidden=!canDividends();syncDirectSections();
    if(!current()){recentList.replaceChildren();status.textContent='내역을 다시 확인해 주세요.';todos.replaceChildren();return;}
@@ -173,7 +177,6 @@
   function paint(){
    for(const key of Object.keys(names)){panels[key].hidden=key!==selected;buttons[key].setAttribute('aria-selected',String(key===selected));buttons[key].tabIndex=key===selected?0:-1;buttons[key].disabled=!current();}
    (selected==='funds'?fundAssets:summaryAssets).append(nodes.assetSummaryRow);
-   if(canDividends()&&selected==='funds'){options.renderHistory?.('dividend_net',historyTitle,historySummary,historyList);historyTitle.textContent='배당 내역';}
    nav.setAttribute('aria-busy',String(!current()));
   }
   function show(key,settings={}){
@@ -194,5 +197,5 @@
   dashboard.classList.add('portal-purpose-layout');dashboard.dataset.purposeMounted='true';refresh();
   return Object.freeze({isDirect:true,show,refresh,suspend,getSelected:()=>selected});
  }
- root.MemberPortalLayout=Object.freeze({version:'1.2.0',create});
+ root.MemberPortalLayout=Object.freeze({version:'1.3.0',create});
 })(window);
