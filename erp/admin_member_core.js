@@ -8719,11 +8719,27 @@ function buildDonationReceiptNumber(memberRow) {
 let adminIssueDocBusy = false;
 let adminIssueDocRun = null;
 let adminCertificateAuthId = '';
+let adminCertificatePreparationEpoch = 0;
+
+function invalidateAdminCertificatePreparation() {
+    adminCertificatePreparationEpoch++;
+    const run = adminIssueDocRun;
+    if (run?.phase !== 'preparation') return;
+    run.cancelPreparation?.();
+    run.preview?.close();
+    if (adminIssueDocRun === run) {
+        adminIssueDocRun = null;
+        adminIssueDocBusy = false;
+        const submit = document.getElementById('issue-doc-submit');
+        if (submit) submit.disabled = false;
+    }
+}
 
 function bindAdminCertificateContext(authId) {
     adminCertificateAuthId = String(authId || '');
     _supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== adminCertificateAuthId)) {
+            invalidateAdminCertificatePreparation();
             invalidateMemberRosterRead();
             adminCertificateAuthId = '';
             invalidateMemberInformationList(true);
@@ -8736,7 +8752,9 @@ function bindAdminCertificateContext(authId) {
     // A parked workspace retains editor input, not an open personal certificate.
     const frame = window.frameElement;
     if (frame) {
-        const observer = new MutationObserver(() => {
+        const observer = new MutationObserver(records => {
+            // A hide/return in one turn must still cancel the original preparation.
+            if (frame.hidden || records.some(record => record.oldValue === null)) invalidateAdminCertificatePreparation();
             invalidateMemberRosterRead();
             if (frame.hidden) {
                 invalidateDonationListRead();
@@ -8771,21 +8789,32 @@ function bindAdminCertificateContext(authId) {
                 }
             }
         });
-        observer.observe(frame, { attributes: true, attributeFilter: ['hidden'] });
+        observer.observe(frame, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
         window.addEventListener('pagehide', () => {invalidateMemberRosterRead();observer.disconnect();memberFundListResume=null;memberFundRefreshSequence++;}, { once: true });
     }
-    window.addEventListener('pagehide', invalidateMemberRosterRead);
-    document.addEventListener('visibilitychange', () => { if (document.hidden) invalidateMemberRosterRead(); });
+    window.addEventListener('pagehide', () => { invalidateAdminCertificatePreparation(); invalidateMemberRosterRead(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { invalidateAdminCertificatePreparation(); invalidateMemberRosterRead(); } });
 }
 
-async function hideIssueDocForPreview() {
+async function hideIssueDocForPreview(run, isCurrent) {
     const modalEl = document.getElementById('issueDocModal');
     if (!modalEl?.classList.contains('show')) return;
     const modal = bootstrap.Modal.getInstance(modalEl);
     if (!modal) return;
     await new Promise(resolve => {
-        modalEl.addEventListener('hidden.bs.modal', resolve, { once: true });
-        const hide = () => { moveFocusOutsideModal(modalEl); modal.hide(); };
+        const finish = () => {
+            modalEl.removeEventListener('hidden.bs.modal', finish);
+            modalEl.removeEventListener('shown.bs.modal', hide);
+            if (run.cancelPreparation === finish) run.cancelPreparation = null;
+            resolve();
+        };
+        const hide = () => {
+            if (!isCurrent() || adminIssueDocRun !== run) return finish();
+            moveFocusOutsideModal(modalEl);
+            modal.hide();
+        };
+        run.cancelPreparation = finish;
+        modalEl.addEventListener('hidden.bs.modal', finish, { once: true });
         if (modalEl.dataset.adminMemberModalOpening === '1') modalEl.addEventListener('shown.bs.modal', hide, { once: true });
         else hide();
     });
@@ -8814,7 +8843,9 @@ async function submitIssueDoc() {
     const coopId = String(g_adminMemberRuntime?.coop_id || '').trim();
     const authId = adminCertificateAuthId;
     const revision = g_member_detail_revision;
-    const current = () => String(g_current_member_id) === String(memberData.id)
+    const preparationEpoch = adminCertificatePreparationEpoch;
+    const current = () => adminCertificatePreparationEpoch === preparationEpoch
+        && String(g_current_member_id) === String(memberData.id)
         && g_current_member_row?.member_id === memberData.member_id
         && g_member_detail_revision === revision
         && String(g_adminMemberRuntime?.coop_id || '').trim() === coopId
@@ -8837,7 +8868,7 @@ async function submitIssueDoc() {
             throw Object.assign(new Error('로그인 계정, 조합 또는 발급 권한이 변경되었습니다. 다시 열어주세요.'), {code:'CERTIFICATE_CONTEXT_CHANGED'});
         }
     };
-    if (adminIssueDocBusy && adminIssueDocRun?.phase === 'preparation' && !adminIssueDocRun.preview?.isCurrent()) {
+    if (adminIssueDocBusy && adminIssueDocRun?.phase === 'preparation' && adminIssueDocRun.preview && !adminIssueDocRun.preview.isCurrent()) {
         const previous=adminIssueDocRun;previous.preview?.close();
         if(adminIssueDocRun===previous){adminIssueDocRun=null;adminIssueDocBusy=false;}
     }
@@ -8860,7 +8891,7 @@ async function submitIssueDoc() {
     try {
         if (docType !== 'donation') {
             if (!window.ContributionCertPreview) throw new Error('증명서 미리보기를 준비하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
-            await hideIssueDocForPreview();
+            await hideIssueDocForPreview(run, current);
             if (!current() || adminIssueDocRun!==run) return;
             preview = window.ContributionCertPreview.start({ isCurrent: current, authorize, onClose:()=>{
                 if(run.phase==='preparation' && adminIssueDocRun===run){
