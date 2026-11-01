@@ -1,4 +1,4 @@
-/* v1.0.3 — Parallel read-only preparation; issuance/context checks remain mandatory. */
+/* v1.0.4 — Avoid duplicate preparation reads; canonical issuer rechecks locked context. */
 (function (root) {
   'use strict';
   let busy = false;
@@ -71,17 +71,18 @@
     if(busy || !client || !memberId || !coopId || !isCurrent?.())return;
     busy=true;let preview;
     try {
-      const identity=await client.auth.getUser();
-      if(identity.error || !identity.data?.user)throw new Error('MEMBERSHIP_ACCESS_DENIED');
-      if(!isCurrent())return;
-      const actor=identity.data.user.id;
+      let actor='';
+      const requireIdentity=who=>{
+        if(who.error||!who.data?.user?.id||(actor&&who.data.user.id!==actor)||!isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
+        actor=who.data.user.id;
+      };
       const check=async()=>{
         if(!isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
         await authorize?.();
         const [who,response]=await Promise.all([
           client.auth.getUser(),read(client,'get_member_confirmation_context',{p_member_id:memberId})
         ]);
-        if(who.error||who.data?.user?.id!==actor||!isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
+        requireIdentity(who);
         if(response.error)throw response.error;
         if(response.data?.coop_id!==coopId||!isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
         return response.data;
@@ -106,7 +107,12 @@
         downloadCertStorageAssetDataUrl(client,'attachments',context.snapshot.seal_path)
       ]);
       if(!preview.isCurrent())return;
-      await check();if(!preview.isCurrent())return;
+      // The canonical issuer rereads and locks this context, checks the expected
+      // revision and current target permission. Keep fresh actor/ERP authorization
+      // here, without fetching the same context immediately before that writer.
+      await authorize?.();
+      requireIdentity(await client.auth.getUser());
+      if(!preview.isCurrent())return;
       pending.set(key,request);
       let result;
       let timer;

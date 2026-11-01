@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.242
-Change: 2026-11-01 - Show only missing refund accounts and align funding cards on desktop.
+Version: v1.0.243
+Change: 2026-11-01 - Reduce duplicate certificate preparation reads and cache the unchanged local font.
 -->
 <html lang="ko">
 <head>
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Show only missing refund accounts and align funding cards o
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.1" integrity="sha384-WcPwZeSpbtFs8ONHUNTfsWGKvwdVHqaRqOw66iLtErZ27RowhxtU+gmoEa+p2a21" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.242 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.243 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -59,9 +59,9 @@ allowKakaoApp: true
 <script src="/shared/image_display.js?v=20261012-2"></script>
 <script src="/shared/participation_image_display.js?v=20261012-2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
-<script src="cert_generator.js?v=20261018-organization-1"></script>
+<script src="cert_generator.js?v=20261101-speed-1"></script>
 <script src="shared/contribution_cert_preview.js?v=20261101-1"></script>
-<script src="shared/member_confirmation.js?v=20261101-1"></script>
+<script src="shared/member_confirmation.js?v=20261101-speed-1"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" integrity="sha384-xgNdoEQu0JeBEAN3/f7mrS+EPOsrmARCvhS7PEpk7QI2wvo4YOF3xY3EjQGKHAY9" crossorigin="anonymous"></script>
 <script src="badges.js?v=20260828-1"></script>
@@ -9176,15 +9176,19 @@ const member = { ...curMem };
 const authId = curAuth.id;
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
 const sameContext = () => curAuth?.id === authId && curMem?.id === member.id && currentMemberCoopId === coopId;
+const requireIdentity = identity => {
+if(identity.error || identity.data?.user?.id !== authId || !sameContext()) {
+if(preview?.isCurrent()) window.ContributionCertPreview.clear();
+throw new Error('로그인 정보가 변경되었습니다. 다시 로그인해 주세요.');
+}
+};
 const authorize = async () => {
 const [identity,access] = await Promise.all([
 _supabase.auth.getUser(),_supabase.rpc('can_issue_contribution_certificate',{p_member_id:member.member_id})
 ]);
-if(identity.error || identity.data?.user?.id !== authId || !sameContext()) {
-window.ContributionCertPreview.clear();throw new Error('로그인 정보가 변경되었습니다. 다시 로그인해 주세요.');
-}
+requireIdentity(identity);
 if(access.error) throw new Error('증명서 발급 권한을 확인하지 못했습니다. 다시 시도해주세요.');
-if(access.data !== true) { window.ContributionCertPreview.clear();throw new Error('본인 또는 등록된 단체 관리자의 발급 권한이 필요합니다.'); }
+if(access.data !== true) { if(preview?.isCurrent()) window.ContributionCertPreview.clear();throw new Error('본인 또는 등록된 단체 관리자의 발급 권한이 필요합니다.'); }
 };
 preview = window.ContributionCertPreview.start({ isCurrent: sameContext, authorize });
 await authorize();
@@ -9206,9 +9210,10 @@ const [companyProfile] = await Promise.all([
 prepareContributionCertCompanyProfile(_supabase, { coopId }),
 typeof getCertPretendardFontBase64 === 'function' ? getCertPretendardFontBase64() : Promise.resolve()
 ]);
-await authorize();
+requireIdentity(await _supabase.auth.getUser());
 if (!preview.isCurrent()) return;
 
+// 원래 서버 writer가 현재 대상/권한을 잠금 전후 재검사한다.
 // 증서 번호는 출력에 필요한 조합 정보와 직인을 확인한 뒤에만 발급한다.
 const { data: cert, error } = await _supabase.rpc('issue_contribution_certificate', { 
 p_member_id: member.member_id,

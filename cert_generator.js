@@ -1,6 +1,6 @@
 /*
-Version: v1.0.19
-Change: Use the registered corporate number or business/organization number for group contribution certificates.
+Version: v1.0.20
+Change: Serve the unchanged certificate font from a content-pinned same-origin asset.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -54,7 +54,7 @@ if (typeof window !== 'undefined') {
   window.showAlert = showAlert;
 }
 
-const CERT_FONT_URL = 'https://raw.githubusercontent.com/orioncactus/pretendard/master/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf';
+const CERT_FONT_URL = '/assets/certificate-fonts/Pretendard-SemiBold.5e1c548732af.ttf';
 let certPretendardFontBase64Promise = null;
 
 function trimCertCompanyValue(value) {
