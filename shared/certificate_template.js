@@ -1,4 +1,4 @@
-/* v1.0.0 — One certificate drawing template for SVG preview and vector PDF. */
+/* v1.0.1 — Shared certificate geometry; isolate tracking without stretching glyphs. */
 // Widths: unchanged Pretendard SemiBold (2048 units/em), SHA256
 // 5e1c548732af70873103066c16e1369b9a8a871f0b38c321a1d5bc73e43cea2d.
 // Compact public glyph advances avoid fetching/parsing the 2.67MB PDF font for preview.
@@ -82,8 +82,8 @@ const splitParagraph=function(t,e,r){r||(r={});var n,i,a,o,s,c,u,l=[],h=[l],f=r.
       text(text,x,y,options={}){
         for(const[line,i]of (Array.isArray(text)?text:[String(text)]).map((t,i)=>[String(t),i])){
           const el=add('text',{x,y:y+i*this.fontSize*1.15/SCALE,'text-anchor':options.align==='center'?'middle':options.align==='right'?'end':'start','xml:space':'preserve'});
-          el.textContent=line;css(el,{'font-family':'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif','font-size':this.fontSize/SCALE+'px','font-weight':600,'font-kerning':'none','font-feature-settings':'"kern" 0, "liga" 0','white-space':'pre',fill:state.text,stroke:'none'});
-          const width=this.getTextWidth(line);if(width>0){el.setAttribute('textLength',width);el.setAttribute('lengthAdjust','spacingAndGlyphs');}
+          el.textContent=line;css(el,{'font-family':'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif','font-size':this.fontSize/SCALE+'px','font-weight':600,'font-style':'normal','font-stretch':'normal','font-variant':'normal','font-kerning':'none','font-feature-settings':'"kern" 0, "liga" 0','letter-spacing':'0px','word-spacing':'0px','text-transform':'none','white-space':'pre',fill:state.text,stroke:'none'});
+          const width=this.getTextWidth(line);if(width>0){el.setAttribute('textLength',width);el.setAttribute('lengthAdjust','spacing');}
         }
       },
       setLineWidth(n){state.lineWidth=n;},setFillColor(...args){state.fill=color(args);},setDrawColor(...args){state.stroke=color(args);},setTextColor(...args){state.text=color(args);},
