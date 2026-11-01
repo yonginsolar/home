@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.261
+Version: v1.0.262
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.3" integrity="sha384-//kW6Kw570ydE6HQ66SJ7P9c54jcTxp7knNWDYBtWUpCcLHhZ3t/AhMJrErCS/mP" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.261 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.262 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -11551,9 +11551,18 @@ const onFocus = event => {
 if (!belongs(event.target) && !['BODY', 'HTML'].includes(event.target?.tagName)) displaced = true;
 };
 const onPointer = event => { if (!belongs(event.target)) displaced = true; };
+const onScrollIntent = event => { if (!dialog?.contains(event.target)) displaced = true; };
+const onScrollKey = event => {
+if (!dialog?.contains(event.target) && ['PageUp','PageDown','Home','End','ArrowUp','ArrowDown',' '].includes(event.key)) displaced = true;
+};
+const onVisibility = event => { if (event.target.hidden) displaced = true; };
 documents.forEach(doc => {
 doc.addEventListener('focusin', onFocus, true);
 doc.addEventListener('pointerdown', onPointer, true);
+doc.addEventListener('wheel', onScrollIntent, {capture:true,passive:true});
+doc.addEventListener('touchmove', onScrollIntent, {capture:true,passive:true});
+doc.addEventListener('keydown', onScrollKey, true);
+doc.addEventListener('visibilitychange', onVisibility, true);
 });
 return {
 request, trigger, hostDocument, menuRevision: portalApplicationRequest,
@@ -11561,6 +11570,10 @@ appId: options.appId, decision: options.decision, untouched: () => !displaced,
 release: () => documents.forEach(doc => {
 doc.removeEventListener('focusin', onFocus, true);
 doc.removeEventListener('pointerdown', onPointer, true);
+doc.removeEventListener('wheel', onScrollIntent, true);
+doc.removeEventListener('touchmove', onScrollIntent, true);
+doc.removeEventListener('keydown', onScrollKey, true);
+doc.removeEventListener('visibilitychange', onVisibility, true);
 })
 };
 }
@@ -11589,18 +11602,25 @@ const hostActive = focus.hostDocument.activeElement;
 if (focus.hostDocument !== document && hostActive !== window.frameElement && !['BODY', 'HTML'].includes(hostActive?.tagName)) return;
 if (focus.hostDocument.querySelector('dialog[open], .modal.show')) return;
 const panel = document.getElementById('connectRequestAlert');
-let target;
+let target, revealZeroTarget = false;
 if (current.phase === 'failed') target = panel?.querySelector('.connect-request-retry');
 else if (current.ids.size) {
 const index = [...current.ids].indexOf(Number(focus.appId));
 const row = panel?.querySelectorAll('.connect-request-row')[index >= 0 ? index : 0];
 target = row?.querySelector(`[data-connect-answer="${index >= 0 && focus.decision === 'approve' ? 'approve' : 'reject'}"]`);
 } else {
+revealZeroTarget = true;
 const edit = document.getElementById('btnEditProfile');
 target = edit && !edit.disabled && !edit.hidden && edit.getClientRects().length
 ? edit : document.getElementById('btnToggleProfileDetails');
+if (!target?.isConnected || target.disabled || target.hidden || !target.getClientRects().length) {
+target = origin.container.querySelector('.portal-purpose-nav [role="tab"][aria-selected="true"]');
 }
-if (target?.isConnected && !target.disabled && !target.hidden && target.getClientRects().length) target.focus({ preventScroll: true });
+}
+if (target?.isConnected && !target.disabled && !target.hidden && target.getClientRects().length) {
+target.focus({ preventScroll: true });
+if (revealZeroTarget) target.scrollIntoView?.({block:'center',inline:'nearest',behavior:'instant'});
+}
 } finally { focus.release(); }
 }
 
