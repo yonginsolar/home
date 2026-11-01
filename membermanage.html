@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.251
+Version: v1.0.252
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.1" integrity="sha384-WcPwZeSpbtFs8ONHUNTfsWGKvwdVHqaRqOw66iLtErZ27RowhxtU+gmoEa+p2a21" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.251 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.252 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -3223,6 +3223,8 @@ return '';
 }
 function acceptPortalPartnerFile(input) {
 if (!currentPortalPartnerState()) return;
+portalPartnerState.fileChoiceRevision = (portalPartnerState.fileChoiceRevision || 0) + 1;
+portalPartnerState.feedbackRevision = (portalPartnerState.feedbackRevision || 0) + 1;
 const file = input.files?.[0] || null, error = getPortalPartnerFileError(file);
 if (error) {
 portalPartnerState.fileError = error + (portalPartnerState.file ? ' 이전에 선택한 사진은 유지했어요.' : ' 기존 작성 내용은 유지했어요.');
@@ -3271,7 +3273,8 @@ preview.querySelector('img').src = src || '';preview.classList.toggle('hidden',!
 function capturePortalPartnerRequest() {
 if (!currentPortalPartnerState() || !canUsePortalPartner() || !portalPartnerState.loaded || portalPartnerState.pending || portalPartnerWritePending) return null;
 return {state:portalPartnerState,revision:++portalPartnerRequestRevision,snapshot:portalPartnerSnapshot(),
-    memberId:portalPartnerState.memberId,member:portalPartnerState.member,coop:String(currentMemberCoopId)};
+    memberId:portalPartnerState.memberId,member:portalPartnerState.member,coop:String(currentMemberCoopId),
+    feedbackRevision:portalPartnerState.feedbackRevision || 0,fileChoiceRevision:portalPartnerState.fileChoiceRevision || 0};
 }
 function currentPortalPartnerRequest(request) {
 return !!request && currentPortalPartnerState(request.state) && canUsePortalPartner()
@@ -3279,6 +3282,7 @@ return !!request && currentPortalPartnerState(request.state) && canUsePortalPart
 }
 document.addEventListener('input',event => {
 if (!currentPortalPartnerState() || !['ptName','ptDesc','ptLink'].includes(event.target?.id)) return;
+portalPartnerState.feedbackRevision = (portalPartnerState.feedbackRevision || 0) + 1;
 retainPortalPartnerDraft();renderPortalPartnerState(portalPartnerState);
 });
 document.getElementById('ptLogoFile').addEventListener('change',event => {
@@ -12202,6 +12206,8 @@ if (currentPortalPartnerState(request.state)) {
 const state = request.state,current = portalPartnerSnapshot();
 const submitted = {values:[['ptName',name],['ptDesc',desc],['ptLink',link],['ptLogoUrl',logoUrl]],file:null};
 state.baseline = submitted;state.loaded = true;state.status = '공개 승인 대기 중';
+// Clear only the warning that preceded this request, not a newer photo choice.
+if ((state.fileChoiceRevision || 0) === request.fileChoiceRevision) state.fileError = '';
 if(samePortalPartnerSnapshot(current,request.snapshot)) {
 state.current = submitted;state.file = null;applyPortalPartnerSnapshot(submitted);
 }
@@ -12216,7 +12222,11 @@ CoopSafeLog.error("[membermanage] operation failed", e);
 if(attempted) logPartnerRequestClientFailure(request.memberId, failureStage, e).catch((logError) => {
 CoopSafeLog.warn("[partner-request] client failure log skipped:", logError?.message || logError);
 });
-if(currentPortalPartnerState(request.state)) showModal('처리 중 오류가 발생했습니다.\n' + getPartnerApplicationErrorMessage(e));
+// A superseded photo preparation must not interrupt the member's newer input.
+const currentPhotoFeedback = currentPortalPartnerRequest(request)
+    && (request.state.feedbackRevision || 0) === request.feedbackRevision;
+if(currentPortalPartnerState(request.state) && (failureStage !== 'logo_upload' || currentPhotoFeedback))
+    showModal('처리 중 오류가 발생했습니다.\n' + getPartnerApplicationErrorMessage(e));
 } finally {
 portalPartnerWritePending = false;
 if(currentPortalPartnerState(request.state)) { showLoading(false);retainPortalPartnerDraft();renderPortalPartnerState(request.state); }
