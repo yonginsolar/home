@@ -1593,8 +1593,14 @@ function buildMemberExportWorksheet(exportType, rows, options = {}) {
     const safeRows = Array.isArray(rows) ? rows : [];
     if (exportType !== 'city-report') {
         const ws = XLSX.utils.json_to_sheet(safeRows);
-        const wscols = Object.keys(safeRows[0] || {}).map(() => ({ wch: 16 }));
+        const headers = Object.keys(safeRows[0] || {});
+        const wscols = headers.map(() => ({ wch: 16 }));
         ws['!cols'] = wscols;
+        const ratioColumn = headers.indexOf('비율(%)');
+        if (ratioColumn >= 0) safeRows.forEach((_, index) => {
+            const cell = ws[XLSX.utils.encode_cell({ r: index + 1, c: ratioColumn })];
+            if (cell?.t === 'n') cell.z = '0.00';
+        });
         return ws;
     }
 
@@ -1619,6 +1625,10 @@ function buildMemberExportWorksheet(exportType, rows, options = {}) {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
+    safeRows.forEach((_, index) => {
+        const cell = ws[XLSX.utils.encode_cell({ r: index + 4, c: 5 })];
+        if (cell?.t === 'n') cell.z = '0.00';
+    });
     ws['!cols'] = [
         { wch: 8 },
         { wch: 18 },
@@ -1816,10 +1826,39 @@ function buildMemberExportRows(records, options = {}) {
     const totalCapital = normalizedRecords.reduce((sum, record) => sum + Number(record.capitalAmount || 0), 0);
     const overLimitMembers = [];
 
-    const rows = normalizedRecords.map((record) => {
+    // Allocate hundredths of a percent by largest remainder, not independent rounding.
+    // Decimal integer weights avoid floating-point drift; equal remainders use stable IDs.
+    const decimalWeights = normalizedRecords.map(record => {
+        const amount = record.capitalAmount;
+        if (!Number.isFinite(amount)) throw new Error('출자금액을 확인한 뒤 다시 다운로드해 주세요.');
+        const [coefficient, exponent = '0'] = String(amount).toLowerCase().split('e');
+        const fractionLength = (coefficient.split('.')[1] || '').length;
+        return { units: BigInt(coefficient.replace('.', '')), scale: fractionLength - Number(exponent) };
+    });
+    const commonScale = decimalWeights.reduce((scale, weight) => Math.max(scale, weight.scale), 0);
+    const weights = decimalWeights.map(weight => weight.units * (10n ** BigInt(commonScale - weight.scale)));
+    const exactTotal = weights.reduce((sum, amount) => sum + amount, 0n);
+    const ratioUnits = normalizedRecords.map(() => 0);
+    if (exactTotal > 0n) {
+        const remainders = weights.map((amount, index) => {
+            const numerator = amount * 10000n;
+            const remainder = ((numerator % exactTotal) + exactTotal) % exactTotal;
+            ratioUnits[index] = Number((numerator - remainder) / exactTotal);
+            if (!Number.isSafeInteger(ratioUnits[index])) throw new Error('출자금액을 확인한 뒤 다시 다운로드해 주세요.');
+            const record = normalizedRecords[index];
+            return { index, remainder, key: String(record.id || record.member_id || '') };
+        });
+        const remaining = 10000 - ratioUnits.reduce((sum, units) => sum + units, 0);
+        remainders.sort((a, b) => a.remainder !== b.remainder
+            ? (a.remainder > b.remainder ? -1 : 1)
+            : (a.key < b.key ? -1 : a.key > b.key ? 1 : a.index - b.index));
+        for (let index = 0; index < remaining; index++) ratioUnits[remainders[index].index]++;
+    }
+
+    const rows = normalizedRecords.map((record, index) => {
         const ratio = totalCapital > 0 ? (Number(record.capitalAmount || 0) / totalCapital) * 100 : 0;
-        const normalizedRatio = formatMemberExportRatio(ratio);
-        const overLimit = normalizedRatio > 30;
+        const normalizedRatio = ratioUnits[index] / 100;
+        const overLimit = formatMemberExportRatio(ratio) > 30;
         if (overLimit) {
             overLimitMembers.push({ name: record.name || '-', ratio: normalizedRatio });
         }
