@@ -1,4 +1,4 @@
-/* v1.1.0 — Authorized HTML preview; original PDF generated only on output. */
+/* v1.2.0 — Authorized canonical SVG preview; original vector PDF only on output. */
 (function (root) {
   'use strict';
   let busy = false;
@@ -21,43 +21,7 @@
     const doc = new root.jspdf.jsPDF('p', 'mm', 'a4');
     const font = await getCertPretendardFontBase64();
     doc.addFileToVFS('Pretendard.ttf', font); doc.addFont('Pretendard.ttf', 'Pretendard', 'normal');doc.setFont('Pretendard');
-    doc.setLineWidth(.65);doc.rect(12,12,186,273);doc.setLineWidth(.2);doc.rect(14,14,182,269);
-    doc.setFontSize(11);doc.text('발급번호  ' + record.cert_number,25,31);
-    doc.setFontSize(28);doc.text('조합원 확인서',105,63,{align:'center'});
-    doc.setLineWidth(.35);doc.line(71,71,139,71);
-    let y=92;
-    const row=(label,value)=>{
-      doc.setFontSize(13);const lines=doc.splitTextToSize(String(value||''),114);
-      const h=Math.max(15,lines.length*6+7);
-      doc.setFillColor(247);doc.rect(25,y,39,h,'F');doc.setLineWidth(.25);
-      doc.rect(25,y,160,h);doc.line(64,y,64,y+h);
-      doc.text(label,29,y+9);doc.text(lines,69,y+9);y+=h;
-    };
-    row(['단체','organization'].includes(s.member_type)?'단체명':'성명',s.member_name);
-    row('조합원 번호',s.member_id);row('가입일',formatKoreanDateLabel(s.join_date));
-    y=Math.max(162,y+23);doc.setFontSize(14);
-    const subject=['단체','organization'].includes(s.member_type)?'위 단체는':'위 사람은';
-    const statement=doc.splitTextToSize(`${subject} 발급일 현재 ${s.company_name}의 조합원임을 확인합니다.`,150);
-    statement.forEach((line,index)=>doc.text(line,105,y+index*8,{align:'center'}));
-    const statementEnd=y+(statement.length-1)*8;
-
-    // Keep one current date, a balanced signature, and a quiet employment-certificate-style footer.
-    doc.setFontSize(11);
-    const footer=['사업자등록번호  '+s.business_number,'주소  '+s.address,'담당 연락처  '+s.contact]
-      .flatMap(text=>doc.splitTextToSize(text,158));
-    const footerStart=274-(footer.length-1)*6;
-    const companyLayout=buildCertWrappedTextLayout(doc,s.company_name,{maxWidth:150,initialFontSize:17,minFontSize:13,maxLines:3});
-    const chairmanLayout=buildCertWrappedTextLayout(doc,'이사장  '+s.chairman_name,{maxWidth:139,initialFontSize:18,minFontSize:14,maxLines:2});
-    const signatureBottom=Math.min(241,footerStart-17);
-    const signatureStart=signatureBottom-25-(companyLayout.lines.length-1)*7-(chairmanLayout.lines.length-1)*9;
-    const dateY=signatureStart-18;
-    if(dateY<statementEnd+18 || footerStart<249)throw new Error('PDF_CONTENT_TOO_LONG');
-    doc.setFontSize(13);doc.text(formatKoreanDateLabel(s.issue_date),105,dateY,{align:'center'});
-    const signature=drawCertSignatureBlock(doc,{companyName:s.company_name,chairmanName:s.chairman_name,sealDataUrl},105,signatureStart,{companyFontSize:17,companyMinFontSize:13,chairmanFontSize:18,chairmanMinFontSize:14,gapBeforeChairman:17,sealWidth:22,sealLift:14,maxWidth:150});
-    doc.addImage(sealDataUrl,'PNG',signature.sealX,signature.sealY,22,22);
-    doc.setDrawColor(180);doc.setLineWidth(.2);doc.line(25,footerStart-8,185,footerStart-8);
-    doc.setFontSize(11);doc.setTextColor(85);
-    footer.forEach((line,index)=>doc.text(line,105,footerStart+index*6,{align:'center'}));
+    root.CoopCertificateTemplate.paintMembership(doc,record,sealDataUrl);
     const name=String(s.member_name).replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_');
     return {doc,fileName:name+'_조합원확인서.pdf'};
   }
@@ -123,9 +87,8 @@
       context=await check();
       if(context.revision!==issued.revision)throw new Error('MEMBERSHIP_CONTEXT_CHANGED');
       if(context.snapshot.seal_path!==issued.snapshot.seal_path)throw new Error('MEMBERSHIP_CONTEXT_CHANGED');
-      const record={...issued,snapshot:{...issued.snapshot}},s=record.snapshot;
-      const group=['단체','organization'].includes(s.member_type);
-      const element=root.ContributionCertPreview.documentPreview({kind:'membership',number:record.cert_number,rows:[[group?'단체명':'성명',s.member_name],['조합원 번호',s.member_id],['가입일',formatKoreanDateLabel(s.join_date)]],companyName:s.company_name,chairmanName:s.chairman_name,sealDataUrl:seal,date:formatKoreanDateLabel(s.issue_date),footer:['사업자등록번호  '+s.business_number,'주소  '+s.address,'담당 연락처  '+s.contact]});
+      const record={...issued,snapshot:{...issued.snapshot}};
+      const element=root.ContributionCertPreview.documentPreview({kind:'membership',record,sealDataUrl:seal});
       await preview.presentHtml({element,createPdf:async()=>{
         if(!preview.isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
         if(prepare)await prepare();else await ensureCertPdfReady();

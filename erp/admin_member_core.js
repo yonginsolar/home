@@ -976,11 +976,11 @@ async function ensureCertGeneratorReady() {
             const routeOrigins = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : null;
             const publicOrigin = String(routeOrigins?.publicOrigin || '').trim().replace(/\/+$/, '');
             const remoteFallback = /^https?:\/\//i.test(publicOrigin)
-                ? `${publicOrigin}/cert_generator.js?v=20261101-html-1`
-                : 'https://www.yonginsolar.kr/cert_generator.js?v=20261101-html-1';
+                ? `${publicOrigin}/cert_generator.js?v=20261101-unified-1`
+                : 'https://www.yonginsolar.kr/cert_generator.js?v=20261101-unified-1';
             const candidates = [
-                '/cert_generator.js?v=20261101-html-1',
-                '../cert_generator.js?v=20261101-html-1',
+                '/cert_generator.js?v=20261101-unified-1',
+                '../cert_generator.js?v=20261101-unified-1',
                 remoteFallback
             ];
             for (const src of candidates) {

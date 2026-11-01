@@ -1,6 +1,6 @@
 /*
-Version: v1.1.0
-Change: HTML certificate preview with lazy PDF dependency preparation.
+Version: v1.2.0
+Change: Share exact certificate drawing geometry between SVG preview and vector PDF.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -73,13 +73,7 @@ function ensureCertPdfReady() {
 
 function buildContributionCertificatePreview(member,totalAmount,number,profile,issueDate) {
     ensureCertCompanyPrintProfile(profile,'출자증서 발급');
-    const group=member.member_type==='단체';
-    let label='생 년 월 일',value=member.rrn_display||'';
-    if(group){const identity=getContributionCertificateOrganizationIdentity(member);label=identity.label;value=identity.value;}
-    else if(value.length>=6){const gender=value.includes('-')?value.split('-')[1].charAt(0):'1';value=`${['3','4'].includes(gender)?'20':'19'}${value.substring(0,2)}년 ${value.substring(2,4)}월 ${value.substring(4,6)}일`;}
-    const unit=Number(profile.shareUnitAmount),shares=totalAmount/unit;
-    const count=Number.isInteger(shares)?shares.toLocaleString('ko-KR'):shares.toLocaleString('ko-KR',{maximumFractionDigits:3});
-    return window.ContributionCertPreview.documentPreview({kind:'contribution',number,companyName:profile.companyName,chairmanName:profile.chairmanName,sealDataUrl:profile.sealDataUrl,logoDataUrl:profile.logoDataUrl,logoRatio:profile.logoRatio,date:formatKoreanDateLabel(issueDate),money:`일금${numberToKorean(totalAmount)}원정 (₩${totalAmount.toLocaleString()})`,rows:[['조합원 번호',member.member_id],[group?'단   체   명':'성        명',member.name],[label,value],['가 입 연 월 일',member.join_date||'-'],['출 자 좌 수',`${count} 좌 (1좌 ${unit.toLocaleString('ko-KR')}원)`],['출 자 금 액',`${totalAmount.toLocaleString()} 원`]]});
+    return window.CoopCertificateTemplate.previewContribution({memberData:member,totalAmount,certNumber:number,companyProfile:profile,issueDate});
 }
 
 function trimCertCompanyValue(value) {
@@ -371,8 +365,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             throw new Error("출자금이 확인되지 않습니다. 출자 내역을 다시 확인해주세요.");
         }
 
-        const organizationIdentity = memberData.member_type === '단체'
-            ? getContributionCertificateOrganizationIdentity(memberData) : null;
+        if (memberData.member_type === '단체') getContributionCertificateOrganizationIdentity(memberData);
 
 
         const { jsPDF } = window.jspdf;
@@ -389,8 +382,6 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         doc.setFont('Pretendard');
 
         const sealDataUrl = companyProfile.sealDataUrl || null;
-        const logoDataUrl = companyProfile.logoDataUrl || null;
-        const logoRatio = Number(companyProfile.logoRatio || 0);
         if (options?.requireSeal === true && !sealDataUrl) {
             throw new Error('출자증서 발급 전에 출자증서 설정에서 조합 직인을 등록해주세요.');
         }
@@ -400,148 +391,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         // 2. 디자인 그리기
         // -----------------------------------------------------------
 
-        // [워터마크] 로고 (중앙 배치, 비율 유지)
-        if (logoDataUrl && logoRatio > 0) {
-            doc.saveGraphicsState();
-            doc.setGState(new doc.GState({ opacity: 0.1 })); // 투명도 10% (아주 연하게)
-            
-            const logoW = 140; // 가로 140mm 고정
-            const logoH = logoW * logoRatio; // 세로 자동 계산
-            const logoY = (297 - logoH) / 2; // 종이 중앙 정렬
-            
-            doc.addImage(logoDataUrl, 'PNG', 35, logoY, logoW, logoH, '', 'CENTER');
-            doc.restoreGraphicsState();
-        }
-
-        // [테두리]
-        doc.setLineWidth(1.5);
-        doc.rect(10, 10, 190, 277); // 외곽
-        doc.setLineWidth(0.5);
-        doc.rect(12, 12, 186, 273); // 내곽
-
-        // [데이터 가공]
-        const dateStr = formatKoreanDateLabel(options.issueDate) || formatKoreanDateLabel(new Date());
-        
-        // [UPDATE] 개인/단체 구분에 따른 라벨 및 값 설정
-        let displayLabel = "생 년 월 일"; // 기본값 (개인)
-        let displayValue = "";          // 표시될 값
-
-        if (memberData.member_type === '단체') {
-            displayLabel = organizationIdentity.label;
-            displayValue = organizationIdentity.value;
-        } else {
-            // [CASE] 개인 (또는 기타): 기존 생년월일 로직 유지
-            displayLabel = "생 년 월 일";
-            let birthStr = memberData.rrn_display || '';
-            if (birthStr.length >= 6) {
-                const yy = birthStr.substring(0, 2);
-                const mm = birthStr.substring(2, 4);
-                const dd = birthStr.substring(4, 6);
-                const gender = birthStr.includes('-') ? birthStr.split('-')[1].charAt(0) : '1';
-                const prefix = (gender === '3' || gender === '4') ? '20' : '19';
-                birthStr = `${prefix}${yy}년 ${mm}월 ${dd}일`;
-            }
-            displayValue = birthStr;
-        }
-
-        const shareUnitAmount = Number(companyProfile.shareUnitAmount);
-        const shares = totalAmount / shareUnitAmount;
-        const shareCountText = Number.isInteger(shares)
-            ? shares.toLocaleString('ko-KR')
-            : shares.toLocaleString('ko-KR', { maximumFractionDigits: 3 });
-
-        // [타이틀]
-        doc.setFontSize(32);
-        doc.text("출 자 증 서", 105, 45, { align: "center" });
-
-        // [증서번호] 제 2026-0001 호
-        doc.setFontSize(12);
-        doc.text(`증서번호 : 제 ${certNumber} 호`, 20, 60);
-
-        // [메인 금액] 일금 일십만 원정
-        doc.setFontSize(20);
-        const moneyText = `일금${numberToKorean(totalAmount)}원정 (₩${totalAmount.toLocaleString()})`;
-        doc.text(moneyText, 105, 80, { align: "center" });
-        
-        // 금액 밑줄
-        doc.setLineWidth(0.5);
-        const textWidth = doc.getTextWidth(moneyText);
-        doc.line(105 - (textWidth/2) - 5, 85, 105 + (textWidth/2) + 5, 85);
-
-        // [표 그리기] (6줄)
-        const startY = 100;
-        const rowH = 14; 
-        
-        doc.rect(20, startY, 170, rowH * 6); // 전체 박스
-        
-        // 가로선 5개
-        for(let i=1; i<6; i++) doc.line(20, startY+(rowH*i), 190, startY+(rowH*i));
-        // 세로선
-        doc.line(75, startY, 75, startY+(rowH*6));
-
-        const drawRow = (idx, label, value) => {
-            const yPos = startY + (rowH * idx) + 9;
-            doc.setFontSize(12);
-            doc.text(label, 47.5, yPos, { align: "center" });
-            doc.text(String(value), 80, yPos);
-        };
-
-        // [UPDATE] 표 내용 채우기 (단체일 경우 성명->단체명, 생년월일->법인번호)
-        const nameLabel = memberData.member_type === '단체' ? "단   체   명" : "성        명";
-
-        drawRow(0, "조합원 번호", memberData.member_id);
-        drawRow(1, nameLabel, memberData.name);
-        drawRow(2, displayLabel, displayValue); // [UPDATE] 위에서 설정한 변수 사용
-        drawRow(3, "가 입 연 월 일", memberData.join_date || '-');
-        drawRow(4, "출 자 좌 수", `${shareCountText} 좌 (1좌 ${shareUnitAmount.toLocaleString('ko-KR')}원)`);
-        drawRow(5, "출 자 금 액", `${totalAmount.toLocaleString()} 원`);
-
-        // [하단 문구]
-        const msgY = startY + (rowH * 6) + 30; // 표 끝에서 30mm 띄움
-        doc.setFontSize(14);
-        const companyIntroText = `상기와 같이 출자하였으므로 ${companyProfile.companyName}`;
-        const introLayout = drawCenteredCertWrappedText(doc, companyIntroText, 105, msgY, {
-            maxWidth: 150,
-            initialFontSize: 14,
-            minFontSize: 11,
-            maxLines: 3,
-            lineHeight: 6.8
-        });
-        doc.setFontSize(14);
-        const charterLineY = introLayout.endY + 10;
-        doc.text("정관에 따라 이 증서를 드립니다.", 105, charterLineY, { align: "center" });
-
-        // [발급일]
-        doc.setFontSize(15);
-        const issueDateY = charterLineY + 20;
-        doc.text(dateStr, 105, issueDateY, { align: "center" });
-
-        // [이사장 서명]
-        const signatureLayout = drawCertSignatureBlock(doc, companyProfile, 105, issueDateY + 12, {
-            maxWidth: 150,
-            companyFontSize: 18,
-            companyMinFontSize: 13,
-            companyMaxLines: 3,
-            companyLineHeight: 7,
-            gapBeforeChairman: 8,
-            chairmanFontSize: 22,
-            chairmanMinFontSize: 15,
-            chairmanMaxLines: 2,
-            chairmanLineHeight: 9,
-            sealWidth: 24,
-            sealCenterOffset: 0,
-            sealLift: 14,
-            minSealX: 15,
-            maxSealRight: 195,
-            minSealY: 15,
-            maxSealBottom: 282
-        });
-
-        // [직인] 이사장 텍스트의 오른쪽에 배치
-        if (sealDataUrl) {
-            doc.addImage(sealDataUrl, 'PNG', signatureLayout.sealX, signatureLayout.sealY, 24, 24);
-        }
-
+        window.CoopCertificateTemplate.paintContribution(doc, {memberData,totalAmount,certNumber,companyProfile,issueDate:options.issueDate});
         const fileName = `${String(memberData.name || '조합원').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')}_출자증서.pdf`;
         if (options.output === 'preview') return { doc, fileName };
         // Existing administrator issuance keeps its original download flow.
