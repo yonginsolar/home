@@ -1,4 +1,4 @@
-/* Version: v1.2.0 — Canonical SVG preview; PDF generation only on explicit save/print. */
+/* Version: v1.3.0 — Cancellable bounded preparation; actual issuance locks stay with the caller. */
 (function () {
   'use strict';
   let active = null;
@@ -12,6 +12,8 @@
     const state = active;
     active = null;
     if (!state) return;
+    for (const cancel of [...state.reads]) cancel();
+    state.onClose?.();
     state.doc = null;
     state.createPdf = null;
     state.observer?.disconnect();
@@ -26,7 +28,7 @@
     if (state.focus?.isConnected) state.focus.focus({ preventScroll: true });
   }
 
-  function start({ isCurrent, authorize, title = '출자증명서' } = {}) {
+  function start({ isCurrent, authorize, onClose, title = '출자증명서' } = {}) {
     clear();
     const dialog = document.createElement('dialog');
     dialog.className = 'contribution-cert-preview';
@@ -43,14 +45,17 @@
       .contribution-cert-preview button:focus-visible{outline:3px solid #4285f4;outline-offset:2px}
       .contribution-cert-preview .cert-scroll{flex:1;min-height:0;overflow:auto;background:#e9edf1;padding:16px;text-align:center}
       .contribution-cert-preview .cert-status{color:#17212b;padding:40px 12px;white-space:pre-line}
+      .contribution-cert-preview .cert-retry{display:block;margin:0 auto 24px}
+      .contribution-cert-preview .cert-retry[hidden]{display:none}
       .contribution-cert-preview img{display:block;width:100%;max-width:794px;height:auto;margin:auto;background:#fff;box-shadow:0 2px 10px #0002;filter:none!important}
       .contribution-cert-preview .cert-html-fit{position:relative;width:100%;max-width:794px;margin:auto;text-align:left}
       .contribution-cert-preview .cert-paper{position:absolute;left:0;top:0;width:210mm;height:297mm;background:#fff;color:#111;transform-origin:top left;font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-weight:600;line-height:1.45;overflow:hidden;box-shadow:0 2px 10px #0002}
       .contribution-cert-preview .cert-paper *{box-sizing:border-box;color:#111!important;filter:none!important}
       @media(max-width:480px){.contribution-cert-preview .cert-toolbar{gap:6px;padding:10px}.contribution-cert-preview h2{font-size:16px;width:100%}.contribution-cert-preview .cert-scroll{padding:8px}.contribution-cert-preview button{flex:1}}
-    </style><div class="cert-toolbar"><h2 id="contribution-cert-preview-title">출자증명서</h2><button type="button" data-action="print" disabled>인쇄</button><button type="button" data-action="save" disabled>PDF 저장</button><button type="button" data-action="close">닫기</button></div><div class="cert-scroll"><div class="cert-status" role="status">증명서를 준비하고 있습니다.</div></div>`;
+    </style><div class="cert-toolbar"><h2 id="contribution-cert-preview-title">출자증명서</h2><button type="button" data-action="print" disabled>인쇄</button><button type="button" data-action="save" disabled>PDF 저장</button><button type="button" data-action="close">닫기</button></div><div class="cert-scroll"><div class="cert-status" role="status">증명서를 준비하고 있습니다.</div><button type="button" class="cert-retry" hidden>다시 확인</button></div>`;
     const state = { dialog, isCurrent, authorize, doc: null, frame: null, url: '', image: null,
-      focus: document.activeElement, previousOverflow: document.documentElement.style.overflow, busy: false };
+      focus: document.activeElement, previousOverflow: document.documentElement.style.overflow, busy: false,
+      onClose, reads: new Set() };
     active = state;
     dialog.querySelector('h2').textContent = title;
     document.body.appendChild(dialog);
@@ -58,11 +63,38 @@
     const valid = () => active === state && (!isCurrent || isCurrent());
     const buttons = [...dialog.querySelectorAll('[data-action="print"], [data-action="save"]')];
     const status = dialog.querySelector('.cert-status');
-    const fail = message => {
+    const retryButton = dialog.querySelector('.cert-retry');
+    const fail = (message, { retry } = {}) => {
       if (!valid()) return;
       status.hidden = false;
       status.textContent = message;
+      retryButton.hidden = typeof retry !== 'function';
+      retryButton.disabled = false;
+      retryButton.onclick = async () => {
+        if (!valid() || retryButton.disabled || typeof retry !== 'function') return;
+        retryButton.disabled = true;
+        try { await retry(); }
+        finally { if (valid()) retryButton.disabled = false; }
+      };
     };
+    // Only UI preparation reads use this deadline. Issuer/receipt promises must
+    // never be passed here: closing or timing out cannot unlock a real writer.
+    const read = request => new Promise((resolve, reject) => {
+      let done = false, timer;
+      const finish = (error, value) => {
+        if (done) return;
+        done = true;clearTimeout(timer);state.reads.delete(cancel);
+        if (error) reject(error);else resolve(value);
+      };
+      const cancel = () => finish(Object.assign(new Error('CERTIFICATE_PREPARATION_CANCELED'), {code:'CERTIFICATE_PREPARATION_CANCELED'}));
+      if (!valid()) return cancel();
+      state.reads.add(cancel);
+      timer = setTimeout(() => finish(Object.assign(new Error('CERTIFICATE_PREPARATION_TIMEOUT'), {code:'CERTIFICATE_PREPARATION_TIMEOUT'})), 15000);
+      Promise.resolve().then(() => {
+        if (!valid()) throw Object.assign(new Error('CERTIFICATE_PREPARATION_CANCELED'), {code:'CERTIFICATE_PREPARATION_CANCELED'});
+        return typeof request === 'function' ? request() : request;
+      }).then(value => valid() ? finish(null, value) : cancel(), error => finish(error));
+    });
     dialog.querySelector('[data-action="close"]').onclick = clear;
     dialog.addEventListener('cancel', event => { event.preventDefault(); clear(); });
     dialog.showModal();
@@ -137,6 +169,8 @@
     return {
       isCurrent: valid,
       fail,
+      read,
+      close: () => { if (active === state) clear(); },
       async presentHtml({ element, createPdf }) {
         if (!valid()) return;
         if (!(element instanceof HTMLElement) || typeof createPdf !== 'function') throw new Error('PREVIEW_NOT_READY');

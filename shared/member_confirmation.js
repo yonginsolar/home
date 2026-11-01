@@ -1,7 +1,8 @@
-/* v1.2.0 — Authorized canonical SVG preview; original vector PDF only on output. */
+/* v1.3.0 — Recoverable preparation, canonical issuer/unknown-result receipt unchanged. */
 (function (root) {
   'use strict';
   let busy = false;
+  let activeRun = null;
   const pending = new Map();
   const messages = {
     MEMBERSHIP_ACCESS_DENIED: '본인 또는 등록된 단체 관리자의 발급 권한이 필요합니다.',
@@ -32,8 +33,22 @@
     finally {clearTimeout(timer);}
   }
   async function open({client,memberId,coopId,isCurrent,authorize,prepare,notify}) {
-    if(busy || !client || !memberId || !coopId || !isCurrent?.())return;
-    busy=true;let preview;
+    if(!client || !memberId || !coopId || !isCurrent?.())return;
+    const retry=()=>open({client,memberId,coopId,isCurrent,authorize,prepare,notify});
+    if(busy && activeRun?.phase==='preparation' && !activeRun.preview?.isCurrent()) {
+      const previous=activeRun;previous.preview?.close();
+      if(activeRun===previous){activeRun=null;busy=false;}
+    }
+    if(busy){
+      if(activeRun && !activeRun.preview?.isCurrent() && !activeRun.waiting?.isCurrent() && root.ContributionCertPreview){
+        activeRun.waiting=root.ContributionCertPreview.start({title:'조합원 확인서',isCurrent});
+        activeRun.waitingRetry=retry;
+        activeRun.waiting.fail('발급 결과를 확인하고 있습니다.');
+      }
+      return;
+    }
+    const run={phase:'preparation',preview:null,waiting:null};
+    activeRun=run;busy=true;let preview;
     try {
       let actor='';
       const requireIdentity=who=>{
@@ -53,24 +68,28 @@
       };
       if(!root.ContributionCertPreview)throw new Error('PDF_NOT_READY');
       let issued;
-      preview=root.ContributionCertPreview.start({title:'조합원 확인서',isCurrent,authorize:async()=>{
+      preview=root.ContributionCertPreview.start({title:'조합원 확인서',isCurrent,onClose:()=>{
+        if(run.phase==='preparation' && activeRun===run){activeRun=null;busy=false;}
+      },authorize:async()=>{
         const latest=await check();
         if(issued && latest.revision!==issued.revision)throw new Error('MEMBERSHIP_CONTEXT_CHANGED');
       }});
-      let context=await check();
+      run.preview=preview;
+      let context=await preview.read(check);
       const key=actor+'|'+coopId+'|'+memberId;
       const existing=pending.get(key);
       const request=existing || {p_member_id:memberId,p_request_key:crypto.randomUUID(),p_expected_revision:context.revision};
       // The private seal is needed for HTML; font/jsPDF wait until explicit output.
-      const seal=await downloadCertStorageAssetDataUrl(client,'attachments',context.snapshot.seal_path);
+      const seal=await preview.read(()=>downloadCertStorageAssetDataUrl(client,'attachments',context.snapshot.seal_path));
       if(!preview.isCurrent())return;
       // The canonical issuer rereads and locks this context, checks the expected
       // revision and current target permission. Keep fresh actor/ERP authorization
       // here, without fetching the same context immediately before that writer.
-      await authorize?.();
-      requireIdentity(await client.auth.getUser());
+      await preview.read(()=>authorize?.());
+      requireIdentity(await preview.read(()=>client.auth.getUser()));
       if(!preview.isCurrent())return;
       pending.set(key,request);
+      run.phase='issuance';
       let result;
       let timer;
       try {result=await Promise.race([client.rpc('issue_member_confirmation_certificate',request),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('RESULT_UNKNOWN')),20000);})]);}
@@ -84,7 +103,8 @@
       if(!issued?.cert_number||issued.coop_id!==coopId)throw new Error('INVALID_RESPONSE');
       pending.delete(key);
       if(!preview.isCurrent())return;
-      context=await check();
+      run.phase='preparation';
+      context=await preview.read(check);
       if(context.revision!==issued.revision)throw new Error('MEMBERSHIP_CONTEXT_CHANGED');
       if(context.snapshot.seal_path!==issued.snapshot.seal_path)throw new Error('MEMBERSHIP_CONTEXT_CHANGED');
       const record={...issued,snapshot:{...issued.snapshot}};
@@ -95,8 +115,16 @@
         if(!preview.isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
         return generate(record,seal);
       }});
-    }catch(error){if(preview?.isCurrent())preview.fail(message(error));else if(!preview && isCurrent())notify?.(message(error));}
-    finally{busy=false;}
+    }catch(error){
+      if(preview?.isCurrent()) {
+        if(error?.code==='CERTIFICATE_PREPARATION_TIMEOUT')preview.fail('증명서 준비가 지연되고 있습니다. 다시 확인해 주세요.',{retry});
+        else preview.fail(message(error));
+      }else if(!preview && isCurrent())notify?.(message(error));
+    }
+    finally{
+      if(activeRun===run){activeRun=null;busy=false;}
+      run.waiting?.fail('발급 상태를 다시 확인해 주세요.',{retry:run.waitingRetry});
+    }
   }
   root.MemberConfirmation=Object.freeze({open,generate});
 })(window);

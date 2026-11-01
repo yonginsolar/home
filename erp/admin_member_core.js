@@ -8717,6 +8717,7 @@ function buildDonationReceiptNumber(memberRow) {
 }
 
 let adminIssueDocBusy = false;
+let adminIssueDocRun = null;
 let adminCertificateAuthId = '';
 
 function bindAdminCertificateContext(authId) {
@@ -8791,7 +8792,6 @@ async function hideIssueDocForPreview() {
 }
 
 async function submitIssueDoc() {
-    if (adminIssueDocBusy) return;
     const typeEl = document.getElementById('issue-doc-type');
     const modeEl = document.getElementById('issue-amount-mode');
     const dateEl = document.getElementById('issue-cutoff-date');
@@ -8837,6 +8837,20 @@ async function submitIssueDoc() {
             throw Object.assign(new Error('로그인 계정, 조합 또는 발급 권한이 변경되었습니다. 다시 열어주세요.'), {code:'CERTIFICATE_CONTEXT_CHANGED'});
         }
     };
+    if (adminIssueDocBusy && adminIssueDocRun?.phase === 'preparation' && !adminIssueDocRun.preview?.isCurrent()) {
+        const previous=adminIssueDocRun;previous.preview?.close();
+        if(adminIssueDocRun===previous){adminIssueDocRun=null;adminIssueDocBusy=false;}
+    }
+    if (adminIssueDocBusy) {
+        const run=adminIssueDocRun;
+        if(run?.phase==='issuance' && !run.preview?.isCurrent() && !run.waiting?.isCurrent()) {
+            run.waiting=window.ContributionCertPreview.start({isCurrent:current});
+            run.waiting.fail('발급 결과를 확인하고 있습니다.');
+        }
+        return;
+    }
+    const run={phase:docType==='donation'?'locked':'preparation',preview:null,waiting:null};
+    adminIssueDocRun=run;
     adminIssueDocBusy = true;
     const submitEl = document.getElementById('issue-doc-submit');
     if (submitEl) submitEl.disabled = true;
@@ -8847,9 +8861,15 @@ async function submitIssueDoc() {
         if (docType !== 'donation') {
             if (!window.ContributionCertPreview) throw new Error('증명서 미리보기를 준비하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
             await hideIssueDocForPreview();
-            if (!current()) return;
-            preview = window.ContributionCertPreview.start({ isCurrent: current, authorize });
-            await authorize();
+            if (!current() || adminIssueDocRun!==run) return;
+            preview = window.ContributionCertPreview.start({ isCurrent: current, authorize, onClose:()=>{
+                if(run.phase==='preparation' && adminIssueDocRun===run){
+                    adminIssueDocRun=null;adminIssueDocBusy=false;
+                    if(submitEl)submitEl.disabled=false;
+                }
+            } });
+            run.preview=preview;
+            await preview.read(authorize);
             if (!preview.isCurrent()) return;
         }
         if (docType === 'donation') await ensureCertGeneratorReady();
@@ -8857,7 +8877,7 @@ async function submitIssueDoc() {
         if (docType === 'donation' && typeof window.jspdf?.jsPDF !== 'function') {
             throw new Error('PDF 라이브러리(jsPDF) 로드에 실패했습니다. 네트워크/차단 설정을 확인해주세요.');
         }
-        const amount = await calcIssueAmountByCriteria(
+        const calculateAmount = () => calcIssueAmountByCriteria(
             docType,
             mode,
             cutoffDate,
@@ -8866,6 +8886,7 @@ async function submitIssueDoc() {
             periodFrom,
             periodTo
         );
+        const amount = preview ? await preview.read(calculateAmount) : await calculateAmount();
         if (preview && !preview.isCurrent()) return;
         if (!amount || amount <= 0) {
             throw new Error(docType === 'donation'
@@ -8873,7 +8894,7 @@ async function submitIssueDoc() {
                 : '기준 조건에 해당하는 출자금이 없어 발급할 수 없습니다.');
         }
 
-        const chairmanName = await fetchChairmanName();
+        const chairmanName = preview ? await preview.read(fetchChairmanName) : await fetchChairmanName();
         if (isAdminMemberSiteProfile() && (!chairmanName || chairmanName === '이사장')) {
             throw new Error('출자증서 발급 전에 출자증서 설정에서 이사장 성명을 등록해주세요.');
         }
@@ -8910,14 +8931,15 @@ async function submitIssueDoc() {
                 throw new Error('cert_generator.js 최신본이 로드되지 않았습니다. 배포/캐시를 확인해주세요.');
             }
 
-            const companyProfile = await prepareContributionCertCompanyProfile(_supabase, {
+            const companyProfile = await preview.read(()=>prepareContributionCertCompanyProfile(_supabase, {
                 coopId,
                 fallbackChairmanName: chairmanName
-            });
+            }));
             if (!preview.isCurrent()) return;
-            await authorize();
+            await preview.read(authorize);
             if (!preview.isCurrent()) return;
 
+            run.phase='issuance';
             const { data: cert, error } = await _supabase.rpc('issue_contribution_certificate', {
                 p_member_id: memberData.member_id,
                 p_amount: amount
@@ -8926,7 +8948,8 @@ async function submitIssueDoc() {
             if (!preview.isCurrent()) return;
             if (!cert?.cert_number) throw new Error('증명서 발급 번호를 확인하지 못했습니다. 다시 시도해 주세요.');
 
-            await authorize();
+            run.phase='preparation';
+            await preview.read(authorize);
             if (!preview.isCurrent()) return;
             const issueDate = mode === 'cutoff' ? cutoffDate : new Date();
             const element = buildContributionCertificatePreview(memberData, amount, cert.cert_number, companyProfile, issueDate);
@@ -8950,10 +8973,14 @@ async function submitIssueDoc() {
         }
         myAlert('문서 발급이 완료되었습니다.', 'success');
     } catch (e) {
+        if(e?.code==='CERTIFICATE_PREPARATION_CANCELED') return;
         showLoading(false);
         CoopSafeLog.error("[erp/admin_member] operation failed", e);
         if (preview) {
-            if (preview.isCurrent()) preview.fail('증명서 준비 실패: ' + (e?.message || '다시 시도해 주세요.'));
+            if (preview.isCurrent()) {
+                if(e?.code==='CERTIFICATE_PREPARATION_TIMEOUT')preview.fail('증명서 준비가 지연되고 있습니다. 다시 확인해 주세요.',{retry:submitIssueDoc});
+                else preview.fail('증명서 준비 실패: ' + (e?.message || '다시 시도해 주세요.'));
+            }
             else if (e?.code === 'CERTIFICATE_CONTEXT_CHANGED') myAlert(e.message, 'warning');
             return;
         }
@@ -8963,8 +8990,11 @@ async function submitIssueDoc() {
         if (issueModal) issueModal.hide();
         myAlert('문서 발급 실패: ' + (e?.message || e), 'error');
     } finally {
-        adminIssueDocBusy = false;
-        if (submitEl) submitEl.disabled = false;
+        if(adminIssueDocRun===run){
+            adminIssueDocRun=null;adminIssueDocBusy=false;
+            if (submitEl) submitEl.disabled = false;
+        }
+        run.waiting?.fail('발급 상태를 다시 확인해 주세요.',{retry:submitIssueDoc});
     }
 }
 
