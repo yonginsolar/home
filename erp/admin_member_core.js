@@ -6433,6 +6433,10 @@ function switchTab(tabName) {
 
     if (tabName === 'members' && document.getElementById('tab-members')?.classList.contains('active')) return;
 
+    if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) {
+        invalidateAdminCertificatePreparation();
+        window.ContributionCertPreview?.clear();
+    }
     if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) invalidateMemberRosterRead();
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
