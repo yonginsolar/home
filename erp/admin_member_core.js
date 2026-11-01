@@ -1591,25 +1591,30 @@ function formatMemberExportIdentityValue(record) {
 
 function buildMemberExportWorksheet(exportType, rows, options = {}) {
     const safeRows = Array.isArray(rows) ? rows : [];
+    const coopName = String(options.coopName || '').trim() || '협동조합';
+    const cutoffLabel = formatMemberExportCutoffDate(options.cutoffDate);
     if (exportType !== 'city-report') {
-        const ws = XLSX.utils.json_to_sheet(safeRows);
+        const ws = XLSX.utils.json_to_sheet(safeRows, { origin: 'A4' });
         const headers = Object.keys(safeRows[0] || {});
+        const lastColumn = headers.length ? headers.length - 1 : (exportType === 'secret' ? 15 : 11);
+        XLSX.utils.sheet_add_aoa(ws, [[`${coopName} 조합원 명부`], [`기준일: ${cutoffLabel}`]], { origin: 'A1' });
+        ws['!merges'] = [0, 1].map(r => ({ s: { r, c: 0 }, e: { r, c: lastColumn } }));
+        ws['!rows'] = [{ hpt: 28 }, { hpt: 22 }, { hpt: 8 }];
         const wscols = headers.map(header => ({ wch: header === '순번' ? 8 : 16 }));
         ws['!cols'] = wscols;
         const ratioColumn = headers.indexOf('비율(%)');
         if (ratioColumn >= 0) safeRows.forEach((_, index) => {
-            const cell = ws[XLSX.utils.encode_cell({ r: index + 1, c: ratioColumn })];
+            const cell = ws[XLSX.utils.encode_cell({ r: index + 4, c: ratioColumn })];
             if (cell?.t === 'n') cell.z = '0.00';
         });
         return ws;
     }
 
     const shareUnitAmount = normalizeMemberExportShareUnitAmount(options.shareUnitAmount) || 0;
-    const coopName = String(options.coopName || '').trim() || '협동조합';
     const aoa = [
-        ['', '', `${coopName} 출자자 명부`],
+        [`${coopName} 조합원 명부`],
+        [`기준일: ${cutoffLabel}`],
         [`* 1좌당 금액: ${shareUnitAmount.toLocaleString()}원`, '', '', '', '', '(단위: 좌, 원, %)'],
-        [],
         ['연번', '성명(법인명)', '생년월일(법인등록번호)', '출자좌수', '출자금액', '비율']
     ];
 
@@ -1641,9 +1646,8 @@ function buildMemberExportWorksheet(exportType, rows, options = {}) {
         { wch: 14 },
         { wch: 10 }
     ];
-    ws['!merges'] = [
-        { s: { r: 0, c: 2 }, e: { r: 0, c: 5 } }
-    ];
+    ws['!merges'] = [0, 1].map(r => ({ s: { r, c: 0 }, e: { r, c: 5 } }));
+    ws['!rows'] = [{ hpt: 28 }, { hpt: 22 }, { hpt: 22 }];
     return ws;
 } // End of buildMemberExportWorksheet
 
@@ -1812,7 +1816,7 @@ function normalizeMemberExportDateValue(value) {
 
 function filterMemberExportRecordsByCutoffDate(records, cutoffDate) {
     const safeRecords = (Array.isArray(records) ? records : []).filter(record => !isWithdrawnMemberExport(record)
-        && String(record?.status || '').trim() !== '승인대기');
+        && !isTestMemberExport(record) && String(record?.status || '').trim() !== '승인대기');
     const safeCutoffDate = normalizeMemberExportDateValue(cutoffDate);
     if (!safeCutoffDate) return safeRecords.slice();
     return safeRecords.filter((record) => {
@@ -1821,6 +1825,20 @@ function filterMemberExportRecordsByCutoffDate(records, cutoffDate) {
     });
 } // End of filterMemberExportRecordsByCutoffDate
 
+function isTestMemberExport(record) {
+    // Confirmed election rehearsal identities only; never infer from names, blanks or capital.
+    const identities = [
+        ['07e99e55-bc64-432c-828d-66817d80c0d6', 'QA-ELECT-20261019-C'],
+        ['e4a11490-7c88-43ff-9c6b-b010a98f65dc', 'QA-ELECT-20261019-B']
+    ];
+    const id = String(record?.id || '').trim().toLowerCase();
+    if (id) return identities.some(([testId]) => id === testId);
+    // The existing PIN-protected export returns member numbers, not UUIDs.
+    const coopId = String(record?.coop_id || (typeof g_adminMemberRuntime === 'object' ? g_adminMemberRuntime?.coop_id : '') || '').trim();
+    return coopId === 'a4e65bb0-aa8e-4cef-a895-cd7865a67fef'
+        && identities.some(([, number]) => String(record?.member_id || '').trim() === number);
+}
+
 function isWithdrawnMemberExport(record) {
     return ['탈퇴','탈퇴완료','withdrawn','withdrawal_completed'].includes(String(record?.status || '').trim().toLowerCase());
 }
@@ -1828,7 +1846,6 @@ function isWithdrawnMemberExport(record) {
 function buildMemberExportRows(records, options = {}) {
     const safeRecords = Array.isArray(records) ? records : [];
     const cutoffDate = String(options.cutoffDate || '').trim();
-    const cutoffLabel = formatMemberExportCutoffDate(cutoffDate);
     const shareUnitAmount = normalizeMemberExportShareUnitAmount(options.shareUnitAmount);
     const snapshotMap = options.snapshotMap || {};
     const exportType = String(options.exportType || 'public');
@@ -1892,7 +1909,6 @@ function buildMemberExportRows(records, options = {}) {
             "유형": record.member_type || '-',
             "상태": record.status || '-',
             "가입일": record.join_date || '',
-            "기준일": cutoffLabel,
             "출자좌수": formatMemberExportShareCount(record.capitalAmount, shareUnitAmount),
             "출자금액": formatMemberExportAmountDisplay(record.capitalAmount),
             "비율(%)": normalizedRatio,
@@ -2874,7 +2890,7 @@ async function downloadMemberSmsExcel(attempt) {
             if(!next||next===cursor)throw new Error('SMS_EXPORT_PAGE_INVALID');
             cursor=next;
         }
-        const rows=window.CoopMemberSmsExport.build(records.filter(record=>!isWithdrawnMemberExport(record)));
+        const rows=window.CoopMemberSmsExport.build(records.filter(record=>!isWithdrawnMemberExport(record) && !isTestMemberExport(record)));
         if(!current())return;
         if(!rows.length)return myAlert('문자 발송용으로 내려받을 휴대전화 번호가 없습니다.','warning');
         await verifyMemberExcelExportAccess(attempt);
