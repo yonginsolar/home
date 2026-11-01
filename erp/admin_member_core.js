@@ -8833,7 +8833,7 @@ async function submitIssueDoc() {
             && (runtime.effective_permissions?.includes('member.admin')
                 || (runtime.runtime_profile === 'site_member' && runtime.module_access?.member_admin === true));
         if (!authId || identity.data?.user?.id !== authId || !current() || !allowed) {
-            window.ContributionCertPreview?.clear();
+            if (preview?.isCurrent()) window.ContributionCertPreview?.clear();
             throw Object.assign(new Error('로그인 계정, 조합 또는 발급 권한이 변경되었습니다. 다시 열어주세요.'), {code:'CERTIFICATE_CONTEXT_CHANGED'});
         }
     };
