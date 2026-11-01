@@ -1594,7 +1594,7 @@ function buildMemberExportWorksheet(exportType, rows, options = {}) {
     if (exportType !== 'city-report') {
         const ws = XLSX.utils.json_to_sheet(safeRows);
         const headers = Object.keys(safeRows[0] || {});
-        const wscols = headers.map(() => ({ wch: 16 }));
+        const wscols = headers.map(header => ({ wch: header === '순번' ? 8 : 16 }));
         ws['!cols'] = wscols;
         const ratioColumn = headers.indexOf('비율(%)');
         if (ratioColumn >= 0) safeRows.forEach((_, index) => {
@@ -1623,6 +1623,10 @@ function buildMemberExportWorksheet(exportType, rows, options = {}) {
             row['비율'] || 0
         ]);
     });
+    if (Number(options.missingJoinDateCount) > 0) {
+        aoa.push([], [`* 가입일 미기록 ${Number(options.missingJoinDateCount)}명이 포함되어 있습니다.`],
+            ['기준일 이전 가입 여부를 확인한 후 사용해 주세요.']);
+    }
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     safeRows.forEach((_, index) => {
@@ -1710,33 +1714,64 @@ async function openExcelModal() {
     bootstrap.Modal.getOrCreateInstance(document.getElementById('excelModal')).show();
 } // End of openExcelModal
 
-async function fetchMemberCapitalSnapshotByDate(cutoffDate) {
+async function readMemberExportPages(makeRequest, key, signal, runtime) {
+    const rows = [], seen = new Set();
+    let total = null, offset = 0;
+    for (;;) {
+        if (signal?.aborted || g_adminMemberRuntime !== runtime) throw new Error('MEMBER_EXPORT_CANCELLED');
+        let request = makeRequest(offset === 0).range(offset, offset + 499);
+        if (signal && request.abortSignal) request = request.abortSignal(signal);
+        const { data, error, count } = await request;
+        if (signal?.aborted || g_adminMemberRuntime !== runtime) throw new Error('MEMBER_EXPORT_CANCELLED');
+        if (error) throw error;
+        if (!Array.isArray(data)) throw new Error('MEMBER_EXPORT_READ_INCOMPLETE');
+        if (offset === 0 && Number.isInteger(count) && count >= 0) total = count;
+        for (const row of data) {
+            const identity = String(row[key] ?? '');
+            if (identity && seen.has(identity)) throw new Error('MEMBER_EXPORT_LIST_CHANGED');
+            if (identity) seen.add(identity);
+            rows.push(row);
+        }
+        if (total !== null && rows.length > total) throw new Error('MEMBER_EXPORT_LIST_CHANGED');
+        if (!data.length || (total !== null && rows.length === total)) break;
+        offset += data.length;
+    }
+    if (total !== null && rows.length !== total) throw new Error('MEMBER_EXPORT_READ_INCOMPLETE');
+    return rows;
+}
+
+async function fetchMemberCapitalSnapshotByDate(cutoffDate, signal) {
     const safeCutoffDate = String(cutoffDate || '').trim();
     const snapshotMap = {};
     if (!safeCutoffDate) return snapshotMap;
-    const snapshotRequest = isAdminMemberSiteProfile()
-        ? _supabase.rpc('member_export_capital_snapshot_secure', { p_cutoff_date: safeCutoffDate })
-        : scopeAdminTenant(
+    const runtime = g_adminMemberRuntime, siteProfile = isAdminMemberSiteProfile();
+    const coopId = String(runtime?.coop_id || '').trim() || '00000000-0000-0000-0000-000000000000';
+    const data = await readMemberExportPages(first => siteProfile
+        ? _supabase.rpc('member_export_capital_snapshot_secure', { p_cutoff_date: safeCutoffDate }, first ? { count: 'exact' } : {})
+            .order('member_id', { ascending: true })
+        : (
             _supabase
                 .from('ref_members')
-                .select('member_id, amount')
+                .select('id, member_id, amount', first ? { count: 'exact' } : {})
+                .eq('coop_id', coopId)
                 .lte('deposit_date', safeCutoffDate)
-        );
-    const { data, error } = await snapshotRequest;
-    if (error) throw error;
+                .order('id', { ascending: true })
+        ), siteProfile ? 'member_id' : 'id', signal, runtime);
     (data || []).forEach((row) => {
         const memberId = String(row.member_id || '').trim();
         if (!memberId) return;
         const amount = Number(row.total_capital ?? row.amount ?? 0);
-        snapshotMap[memberId] = isAdminMemberSiteProfile()
+        snapshotMap[memberId] = siteProfile
             ? amount
             : (snapshotMap[memberId] || 0) + amount;
     });
     return snapshotMap;
 } // End of fetchMemberCapitalSnapshotByDate
 
-async function fetchAllMembersForExport() {
-    const { data: members, error } = await scopeAdminTenant(
+async function fetchAllMembersForExport(signal) {
+    const runtime = g_adminMemberRuntime;
+    const coopId = String(runtime?.coop_id || '').trim() || '00000000-0000-0000-0000-000000000000';
+    const members = await readMemberExportPages(first => (
         _supabase
             .from('coop_members')
             .select([
@@ -1756,31 +1791,16 @@ async function fetchAllMembersForExport() {
                 'bank_name',
                 'account_holder',
                 'account_num_display'
-            ].join(','))
-            .neq('status', '승인대기')
-            .not('status', 'in', '(탈퇴,탈퇴완료,withdrawn,withdrawal_completed)')
+            ].join(','), first ? { count: 'exact' } : {})
+            .eq('coop_id', coopId)
+            .or('status.is.null,status.not.in.(승인대기,탈퇴,탈퇴완료,withdrawn,withdrawal_completed)')
             .order('name', { ascending: true })
-    );
-    if (error) throw error;
+            .order('id', { ascending: true })
+    ), 'id', signal, runtime);
 
     const list = Array.isArray(members) ? members : [];
-    const memberUids = list.map((row) => row.id).filter(Boolean);
-    const capitalMap = {};
-
-    if (memberUids.length > 0) {
-        const { data: assets, error: assetError } = await _supabase
-            .from('view_my_assets')
-            .select('member_uid, total_capital')
-            .in('member_uid', memberUids);
-        if (assetError) throw assetError;
-        (assets || []).forEach((row) => {
-            capitalMap[String(row.member_uid || '')] = Number(row.total_capital || 0);
-        });
-    }
-
     return list.map((row) => ({
         ...row,
-        total_capital: capitalMap[String(row.id || '')] || 0,
         account_number: row.account_num_display || null
     }));
 } // End of fetchAllMembersForExport
@@ -1791,12 +1811,13 @@ function normalizeMemberExportDateValue(value) {
 } // End of normalizeMemberExportDateValue
 
 function filterMemberExportRecordsByCutoffDate(records, cutoffDate) {
-    const safeRecords = (Array.isArray(records) ? records : []).filter(record => !isWithdrawnMemberExport(record));
+    const safeRecords = (Array.isArray(records) ? records : []).filter(record => !isWithdrawnMemberExport(record)
+        && String(record?.status || '').trim() !== '승인대기');
     const safeCutoffDate = normalizeMemberExportDateValue(cutoffDate);
     if (!safeCutoffDate) return safeRecords.slice();
     return safeRecords.filter((record) => {
         const joinDate = normalizeMemberExportDateValue(record?.join_date);
-        return Boolean(joinDate) && joinDate <= safeCutoffDate;
+        return !joinDate || joinDate <= safeCutoffDate;
     });
 } // End of filterMemberExportRecordsByCutoffDate
 
@@ -1815,7 +1836,8 @@ function buildMemberExportRows(records, options = {}) {
 
     const normalizedRecords = eligibleRecords.map((record) => {
         const memberId = String(record.member_id || '').trim();
-        const capitalAmount = Number(snapshotMap[memberId] ?? record.total_capital ?? 0);
+        const capitalAmount = Number(normalizeMemberExportDateValue(cutoffDate)
+            ? (snapshotMap[memberId] ?? 0) : (record.total_capital ?? 0));
         return {
             ...record,
             member_id: memberId,
@@ -1864,6 +1886,7 @@ function buildMemberExportRows(records, options = {}) {
         }
 
         const commonFields = {
+            "순번": index + 1,
             "조합원번호": record.member_id || '-',
             "이름": record.name || '-',
             "유형": record.member_type || '-',
@@ -1913,7 +1936,8 @@ function buildMemberExportRows(records, options = {}) {
         });
     }
 
-    return { rows, overLimitMembers, totalCapital };
+    const missingJoinDateCount = normalizedRecords.filter(record => !normalizeMemberExportDateValue(record.join_date)).length;
+    return { rows, overLimitMembers, totalCapital, missingJoinDateCount };
 } // End of buildMemberExportRows
 
 function resetMemberCreateForm() {
@@ -2838,7 +2862,8 @@ async function downloadMemberSmsExcel(attempt) {
         const records=[];let cursor=null;
         for(;;){
             let query=scopeAdminTenant(_supabase.from('coop_members').select('id,name,phone')
-              .neq('status','승인대기').not('status','in','(탈퇴,탈퇴완료,withdrawn,withdrawal_completed)').lte('join_date',cutoffDate).order('id',{ascending:true}).limit(500));
+              .or('status.is.null,status.not.in.(승인대기,탈퇴,탈퇴완료,withdrawn,withdrawal_completed)')
+              .or('join_date.is.null,join_date.lte.'+cutoffDate).order('id',{ascending:true}).limit(500));
             if(cursor)query=query.gt('id',cursor);
             const {data,error}=await readMemberExcelExport(attempt,signal=>query.abortSignal(signal));
             if(!current())return;
@@ -2891,21 +2916,21 @@ async function downloadExcel() {
 
     let snapshotMap = {};
     try {
-        snapshotMap = await readMemberExcelExport(attempt,()=>fetchMemberCapitalSnapshotByDate(cutoffDate));
+        snapshotMap = await readMemberExcelExport(attempt,signal=>fetchMemberCapitalSnapshotByDate(cutoffDate, signal));
     } catch (snapshotError) {
         if(!isCurrentMemberExcelExport(attempt))return;
         attempt.releaseLoading();
         CoopSafeLog.error("[erp/admin_member] operation failed", snapshotError);
-        return myAlert('기준일 출자금 계산 실패: ' + snapshotError.message, 'error');
+        return myAlert('기준일 출자 내역을 끝까지 확인하지 못했습니다. 다시 시도해 주세요.', 'error');
     }
 
     try {
-        exportSourceRecords = await readMemberExcelExport(attempt,()=>fetchAllMembersForExport());
+        exportSourceRecords = await readMemberExcelExport(attempt,signal=>fetchAllMembersForExport(signal));
     } catch (memberError) {
         if(!isCurrentMemberExcelExport(attempt))return;
         attempt.releaseLoading();
         CoopSafeLog.error("[erp/admin_member] operation failed", memberError);
-        return myAlert('전체 조합원 명부 조회 실패: ' + memberError.message, 'error');
+        return myAlert('조합원 명부를 끝까지 확인하지 못했습니다. 다시 시도해 주세요.', 'error');
     }
 
     // 1. 보안용 엑셀 다운로드
@@ -2951,16 +2976,19 @@ async function downloadExcel() {
         }
 
         dataToExport = exportResult.rows;
-        if (exportResult.overLimitMembers.length > 0) {
+        if (exportResult.overLimitMembers.length > 0 || exportResult.missingJoinDateCount > 0) {
             attempt.releaseLoading();
-            const ws = buildMemberExportWorksheet(type, dataToExport, { cutoffDate, shareUnitAmount, coopName });
+            const ws = buildMemberExportWorksheet(type, dataToExport, { cutoffDate, shareUnitAmount, coopName, missingJoinDateCount: exportResult.missingJoinDateCount });
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "명부");
             XLSX.writeFile(wb, fileName);
             document.getElementById('decryptKey').value = '';
             bootstrap.Modal.getInstance(document.getElementById('excelModal')).hide();
-            const warningText = exportResult.overLimitMembers.map((item) => `${item.name}(${item.ratio}%)`).join(', ');
-            return myAlert(`다운로드되었습니다. 기준일 ${cutoffDate} 기준 30% 초과 조합원이 있습니다: ${warningText}`, 'warning');
+            const warningText = exportResult.overLimitMembers.length
+                ? `기준일 ${cutoffDate} 기준 30% 초과 조합원이 있습니다: ` + exportResult.overLimitMembers.map((item) => `${item.name}(${item.ratio}%)`).join(', ') : '';
+            const dateText = exportResult.missingJoinDateCount > 0
+                ? `가입일이 없는 조합원 ${exportResult.missingJoinDateCount}명도 포함했습니다. 기준일 이전 가입 여부를 확인해 주세요.` : '';
+            return myAlert(['다운로드되었습니다.', warningText, dateText].filter(Boolean).join('\n'), 'warning');
         }
     } else {
         // 2. 일반용/시청 신고용 엑셀 다운로드 (가입일 기준일 이하 조합원 기준)
@@ -2977,16 +3005,19 @@ async function downloadExcel() {
             : `조합원명부_일반_${cutoffDate}.xlsx`;
         logAdminAction('export_roster', { format: type === 'city-report' ? 'city-report' : 'general', count: dataToExport.length, cutoff: cutoffDate });
 
-        if (exportResult.overLimitMembers.length > 0) {
+        if (exportResult.overLimitMembers.length > 0 || exportResult.missingJoinDateCount > 0) {
             attempt.releaseLoading();
-            const ws = buildMemberExportWorksheet(type, dataToExport, { cutoffDate, shareUnitAmount, coopName });
+            const ws = buildMemberExportWorksheet(type, dataToExport, { cutoffDate, shareUnitAmount, coopName, missingJoinDateCount: exportResult.missingJoinDateCount });
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "명부");
             XLSX.writeFile(wb, fileName);
             document.getElementById('decryptKey').value = '';
             bootstrap.Modal.getInstance(document.getElementById('excelModal')).hide();
-            const warningText = exportResult.overLimitMembers.map((item) => `${item.name}(${item.ratio}%)`).join(', ');
-            return myAlert(`다운로드되었습니다. 기준일 ${cutoffDate} 기준 30% 초과 조합원이 있습니다: ${warningText}`, 'warning');
+            const warningText = exportResult.overLimitMembers.length
+                ? `기준일 ${cutoffDate} 기준 30% 초과 조합원이 있습니다: ` + exportResult.overLimitMembers.map((item) => `${item.name}(${item.ratio}%)`).join(', ') : '';
+            const dateText = exportResult.missingJoinDateCount > 0
+                ? `가입일이 없는 조합원 ${exportResult.missingJoinDateCount}명도 포함했습니다. 기준일 이전 가입 여부를 확인해 주세요.` : '';
+            return myAlert(['다운로드되었습니다.', warningText, dateText].filter(Boolean).join('\n'), 'warning');
         }
     }
 
