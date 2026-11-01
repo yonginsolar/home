@@ -1,4 +1,4 @@
-/* Member portal help 1.0.3. Contextual unlink verification and profile explanations only. */
+/* Member portal help 1.0.4. Certificate directions match the direct purpose sections. */
 (function(root){
  'use strict';
  if(!/^\/membermanage(?:\.html)?\/?$/.test(root.location.pathname))return;
@@ -34,7 +34,7 @@
   ['capital','#assetSummaryRow > :first-child .count-title','append','납입 출자금과 상세 내역',
    '이미 반영된 금액입니다\n총 납입 출자금은 실제 입금이 반영된 출자금입니다. 추가 출자를 신청한 금액과는 다를 수 있으니 신청 후에는 반영 내역도 확인하세요.\n\n입금별로 확인하려면\n출자금 카드를 누르면 상세 내역이 열립니다. 입금했는데 아직 반영되지 않았다면 입금일·금액·입금자명을 확인해 조합 사무국에 문의해 주세요.'],
   ['certificate','#memberContributionCertificateTitle','append','출자 증명서',
-   '출자금을 증명하는 문서입니다\n업무 신청 → 증명서 발급 → 증명서 보기에서 현재 납입이 반영된 출자금을 확인합니다. 신청만 하고 아직 납입이 반영되지 않은 금액은 증명할 수 없습니다.\n\n출력하기 전에\n미리보기에서 이름·조합원번호·금액·조합 정보를 확인한 뒤 인쇄하거나 PDF로 저장하세요. 단체의 출자 증명서는 등록된 단체 관리자만 발급할 수 있습니다.'],
+   '출자금을 증명하는 문서입니다\n「출자·신청」 탭의 「출자증명서 보기」에서 현재 납입이 반영된 출자금을 확인합니다. 요약 탭에서도 바로 열 수 있습니다. 신청만 하고 아직 납입이 반영되지 않은 금액은 증명할 수 없습니다.\n\n출력하기 전에\n미리보기에서 이름·조합원번호·금액·조합 정보를 확인한 뒤 인쇄하거나 PDF로 저장하세요. 단체의 출자 증명서는 등록된 단체 관리자만 발급할 수 있습니다.'],
   ['membership','#tabCert h6:not(#memberContributionCertificateTitle)','append','조합원 확인서',
    '출자 증명서와 무엇이 다른가요?\n조합원 확인서는 발급일 현재 해당 조합의 조합원임을 확인하는 문서입니다. 출자금액을 증명해야 한다면 위의 출자 증명서를 이용하세요.\n\n확인하고 출력하세요\n현재 선택한 프로필을 확인한 뒤 조합원 확인서 보기를 누르세요. 미리보기에서 성명·조합원번호·가입일과 조합 정보를 살핀 뒤 인쇄하거나 PDF로 저장할 수 있습니다.'],
   ['timeline','#timelineList','heading','활동·신청 처리 내역',

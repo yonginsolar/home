@@ -1,22 +1,23 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.238
-Change: 2026-11-01 - Clarify email login status; keep authentication guidance within unlink intent.
+Version: v1.0.239
+Change: 2026-11-01 - Show actual purpose sections, capital history and scoped document lists directly.
 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
   <script src="/shared/coop_dialog.js?v=20261013-2" integrity="sha384-SPhTaEg4LScQfJkxXl9A2VG7CdbLrjPUbecITHuHpYCXQDguKuVcof13KMO+GV4N" crossorigin="anonymous"></script>
   <script src="/shared/workflow_help.js?v=20261026-mobile-help-1" integrity="sha384-aDygb3b3+ARJmbKazWhergFuAz+9LZCHQH8bfj4EIisehZMMJM8FvaxnmRoObWjM" crossorigin="anonymous" defer></script>
-  <script src="/shared/member_portal_help.js?v=1.0.3" integrity="sha384-RYcoJWeRy3JUJ7kuyyCeTcE2yKvllSUC6fcqhbJ+M4VFHwRdcp8PjsTfJFGzT1fn" crossorigin="anonymous" defer></script>
+  <script src="/shared/member_portal_help.js?v=1.0.4" integrity="sha384-FuN3MLgNUoIvA6WzQINIO+wU+M0KCF0tpzrSyFyBqt4tkp4NObxD7UF16urV5VYi" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | membermanage.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
-<script src="shared/member_portal_layout.js?v=1.0.0" integrity="sha384-nj2EMhfHctRJrEeQM4Q9ddaVTGmXc2oHz7q3F4utoQF5+FKhgRUY1PhTzPJ8zHzz" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.238 | membermanage.html');</script>
+<script src="shared/member_portal_documents.js?v=1.0.0" integrity="sha384-zGw2COoO/LzyE0Sy8r7fkfzU0mdXZofh24yyc7LAcsvjWwvFo6j6SrOPigt/Mr+L" crossorigin="anonymous" defer></script>
+<script src="shared/member_portal_layout.js?v=1.1.0" integrity="sha384-J1rnDQACl3W3rvLUx1Ni9HGrV69JPS0JgDpzcGBgBZMI5hKldqFMcaeffzhKsv8s" crossorigin="anonymous" defer></script>
+    <script>console.log('[Version] v1.0.239 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2627,6 +2628,7 @@ const SESSION_EXPIRED_NOTICE_KEY = 'member_session_expired_notice_v1';
 
 let _supabase = null;
 let curMem = null;
+let portalDirectRevision = 0, portalDocumentRoles = [], portalDeferredViews = null;
 function initializeMemberPurposeLayout() {
 if (!window.MemberPortalLayout || window.MemberPortalPurposeController) return;
 window.MemberPortalPurposeController = MemberPortalLayout.create({
@@ -2634,6 +2636,7 @@ getContext: () => getFamilyRegistrationOwner(),
 beforeChange: () => {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()
     || ['submitApplication','modifyApplication','cancelApplication','submitFamily','requestConnect','disconnectRelation','submitPost'].some(key => window.__memberAppLocks?.[key])) return false;
+++portalDirectRevision;
 retainPortalProfileEdit();retainPortalApplicationDraft();retainPortalPartnerDraft();
 const phoneRead=portalProfileEditor?.phoneRead;
 const ownsPhoneRead=phoneRead?.revision===portalProfileValidationRevision && phoneRead?.loadRevision===portalProfileLoadRevision;
@@ -2649,15 +2652,49 @@ window.CoopDialog?.cancelAll(window);closeCustomModal();
 document.getElementById('btnModalYes').onclick=null;document.getElementById('btnModalNo').onclick=null;
 return true;
 },
-openApplication: type => toggleTab(type),
-onEnter: (key, settings) => {
-if (key !== 'funds' || settings.reason === 'application') return;
-const active = ['extra','reduction','withdraw','cert','partner'].find(type => !document.getElementById('tab'+type[0].toUpperCase()+type.slice(1))?.classList.contains('hidden'));
-if (active) void toggleTab(active, null, {restore:true});
-}
+openApplication: type => toggleTab(type,null,{direct:true}),
+renderHistory: (title,summary,list) => renderMemberHistory('ledger',title,summary,list),
+documents: {
+getClient: () => _supabase,
+getContext: () => getFamilyRegistrationOwner() ? {owner:getFamilyRegistrationOwner(),actor:String(curAuth.id),coop:String(currentMemberCoopId),profile:String(curMem.id),role:curMem.role,officials:portalDocumentRoles,documents:isCoopRuntimeModuleEnabled('documents'),notices:isCoopRuntimeModuleEnabled('site_admin')} : null,
+formatDate: value => formatMemberKstDate(value),
+openFull: () => openDocumentBox()
+},
+onEnter: key => { void preparePortalDirectSections(key); }
 });
 }
+async function preparePortalDirectSections(key) {
+const owner=getFamilyRegistrationOwner(),revision=++portalDirectRevision;
+const current=()=>owner&&owner===getFamilyRegistrationOwner()&&revision===portalDirectRevision&&window.MemberPortalPurposeController?.getSelected()===key;
+void loadPortalPurposeExtras(key);
+if(key==='funds') {
+await toggleTab('extra',null,{restore:true,direct:true});
+if(current()) await toggleTab('reduction',null,{restore:true,direct:true});
+} else if(key==='profile') {
+setProfileDetailsExpanded(true);syncWithdrawRefundAccountUi();
+if(current()&&canUsePortalPartner())void toggleTab('partner',null,{restore:true});
+}
+}
 window.addEventListener('DOMContentLoaded', initializeMemberPurposeLayout, {once:true});
+async function loadPortalPurposeExtras(key) {
+const state=portalDeferredViews;
+const current=()=>state&&state===portalDeferredViews&&state.owner===getFamilyRegistrationOwner()&&state.revision===portalProfileLoadRevision;
+if(!current()||isSiteMemberPortalProfile())return;
+if(key==='profile'&&!state.profile) {
+state.profile=true;void refreshMemberInformation(curMem);
+if(typeof loadFamilyList==='function')void loadFamilyList(state.member);
+}
+if(key!=='activity'||state.activity)return;
+state.activity=true;checkSolarMapVisibility(portalDocumentRoles);void loadQuizPilotEntry();void loadBoard('free',null,20);
+if(typeof Badges==='undefined')return;
+try {
+await ensureProfileBadgesGranted(state.member);if(!current())return;
+const stage=document.createElement('div');stage.id='portalBadgeStage-'+state.revision;stage.hidden=true;stage.setAttribute('aria-hidden','true');state.badgeStage=stage;document.body.append(stage);
+try { await Badges.render(stage.id,state.member,_supabase);if(current())document.getElementById('badgeContainer').replaceChildren(...stage.childNodes); }
+finally { stage.remove();if(state.badgeStage===stage)state.badgeStage=null; }
+if(current()&&getRootMemberProfileId()&&state.member===getRootMemberProfileId())Badges.checkAnniversary(curMem,_supabase);
+} catch(error) { if(current()){state.activity=false;CoopSafeLog.warn('활동 화면 준비 실패:',error?.code||'unavailable');} }
+}
 let portalIdentityClaim = null;
 let portalLoginMethods = null;
 const EXISTING_MEMBER_CONNECT_INTENT='member_existing_connect_intent_v1';
@@ -5107,7 +5144,8 @@ async function loadDashboardData(uuid, options = {}) {
 window.PortalLoginToolRecovery?.cancel();
 portalIdentityClaim?.suspend();
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
-window.MemberPortalPurposeController?.suspend();
+window.MemberPortalPurposeController?.suspend();++portalDirectRevision;
+portalDeferredViews?.badgeStage?.remove();portalDeferredViews=null;
 if (typeof invalidateIncomingConnects === 'function') invalidateIncomingConnects();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
@@ -5235,29 +5273,17 @@ await loadCoopRuntimeModules();
 if (!currentProfileLoad()) return;
 
 // 5. 렌더링 호출
+portalDeferredViews={owner:getFamilyRegistrationOwner(),member:String(uuid),revision:profileLoadRevision,profile:false,activity:false,badgeStage:null};
 renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta);
 const restoredApplicationTab = ['extra','reduction','withdraw','cert'].find(type => !document.getElementById('tab'+type[0].toUpperCase()+type.slice(1))?.classList.contains('hidden'));
 if (restoredApplicationTab && typeof toggleTab === 'function') void toggleTab(restoredApplicationTab, null, {restore:true});
-void refreshMemberInformation(curMem);
 
 // [부가 기능 로드]
 if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
 checkElectionVisibility(curMem, myRoles);
 
-checkSolarMapVisibility(myRoles);
-if (!isSiteMemberPortalProfile() && typeof loadFamilyList === 'function') loadFamilyList(uuid);
 if (!isSiteMemberPortalProfile() && typeof checkIncomingConnects === 'function') checkIncomingConnects();
-if (!isSiteMemberPortalProfile()) loadBoard('free', null, 20);
-
-	if (!isSiteMemberPortalProfile() && typeof Badges !== 'undefined') {
-	await ensureProfileBadgesGranted(uuid);
-	await Badges.render('badgeContainer', uuid, _supabase);
-
-	// 가입 N주년 체크 RPC는 self-only라(보안) 프로필 전환 상태에선 호출하지 않음
-	if (getRootMemberProfileId() && uuid === getRootMemberProfileId()) {
-	Badges.checkAnniversary(curMem, _supabase);
-	}
-	}
+if(!window.MemberPortalPurposeController?.isDirect){void loadPortalPurposeExtras('profile');void loadPortalPurposeExtras('activity');}
 
 	showOnly('dashboardSection');
 	if (!isSiteMemberPortalProfile()) await handlePendingEducationQrCheckIn(uuid);
@@ -6679,7 +6705,7 @@ const siteAdminEnabled = isCoopRuntimeModuleEnabled('site_admin');
 if(btnPartner) {
 const canShowPartner = !isSiteMemberPortalProfile() && !!(siteAdminEnabled || isMemberPortalAdmin(member));
 btnPartner.classList.toggle('hidden', !canShowPartner);
-if (canShowPartner && siteAdminEnabled) {
+if (canShowPartner && siteAdminEnabled && !window.MemberPortalPurposeController?.isDirect) {
 loadPartnerInfo(member.member_id);
 }
 }
@@ -6795,13 +6821,14 @@ assetRow.appendChild(div);
 
 // [신규] 퀵 링크 카드 렌더링 (선거/태양광/회의록)
 renderQuickLinks(member, myRoles, isOfficial, officialIds);
-void loadQuizPilotEntry();
+if(!window.MemberPortalPurposeController?.isDirect)void loadQuizPilotEntry();
 
 // ----------------------------------------------------
 // [3] 타임라인 렌더링 (통합)
 // ----------------------------------------------------
 renderTimeline(ledger, apps, visibleDonations, visiblePoints, visibleDividends);
 initializePortalProfileEdit(member);
+portalDocumentRoles = Array.isArray(myRoles) ? myRoles.slice() : [];
 window.MemberPortalPurposeController?.refresh();
 }
 
@@ -8211,6 +8238,12 @@ function openHistoryModal(type) {
 const titleEl = document.getElementById('historyModalTitle');
 const summaryEl = document.getElementById('historyModalSummary');
 const listEl = document.getElementById('historyModalList');
+renderMemberHistory(type,titleEl,summaryEl,listEl);
+setModalDepth(true);
+document.getElementById('historyModalOverlay').style.display = 'flex';
+}
+
+function renderMemberHistory(type,titleEl,summaryEl,listEl) {
 
 let title = '';
 let total = 0;
@@ -8340,9 +8373,6 @@ if(type !== 'dividend' && type !== 'dividend_net') html += '</tbody></table></di
 titleEl.innerText = title;
 listEl.innerHTML = html;
 
-// 모달 표시
-setModalDepth(true);
-document.getElementById('historyModalOverlay').style.display = 'flex';
 }
 
 // [수정된 버전] 통합 타임라인 렌더링 (수정/취소 버튼 로직 포함)
@@ -9036,7 +9066,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 async function toggleTab(type, btn, navigation = {}) {
 window.PortalLoginToolRecovery?.cancel();
 if (portalApplicationWritePending && window.__memberAppLocks?.modifyApplication) return;
-if (!navigation.restore && window.MemberPortalPurposeController && !window.MemberPortalPurposeController.show('funds', {reason:'application'})) return;
+if (!navigation.restore && window.MemberPortalPurposeController && !window.MemberPortalPurposeController.show(window.MemberPortalPurposeController.isDirect&&['withdraw','partner'].includes(type)?'profile':'funds', {reason:'application'})) return;
 memberInformationPortal?.suspend();
 if (typeof closeParticipationDocument === 'function') closeParticipationDocument(false);
 invalidatePortalAddressSearch();
@@ -9084,8 +9114,10 @@ else if(portalPartnerState.badgeRetry) retryPortalPartnerBadges();
 
 if(type === 'reduction') {
 let rules;
+const directRetry=document.getElementById('portalDirectRedRetry');
+if(navigation.direct){if(directRetry)directRetry.hidden=true;document.getElementById('redLimitDisplay').textContent='출자 기준을 확인하는 중…';}
 try { rules = await loadMemberCapitalRules(); }
-catch (_) { if(applicationGeneration === portalApplicationGeneration && tabRevision === portalApplicationRequest) showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
+catch (_) { if(applicationGeneration === portalApplicationGeneration && tabRevision === portalApplicationRequest){if(navigation.direct){document.getElementById('redLimitDisplay').textContent='출자 기준을 불러오지 못했습니다. 다시 확인해 주세요.';if(directRetry)directRetry.hidden=false;}else showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.');}return; }
 if(applicationState !== portalApplicationState || applicationGeneration !== portalApplicationGeneration
     || (applicationState && !currentPortalApplicationState(applicationState)) || tabRevision !== portalApplicationRequest
     || document.getElementById('tabReduction')?.classList.contains('hidden')) return;

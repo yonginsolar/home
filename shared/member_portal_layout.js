@@ -1,4 +1,4 @@
-/* v1.0.0 — Purpose navigation over existing portal nodes. No network/storage or business writes. */
+/* v1.1.0 — Direct purpose sections; original editors/writers, scoped read-only documents. */
 (function(root){
  'use strict';
  function create(options){
@@ -46,6 +46,23 @@
   #dashboardSection.portal-purpose-layout #portalProfileGroup>.d-flex{flex-wrap:wrap;gap:12px}
   #dashboardSection.portal-purpose-layout #portalProfileGroup .d-flex.align-items-center.mb-2{flex-wrap:wrap;gap:8px}
   #dashboardSection.portal-purpose-layout #portalProfileGroup .member-number-badge{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+  #dashboardSection.portal-purpose-layout #portalApplicationColumn{display:none!important}
+  #dashboardSection.portal-purpose-layout .portal-direct-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:18px;align-items:start}
+  #dashboardSection.portal-purpose-layout .portal-direct-card{min-width:0;margin:0 0 18px}
+  #dashboardSection.portal-purpose-layout .portal-direct-card>[data-direct-section]{display:block!important}
+  #dashboardSection.portal-purpose-layout .portal-direct-card[hidden]{display:none!important}
+  #dashboardSection.portal-purpose-layout .portal-direct-history-list{max-height:24rem;overflow:auto}
+  #dashboardSection.portal-purpose-layout .portal-document-controls{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:center;margin-bottom:12px}
+  #dashboardSection.portal-purpose-layout .portal-document-controls :is(input,select){font:inherit;max-width:100%;min-width:0;min-height:44px;background:var(--theme-surface);color:var(--theme-text);border:1px solid var(--theme-border);border-radius:8px;padding:8px}
+  #dashboardSection.portal-purpose-layout .portal-document-row{display:flex;flex-direction:column;gap:6px;width:100%;min-width:0;min-height:44px;text-align:left;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;padding:14px 0;border:0;border-top:1px solid var(--theme-border);background:transparent;color:var(--theme-text);font:inherit}
+  #dashboardSection.portal-purpose-layout .portal-document-row small{color:var(--theme-muted,#68766c)}
+  #dashboardSection.portal-purpose-layout .portal-document-list{margin-bottom:14px}
+  #dashboardSection.portal-purpose-layout[data-inline-documents] #quickMinutesViewCard{display:none!important}
+  #dashboardSection.portal-purpose-layout[data-inline-documents] #quickLinksRow>.quick-col:has(>#quickMinutesViewCard){display:none!important}
+  #dashboardSection.portal-purpose-layout #portalModifyDraftList{margin-bottom:18px}
+  .portal-document-reader{width:min(1100px,calc(100vw - 24px));height:calc(100dvh - 24px);max-height:calc(100dvh - 24px);box-sizing:border-box;border:1px solid var(--theme-border);border-radius:16px;padding:14px;background:var(--theme-surface,#fff);color:var(--theme-text,#172033)}
+  .portal-document-reader[open]{display:flex;flex-direction:column;gap:12px}.portal-document-reader::backdrop{background:#0f172a80}
+  .portal-document-reader header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px}.portal-document-reader h3{font-size:1.1rem;margin:0}.portal-document-reader button{font:inherit;min-height:44px;white-space:normal}.portal-document-reader iframe{width:100%;min-height:0;flex:1;border:0;background:var(--theme-surface,#fff)}
   @media(max-width:575px){#dashboardSection.portal-purpose-layout .portal-purpose-nav button{flex-direction:column;gap:4px;padding:9px 3px;font-size:.85rem}#dashboardSection.portal-purpose-layout .portal-purpose-nav{gap:3px;padding:5px}#dashboardSection.portal-purpose-layout .portal-purpose-top h2{font-size:1.25rem}}
   @media(max-width:340px){#dashboardSection.portal-purpose-layout .portal-purpose-nav button{flex-basis:calc(50% - 8px)}#dashboardSection.portal-purpose-layout .portal-purpose-shortcuts{grid-template-columns:1fr}}
   `;doc.head.append(style);
@@ -63,18 +80,31 @@
   panels.funds.append(fundAssets,nodes.portalApplicationColumn);
   panels.activity.append(nodes.quickLinksRow,nodes.portalTimelineColumn,nodes.memberFreeBoardCard,nodes.memberBadgeCollectionCard,nodes.hallOfFameCard);
   panels.profile.append(nodes.portalProfileGroup,nodes.memberFamilyAccountCard);
+  const directGrid=element('div','portal-direct-grid'),sectionCards=new Map();panels.funds.append(directGrid);
+  function directSection(type,parent){const node=doc.getElementById('tab'+type[0].toUpperCase()+type.slice(1)),card=element('section','portal-direct-card dashboard-card');node.dataset.directSection=type;node.classList.remove('py-3');card.append(node);parent.append(card);sectionCards.set(type,card);return card;}
+  directSection('extra',directGrid);
+  const history=element('section','portal-direct-card dashboard-card'),historyTitle=element('h3','','출자금 납입 내역'),historySummary=element('div','mb-2 small'),historyList=element('div','portal-direct-history-list');history.id='portalInlineCapitalHistory';historyList.tabIndex=0;historyList.setAttribute('aria-label','출자금 납입 내역');history.append(historyTitle,historySummary,historyList);directGrid.append(history);
+  directSection('cert',directGrid);const reductionCard=directSection('reduction',directGrid),redRetry=action('다시 확인',()=>options.openApplication?.('reduction'),'btn btn-sm btn-outline-secondary');redRetry.id='portalDirectRedRetry';redRetry.hidden=true;reductionCard.append(redRetry);
+  const modify=doc.getElementById('portalModifyDraftList');if(modify)panels.funds.append(modify);
+  directSection('partner',panels.profile);directSection('withdraw',panels.profile);
+  const docHost=element('section','dashboard-card mb-4');docHost.id='portalInlineDocuments';panels.activity.prepend(docHost);
+  const documents=root.MemberPortalDocuments&&options.documents?root.MemberPortalDocuments.create({...options.documents,container:docHost,isActive:()=>current()&&selected==='activity'}):null;
+  if(documents)dashboard.dataset.inlineDocuments='true';else docHost.hidden=true;
   nodes.portalApplicationsAndHistory.hidden=true;
   const birthday=doc.getElementById('birthdayBanner');if(birthday)overview.prepend(birthday);
   const todos=element('div','portal-purpose-todos');todos.setAttribute('aria-label','확인할 일');overview.append(todos);
   const shortcuts=element('div','portal-purpose-shortcuts');shortcuts.setAttribute('aria-label','바로가기');
-  const cert=action('증명서 보기',()=>openApplication('cert','memberContributionCertificateView'));
-  const extra=action('추가 출자',()=>openApplication('extra','exAmount'));shortcuts.append(cert,extra);overview.append(shortcuts);
+  const cert=action('출자증명서 보기',()=>invokeCertificate('memberContributionCertificateView'));
+  const confirmation=action('조합원 확인서 보기',()=>invokeCertificate('memberConfirmationCertificateView'));
+  const extra=action('추가 출자',()=>openApplication('extra','exAmount'));shortcuts.append(extra,cert,confirmation);overview.append(shortcuts);
   const recent=element('section','dashboard-card mb-4'),heading=element('div','portal-purpose-heading'),recentTitle=element('h3','','최근 내역'),all=action('전체 내역',()=>{if(show('activity',{focus:false}))focusNode(nodes.portalTimelineColumn.querySelector('h5'));},'btn btn-sm btn-outline-secondary');
   heading.append(recentTitle,all);const recentList=element('ol','portal-purpose-recent'),status=element('p','text-muted mb-0');recent.append(heading,recentList,status);overview.append(recent);
   function focusNode(node){if(!node?.isConnected||!current())return;if(!node.matches('button,a,input,select,textarea'))node.tabIndex=-1;node.focus({preventScroll:true});node.scrollIntoView?.({block:'nearest'});}
   function openApplication(type,target){if(!current()||!allowed(doc.querySelector('.menu-btn[onclick*="'+type+'"]')))return;options.openApplication?.(type);if(selected==='funds')focusNode(doc.getElementById(target));}
+  function invokeCertificate(id){const button=doc.getElementById(id);if(!current()||!allowed(doc.querySelector('.menu-btn[onclick*="cert"]'))||button?.disabled)return;button.click();}
+  function syncDirectSections(){for(const [type,card]of sectionCards){const menu=doc.querySelector('.menu-btn[onclick*="'+type+'"]');card.hidden=!current()||!allowed(menu);}const docCard=doc.getElementById('quickMinutesViewCard'),canRead=!!documents&&current()&&allowed(docCard);docHost.hidden=!canRead;if(documents)documents.activate(canRead&&selected==='activity');}
   function updateOverview(){
-   cert.hidden=!allowed(doc.querySelector('.menu-btn[onclick*="cert"]'));extra.hidden=!allowed(doc.querySelector('.menu-btn[onclick*="extra"]'));
+   cert.hidden=confirmation.hidden=!allowed(doc.querySelector('.menu-btn[onclick*="cert"]'));extra.hidden=!allowed(doc.querySelector('.menu-btn[onclick*="extra"]'));syncDirectSections();
    if(!current()){recentList.replaceChildren();status.textContent='내역을 다시 확인해 주세요.';todos.replaceChildren();return;}
    const items=[...doc.querySelectorAll('#timelineList .timeline-item')].slice(0,3);recentList.replaceChildren();
    for(const item of items){const li=element('li'),date=element('time','',item.querySelector('.timeline-date')?.textContent.trim()||''),body=element('div');
@@ -84,7 +114,7 @@
    todos.replaceChildren();
    for(const [badgeId,cardId,label]of [['voteTodoBadge','quickVoteCard','선거·투표 확인'],['signTodoBadge','quickMinutesSignCard','서명 요청 확인'],['docTodoBadge','quickMinutesViewCard','문서함 확인']]){
     const badge=doc.getElementById(badgeId),card=doc.getElementById(cardId);if(!allowed(badge)||!allowed(card))continue;
-    const button=action(label,()=>{if(current()&&allowed(badge)&&allowed(card)&&show('activity',{focus:false}))focusNode(card.querySelector('button,a'));},'btn btn-outline-success');todos.append(button);
+    const button=action(label,()=>{if(!current()||!allowed(badge)||!allowed(card))return;if(cardId==='quickMinutesViewCard'&&documents){if(show('activity',{focus:false}))focusNode(docHost.querySelector('h3'));}else card.querySelector('button,a')?.click();},'btn btn-outline-success');todos.append(button);
    }
   }
   function enhanceAssets(){for(const card of nodes.assetSummaryRow.querySelectorAll('.dashboard-card[onclick]')){
@@ -94,6 +124,7 @@
   function paint(){
    for(const key of Object.keys(names)){panels[key].hidden=key!==selected;buttons[key].setAttribute('aria-selected',String(key===selected));buttons[key].tabIndex=key===selected?0:-1;buttons[key].disabled=!current();}
    (selected==='funds'?fundAssets:summaryAssets).append(nodes.assetSummaryRow);
+   if(current()&&selected==='funds')options.renderHistory?.(historyTitle,historySummary,historyList);
    nav.setAttribute('aria-busy',String(!current()));
   }
   function show(key,settings={}){
@@ -103,14 +134,14 @@
    selected=key;choices.set(verified,key);paint();updateOverview();
    if(settings.focus)buttons[key].focus({preventScroll:true});options.onEnter?.(key,settings);return true;
   }
-  function refresh(){const key=context();if(!key){suspend();return;}if(verified!==key){verified=key;selected=choices.get(key)||'summary';}paint();updateOverview();}
-  function suspend(){verified='';for(const b of Object.values(buttons))b.disabled=true;nav.setAttribute('aria-busy','true');updateOverview();}
+  function refresh(){const key=context();if(!key){suspend();return;}if(verified!==key){verified=key;selected=choices.get(key)||'summary';}paint();updateOverview();options.onEnter?.(selected,{reason:'refresh'});}
+  function suspend(){verified='';documents?.suspend();for(const b of Object.values(buttons))b.disabled=true;nav.setAttribute('aria-busy','true');updateOverview();}
   nav.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)||!current())return;const keys=Object.keys(names),at=keys.indexOf(event.target.dataset.purposeTab);if(at<0)return;
    event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?keys.length-1:(at+(event.key==='ArrowRight'?1:-1)+keys.length)%keys.length;show(keys[next],{focus:true});});
   const observer=new MutationObserver(updateOverview);observer.observe(doc.getElementById('timelineList'),{childList:true,subtree:true,characterData:true});observer.observe(nodes.quickLinksRow,{childList:true,subtree:true,attributes:true,attributeFilter:['class','hidden','style'],characterData:true});observer.observe(nodes.portalApplicationColumn,{attributes:true,subtree:true,attributeFilter:['class','hidden']});
   const assetsObserver=new MutationObserver(enhanceAssets);assetsObserver.observe(nodes.assetSummaryRow,{childList:true,subtree:true});enhanceAssets();
   dashboard.classList.add('portal-purpose-layout');dashboard.dataset.purposeMounted='true';refresh();
-  return Object.freeze({show,refresh,suspend,getSelected:()=>selected});
+  return Object.freeze({isDirect:true,show,refresh,suspend,getSelected:()=>selected});
  }
- root.MemberPortalLayout=Object.freeze({version:'1.0.0',create});
+ root.MemberPortalLayout=Object.freeze({version:'1.1.0',create});
 })(window);
