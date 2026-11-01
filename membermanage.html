@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.247
+Version: v1.0.248
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.1" integrity="sha384-WcPwZeSpbtFs8ONHUNTfsWGKvwdVHqaRqOw66iLtErZ27RowhxtU+gmoEa+p2a21" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.247 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.248 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -1900,7 +1900,7 @@ NO. <span id="infoMemberId">-</span>
 <div class="col-md-6"> 
 <label class="small text-muted" id="profilePhoneLabel">전화번호</label>
 <div id="viewPhoneBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
-<input type="text" id="editPhone" class="readonly-text" style="display:none;" oninput="autoHyphen(this)" maxlength="13" placeholder="010-0000-0000">
+<input type="text" id="editPhone" class="readonly-text" style="display:none;" oninput="formatProfilePhoneInput(this)" maxlength="13" placeholder="010-0000-0000">
 </div>
 
 <div class="col-12">
@@ -4865,6 +4865,23 @@ formatted = raw.substr(0, 3) + '-' + raw.substr(3, 4) + '-' + raw.substr(7);
 }
 
 target.value = formatted;
+}
+
+// Profile-only formatting: keep other registration/check-in phone paths unchanged.
+function formatProfilePhoneInput(target) {
+const raw = target.value.replace(/[^0-9]/g, '');
+if (!raw.startsWith('02')) return autoHyphen(target);
+const digits = raw.slice(0, 10);
+target.value = digits.length <= 2 ? digits
+    : digits.length <= 5 ? digits.slice(0, 2) + '-' + digits.slice(2)
+    : digits.length <= 9 ? digits.slice(0, 2) + '-' + digits.slice(2, 5) + '-' + digits.slice(5)
+    : digits.slice(0, 2) + '-' + digits.slice(2, 6) + '-' + digits.slice(6);
+}
+function isValidPortalProfilePhone(value) {
+const phone = String(value || '').trim();
+const digits = phone.replace(/[\s-]/g, '');
+if (digits.startsWith('02')) return /^02[0-9]{7,8}$/.test(digits);
+return phone.length >= 12; // Preserve the existing acceptance rule for other numbers.
 }
 
 // [신규] 라디오 버튼에 따라 입력창 교체
@@ -8822,9 +8839,10 @@ representativeName = document.getElementById('editRepresentativeName').value.tri
 contactName = document.getElementById('editContactName').value.trim();
 contactPosition = document.getElementById('editContactPosition').value.trim();
 
-if (!representativeName) return showModal('대표자명을 입력해주세요.');
-if (!contactName) return showModal('담당자명을 입력해주세요.');
-if (!contactPosition) return showModal('담당자 직함 또는 역할을 입력해주세요.');
+if ([representativeName, contactName, contactPosition].some(value => value.length > 100))
+    return showModal('대표자와 담당자 정보는 각각 100자 이내로 입력해주세요.');
+if ([representativeName, contactName, contactPosition].some(value => /[\u0000-\u001f\u007f]/.test(value)))
+    return showModal('대표자와 담당자 정보에 제어 문자를 사용할 수 없습니다.');
 
 // ★ [검증 1] 'hidden' 클래스가 없으면(=에러가 보이면) 저장 차단
 const bizErrVisible = !document.getElementById('bizNoError').classList.contains('hidden');
@@ -8848,10 +8866,10 @@ return showModal('유효하지 않은 법인등록번호입니다.');
 }
 }
 
-if (phone.length < 12) return showModal('전화번호를 올바르게 입력해주세요.');
+if ((phone || !isGroup) && !isValidPortalProfilePhone(phone)) return showModal('전화번호를 올바르게 입력해주세요.');
 
 // [중복 검사 로직 수정 시작]
-if (phone !== curMem.phone) {
+if (phone && phone !== curMem.phone) {
 const phoneRead = {revision:validationRevision,loadRevision:validationLoadRevision};
 editState.phoneRead = phoneRead;
 showLoading(true, '중복 검사 중...');
