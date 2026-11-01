@@ -1,4 +1,4 @@
-/* v1.3.0 — Stable responsive dialogs and summary-only documents/dividends. */
+/* v1.3.1 — Match desktop funding card size; preserve responsive forms. */
 (function(root){
  'use strict';
  function create(options){
@@ -58,7 +58,11 @@
   #dashboardSection.portal-purpose-layout #portalProfileGroup .member-number-badge{max-width:100%;white-space:normal;overflow-wrap:anywhere}
   #dashboardSection.portal-purpose-layout #assetSummaryRow .count-val{max-width:100%;overflow-wrap:anywhere;word-break:normal}
   #dashboardSection.portal-purpose-layout #portalApplicationColumn{display:none!important}
-  #dashboardSection.portal-purpose-layout .portal-direct-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:18px;align-items:start}
+  #dashboardSection.portal-purpose-layout .portal-direct-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:18px;align-items:stretch}
+  #dashboardSection.portal-purpose-layout .portal-direct-grid>.portal-direct-card{display:flex;flex-direction:column}
+  #dashboardSection.portal-purpose-layout .portal-direct-grid>.portal-direct-card>[data-direct-section]{display:flex!important;flex:1;min-width:0;flex-direction:column}
+  #dashboardSection.portal-purpose-layout .portal-direct-grid [data-direct-section]>button:last-child{margin-top:auto}
+  @media(min-width:992px){#dashboardSection.portal-purpose-layout .portal-direct-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
   #dashboardSection.portal-purpose-layout .portal-direct-card{min-width:0;height:auto;overflow:visible;margin:0 0 18px}
   #dashboardSection.portal-purpose-layout .portal-direct-card>[data-direct-section]{display:block!important}
   #dashboardSection.portal-purpose-layout .portal-direct-card[hidden]{display:none!important}
@@ -197,5 +201,5 @@
   dashboard.classList.add('portal-purpose-layout');dashboard.dataset.purposeMounted='true';refresh();
   return Object.freeze({isDirect:true,show,refresh,suspend,getSelected:()=>selected});
  }
- root.MemberPortalLayout=Object.freeze({version:'1.3.0',create});
+ root.MemberPortalLayout=Object.freeze({version:'1.3.1',create});
 })(window);

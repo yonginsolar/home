@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.241
-Change: 2026-11-01 - Stable portal dialogs, funding order and screen-first certificate preparation.
+Version: v1.0.242
+Change: 2026-11-01 - Show only missing refund accounts and align funding cards on desktop.
 -->
 <html lang="ko">
 <head>
@@ -16,8 +16,8 @@ Change: 2026-11-01 - Stable portal dialogs, funding order and screen-first certi
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
-<script src="shared/member_portal_layout.js?v=1.3.0" integrity="sha384-vtTZW3ZpGrQbzJ9MaFPdV4jH92/hTQ//E4qhp/52Ax4OBzUj40/oYYHuIKd12OCj" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.241 | membermanage.html');</script>
+<script src="shared/member_portal_layout.js?v=1.3.1" integrity="sha384-WcPwZeSpbtFs8ONHUNTfsWGKvwdVHqaRqOw66iLtErZ27RowhxtU+gmoEa+p2a21" crossorigin="anonymous" defer></script>
+    <script>console.log('[Version] v1.0.242 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2035,6 +2035,10 @@ NO. <span id="infoMemberId">-</span>
 <div id="tabReduction" class="hidden">
 <h6 class="fw-bold mb-3">감자 신청</h6>
 <div class="alert alert-warning small py-2" id="capitalReductionHint"></div>
+<div class="alert alert-warning small" id="reductionRefundAccountNotice" hidden>
+<div>환급받을 계좌를 내 정보에서 등록해 주세요.</div>
+<button type="button" class="btn btn-sm btn-outline-dark mt-2" onclick="goToRefundAccountSetup()">내 정보에서 계좌 입력</button>
+</div>
 <div class="mb-3">
 <label class="form-label small">환급 요청액</label>
 <input type="number" id="redAmount" class="form-control" placeholder="금액 입력">
@@ -2051,9 +2055,9 @@ NO. <span id="infoMemberId">-</span>
 
 <div id="tabWithdraw" class="hidden">
 <h6 class="fw-bold text-danger mb-3">탈퇴 신청</h6>
-<div class="alert alert-warning small" id="withdrawRefundAccountNotice">
+<div class="alert alert-warning small" id="withdrawRefundAccountNotice" hidden>
 <div class="fw-bold mb-1"><i class="bi bi-bank me-1"></i>환급 계좌 확인</div>
-<div id="withdrawRefundAccountMessage">등록 상태를 확인하는 중입니다.</div>
+<div id="withdrawRefundAccountMessage"></div>
 <button type="button" class="btn btn-sm btn-outline-dark mt-2 hidden" id="withdrawRefundAccountButton" onclick="goToRefundAccountSetup()">내 정보에서 계좌 입력</button>
 </div>
 <div class="mb-3">
@@ -9044,23 +9048,26 @@ const ready = hasRefundAccountLocally();
 const own = !!curMem && String(curMem.id) === String(getRootMemberProfileId() || '')
     && (!curMem.auth_user_id || String(curMem.auth_user_id) === String(curAuth?.id || ''));
 const message = document.getElementById('withdrawRefundAccountMessage');
+const notice = document.getElementById('withdrawRefundAccountNotice');
+const reductionNotice = document.getElementById('reductionRefundAccountNotice');
 const setupButton = document.getElementById('withdrawRefundAccountButton');
 const submitButton = document.getElementById('withdrawSubmitButton');
 if (message) {
-message.textContent = !own ? '본인 프로필에서 탈퇴를 신청해주세요.' : ready
-? `${curMem.bank_name} 환급 계좌가 등록되어 있습니다. 계좌번호 전체는 이 화면에 표시하지 않습니다.`
-: '환급받을 계좌가 등록되어 있지 않습니다. 탈퇴 신청 전에 내 정보에서 계좌를 입력해주세요.';
+message.textContent = !own || ready ? '' : '환급받을 계좌를 내 정보에서 등록해 주세요.';
 }
+if (notice) notice.hidden = ready || !own;
+if (reductionNotice) reductionNotice.hidden = !curMem || ready;
 if (setupButton) setupButton.classList.toggle('hidden', ready || !own);
 if (submitButton) submitButton.disabled = !ready || !own;
 }
 
 function goToRefundAccountSetup() {
+if (window.MemberPortalPurposeController && !window.MemberPortalPurposeController.show('profile', {reason:'refund-account'})) return;
 toggleEditMode(true);
 const bankInput = document.getElementById('editBankName');
-if (bankInput) {
+if (bankInput && !bankInput.disabled) {
+bankInput.focus({ preventScroll: true });
 bankInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 }
 }
 
