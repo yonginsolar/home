@@ -1,4 +1,4 @@
-/* v1.0.3 — Preserve verified state; require a successful current read before link/unlink. */
+/* v1.0.4 — Clarify unset email login without changing verification or link/unlink guards. */
 (function(root){
  'use strict';
  function create(options){
@@ -16,7 +16,7 @@
   function paint(){if(!opened||state?.key!==key())return;const focusKind=list.contains(doc.activeElement)?doc.activeElement.dataset.kind:null;list.replaceChildren();const data=state.data;
    const card=(kind,name)=>{const section=doc.createElement('section'),icon=doc.createElement('span'),body=doc.createElement('div'),title=doc.createElement('strong');section.className='method-card method-'+kind;icon.className='method-icon';icon.textContent=kind==='email'?'@':kind==='kakao'?'💬':'N';icon.setAttribute('aria-hidden','true');body.className='method-content';title.textContent=name;body.append(title);section.append(icon,body);list.append(section);return {section,body};};
    const email=card('email','이메일'),detail=doc.createElement('p');detail.className='method-email';detail.textContent=state.user?.email||'확인 중';email.body.append(detail);
-   const emailState=doc.createElement('span');emailState.className='method-state';emailState.textContent=data?.email_ready?'연결됨':data?'인증 필요':'확인 중';email.body.append(emailState);
+   const emailState=doc.createElement('span');emailState.className='method-state';emailState.textContent=data?.email_ready?'연결됨':data?'이메일 로그인 미설정':'확인 중';email.body.append(emailState);
    for(const kind of ['kakao','naver']){
     const item=data?.methods?.find(m=>m.kind===kind),{section,body}=card(kind,kind==='kakao'?'카카오':'네이버'),text=doc.createElement('p');text.className='method-state';text.textContent=item?(item.linked?'연결됨':'연결되지 않음'):'확인 중';section.classList.toggle('is-connected',!!item?.linked);body.append(text);
     if(item?.linked&&item.shared_with_other_coops===true){const note=doc.createElement('p');note.className='method-shared-notice';note.textContent='같은 연결을 쓰는 다른 조합에서도 함께 해제돼요.';body.append(note);}
@@ -111,5 +111,5 @@
   }
   return Object.freeze({open,suspend:()=>hide(false)});
  }
- root.MemberLoginMethods=Object.freeze({version:'1.0.3',create});
+ root.MemberLoginMethods=Object.freeze({version:'1.0.4',create});
 })(window);
