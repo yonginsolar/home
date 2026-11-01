@@ -1,4 +1,4 @@
-/* v1.0.4 — Avoid duplicate preparation reads; canonical issuer rechecks locked context. */
+/* v1.1.0 — Authorized HTML preview; original PDF generated only on output. */
 (function (root) {
   'use strict';
   let busy = false;
@@ -97,15 +97,8 @@
       const key=actor+'|'+coopId+'|'+memberId;
       const existing=pending.get(key);
       const request=existing || {p_member_id:memberId,p_request_key:crypto.randomUUID(),p_expected_revision:context.revision};
-      // ERP loads jsPDF on demand. A blocked/late dependency must never allocate a number.
-      try {await prepare?.();}catch(_){throw new Error('PDF_NOT_READY');}
-      if(!preview.isCurrent())return;
-      if(typeof root.jspdf?.jsPDF!=='function')throw new Error('PDF_NOT_READY');
-      // Prepare the font and the existing private display seal before allocating a number.
-      const [,seal]=await Promise.all([
-        getCertPretendardFontBase64(),
-        downloadCertStorageAssetDataUrl(client,'attachments',context.snapshot.seal_path)
-      ]);
+      // The private seal is needed for HTML; font/jsPDF wait until explicit output.
+      const seal=await downloadCertStorageAssetDataUrl(client,'attachments',context.snapshot.seal_path);
       if(!preview.isCurrent())return;
       // The canonical issuer rereads and locks this context, checks the expected
       // revision and current target permission. Keep fresh actor/ERP authorization
@@ -130,9 +123,15 @@
       context=await check();
       if(context.revision!==issued.revision)throw new Error('MEMBERSHIP_CONTEXT_CHANGED');
       if(context.snapshot.seal_path!==issued.snapshot.seal_path)throw new Error('MEMBERSHIP_CONTEXT_CHANGED');
-      const pdf=await generate(issued,seal);
-      if(!preview.isCurrent())return;
-      await preview.present(pdf);
+      const record={...issued,snapshot:{...issued.snapshot}},s=record.snapshot;
+      const group=['단체','organization'].includes(s.member_type);
+      const element=root.ContributionCertPreview.documentPreview({kind:'membership',number:record.cert_number,rows:[[group?'단체명':'성명',s.member_name],['조합원 번호',s.member_id],['가입일',formatKoreanDateLabel(s.join_date)]],companyName:s.company_name,chairmanName:s.chairman_name,sealDataUrl:seal,date:formatKoreanDateLabel(s.issue_date),footer:['사업자등록번호  '+s.business_number,'주소  '+s.address,'담당 연락처  '+s.contact]});
+      await preview.presentHtml({element,createPdf:async()=>{
+        if(!preview.isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
+        if(prepare)await prepare();else await ensureCertPdfReady();
+        if(!preview.isCurrent())throw new Error('MEMBERSHIP_ACCESS_DENIED');
+        return generate(record,seal);
+      }});
     }catch(error){if(preview?.isCurrent())preview.fail(message(error));else if(!preview && isCurrent())notify?.(message(error));}
     finally{busy=false;}
   }

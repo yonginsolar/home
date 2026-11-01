@@ -976,11 +976,11 @@ async function ensureCertGeneratorReady() {
             const routeOrigins = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : null;
             const publicOrigin = String(routeOrigins?.publicOrigin || '').trim().replace(/\/+$/, '');
             const remoteFallback = /^https?:\/\//i.test(publicOrigin)
-                ? `${publicOrigin}/cert_generator.js?v=20261101-speed-1`
-                : 'https://www.yonginsolar.kr/cert_generator.js?v=20261101-speed-1';
+                ? `${publicOrigin}/cert_generator.js?v=20261101-html-1`
+                : 'https://www.yonginsolar.kr/cert_generator.js?v=20261101-html-1';
             const candidates = [
-                '/cert_generator.js?v=20261101-speed-1',
-                '../cert_generator.js?v=20261101-speed-1',
+                '/cert_generator.js?v=20261101-html-1',
+                '../cert_generator.js?v=20261101-html-1',
                 remoteFallback
             ];
             for (const src of candidates) {
@@ -8852,9 +8852,9 @@ async function submitIssueDoc() {
             await authorize();
             if (!preview.isCurrent()) return;
         }
-        await ensureCertGeneratorReady();
+        if (docType === 'donation') await ensureCertGeneratorReady();
         if (preview && !preview.isCurrent()) return;
-        if (typeof window.jspdf?.jsPDF !== 'function') {
+        if (docType === 'donation' && typeof window.jspdf?.jsPDF !== 'function') {
             throw new Error('PDF 라이브러리(jsPDF) 로드에 실패했습니다. 네트워크/차단 설정을 확인해주세요.');
         }
         const amount = await calcIssueAmountByCriteria(
@@ -8914,7 +8914,6 @@ async function submitIssueDoc() {
                 coopId,
                 fallbackChairmanName: chairmanName
             });
-            if (typeof getCertPretendardFontBase64 === 'function') await getCertPretendardFontBase64();
             if (!preview.isCurrent()) return;
             await authorize();
             if (!preview.isCurrent()) return;
@@ -8927,16 +8926,18 @@ async function submitIssueDoc() {
             if (!preview.isCurrent()) return;
             if (!cert?.cert_number) throw new Error('증명서 발급 번호를 확인하지 못했습니다. 다시 시도해 주세요.');
 
-            const result = await generateContributionCert(memberData, amount, cert.cert_number, chairmanName, _supabase, {
-                output: 'preview',
-                issueDate: mode === 'cutoff' ? cutoffDate : null,
-                coopId,
-                requireSeal: true,
-                companyProfile
-            });
             await authorize();
             if (!preview.isCurrent()) return;
-            await preview.present(result);
+            const issueDate = mode === 'cutoff' ? cutoffDate : new Date();
+            const element = buildContributionCertificatePreview(memberData, amount, cert.cert_number, companyProfile, issueDate);
+            await preview.presentHtml({element,createPdf:async()=>{
+                if (!preview.isCurrent()) throw new Error('CERTIFICATE_CONTEXT_CHANGED');
+                await ensureCertGeneratorReady();
+                if (!preview.isCurrent()) throw new Error('CERTIFICATE_CONTEXT_CHANGED');
+                return generateContributionCert(memberData, amount, cert.cert_number, chairmanName, _supabase, {
+                    output:'preview',issueDate,coopId,requireSeal:true,companyProfile
+                });
+            }});
             return;
         }
 

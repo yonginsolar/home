@@ -1,4 +1,4 @@
-/* Version: v1.0.2 — Screen-first preview; original PDF and high-resolution printing retained. */
+/* Version: v1.1.0 — HTML preview; PDF generation only on explicit save/print. */
 (function () {
   'use strict';
   let active = null;
@@ -13,6 +13,9 @@
     active = null;
     if (!state) return;
     state.doc = null;
+    state.createPdf = null;
+    state.observer?.disconnect();
+    window.removeEventListener('resize', state.fit);
     if (state.url) URL.revokeObjectURL(state.url);
     state.url = '';
     state.frame?.remove();
@@ -25,8 +28,6 @@
 
   function start({ isCurrent, authorize, title = '출자증명서' } = {}) {
     clear();
-    // Public renderer only: overlap dependency loading, never pre-issue a certificate.
-    void renderer().catch(() => {});
     const dialog = document.createElement('dialog');
     dialog.className = 'contribution-cert-preview';
     dialog.setAttribute('aria-labelledby', 'contribution-cert-preview-title');
@@ -43,6 +44,13 @@
       .contribution-cert-preview .cert-scroll{flex:1;min-height:0;overflow:auto;background:#e9edf1;padding:16px;text-align:center}
       .contribution-cert-preview .cert-status{color:#17212b;padding:40px 12px;white-space:pre-line}
       .contribution-cert-preview img{display:block;width:100%;max-width:794px;height:auto;margin:auto;background:#fff;box-shadow:0 2px 10px #0002;filter:none!important}
+      .contribution-cert-preview .cert-html-fit{position:relative;width:100%;max-width:794px;margin:auto;text-align:left}
+      .contribution-cert-preview .cert-paper{position:absolute;left:0;top:0;width:210mm;height:297mm;background:#fff;color:#111;transform-origin:top left;font-family:Pretendard,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-weight:600;line-height:1.45;overflow:hidden;box-shadow:0 2px 10px #0002}
+      .contribution-cert-preview .cert-paper *{box-sizing:border-box;color:#111!important;filter:none!important}
+      .contribution-cert-preview .cert-paper img{width:auto;max-width:none;margin:0;box-shadow:none;background:transparent}
+      .contribution-cert-preview .cert-paper table{border-collapse:collapse;table-layout:fixed;font-size:12pt;line-height:1.35}
+      .contribution-cert-preview .cert-paper th,.contribution-cert-preview .cert-paper td{border:.25mm solid #111;padding:2mm 4mm;overflow-wrap:anywhere;font-weight:600}
+      .contribution-cert-preview .cert-paper th{background:#f7f7f7;text-align:left}
       @media(max-width:480px){.contribution-cert-preview .cert-toolbar{gap:6px;padding:10px}.contribution-cert-preview h2{font-size:16px;width:100%}.contribution-cert-preview .cert-scroll{padding:8px}.contribution-cert-preview button{flex:1}}
     </style><div class="cert-toolbar"><h2 id="contribution-cert-preview-title">출자증명서</h2><button type="button" data-action="print" disabled>인쇄</button><button type="button" data-action="save" disabled>PDF 저장</button><button type="button" data-action="close">닫기</button></div><div class="cert-scroll"><div class="cert-status" role="status">증명서를 준비하고 있습니다.</div></div>`;
     const state = { dialog, isCurrent, authorize, doc: null, frame: null, url: '', image: null,
@@ -65,12 +73,23 @@
     dialog.querySelector('[data-action="close"]').focus();
 
     async function action(kind) {
-      if (!valid() || !state.ready || !state.doc || state.busy) return;
+      if (!valid() || !state.ready || (!state.doc && !state.createPdf) || state.busy) return;
       state.busy = true;
       buttons.forEach(button => { button.disabled = true; });
       try {
         if (authorize) await authorize();
         if (!valid()) return;
+        if (!state.doc) {
+          status.hidden = false;status.textContent = 'PDF를 준비하고 있어요.';
+          const result = await state.createPdf();
+          if (!valid()) return;
+          if (!result?.doc || !result.fileName) throw new Error('PDF_NOT_READY');
+          state.doc = result.doc;state.fileName = result.fileName;
+          // Preparation can be slow: permission and owner must still be current.
+          if (authorize) await authorize();
+          if (!valid()) return;
+        }
+        status.hidden = true;
         if (kind === 'save') state.doc.save(state.fileName);
         else {
           if (!state.frame) await preparePrint();
@@ -83,7 +102,7 @@
         else fail('로그인 상태 또는 출력 준비를 확인하지 못했습니다. 다시 시도해 주세요.');
       } finally {
         state.busy = false;
-        if (valid() && state.doc) buttons.forEach(button => { button.disabled = false; });
+        if (valid() && state.ready) buttons.forEach(button => { button.disabled = false; });
       }
     }
     buttons.forEach(button => { button.onclick = () => action(button.dataset.action); });
@@ -122,6 +141,22 @@
     return {
       isCurrent: valid,
       fail,
+      async presentHtml({ element, createPdf }) {
+        if (!valid()) return;
+        if (!(element instanceof HTMLElement) || typeof createPdf !== 'function') throw new Error('PREVIEW_NOT_READY');
+        const fit = document.createElement('div');fit.className = 'cert-html-fit';
+        fit.appendChild(element);dialog.querySelector('.cert-scroll').appendChild(fit);
+        state.createPdf = createPdf;
+        state.fit = () => {
+          if (!valid()) return;
+          const scale = Math.min(1, fit.clientWidth / element.offsetWidth);
+          element.style.transform = `scale(${scale})`;fit.style.height = `${element.offsetHeight * scale}px`;
+        };
+        if (typeof ResizeObserver === 'function') {state.observer = new ResizeObserver(state.fit);state.observer.observe(fit);}
+        window.addEventListener('resize', state.fit);state.fit();
+        status.hidden = true;state.ready = true;
+        buttons.forEach(button => { button.disabled = false; });
+      },
       async present({ doc, fileName }) {
         if (!valid()) return;
         state.doc = doc;
@@ -141,6 +176,26 @@
       }
     };
   }
-  window.ContributionCertPreview = { start, clear };
+  function documentPreview({kind,number,rows,companyName,chairmanName,sealDataUrl,logoDataUrl,logoRatio,date,money,footer=[]}) {
+    const paper=document.createElement('article');paper.className='cert-paper';paper.setAttribute('aria-label',kind==='membership'?'조합원 확인서 미리보기':'출자증서 미리보기');
+    const add=(tag,text,x,y,width,size,align='left')=>{const n=document.createElement(tag);n.textContent=String(text??'');n.style.cssText=`position:absolute;left:${x}mm;top:${y}mm;width:${width}mm;font-size:${size}pt;text-align:${align};white-space:pre-line`;paper.appendChild(n);return n;};
+    const box=(x,y,w,h,border)=>{const n=add('div','',x,y,w,12);n.style.height=h+'mm';n.style.border=border+'mm solid #111';return n;};
+    const image=(url,x,y,w,h,opacity=1)=>{if(!/^data:image\/(png|jpeg|webp);base64,/i.test(String(url||'')))return;const n=add('img','',x,y,w,12);n.src=url;n.alt='';n.style.width=w+'mm';n.style.height=h+'mm';n.style.objectFit='contain';n.style.opacity=opacity;return n;};
+    const member=kind==='membership';
+    if(!member&&logoDataUrl&&logoRatio>0)image(logoDataUrl,35,(297-140*logoRatio)/2,140,140*logoRatio,.1);
+    box(member?12:10,member?12:10,member?186:190,member?273:277,member?.65:1.5);box(member?14:12,member?14:12,member?182:186,member?269:273,member?.2:.5);
+    add('div',member?'발급번호  '+number:'증서번호 : 제 '+number+' 호',member?25:20,member?26:55,160,member?11:12);
+    add('div',member?'조합원 확인서':'출 자 증 서',25,member?52:32,160,member?28:32,'center');
+    if(member){const line=add('div','',71,71,68,12);line.style.borderTop='.35mm solid #111';}
+    else{const amount=add('div',money,20,71,170,20,'center');amount.style.textDecoration='underline';amount.style.textUnderlineOffset='3mm';}
+    const table=add('table','',member?25:20,member?92:100,member?160:170,member?13:12);table.style.border='.25mm solid #111';
+    const body=document.createElement('tbody');table.appendChild(body);
+    for(const [label,value]of rows){const tr=document.createElement('tr');tr.style.height=(member?15:14)+'mm';const th=document.createElement('th'),td=document.createElement('td');th.scope='row';th.textContent=label;th.style.width=(member?39:55)+'mm';td.textContent=String(value??'');if(!member){th.style.textAlign='center';th.style.background='#fff';}tr.append(th,td);body.appendChild(tr);}
+    if(member){add('div',`${rows[0][0]==='단체명'?'위 단체는':'위 사람은'} 발급일 현재 ${companyName}의 조합원임을 확인합니다.`,30,156,150,14,'center');add('div',date,30,193,150,13,'center');add('div',companyName,30,211,150,17,'center');add('div','이사장  '+chairmanName,30,228,150,18,'center');image(sealDataUrl,148,220,22,22);
+      const foot=add('div',footer.join('\n'),25,266-(footer.length-1)*6,160,11,'center');foot.style.borderTop='.2mm solid #bbb';foot.style.paddingTop='5mm';foot.style.color='#555';
+    }else{add('div',`상기와 같이 출자하였으므로 ${companyName}\n\n정관에 따라 이 증서를 드립니다.`,30,208,150,14,'center');add('div',date,30,238,150,15,'center');add('div',companyName,30,251,150,18,'center');add('div','이사장  '+chairmanName,30,262,150,22,'center');image(sealDataUrl,151,257,24,24);}
+    return paper;
+  }
+  window.ContributionCertPreview = { start, clear, documentPreview };
   window.addEventListener('pagehide', clear);
 })();

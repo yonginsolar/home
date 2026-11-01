@@ -1,6 +1,6 @@
 /*
-Version: v1.0.20
-Change: Serve the unchanged certificate font from a content-pinned same-origin asset.
+Version: v1.1.0
+Change: HTML certificate preview with lazy PDF dependency preparation.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -56,6 +56,31 @@ if (typeof window !== 'undefined') {
 
 const CERT_FONT_URL = '/assets/certificate-fonts/Pretendard-SemiBold.5e1c548732af.ttf';
 let certPretendardFontBase64Promise = null;
+let certPdfLibraryPromise = null;
+function ensureCertPdfReady() {
+    if (typeof window.jspdf?.jsPDF === 'function') return Promise.resolve();
+    if (!certPdfLibraryPromise) certPdfLibraryPromise = new Promise((resolve,reject)=>{
+        const script=document.createElement('script');
+        const finish=error=>{clearTimeout(timer);script.onload=script.onerror=null;if(error){script.remove();reject(error);}else resolve();};
+        const timer=setTimeout(()=>finish(new Error('PDF_NOT_READY')),15000);
+        script.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+        script.integrity='sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk';script.crossOrigin='anonymous';
+        script.onload=()=>finish(typeof window.jspdf?.jsPDF==='function'?null:new Error('PDF_NOT_READY'));
+        script.onerror=()=>finish(new Error('PDF_NOT_READY'));document.head.appendChild(script);
+    }).catch(error=>{certPdfLibraryPromise=null;throw error;});
+    return certPdfLibraryPromise;
+}
+
+function buildContributionCertificatePreview(member,totalAmount,number,profile,issueDate) {
+    ensureCertCompanyPrintProfile(profile,'출자증서 발급');
+    const group=member.member_type==='단체';
+    let label='생 년 월 일',value=member.rrn_display||'';
+    if(group){const identity=getContributionCertificateOrganizationIdentity(member);label=identity.label;value=identity.value;}
+    else if(value.length>=6){const gender=value.includes('-')?value.split('-')[1].charAt(0):'1';value=`${['3','4'].includes(gender)?'20':'19'}${value.substring(0,2)}년 ${value.substring(2,4)}월 ${value.substring(4,6)}일`;}
+    const unit=Number(profile.shareUnitAmount),shares=totalAmount/unit;
+    const count=Number.isInteger(shares)?shares.toLocaleString('ko-KR'):shares.toLocaleString('ko-KR',{maximumFractionDigits:3});
+    return window.ContributionCertPreview.documentPreview({kind:'contribution',number,companyName:profile.companyName,chairmanName:profile.chairmanName,sealDataUrl:profile.sealDataUrl,logoDataUrl:profile.logoDataUrl,logoRatio:profile.logoRatio,date:formatKoreanDateLabel(issueDate),money:`일금${numberToKorean(totalAmount)}원정 (₩${totalAmount.toLocaleString()})`,rows:[['조합원 번호',member.member_id],[group?'단   체   명':'성        명',member.name],[label,value],['가 입 연 월 일',member.join_date||'-'],['출 자 좌 수',`${count} 좌 (1좌 ${unit.toLocaleString('ko-KR')}원)`],['출 자 금 액',`${totalAmount.toLocaleString()} 원`]]});
+}
 
 function trimCertCompanyValue(value) {
     return String(value == null ? '' : value).trim();

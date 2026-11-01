@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.243
-Change: 2026-11-01 - Reduce duplicate certificate preparation reads and cache the unchanged local font.
+Version: v1.0.244
+Change: 2026-11-01 - Show authorized HTML certificate previews; prepare PDFs only on explicit output.
 -->
 <html lang="ko">
 <head>
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Reduce duplicate certificate preparation reads and cache th
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.1" integrity="sha384-WcPwZeSpbtFs8ONHUNTfsWGKvwdVHqaRqOw66iLtErZ27RowhxtU+gmoEa+p2a21" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.243 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.244 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -58,10 +58,9 @@ allowKakaoApp: true
 <script src="/shared/public_image_index.js?v=20261012-1"></script>
 <script src="/shared/image_display.js?v=20261012-2"></script>
 <script src="/shared/participation_image_display.js?v=20261012-2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
-<script src="cert_generator.js?v=20261101-speed-1"></script>
-<script src="shared/contribution_cert_preview.js?v=20261101-1"></script>
-<script src="shared/member_confirmation.js?v=20261101-speed-1"></script>
+<script src="cert_generator.js?v=20261101-html-1"></script>
+<script src="shared/contribution_cert_preview.js?v=20261101-html-1"></script>
+<script src="shared/member_confirmation.js?v=20261101-html-1"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" integrity="sha384-xgNdoEQu0JeBEAN3/f7mrS+EPOsrmARCvhS7PEpk7QI2wvo4YOF3xY3EjQGKHAY9" crossorigin="anonymous"></script>
 <script src="badges.js?v=20260828-1"></script>
@@ -9206,10 +9205,7 @@ if (typeof prepareContributionCertCompanyProfile !== 'function' || typeof genera
 throw new Error('출자증서 생성기를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
 }
 if (isMemberGroupRecord(member)) getContributionCertificateOrganizationIdentity(member);
-const [companyProfile] = await Promise.all([
-prepareContributionCertCompanyProfile(_supabase, { coopId }),
-typeof getCertPretendardFontBase64 === 'function' ? getCertPretendardFontBase64() : Promise.resolve()
-]);
+const companyProfile = await prepareContributionCertCompanyProfile(_supabase, { coopId });
 requireIdentity(await _supabase.auth.getUser());
 if (!preview.isCurrent()) return;
 
@@ -9224,13 +9220,16 @@ if (error) throw error;
 if (!cert?.cert_number) throw new Error('증서번호를 확인하지 못했습니다.');
 await authorize();
 if (!preview.isCurrent()) return;
-const documentResult = await generateContributionCert(member, finalTotal, cert.cert_number, '', _supabase, {
-coopId,
-requireSeal: true,
-companyProfile,
-output: 'preview'
+const issueDate = new Date();
+const element = buildContributionCertificatePreview(member, finalTotal, cert.cert_number, companyProfile, issueDate);
+await preview.presentHtml({element,createPdf:async()=>{
+if (!preview.isCurrent()) throw new Error('CERTIFICATE_CONTEXT_CHANGED');
+await ensureCertPdfReady();
+if (!preview.isCurrent()) throw new Error('CERTIFICATE_CONTEXT_CHANGED');
+return generateContributionCert(member, finalTotal, cert.cert_number, '', _supabase, {
+coopId,requireSeal:true,companyProfile,output:'preview',issueDate
 });
-await preview.present(documentResult);
+}});
 } catch(e) { 
 CoopSafeLog.error("[membermanage] operation failed", e);
 if (preview) preview.fail('증명서 발급 중 오류가 발생했습니다.\n' + (e.message || ''));
