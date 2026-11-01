@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.260
+Version: v1.0.261
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.3" integrity="sha384-//kW6Kw570ydE6HQ66SJ7P9c54jcTxp7knNWDYBtWUpCcLHhZ3t/AhMJrErCS/mP" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.260 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.261 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -11652,18 +11652,23 @@ retry.className = 'btn btn-sm btn-outline-primary connect-request-retry';
 retry.textContent = '다시 확인';
 status.append(statusText, retry);
 alertDiv.appendChild(status);
-const banner = document.getElementById('birthdayBanner');
-if (banner && banner.nextSibling) container.insertBefore(alertDiv, banner.nextSibling);
-else container.prepend(alertDiv);
 }
 alertDiv.querySelector('.connect-request-retry').onclick = () => retryIncomingConnects(request);
-syncIncomingConnectStatus(request, '연결 요청을 확인하고 있어요.');
 const controller = new AbortController();
 let timer, cancel;
 const cancelled = new Promise(resolve => { cancel = () => resolve(null); });
 request.readFinished = cancelled;
 request.cancelRead = () => { clearTimeout(timer); controller.abort(); cancel(); };
 try {
+// The birthday banner belongs to the summary pane, not the dashboard root.
+// Keep requests outside hidden panes and verify the reference's direct parent.
+if (!container.contains(alertDiv)) {
+const shell = container.querySelector('.portal-purpose-shell');
+const nav = shell?.querySelector('.portal-purpose-nav');
+if (shell && nav?.parentNode === shell) shell.insertBefore(alertDiv, nav);
+else container.prepend(alertDiv);
+}
+syncIncomingConnectStatus(request, '연결 요청을 확인하고 있어요.');
 const timeout = new Promise((_, reject) => {
 timer = setTimeout(() => { controller.abort(); reject(new Error('INCOMING_CONNECT_READ_TIMEOUT')); }, 15000);
 });
@@ -11717,6 +11722,7 @@ alertDiv.appendChild(requestRow);
 syncIncomingConnectStatus(request);
 } catch (error) {
 if (!isCurrentIncomingConnectRequest(request)) return;
+if (!container.contains(alertDiv)) container.prepend(alertDiv);
 request.phase = 'failed';
 syncIncomingConnectStatus(request, '연결 요청을 불러오지 못했습니다. 다시 확인해 주세요.');
 CoopSafeLog.error('연결 요청 조회 실패:', { code: error?.code || 'INCOMING_CONNECT_READ_FAILED' });
