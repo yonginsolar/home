@@ -1,4 +1,4 @@
-/* v1.3.1 — Match desktop funding card size; preserve responsive forms. */
+/* v1.3.2 — Equal purpose tabs on wider screens; preserve mobile forms. */
 (function(root){
  'use strict';
  function create(options){
@@ -18,6 +18,7 @@
   #dashboardSection.portal-purpose-layout .portal-purpose-nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px;padding:8px;background:var(--theme-surface,#fff);border:1px solid var(--theme-border,#dae5dd);border-radius:16px}
   #dashboardSection.portal-purpose-layout .portal-purpose-nav button{flex:1 0 calc(25% - 8px);min-height:54px;min-width:min(100%,5em);max-width:100%;padding:10px 8px;border:0;border-radius:10px;background:transparent;color:var(--theme-text,#233b2a);font:inherit;font-weight:700;word-break:keep-all;overflow-wrap:anywhere;display:flex;align-items:center;justify-content:center;gap:8px}
   #dashboardSection.portal-purpose-layout .portal-purpose-nav button[aria-selected=true]{background:var(--theme-text,#1f442b);color:var(--theme-surface,#fff)}
+  @media(min-width:576px){#dashboardSection.portal-purpose-layout .portal-purpose-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch}#dashboardSection.portal-purpose-layout .portal-purpose-nav button{box-sizing:border-box;width:100%;min-width:0;height:100%;flex-direction:column;justify-content:flex-start}}
   #dashboardSection.portal-purpose-layout .portal-purpose-nav button:focus-visible{outline:3px solid #508c58;outline-offset:3px}
   #dashboardSection.portal-purpose-layout .portal-purpose-nav button:disabled{opacity:.55}
   #dashboardSection.portal-purpose-layout [data-purpose-panel][hidden]{display:none!important}
@@ -201,5 +202,5 @@
   dashboard.classList.add('portal-purpose-layout');dashboard.dataset.purposeMounted='true';refresh();
   return Object.freeze({isDirect:true,show,refresh,suspend,getSelected:()=>selected});
  }
- root.MemberPortalLayout=Object.freeze({version:'1.3.1',create});
+ root.MemberPortalLayout=Object.freeze({version:'1.3.2',create});
 })(window);
