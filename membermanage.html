@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.258
+Version: v1.0.259
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.3" integrity="sha384-//kW6Kw570ydE6HQ66SJ7P9c54jcTxp7knNWDYBtWUpCcLHhZ3t/AhMJrErCS/mP" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.258 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.259 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -9578,13 +9578,13 @@ const previousFocus = showModal.noticeCleanup?.returnFocus?.();
 closePortalPartnerConfirmation(false);
 showModal.noticeCleanup?.(false);
 const overlay = document.getElementById('customModalOverlay'),button = document.getElementById('btnModalYes');
-const origin = previousFocus?.origin || document.activeElement;
+let origin = previousFocus?.origin || document.activeElement;
 const context = () => JSON.stringify([String(curAuth?.id || ''),String(currentMemberCoopId || ''),String(curMem?.id || ''),portalDirectRevision,window.MemberPortalPurposeController?.getSelected() || '']);
 const originalContext = context();
 const attrs = new Map(['role','aria-modal','aria-labelledby','aria-describedby','aria-label','tabindex'].map(k=>[k,overlay.getAttribute(k)]));
 const editing = origin?.matches('input,textarea,select,[contenteditable="true"]') && !overlay.contains(origin);
-const range = previousFocus?.range || (editing && typeof origin.selectionStart === 'number' ? [origin.selectionStart,origin.selectionEnd,origin.selectionDirection] : null);
-let active = true,displaced = false,observer;
+let range = previousFocus?.range || (editing && typeof origin.selectionStart === 'number' ? [origin.selectionStart,origin.selectionEnd,origin.selectionDirection] : null);
+let active = true,displaced = false,observer,relationTarget = null,relationHandoff = false;
 const visible = node => {
 if(!node?.isConnected || node.disabled) return false;
 for(let n=node;n;n=n.parentElement) if(n.hidden || n.classList.contains('hidden') || getComputedStyle(n).display === 'none' || getComputedStyle(n).visibility === 'hidden') return false;
@@ -9596,10 +9596,27 @@ const box = overlay.querySelector('.custom-modal-box'),item = target.getBounding
 if(item.bottom > area.bottom) box.scrollTop += item.bottom - area.bottom + 8;
 else if(item.top < area.top) box.scrollTop -= area.top - item.top + 8;
 };
-const focusChanged = event => { if(!overlay.contains(event.target) && event.target !== origin) displaced = true; };
+// Only the synchronous, original relationship onchange may hand off ownership.
+const relationChanged = event => {
+if(displaced || context() !== originalContext || event.target !== origin || origin !== document.getElementById('newFamRelSelect') || origin.value !== '직접입력' || !visible(origin)) return;
+const target = document.getElementById('newFamRelInput');
+relationTarget = target;
+queueMicrotask(()=>{ if(relationTarget === target) relationTarget = null; });
+};
+const focusChanged = event => {
+if(overlay.contains(event.target)) {
+if(relationHandoff && !displaced && context() === originalContext) range = [origin.selectionStart,origin.selectionEnd,origin.selectionDirection];
+return;
+}
+if(event.target === origin) return;
+if(!displaced && relationTarget && event.target === relationTarget && context() === originalContext && visible(relationTarget) && origin.closest('#familyModalOverlay') && relationTarget.closest('#familyModalOverlay') === origin.closest('#familyModalOverlay')) {
+origin = relationTarget;range = null;relationTarget = null;relationHandoff = true;return;
+}
+displaced = true;
+};
 const cleanup = restore => {
 if(!active) return;active = false;observer?.disconnect();
-window.removeEventListener('keydown',keydown,true);document.removeEventListener('focusin',focusChanged,true);
+window.removeEventListener('keydown',keydown,true);window.removeEventListener('change',relationChanged,true);document.removeEventListener('focusin',focusChanged,true);
 if(showModal.noticeCleanup === cleanup) showModal.noticeCleanup = null;
 const owned = overlay.contains(document.activeElement);
 for(const [key,value] of attrs) { if(value === null) overlay.removeAttribute(key);else overlay.setAttribute(key,value); }
@@ -9630,7 +9647,7 @@ button.onclick = closeCustomModal;
 overlay.setAttribute('role','alertdialog');overlay.setAttribute('aria-modal','true');
 overlay.removeAttribute('aria-labelledby');overlay.setAttribute('aria-label','안내');overlay.setAttribute('aria-describedby','customModalMsg');overlay.setAttribute('tabindex','-1');
 overlay.style.display = 'flex';showModal.noticeCleanup = cleanup;
-window.addEventListener('keydown',keydown,true);document.addEventListener('focusin',focusChanged,true);
+window.addEventListener('keydown',keydown,true);window.addEventListener('change',relationChanged,true);document.addEventListener('focusin',focusChanged,true);
 const noticeText = document.getElementById('customModalMsg').innerText;
 observer = new MutationObserver(()=>{ if(overlay.style.display !== 'flex' || document.getElementById('btnModalNo').style.display !== 'none' || document.getElementById('customModalMsg').innerText !== noticeText) cleanup(false); });
 observer.observe(overlay,{attributes:true,attributeFilter:['style'],childList:true,subtree:true});
