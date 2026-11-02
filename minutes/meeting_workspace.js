@@ -1,11 +1,11 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.18.1
+Version: v1.18.2
 Change: 2026-10-29 - Bound and recover current meeting detail reads while preserving drafts.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.9.0';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.9.1';
 import { createMeetingNotHeld } from './meeting_not_held.js?v=1.2.2';
 import { listMeetingAnnexes, appendMeetingTextAnnexes, orderMeetingAnnexes, setMeetingAnnexLink, moveMeetingAnnex } from './meeting_annex_import.js?v=1.1.2';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
@@ -1445,6 +1445,12 @@ function renderPdfAttachmentList() {
         ${row.inherited?'': '<button type="button" class="btn btn-small btn-danger" data-pdf-action="delete">삭제</button>'}
       </div>`).join('')
     : '<div class="pdf-attachment-empty">첨부한 PDF가 없습니다. 자동 자료가 없는 항목은 그대로 비워 두어도 됩니다.</div>';
+  for(const pending of MeetingPackageService.pendingPdfCleanups(pdfActionOwner())){
+    const row=document.createElement('div');row.className='pdf-attachment-row';row.dataset.pdfAttachmentId=pending.id;
+    const text=document.createElement('span');text.className='pdf-meta';text.textContent=(pending.title||pending.original_filename||'이전 PDF')+' · 제거 결과·파일 정리 확인 대기';
+    const button=document.createElement('button');button.type='button';button.className='btn btn-small';button.dataset.pdfAction='delete';button.textContent='제거 결과 다시 확인';
+    row.append(text,button);$('pdfAttachmentList').append(row);
+  }
 }
 
 const boardAnnexDrafts = new Map();
@@ -2800,7 +2806,7 @@ async function addPdfAttachment(file) {
 
 async function deletePdfAttachment(id) {
   const owner=pdfActionOwner();
-  const row = state.pdfAttachments.find(item => item.id === id);
+  const row = state.pdfAttachments.find(item => item.id === id)||MeetingPackageService.pendingPdfCleanups(owner).find(item=>item.id===id);
   if (!row||row.inherited||state.current?.status==='CANCELLED') return;
   if (!(await window.CoopDialog.confirm(`「${row.title}」 PDF를 자료집과 비공개 저장소에서 삭제할까요?`))) return;
   if(!pdfActionStillCurrent(owner))return;

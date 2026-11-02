@@ -1,5 +1,5 @@
 /*
-Version: v1.9.0
+Version: v1.9.1
 Change: 2026-10-27 - Use automatic imported call-notice association without a second linking workflow.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -123,7 +123,7 @@ async function acknowledgePdfAttachment(packageId,anchor,id) {
 async function deletePdfAttachment(id) {
   const who=await writeOwner(), coopId=who.coopId, key=JSON.stringify([who.userId,coopId,id]);
   const lookup = pdfDeletions.has(key)?{data:pdfDeletions.get(key)}:await scope(
-    supabase.from('meeting_package_pdf_attachments').select('id,package_id,storage_path').eq('id', id),coopId).maybeSingle();
+    supabase.from('meeting_package_pdf_attachments').select('id,package_id,storage_path,title,original_filename,insert_after_chapter_id').eq('id', id),coopId).maybeSingle();
   if (lookup.error || !lookup.data) return { data: null, error: lookup.error || new Error('첨부 PDF를 찾을 수 없습니다.') };
   pdfDeletions.set(key,lookup.data);
   // Remove the reference atomically before touching the object. An interrupted
@@ -134,6 +134,11 @@ async function deletePdfAttachment(id) {
   }});
   if(!result.error)pdfDeletions.delete(key);
   return result;
+}
+function pendingPdfCleanups(owner) {
+  return [...pdfDeletions.entries()].filter(([key,row])=>{
+    const [user,coop]=JSON.parse(key);return user===owner.userId&&coop===owner.coopId&&row.package_id===owner.packageId;
+  }).map(([,row])=>({...row,cleanup_pending:true}));
 }
 
 async function createPdfAttachmentSignedUrl(storagePath, expiresIn = 1800) {
@@ -304,5 +309,6 @@ export const MeetingPackageService = {
   uploadPdfAttachment,
   acknowledgePdfAttachment,
   deletePdfAttachment,
+  pendingPdfCleanups,
   createPdfAttachmentSignedUrl
 };
