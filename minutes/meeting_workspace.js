@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.18.3
+Version: v1.18.4
 Change: 2026-10-29 - Bound and recover current meeting detail reads while preserving drafts.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -2105,7 +2105,8 @@ async function recordAuditChangeRequest() {
   if(!pdfActionStillCurrent(owner))return;
   if (error) throw error;
   await loadAssemblySources();
-  if(data?.revision_minute_id && pdfActionStillCurrent(owner))state.auditDraftExpected=auditExpected(state.sourceContext?.audit_report);
+  if(!previousInput && data?.revision_minute_id===state.sourceContext?.audit_report?.id
+    && state.auditDraftExpected?.id===audit.id && pdfActionStillCurrent(owner))state.auditDraftExpected=auditExpected(state.sourceContext.audit_report);
   if (data?.revision_minute_id) refreshAutoDrafts({ render: state.currentStep === 'documents' });
   if(!pdfActionStillCurrent(owner))return;
   if(!previousInput && $('auditChangeSummary').value.trim()===summary && $('auditChangeRequestedAt').value===requestedAtValue
