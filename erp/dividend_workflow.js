@@ -179,7 +179,7 @@
         g_dividend_export_state.selectedBatchId = String(id || '');
         exportCache = null; resetPayment();
         renderDividendExportBatches(); renderDividendExportSelectedBatch(getDividendExportSelectedBatch());
-        status('dividendExportLastLoaded','선택한 회차의 최신 지급 내역을 확인하고 있습니다.');
+        status('dividendExportLastLoaded',id ? '선택한 회차의 최신 지급 내역을 확인하고 있습니다.' : '확정된 배당 회차가 없습니다. 회차를 확정하면 지급 내역을 확인할 수 있습니다.');
         return fetchDividendPaymentState();
     };
     fetchDividendPaymentState = function() {
@@ -197,9 +197,13 @@
             g_dividend_export_state.paymentRuns = data.rows; g_dividend_export_state.selectedPaymentRunId = data.run?.payment_run_id || '';
             g_dividend_export_state.paymentRunItems = data.items; g_dividend_export_state.notificationSummary = data.notifications;
             paymentReady = c.batch; renderDividendPaymentRunState(); renderDividendNotificationSummary();
+            status('dividendExportLastLoaded','선택한 회차의 지급 내역을 확인했습니다. 파일을 내려받을 때 최신 자료를 확인합니다.');
             const failed = failedSelections.get(key(c.owner,String(data.run?.payment_run_id || ''))) || [];
             document.querySelectorAll('.dividend-payment-failed-check').forEach(n => { if (!n.disabled) n.checked = failed.includes(n.value); });
-        }, () => retry('dividendPaymentRunMeta','지급 내역을 확인하지 못했습니다. 다시 확인하기 전에는 처리할 수 없습니다.',() => fetchDividendPaymentState()));
+        }, () => {
+            status('dividendExportLastLoaded','지급 내역 조회에 실패했습니다. 이전 목록은 유지되며 재확인 전에는 처리할 수 없습니다.');
+            retry('dividendPaymentRunMeta','지급 내역을 확인하지 못했습니다. 다시 확인하기 전에는 처리할 수 없습니다.',() => fetchDividendPaymentState());
+        });
     };
     fetchDividendExportBatches = function() {
         const c = context('export',''); paymentReady = '';
