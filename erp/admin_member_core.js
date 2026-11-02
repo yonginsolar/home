@@ -7955,7 +7955,8 @@ function retainMemberDetailEdit() {
     if (!isCurrentMemberDetailEditor(state) || memberDetailSaving) return;
     const current = memberDetailSnapshot();
     if (state.editing && JSON.stringify(current) !== JSON.stringify(state.baseline)) {
-        memberDetailDrafts.set(state.key, {current, baseline:state.baseline, server:state.server});
+        memberDetailDrafts.set(state.key, {current, baseline:state.baseline, server:state.server,
+            badgeExpected:state.badgeExpected, badgeTouched:state.badgeTouched});
     } else memberDetailDrafts.delete(state.key);
     syncMemberBasicActions();
 }
@@ -8023,6 +8024,8 @@ function discardMemberBasicDraft() {
 
 for (const event of ['input','change']) document.getElementById('md-tab-basic')?.addEventListener(event, event => {
     if (!memberDetailFields().includes(event.target)) return;
+    if (memberDetailEditState && event.target.closest('#member-badge-checkboxes')
+        && !ADMIN_AUTO_MANAGED_BADGE_CODES.has(event.target.value)) memberDetailEditState.badgeTouched = true;
     if (memberDetailEditState) ++memberDetailEditState.actionRevision;
     retainMemberDetailEdit();
 });
@@ -8034,12 +8037,15 @@ document.getElementById('memberDetailTab')?.addEventListener('shown.bs.tab', () 
 function initializeMemberDetailEdit(owner, member) {
     if (!owner || owner !== memberDetailOwner()) return;
     const key = JSON.stringify([owner, String(member)]);
-    const state = {key, owner, member:String(member), baseline:memberDetailSnapshot(), server:{...g_current_member_row}, editing:true, actionRevision:0};
+    const state = {key, owner, member:String(member), baseline:memberDetailSnapshot(), server:{...g_current_member_row}, editing:true, actionRevision:0,
+        badgeExpected:memberManualBadgeSelection(), badgeTouched:false};
     memberDetailEditState = state;
     const draft = memberDetailDrafts.get(key);
     if (draft) {
         state.baseline = draft.baseline || state.baseline;
         state.server = draft.server || state.server;
+        state.badgeExpected = draft.badgeExpected || state.badgeExpected;
+        state.badgeTouched = draft.badgeTouched === true;
         applyMemberDetailSnapshot(draft.current);
     }
     toggleEditMode(true);
@@ -8049,6 +8055,7 @@ function cancelMemberBasicEdit() {
     const state = memberDetailEditState;
     if (memberDetailSaving || !isCurrentMemberDetailEditor(state)) return;
     applyMemberDetailSnapshot(state.baseline);
+    state.badgeTouched = false;
     MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'),
         {account_num_display:new Map(state.baseline).get('md-bank-account') || ''});
     memberDetailDrafts.delete(state.key);
@@ -8082,6 +8089,25 @@ function memberBasicPatch(state, updates) {
     return {p_id:updates.p_id,p_changes:changes,p_expected:expected};
 }
 
+function memberManualBadgeSelection() {
+    return Array.from(document.querySelectorAll('#member-badge-checkboxes input[type="checkbox"]:checked'))
+        .filter(node => !ADMIN_AUTO_MANAGED_BADGE_CODES.has(node.value))
+        .map(node => String(g_badges.find(b => b.code === node.value)?.id || '')).filter(Boolean).sort();
+}
+
+function memberManualBadgePatch(state) {
+    const container = document.getElementById('member-badge-checkboxes');
+    if (!state.badgeTouched) return null;
+    const selected = memberManualBadgeSelection();
+    if (JSON.stringify(selected) !== JSON.stringify(state.badgeExpected)
+        && (!canManageAdminMemberIndividualBadges() || isAdminMemberSiteProfile()
+            || container?.dataset.readReady !== '1' || !container.querySelector('input[type="checkbox"]'))) {
+        throw new Error('배지 목록을 확인하지 못했습니다. 작성한 내용은 유지됩니다. 창을 닫았다 다시 열어 배지를 확인해 주세요.');
+    }
+    return JSON.stringify(selected) === JSON.stringify(state.badgeExpected) ? null
+        : {p_member_uid:state.member, p_badge_ids:selected, p_expected_badge_ids:state.badgeExpected};
+}
+
 function memberBasicServerSnapshot(submitted, member) {
     const fields = {'md-name':'name','md-phone':'phone','md-email':'email','md-email-original':'email','md-status':'status',
         'md-type':'member_type','md-addr':'address','md-memo':'admin_memo','md-bank-name':'bank_name','md-bank-owner':'account_holder',
@@ -8102,10 +8128,20 @@ function showMemberBasicResult(message, state, action, conflict = null) {
     if (active?.matches('input,textarea,select,[contenteditable="true"]')) return;
     if (!conflict) { void window.CoopDialog?.alert(message,{title:'저장 결과'});return; }
     if (typeof window.CoopDialog?.confirm !== 'function') return;
-    const review={...action};state.confirming=review;
+    const review={...action,snapshot:JSON.stringify(memberDetailSnapshot())};state.confirming=review;
     void window.CoopDialog?.confirm(message+'\n\n최신 저장값을 기준으로 검토를 이어갈까요? 작성한 내용은 유지되며, 다시 저장을 눌러야 반영됩니다.',{title:'변경 내용 확인',confirmText:'검토 이어가기'})
         .then(accepted=>{
             if (!accepted || !isCurrentMemberBasicAction(review)) return;
+            if (conflict.badges) {
+                const ids = new Set(conflict.manual_badge_ids.map(String));
+                const nodes = new Map(Array.from(document.querySelectorAll('#member-badge-checkboxes input')).map(n=>[n.id||'badge:'+n.value,n]));
+                state.baseline = state.baseline.map(([key,value])=>{
+                    const node=nodes.get(key), badge=node && g_badges.find(b=>b.code===node.value);
+                    return [key,badge&&!ADMIN_AUTO_MANAGED_BADGE_CODES.has(badge.code)?ids.has(String(badge.id)):value];
+                });
+                state.badgeExpected = Array.from(ids).sort();
+                ++state.actionRevision;retainMemberDetailEdit();return;
+            }
             const old=new Map(state.baseline), current=memberDetailSnapshot();
             const baseline=memberBasicServerSnapshot(state.baseline,conflict.member);
             const sent=new Map(current), fresh=new Map(baseline);
@@ -8699,7 +8735,7 @@ async function openMemberDetail(id) {
     const typeStr = m.member_type || m.type || '개인';
     const isGroup = String(typeStr).includes('단체');
     let accountManagerLabel = '-';
-    let myBadgeCodes = [];
+    let myBadgeCodes = [], badgeReadReady = false;
     if (isGroup) {
         accountManagerLabel = await resolveMemberAccountManagerLabel(m);
         if (requestRevision !== g_member_detail_revision) return;
@@ -8716,6 +8752,7 @@ async function openMemberDetail(id) {
             .from('coop_member_badges').select('badge_id').eq('member_uid', memberUid);
         if (requestRevision !== g_member_detail_revision) return;
         if (myRows && !badgeError) {
+            badgeReadReady = myRows.every(row => g_badges.some(b => b.id == row.badge_id));
             myBadgeCodes = myRows.map(row => g_badges.find(b => b.id == row.badge_id)?.code)
                 .filter(code => code != null);
         }
@@ -8818,6 +8855,13 @@ async function openMemberDetail(id) {
     } else {
         const badgeContainer = document.getElementById('member-badge-checkboxes');
         if (badgeContainer) badgeContainer.innerHTML = '';
+    }
+    const badgeEditor = document.getElementById('member-badge-checkboxes');
+    if (badgeEditor) badgeEditor.dataset.readReady = badgeReadReady && canManageAdminMemberIndividualBadges() && !isAdminMemberSiteProfile() ? '1' : '0';
+    if (badgeEditor && !badgeReadReady && canManageAdminMemberIndividualBadges() && !isAdminMemberSiteProfile()) {
+        const notice=document.createElement('p');notice.className='small text-warning mb-0';notice.setAttribute('role','status');
+        notice.textContent='배지를 불러오지 못해 배지 수정을 잠갔습니다. 창을 닫았다 다시 열어 확인해 주세요.';
+        badgeEditor.append(notice);
     }
 
     // 5. 모달 설정 및 하위 데이터 로드 (기존 유지)
@@ -9387,7 +9431,8 @@ function toggleEditMode(isEdit) {
     const badgeChecks = document.querySelectorAll('#member-badge-checkboxes input[type="checkbox"]');
     badgeChecks.forEach(chk => {
         const isAutoManaged = chk.dataset.autoManaged === 'true' || ADMIN_AUTO_MANAGED_BADGE_CODES.has(chk.value);
-        chk.disabled = !isEdit || isAutoManaged;
+        chk.disabled = !isEdit || isAutoManaged || !canManageAdminMemberIndividualBadges()
+            || document.getElementById('member-badge-checkboxes')?.dataset.readReady !== '1';
     });
 
     // 3. 버튼 및 UI 제어 (기존 로직 유지)
@@ -9560,6 +9605,7 @@ async function saveMemberBasic() {
                 p_join_details: joinDetails
             };
             const submitted = memberDetailSnapshot();
+            const badgePatch = memberManualBadgePatch(editState);
             lockedControls = Array.from(document.querySelectorAll('#memberDetailModal input,#memberDetailModal select,#memberDetailModal textarea,#memberDetailModal button'))
                 .map(node => [node,node.disabled]);
             lockedControls.forEach(([node]) => { node.disabled = true; });
@@ -9585,23 +9631,19 @@ async function saveMemberBasic() {
             basicSaved = true;
             acceptMemberBasicSave(editState, submitted, updates, false, savedJoinDetails);
 
-            if (canManageAdminMemberIndividualBadges()) {
-                const selectedCodes = [];
-                document.querySelectorAll('#member-badge-checkboxes input:checked').forEach(cb => {
-                    selectedCodes.push(cb.value);
-                });
-
-                const selectedIds = selectedCodes.map(code => {
-                    const match = g_badges.find(b => b.code === code);
-                    return match ? Number(match.id) : null;
-                }).filter(id => id !== null);
-
-                const { error: badgeError } = await _supabase.rpc('sync_member_badges', {
-                    p_member_uid: memberUid,
-                    p_badge_ids: selectedIds
-                });
-
-                if (badgeError) throw new Error('뱃지 동기화 실패: ' + badgeError.message);
+            if (badgePatch) {
+                const { data: badgeResult, error: badgeError } = await _supabase.rpc('sync_member_badges_v2', badgePatch);
+                if (!isCurrentMemberDetailEditor(editState)) return;
+                if (badgeError) throw badgeError;
+                if (badgeResult?.outcome === 'conflict') {
+                    conflict = {...badgeResult,badges:true};
+                    const names = ids => ids.map(id=>g_badges.find(b=>String(b.id)===String(id))?.name || '목록에서 변경된 배지').join(', ') || '없음';
+                    resultMessage = '기본 정보는 저장됐습니다. 다른 작업에서 배지를 먼저 변경해 배지는 저장하지 않았습니다. 선택한 초안은 유지됩니다.\n현재 저장: '
+                        +names(badgeResult.manual_badge_ids)+'\n작성한 선택: '+names(badgePatch.p_badge_ids);
+                    return;
+                }
+                if (badgeResult?.outcome !== 'saved') throw new Error('배지 저장 결과를 확인하지 못했습니다. 선택을 유지한 채 다시 저장하여 결과를 확인해 주세요.');
+                editState.badgeExpected = badgePatch.p_badge_ids;
             }
             if (!isCurrentMemberDetailEditor(editState)) return;
             acceptMemberBasicSave(editState, submitted, updates, true, savedJoinDetails);
