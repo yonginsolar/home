@@ -280,7 +280,7 @@
     }
     function created(a,c) {
         a.done = true; a.pending = false;
-        if (!current(c)) return;
+        if (!current(c) || attempts.get(a.owner) !== a) return;
         g_dividend_batch_state.selectedBatchId = a.payload.id;
         createBaselines.set(a.owner,a.form);
         for (const field of createIds) if (values([field])[field] === a.form[field]) window.ErpWorkspaceResume?.checkpoint(el(field));
