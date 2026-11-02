@@ -1651,41 +1651,87 @@ function buildMemberExportWorksheet(exportType, rows, options = {}) {
     return ws;
 } // End of buildMemberExportWorksheet
 
+let memberExportPreparation = null;
+function isCurrentMemberExportPreparation(run) {
+    return memberExportPreparation === run && !run.cancelled
+        && g_adminMemberRuntime === run.runtime && adminCertificateAuthId === run.authId
+        && !window.frameElement?.hidden && document.getElementById('excelModal')?.classList.contains('show');
+}
+function cancelMemberExportPreparation() {
+    const run = memberExportPreparation;
+    if (run) { run.cancelled = true; run.controller.abort(); }
+    memberExportPreparation = null;
+    const modal = document.getElementById('excelModal');
+    if (modal) { modal.dataset.memberExportPreparation = 'idle'; modal.setAttribute('aria-busy','false'); }
+    const button = document.getElementById('member-export-download');
+    if (button) button.disabled = true;
+}
 async function loadMemberExportModalSettings() {
-    const cutoffInput = document.getElementById('memberExportCutoffDate');
-    const reportYearInput = document.getElementById('memberExportReportYear');
-    const shareUnitInput = document.getElementById('memberExportShareUnitAmount');
-    if (cutoffInput && !cutoffInput.value) cutoffInput.value = getTodayIsoDate();
-    if (reportYearInput && !reportYearInput.value) reportYearInput.value = getCurrentYearText();
-    if (shareUnitInput) shareUnitInput.value = '';
+    const modal = document.getElementById('excelModal');
+    if (!modal?.classList.contains('show') || window.frameElement?.hidden) return;
+    if (memberExportPreparation && isCurrentMemberExportPreparation(memberExportPreparation)
+        && memberExportPreparation.phase === 'loading') return memberExportPreparation.promise;
+    cancelMemberExportPreparation();
+    const run = {runtime:g_adminMemberRuntime,authId:adminCertificateAuthId,controller:new AbortController(),phase:'loading',cancelled:false};
+    memberExportPreparation = run;
+    modal.dataset.memberExportPreparation = 'loading'; modal.setAttribute('aria-busy','true');
+    const message = document.getElementById('member-export-preparation-status');
+    const retry = document.getElementById('member-export-preparation-retry');
+    const button = document.getElementById('member-export-download');
+    if (message) message.textContent = '조합명과 출자 기준·보안 설정을 확인하고 있습니다.';
+    if (retry) retry.hidden = true;
+    if (button) button.disabled = true;
     setMemberExportPinStatus(null);
-    g_memberExportOrgName = '';
-
-    try {
-        const { data: companyConfigs, error: shareError } = await scopeAdminTenant(
-            _supabase
-                .from('ref_company_info')
-                .select('key, value')
-                .in('key', [MEMBER_EXPORT_SHARE_UNIT_KEY, 'company_name', 'orgName'])
-        );
-        if (shareError) throw shareError;
-        const configMap = new Map((companyConfigs || []).map((row) => [String(row.key || '').trim(), row.value]));
-        await refreshMemberCapitalDisplays();
-        g_memberExportOrgName = String(configMap.get('company_name') || configMap.get('orgName') || '').trim();
-    } catch (error) {
-        CoopSafeLog.warn("member export share unit load failed:", error);
-    }
-
-    try {
-        const { data: pinReady, error: pinError } = await _supabase.rpc('member_export_secure_pin_status');
-        if (pinError) throw pinError;
-        setMemberExportPinStatus(!!pinReady);
-    } catch (error) {
-        CoopSafeLog.warn("member export secure pin status failed:", error);
-        setMemberExportPinStatus(null);
-        document.getElementById('memberExportPinStatus').textContent = '확인 실패 · 다시 열어 주세요';
-    }
-    syncExcelOptionState();
+    const cutoff = document.getElementById('memberExportCutoffDate'), year = document.getElementById('memberExportReportYear');
+    if (cutoff && !cutoff.value) cutoff.value = getTodayIsoDate();
+    if (year && !year.value) year.value = getCurrentYearText();
+    let timer, onAbort;
+    const signal = run.controller.signal;
+    const cancellable = request => request.abortSignal ? request.abortSignal(signal) : request;
+    run.promise = (async () => {
+        try {
+            const [company, pin, rules] = await Promise.race([
+                Promise.all([
+                    Promise.resolve().then(() => cancellable(scopeAdminTenant(_supabase.from('ref_company_info')
+                        .select('key, value').in('key',[MEMBER_EXPORT_SHARE_UNIT_KEY,'company_name','orgName'])))),
+                    Promise.resolve().then(() => cancellable(_supabase.rpc('member_export_secure_pin_status'))),
+                    Promise.resolve().then(() => window.CoopMemberCapital.load(_supabase,true))
+                ]),
+                new Promise((_,reject) => {
+                    onAbort = () => reject(new Error('MEMBER_EXPORT_CANCELLED'));
+                    signal.addEventListener('abort',onAbort,{once:true});
+                    timer = setTimeout(() => { reject(new Error('MEMBER_EXPORT_PREPARATION_TIMEOUT')); run.controller.abort(); },15000);
+                })
+            ]);
+            if (!isCurrentMemberExportPreparation(run)) return;
+            if (company.error) throw company.error;
+            if (pin.error) throw pin.error;
+            const map = new Map((company.data || []).map(row => [String(row.key || '').trim(),row.value]));
+            const name = String(map.get('company_name') || map.get('orgName') || '').trim();
+            if (!name || !Number.isSafeInteger(rules?.unit) || rules.unit <= 0) throw new Error('MEMBER_EXPORT_SETTINGS_INCOMPLETE');
+            g_memberExportOrgName = name;
+            const share = document.getElementById('memberExportShareUnitAmount');
+            if (share) share.value = String(rules.unit);
+            setMemberExportPinStatus(!!pin.data);
+            syncExcelOptionState();
+            run.phase = 'ready'; modal.dataset.memberExportPreparation = 'ready';
+            if (message) message.textContent = '준비되었습니다. 기준일과 다운로드 종류를 확인해 주세요.';
+            if (button) button.disabled = false;
+        } catch (_) {
+            if (!isCurrentMemberExportPreparation(run)) return;
+            run.phase = 'failed'; modal.dataset.memberExportPreparation = 'failed';
+            if (message) message.textContent = '다운로드 준비를 마치지 못했습니다. 입력은 그대로 두고 다시 확인해 주세요.';
+            if (retry) retry.hidden = false;
+            if (button) button.disabled = true;
+            const pinStatus = document.getElementById('memberExportPinStatus');
+            if (pinStatus) pinStatus.textContent = '다시 확인 필요';
+        } finally {
+            clearTimeout(timer);
+            signal.removeEventListener('abort',onAbort);
+            if (isCurrentMemberExportPreparation(run)) modal.setAttribute('aria-busy','false');
+        }
+    })();
+    return run.promise;
 } // End of loadMemberExportModalSettings
 
 async function saveMemberExportSecurePin() {
@@ -1713,9 +1759,21 @@ async function saveMemberExportSecurePin() {
 } // End of saveMemberExportSecurePin
 
 async function openExcelModal() {
-    await loadMemberExportModalSettings();
-    syncExcelOptionState();
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('excelModal')).show();
+    const modal = document.getElementById('excelModal');
+    if (!modal || window.frameElement?.hidden) return;
+    if (!modal.dataset.preparationBound) {
+        modal.addEventListener('hide.bs.modal',cancelMemberExportPreparation);
+        modal.addEventListener('shown.bs.modal',() => {
+            if (!memberExportPreparation || !isCurrentMemberExportPreparation(memberExportPreparation)) void loadMemberExportModalSettings();
+        });
+        window.addEventListener('pagehide',cancelMemberExportPreparation);
+        if (window.frameElement) new MutationObserver(records => {
+            if (window.frameElement.hidden || records.some(record => record.oldValue === null)) cancelMemberExportPreparation();
+        }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+        modal.dataset.preparationBound = '1';
+    }
+    if (!modal.classList.contains('show')) bootstrap.Modal.getOrCreateInstance(modal).show();
+    return loadMemberExportModalSettings();
 } // End of openExcelModal
 
 async function readMemberExportPages(makeRequest, key, signal, runtime) {
@@ -1814,9 +1872,9 @@ function normalizeMemberExportDateValue(value) {
     return /^\d{4}-\d{2}-\d{2}$/.test(safeValue) ? safeValue : '';
 } // End of normalizeMemberExportDateValue
 
-function filterMemberExportRecordsByCutoffDate(records, cutoffDate) {
+function filterMemberExportRecordsByCutoffDate(records, cutoffDate, confirmedTestNumbers) {
     const safeRecords = (Array.isArray(records) ? records : []).filter(record => !isWithdrawnMemberExport(record)
-        && !isTestMemberExport(record) && String(record?.status || '').trim() !== '승인대기');
+        && !isTestMemberExport(record, confirmedTestNumbers) && String(record?.status || '').trim() !== '승인대기');
     const safeCutoffDate = normalizeMemberExportDateValue(cutoffDate);
     if (!safeCutoffDate) return safeRecords.slice();
     return safeRecords.filter((record) => {
@@ -1825,7 +1883,7 @@ function filterMemberExportRecordsByCutoffDate(records, cutoffDate) {
     });
 } // End of filterMemberExportRecordsByCutoffDate
 
-function isTestMemberExport(record) {
+function isTestMemberExport(record, confirmedTestNumbers) {
     // Confirmed election rehearsal identities only; never infer from names, blanks or capital.
     const identities = [
         ['07e99e55-bc64-432c-828d-66817d80c0d6', 'QA-ELECT-20261019-C'],
@@ -1833,6 +1891,8 @@ function isTestMemberExport(record) {
     ];
     const id = String(record?.id || '').trim().toLowerCase();
     if (id) return identities.some(([testId]) => id === testId);
+    // Use current numbers from the already-authorized UUID roster, including an empty set.
+    if (confirmedTestNumbers && typeof confirmedTestNumbers.has === 'function') return confirmedTestNumbers.has(String(record?.member_id || '').trim());
     // The existing PIN-protected export returns member numbers, not UUIDs.
     const coopId = String(record?.coop_id || (typeof g_adminMemberRuntime === 'object' ? g_adminMemberRuntime?.coop_id : '') || '').trim();
     return coopId === 'a4e65bb0-aa8e-4cef-a895-cd7865a67fef'
@@ -1849,7 +1909,7 @@ function buildMemberExportRows(records, options = {}) {
     const shareUnitAmount = normalizeMemberExportShareUnitAmount(options.shareUnitAmount);
     const snapshotMap = options.snapshotMap || {};
     const exportType = String(options.exportType || 'public');
-    const eligibleRecords = filterMemberExportRecordsByCutoffDate(safeRecords, cutoffDate);
+    const eligibleRecords = filterMemberExportRecordsByCutoffDate(safeRecords, cutoffDate, options.confirmedTestNumbers);
 
     const normalizedRecords = eligibleRecords.map((record) => {
         const memberId = String(record.member_id || '').trim();
@@ -2817,6 +2877,8 @@ function cancelMemberExcelExport() {
 function beginMemberExcelExport() {
     const modal=document.getElementById('excelModal');
     if (!modal?.classList.contains('show') || window.frameElement?.hidden) return null;
+    if (modal.dataset.memberExportPreparation && (modal.dataset.memberExportPreparation !== 'ready'
+        || !isCurrentMemberExportPreparation(memberExportPreparation))) return null;
     if(!modal.dataset.excelReadBound){
         modal.addEventListener('hide.bs.modal',cancelMemberExcelExport);
         const changed=event=>{
@@ -2914,7 +2976,7 @@ async function downloadExcel() {
     const cutoffDate = attempt.cutoffDate;
     await verifyMemberExcelExportAccess(attempt);
     let shareUnitAmount;
-    try { shareUnitAmount = (await readMemberExcelExport(attempt,()=>refreshMemberCapitalDisplays())).unit; }
+    try { shareUnitAmount = (await readMemberExcelExport(attempt,()=>window.CoopMemberCapital.load(_supabase,true))).unit; }
     catch (_) { if(isCurrentMemberExcelExport(attempt))myAlert('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.', 'error');return; }
     const coopName = String(g_memberExportOrgName || '').trim();
     let dataToExport = [];
@@ -2979,7 +3041,9 @@ async function downloadExcel() {
             cutoffDate,
             shareUnitAmount,
             snapshotMap,
-            exportType: 'secret'
+            exportType: 'secret',
+            confirmedTestNumbers: new Set(exportSourceRecords.filter(record => isTestMemberExport(record))
+                .map(record => String(record.member_id || '').trim()))
         });
         dataToExport = exportResult.rows;
 
@@ -6281,6 +6345,7 @@ if (activePane?.id === 'sub-docs') selectAdminMemberSiteSubTab('sub-sections');
 }
 
 function applyAdminMemberRuntimeUi(runtime) {
+if (g_adminMemberRuntime !== runtime) cancelMemberExportPreparation();
 const oldInformationScope = g_adminMemberRuntime?.coop_id;
 g_adminMemberRuntime = runtime && typeof runtime === 'object' ? runtime : null;
 if (oldInformationScope !== g_adminMemberRuntime?.coop_id || !canAccessAdminMemberTab('members')) invalidateMemberRosterRead();
@@ -6520,6 +6585,7 @@ function switchTab(tabName) {
     if (tabName === 'members' && document.getElementById('tab-members')?.classList.contains('active')) return;
 
     if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) {
+        cancelMemberExportPreparation();
         invalidateAdminCertificatePreparation();
         window.ContributionCertPreview?.clear();
     }
@@ -8829,6 +8895,7 @@ function bindAdminCertificateContext(authId) {
     adminCertificateAuthId = String(authId || '');
     _supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== adminCertificateAuthId)) {
+            cancelMemberExportPreparation();
             invalidateAdminCertificatePreparation();
             invalidateMemberRosterRead();
             adminCertificateAuthId = '';
