@@ -7463,6 +7463,8 @@ function refreshVisibleMemberFundList() {
         || window.frameElement?.hidden || !(pane?.classList.contains('active') || pane?.style.display === 'block')) return Promise.resolve();
     if (document.getElementById('sub-tab-donations')?.classList.contains('active')) return fetchGlobalDonations();
     if (document.getElementById('sub-tab-dividends')?.classList.contains('active')) return fetchGlobalDividends();
+    if (document.getElementById('sub-tab-dividend-batches')?.classList.contains('active')) return initializeDividendBatchTab();
+    if (document.getElementById('sub-tab-dividend-exports')?.classList.contains('active')) return initializeDividendExportTab();
     return Promise.resolve();
 }
 function requestMemberFundListRefresh(sequence) {
@@ -12570,6 +12572,9 @@ async function runDividendUsageCalculation(batchId) {
 } // End of runDividendUsageCalculation
 
 async function approveSelectedDividendBatch() {
+    const workflow = window.DividendWorkflow;
+    const context = workflow?.context('manage');
+    if (!workflow?.current(context)) return;
     const batchId = requireDividendManageBatchId();
     if (!batchId) return;
 
@@ -12582,7 +12587,9 @@ async function approveSelectedDividendBatch() {
     if (!meetingDate) return myAlert('총회일을 입력해주세요.', 'warning');
     if (!agenda) return myAlert('안건명을 입력해주세요.', 'warning');
 
-    myConfirm('선택한 배당 회차에 총회 승인 근거를 반영하시겠습니까?', async () => {
+    const submitted = {dividendBatchMinutesDocId:minutesDocId,dividendBatchMeetingDate:meetingDate,dividendBatchAgenda:agenda,dividendBatchResolutionResult:resolutionResult};
+    if (!await workflow.confirmOnce('선택한 배당 회차에 총회 승인 근거를 반영할까요?',context,() => Object.entries(submitted).every(([id,value]) => getDividendBatchFormValue(id) === value))) return;
+    {
         showLoading(true);
         const { error } = await _supabase.rpc('approve_dividend_batch_by_general_meeting', {
             p_batch_id: batchId,
@@ -12593,20 +12600,26 @@ async function approveSelectedDividendBatch() {
         });
         showLoading(false);
 
+        if (!workflow.current(context)) return;
         if (error) return myAlert('총회 승인 반영 실패: ' + error.message, 'error');
+        workflow.saved(batchId,submitted);
         myAlert('총회 승인 근거가 반영되었습니다.');
         fetchDividendManageBatches(false);
-    });
+    }
 } // End of approveSelectedDividendBatch
 
 async function finalizeSelectedDividendBatch() {
+    const workflow = window.DividendWorkflow;
+    const context = workflow?.context('manage');
+    if (!workflow?.current(context)) return;
     const batchId = requireDividendManageBatchId();
     if (!batchId) return;
 
     const paymentDueDate = getDividendBatchFormValue('dividendBatchPaymentDueDate');
     if (!paymentDueDate) return myAlert('지급예정일을 입력해주세요.', 'warning');
 
-    myConfirm('선택한 배당 회차를 조합원 공개 상태로 확정하시겠습니까?', async () => {
+    if (!await workflow.confirmOnce('선택한 배당 회차를 조합원 공개 상태로 확정할까요?',context,() => getDividendBatchFormValue('dividendBatchPaymentDueDate') === paymentDueDate)) return;
+    {
         showLoading(true);
         const { data, error } = await _supabase.rpc('finalize_dividend_batch_with_payment_policy', {
             p_batch_id: batchId,
@@ -12615,17 +12628,20 @@ async function finalizeSelectedDividendBatch() {
         });
         if (error) {
             showLoading(false);
-            return myAlert('배당 확정 실패: ' + error.message, 'error');
+            if (workflow.current(context)) myAlert('배당 확정 실패: ' + error.message, 'error');
+            return;
         }
         const heldCount = Number(data?.held_item_count || 0);
         const deadline = data?.account_change_deadline ? formatAdminMemberKstDateTime(data.account_change_deadline) : '지급예정일 전날 23:59';
         const notificationResult = await dispatchDividendKakaoNotifications(batchId, 'dividend_finalized', false);
         showLoading(false);
+        if (!workflow.current(context)) return;
+        workflow.saved(batchId,{dividendBatchPaymentDueDate:paymentDueDate});
         await fetchDividendManageBatches(false);
         const notificationText = formatDividendNotificationDispatchResult(notificationResult);
         const alertType = getDividendNotificationDispatchAlertType(notificationResult);
         myAlert(`배당 회차가 확정되었습니다.\n계좌 등록·변경 마감: ${deadline}${heldCount > 0 ? `\n계좌 미등록 지급보류: ${heldCount.toLocaleString('ko-KR')}명` : ''}\n${notificationText}`, alertType);
-    });
+    }
 } // End of finalizeSelectedDividendBatch
 
 const DIVIDEND_BANK_TRANSFER_SAMPLE_BANK_NAMES = Object.freeze([
@@ -13283,9 +13299,13 @@ function createDividendPaymentRequestKey(batchId) {
 } // End of createDividendPaymentRequestKey
 
 async function downloadDividendBankTransferXlsx() {
+    const workflow = window.DividendWorkflow, context = workflow?.context('export');
+    if (!workflow?.current(context)) return;
     if (!(await ensureAdminMemberSpreadsheetReady())) return;
+    if (!workflow.current(context)) return;
     const batchId = requireDividendExportBatchId();
     if (!batchId) return;
+    const fileBatch = {...getDividendExportSelectedBatch()};
 
     const debitMemo = document.getElementById('dividendExportDebitMemo')?.value || '배당금';
     const creditMemo = document.getElementById('dividendExportCreditMemo')?.value || '배당금';
@@ -13308,6 +13328,7 @@ async function downloadDividendBankTransferXlsx() {
         if (error) throw error;
 
         const rows = Array.isArray(data) ? data : [];
+        if (!workflow.current(context)) return;
         g_dividend_export_state.selectedPaymentRunId = runId;
         if (!rows.length) {
             await fetchDividendPaymentState();
@@ -13345,37 +13366,45 @@ async function downloadDividendBankTransferXlsx() {
         XLSX.utils.book_append_sheet(workbook, transferSheet, '대량이체');
         XLSX.utils.book_append_sheet(workbook, auditSheet, '지급확정정보');
         XLSX.utils.book_append_sheet(workbook, bankNameSheet, '은행명');
-        XLSX.writeFile(workbook, makeDividendExportFileName('은행대량이체', 'xlsx'));
+        if (!workflow.current(context)) return;
+        XLSX.writeFile(workbook, makeDividendExportFileName('은행대량이체', 'xlsx',fileBatch));
 
         document.getElementById('dividendExportLastLoaded').innerText = `${formatAdminMemberKstDateTime(new Date())} 지급계좌 잠금 및 은행 XLSX 생성 완료`;
         await fetchDividendExportBatches(false);
         myAlert(`은행 지급파일을 확정했습니다.\n이체 대상 ${rows.length.toLocaleString('ko-KR')}명 · 보류 ${Number(run?.held_count || 0).toLocaleString('ko-KR')}명\n은행 이체가 끝난 뒤 반드시 지급 결과를 반영하세요.`);
     } catch (error) {
-        myAlert('지급파일 생성 실패: ' + getDividendExportRpcErrorMessage(error), 'error');
+        if (workflow.current(context)) myAlert('지급파일 생성 실패: ' + getDividendExportRpcErrorMessage(error), 'error');
     } finally {
         showLoading(false);
     }
 } // End of downloadDividendBankTransferXlsx
 
 async function cancelSelectedDividendPaymentRun() {
+    const workflow = window.DividendWorkflow, context = workflow?.context('export');
+    if (!workflow?.current(context) || !workflow.paymentCurrent()) return;
     const run = getDividendSelectedPaymentRun();
     if (!run || run.status !== 'EXPORTED') return myAlert('취소할 지급파일이 없습니다.', 'warning');
 
-    myConfirm('이 지급파일을 취소하시겠습니까?\n이미 은행에서 이체를 실행했다면 취소하지 말고 지급 결과를 반영해야 합니다.', async () => {
+    if (!await workflow.confirmOnce('이 지급파일을 취소할까요?\n이미 은행에서 이체했다면 취소하지 말고 지급 결과를 반영해 주세요.',context,() => workflow.paymentCurrent() && getDividendSelectedPaymentRun() === run)) return;
+    workflow.paymentLock(true);
+    try {
         showLoading(true);
         const { error } = await _supabase.rpc('cancel_dividend_payment_run', {
             p_payment_run_id: run.payment_run_id,
             p_reason: '관리자 지급파일 재생성'
         });
         showLoading(false);
+        if (!workflow.current(context)) return;
         if (error) return myAlert('지급파일 취소 실패: ' + getDividendExportRpcErrorMessage(error), 'error');
         g_dividend_export_state.selectedPaymentRunId = '';
         await fetchDividendExportBatches(false);
         myAlert('지급파일을 취소했습니다. 계좌 마감 기준으로 다시 생성할 수 있습니다.');
-    });
+    } finally { workflow.paymentLock(false); }
 } // End of cancelSelectedDividendPaymentRun
 
 async function confirmSelectedDividendPaymentRun() {
+    const workflow = window.DividendWorkflow, context = workflow?.context('export');
+    if (!workflow?.current(context) || !workflow.paymentCurrent()) return;
     const run = getDividendSelectedPaymentRun();
     if (!run || run.status !== 'EXPORTED') return myAlert('결과를 반영할 지급파일이 없습니다.', 'warning');
     const failedIds = Array.from(document.querySelectorAll('.dividend-payment-failed-check:checked'))
@@ -13386,7 +13415,10 @@ async function confirmSelectedDividendPaymentRun() {
         ? `은행 이체 결과를 반영하시겠습니까?\n성공 ${successCount.toLocaleString('ko-KR')}명 · 실패 ${failedIds.length.toLocaleString('ko-KR')}명\n체크한 조합원은 지급실패로 남습니다.`
         : `은행에서 전원 이체가 완료된 것을 확인했습니까?\n${Number(run.item_count || 0).toLocaleString('ko-KR')}명을 지급완료 처리합니다.`;
 
-    myConfirm(confirmText, async () => {
+    const failedSnapshot = () => JSON.stringify(Array.from(document.querySelectorAll('.dividend-payment-failed-check:checked')).map(input => String(input.value || '').trim()).filter(Boolean));
+    if (!await workflow.confirmOnce(confirmText,context,() => workflow.paymentCurrent() && getDividendSelectedPaymentRun() === run && failedSnapshot() === JSON.stringify(failedIds))) return;
+    workflow.paymentLock(true);
+    try {
         showLoading(true);
         const { data, error } = await _supabase.rpc('confirm_dividend_payment_run', {
             p_payment_run_id: run.payment_run_id,
@@ -13396,16 +13428,18 @@ async function confirmSelectedDividendPaymentRun() {
         });
         if (error) {
             showLoading(false);
-            return myAlert('지급 결과 반영 실패: ' + getDividendExportRpcErrorMessage(error), 'error');
+            if (workflow.current(context)) myAlert('지급 결과 반영 실패: ' + getDividendExportRpcErrorMessage(error), 'error');
+            return;
         }
 
-        const notificationResult = await dispatchDividendKakaoNotifications(g_dividend_export_state.selectedBatchId, 'dividend_paid', false);
+        const notificationResult = await dispatchDividendKakaoNotifications(context.batch, 'dividend_paid', false);
         showLoading(false);
+        if (!workflow.current(context)) return;
         await fetchDividendExportBatches(false);
         const notificationText = formatDividendNotificationDispatchResult(notificationResult);
         const alertType = getDividendNotificationDispatchAlertType(notificationResult);
         myAlert(`지급 결과를 반영했습니다.\n지급완료 ${Number(data?.paid_count || 0).toLocaleString('ko-KR')}명 · 실패 ${Number(data?.failed_count || 0).toLocaleString('ko-KR')}명 · 보류 ${Number(data?.held_count || 0).toLocaleString('ko-KR')}명\n${notificationText}`, alertType);
-    });
+    } finally { workflow.paymentLock(false); }
 } // End of confirmSelectedDividendPaymentRun
 
 const DIVIDEND_NOTIFICATION_CLAIM_LIMIT = 50;
@@ -13541,7 +13575,10 @@ function getDividendTaxIdentifierReviewText(row) {
 } // End of getDividendTaxIdentifierReviewText
 
 async function downloadDividendTaxLedgerXlsx() {
+    const workflow = window.DividendWorkflow, context = workflow?.context('export');
+    if (!workflow?.current(context)) return;
     if (!(await ensureAdminMemberSpreadsheetReady())) return;
+    if (!workflow.current(context)) return;
     const loaded = await loadDividendExportRows(true);
     if (!loaded) return;
 
@@ -13609,7 +13646,7 @@ async function downloadDividendTaxLedgerXlsx() {
     XLSX.utils.book_append_sheet(workbook, ledgerSheet, '세무검토장부');
     XLSX.utils.book_append_sheet(workbook, summarySheet, '원천세집계');
     XLSX.utils.book_append_sheet(workbook, checkSheet, '제출전확인');
-    XLSX.writeFile(workbook, makeDividendExportFileName('세무검토장부', 'xlsx'));
+    if (workflow.current(context)) XLSX.writeFile(workbook, makeDividendExportFileName('세무검토장부', 'xlsx',loaded.batch));
 } // End of downloadDividendTaxLedgerXlsx
 
 function toDividendCsvCell(value) {
@@ -13660,7 +13697,7 @@ async function downloadDividendHometaxPaymentStatementCsv() {
         ])
     ];
 
-    downloadDividendCsvFile(makeDividendExportFileName('홈택스_이자배당_지급명세서_검토용', 'csv'), csvRows);
+    downloadDividendCsvFile(makeDividendExportFileName('홈택스_이자배당_지급명세서_검토용', 'csv',loaded.batch), csvRows);
 } // End of downloadDividendHometaxPaymentStatementCsv
 
 async function downloadDividendWithholdingSummaryCsv() {
@@ -13690,7 +13727,7 @@ async function downloadDividendWithholdingSummaryCsv() {
         ])
     ];
 
-    downloadDividendCsvFile(makeDividendExportFileName('홈택스_원천세_집계_검토용', 'csv'), csvRows);
+    downloadDividendCsvFile(makeDividendExportFileName('홈택스_원천세_집계_검토용', 'csv',loaded.batch), csvRows);
 } // End of downloadDividendWithholdingSummaryCsv
 
 let g_donation_excel_data = [];
