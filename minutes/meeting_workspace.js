@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.18.2
+Version: v1.18.3
 Change: 2026-10-29 - Bound and recover current meeting detail reads while preserving drafts.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -2811,7 +2811,7 @@ async function deletePdfAttachment(id) {
   if (!(await window.CoopDialog.confirm(`「${row.title}」 PDF를 자료집과 비공개 저장소에서 삭제할까요?`))) return;
   if(!pdfActionStillCurrent(owner))return;
   const { error } = await MeetingPackageService.deletePdfAttachment(id);
-  if (error) throw error;
+  if (error) {if(pdfActionStillCurrent(owner))renderPdfAttachmentList();throw error;}
   if(!pdfActionStillCurrent(owner))return;
   state.pdfAttachments = state.pdfAttachments.filter(item => item.id !== id);
   renderPdfAttachmentList();
