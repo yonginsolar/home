@@ -1,4 +1,4 @@
-/* v1.3.3 — Match purpose navigation to the capital summary width. */
+/* v1.3.4 — Use one content width for navigation and every purpose pane. */
 (function(root){
  'use strict';
  function create(options){
@@ -37,7 +37,7 @@
   #dashboardSection.portal-purpose-layout .portal-purpose-shortcuts strong{font-size:1.1rem}.portal-purpose-shortcuts small{color:var(--theme-muted,#586a5d)}
   #dashboardSection.portal-purpose-layout .portal-shortcut-link{margin-top:auto;font-size:.85rem;color:var(--theme-muted,#586a5d)}
   #dashboardSection.portal-purpose-layout .portal-purpose-overview{max-width:900px;margin:0 auto}
-  #dashboardSection.portal-purpose-layout .portal-purpose-nav{box-sizing:border-box;max-width:900px;width:100%;margin-left:auto;margin-right:auto}
+  #dashboardSection.portal-purpose-layout :is(.portal-purpose-top,.portal-purpose-nav,.portal-purpose-panel){box-sizing:border-box;max-width:900px;width:100%;margin-left:auto;margin-right:auto}
   #dashboardSection.portal-purpose-layout .portal-purpose-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px}
   #dashboardSection.portal-purpose-layout .portal-purpose-heading h3{font-size:1.1rem;font-weight:700;margin:0}
   #dashboardSection.portal-purpose-layout .portal-purpose-heading button{min-height:44px;white-space:normal}
@@ -203,5 +203,5 @@
   dashboard.classList.add('portal-purpose-layout');dashboard.dataset.purposeMounted='true';refresh();
   return Object.freeze({isDirect:true,show,refresh,suspend,getSelected:()=>selected});
  }
- root.MemberPortalLayout=Object.freeze({version:'1.3.3',create});
+ root.MemberPortalLayout=Object.freeze({version:'1.3.4',create});
 })(window);
