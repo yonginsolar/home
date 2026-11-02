@@ -11459,9 +11459,9 @@ async function saveChildMember() {
 }
 
 // ================================================================
-// [초기화] 통합 윈도우 로드 함수 (중복 선언 금지)
+// [초기화] DOM과 필수 스크립트가 준비되면 시작한다. 이미지 등의 load는 기다리지 않는다.
 // ================================================================
-window.onload = async function() {
+async function initializeAdminMember() {
 
     setAdminMemberBootMessage('로그인 상태와 권한을 확인하고 있습니다.', false);
     const memberUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
@@ -11629,7 +11629,29 @@ window.onload = async function() {
         }});
     }
 
-};
+}
+
+// DOMContentLoaded 뒤의 native load/재진입 호출이 권한·목록 조회를 반복하지 않게 한다.
+let adminMemberBootPromise = null;
+function startAdminMemberOnce() {
+    if (!adminMemberBootPromise) {
+        adminMemberBootPromise = Promise.resolve().then(initializeAdminMember);
+        adminMemberBootPromise.catch(error => {
+            CoopSafeLog.error('관리 화면 초기화 실패:', error);
+            // 이미 열린 편집 화면의 입력을 초기화 안내로 덮거나 새로고침하도록 유도하지 않는다.
+            if (document.getElementById('admin-boot-gate')?.classList.contains('hidden')) return;
+            window.AdminMemberAssets?.showBootFailure();
+            setAdminMemberBootMessage('화면 준비를 마치지 못했습니다. 다시 불러오기를 눌러 주세요.', true);
+        });
+    }
+    return adminMemberBootPromise;
+}
+window.onload = startAdminMemberOnce;
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startAdminMemberOnce, { once: true });
+} else {
+    startAdminMemberOnce();
+}
 
     // ================================================================
 // [기능 11] 관리자 로그 뷰어 (신규 추가)
