@@ -1,6 +1,6 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.18.0
+Version: v1.18.1
 Change: 2026-10-29 - Bound and recover current meeting detail reads while preserving drafts.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -2099,6 +2099,7 @@ async function recordAuditChangeRequest() {
   if(!pdfActionStillCurrent(owner))return;
   if (error) throw error;
   await loadAssemblySources();
+  if(data?.revision_minute_id && pdfActionStillCurrent(owner))state.auditDraftExpected=auditExpected(state.sourceContext?.audit_report);
   if (data?.revision_minute_id) refreshAutoDrafts({ render: state.currentStep === 'documents' });
   if(!pdfActionStillCurrent(owner))return;
   if(!previousInput && $('auditChangeSummary').value.trim()===summary && $('auditChangeRequestedAt').value===requestedAtValue
@@ -2755,6 +2756,9 @@ function renderPendingPdf() {
   const draft=pendingPdfDrafts.get(pendingPdfKey());
   button.textContent=draft?'PDF 준비 다시 확인':'PDF 첨부';
   button.title=draft?draft.file.name:'';
+  let filename=$('pendingPdfFilename');
+  if(!filename){filename=document.createElement('span');filename.id='pendingPdfFilename';filename.style.overflowWrap='anywhere';button.after(filename);}
+  filename.textContent=draft?'준비 중: '+draft.file.name:'';
   let replacement=$('replacePendingPdf');
   if(!replacement){replacement=document.createElement('button');replacement.id='replacePendingPdf';replacement.type='button';replacement.className=button.className;
     replacement.textContent='다른 PDF 선택';replacement.onclick=()=>$('pdfAttachmentInput').click();button.after(replacement);}
