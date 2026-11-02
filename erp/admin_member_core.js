@@ -6585,6 +6585,7 @@ function switchTab(tabName) {
     if (tabName === 'members' && document.getElementById('tab-members')?.classList.contains('active')) return;
 
     if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) {
+        if (memberDetailEditState) ++memberDetailEditState.actionRevision;
         cancelMemberExportPreparation();
         invalidateAdminCertificatePreparation();
         window.ContributionCertPreview?.clear();
@@ -7254,6 +7255,7 @@ let memberGroupConfirmation = null;
 let memberGroupConnectPending = null;
 function invalidateMemberAddressSearch() { memberAddressSearch = null; }
 function invalidateMemberRelationSearches() {
+    if (memberDetailEditState) ++memberDetailEditState.actionRevision;
     invalidateMemberAddressSearch();
     memberGroupSearchState = null;
     memberGroupConfirmation = null;
@@ -7715,6 +7717,9 @@ function clearMemberDetailEdits() {
     memberDetailDrafts.clear();
     memberDetailEditState = null;
     memberDetailDraftOwner = '';
+    memberDetailFields().forEach(node => { node.disabled = true; });
+    const basicActions = document.getElementById('btn-save-group');
+    if (basicActions) basicActions.style.display = 'none';
     memberConsultDrafts.clear();
     memberConsultState = null;
     memberChildDrafts.clear();
@@ -7951,18 +7956,90 @@ function retainMemberDetailEdit() {
     if (state.editing && JSON.stringify(current) !== JSON.stringify(state.baseline)) {
         memberDetailDrafts.set(state.key, {current});
     } else memberDetailDrafts.delete(state.key);
+    syncMemberBasicActions();
 }
+
+function memberBasicHasChanges(state = memberDetailEditState) {
+    return isCurrentMemberDetailEditor(state) && state.editing
+        && JSON.stringify(memberDetailSnapshot()) !== JSON.stringify(state.baseline);
+}
+
+function syncMemberBasicActions() {
+    const state = memberDetailEditState;
+    const current = isCurrentMemberDetailEditor(state);
+    const basic = document.getElementById('md-tab-basic')?.classList.contains('active');
+    const bar = document.getElementById('btn-save-group');
+    if (bar) bar.style.display = current && state.editing && basic ? 'flex' : 'none';
+    const dirty = current && memberBasicHasChanges(state);
+    for (const id of ['member-basic-save','member-basic-discard']) {
+        const button = document.getElementById(id);
+        if (button) button.disabled = !dirty || memberDetailSaving;
+    }
+    const status = document.getElementById('member-basic-draft-status');
+    const message = memberDetailSaving ? '저장 중…' : dirty ? '저장하지 않은 변경사항' : '변경사항 없음';
+    if (status && status.textContent !== message) status.textContent = message;
+}
+
+function memberBasicAction() {
+    const state = memberDetailEditState;
+    if (memberDetailSaving || state?.confirming || !memberBasicHasChanges(state)
+        || window.frameElement?.hidden || !document.getElementById('memberDetailModal')?.classList.contains('show')) return null;
+    return {state, revision:++state.actionRevision, detail:g_member_detail_revision,
+        snapshot:JSON.stringify(memberDetailSnapshot())};
+}
+
+function isCurrentMemberBasicAction(action) {
+    return !!action && !memberDetailSaving && isCurrentMemberDetailEditor(action.state) && action.state.editing
+        && action.revision === action.state.actionRevision && action.detail === g_member_detail_revision
+        && action.snapshot === JSON.stringify(memberDetailSnapshot()) && !window.frameElement?.hidden
+        && document.getElementById('memberDetailModal')?.classList.contains('show');
+}
+
+function confirmMemberBasicAction(message, action, callback) {
+    if (typeof window.CoopDialog?.confirm !== 'function') {
+        myAlert('확인창을 준비하지 못했습니다. 작성한 내용은 유지됩니다. 다시 시도해 주세요.', 'warning');
+        return;
+    }
+    action.state.confirming = action;
+    void window.CoopDialog.confirm(message).then(accepted => {
+        if (accepted && isCurrentMemberBasicAction(action)) return callback();
+    }).catch(error => {
+        if (isCurrentMemberDetailEditor(action.state)) myAlert('저장을 준비하지 못했습니다. 작성한 내용을 확인하고 다시 시도해 주세요.', 'warning');
+        CoopSafeLog.error('[erp/admin_member] basic confirmation failed', error);
+    }).finally(() => {
+        if (action.state.confirming === action) action.state.confirming = null;
+    });
+}
+
+function discardMemberBasicDraft() {
+    const action = memberBasicAction();
+    if (!action) return;
+    confirmMemberBasicAction('이 조합원의 정보 수정 초안을 버릴까요?', action, () => {
+        if (!isCurrentMemberBasicAction(action)) return;
+        cancelMemberBasicEdit();
+    });
+}
+
+for (const event of ['input','change']) document.getElementById('md-tab-basic')?.addEventListener(event, event => {
+    if (!memberDetailFields().includes(event.target)) return;
+    if (memberDetailEditState) ++memberDetailEditState.actionRevision;
+    retainMemberDetailEdit();
+});
+document.getElementById('memberDetailTab')?.addEventListener('shown.bs.tab', () => {
+    if (memberDetailEditState) ++memberDetailEditState.actionRevision;
+    syncMemberBasicActions();
+});
 
 function initializeMemberDetailEdit(owner, member) {
     if (!owner || owner !== memberDetailOwner()) return;
     const key = JSON.stringify([owner, String(member)]);
-    const state = {key, owner, member:String(member), baseline:memberDetailSnapshot(), editing:false};
+    const state = {key, owner, member:String(member), baseline:memberDetailSnapshot(), editing:true, actionRevision:0};
     memberDetailEditState = state;
     const draft = memberDetailDrafts.get(key);
     if (draft) {
         applyMemberDetailSnapshot(draft.current);
-        toggleEditMode(true);
     }
+    toggleEditMode(true);
 }
 
 function cancelMemberBasicEdit() {
@@ -7972,7 +8049,8 @@ function cancelMemberBasicEdit() {
     MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'),
         {account_num_display:new Map(state.baseline).get('md-bank-account') || ''});
     memberDetailDrafts.delete(state.key);
-    toggleEditMode(false);
+    ++state.actionRevision;
+    toggleEditMode(true);
     memberDetailFields().forEach(node => window.ErpWorkspaceResume?.checkpoint(node));
 }
 
@@ -7994,7 +8072,8 @@ function acceptMemberBasicSave(state, submitted, updates, includeBadges = false,
         : (key === 'md-email' || key === 'md-email-original') ? savedEmail
         : key === 'md-join-date' ? savedJoinDate : key === 'md-join-category' ? savedJoinCategory
         : (!includeBadges && badgeIds.has(key) ? old.get(key) : value)]);
-    const current = memberDetailSnapshot().map(([key,value]) => [key,
+    const sent = new Map(submitted);
+    const current = memberDetailSnapshot().map(([key,value]) => [key, value !== sent.get(key) ? value :
         key === 'md-bank-account' ? mask : key === 'md-rrn' ? ''
         : (key === 'md-email' || key === 'md-email-original') ? savedEmail
         : key === 'md-join-date' ? savedJoinDate : key === 'md-join-category' ? savedJoinCategory : value]);
@@ -8127,7 +8206,7 @@ function syncMemberDetailTypeLayout() {
     const isGroup = String(typeStr).includes('단체');
     const areaInd = document.getElementById('area-individual');
     const areaGrp = document.getElementById('area-group');
-    const isEdit = document.getElementById('btn-save-group')?.style.display !== 'none';
+    const isEdit = isCurrentMemberDetailEditor() && memberDetailEditState.editing && !memberDetailSaving;
 
     if (areaInd) areaInd.style.display = isGroup ? 'none' : 'block';
     if (areaGrp) areaGrp.style.display = isGroup ? 'block' : 'none';
@@ -8911,7 +8990,10 @@ function bindAdminCertificateContext(authId) {
     if (frame) {
         const observer = new MutationObserver(records => {
             // A hide/return in one turn must still cancel the original preparation.
-            if (frame.hidden || records.some(record => record.oldValue === null)) invalidateAdminCertificatePreparation();
+            if (frame.hidden || records.some(record => record.oldValue === null)) {
+                invalidateAdminCertificatePreparation();
+                if (memberDetailEditState) ++memberDetailEditState.actionRevision;
+            }
             invalidateMemberRosterRead();
             if (frame.hidden) {
                 invalidateDonationListRead();
@@ -9207,10 +9289,11 @@ function markAutoManagedBadgeControls() {
 } // End of markAutoManagedBadgeControls
 
 function toggleEditMode(isEdit) {
+    isEdit = !!isEdit && isCurrentMemberDetailEditor() && !memberDetailSaving;
     if (!isEdit) invalidateMemberAddressSearch();
     if (isCurrentMemberDetailEditor()) memberDetailEditState.editing = !!isEdit;
     // 1. 일반 입력창 제어 (기존 로직)
-    const inputs = document.querySelectorAll('#md-tab-basic input:not([type=checkbox]), #md-tab-basic select, #md-tab-basic textarea');
+    const inputs = memberDetailFields().filter(node => node.type !== 'checkbox');
     inputs.forEach(el => {
         if(el.id === 'md-addr') el.disabled = true;
 
@@ -9237,15 +9320,11 @@ function toggleEditMode(isEdit) {
     const addrDetail = document.getElementById('md-addr-detail');
 
     if(isEdit) {
-        document.getElementById('btn-edit-mode').style.display = 'none';
-        document.getElementById('btn-save-group').style.display = 'flex';
         document.getElementById('rrn-edit-area').style.display = 'block';
-        document.getElementById('rrn-view-area').style.display = 'none';
+        document.getElementById('rrn-view-area').style.display = 'block';
         btnSearch.style.display = 'inline-block';
         addrDetail.style.display = 'block';
     } else {
-        document.getElementById('btn-edit-mode').style.display = 'inline-block';
-        document.getElementById('btn-save-group').style.display = 'none';
         document.getElementById('rrn-edit-area').style.display = 'none';
         document.getElementById('rrn-view-area').style.display = 'block';
         btnSearch.style.display = 'none';
@@ -9268,6 +9347,7 @@ function toggleEditMode(isEdit) {
     }
 
     syncMemberDetailTypeLayout();
+    syncMemberBasicActions();
 }
 
 // [교체] 주소 검색 (검색 결과 -> 기본창, 포커스 -> 상세창)
@@ -9307,12 +9387,18 @@ myAlert('주소 검색을 열지 못했습니다. 잠시 후 다시 시도해 �
 
 async function saveMemberBasic() {
     const editState = memberDetailEditState;
-    if (memberDetailSaving || !isCurrentMemberDetailEditor(editState) || !editState.editing) return;
-    myConfirm("수정된 정보를 저장하시겠습니까?", async () => {
-        if (memberDetailSaving || !isCurrentMemberDetailEditor(editState) || !editState.editing
-            || !document.getElementById('memberDetailModal')?.classList.contains('show')
-            || window.frameElement?.hidden) return;
+    const action = memberBasicAction();
+    if (!action) return;
+    const previousStatus = new Map(editState.baseline).get('md-status') || '';
+    const nextStatus = document.getElementById('md-status').value || '';
+    const statusText = value => ({'':'미설정','승인대기':'승인 대기','정상':'정조합원','탈퇴':'탈퇴','제명':'제명'}[value] || value);
+    const message = previousStatus !== nextStatus
+        ? `조합원 상태를 ‘${statusText(previousStatus)}’에서 ‘${statusText(nextStatus)}’(으)로 변경하고 저장할까요?`
+        : '수정한 정보를 저장할까요?';
+    confirmMemberBasicAction(message, action, async () => {
+        if (!isCurrentMemberBasicAction(action)) return;
         memberDetailSaving = true;
+        syncMemberBasicActions();
         let lockedControls = [], basicSaved = false, completed = false;
         // 1. 주소 및 기본값 처리
         const memberUid = document.getElementById('md-uid').value;
@@ -9452,8 +9538,12 @@ async function saveMemberBasic() {
             memberDetailSaving = false;
             if (current) {
                 if (completed) {
-                    toggleEditMode(false);
-                    memberDetailFields().forEach(node => window.ErpWorkspaceResume?.checkpoint(node));
+                    toggleEditMode(true);
+                    const saved = new Map(editState.baseline);
+                    memberDetailFields().forEach(node => {
+                        const key = node.id || 'badge:' + node.value;
+                        if ((node.type === 'checkbox' ? node.checked : node.value) === saved.get(key)) window.ErpWorkspaceResume?.checkpoint(node);
+                    });
                 }
                 retainMemberDetailEdit();
             }
