@@ -40,7 +40,7 @@
     // A same-turn leave/return still invalidates pending work, without removing input nodes.
     const originalSwitch = switchTab;
     switchTab = function(name, ...args) {
-        if (name !== 'funds-manage' || !el('tab-funds-manage')?.classList.contains('active')) invalidate();
+        if (canAccessAdminMemberTab(name) && (name !== 'funds-manage' || !el('tab-funds-manage')?.classList.contains('active'))) invalidate();
         return originalSwitch.call(this,name,...args);
     };
     document.addEventListener('show.bs.tab', event => {
