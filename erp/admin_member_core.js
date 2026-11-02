@@ -1089,6 +1089,7 @@ const ADMIN_MEMBER_SELECT_COLUMNS = [
     'join_date',
     'birth_date',
     'created_at',
+    'updated_at',
     'address',
     'rrn_display',
     'corp_number',
@@ -7954,7 +7955,7 @@ function retainMemberDetailEdit() {
     if (!isCurrentMemberDetailEditor(state) || memberDetailSaving) return;
     const current = memberDetailSnapshot();
     if (state.editing && JSON.stringify(current) !== JSON.stringify(state.baseline)) {
-        memberDetailDrafts.set(state.key, {current});
+        memberDetailDrafts.set(state.key, {current, baseline:state.baseline, server:state.server});
     } else memberDetailDrafts.delete(state.key);
     syncMemberBasicActions();
 }
@@ -8033,10 +8034,12 @@ document.getElementById('memberDetailTab')?.addEventListener('shown.bs.tab', () 
 function initializeMemberDetailEdit(owner, member) {
     if (!owner || owner !== memberDetailOwner()) return;
     const key = JSON.stringify([owner, String(member)]);
-    const state = {key, owner, member:String(member), baseline:memberDetailSnapshot(), editing:true, actionRevision:0};
+    const state = {key, owner, member:String(member), baseline:memberDetailSnapshot(), server:{...g_current_member_row}, editing:true, actionRevision:0};
     memberDetailEditState = state;
     const draft = memberDetailDrafts.get(key);
     if (draft) {
+        state.baseline = draft.baseline || state.baseline;
+        state.server = draft.server || state.server;
         applyMemberDetailSnapshot(draft.current);
     }
     toggleEditMode(true);
@@ -8054,8 +8057,80 @@ function cancelMemberBasicEdit() {
     memberDetailFields().forEach(node => window.ErpWorkspaceResume?.checkpoint(node));
 }
 
+function memberBasicPatch(state, updates) {
+    const old = new Map(state.baseline), now = new Map(memberDetailSnapshot());
+    const changes = {}, expected = {member_type:state.server.member_type || '개인'};
+    const fields = {name:['md-name','p_name'],phone:['md-phone','p_phone'],email:['md-email','p_email'],
+        bank_name:['md-bank-name','p_bank_name'],account_holder:['md-bank-owner','p_bank_owner'],status:['md-status','p_status'],
+        member_type:['md-type','p_member_type'],admin_memo:['md-memo','p_admin_memo'],corp_number:['md-corp-num','p_corp_number'],
+        business_number:['md-biz-num','p_business_number'],representative_name:['md-representative-name','p_representative_name'],
+        contact_name:['md-contact-name','p_contact_name'],contact_position:['md-contact-position','p_contact_position'],
+        preferred_name:['md-preferred-name','p_preferred_name'],preferred_name_position:['md-preferred-name-position','p_preferred_name_position']};
+    for (const [key,[id,param]] of Object.entries(fields)) {
+        if (now.get(id) !== old.get(id)) { changes[key]=updates[param];expected[key]=state.server[key] ?? null; }
+    }
+    if (['md-addr','md-addr-detail'].some(id=>now.get(id)!==old.get(id))) {
+        changes.address=updates.p_address;expected.address=state.server.address ?? null;
+    }
+    for (const key of ['join_date','join_category']) if (Object.hasOwn(updates.p_join_details,key)) {
+        changes[key]=updates.p_join_details[key];expected[key]=state.server[key] ?? null;
+    }
+    for (const [key,param] of [['bank_account','p_bank_account'],['rrn','p_rrn']]) if (updates[param]?.trim() && !updates[param].includes('*')) {
+        changes[key]=updates[param];expected.updated_at=state.server.updated_at ?? null;
+    }
+    if (Object.hasOwn(changes,'member_type')) for (const key of ['representative_name','contact_name','contact_position','preferred_name','preferred_name_position']) expected[key]=state.server[key] ?? null;
+    return {p_id:updates.p_id,p_changes:changes,p_expected:expected};
+}
+
+function memberBasicServerSnapshot(submitted, member) {
+    const fields = {'md-name':'name','md-phone':'phone','md-email':'email','md-email-original':'email','md-status':'status',
+        'md-type':'member_type','md-addr':'address','md-memo':'admin_memo','md-bank-name':'bank_name','md-bank-owner':'account_holder',
+        'md-bank-account':'account_num_display','md-corp-num':'corp_number','md-biz-num':'business_number','md-representative-name':'representative_name',
+        'md-contact-name':'contact_name','md-contact-position':'contact_position','md-preferred-name':'preferred_name',
+        'md-preferred-name-position':'preferred_name_position','md-join-date':'join_date','md-join-category':'join_category'};
+    return submitted.map(([key,value])=>[key,key==='md-rrn'||key==='md-addr-detail'?'':fields[key]
+        ? String(member[fields[key]] ?? (key==='md-preferred-name-position'?'before':'')) : value]);
+}
+
+function showMemberBasicResult(message, state, action, conflict = null) {
+    if (!isCurrentMemberDetailEditor(state) || action.detail!==g_member_detail_revision || action.revision!==state.actionRevision
+        || window.frameElement?.hidden || !document.getElementById('memberDetailModal')?.classList.contains('show')) return;
+    const status=document.getElementById('member-basic-draft-status');
+    if (status) status.textContent=message.split('\n')[0];
+    const active=document.activeElement;
+    // A newer input owns its caret. Keep the result inline instead of opening a dialog over it.
+    if (active?.matches('input,textarea,select,[contenteditable="true"]')) return;
+    if (!conflict) { void window.CoopDialog?.alert(message,{title:'저장 결과'});return; }
+    if (typeof window.CoopDialog?.confirm !== 'function') return;
+    const review={...action};state.confirming=review;
+    void window.CoopDialog?.confirm(message+'\n\n최신 저장값을 기준으로 검토를 이어갈까요? 작성한 내용은 유지되며, 다시 저장을 눌러야 반영됩니다.',{title:'변경 내용 확인',confirmText:'검토 이어가기'})
+        .then(accepted=>{
+            if (!accepted || !isCurrentMemberBasicAction(review)) return;
+            const old=new Map(state.baseline), current=memberDetailSnapshot();
+            const baseline=memberBasicServerSnapshot(state.baseline,conflict.member);
+            const sent=new Map(current), fresh=new Map(baseline);
+            // Only untouched fields adopt the newest values; every actual draft stays as written.
+            applyMemberDetailSnapshot(current.map(([key,value])=>[key,value===old.get(key)?fresh.get(key):sent.get(key)]));
+            state.baseline=baseline;state.server={...conflict.member};
+            Object.assign(g_current_member_row||{},conflict.member,{account_number:conflict.member.account_num_display||null});
+            ++state.actionRevision;retainMemberDetailEdit();
+        }).catch(error=>CoopSafeLog.error('[erp/admin_member] conflict review failed',error))
+        .finally(()=>{if(state.confirming===review)state.confirming=null;});
+}
+
 function acceptMemberBasicSave(state, submitted, updates, includeBadges = false, savedJoinDetails = null) {
     if (!isCurrentMemberDetailEditor(state)) return;
+    if (savedJoinDetails?.member) {
+        const old=new Map(state.baseline), sent=new Map(submitted), fresh=memberBasicServerSnapshot(submitted,savedJoinDetails.member);
+        const badgeKeys=new Set(Array.from(document.querySelectorAll('#member-badge-checkboxes input')).map(n=>n.id||'badge:'+n.value));
+        state.baseline=fresh.map(([key,value])=>[key,!includeBadges&&badgeKeys.has(key)?old.get(key):value]);
+        const accepted=new Map(fresh);
+        applyMemberDetailSnapshot(memberDetailSnapshot().map(([key,value])=>[key,value===sent.get(key)?accepted.get(key):value]));
+        state.server={...savedJoinDetails.member};
+        Object.assign(g_current_member_row||{},savedJoinDetails.member,{account_number:savedJoinDetails.member.account_num_display||null});
+        MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'),savedJoinDetails.member);
+        return;
+    }
     const old = new Map(state.baseline);
     const savedEmail = updates.p_email || old.get('md-email-original') || '';
     const joinValue = (key, input) => savedJoinDetails && Object.prototype.hasOwnProperty.call(savedJoinDetails, key)
@@ -9399,7 +9474,7 @@ async function saveMemberBasic() {
         if (!isCurrentMemberBasicAction(action)) return;
         memberDetailSaving = true;
         syncMemberBasicActions();
-        let lockedControls = [], basicSaved = false, completed = false;
+        let lockedControls = [], basicSaved = false, completed = false, resultMessage = '', conflict = null;
         // 1. 주소 및 기본값 처리
         const memberUid = document.getElementById('md-uid').value;
         const basicAddr = document.getElementById('md-addr').value;
@@ -9489,9 +9564,23 @@ async function saveMemberBasic() {
                 .map(node => [node,node.disabled]);
             lockedControls.forEach(([node]) => { node.disabled = true; });
 
-            const { data: savedJoinDetails, error: basicError } = await _supabase.rpc('update_member_details_secure_v4', updates);
+            const patch = memberBasicPatch(editState, updates);
+            const { data: savedJoinDetails, error: basicError } = await _supabase.rpc('update_member_details_secure_v5', patch);
             if (basicError) throw basicError;
             if (!isCurrentMemberDetailEditor(editState)) return;
+            if (savedJoinDetails?.outcome === 'conflict') {
+                conflict = savedJoinDetails;
+                const labels={name:'이름·단체명',phone:'전화번호',email:'이메일',address:'주소',status:'상태',member_type:'회원 유형',
+                    bank_name:'은행',account_holder:'예금주',bank_account:'계좌 정보',rrn:'주민등록번호',admin_memo:'메모',
+                    corp_number:'법인등록번호',business_number:'사업자등록번호',representative_name:'대표자',contact_name:'담당자',contact_position:'직함',
+                    preferred_name:'별칭',preferred_name_position:'별칭 위치',join_date:'가입일',join_category:'가입구분'};
+                const display=(key,value)=>key==='status'?statusText(value):String(value||'미설정');
+                resultMessage='다른 작업에서 먼저 변경한 항목이 있어 저장하지 않았습니다. 초안은 그대로 유지됩니다.\n'
+                    + [...new Set(conflict.fields)].map(key=>['rrn','bank_account'].includes(key)?'• '+labels[key]+': 최신 정보를 다시 확인해 주세요.'
+                        :'• '+(labels[key]||key)+'\n  현재 저장: '+display(key,conflict.member[key])+'\n  작성한 값: '+display(key,Object.hasOwn(patch.p_changes,key)?patch.p_changes[key]:editState.server[key])).join('\n');
+                return;
+            }
+            if (savedJoinDetails?.outcome !== 'saved' || !savedJoinDetails.member) throw new Error('저장 결과를 확인하지 못했습니다. 작성한 내용은 유지됩니다. 최신 목록에서 반영 여부를 확인해 주세요.');
             basicSaved = true;
             acceptMemberBasicSave(editState, submitted, updates, false, savedJoinDetails);
 
@@ -9519,7 +9608,7 @@ async function saveMemberBasic() {
             memberDetailDrafts.delete(editState.key);
 
             showLoading(false);
-            myAlert('저장되었습니다.');
+            resultMessage = '저장되었습니다.';
             void loadMemberInformationSummary();
             void refreshMemberDashboardAfterSave();
             if (!document.getElementById('member-information-list-panel').hidden) void loadMemberInformationList(true);
@@ -9531,7 +9620,7 @@ async function saveMemberBasic() {
             showLoading(false);
             if (!isCurrentMemberDetailEditor(editState)) return;
             CoopSafeLog.error("[erp/admin_member] operation failed", err);
-            myAlert((basicSaved ? '기본 정보는 저장됐지만 나머지 처리를 완료하지 못했습니다. ' : '오류 발생: ') + err.message, 'error');
+            resultMessage = (basicSaved ? '기본 정보는 저장됐지만 나머지 처리를 완료하지 못했습니다. ' : err.code ? '저장하지 못했습니다. ' : '저장 결과를 확인하지 못했습니다. ') + err.message;
         } finally {
             const current = isCurrentMemberDetailEditor(editState);
             lockedControls.forEach(([node,disabled]) => { if (node.isConnected) node.disabled = current ? disabled : true; });
@@ -9548,6 +9637,7 @@ async function saveMemberBasic() {
                 retainMemberDetailEdit();
             }
             showLoading(false);
+            if (resultMessage) showMemberBasicResult(resultMessage, editState, action, conflict);
         }
     });
 }
