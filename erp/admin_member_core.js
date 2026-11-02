@@ -9474,7 +9474,7 @@ async function saveMemberBasic() {
         if (!isCurrentMemberBasicAction(action)) return;
         memberDetailSaving = true;
         syncMemberBasicActions();
-        let lockedControls = [], basicSaved = false, completed = false, resultMessage = '', conflict = null;
+        let lockedControls = [], basicSaved = false, completed = false, requestStarted = false, resultMessage = '', conflict = null;
         // 1. 주소 및 기본값 처리
         const memberUid = document.getElementById('md-uid').value;
         const basicAddr = document.getElementById('md-addr').value;
@@ -9565,6 +9565,7 @@ async function saveMemberBasic() {
             lockedControls.forEach(([node]) => { node.disabled = true; });
 
             const patch = memberBasicPatch(editState, updates);
+            requestStarted = true;
             const { data: savedJoinDetails, error: basicError } = await _supabase.rpc('update_member_details_secure_v5', patch);
             if (basicError) throw basicError;
             if (!isCurrentMemberDetailEditor(editState)) return;
@@ -9620,7 +9621,8 @@ async function saveMemberBasic() {
             showLoading(false);
             if (!isCurrentMemberDetailEditor(editState)) return;
             CoopSafeLog.error("[erp/admin_member] operation failed", err);
-            resultMessage = (basicSaved ? '기본 정보는 저장됐지만 나머지 처리를 완료하지 못했습니다. ' : err.code ? '저장하지 못했습니다. ' : '저장 결과를 확인하지 못했습니다. ') + err.message;
+            resultMessage = (basicSaved ? '기본 정보는 저장됐지만 나머지 처리를 완료하지 못했습니다. '
+                : !requestStarted ? '입력 내용을 확인해 주세요. ' : err.code ? '저장하지 못했습니다. ' : '저장 결과를 확인하지 못했습니다. ') + err.message;
         } finally {
             const current = isCurrentMemberDetailEditor(editState);
             lockedControls.forEach(([node,disabled]) => { if (node.isConnected) node.disabled = current ? disabled : true; });
