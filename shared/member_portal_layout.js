@@ -1,4 +1,4 @@
-/* v1.3.4 — Use one content width for navigation and every purpose pane. */
+/* v1.3.5 — Align purpose panes and give application cards two desktop columns. */
 (function(root){
  'use strict';
  function create(options){
@@ -64,7 +64,7 @@
   #dashboardSection.portal-purpose-layout .portal-direct-grid>.portal-direct-card{display:flex;flex-direction:column}
   #dashboardSection.portal-purpose-layout .portal-direct-grid>.portal-direct-card>[data-direct-section]{display:flex!important;flex:1;min-width:0;flex-direction:column}
   #dashboardSection.portal-purpose-layout .portal-direct-grid [data-direct-section]>button:last-child{margin-top:auto}
-  @media(min-width:992px){#dashboardSection.portal-purpose-layout .portal-direct-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+  @media(min-width:992px){#dashboardSection.portal-purpose-layout .portal-direct-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
   #dashboardSection.portal-purpose-layout .portal-direct-card{min-width:0;height:auto;overflow:visible;margin:0 0 18px}
   #dashboardSection.portal-purpose-layout .portal-direct-card>[data-direct-section]{display:block!important}
   #dashboardSection.portal-purpose-layout .portal-direct-card[hidden]{display:none!important}
@@ -203,5 +203,5 @@
   dashboard.classList.add('portal-purpose-layout');dashboard.dataset.purposeMounted='true';refresh();
   return Object.freeze({isDirect:true,show,refresh,suspend,getSelected:()=>selected});
  }
- root.MemberPortalLayout=Object.freeze({version:'1.3.4',create});
+ root.MemberPortalLayout=Object.freeze({version:'1.3.5',create});
 })(window);
