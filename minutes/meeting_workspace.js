@@ -1,11 +1,11 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.17.6
+Version: v1.18.0
 Change: 2026-10-29 - Bound and recover current meeting detail reads while preserving drafts.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.8.0';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.9.0';
 import { createMeetingNotHeld } from './meeting_not_held.js?v=1.2.2';
 import { listMeetingAnnexes, appendMeetingTextAnnexes, orderMeetingAnnexes, setMeetingAnnexLink, moveMeetingAnnex } from './meeting_annex_import.js?v=1.1.2';
 import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
@@ -70,6 +70,7 @@ const state = {
   agendaDirty: false,
   pendingDocuments: new Set(),
   auditDraftDirty: false,
+  auditDraftExpected: null,
   chapters: [],
   activeChapterId: null,
   loading: false,
@@ -149,6 +150,7 @@ function renderDocumentEditState() {
   document.querySelectorAll('#boardAnnexLinks select,#boardAnnexLinks button').forEach(n=>n.disabled=busy||!allowed||n.dataset.edge==='true');
   $('documentEditConflict').hidden=!documentConflicts.has(documentEditKey());
   renderNotHeldState();
+  renderPendingPdf();
   // Viewing, printing and existing File selection are independent of body editing.
 }
 async function refreshDocumentEditState() {
@@ -733,6 +735,7 @@ function setBusy(value) {
 
 function hasUnsavedPacketChanges({ includeAnnex = true } = {}) {
   return state.infoDirty || state.agendaDirty || state.documentDirty || state.auditDraftDirty || state.pendingDocuments.size > 0
+    || [...pendingPdfDrafts.keys()].some(key=>{const [user,coop]=JSON.parse(key);return user===state.session?.user?.id&&coop===state.runtime?.coop_id;})
     || (includeAnnex && hasUnsavedBoardAnnexDraft())
     || (!!state.current && MeetingPackageService.documentEdits.hasPending(pdfActionOwner()));
 }
@@ -1218,7 +1221,10 @@ function renderAuditChangePanel() {
     : '<div class="audit-change-empty">기록된 수정 요청이 없습니다.</div>';
 }
 
-function renderAuditStep({ preserveDraft = false } = {}) {
+function auditExpected(audit) {
+  return {id:audit?.id||null,title:audit?.title??null,content:audit?.content??null};
+}
+function renderAuditStep({ preserveDraft = true } = {}) {
   const panel = $('auditStepPanel');
   const editor = $('auditDraftEditor');
   if (!panel || panel.hidden || !editor) return;
@@ -1273,6 +1279,7 @@ function renderAuditStep({ preserveDraft = false } = {}) {
       editor.classList.add('is-empty');
     }
     state.auditDraftDirty = false;
+    state.auditDraftExpected = auditExpected(audit);
   }
 
   editor.contentEditable = closingReady && !locked ? 'true' : 'false';
@@ -1307,10 +1314,12 @@ async function loadAssemblySources({ render = true } = {}) {
     }
     return null;
   }
+  const owner=pdfActionOwner();
   const [sourceResult, requestResult] = await Promise.all([
     MeetingPackageService.getAssemblySources(state.current.id),
     MeetingPackageService.listAuditChangeRequests(state.current.id)
   ]);
+  if(!pdfActionStillCurrent(owner))throw Object.assign(new Error('이전 회의 조회를 중단했습니다.'),{code:'MEETING_EDIT_REQUEST_STALE'});
   if (sourceResult.error) throw sourceResult.error;
   if (requestResult.error) throw requestResult.error;
   state.sourceContext = sourceResult.data || null;
@@ -1983,7 +1992,11 @@ async function saveAuditReportForReview() {
   if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY' || state.current.assembly_kind === 'EXTRAORDINARY') {
     throw new Error('감사보고서 연동은 정기총회에서만 사용합니다.');
   }
+  const owner=pdfActionOwner(), editor=$('auditDraftEditor');
+  const content=sanitizeHtml(editor.innerHTML), expected=state.auditDraftExpected||auditExpected(state.sourceContext?.audit_report);
+  if (!String(editor.textContent || '').trim()) throw new Error('감사보고서 내용을 먼저 작성해 주세요.');
   await saveInfo({ quiet: true });
+  if(!pdfActionStillCurrent(owner))return null;
   const source = await loadAssemblySources();
   if (!source?.closing_report) {
     throw new Error(`${source?.fiscal_year || $('fiscalYear').value}년도 결산보고서를 회계관리에서 먼저 생성해 주세요.`);
@@ -1994,26 +2007,36 @@ async function saveAuditReportForReview() {
   if (auditReportLocked(source.audit_report)) {
     throw new Error('감사의 전자서명이 시작되어 감사보고서 내용을 바꿀 수 없습니다.');
   }
-  const editor = $('auditDraftEditor');
-  const content = sanitizeHtml(editor.innerHTML);
-  if (!String(editor.textContent || '').trim()) throw new Error('감사보고서 내용을 먼저 작성해 주세요.');
   const title = `${source.fiscal_year}년도 감사보고서`;
-  const { data, error } = await MeetingPackageService.prepareAuditReport(state.current.id, { title, content });
-  if (error) throw error;
-  state.auditDraftDirty = false;
-  await loadAssemblySources();
-  const savedAudit = state.sourceContext?.audit_report;
-  if (auditReportLocked(savedAudit) && sanitizeHtml(savedAudit?.content || '') !== content) {
-    throw new Error('감사의 전자서명이 시작되어 방금 수정한 내용은 저장하지 않았습니다. 전자검토 화면에서 확정 내용을 확인해 주세요.');
+  const { data, error, previousInput } = await MeetingPackageService.prepareAuditReport(owner.packageId, { title, content, expected },()=>pdfActionStillCurrent(owner));
+  if(!pdfActionStillCurrent(owner))return null;
+  if (error) {
+    if(String(error.message).includes('MEETING_AUDIT_CONFLICT')){
+      await loadAssemblySources();
+      if(pdfActionStillCurrent(owner)){
+        const latest=state.sourceContext?.audit_report;
+        await window.CoopDialog.alert('다른 사람이 감사보고서를 수정했습니다. 작성한 초안은 유지했습니다. 전자검토 문서에서 최신 내용을 확인한 뒤 다시 저장해 주세요.');
+        if(pdfActionStillCurrent(owner))state.auditDraftExpected=auditExpected(latest);
+      }
+    }
+    throw error;
   }
+  if(previousInput)throw new Error('이전 감사보고서 저장 결과를 확인했습니다. 지금 추가로 쓴 내용은 미저장 상태로 남겼습니다. 최신 문서를 확인한 뒤 다시 저장해 주세요.');
+  const unchanged=sanitizeHtml(editor.innerHTML)===content;
+  if(unchanged){state.auditDraftDirty=false;state.auditDraftExpected={id:data.id,title,content};}
+  else state.auditDraftDirty=true;
+  // No reread/render may replace extra typing before the exact save is confirmed.
+  try{await loadAssemblySources();}catch(_){throw new Error('감사보고서는 저장했지만 최신 조회를 마치지 못했습니다. 다시 확인한 뒤 전자검토를 요청해 주세요.');}
+  if(!pdfActionStillCurrent(owner)||!unchanged||sanitizeHtml(editor.innerHTML)!==content)return null;
   refreshAutoDrafts({ render: state.currentStep === 'documents' });
   renderAuditStep();
   return data?.id || state.sourceContext?.audit_report?.id || null;
 }
 
 async function requestAuditReview() {
+  const owner=pdfActionOwner();
   const minuteId = await saveAuditReportForReview();
-  if (!minuteId) throw new Error('전자검토를 요청할 감사보고서를 찾지 못했습니다.');
+  if (!minuteId || !pdfActionStillCurrent(owner)) return;
   let notification = null;
   let notificationError = null;
   if (minuteId) {
@@ -2024,6 +2047,7 @@ async function requestAuditReview() {
       console.warn('notifyAuditReportSigners failed:', error?.message || error);
     }
   }
+  if(!pdfActionStillCurrent(owner))return;
   if (minuteId) window.open(`/minutes/minutes_sign.html?minuteId=${encodeURIComponent(minuteId)}`, '_blank', 'noopener');
   const sentCount = Number(notification?.sentCount || 0);
   const pendingKakaoCount = Number(notification?.kakaoTemplatePendingCount || 0);
@@ -2048,6 +2072,7 @@ function openAuditReport() {
 }
 
 async function recordAuditChangeRequest() {
+  const owner=pdfActionOwner();
   const audit = state.sourceContext?.audit_report;
   if (!state.current || !audit?.id) throw new Error('전자검토 중인 감사보고서를 먼저 준비해 주세요.');
   const auditorId = Number($('auditChangeAuditor').value || 0);
@@ -2062,22 +2087,26 @@ async function recordAuditChangeRequest() {
 
   const createRevision = auditReportLocked(audit);
   if (createRevision && !(await window.CoopDialog.confirm('기존 전자서명본은 그대로 보존하고, 감사 전원이 다시 확인할 개정본을 만들까요?'))) return;
-  const { data, error } = await MeetingPackageService.recordAuditChangeRequest(state.current.id, {
-    request_key: crypto.randomUUID(),
+  if(!pdfActionStillCurrent(owner))return;
+  const { data, error, previousInput } = await MeetingPackageService.recordAuditChangeRequest(owner.packageId, {
+    source_report_id:audit.id,
     requested_auditor_official_id: auditorId,
     request_method: method,
     requested_at: requestedAt.toISOString(),
     request_summary: summary,
     create_revision: createRevision
-  });
+  },()=>pdfActionStillCurrent(owner));
+  if(!pdfActionStillCurrent(owner))return;
   if (error) throw error;
-
-  if (data?.revision_minute_id) state.auditDraftDirty = false;
   await loadAssemblySources();
   if (data?.revision_minute_id) refreshAutoDrafts({ render: state.currentStep === 'documents' });
-  $('auditChangeSummary').value = '';
-  $('auditChangeRequestedAt').value = toDateTimeLocalValue();
-  $('auditChangeFormDetails').open = false;
+  if(!pdfActionStillCurrent(owner))return;
+  if(!previousInput && $('auditChangeSummary').value.trim()===summary && $('auditChangeRequestedAt').value===requestedAtValue
+    && Number($('auditChangeAuditor').value)===auditorId && $('auditChangeMethod').value===method){
+    $('auditChangeSummary').value = '';
+    $('auditChangeRequestedAt').value = toDateTimeLocalValue();
+    $('auditChangeFormDetails').open = false;
+  }
   $('auditChangeHistoryDetails').open = true;
   renderAuditStep();
   showToast(data?.revision_minute_id
@@ -2496,12 +2525,16 @@ async function createPackage() {
   if (!title) throw new Error('회의 제목을 입력하세요.');
   const type = $('newMeetingType').value;
   const number = $('newMeetingNumber').value.trim(), assemblyKind = $('newAssemblyKind').value;
+  const creationIdentity=pdfIdentityRevision, dialogRevision=newPackageDialogRevision;
+  const creationCurrent=()=>draftOwner===newPackageOwnerKey() && creationIdentity===pdfIdentityRevision
+    && dialogRevision===newPackageDialogRevision && $('newPackageModal').classList.contains('show') && !window.frameElement?.hidden;
   const sources = type === 'BOARD' ? state.packages.filter(row => row.meeting_type === 'BOARD' && isPastPackage(row))
     .sort((a, b) => String(b.meeting_date).localeCompare(String(a.meeting_date))
       || String(b.updated_at || '').localeCompare(String(a.updated_at || ''))) : [];
   let sourceStyle = null;
   for (const source of sources) {
     const previous = await MeetingPackageService.getPackage(source.id);
+    if(!creationCurrent())return;
     if (previous.error) throw previous.error;
     const sourceDocument = previous.data?.documents?.find(row => row.document_type === 'SCENARIO')
       || previous.data?.documents?.find(row => row.document_type === 'SCENARIO_SECRETARIAT');
@@ -2518,8 +2551,19 @@ async function createPackage() {
     fiscal_year: type === 'GENERAL_ASSEMBLY' && assemblyKind !== 'EXTRAORDINARY' ? new Date().getFullYear() - 1 : null,
     eligible_count: candidates.length,
     chair_official_id: chair?.id || null
-  });
+  },creationCurrent);
+  if(!creationCurrent())return;
   if (error) throw error;
+  // A confirmed creation is checkpointed before optional template seeding.
+  // If that later step fails, reopening New cannot silently create a second one.
+  if (newPackageDrafts.get(draftKey)?.values === draftValues) newPackageDrafts.delete(draftKey);
+  if (draftKey === newPackageDraftKey && draftValues === newPackageValues()) {
+    newPackageDraftBaseline = draftValues;
+    closeNewPackage(); newPackageDraftKey = ''; newPackageDraftBaseline = '';
+    $('newMeetingTitle').value = ''; $('newMeetingNumber').value = '';
+    window.ErpWorkspaceResume?.checkpoint($('newPackageModal'));
+  } else rememberNewPackageDraft();
+  await MeetingPackageService.acknowledgePackageCreation({meeting_type:type,assembly_kind:type==='GENERAL_ASSEMBLY'?assemblyKind:null},data.id);
   if (sourceStyle) {
     const chairName = chair ? `${officialRole(chair)} ${officialName(chair)}` : '의장';
     const seeds = buildPreMeetingDocuments({
@@ -2532,25 +2576,16 @@ async function createPackage() {
         version: 1, manually_edited: false, generated_at: new Date().toISOString()
       }));
     const seedOwner={...pdfActionOwner(),packageId:data.id};
-    for(const row of seeds){
+    try {for(const row of seeds){
       const claimed=await MeetingPackageService.documentEdits.manage(seedOwner,row.document_type,'acquire');
       if(!claimed.owned)throw new Error('새 회의의 시나리오 편집권을 다시 확인해 주세요.');
     }
     const seeded = await MeetingPackageService.saveDocuments(data.id, seeds,seedOwner);
-    for(const row of seeds)void MeetingPackageService.documentEdits.manage(seedOwner,row.document_type,'release').catch(()=>{});
-    if (seeded.error) {
+    if (seeded.error) throw seeded.error;
+    } catch (_) {
       await loadPackages(data.id);
       throw new Error('새 회의는 만들었지만 지난 시나리오를 불러오지 못했습니다. 중복으로 새 회의를 만들지 말고 현재 회의를 확인해 주세요.');
-    }
-  }
-  if (draftOwner === newPackageOwnerKey()) {
-    if (newPackageDrafts.get(draftKey)?.values === draftValues) newPackageDrafts.delete(draftKey);
-    if (draftKey === newPackageDraftKey && draftValues === newPackageValues()) {
-      newPackageDraftBaseline = draftValues;
-      closeNewPackage(); newPackageDraftKey = ''; newPackageDraftBaseline = '';
-      $('newMeetingTitle').value = ''; $('newMeetingNumber').value = '';
-      window.ErpWorkspaceResume?.checkpoint($('newPackageModal'));
-    } else rememberNewPackageDraft();
+    } finally {for(const row of seeds)void MeetingPackageService.documentEdits.manage(seedOwner,row.document_type,'release').catch(()=>{});}
   }
   if (draftOwner !== newPackageOwnerKey()) return;
   await loadPackages(data.id);
@@ -2711,11 +2746,27 @@ async function deleteChapter() {
   renderActiveChapter();
 }
 
+const pendingPdfDrafts=new Map();
+function pendingPdfKey(anchor=activePdfAttachmentAnchor()) {
+  const o=pdfActionOwner();return JSON.stringify([o.userId,o.coopId,o.packageId,anchor]);
+}
+function renderPendingPdf() {
+  const button=$('addPdfAttachmentButton');if(!button)return;
+  const draft=pendingPdfDrafts.get(pendingPdfKey());
+  button.textContent=draft?'PDF 준비 다시 확인':'PDF 첨부';
+  button.title=draft?draft.file.name:'';
+  let replacement=$('replacePendingPdf');
+  if(!replacement){replacement=document.createElement('button');replacement.id='replacePendingPdf';replacement.type='button';replacement.className=button.className;
+    replacement.textContent='다른 PDF 선택';replacement.onclick=()=>$('pdfAttachmentInput').click();button.after(replacement);}
+  replacement.hidden=!draft;replacement.disabled=button.disabled;
+}
 async function addPdfAttachment(file) {
   const anchor = activePdfAttachmentAnchor();
   if (!state.current || !anchor) throw new Error('PDF를 붙일 회의자료나 챕터를 먼저 선택해 주세요.');
   if (!file) return;
   if (file.size > 20 * 1024 * 1024) throw new Error('PDF 파일은 20MB 이하만 첨부할 수 있습니다.');
+  const draftKey=pendingPdfKey(anchor),draft={file};
+  pendingPdfDrafts.set(draftKey,draft);renderPendingPdf();
   const owner = pdfActionOwner();
   const { inspectPdfFile } = await getPdfRenderer();
   if (!pdfActionStillCurrent(owner, anchor)) return;
@@ -2725,19 +2776,22 @@ async function addPdfAttachment(file) {
   if (!pdfActionStillCurrent(owner, anchor)) return;
   const title = String(file.name || '첨부 자료').replace(/\.pdf$/i, '').trim() || '첨부 자료';
   const existing = activeChapterPdfAttachments();
-  const { data, error } = await MeetingPackageService.uploadPdfAttachment(state.current.id, file, {
+  const { data, error, previousInput } = await MeetingPackageService.uploadPdfAttachment(state.current.id, file, {
     title,
     insert_after_chapter_id: anchor,
     page_count: inspected.pageCount,
     sort_order: existing.length ? Math.max(...existing.map(row => Number(row.sort_order || 0))) + 1 : 0
-  });
+  },()=>pdfActionStillCurrent(owner,anchor));
   if (error) throw error;
   if (!pdfActionStillCurrent(owner, anchor)) return;
-  state.pdfAttachments.push(data);
+  if(!previousInput && pendingPdfDrafts.get(draftKey)===draft)pendingPdfDrafts.delete(draftKey);
+  if(!state.pdfAttachments.some(row=>row.id===data.id))state.pdfAttachments.push(data);
   state.pdfAttachments.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
   renderPdfAttachmentList();
+  renderPendingPdf();
+  await MeetingPackageService.acknowledgePdfAttachment(owner.packageId,anchor,data.id);
   if(state.current.meeting_type==='BOARD')renderBoardAnnexLinks();
-  showToast(`「${title}」 ${inspected.pageCount}쪽을 ${anchor === 'board-materials' ? '이사회 회의자료' : '이 챕터'} 뒤에 붙였습니다.`);
+  showToast(previousInput?'이전 PDF 첨부 결과를 확인했습니다. 새로 선택한 파일은 그대로 남겨두었습니다.':`「${title}」 ${inspected.pageCount}쪽을 ${anchor === 'board-materials' ? '이사회 회의자료' : '이 챕터'} 뒤에 붙였습니다.`);
 }
 
 async function deletePdfAttachment(id) {
@@ -2768,10 +2822,14 @@ async function runAction(action) {
   setBusy(true);
   try { await action(); }
   catch (error) {
-    if(error?.code==='MEETING_EDIT_REQUEST_STALE')return;
+    if(error?.code==='MEETING_EDIT_REQUEST_STALE'||error?.code==='MEETING_WRITE_STALE')return;
     console.error(error);
     const code = String(error?.message || '');
-    showToast(code.includes('MEETING_AGENDA_LOCKED') ? '소집 공문 결재가 완료되어 기본정보와 안건 제목·구성이 잠겼습니다. 입력은 보관했습니다. 잠금 상태를 다시 확인해 주세요.'
+    showToast(code.includes('MEETING_AUDIT_LOCKED') ? '감사의 서명이 시작되어 이번 수정은 저장하지 않았습니다. 작성한 초안은 그대로 남아 있습니다.'
+      : code.includes('MEETING_AUDIT_CONFLICT') ? '저장된 감사보고서가 바뀌었습니다. 작성한 초안과 최신 문서를 확인한 뒤 다시 저장해 주세요.'
+      : code.includes('MEETING_REQUEST_MISMATCH') ? '이전 요청과 대상이나 내용이 다릅니다. 원래 작업의 결과를 먼저 확인해 주세요.'
+      : code.includes('MEETING_PDF_SOURCE_RETAINED') ? '무산된 회의나 다음 회의에서 참조하는 원본 PDF는 삭제할 수 없습니다.'
+      : code.includes('MEETING_AGENDA_LOCKED') ? '소집 공문 결재가 완료되어 기본정보와 안건 제목·구성이 잠겼습니다. 입력은 보관했습니다. 잠금 상태를 다시 확인해 주세요.'
       : code.includes('MEETING_DOCUMENT_EDIT_REQUIRED') ? '편집권이 없거나 만료되었습니다. 작성한 내용을 확인하고 편집권을 다시 확인해 주세요.'
       : code.includes('MEETING_DOCUMENT_EDIT_IN_PROGRESS') ? '편집 중인 문서가 있습니다. 편집을 마친 뒤 다시 확인해 주세요.'
       : code.includes('MEETING_DOCUMENT_CONFLICT') ? '저장된 문서가 바뀌었습니다. 편집권을 다시 확인해 최신 문서와 초안을 비교해 주세요.'
@@ -2865,7 +2923,10 @@ function bindEvents() {
   for(const event of ['input','change'])$('boardAnnexPanel').addEventListener(event,()=>{boardAnnexRevision++;rememberBoardAnnexDraft();});
   $('boardAnnexLinks').addEventListener('change',event=>{const select=event.target.closest('[data-annex-relation]');if(select)changeBoardAnnexRelation(select.dataset.annexRelation,select.value);});
   $('boardAnnexLinks').addEventListener('click',event=>{const b=event.target.closest('[data-annex-move]');if(b)changeBoardAnnexRelation(b.dataset.annexMove,null,Number(b.dataset.direction));});
-  $('addPdfAttachmentButton').addEventListener('click', () => $('pdfAttachmentInput').click());
+  $('addPdfAttachmentButton').addEventListener('click', () => {
+    const pending=pendingPdfDrafts.get(pendingPdfKey());
+    if(pending)void runAction(()=>addPdfAttachment(pending.file));else $('pdfAttachmentInput').click();
+  });
   $('pdfAttachmentInput').addEventListener('change', () => {
     const file = $('pdfAttachmentInput').files?.[0] || null;
     $('pdfAttachmentInput').value = '';

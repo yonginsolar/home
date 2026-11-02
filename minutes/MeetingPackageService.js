@@ -1,10 +1,19 @@
 /*
-Version: v1.8.0
+Version: v1.9.0
 Change: 2026-10-27 - Use automatic imported call-notice association without a second linking workflow.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { createMeetingDocumentEdits } from './meeting_document_edits.js?v=1.0.3';
+import { createMeetingWriteRecovery } from './meeting_write_recovery.js?v=1.0.0';
 const documentEdits = createMeetingDocumentEdits((name,body)=>supabase.rpc(name,body));
+async function writeOwner() {
+  const session=await supabase.auth.getSession(), runtime=await getRuntime();
+  return {userId:session.data?.session?.user?.id,coopId:runtime.coop_id};
+}
+const writes=createMeetingWriteRecovery({call:(name,body)=>supabase.rpc(name,body),owner:writeOwner,
+  confirmPrevious:message=>window.CoopDialog?.confirm(message)||Promise.resolve(false)});
+const pdfFiles=new Map();
+const pdfDeletions=new Map();
 
 export const MEETING_PACKAGE_FILE_BUCKET = 'meeting-package-files';
 
@@ -80,7 +89,7 @@ async function getPackage(id) {
   };
 }
 
-async function uploadPdfAttachment(packageId, file, payload) {
+async function uploadPdfAttachment(packageId, file, payload, current) {
   const runtime = await getRuntime();
   const session = await supabase.auth.getSession();
   const userId = session.data?.session?.user?.id || null;
@@ -91,60 +100,55 @@ async function uploadPdfAttachment(packageId, file, payload) {
   if (file.size < 1 || file.size > 20 * 1024 * 1024) {
     return { data: null, error: new Error('PDF 파일은 20MB 이하만 첨부할 수 있습니다.') };
   }
-  const objectId = crypto.randomUUID();
-  const storagePath = `${runtime.coop_id}/${packageId}/${objectId}.pdf`;
-  const upload = await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).upload(storagePath, file, {
-    contentType: 'application/pdf',
-    cacheControl: '3600',
-    upsert: false
+  const digest=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
+  const sha256=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
+  return writes.execute('pdf_add',packageId,{...payload,original_filename:file.name,file_size:file.size,sha256},{
+    target:packageId+':'+payload.insert_after_chapter_id,
+    retainSuccess:true,
+    current,
+    before:async entry=>{
+      pdfFiles.set(entry.key,file); // Exact original File is retained across retries.
+      const path=`${runtime.coop_id}/${packageId}/${entry.key}.pdf`;
+      const uploaded=await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).upload(path,pdfFiles.get(entry.key),{
+        contentType:'application/pdf',cacheControl:'3600',upsert:false});
+      if(uploaded.error && String(uploaded.error.statusCode)!=='409' && !/already exists|duplicate/i.test(uploaded.error.message||''))throw uploaded.error;
+      // Even a lost upload reply is never compensated by deleting a possibly referenced object.
+    },after:async(_,entry)=>{pdfFiles.delete(entry.key);}
   });
-  if (upload.error) return { data: null, error: upload.error };
-
-  const row = withCoop({
-    package_id: packageId,
-    title: payload.title,
-    insert_after_chapter_id: payload.insert_after_chapter_id,
-    storage_path: storagePath,
-    original_filename: file.name,
-    file_size: file.size,
-    page_count: payload.page_count,
-    sort_order: payload.sort_order || 0,
-    created_by: userId
-  }, runtime.coop_id);
-  const inserted = await supabase.from('meeting_package_pdf_attachments').insert(row).select('*').single();
-  if (inserted.error) {
-    await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).remove([storagePath]);
-    return { data: null, error: inserted.error };
-  }
-  return inserted;
+}
+async function acknowledgePdfAttachment(packageId,anchor,id) {
+  await writes.acknowledge('pdf_add',packageId+':'+anchor,id);
 }
 
 async function deletePdfAttachment(id) {
-  const { coop_id: coopId } = await getRuntime();
-  const lookup = await scope(
-    supabase.from('meeting_package_pdf_attachments').select('id,storage_path').eq('id', id),
-    coopId
-  ).maybeSingle();
+  const who=await writeOwner(), coopId=who.coopId, key=JSON.stringify([who.userId,coopId,id]);
+  const lookup = pdfDeletions.has(key)?{data:pdfDeletions.get(key)}:await scope(
+    supabase.from('meeting_package_pdf_attachments').select('id,package_id,storage_path').eq('id', id),coopId).maybeSingle();
   if (lookup.error || !lookup.data) return { data: null, error: lookup.error || new Error('첨부 PDF를 찾을 수 없습니다.') };
-  const storageDelete = await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).remove([lookup.data.storage_path]);
-  if (storageDelete.error) return { data: null, error: storageDelete.error };
-  return await scope(supabase.from('meeting_package_pdf_attachments').delete().eq('id', id), coopId);
+  pdfDeletions.set(key,lookup.data);
+  // Remove the reference atomically before touching the object. An interrupted
+  // cleanup leaves an unreferenced private file, never a missing referenced PDF.
+  const result=await writes.execute('pdf_delete',lookup.data.package_id,{id},{target:id,after:async result=>{
+    const removed=await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).remove([result.storage_path]);
+    if(removed.error)throw Object.assign(new Error('목록에서는 제외했습니다. 파일 정리는 같은 버튼으로 다시 확인해 주세요.'),{code:'MEETING_WRITE_UNKNOWN'});
+  }});
+  if(!result.error)pdfDeletions.delete(key);
+  return result;
 }
 
 async function createPdfAttachmentSignedUrl(storagePath, expiresIn = 1800) {
   return await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).createSignedUrl(storagePath, expiresIn);
 }
 
-async function createPackage(payload) {
+async function createPackage(payload,current) {
   const runtime = await getRuntime();
   const session = await supabase.auth.getSession();
   const userId = session.data?.session?.user?.id || null;
   if (!userId) return { data: null, error: new Error('로그인이 필요합니다.') };
-  return await supabase
-    .from('meeting_packages')
-    .insert(withCoop({ ...payload, created_by: userId, updated_by: userId }, runtime.coop_id))
-    .select('*')
-    .single();
+  return writes.execute('create',null,payload,{target:payload.meeting_type+':'+(payload.assembly_kind||''),retainSuccess:true,current});
+}
+async function acknowledgePackageCreation(payload,id) {
+  await writes.acknowledge('create',payload.meeting_type+':'+(payload.assembly_kind||''),id);
 }
 
 async function updatePackage(id, payload) {
@@ -262,15 +266,8 @@ async function getAssemblySources(packageId) {
   return { data: data || null, error };
 }
 
-async function prepareAuditReport(packageId, payload) {
-  const { data, error } = await supabase
-    .rpc('prepare_meeting_audit_report', {
-      p_package_id: packageId,
-      p_title: payload.title,
-      p_content: payload.content
-    })
-    .single();
-  return { data: data || null, error };
+async function prepareAuditReport(packageId, payload,current) {
+  return writes.execute('audit',packageId,payload,{current});
 }
 
 async function listAuditChangeRequests(packageId) {
@@ -280,19 +277,8 @@ async function listAuditChangeRequests(packageId) {
   return { data: data || [], error };
 }
 
-async function recordAuditChangeRequest(packageId, payload) {
-  const { data, error } = await supabase
-    .rpc('record_meeting_audit_change_request', {
-      p_package_id: packageId,
-      p_request_key: payload.request_key,
-      p_requested_auditor_official_id: payload.requested_auditor_official_id,
-      p_request_method: payload.request_method,
-      p_requested_at: payload.requested_at,
-      p_request_summary: payload.request_summary,
-      p_create_revision: payload.create_revision === true
-    })
-    .single();
-  return { data: data || null, error };
+async function recordAuditChangeRequest(packageId, payload,current) {
+  return writes.execute('audit_change',packageId,payload,{current});
 }
 
 export const MeetingPackageService = {
@@ -304,6 +290,7 @@ export const MeetingPackageService = {
   listMeetingHistory,
   getPackage,
   createPackage,
+  acknowledgePackageCreation,
   updatePackage,
   deletePackage,
   saveAgendas,
@@ -315,6 +302,7 @@ export const MeetingPackageService = {
   listAuditChangeRequests,
   recordAuditChangeRequest,
   uploadPdfAttachment,
+  acknowledgePdfAttachment,
   deletePdfAttachment,
   createPdfAttachmentSignedUrl
 };
