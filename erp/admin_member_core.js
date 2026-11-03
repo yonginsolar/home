@@ -6389,6 +6389,7 @@ el.classList.toggle('hidden', !enabled);
 capitalImportController?.syncContext();
 window.memberWorkbookController?.syncContext();
 memberExcelEntryController?.syncContext();
+memberBankImportController?.syncContext();
 [
 ['site-external-news-nav-item', !isSiteMemberProfile],
 ['site-legal-nav-item', siteAdminEnabled],
@@ -6584,6 +6585,7 @@ function switchTab(tabName) {
     }
 
     if (tabName === 'members' && document.getElementById('tab-members')?.classList.contains('active')) return;
+    if (tabName !== 'members') memberBankImportController?.pause();
 
     if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) {
         if (memberDetailEditState) ++memberDetailEditState.actionRevision;
@@ -6868,11 +6870,14 @@ let capitalImportOpening = false;
 window.memberWorkbookController = null;
 let memberWorkbookOpening = false;
 let memberExcelEntryController = null, memberExcelEntryOpening = false;
+let memberBankImportController = null, memberBankImportOpening = false;
 function memberExcelDraftKinds() {
     if (!capitalImportContext().allowed) return [];
     capitalImportController?.syncContext();
     window.memberWorkbookController?.syncContext();
     const kinds=[];
+    memberBankImportController?.syncContext();
+    if(memberBankImportController?.hasDraft())kinds.push('bank');
     if (hasMemberImportDraft()) kinds.push('members');
     if (document.getElementById('capitalImportFile')?.files?.length) kinds.push('capital');
     if (window.memberWorkbookController?.hasDraft()) kinds.push('workbook');
@@ -6887,13 +6892,14 @@ async function openMemberExcelUpload() {
         if(!memberExcelEntryController)memberExcelEntryController=feature.create({
             getContext:capitalImportContext,ensureSpreadsheet:()=>window.AdminMemberAssets.ensureSpreadsheet(),getDrafts:memberExcelDraftKinds,
             openReview:async(kind,transfer,current)=>{
-                const ids={members:'member-import-file',capital:'capitalImportFile',workbook:'memberWorkbookFile'};
+                const ids={members:'member-import-file',capital:'capitalImportFile',workbook:'memberWorkbookFile',bank:'memberBankImportFile'};
                 const existing=document.getElementById(ids[kind]);
                 if(!current()||!capitalImportContext().allowed||(transfer&&existing?.files?.length&&existing.disabled))return false;
                 document.getElementById('member-excel-upload-button')?.focus({preventScroll:true});
                 if(kind==='members')openMemberImportModal();
                 else if(kind==='capital')await openCapitalImportModal();
                 else if(kind==='workbook'){if(!await openMemberWorkbookModal({replacementFile:transfer?.files?.[0],isCurrent:current}))return false;}
+                else if(kind==='bank'){if(!await openMemberBankImportModal({replacementFile:transfer?.files?.[0],isCurrent:current}))return false;}
                 else return false;
                 const input=document.getElementById(ids[kind]);
                 const modal=input?.closest('.modal');
@@ -6905,6 +6911,7 @@ async function openMemberExcelUpload() {
                 if(transfer){if(input.disabled)return false;input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));}
                 return true;
             },
+            downloadBankTemplate:()=>{const a=document.createElement('a');a.href=new URL('../assets/templates/member_bank_accounts.xlsx',document.baseURI).href;a.download='조합원_계좌정보_양식.xlsx';a.click();},
             downloadTemplate:async(current)=>{
                 const tools=await window.AdminMemberAssets.ensureMemberWorkbook();await window.AdminMemberAssets.ensureSpreadsheet();
                 if(!current())return;
@@ -6919,6 +6926,17 @@ async function openMemberExcelUpload() {
         if(before.owner===capitalImportContext().owner&&capitalImportContext().allowed&&!window.frameElement?.hidden)
             myAlert('엑셀 업로드 도구를 불러오지 못했어요. 다시 열어 주세요.','error');
     } finally {memberExcelEntryOpening=false;}
+}
+async function openMemberBankImportModal({replacementFile=null,isCurrent=()=>true}={}) {
+    const before=capitalImportContext();if(!before.allowed||memberBankImportOpening||!isCurrent())return false;
+    memberBankImportOpening=true;
+    try {
+        const feature=await window.AdminMemberAssets.ensureMemberBankImport();
+        if(!isCurrent()||!capitalImportContext().allowed||before.owner!==capitalImportContext().owner||window.frameElement?.hidden)return false;
+        if(!memberBankImportController)memberBankImportController=feature.create({client:_supabase,getContext:()=>({...capitalImportContext(),actorId:String(adminCertificateAuthId||'')}),ensureSpreadsheet:()=>window.AdminMemberAssets.ensureSpreadsheet(),refresh:async()=>{const ok=await fetchMembers();await refreshMemberDashboardAfterSave();return ok===true;}});
+        return memberBankImportController.open({replacementFile});
+    }catch(_){if(isCurrent()&&before.owner===capitalImportContext().owner&&capitalImportContext().allowed&&!window.frameElement?.hidden)myAlert('계좌정보 엑셀 도구를 불러오지 못했어요. 파일을 유지한 채 다시 열어 주세요.','error');return false;}
+    finally{memberBankImportOpening=false;}
 }
 async function openMemberWorkbookModal({replacementFile=null,isCurrent=()=>true}={}) {
     const before = capitalImportContext();
@@ -7705,6 +7723,7 @@ function clearMemberDetailEdits() {
     capitalImportController?.syncContext();
     window.memberWorkbookController?.syncContext();
     memberExcelEntryController?.syncContext();
+    memberBankImportController?.pause();
     invalidateMemberRelationSearches();
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
@@ -8805,6 +8824,7 @@ async function openMemberDetail(id) {
     document.getElementById('md-addr-detail').value = '';
     document.getElementById('md-memo').value = m.admin_memo || '';
     document.getElementById('md-bank-name').value = m.bank_name || '';
+    window.CoopBankChoices?.refresh(document.getElementById('md-bank-name'));
     document.getElementById('md-bank-owner').value = m.account_holder || '';
     document.getElementById('md-bank-account').value = MemberInformation.bankAccountDisplay(m);
     MemberInformation.renderBankAccountStatus(document.getElementById('md-bank-entered'), m);

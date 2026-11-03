@@ -1,7 +1,7 @@
-/* Member Excel entry v1.0.4. File routing only; original preview/writers remain authoritative. */
+/* Member Excel entry v1.0.5. Bank information joins the existing file entry. */
 (function (root) {
     'use strict';
-    const labels = {members:'회원 등록',capital:'출자금 추가',workbook:'회원·출자금 함께 등록'};
+    const labels = {members:'회원 등록',capital:'출자금 추가',workbook:'회원·출자금 함께 등록',bank:'계좌정보 보완'};
     function classify(wb, X) {
         if (!wb.SheetNames?.length) throw Error('시트가 없는 파일입니다.');
         const header = name => {
@@ -12,6 +12,7 @@
         };
         if (wb.Sheets['조합원'] && wb.Sheets['출자금 납입내역']) return 'workbook';
         const first = wb.SheetNames[0], head = header(first), has = values => values.some(value => head.includes(value));
+        if (wb.Sheets['계좌정보'] || (has(['은행명','은행']) && head.includes('계좌번호') && !has(['유형','member_type','납입일','입금일']))) return 'bank';
         if (has(['유형','member_type']) && has(['이름','성명','name','단체명','법인명','상호']) && first !== '출자금 납입내역') return 'members';
         if (has(['납입일','입금일','날짜','deposit_date']) && has(['금액','입금액','출자금액','출자금','amount'])
             && has(['조합원번호','회원번호','member_id','이름·단체명','이름','성명','단체명','name'])) {
@@ -20,7 +21,7 @@
         }
         throw Error('양식의 항목을 확인해 주세요. 양식 다운로드에서 회원·출자금 통합 양식을 받을 수 있습니다.');
     }
-    function create({getContext,ensureSpreadsheet,openReview,getDrafts,downloadTemplate}) {
+    function create({getContext,ensureSpreadsheet,openReview,getDrafts,downloadTemplate,downloadBankTemplate}) {
         let modal, input, status, proceed, retry, drafts, opener, owner='', epoch=0, file=null, kind=null, forwarding=false, permissionBlocked=false, reading=false, interrupted=false, stopFocusWatch=null, closeReturn=null;
         const context = () => getContext() || {};
         const current = ticket => ticket === epoch && owner && owner === context().owner && context().allowed === true && !root.frameElement?.hidden;
@@ -118,6 +119,11 @@
             modal.setAttribute('aria-labelledby','memberExcelEntryTitle');
             modal.innerHTML='<div class="modal-dialog modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="memberExcelEntryTitle">엑셀 업로드</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><p>회원 등록·출자금 추가·함께 등록을 파일 양식에 맞춰 검토합니다.</p><div class="d-flex gap-2 flex-wrap mb-3"><button type="button" class="btn btn-sm btn-outline-success" data-template>통합 양식 다운로드</button><button type="button" class="btn btn-sm btn-outline-secondary coop-workflow-help" data-help aria-label="엑셀 업로드 도움말">?</button></div><label for="memberExcelEntryFile" class="form-label">엑셀·CSV 파일</label><input id="memberExcelEntryFile" type="file" accept=".xlsx,.xls,.csv" class="form-control"><p class="small text-muted mt-2">신규 회원은 조합원 시트에, 실제 입금은 출자금 납입내역 시트에 입력하세요. 한 종류만 입력해도 됩니다. 기존 양식도 사용할 수 있어요. 파일은 10MB, 시트별 500건까지입니다.</p><p data-status class="small" role="status" aria-live="polite"></p><div data-drafts class="d-flex gap-2 flex-wrap"></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" data-proceed class="btn btn-primary" disabled>검토하기</button></div></div></div>';
             document.body.append(modal);input=modal.querySelector('input');status=modal.querySelector('[data-status]');proceed=modal.querySelector('[data-proceed]');drafts=modal.querySelector('[data-drafts]');
+            modal.querySelector('.modal-body > p').textContent='회원 등록·출자금 추가·계좌정보 보완을 파일 양식에 맞춰 검토합니다.';
+            const bankTemplate=document.createElement('button');bankTemplate.type='button';bankTemplate.className='btn btn-sm btn-outline-success';bankTemplate.textContent='계좌정보 양식 다운로드';bankTemplate.dataset.bankTemplate='';
+            bankTemplate.onclick=()=>{if(current(epoch)&&visible())downloadBankTemplate?.();};modal.querySelector('[data-template]').after(bankTemplate);
+            modal.querySelector('[data-template]').textContent='회원·출자금 양식 다운로드';
+            const accountGuide=document.createElement('p');accountGuide.className='small text-muted';accountGuide.textContent='기존 회원의 계좌를 보완하려면 계좌정보 양식을 사용하세요. 조합원번호 또는 이름·전화번호로 연결하며, 빈칸으로 기존 계좌를 지우지 않습니다.';drafts.before(accountGuide);
             retry=document.createElement('button');retry.type='button';retry.className='btn btn-sm btn-outline-primary mb-3';retry.dataset.retry='';retry.textContent='다시 확인';retry.hidden=true;status.after(retry);
             input.addEventListener('change',()=>void read());proceed.onclick=()=>void forward(kind,file);retry.onclick=()=>void read(true);
             modal.addEventListener('keydown',containTab);
@@ -148,7 +154,7 @@
                 const bytes=await selected.arrayBuffer();if(!current(ticket)||!visible()||file!==selected)return;
                 const wb=root.XLSX.read(bytes,{type:'array',cellDates:false,sheetRows:10002});
                 kind=classify(wb,root.XLSX);
-                if(kind!=='capital'&&/[.]csv$/i.test(selected.name))throw Error('회원 등록은 엑셀(.xlsx, .xls) 파일로 선택해 주세요.');
+                if(!['capital','bank'].includes(kind)&&/[.]csv$/i.test(selected.name))throw Error('회원 등록은 엑셀(.xlsx, .xls) 파일로 선택해 주세요.');
                 if(kind==='capital'&&/[.]xls$/i.test(selected.name))throw Error('출자금만 담은 파일은 엑셀(.xlsx) 또는 CSV로 선택해 주세요.');
                 status.textContent=labels[kind]+' 양식입니다. 검토하기를 눌러 내용과 중복 여부를 확인해 주세요.';proceed.disabled=false;
             }catch(error){if(current(ticket)&&visible()&&file===selected){
@@ -200,5 +206,5 @@
         }
         return Object.freeze({open,syncContext});
     }
-    root.MemberExcelEntry=Object.freeze({version:'1.0.4',create,classify});
+    root.MemberExcelEntry=Object.freeze({version:'1.0.5',create,classify});
 })(window);

@@ -29,9 +29,10 @@
         integrity: 'sha384-CQGWi4h+n715X7fMTJAHtG/AKIovtUNUkkGGMaYV5ux6syh0MsZCck79rdGJXFcw'
     });
     const memberExcelEntry = Object.freeze({
-        src: new URL('member_excel_entry.js?v=1.0.4', document.baseURI).href,
-        integrity: 'sha384-F4dg338gifzgPhdO1wBkAmczdZgyb4G4mGwayvj9WPszhdGSxS0SPtyxoNT0RHRb'
+        src: new URL('member_excel_entry.js?v=1.0.5', document.baseURI).href,
+        integrity: 'sha384-yTrnaOK+7wXqdBdh+f2+aUfrsj7BhLlXraI4KYrAYxrfx3/JdE2+FNscQtd/vgpg'
     });
+    const memberBankImport=Object.freeze({src:new URL('member_bank_import.js?v=1.0.0',document.baseURI).href,integrity:'sha384-qGjxjg4MjS3hypcmTxfTo4iV9y53MeRxKtl7G5+eBGjqqsprdQEsjyjVQgJzZO3t'});
     const siteAssets = Object.freeze([
         Object.freeze({src: new URL('home_settings_conflict.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-2dLr0r0obVLbc9+OB2t4zQ/93bWr/XN6tUV8fMHwIggYDmjZ6ezKQX91b3CHjNz6', ready: () => root.CoopHomeConflict?.version === '1.0.0'}),
         Object.freeze({src: new URL('site_editor_drafts.js?v=1.1.0', document.baseURI).href, integrity: 'sha384-avf0MN4qCGjirM7RyH6TywwTUqp333nFCV4SsJFyRtaeRmmQKwtJzU7csLBKgFJ+', ready: () => typeof root.SiteEditorDrafts?.create === 'function'}),
@@ -87,9 +88,10 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261025-cert-intent-1', do
         return root.MemberCapitalWorkbook;
     }
     async function ensureMemberExcelEntry() {
-        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.0.4');
+        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.0.5');
         return root.MemberExcelEntry;
     }
+    async function ensureMemberBankImport(){await ensureAsset('MEMBER_BANK_IMPORT',memberBankImport,()=>root.MemberBankImport?.version==='1.0.0');return root.MemberBankImport;}
     function ensurePdf() {
         return ensureAsset('PDF', pdf, () => root.jspdf?.jsPDF?.version === '2.5.1');
     }
@@ -128,5 +130,5 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261025-cert-intent-1', do
             card.appendChild(retry);
         }
     }
-    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensureCapitalImport, ensureMemberWorkbook, ensureMemberExcelEntry, ensurePdf, ensureDashboard, ensureSite, showBootFailure });
+    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensureCapitalImport, ensureMemberWorkbook, ensureMemberExcelEntry, ensureMemberBankImport, ensurePdf, ensureDashboard, ensureSite, showBootFailure });
 })(window);
