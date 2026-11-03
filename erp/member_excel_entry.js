@@ -1,4 +1,4 @@
-/* Member Excel entry v1.1.0. One workbook for members, deposits and bank information. */
+/* Member Excel entry v1.2.0. One workbook for members, deposits and bank information. */
 (function (root) {
     'use strict';
     const labels = {members:'회원 등록',capital:'출자금 추가',workbook:'회원·출자금·계좌정보 통합 검토',bank:'계좌정보 보완'};
@@ -11,7 +11,7 @@
             return (rows.find(row => row.some(value => String(value ?? '').trim())) || []).map(value => String(value ?? '').trim());
         };
         if (wb.Sheets['계좌정보']) {if(wb.SheetNames.some(name=>!['조합원','출자금 납입내역','계좌정보'].includes(name)&&X.utils.sheet_to_json(wb.Sheets[name],{raw:true}).length))throw Error('통합 양식의 조합원·출자금 납입내역·계좌정보 시트를 사용해 주세요.');return wb.Sheets['조합원']||wb.Sheets['출자금 납입내역']?'workbook':'bank';}
-        if (wb.Sheets['조합원'] && wb.Sheets['출자금 납입내역']) return 'workbook';
+        if (wb.Sheets['조합원'] && (wb.Sheets['출자금 납입내역']||header('조합원').some(x=>['은행명','은행','계좌번호','예금주'].includes(x)))) return 'workbook';
         const first = wb.SheetNames[0], head = header(first), has = values => values.some(value => head.includes(value));
         if (has(['은행명','은행']) && head.includes('계좌번호') && !has(['유형','member_type','납입일','입금일'])) return 'bank';
         if (has(['유형','member_type']) && has(['이름','성명','name','단체명','법인명','상호']) && first !== '출자금 납입내역') return 'members';
@@ -122,7 +122,7 @@
             document.body.append(modal);input=modal.querySelector('input');status=modal.querySelector('[data-status]');proceed=modal.querySelector('[data-proceed]');drafts=modal.querySelector('[data-drafts]');
             modal.querySelector('.modal-body > p').textContent='회원 등록·출자금 추가·계좌정보 보완을 파일 양식에 맞춰 검토합니다.';
             modal.querySelector('[data-template]').textContent='통합 양식 다운로드';
-            const accountGuide=document.createElement('p');accountGuide.className='small text-muted';accountGuide.textContent='계좌정보도 같은 파일의 계좌정보 시트에 입력하세요. 조합원번호 또는 이름·전화번호로 연결하고 한 검토창의 탭에서 확인합니다.';drafts.before(accountGuide);
+            const accountGuide=document.createElement('p');accountGuide.className='small text-muted';accountGuide.textContent='은행명·계좌번호·예금주는 조합원 시트에 함께 입력하세요. 조합원번호 또는 이름·전화번호로 연결해 비어 있는 계좌 항목만 보완합니다. 목록에 없는 증권사·금융기관도 직접 입력할 수 있어요.';drafts.before(accountGuide);
             retry=document.createElement('button');retry.type='button';retry.className='btn btn-sm btn-outline-primary mb-3';retry.dataset.retry='';retry.textContent='다시 확인';retry.hidden=true;status.after(retry);
             input.addEventListener('change',()=>void read());proceed.onclick=()=>void forward(kind,file);retry.onclick=()=>void read(true);
             modal.addEventListener('keydown',containTab);
@@ -205,5 +205,5 @@
         }
         return Object.freeze({open,syncContext});
     }
-    root.MemberExcelEntry=Object.freeze({version:'1.1.0',create,classify});
+    root.MemberExcelEntry=Object.freeze({version:'1.2.0',create,classify});
 })(window);

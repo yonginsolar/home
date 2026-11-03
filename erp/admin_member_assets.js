@@ -25,14 +25,14 @@
     const capitalMatching=Object.freeze({src:new URL('capital_member_matching.js?v=1.0.0',document.baseURI).href,
         integrity:'sha384-hjV/oKOplGPUOFoX+gRmEwXPfWjB7d/5xua0PqlDAv1wuzu5KLpvNS02M2IsN7nO'});
     const memberWorkbook = Object.freeze({
-        src: new URL('member_capital_workbook.js?v=1.4.0', document.baseURI).href,
-        integrity: 'sha384-aKz0FXwnz8BD6vqUUqox30q0IJkige3kNuUKxzlf3E2jKzROJP0uwS3j//BT31Mp'
+        src: new URL('member_capital_workbook.js?v=1.5.0', document.baseURI).href,
+        integrity: 'sha384-sxHtT6+PcI88csLRfXPcinhUEULlEImFNUT2MKBVfQqe7GAl8Ii74HfNwsdaIKXe'
     });
     const memberExcelEntry = Object.freeze({
-        src: new URL('member_excel_entry.js?v=1.1.0', document.baseURI).href,
-        integrity: 'sha384-g1kDyZznur48I4mAruqts86UYXEAB1fD6bsKfSvOIeI64YuJKFpGv0Dfw3y2DVE8'
+        src: new URL('member_excel_entry.js?v=1.2.0', document.baseURI).href,
+        integrity: 'sha384-PJO+kxqRibZ78yEfhUnZCPK3xljEmYCBZT/W6SJ8KOn+LX4d2qB8R0H45nSioI7e'
     });
-    const memberBankImport=Object.freeze({src:new URL('member_bank_import.js?v=1.1.0',document.baseURI).href,integrity:'sha384-gFyD46tEoV5MbVxA/kK0uHfYU4rjEEbymaY8KYXMOZkKGrl/zwCORAX9rkvByg7z'});
+    const memberBankImport=Object.freeze({src:new URL('member_bank_import.js?v=1.2.0',document.baseURI).href,integrity:'sha384-3uyiXOGWnRWexZVa30m1ltVqnJkH0xmfT8HqplOvl4jy6bp0VZCBycl5OjwRllC4'});
     const siteAssets = Object.freeze([
         Object.freeze({src: new URL('home_settings_conflict.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-2dLr0r0obVLbc9+OB2t4zQ/93bWr/XN6tUV8fMHwIggYDmjZ6ezKQX91b3CHjNz6', ready: () => root.CoopHomeConflict?.version === '1.0.0'}),
         Object.freeze({src: new URL('site_editor_drafts.js?v=1.1.0', document.baseURI).href, integrity: 'sha384-avf0MN4qCGjirM7RyH6TywwTUqp333nFCV4SsJFyRtaeRmmQKwtJzU7csLBKgFJ+', ready: () => typeof root.SiteEditorDrafts?.create === 'function'}),
@@ -84,14 +84,14 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261025-cert-intent-1', do
     }
     async function ensureMemberWorkbook() {
         await ensureCapitalImport();
-        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.4.0');
+        await ensureAsset('MEMBER_WORKBOOK', memberWorkbook, () => root.MemberCapitalWorkbook?.version === '1.5.0');
         return root.MemberCapitalWorkbook;
     }
     async function ensureMemberExcelEntry() {
-        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.1.0');
+        await ensureAsset('MEMBER_EXCEL_ENTRY', memberExcelEntry, () => root.MemberExcelEntry?.version === '1.2.0');
         return root.MemberExcelEntry;
     }
-    async function ensureMemberBankImport(){await ensureAsset('MEMBER_BANK_IMPORT',memberBankImport,()=>root.MemberBankImport?.version==='1.1.0');return root.MemberBankImport;}
+    async function ensureMemberBankImport(){await ensureAsset('MEMBER_BANK_IMPORT',memberBankImport,()=>root.MemberBankImport?.version==='1.2.0');return root.MemberBankImport;}
     function ensurePdf() {
         return ensureAsset('PDF', pdf, () => root.jspdf?.jsPDF?.version === '2.5.1');
     }

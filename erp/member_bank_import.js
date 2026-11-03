@@ -1,21 +1,24 @@
-/* Bank import1.1.0. Account review can share the integrated workbook dialog. */
+/* Bank import1.2.0. Account review can share the integrated workbook dialog. */
 (function(root){
  'use strict';
  const headers=['조합원번호','이름·단체명','전화번호','은행명','계좌번호','예금주'];
  const accountReview='숫자형 계좌번호입니다. 원본의 앞자리 0까지 확인해 주세요.';
  const text=v=>String(v??'').trim();
  function parse(book,X,{integrated=false}={}){
-  const name=book.Sheets['계좌정보']?'계좌정보':book.SheetNames[0],sheet=book.Sheets[name];
+  const inline=integrated&&book.Sheets['조합원']&&X.utils.sheet_to_json(book.Sheets['조합원'],{raw:true}).some(r=>text(r['은행명']||r['은행'])||text(r['계좌번호'])||text(r['예금주']));
+  if(inline&&book.Sheets['계좌정보']&&X.utils.sheet_to_json(book.Sheets['계좌정보'],{raw:true}).length)throw Error('계좌정보가 두 시트에 있습니다. 조합원 시트 한 곳에 정리해 주세요.');
+  const name=inline?'조합원':book.Sheets['계좌정보']?'계좌정보':book.SheetNames[0],sheet=book.Sheets[name];
   if(!sheet)throw Error('계좌정보 시트를 확인해 주세요.');
   for(const other of book.SheetNames)if(other!==name&&X.utils.sheet_to_json(book.Sheets[other],{raw:true}).length&&!(integrated&&['조합원','출자금 납입내역'].includes(other)))throw Error('통합 양식의 조합원·출자금 납입내역·계좌정보 시트를 사용해 주세요.');
   const bounds=X.utils.decode_range(sheet['!fullref']||sheet['!ref']||'A1');
   if(bounds.e.r>10000||bounds.e.c>100)throw Error('계좌정보는 500행 이내로 정리해 주세요.');
   for(const [key,cell]of Object.entries(sheet))if(!key.startsWith('!')&&cell?.f)throw Error('수식 대신 확인한 값을 붙여넣어 주세요.');
-  const input=X.utils.sheet_to_json(sheet,{raw:true,defval:''});
+  const source=X.utils.sheet_to_json(sheet,{raw:true,defval:''});if(source.length>500)throw Error('계좌정보는 500행까지 검사합니다.');const input=inline?source.filter(r=>text(r['은행명']||r['은행'])||text(r['계좌번호'])||text(r['예금주'])):source;
   if(!input.length||input.length>500)throw Error('계좌정보를 1~500행 입력해 주세요.');
-  return input.map((r,i)=>({row_no:Number.isInteger(r.__rowNum__)?r.__rowNum__+1:i+2,member_id:text(r['조합원번호']||r['회원번호']),name:text(r['이름·단체명']||r['이름']||r['단체명']||r['성명']),phone:text(r['전화번호']||r['연락처']||r['휴대전화']),bank_name:text(r['은행명']||r['은행']),bank_account:text(r['계좌번호']),account_holder:text(r['예금주']),_issues:typeof r['계좌번호']==='number'||text(r['계좌번호 원본확인'])==='필요'?[accountReview]:[]}));
+  return input.map((r,i)=>({row_no:Number.isInteger(r.__rowNum__)?r.__rowNum__+1:i+2,member_id:text(r['조합원번호']||r['회원번호']),name:text(r['이름·단체명']||(r['유형']==='단체'?r['단체명']||r['이름']:r['이름']||r['단체명'])||r['성명']),phone:text(r['전화번호']||r['연락처']||r['휴대전화']),bank_name:text(r['은행명']||r['은행']),bank_account:text(r['계좌번호']),account_holder:text(r['예금주']),_issues:typeof r['계좌번호']==='number'||text(r['계좌번호 원본확인'])==='필요'?[accountReview]:[]}));
  }
- function create({client,getContext,ensureSpreadsheet,refresh,mount=null,onClose=()=>{},onStateChange=()=>{},onExport=null}){
+ function create({client,getContext,ensureSpreadsheet,refresh,mount=null,onClose=()=>{},onStateChange=()=>{},onExport=null,fillOnly=true}){
+  const rpcName=fillOnly?'member_bank_fill_admin':'member_bank_import_admin';
   const states=new Map();let state,modal,input,status,body,recheck,apply,drop,download,listRetry,progress,filename,opener,epoch=0,closing=null;
   const ctx=()=>getContext()||{},visible=()=>mount?!!modal&&!modal.hidden&&!mount.hidden&&!!mount.closest('.modal.show'):modal?.classList.contains('show');
   const menu=()=>!document.getElementById('tab-members')||document.getElementById('tab-members').classList.contains('active');
@@ -31,8 +34,8 @@
    const locked=!editable();status.textContent=state.status;filename.textContent=state.file?.name||'';input.disabled=locked||!!mount;
    recheck.disabled=locked||!!state.read||!state.file;drop.disabled=locked||!!state.read||!state.file;download.disabled=!!state.read||!!state.job||!state.rows.length;
    apply.disabled=!!state.read||state.confirming||!ctx().allowed||(!state.job&&!state.review?.rows.some(r=>r.eligible&&!state.excluded?.has(r.row_no)));
-   if(state.job){apply.textContent=state.job.unknown?'등록 결과 확인':'계속 반영';apply.disabled=!!state.job.running||state.confirming;}
-   else apply.textContent='선택한 계좌 반영';
+   if(state.job){apply.textContent=state.job.unknown||state.job.index===state.job.chunks.length?'등록 결과 확인':'계속 반영';apply.disabled=!!state.job.running||state.confirming;}
+   else apply.textContent=(fillOnly?'빈 계좌정보 보완':'선택한 계좌 반영');
    const job=state.job||state.lastJob;progress.hidden=!job;progress.max=job?.total||1;progress.value=job?.confirmed||0;
    progress.setAttribute('aria-label',job?'처리 확인 '+job.confirmed+' / '+job.total+'행':'처리 진행');
    listRetry.hidden=!state.listFailed;listRetry.disabled=!!state.listBusy;
@@ -49,8 +52,10 @@
     const bank=cell(v?.bank?.value||r.bank_name||'기존 값 유지');
     if(v?.bank?.status==='alias'){const label=document.createElement('small');label.textContent=' ('+r.bank_name+' → '+v.bank.value+')';bank.append(label);}
     if(v?.bank?.reason){const select=document.createElement('select');select.className='form-select form-select-sm';select.setAttribute('aria-label',r.row_no+'행 은행 확인');select.disabled=locked;
-     select.append(new Option('은행 확인 필요',''));for(const b of root.CoopBankChoices?.banks||[])select.append(new Option(b,b));select.append(new Option('원문 은행명 확인: '+r.bank_name,'__original__'));
-     select.onchange=()=>{if(!select.value)return;if(select.value==='__original__')r.bank_confirmed=true;else{r.bank_name=select.value;r.bank_confirmed=false;}invalidateReview();};bank.append(select);}
+     select.append(new Option('은행 확인 필요',''));for(const b of root.CoopBankChoices?.banks||[])select.append(new Option(b,b));select.append(new Option('직접 입력 (증권사·기타 금융기관)','__direct__'));select.append(new Option('원문 금융기관명 확인: '+r.bank_name,'__original__'));
+     const direct=document.createElement('input');direct.type='text';direct.maxLength=50;direct.className='form-control form-control-sm mt-1';direct.setAttribute('aria-label',r.row_no+'행 금융기관명 직접입력');direct.value=r.bank_name;direct.hidden=true;direct.disabled=locked;direct.oninput=()=>{r.bank_name=direct.value;r.bank_confirmed=false;invalidateReview();};
+     const label=document.createElement('label'),confirm=document.createElement('input');confirm.type='checkbox';confirm.disabled=locked;label.hidden=true;label.append(confirm,document.createTextNode(' 직접 입력한 금융기관명 확인'));confirm.onchange=()=>{r.bank_confirmed=confirm.checked;invalidateReview();};
+     select.onchange=()=>{if(!select.value)return;if(select.value==='__direct__'){direct.hidden=false;label.hidden=false;r.bank_confirmed=false;direct.focus();}else if(select.value==='__original__')r.bank_confirmed=true;else{r.bank_name=select.value;r.bank_confirmed=false;}invalidateReview();};bank.append(select,direct,label);}
     const account=cell(r.bank_account||'기존 값 유지');
     if(r._issues.includes(accountReview)){const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.disabled=locked;check.className='form-check-input me-1';label.style.display='block';label.append(check,document.createTextNode('앞자리 0까지 원본과 일치'));check.onchange=()=>{if(check.checked){r._issues=r._issues.filter(x=>x!==accountReview);invalidateReview();}};account.append(label);}
     cell(r.account_holder||'기존 값 유지');
@@ -90,7 +95,7 @@
    if(!s.file){s.read=null;return;}message(s,'파일과 연결 대상을 확인하고 있어요…');render();let timer,toolReady=false,rpcStarted=false;
    try{
     const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('timeout'));},15000);});
-    const result=await Promise.race([(async()=>{await ensureSpreadsheet();toolReady=true;if(!valid())return null;if(!s.rows.length){const bytes=await s.file.arrayBuffer();if(!valid())return null;s.rows=parse(root.XLSX.read(bytes,{type:'array',raw:true,cellDates:false,sheetRows:10002}),root.XLSX,{integrated:!!mount});}rpcStarted=true;let query=client.rpc('member_bank_import_admin',{p_action:'preview',p_coop_id:s.coop,p_actor_uid:s.actor,p_rows:s.rows});if(query.abortSignal)query=query.abortSignal(controller.signal);const response=await query;if(response.error)throw response.error;return response.data;})(),timeout]);
+    const result=await Promise.race([(async()=>{await ensureSpreadsheet();toolReady=true;if(!valid())return null;if(!s.rows.length){const bytes=await s.file.arrayBuffer();if(!valid())return null;s.rows=parse(root.XLSX.read(bytes,{type:'array',raw:true,cellDates:false,sheetRows:10002}),root.XLSX,{integrated:!!mount});}rpcStarted=true;let query=client.rpc(rpcName,{p_action:'preview',p_coop_id:s.coop,p_actor_uid:s.actor,p_rows:s.rows});if(query.abortSignal)query=query.abortSignal(controller.signal);const response=await query;if(response.error)throw response.error;return response.data;})(),timeout]);
     if(!valid()||!result)return;if(!Array.isArray(result.rows)||result.rows.length!==s.rows.length||new Set(result.rows.map(r=>r.row_no)).size!==s.rows.length||result.rows.some(r=>!s.rows.some(x=>x.row_no===r.row_no)))throw Error('INVALID_PREVIEW');s.review=result;s.results.clear();s.dirty=result.rows.some(r=>!r.skipped);if(!s.dirty)root.ErpWorkspaceResume?.checkpoint(input);message(s,'반영 가능 '+result.rows.filter(x=>x.eligible).length+'행 · 확인 필요 '+result.rows.filter(x=>!x.eligible&&!x.skipped).length+'행. 연결 대상과 계좌를 검토한 뒤 반영해 주세요.');
    }catch(e){if(valid())message(s,e.code==='42501'?'현재 권한으로는 검사할 수 없습니다. 권한을 확인해 주세요.':e.message==='timeout'?'검사가 지연되고 있어요. 파일은 유지됩니다. 다시 검사해 주세요.':!toolReady?'파일 읽기 도구를 불러오지 못했어요. 파일을 유지한 채 다시 검사해 주세요.':rpcStarted?'연결 대상 조회에 실패했어요. 파일을 유지한 채 다시 검사해 주세요.':e.message||'파일을 확인하지 못했어요. 다시 검사해 주세요.');}
    finally{clearTimeout(timer);if(s.read===run){s.read=null;render();}}
@@ -118,12 +123,12 @@
    const job=s.job;if(!job||job.running)return;job.running=true;render();
    try{while(job.index<job.chunks.length&&current(s)&&visible()){
     const index=job.index,chunk=job.chunks[index];
-    if(job.unknown){let readTimer;try{const out=await Promise.race([client.rpc('member_bank_import_admin',{p_action:'status',p_coop_id:s.coop,p_actor_uid:s.actor,p_request_key:chunk.key}),new Promise((_,reject)=>readTimer=setTimeout(()=>reject(Error('timeout')),15000))]);if(out.error)throw out.error;
+    if(job.unknown){let readTimer;try{const out=await Promise.race([client.rpc(rpcName,{p_action:'status',p_coop_id:s.coop,p_actor_uid:s.actor,p_request_key:chunk.key}),new Promise((_,reject)=>readTimer=setTimeout(()=>reject(Error('timeout')),15000))]);if(out.error)throw out.error;
       if(finishChunk(s,job,index,out.data)){if(!current(s)||!visible())break;continue;}
       if(out.data?.outcome==='not_found'&&!job.pending){job.unknown=false;message(s,'접수된 결과를 찾지 못했습니다. 계속 반영을 누르면 같은 요청으로 다시 확인·처리합니다.');}else message(s,'아직 결과를 확인하지 못했어요. 등록 결과 확인으로 이어가 주세요.');
      }catch(_){message(s,'등록 결과 조회에 실패했어요. 실패로 단정하지 말고 등록 결과 확인을 다시 눌러 주세요.');}finally{clearTimeout(readTimer);}break;
     }
-    const request=client.rpc('member_bank_import_admin',{p_action:'apply',p_coop_id:s.coop,p_actor_uid:s.actor,p_rows:chunk.rows,p_request_key:chunk.key});let timer;job.pending=true;
+    const request=client.rpc(rpcName,{p_action:'apply',p_coop_id:s.coop,p_actor_uid:s.actor,p_rows:chunk.rows,p_request_key:chunk.key});let timer;job.pending=true;
     const original=Promise.resolve(request).then(out=>{job.pending=false;if(out.error){job.unknown=true;return null;}if(job.index>index)return out.data;if(!finishChunk(s,job,index,out.data)){job.unknown=true;return null;}return out.data;},()=>{job.pending=false;job.unknown=true;return null;}).finally(()=>{if(!job.running&&current(s)&&visible())render();});
     const value=await Promise.race([original,new Promise(resolve=>timer=setTimeout(()=>resolve(null),30000))]);clearTimeout(timer);
     if(!value){job.unknown=true;message(s,'응답을 확인하지 못했어요. 입력·파일은 유지됩니다. 등록 결과 확인을 눌러 주세요.');break;}
@@ -133,7 +138,7 @@
   async function submit(){
    const s=state;if(!current(s)||!visible()||s.confirming||s.read)return;if(s.job){await run(s);return;}
    const t=epoch,rows=s.rows.filter(r=>s.review?.rows.find(v=>v.row_no===r.row_no)?.eligible&&!s.excluded?.has(r.row_no)).map(r=>({...r,expected:s.review.rows.find(v=>v.row_no===r.row_no).expected}));if(!rows.length)return;
-   s.confirming=true;render();const yes=await ask(s,t,rows.length+'명의 현재 계좌정보를 반영할까요? 입력한 칸은 기존 값을 바꾸고, 빈칸은 그대로 유지합니다. 실제 송금이나 알림은 보내지 않습니다.');s.confirming=false;
+   s.confirming=true;render();const yes=await ask(s,t,rows.length+(fillOnly?'명의 비어 있는 계좌 항목을 보완할까요? 기존 값과 다른 행은 자동으로 반영하지 않습니다.':'명의 현재 계좌정보를 반영할까요? 입력한 칸은 기존 값을 바꾸고, 빈칸은 그대로 유지합니다.')+' 실제 송금이나 알림은 보내지 않습니다.');s.confirming=false;
    if(!yes||!current(s,t)||!visible()){render();if(!yes)returnAfterConfirm(s,t,apply);return;}
    const chunks=[];for(let i=0;i<rows.length;i+=25)chunks.push({key:root.crypto.randomUUID(),rows:rows.slice(i,i+25)});
    s.job={chunks,index:0,total:rows.length,confirmed:0,running:false,unknown:false,pending:false};await run(s);
@@ -151,5 +156,5 @@
    resetDraft:()=>{if(!state||state.job||!current(state))return false;cancelRead();state=fresh(ctx().owner);states.set(state.owner,state);showFile();render();return true;},
    remainingRows:()=>{const s=states.get(ctx().owner);return s?s.rows.filter(r=>!s.results.get(r.row_no)?.ok&&!s.review?.rows.find(v=>v.row_no===r.row_no)?.skipped):[];}});
  }
- root.MemberBankImport=Object.freeze({version:'1.1.0',headers,parse,create});
+ root.MemberBankImport=Object.freeze({version:'1.2.0',headers,parse,create});
 })(window);
