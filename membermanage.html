@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.267
+Version: v1.0.268
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.5" integrity="sha384-IcwaTuuPaMoh8p4EaYxvDbn0Ye+NrQUGy3diLEArvhVNaLjODZgpVZI/c3lJmmeh" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.267 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.268 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2655,6 +2655,7 @@ beforeChange: () => {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()
     || ['submitApplication','modifyApplication','cancelApplication','submitFamily','requestConnect','disconnectRelation','submitPost'].some(key => window.__memberAppLocks?.[key])) return false;
 ++portalDirectRevision;
+loadMemberCapitalRules.cancel?.();
 if (typeof invalidateExtraCapitalDepositAccountRead === 'function') invalidateExtraCapitalDepositAccountRead();
 retainPortalProfileEdit();retainPortalApplicationDraft();retainPortalPartnerDraft();
 const phoneRead=portalProfileEditor?.phoneRead;
@@ -2888,6 +2889,7 @@ return portalProfileFields().some(node => {
 });
 }
 function clearPortalProfileEdits() {
+loadMemberCapitalRules.cancel?.();
 window.PortalLoginToolRecovery?.cancel();
 portalIncomingConnectRequest?.cancelRead?.();
 portalIncomingConnectRequest = null;
@@ -5318,6 +5320,7 @@ async function loadDashboardData(uuid, options = {}) {
 window.PortalLoginToolRecovery?.cancel();
 portalIdentityClaim?.suspend();
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
+loadMemberCapitalRules.cancel?.();
 if (typeof invalidateExtraCapitalDepositAccountRead === 'function') invalidateExtraCapitalDepositAccountRead();
 window.MemberPortalPurposeController?.suspend();++portalDirectRevision;
 portalDeferredViews?.badgeStage?.remove();portalDeferredViews=null;
@@ -6038,7 +6041,39 @@ hint.textContent = exceeded ? CoopMemberCapital.limitWarning(rules,existing,true
 hint.classList.toggle('text-danger',!!exceeded);
 }
 async function loadMemberCapitalRules() {
-const rules = await CoopMemberCapital.load(_supabase, true);
+// Only the read is bounded/cancelled. Application writers and their locks are separate.
+const context = () => JSON.stringify([String(curAuth?.id || ''),String(currentMemberCoopId || ''),String(curMem?.id || ''),
+    portalProfileLoadRevision,portalDirectRevision,portalApplicationGeneration,window.MemberPortalPurposeController?.getSelected() || '']);
+const key = context(), previous = loadMemberCapitalRules.read;
+if (previous?.key === key && !previous.cancelled) return previous.promise;
+previous?.cancel();
+const cancelledError = () => Object.assign(new Error('CAPITAL_READ_CANCELLED'),{code:'CAPITAL_READ_CANCELLED'});
+const run = {key,controller:new AbortController(),cancelled:false,promise:null,cancel:null};
+let cancelRead;
+const cancelled = new Promise(resolve => {cancelRead = () => resolve(null);});
+run.cancel = () => {
+if (run.cancelled) return;
+run.cancelled = true;
+cancelRead();run.controller.abort();
+if (loadMemberCapitalRules.read === run) loadMemberCapitalRules.read = null;
+};
+loadMemberCapitalRules.read = run;
+loadMemberCapitalRules.cancel = () => {loadMemberCapitalRules.read?.cancel();portalCapitalRules = null;};
+const current = () => loadMemberCapitalRules.read === run && !run.cancelled && key === context();
+run.promise = Promise.resolve().then(async () => {
+let timer;
+try {
+if (!current()) throw cancelledError();
+const query = _supabase.rpc('get_member_capital_rules');
+const result = await Promise.race([
+typeof query.abortSignal === 'function' ? query.abortSignal(run.controller.signal) : query,
+new Promise((_,reject) => {timer = setTimeout(() => {
+reject(Object.assign(new Error('CAPITAL_READ_TIMEOUT'),{code:'CAPITAL_READ_TIMEOUT'}));run.controller.abort();
+},15000);}),cancelled
+]);
+if (!current()) throw cancelledError();
+if (result.error) throw Object.assign(new Error('CAPITAL_READ_FAILED'),{code:result.error.code,status:result.status || result.error.status});
+const rules = CoopMemberCapital.normalize(result.data);
 portalCapitalRules = rules;
 document.getElementById('childCapitalHint').textContent = [CoopMemberCapital.guidance(rules),CoopMemberCapital.limitGuidance(rules)].filter(Boolean).join(' ');
 refreshPortalCapitalLimit();
@@ -6050,6 +6085,12 @@ CoopMemberCapital.applyInput(document.getElementById('redAmount'), rules, false)
 const rejoin = document.getElementById('formerRejoinAmount');
 if (rejoin && !rejoin.value) rejoin.value = rejoin.min;
 return rules;
+} finally {
+clearTimeout(timer);
+if (loadMemberCapitalRules.read === run) loadMemberCapitalRules.read = null;
+}
+});
+return run.promise;
 }
 
 function applyMembermanageBranding() {
@@ -9315,8 +9356,10 @@ window.PortalChildPreparation?.invalidate();
 window.PortalBoardDetail?.close(false);
 retainPortalPartnerDraft();++portalPartnerRequestRevision;
 if (!btn) btn = [...document.querySelectorAll('.menu-btn')].find(node => node.getAttribute('onclick')?.includes("toggleTab('"+type+"'"));
-const tabRevision = ++portalApplicationRequest;
+++portalApplicationRequest;
 const applicationState = portalApplicationState,applicationGeneration = portalApplicationGeneration;
+const directRevision = portalDirectRevision;
+const reductionRevision = type === 'reduction' ? (toggleTab.reductionRevision = (toggleTab.reductionRevision || 0) + 1) : 0;
 if (type === 'partner' && isSiteMemberPortalProfile()) return;
 if (type === 'partner' && !isCoopRuntimeModuleEnabled('site_admin')) {
 showModal('현재 조합에서 홈페이지 관리 모듈 사용이 중지되었습니다.');
@@ -9355,12 +9398,34 @@ else if(portalPartnerState.badgeRetry) retryPortalPartnerBadges();
 if(type === 'reduction') {
 let rules;
 const directRetry=document.getElementById('portalDirectRedRetry');
-if(navigation.direct){if(directRetry)directRetry.hidden=true;document.getElementById('redLimitDisplay').textContent='출자 기준을 확인하는 중…';}
+const currentReduction = () => applicationState === portalApplicationState && applicationGeneration === portalApplicationGeneration
+    && (!applicationState || currentPortalApplicationState(applicationState)) && directRevision === portalDirectRevision
+    && reductionRevision === toggleTab.reductionRevision && !document.getElementById('tabReduction')?.classList.contains('hidden');
+if(navigation.direct){
+if(directRetry){directRetry.disabled=false;directRetry.setAttribute('aria-disabled','true');directRetry.textContent='확인 중…';}
+document.getElementById('tabReduction').setAttribute('aria-busy','true');
+document.getElementById('redLimitDisplay').textContent='출자 기준을 확인하는 중…';
+}
 try { rules = await loadMemberCapitalRules(); }
-catch (_) { if(applicationGeneration === portalApplicationGeneration && tabRevision === portalApplicationRequest){if(navigation.direct){document.getElementById('redLimitDisplay').textContent='출자 기준을 불러오지 못했습니다. 다시 확인해 주세요.';if(directRetry)directRetry.hidden=false;}else showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.');}return; }
-if(applicationState !== portalApplicationState || applicationGeneration !== portalApplicationGeneration
-    || (applicationState && !currentPortalApplicationState(applicationState)) || tabRevision !== portalApplicationRequest
-    || document.getElementById('tabReduction')?.classList.contains('hidden')) return;
+catch (error) {
+if(currentReduction()){
+if(navigation.direct){
+const status=Number(error?.status || 0);
+document.getElementById('redLimitDisplay').textContent=error?.code === 'CAPITAL_READ_TIMEOUT' || error?.code === 'CAPITAL_READ_CANCELLED'
+    ? '출자 기준 조회가 지연되고 있습니다. 다시 확인해 주세요.'
+    : [401,403].includes(status) || error?.code === '42501' ? '현재 출자 기준을 조회할 수 없습니다. 다시 로그인하거나 사무국에 문의해 주세요.'
+    : status === 429 ? '조회 요청이 많습니다. 잠시 후 다시 확인해 주세요.'
+    : '출자 기준을 불러오지 못했습니다. 다시 확인해 주세요.';
+if(directRetry)directRetry.hidden=false;
+}else showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.');
+}return;
+} finally {
+if(currentReduction() && navigation.direct){
+document.getElementById('tabReduction').setAttribute('aria-busy','false');
+if(directRetry){directRetry.setAttribute('aria-disabled','false');directRetry.textContent='다시 확인';}
+}
+}
+if(!currentReduction()) return;
 const total = Number(curMem.total_capital || 0);
 const limit = Math.floor((total - rules.minimum) / rules.unit) * rules.unit;
 const display = document.getElementById('redLimitDisplay');
