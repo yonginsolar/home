@@ -1,10 +1,10 @@
-/* General committees 1.0.0. Records only; no executive, signature or Auth grants. */
+/* General committees 1.0.1. Current editor and applied-query boundaries; original writer/authority unchanged. */
 (function(root){
  'use strict';
  const roles={chair:'위원장',secretary:'간사',member:'위원'};
  const node=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
  function create({client,container,getContext}){
-  let active=false,scope='',seq=0,detailSeq=0,authorized=false,reading=false,rows=[],cursor=null,moreAvailable=false,editing=null,opener=null,epoch=0;
+  let active=false,scope='',seq=0,detailSeq=0,authorized=false,reading=false,readingQuery=null,appliedQuery=null,rows=[],cursor=null,moreAvailable=false,editing=null,opener=null,epoch=0;
   const drafts=new Map(),context=()=>getContext()||{},owner=()=>JSON.stringify([context().actorId,context().coopId]);
   let authActor=context().actorId;
   const allowed=()=>!!context().actorId&&authActor===context().actorId&&!!context().coopId&&context().allowed===true&&!root.frameElement?.hidden;
@@ -49,15 +49,19 @@
   }
   function explain(error){return error?.code==='42501'?'현재 권한으로 확인할 수 없습니다. 권한을 다시 확인해 주세요.':error?.code==='PT409'?'다른 수정과 겹쳤습니다. 닫았다 다시 열어 최신 내용과 초안을 확인해 주세요.':error?.message==='COMMITTEE_READ_TIMEOUT'?'조회가 지연되고 있습니다. 입력은 유지됩니다. 다시 확인해 주세요.':'확인을 마치지 못했습니다. 입력을 유지한 채 다시 시도해 주세요.';}
   function draw(){list.replaceChildren();for(const r of rows){const card=node('article');card.className='border rounded p-3 mb-2';const title=node('h3',r.title);title.className='h6';const text=node('p',`${r.state==='ended'?'활동 종료':'활동 중'} · ${r.member_count}명 · ${r.start_date||'시작일 미설정'} ~ ${r.end_date||'종료일 미설정'}`);const open=node('button','확인·수정');open.type='button';open.className='btn btn-outline-primary';open.onclick=()=>openRecord(r.id,open);card.append(title,text,open);list.append(card);}more.hidden=!moreAvailable;}
+  function syncMore(){more.disabled=reading||appliedQuery===null||search.value.trim()!==appliedQuery;}
+  const queryHint='검색어가 바뀌었습니다. 다시 확인을 눌러 주세요.';
   async function refresh(append=false){
-   if(!active||!allowed())return;const s=owner();if(s!==scope){rows=[];cursor=null;scope=s;authorized=false;draw();}const t=++seq;reading=true;retry.disabled=false;more.disabled=true;add.disabled=true;status.textContent='위원회를 불러오고 있습니다.';
-   try{const data=await rpc('list',{query:search.value.trim(),cursor:append?cursor:null},null,true,null);if(!current(s,t))return;authorized=true;const batch=data.rows||[];rows=append?[...rows,...batch.slice(0,20).filter(x=>!rows.some(y=>y.id===x.id))]:batch.slice(0,20);moreAvailable=batch.length>20;const last=rows.at(-1);cursor=last?{id:last.id,created_at:last.created_at}:null;draw();status.textContent=rows.length?'':search.value.trim()?'검색 조건에 맞는 위원회가 없습니다.':'등록된 위원회가 없습니다.';}
+   if(!active||!allowed())return;const s=owner();if(s!==scope){rows=[];cursor=null;appliedQuery=null;moreAvailable=false;scope=s;authorized=false;draw();}
+   const query=search.value.trim();if(append&&(appliedQuery===null||query!==appliedQuery||!moreAvailable)){syncMore();if(query!==appliedQuery)status.textContent=queryHint;return;}
+   const t=++seq;reading=true;readingQuery=query;retry.disabled=false;syncMore();add.disabled=true;status.textContent='위원회를 불러오고 있습니다.';
+   try{const data=await rpc('list',{query,cursor:append?cursor:null},null,true,null);if(!current(s,t)||search.value.trim()!==query)return;authorized=true;appliedQuery=query;const batch=data.rows||[];rows=append?[...rows,...batch.slice(0,20).filter(x=>!rows.some(y=>y.id===x.id))]:batch.slice(0,20);moreAvailable=batch.length>20;const last=rows.at(-1);cursor=last?{id:last.id,created_at:last.created_at}:null;draw();status.textContent=rows.length?'':query?'검색 조건에 맞는 위원회가 없습니다.':'등록된 위원회가 없습니다.';}
    catch(e){if(current(s,t)){if(e.code==='42501'){authorized=false;closeEditor(false);}status.textContent=explain(e)+(rows.length?' 기존 목록은 유지했습니다.':'');}}
-   finally{if(current(s,t)){reading=false;more.disabled=false;add.disabled=!authorized;updateButtons();}}
+   finally{if(current(s,t)){reading=false;readingQuery=null;syncMore();add.disabled=!authorized;updateButtons();}}
   }
   function renderRoster(){roster.replaceChildren();for(const m of editing.values.roster){const row=node('div');row.className='committee-roster-row';row.append(node('span',`${m.name||'이름 미설정'} · ${m.number||'번호 미설정'}`));const role=node('select');role.className='form-select';role.setAttribute('aria-label',(m.name||'구성원')+' 역할');for(const[v,t]of Object.entries(roles)){const o=node('option',t);o.value=v;role.append(o);}role.value=m.role;role.onchange=()=>{m.role=role.value;epoch++;};const remove=node('button','제외');remove.type='button';remove.className='btn btn-outline-secondary';remove.onclick=()=>{editing.values.roster=editing.values.roster.filter(x=>x.id!==m.id);epoch++;renderRoster();memberSearch.focus({preventScroll:true});};row.append(role,remove);roster.append(row);}}
   function updateButtons(){if(!editing)return;save.disabled=!authorized||!!editing.confirming||!!editing.conflict;save.textContent=editing.job?'저장 결과 확인':'저장';discard.disabled=!!editing.job||!!editing.confirming;history.disabled=!editing.revision;latest.hidden=!editing.conflict;}
-  function show(d,button){if(!current())return;editing=d;opener=button;epoch++;for(const k of fields)form.elements[k].value=d.values[k];memberSearch.value='';found.replaceChildren();memberStatus.textContent='';message.textContent=d.job?'이전 저장 결과를 먼저 확인해 주세요.':dirty(d)?'작성 중인 내용을 이어서 표시합니다.':'';historyBox.hidden=true;historyBox.replaceChildren();renderRoster();overlay.hidden=false;updateButtons();form.elements.title.focus({preventScroll:true});}
+  function show(d,button){if(!current())return;++detailSeq;if(!reading&&status.textContent==='위원회 내용을 불러오고 있습니다.')status.textContent='';editing=d;opener=button;epoch++;for(const k of fields)form.elements[k].value=d.values[k];memberSearch.value='';found.replaceChildren();memberStatus.textContent='';message.textContent=d.job?'이전 저장 결과를 먼저 확인해 주세요.':dirty(d)?'작성 중인 내용을 이어서 표시합니다.':'';historyBox.hidden=true;historyBox.replaceChildren();renderRoster();overlay.hidden=false;updateButtons();form.elements.title.focus({preventScroll:true});}
   async function openRecord(id,button){
    if(!current()||!authorized)return;capture();const t=++detailSeq,s=scope,focus=document.activeElement;let d=drafts.get(key(id));if(d&&(dirty(d)||d.conflict)){show(d,button);return;}
    status.textContent='위원회 내용을 불러오고 있습니다.';
@@ -87,13 +91,13 @@
   latest.onclick=async()=>{const d=editing,e=epoch;if(!owns(d)||!d.conflict)return;latest.disabled=true;try{const result=await rpc('get',{id:d.id},null,true,d);if(!owns(d)||epoch!==e)return;const r=result.record;const yes=await root.CoopDialog.confirm(`현재 저장된 내용: ${r.title}\n${r.start_date||'시작일 미설정'} ~ ${r.end_date||'종료일 미설정'}\n${r.purpose||''}\n${(r.roster||[]).map(m=>`${m.name} (${roles[m.role]||'위원'})`).join(', ')}\n\n작성 중인 초안을 유지하고, 이 최신 저장본을 기준으로 검토를 이어갈까요?`);if(yes&&owns(d)&&epoch===e){d.revision=r.revision;d.baseline=shape(fresh(d.slot,r).values);d.conflict=false;message.textContent='최신 저장본을 기준으로 초안을 검토한 뒤 저장해 주세요.';updateButtons();}}catch(error){if(owns(d)&&epoch===e)message.textContent=explain(error);}finally{latest.disabled=false;}};
   history.onclick=async()=>{const d=editing,e=epoch;if(!owns(d))return;historyBox.hidden=false;historyBox.textContent='이전 변경을 불러오고 있습니다.';try{const r=await rpc('history',{id:d.id},null,true,d);if(!owns(d)||epoch!==e)return;historyBox.replaceChildren();if(!r.rows?.length)historyBox.textContent='이전 변경이 없습니다.';for(const v of r.rows||[]){const block=node('details'),summary=node('summary',`${v.revision}번째 저장 · ${new Date(v.changed_at).toLocaleString('ko-KR')}`),text=node('p',`${v.snapshot.title} · ${v.snapshot.state==='ended'?'활동 종료':'활동 중'} · ${(v.snapshot.roster||[]).map(m=>`${m.name} (${roles[m.role]||'위원'})`).join(', ')} · ${v.snapshot.purpose||''}`);block.append(summary,text);historyBox.append(block);}}catch(error){if(owns(d)&&epoch===e)historyBox.textContent=explain(error);}};
   close.onclick=()=>closeEditor();overlay.addEventListener('keydown',event=>{if(overlay.hidden||event.defaultPrevented)return;if(document.querySelector('dialog.coop-dialog[open]'))return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeEditor();}if(event.key==='Tab'){const focusable=[...overlay.querySelectorAll('button,input,textarea,select,summary,[tabindex="0"]')].filter(n=>!n.disabled&&n.getClientRects().length);const i=focusable.indexOf(document.activeElement);if(!focusable.length){event.preventDefault();panel.focus();}else if(event.shiftKey&&(i<=0)){event.preventDefault();focusable.at(-1).focus();}else if(!event.shiftKey&&(i===focusable.length-1||i<0)){event.preventDefault();focusable[0].focus();}}});
-  search.oninput=()=>{if(reading){seq++;reading=false;more.disabled=false;add.disabled=!authorized;status.textContent='검색어가 바뀌었습니다. 다시 확인을 눌러 주세요.';}};
+  search.oninput=()=>{const query=search.value.trim();if(reading&&query!==readingQuery){seq++;reading=false;readingQuery=null;add.disabled=!authorized;}syncMore();if(query!==appliedQuery)status.textContent=queryHint;else if(!reading&&status.textContent===queryHint)status.textContent=rows.length?'':query?'검색 조건에 맞는 위원회가 없습니다.':'등록된 위원회가 없습니다.';};
   controls.onsubmit=e=>{e.preventDefault();void refresh();};more.onclick=()=>{if(!reading)void refresh(true);};add.onclick=()=>{if(!current()||!authorized)return;const d=drafts.get(key('new'))||fresh();drafts.set(key('new'),d);show(d,add);};
   function pause(){capture();active=false;seq++;detailSeq++;memberSeq++;closeEditor(false);}
   new MutationObserver(()=>{if(root.frameElement?.hidden)pause();}).observe(root.frameElement||document.documentElement,{attributes:true,attributeFilter:['hidden']});
   client.auth?.onAuthStateChange?.((event,session)=>{const next=session?.user?.id||'';if(next!==authActor){pause();authorized=false;authActor=next;}});
   root.addEventListener('pagehide',pause);root.addEventListener('beforeunload',e=>{capture();if([...drafts.values()].some(dirty)){e.preventDefault();e.returnValue='';}});
-  return {activate(){if(!client.auth)authActor=context().actorId;active=true;void refresh();},pause,refresh(){if(active)return refresh();},hasDraft(){capture();return [...drafts.values()].some(dirty);},version:'1.0.0'};
+  return {activate(){if(!client.auth)authActor=context().actorId;active=true;void refresh();},pause,refresh(){if(active)return refresh();},hasDraft(){capture();return [...drafts.values()].some(dirty);},version:'1.0.1'};
  }
- root.CommitteeManagement={create,version:'1.0.0'};
+ root.CommitteeManagement={create,version:'1.0.1'};
 })(window);
