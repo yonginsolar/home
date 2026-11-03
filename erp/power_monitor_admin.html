@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.3.6 | Change: 2026-10-12 - Retain original plant photos and display optimized copies. -->
+<!-- Version: v1.4.0 | Internal plant information, work history and monitoring. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,11 +12,11 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.6 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.4.0 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-  <title>발전소 모니터링 관리</title>
+  <title>발전소 관리</title>
   <script src="/shared/tenant_head.js?v=20260916-1"></script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
@@ -50,6 +50,7 @@
       --solar-line: rgba(21, 38, 31, 0.10);
     }
     * { box-sizing: border-box; }
+    .page-shell > section[hidden] { display:none !important; }
     body {
       min-height: 100vh;
       margin: 0;
@@ -168,8 +169,8 @@
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
         <div>
           <div class="eyebrow">INTEGRATED OPERATIONS</div>
-          <h1 class="page-title">발전소 모니터링 관리</h1>
-          <p class="subcopy">조합별 홈페이지 발전소 정보와 외부 수집 현황을 연결해 한곳에서 확인합니다.</p>
+          <h1 class="page-title">발전소 관리</h1>
+          <p class="subcopy">발전소 기본정보와 점검·작업 이력, 모니터링을 한곳에서 확인합니다.</p>
         </div>
         <button class="btn btn-outline-secondary btn-sm" type="button" onclick="location.href='index.html'" data-erp-home-link>ERP 홈</button>
       </div>
@@ -182,6 +183,13 @@
       </div>
     </section>
 
+    <nav class="d-flex gap-2 flex-wrap mt-3" aria-label="발전소 관리 구분" id="plantManagementTabs">
+      <button type="button" class="btn btn-success" data-plant-view="plants" aria-pressed="true">발전소</button>
+      <button type="button" class="btn btn-outline-success" data-plant-view="history" aria-pressed="false">점검·작업 이력</button>
+      <button type="button" class="btn btn-outline-success" data-plant-view="monitor" aria-pressed="false">모니터링</button>
+    </nav>
+    <section id="plantBasePanel" class="panel-card"><div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3"><h2 class="h5 m-0">등록된 발전소</h2><button type="button" class="btn btn-success" id="addBasePlant">발전소 등록</button></div><div id="plantBaseContent">발전소를 불러오고 있어요…</div></section>
+    <section id="plantWorkPanel" class="panel-card" hidden><h2 class="h5 mb-3">점검·작업 이력</h2><div id="plantWorkContent"></div></section>
     <div class="alert hidden mt-3 mb-0" id="statusArea" role="status" aria-live="polite"></div>
 
     <section class="panel-card">
@@ -457,6 +465,7 @@
     </div>
   </div>
 
+  <script src="plant_work_history.js?v=1.0.0" integrity="sha384-8t/l3DIXER1gNq6W6U+i89oB5ATos5iWDnRiC2zpK7TpM5fIzVwEfXUS9QkmTfIN" crossorigin="anonymous"></script>
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
@@ -948,6 +957,7 @@
       renderVendorContacts();
       renderPlantContent();
       isDirty = false;
+      syncPlantWork();applyPlantView();
     }
 
     function markDirty() {
@@ -1328,6 +1338,10 @@
       }
     }
 
+    let plantWorkController=null,plantView='plants';
+    function plantWorkContext(){const coop=String(monitorData?.dashboard?.coop_id||monitorData?.selected?.coop_id||'');return{coopId:coop,actorId:monitorReadOwner.userId,allowed:!!monitorReadOwner.userId&&!!coop,plants:getAvailableHomepagePlants(coop)};}
+    function syncPlantWork(){if(!window.PlantWorkHistory)return;if(!plantWorkController)plantWorkController=PlantWorkHistory.create({client:_supabase,getContext:plantWorkContext,container:document.getElementById('plantWorkContent'),basicContainer:document.getElementById('plantBaseContent'),onEditPlant:id=>openPlantInfoEditor(null,id)});plantWorkController.sync();}
+    function applyPlantView(){document.querySelectorAll('.page-shell > section').forEach(section=>{if(section.classList.contains('hero-card'))return;section.hidden=section.id==='plantBasePanel'?plantView!=='plants':section.id==='plantWorkPanel'?plantView!=='history':plantView!=='monitor';});document.querySelectorAll('[data-plant-view]').forEach(b=>{const selected=b.dataset.plantView===plantView;b.setAttribute('aria-pressed',String(selected));b.classList.toggle('btn-success',selected);b.classList.toggle('btn-outline-success',!selected);});plantWorkController?.activate(plantView==='history');}
     async function initPage() {
       try {
         const { data: userData, error: userError } = await _supabase.auth.getUser();
@@ -1350,6 +1364,7 @@
             monitorReadOwner = { userId:null, revision:monitorReadOwner.revision + 1 };
             monitorReadSequence++;
             monitorData = null; vendorContacts = [];
+            plantWorkController?.pause();plantWorkController?.sync();
             document.querySelector('.page-shell').hidden = true;
           }
         });
@@ -1360,7 +1375,7 @@
           return result.data?.is_platform_admin===true;
         },busy:()=>isDirty,refresh:()=>loadData(currentScopeKey,true,{allowHidden:true})});
         autoRefreshTimer = setInterval(() => {
-          if (!isDirty && !document.hidden && !window.frameElement?.hidden) loadData(currentScopeKey, true);
+          if (plantView==='monitor' && !isDirty && !document.hidden && !window.frameElement?.hidden) loadData(currentScopeKey, true);
         }, 180000);
       } catch (error) {
         console.error('[power-monitor-admin] init failed', error);
@@ -1369,6 +1384,10 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('plantManagementTabs').addEventListener('click',event=>{const button=event.target.closest('[data-plant-view]');if(!button)return;plantView=button.dataset.plantView;applyPlantView();});
+      window.addEventListener('plant-work-show',()=>{plantView='history';applyPlantView();});
+      document.getElementById('addBasePlant').onclick=()=>openPlantInfoEditor(null,null);
+      applyPlantView();
       const plantInfoModalElement = document.getElementById('plantInfoModal');
       plantInfoModal = bootstrap.Modal.getOrCreateInstance(plantInfoModalElement);
       const vendorContactModalElement = document.getElementById('vendorContactModal');

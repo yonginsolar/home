@@ -21,7 +21,7 @@
     ['btnAudit', '감사 로그', 'audit_logs.html', 'audit', ['audit.view'], '◷'],
     ['btnPerm', '권한 관리', 'permissions.html', 'permission', ['permission.manage'], '⚿']
   ];
-  const extraLabels = {btnVoteHub:'선거·투표 관리',btnServiceContracts:'이용계약·청구서',btnFestivalReceipts:'매출·재고 관리',btnPowerMonitorAdmin:'발전소 모니터링',btnPlatform:'조합 생성·운영 제어',btnSunVillageDemo:'햇빛소득마을',btnVillageEnergy:'발전·정산 현황'};
+  const extraLabels = {btnVoteHub:'선거·투표 관리',btnServiceContracts:'이용계약·청구서',btnFestivalReceipts:'매출·재고 관리',btnPowerMonitorAdmin:'발전소 관리',btnPlatform:'조합 생성·운영 제어',btnSunVillageDemo:'햇빛소득마을',btnVillageEnergy:'발전·정산 현황'};
   const labels = new Map([...catalog.map(item=>[item[0],item[1]]),...Object.entries(extraLabels)]);
   const compare = (a,b) => a.localeCompare(b,'ko-KR') || (a<b?-1:a>b?1:0);
   const cleanOrder = order => [...new Set((Array.isArray(order)?order:[]).filter(id=>typeof id==='string' && /^btn[A-Za-z0-9_-]{1,80}$/.test(id)))];
@@ -672,7 +672,7 @@
     }
     if (festival?.allowed === true) state.items.push(['btnFestivalReceipts', '매출·재고 관리', 'festival_receipts.html', '', [], '▦', true]);
     if (platform?.is_platform_admin === true) {
-      state.items.push(['btnPowerMonitorAdmin', '발전소 모니터링', 'power_monitor_admin.html', '', [], '☀', true]);
+      state.items.push(['btnPowerMonitorAdmin', '발전소 관리', 'power_monitor_admin.html', '', [], '☀', true]);
       state.items.push(['btnPlatform', '조합 생성·운영 제어', 'platform_admin.html', '', [], '⚒']);
     } else if (monitor?.allowed === true && safeMonitor(monitor.url)) {
       state.items.push(['btnPowerMonitorAdmin', '발전소 모니터링', safeMonitor(monitor.url), '', [], '☀', true]);

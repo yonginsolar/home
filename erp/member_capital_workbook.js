@@ -1,4 +1,4 @@
-/* Member/capital workbook 1.3.0. Optional phone matching without looking up member numbers. */
+/* Integrated member/capital/bank workbook1.4.0. Original writers remain separately guarded. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -34,8 +34,8 @@
   const text = (v) => String(v ?? "").trim();
   function parse(wb, X, normalizeMember, memberPayload) {
     const ms = wb.Sheets["조합원"],
-      ps = wb.Sheets["출자금 납입내역"];
-    if (!ms && !ps)
+      ps = wb.Sheets["출자금 납입내역"], bs=wb.Sheets['계좌정보'];
+    if (!ms && !ps && !bs)
       throw Error(
         "조합원 또는 출자금 납입내역 시트를 사용해 주세요. 양식 다운로드에서 두 시트 양식을 받을 수 있습니다.",
       );
@@ -57,7 +57,7 @@
       return rows;
     };
     const rawMembers = read(ms),
-      rawPayments = read(ps),
+      rawPayments = read(ps), rawAccounts=read(bs),
       members = rawMembers.map((r, i) => normalizeMember(r, i)),
       errors = [];
     const payload = memberPayload(members).map((r, i) => {
@@ -113,12 +113,12 @@
       if(row.phone&&!/^[0-9 ()+.-]+$/.test(row.phone))row._issues.push('전화번호 형식을 확인해 주세요.');
       return row;
     });
-    if (!payload.length && !payment.length)
+    if (!payload.length && !payment.length && !rawAccounts.length)
       errors.push("등록할 내용이 없습니다.");
     const sources = {members: {}, payments: {}, date1904: wb.Workbook?.WBProps?.date1904 === true};
     for (const [key, raw, rows] of [["members",rawMembers,payload],["payments",rawPayments,payment]])
       rows.forEach((row,i) => { sources[key][row.row_no] = {...raw[i]}; });
-    return { data: { members: payload, payments: payment, mode: "groups", protocol: "existing-capital-1" }, errors, sources };
+    return { data: { members: payload, payments: payment, mode: "groups", protocol: "existing-capital-1" }, errors, sources, accounts:rawAccounts };
   }
   function create({
     client,
@@ -128,8 +128,9 @@
     memberPayload,
     refresh,
     registrationProgress = false,
+    ensureBankImport = null,
   }) {
-    let state = null,
+      let state = null,
       modal,
       file,
       status,
@@ -140,7 +141,7 @@
       clear,
       tab = "payments",
       opener,
-      activeProgress = null;
+      activeProgress = null, bankController=null, bankPane=null, bankOpening=null;
     const context = () => getContext() || {},
       same = (s) => s === state && s.owner === context().owner,
       allowed = (s) => same(s) && context().allowed === true,
@@ -189,6 +190,7 @@
     }
     function pause() {
       if (!state) return;
+      bankController?.pause();
       finishProgress();
       state.epoch++;
       state.ctl?.abort();
@@ -201,6 +203,7 @@
       render();
     }
     function syncContext() {
+      bankController?.syncContext();
       if (!state) return;
       if (!context().owner || state.owner !== context().owner) {
         pause();
@@ -224,10 +227,14 @@
       const layout = el("style");
       layout.textContent = "#memberWorkbookModal dialog.member-workbook-progress{box-sizing:border-box;width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;margin:auto;padding:24px;border:1px solid #cbd5e1;border-radius:16px;background:#fff;color:#172033;word-break:keep-all;overflow-wrap:anywhere}#memberWorkbookModal dialog.member-workbook-progress::backdrop{background:#0f172a75}#memberWorkbookModal .modal-dialog-scrollable .modal-content{max-height:calc(100vh - var(--bs-modal-margin, .5rem)*2);max-height:calc(100dvh - var(--bs-modal-margin, .5rem)*2);overflow-y:auto}#memberWorkbookModal .modal-body{flex:0 0 auto;overflow:visible}@media(max-width:575.98px){#memberWorkbookModal .modal-footer{padding:8px;gap:8px}#memberWorkbookModal .modal-footer>button{flex:1 1 14rem;max-width:100%;min-width:0;min-height:44px;margin:0;padding:8px 12px;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}}";
       document.head.append(layout);
+      layout.textContent+='#memberWorkbookModal .modal-dialog{width:min(1140px,calc(100vw - 2rem));max-width:none;height:min(780px,calc(100dvh - 2rem));margin:1rem auto}#memberWorkbookModal .modal-content{height:100%}#memberWorkbookModal [data-sheet]{min-width:0;max-width:100%;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}';
       modal.innerHTML =
-        '<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="memberWorkbookTitle">회원·출자금 엑셀 함께 등록</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="d-flex gap-2 flex-wrap mb-3"><button type="button" class="btn btn-outline-success btn-sm" data-template>두 시트 양식 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm coop-workflow-help" data-help aria-label="회원·출자금 함께 등록 도움말">?</button></div><label class="form-label" for="memberWorkbookFile">엑셀 파일</label><input id="memberWorkbookFile" class="form-control mb-2" type="file" accept=".xlsx,.xls"><p class="small text-muted">조합원 시트에는 회원 정보를, 출자금 납입내역 시트에는 실제 입금을 한 줄씩 입력하세요. 기존 회원이 확인되면 출자금만 추가합니다. 파일 10MB·시트별 500건까지 검사합니다.</p><p data-status class="small" role="status" aria-live="polite"></p><p data-summary class="small fw-bold"></p><div class="d-flex gap-2 flex-wrap mb-2"><button type="button" class="btn btn-outline-secondary btn-sm" data-check>다시 검사</button><button type="button" class="btn btn-outline-secondary btn-sm" data-export>검토 목록 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm" data-clear>검토 비우기</button></div><div class="d-flex gap-2 mb-2" role="group" aria-label="검토 시트"><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="members">조합원</button><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="payments">출자금 납입내역</button></div><div class="table-responsive border rounded" style="max-height:45vh;overflow:auto"><table class="table table-sm align-middle mb-0" style="min-width:850px;table-layout:fixed"><thead></thead><tbody></tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-submit>회원·납입내역 등록</button></div></div></div>';
+        '<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="memberWorkbookTitle">회원·출자금·계좌정보 통합 검토</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="d-flex gap-2 flex-wrap mb-3"><button type="button" class="btn btn-outline-success btn-sm" data-template>통합 양식 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm coop-workflow-help" data-help aria-label="통합 엑셀 업로드 도움말">?</button></div><label class="form-label" for="memberWorkbookFile">엑셀 파일</label><input id="memberWorkbookFile" class="form-control mb-2" type="file" accept=".xlsx,.xls"><p class="small text-muted">조합원·출자금 납입내역·계좌정보를 각 시트에 입력하세요. 계좌정보는 계좌정보 탭에서 연결 대상과 은행을 확인한 뒤 반영합니다. 기존 회원이 확인되면 출자금만 추가합니다. 파일 10MB·시트별 500건까지 검사합니다.</p><p data-status class="small" role="status" aria-live="polite"></p><p data-summary class="small fw-bold"></p><div class="d-flex gap-2 flex-wrap mb-2"><button type="button" class="btn btn-outline-secondary btn-sm" data-check>다시 검사</button><button type="button" class="btn btn-outline-secondary btn-sm" data-export>검토 목록 다운로드</button><button type="button" class="btn btn-outline-secondary btn-sm" data-clear>검토 비우기</button></div><div class="d-flex gap-2 mb-2" role="group" aria-label="검토 시트"><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="members">조합원</button><button type="button" class="btn btn-outline-primary btn-sm" data-sheet="payments">출자금 납입내역</button></div><div class="table-responsive border rounded" style="max-height:45vh;overflow:auto"><table class="table table-sm align-middle mb-0" style="min-width:850px;table-layout:fixed"><thead></thead><tbody></tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary" data-submit>회원·납입내역 등록</button></div></div></div>';
       document.body.append(modal);
       const $ = (s) => modal.querySelector(s);
+      const accountTab=el('button','계좌정보');accountTab.type='button';accountTab.className='btn btn-outline-primary btn-sm';accountTab.dataset.sheet='accounts';$('[data-sheet="payments"]').after(accountTab);
+      accountTab.parentElement.classList.add('flex-wrap');
+      bankPane=el('section');bankPane.hidden=true;bankPane.dataset.bankPane='';$('.table-responsive').after(bankPane);
       file = $("input[type=file]");
       status = $("[data-status]");
       status.style.whiteSpace = "pre-line";
@@ -239,7 +246,7 @@
       check = $("[data-check]");
       clear = $("[data-clear]");
       file.onchange = () => {
-        if (!allowed(state) || locked(state) || !file.files[0]) return;
+        if (!allowed(state) || locked(state) || bankController?.pending() || !file.files[0]) {restoreSelection(state?.file);return;}
         const selected = file.files[0];
         if (
           selected.size > 10 * 1024 * 1024 ||
@@ -262,6 +269,7 @@
               phase: state.phase,
               sources: state.sources,
               failures: state.failures,
+              accounts:state.accounts,
             }
           : null;
         pause();
@@ -272,16 +280,18 @@
         state.rechecks = new Set();
         state.attempt = null;
         state.dirty = true;
-        void readFile();
+        const snapshot=state,ticket=state.epoch;
+        const read=()=>{if(same(snapshot)&&snapshot.epoch===ticket&&snapshot.file===selected&&allowed(snapshot)&&visible())void readFile();};
+        if(visible())read();else modal.addEventListener('shown.bs.modal',read,{once:true});
       };
       check.onclick = () => void (state?.data ? review() : readFile());
       submit.onclick = () => void save();
       clear.onclick = async () => {
         const s = state;
-        if (!s || !allowed(s) || locked(s)) return;
+        if (!s || !allowed(s) || locked(s) || bankController?.pending()) return;
         const epoch = s.epoch;
         if (
-          !(await root.CoopDialog.confirm("이 검토 내용을 비울까요?")) ||
+          !(await root.CoopDialog.confirm("이 파일의 회원·출자금·계좌 검토 초안을 버릴까요? 이미 반영한 자료는 바뀌지 않습니다.")) ||
           !same(s) ||
           s.epoch !== epoch ||
           !allowed(s) ||
@@ -289,6 +299,7 @@
         )
           return;
         pause();
+        bankController?.resetDraft();
         state = null;
         file.value = "";
         const originalOpener = opener;
@@ -310,15 +321,16 @@
       $("[data-template]").onclick = () => download(template);
       $("[data-help]").onclick = () =>
         void root.CoopDialog.alert(
-          "💡 두 시트를 어떻게 쓰나요?\n‘조합원’에는 명부에 새로 넣을 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 회원만 등록하면 조합원 시트만 사용하고, 출자금을 함께 등록할 때만 출자금 등록 권한을 추가로 확인합니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역은 이름·전화번호로 기존 조합원을 찾고, 여러 명이 겹치면 검토 목록에서 직접 선택합니다. 조합원번호를 아는 경우에는 그대로 사용할 수 있습니다. 이미 명부에 있는 회원은 납입내역 시트만 사용해도 됩니다. 두 시트에 함께 들어 있다면 조합원번호·주민번호 등으로 같은 회원인지 확인한 뒤 기존 회원의 출자금만 추가합니다. 회원 정보는 덮어쓰지 않습니다.\n\n이메일이 없는 기존 회원은요?\n명부 등록에서는 이메일을 비워 둘 수 있습니다. 임의의 이메일을 만들지 마세요. 명부 등록과 로그인 계정 생성은 별개이며, 이메일 로그인에는 본인의 실제 이메일 인증·계정 연결이 필요합니다.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록한 납입은 다시 등록하지 않고 건너뜁니다. 남은 납입에 필요한 기존 회원 정보는 다운로드에 함께 남습니다.",
+          "통합 양식은 어떻게 쓰나요?\n‘조합원’에는 명부에 새로 넣을 회원을 한 줄씩, ‘출자금 납입내역’에는 실제 입금을 한 줄씩 적습니다. 회원만 등록하면 조합원 시트만 사용하고, 출자금을 함께 등록할 때만 출자금 등록 권한을 추가로 확인합니다. 동명이인과 같은 연락처는 등록할 수 있습니다. 납입내역은 이름·전화번호로 기존 조합원을 찾고, 여러 명이 겹치면 검토 목록에서 직접 선택합니다. 조합원번호를 아는 경우에는 그대로 사용할 수 있습니다. 이미 명부에 있는 회원은 납입내역 시트만 사용해도 됩니다. 두 시트에 함께 들어 있다면 조합원번호·주민번호 등으로 같은 회원인지 확인한 뒤 기존 회원의 출자금만 추가합니다. 회원 정보는 덮어쓰지 않습니다.\n\n계좌정보도 함께 올리려면\n‘계좌정보’ 시트에 조합원번호 또는 이름·전화번호와 은행명·계좌번호·예금주를 입력하고 계좌정보 탭에서 확인하세요. 신규 회원은 회원 등록이 확인된 뒤 같은 파일에서 계좌 연결을 다시 검사해 주세요. 기존 회원의 정보나 출자금 없이 계좌정보만 작성해도 됩니다.\n\n이메일이 없는 기존 회원은요?\n명부 등록에서는 이메일을 비워 둘 수 있습니다. 임의의 이메일을 만들지 마세요. 명부 등록과 로그인 계정 생성은 별개이며, 이메일 로그인에는 본인의 실제 이메일 인증·계정 연결이 필요합니다.\n\n같은 날 같은 금액을 두 번 냈다면\n통장 거래번호·입금 시각 등 서로 다른 거래 구분을 적고 각 별도 입금을 확인하세요. 거래 구분을 수정하면 다시 확인해야 합니다.\n\n확인할 행이 있다면\n정상 회원과 연결된 납입내역부터 함께 등록합니다. 한 묶음에 오류나 미확인 입금이 있으면 그 묶음은 남습니다. ‘남은 행 다운로드’에서 입력값과 사유를 받아 수정한 뒤 다시 올리세요. 이미 등록한 납입은 다시 등록하지 않고 건너뜁니다. 남은 납입에 필요한 기존 회원 정보는 다운로드에 함께 남습니다.",
           { title: "회원·출자금 함께 등록" },
         );
       $("[data-export]").textContent = "남은 행 다운로드";
       $("[data-export]").onclick = () => download(exportReview);
       for (const b of modal.querySelectorAll("[data-sheet]"))
         b.onclick = () => {
-          tab = b.dataset.sheet;
-          renderRows();
+          if(locked(state)||bankController?.pending())return;
+          bankController?.pause();tab = b.dataset.sheet;
+          render();if(tab==='accounts')void openAccounts();
         };
       modal.addEventListener("hide.bs.modal", (e) => {
         if (state?.phase === "saving") {
@@ -328,10 +340,12 @@
         pause();
       });
       modal.addEventListener("hidden.bs.modal", () => {
-        if (opener?.isConnected) opener.focus({ preventScroll: true });
+        const focused=document.activeElement;
+        if (state&&opener?.isConnected&&allowed(state)&&!root.frameElement?.hidden&&!modal.classList.contains('show')&&!document.querySelector('.modal.show,dialog[open]')&&(focused===document.body||focused===modal||modal.contains(focused))&&opener.getClientRects().length&&!opener.disabled) opener.focus({ preventScroll: true });
       });
+      modal.addEventListener('keydown',event=>{if(event.key!=='Tab'||root.CoopDialog?.hasPending?.()||event.target.closest?.('[role="alertdialog"],dialog[open]'))return;const nodes=[...modal.querySelectorAll('button,input,select,textarea,[tabindex]')].filter(n=>!n.disabled&&n.tabIndex>=0&&!n.closest('[hidden],[inert]')&&n.getClientRects().length);const index=nodes.indexOf(document.activeElement);if(index<0||(!event.shiftKey&&index===nodes.length-1)||(event.shiftKey&&index===0)){event.preventDefault();(event.shiftKey?nodes.at(-1):nodes[0])?.focus();}});
       root.addEventListener("beforeunload", (e) => {
-        if (state?.dirty) {
+        if (state?.dirty || bankController?.hasUnsaved()) {
           e.preventDefault();
           e.returnValue = "";
         }
@@ -346,6 +360,7 @@
     }
     function renderRows() {
       if (!modal) return;
+      if(tab==='accounts')return;
       const s = state,
         head = table.tHead,
         body = table.tBodies[0];
@@ -487,6 +502,7 @@
     }
     function ready(s) {
       return (
+        !bankController?.pending() && !!(s?.data?.members.length||s?.data?.payments.length) &&
         s?.phase === "ready" &&
         s.review &&
         !s.errors?.length &&
@@ -506,12 +522,15 @@
       if (!modal) return;
       const s = state,
         can = !!s && allowed(s),
-        busy = locked(s) || ["reading", "checking"].includes(s?.phase);
+        busy = locked(s) || !!bankController?.pending() || ["reading", "checking"].includes(s?.phase);
       file.disabled = !can || busy;
       check.disabled = !can || busy || !s.file;
       clear.disabled = !can || busy || !s.file;
       modal.querySelector('[data-export]').disabled = !can || busy || !(s?.data?.members.length || s?.data?.payments.length);
       submit.disabled = !can || (!ready(s) && s.phase !== "uncertain");
+      submit.hidden=tab==='accounts';bankPane.hidden=tab!=='accounts';table.parentElement.hidden=tab==='accounts';
+      for(const b of modal.querySelectorAll('[data-sheet]')){b.disabled=!can||busy;b.setAttribute('aria-pressed',String(b.dataset.sheet===tab));}
+      clear.hidden=false;check.hidden=tab==='accounts';modal.querySelector('[data-export]').hidden=tab==='accounts';
       submit.textContent =
         s?.phase === "uncertain" ? "등록 결과 확인" : registrationProgress ? "등록" : "등록 가능한 묶음 등록";
       status.textContent = s?.message || "";
@@ -544,10 +563,10 @@
     }
     async function readFile() {
       const s = state;
-      if (!s || !allowed(s) || locked(s) || !s.file) return;
+      if (!s || !allowed(s) || locked(s) || !s.file || !visible()) return;
       const epoch = ++s.epoch;
       s.phase = "reading";
-      s.message = "두 시트의 내용을 읽는 중입니다…";
+      s.message = "통합 파일의 내용을 읽는 중입니다…";
       render();
       try {
         if (s.file.size > 10 * 1024 * 1024)
@@ -566,14 +585,16 @@
         s.sources = parsed.sources;
         s.failures = null;
         s.fallback = null;
-        s.errors = parsed.errors;
+        s.errors = parsed.errors;s.accounts=parsed.accounts;
         s.phase = "needs_check";
         if (parsed.errors.length) {
           s.message = parsed.errors.join("\n");
           render();
           return;
         }
-        await review();
+        bankController?.resetDraft();
+        if(!s.data.members.length&&!s.data.payments.length){s.phase='ready';s.review=null;s.message='계좌정보 탭에서 연결할 회원과 은행을 확인해 주세요.';tab='accounts';render();await openAccounts();}
+        else {render();await review();if(tab==='accounts')await openAccounts();}
       } catch (e) {
         if (same(s) && s.epoch === epoch) {
           if (s.fallback) {
@@ -607,6 +628,7 @@
     async function review() {
       const s = state;
       if (!s || !allowed(s) || locked(s) || !s.data || !visible()) return;
+      if(!s.data.members.length&&!s.data.payments.length){s.phase='ready';s.review=null;render();return;}
       if (s.errors?.length) {
         s.message = s.errors.join("\n");
         render();
@@ -831,10 +853,11 @@
         s.attempt = null;
         s.review = existing.size && remaining ? {members:s.data.members.filter(row => existing.has(row.row_no)).map(row => ({row_no:row.row_no,existing:true,eligible:false,reason:"기존 조합원 · 출자금 연결"})),payments:[]} : null;
         s.failures = failures;
-        s.dirty = remaining > 0;
+        s.dirty = remaining > 0 || (!!s.accounts?.length&&(!bankController||bankController.hasUnsaved()));
         s.message = "등록 완료: 회원 " + r.member_count + "명·납입 " + r.payment_count + "건" + (remaining ? " · 남은 " + remaining + "행은 내려받아 수정하거나 다시 검사해 주세요." : "");
         resultNotice = (r.member_count || r.payment_count ? "회원 " + r.member_count + "명·납입 " + r.payment_count + "건을 등록했습니다." : "등록된 항목이 없습니다.") + (remaining ? "\n남은 " + remaining + "행은 검토 목록에서 확인해 주세요." : "");
-        if (!remaining) {
+        bankController?.invalidate('회원·납입 처리 후 연결 대상을 다시 검사해 주세요. 새 회원은 등록이 확인된 뒤 계좌를 연결합니다.');
+        if (!remaining && !s.accounts?.length) {
           file.value = "";
           s.file = null;
           root.ErpWorkspaceResume?.checkpoint(file);
@@ -878,27 +901,31 @@
       if (!s || !allowed(s)) return;
       await ensureSpreadsheet();
       if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible()) return;
-      const X = root.XLSX,
-        wb = X.utils.book_new();
-      for (const [name, h] of [
-        ["조합원", memberHeaders],
-        ["출자금 납입내역", paymentHeaders],
-      ]) {
-        const sheet = X.utils.aoa_to_sheet([h]);
-        sheet["!cols"] = h.map((v) => ({
-          wch: v.includes("메모") ? 35 : Math.max(16, v.length * 2 + 2),
-        }));
-        X.utils.book_append_sheet(wb, sheet, name);
-      }
-      X.writeFile(wb, "회원_출자금_함께등록_양식.xlsx");
+      const a=el('a');a.href=new URL('../assets/templates/member_integrated.xlsx',document.baseURI).href;a.download='회원_출자금_계좌정보_통합양식.xlsx';a.click();
+    }
+    async function openAccounts(){
+      const s=state,ticket=s?.epoch;if(!s||!allowed(s)||!visible()||tab!=='accounts'||locked(s))return;
+      let notice=bankPane.querySelector('[data-bank-notice]');if(!notice){notice=el('p');notice.dataset.bankNotice='';bankPane.prepend(notice);}notice.replaceChildren();
+      const panel=bankPane.querySelector('#memberBankImportPanel');if(panel)panel.hidden=!s.accounts?.length;
+      if(!s.accounts?.length){notice.textContent='이 파일에는 계좌정보가 없습니다. 통합 양식의 계좌정보 시트에 입력해 주세요.';return;}
+      if(bankOpening)return bankOpening;
+      bankOpening=(async()=>{try{
+        if(!ensureBankImport)throw Error('BANK_TOOL');const feature=await ensureBankImport();
+        if(!same(s)||s.epoch!==ticket||!allowed(s)||!visible()||tab!=='accounts')return;
+        if(!bankController){bankController=feature.create({client,getContext:context,ensureSpreadsheet,refresh,mount:bankPane,onClose:()=>{bankController.pause();tab='payments';render();},onExport:exportReview,onStateChange:()=>{if(state){if(!state.data?.members.length&&!state.data?.payments.length&&bankController?.currentFile()===state.file)state.dirty=bankController.hasUnsaved();render(false);}}});}
+        if(bankController.currentFile()===s.file){bankController.open();return;}
+        await bankController.acceptFile(s.file);
+      }catch(_){if(same(s)&&s.epoch===ticket&&allowed(s)&&visible()&&tab==='accounts'){notice.replaceChildren(document.createTextNode('계좌 검토 도구를 불러오지 못했어요. '));const retry=el('button','다시 확인');retry.type='button';retry.className='btn btn-outline-primary';retry.onclick=()=>void openAccounts();notice.append(retry);}}
+      finally{bankOpening=null;}})();return bankOpening;
     }
     async function exportReview() {
       const s = state,
         epoch = s?.epoch;
-      if (!s || !allowed(s) || locked(s) || !s.data) return;
+      if (!s || !allowed(s) || locked(s) || bankController?.pending() || !s.data) return;
       await ensureSpreadsheet();
-      if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible() || locked(s) || !(s.data.members.length || s.data.payments.length)) return;
-      if (!s.data.members.length && !s.data.payments.length) return;
+      if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible() || locked(s) || bankController?.pending()) return;
+      const accounts=bankController?.currentFile()===s.file?bankController.remainingRows().map(r=>({'조합원번호':r.member_id,'이름·단체명':r.name,'전화번호':r.phone,'은행명':r.bank_name,'계좌번호':r.bank_account,'예금주':r.account_holder,...(r._issues?.length?{'계좌번호 원본확인':'필요'}:{})})):s.accounts||[];
+      if (!s.data.members.length && !s.data.payments.length && !accounts.length) return;
       const X = root.XLSX, wb = X.utils.book_new();
       wb.Workbook = {WBProps:{date1904:s.sources?.date1904 === true}};
       for (const k of ["members", "payments"]) {
@@ -922,11 +949,12 @@
         });
         X.utils.book_append_sheet(
           wb,
-          X.utils.json_to_sheet(rows),
+          X.utils.json_to_sheet(rows,{header:k==='members'?memberHeaders:paymentHeaders}),
           k === "members" ? "조합원" : "출자금 납입내역",
         );
       }
-      X.writeFile(wb, "회원_출자금_남은행.xlsx");
+      if(accounts.length){const bankSheet=X.utils.json_to_sheet(accounts);for(const [key,cell]of Object.entries(bankSheet))if(!key.startsWith('!'))cell.z='@';X.utils.book_append_sheet(wb,bankSheet,'계좌정보');}
+      X.writeFile(wb, "회원_출자금_계좌정보_남은행.xlsx");
     }
     function open({replacementFile=null}={}) {
       build();
@@ -948,7 +976,7 @@
           attempt: null,
         };
       const replacing = replacementFile instanceof root.File;
-      if (replacing && locked(state)) return false;
+      if (replacing && (locked(state)||bankController?.pending())) return false;
       // A new File follows the normal change/parser path after handoff, not the old-file recheck.
       if (replacing) pause();
       opener = document.activeElement;
@@ -962,10 +990,10 @@
       }
       return true;
     }
-    return Object.freeze({ open, syncContext, hasDraft: () => !!state?.dirty });
+    return Object.freeze({ open, syncContext, hasDraft: () => !!(state?.dirty||bankController?.hasUnsaved()) });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.3.0",
+    version: "1.4.0",
     create,
     parse,
     memberHeaders,

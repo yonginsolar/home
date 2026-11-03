@@ -1,13 +1,13 @@
-/* Bank import1.0.0. Existing members only; original secure writer is server-authoritative. */
+/* Bank import1.1.0. Account review can share the integrated workbook dialog. */
 (function(root){
  'use strict';
  const headers=['조합원번호','이름·단체명','전화번호','은행명','계좌번호','예금주'];
  const accountReview='숫자형 계좌번호입니다. 원본의 앞자리 0까지 확인해 주세요.';
  const text=v=>String(v??'').trim();
- function parse(book,X){
+ function parse(book,X,{integrated=false}={}){
   const name=book.Sheets['계좌정보']?'계좌정보':book.SheetNames[0],sheet=book.Sheets[name];
   if(!sheet)throw Error('계좌정보 시트를 확인해 주세요.');
-  for(const other of book.SheetNames)if(other!==name&&X.utils.sheet_to_json(book.Sheets[other],{raw:true}).length)throw Error('계좌정보는 별도 파일로 올려 주세요. 다른 시트의 회원·납입은 함께 반영하지 않습니다.');
+  for(const other of book.SheetNames)if(other!==name&&X.utils.sheet_to_json(book.Sheets[other],{raw:true}).length&&!(integrated&&['조합원','출자금 납입내역'].includes(other)))throw Error('통합 양식의 조합원·출자금 납입내역·계좌정보 시트를 사용해 주세요.');
   const bounds=X.utils.decode_range(sheet['!fullref']||sheet['!ref']||'A1');
   if(bounds.e.r>10000||bounds.e.c>100)throw Error('계좌정보는 500행 이내로 정리해 주세요.');
   for(const [key,cell]of Object.entries(sheet))if(!key.startsWith('!')&&cell?.f)throw Error('수식 대신 확인한 값을 붙여넣어 주세요.');
@@ -15,9 +15,9 @@
   if(!input.length||input.length>500)throw Error('계좌정보를 1~500행 입력해 주세요.');
   return input.map((r,i)=>({row_no:Number.isInteger(r.__rowNum__)?r.__rowNum__+1:i+2,member_id:text(r['조합원번호']||r['회원번호']),name:text(r['이름·단체명']||r['이름']||r['단체명']||r['성명']),phone:text(r['전화번호']||r['연락처']||r['휴대전화']),bank_name:text(r['은행명']||r['은행']),bank_account:text(r['계좌번호']),account_holder:text(r['예금주']),_issues:typeof r['계좌번호']==='number'||text(r['계좌번호 원본확인'])==='필요'?[accountReview]:[]}));
  }
- function create({client,getContext,ensureSpreadsheet,refresh}){
+ function create({client,getContext,ensureSpreadsheet,refresh,mount=null,onClose=()=>{},onStateChange=()=>{},onExport=null}){
   const states=new Map();let state,modal,input,status,body,recheck,apply,drop,download,listRetry,progress,filename,opener,epoch=0,closing=null;
-  const ctx=()=>getContext()||{},visible=()=>modal?.classList.contains('show');
+  const ctx=()=>getContext()||{},visible=()=>mount?!!modal&&!modal.hidden&&!mount.hidden&&!!mount.closest('.modal.show'):modal?.classList.contains('show');
   const menu=()=>!document.getElementById('tab-members')||document.getElementById('tab-members').classList.contains('active');
   const current=(s,t=epoch)=>s===state&&s.owner===ctx().owner&&s.actor===ctx().actorId&&ctx().allowed===true&&!root.frameElement?.hidden&&menu()&&t===epoch;
   const editable=()=>current(state)&&!state.job&&!state.confirming;
@@ -27,8 +27,8 @@
   const showFile=()=>{filename.textContent=state?.file?.name||'';try{const d=new root.DataTransfer();if(state?.file)d.items.add(state.file);input.files=d.files;}catch(_){input.value='';}};
   const fresh=owner=>({owner,coop:ctx().coopId,actor:ctx().actorId,file:null,rows:[],review:null,status:'',results:new Map(),dirty:false,read:null,job:null});
   function render(){
-   if(!state||!visible()||!current(state))return;
-   const locked=!editable();status.textContent=state.status;filename.textContent=state.file?.name||'';input.disabled=locked;
+   if(!state||!visible()||!current(state)){if(state&&current(state))onStateChange();return;}
+   const locked=!editable();status.textContent=state.status;filename.textContent=state.file?.name||'';input.disabled=locked||!!mount;
    recheck.disabled=locked||!!state.read||!state.file;drop.disabled=locked||!!state.read||!state.file;download.disabled=!!state.read||!!state.job||!state.rows.length;
    apply.disabled=!!state.read||state.confirming||!ctx().allowed||(!state.job&&!state.review?.rows.some(r=>r.eligible&&!state.excluded?.has(r.row_no)));
    if(state.job){apply.textContent=state.job.unknown?'등록 결과 확인':'계속 반영';apply.disabled=!!state.job.running||state.confirming;}
@@ -36,7 +36,7 @@
    const job=state.job||state.lastJob;progress.hidden=!job;progress.max=job?.total||1;progress.value=job?.confirmed||0;
    progress.setAttribute('aria-label',job?'처리 확인 '+job.confirmed+' / '+job.total+'행':'처리 진행');
    listRetry.hidden=!state.listFailed;listRetry.disabled=!!state.listBusy;
-   body.replaceChildren();
+   onStateChange();body.replaceChildren();
    for(const r of state.rows){
     const v=state.review?.rows.find(x=>x.row_no===r.row_no),result=state.results.get(r.row_no),tr=document.createElement('tr');
     const cell=value=>{const td=document.createElement('td');td.textContent=value??'';tr.append(td);return td;};
@@ -68,14 +68,15 @@
   }
   function build(){
    if(modal)return;modal=document.createElement('div');modal.id='memberBankImportModal';modal.className='modal fade';modal.tabIndex=-1;modal.setAttribute('aria-labelledby','memberBankImportTitle');
-   modal.innerHTML='<div class="modal-dialog modal-dialog-scrollable" style="width:min(1100px,calc(100vw - 2rem));max-width:none;height:min(760px,calc(100dvh - 2rem));margin:1rem auto"><div class="modal-content" style="height:100%;overflow:auto"><div class="modal-header" style="flex-shrink:0;gap:.5rem"><h2 id="memberBankImportTitle" class="modal-title h5" style="min-width:0;overflow-wrap:anywhere">계좌정보 엑셀 검토</h2><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body" style="min-height:9rem;overflow:auto"><p>기존 회원의 계좌정보만 반영해요. 조합원번호 또는 이름·전화번호로 찾고, 애매한 회원·은행은 직접 확인해 주세요. 빈칸은 기존 값을 유지합니다. 계좌 소유자 인증이나 실제 송금은 하지 않아요.</p><label for="memberBankImportFile" class="form-label">계좌정보 파일</label><input id="memberBankImportFile" class="form-control" type="file" accept=".xlsx,.xls,.csv"><p data-file class="small" style="overflow-wrap:anywhere"></p><p data-status role="status" aria-live="polite"></p><progress data-progress style="width:100%" hidden></progress><div class="table-responsive"><table class="table table-sm align-middle" style="min-width:980px"><thead><tr><th>선택</th><th>행</th><th>입력 회원</th><th>전화번호</th><th>연결한 회원</th><th>은행</th><th>입력 계좌번호</th><th>예금주</th><th>기존 계좌</th><th>확인할 내용</th></tr></thead><tbody></tbody></table></div></div><div class="modal-footer" style="flex-shrink:0;flex-wrap:wrap"><button class="btn btn-outline-danger" type="button" data-drop>검토 버리기</button><button class="btn btn-outline-secondary" type="button" data-download>남은 행 다운로드</button><button class="btn btn-outline-primary" type="button" data-list-retry hidden>명부 다시 불러오기</button><button class="btn btn-outline-primary" type="button" data-recheck>다시 검사</button><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">닫기</button><button class="btn btn-success" type="button" data-apply>선택한 계좌 반영</button></div></div></div>';
-   document.body.append(modal);input=modal.querySelector('input[type=file]');status=modal.querySelector('[data-status]');filename=modal.querySelector('[data-file]');progress=modal.querySelector('progress');body=modal.querySelector('tbody');
+   modal.innerHTML='<div class="modal-dialog modal-dialog-scrollable" style="width:min(1100px,calc(100vw - 2rem));max-width:none;height:min(760px,calc(100dvh - 2rem));margin:1rem auto"><div class="modal-content" style="height:100%;overflow:auto"><div class="modal-header" style="flex-shrink:0;gap:.5rem"><h2 id="memberBankImportTitle" class="modal-title h5" style="min-width:0;overflow-wrap:anywhere">계좌정보 엑셀 검토</h2><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body" style="min-height:9rem;overflow:auto"><p>조합원번호 또는 이름·전화번호로 찾고, 애매한 회원·은행은 직접 확인해 주세요.</p><label for="memberBankImportFile" class="form-label">계좌정보 파일</label><input id="memberBankImportFile" class="form-control" type="file" accept=".xlsx,.xls,.csv"><p data-file class="small" style="overflow-wrap:anywhere"></p><p data-status role="status" aria-live="polite"></p><progress data-progress style="width:100%" hidden></progress><div class="table-responsive"><table class="table table-sm align-middle" style="min-width:980px"><thead><tr><th>선택</th><th>행</th><th>입력 회원</th><th>전화번호</th><th>연결한 회원</th><th>은행</th><th>입력 계좌번호</th><th>예금주</th><th>기존 계좌</th><th>확인할 내용</th></tr></thead><tbody></tbody></table></div></div><div class="modal-footer" style="flex-shrink:0;flex-wrap:wrap"><button class="btn btn-outline-danger" type="button" data-drop>검토 버리기</button><button class="btn btn-outline-secondary" type="button" data-download>남은 행 다운로드</button><button class="btn btn-outline-primary" type="button" data-list-retry hidden>명부 다시 불러오기</button><button class="btn btn-outline-primary" type="button" data-recheck>다시 검사</button><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">닫기</button><button class="btn btn-success" type="button" data-apply>선택한 계좌 반영</button></div></div></div>';
+   if(mount){modal.id='memberBankImportPanel';modal.className='member-bank-import-panel';modal.removeAttribute('aria-labelledby');const content=modal.querySelector('.modal-content');content.className='';content.removeAttribute('style');content.querySelector('.modal-header').remove();content.querySelector('input').hidden=true;content.querySelector('label[for]').hidden=true;modal.replaceChildren(...content.childNodes);for(const b of modal.querySelectorAll('[data-bs-dismiss]')){b.removeAttribute('data-bs-dismiss');b.onclick=onClose;}mount.append(modal);}else document.body.append(modal);
+   input=modal.querySelector('input[type=file]');if(mount)input.id='memberBankEmbeddedFile';status=modal.querySelector('[data-status]');filename=modal.querySelector('[data-file]');progress=modal.querySelector('progress');body=modal.querySelector('tbody');
    recheck=modal.querySelector('[data-recheck]');apply=modal.querySelector('[data-apply]');drop=modal.querySelector('[data-drop]');download=modal.querySelector('[data-download]');listRetry=modal.querySelector('[data-list-retry]');
-   input.onchange=()=>void inspect(input.files?.[0]);recheck.onclick=()=>void inspect();apply.onclick=()=>void submit();drop.onclick=()=>void discard();download.onclick=()=>void exportRemaining();listRetry.onclick=()=>void refreshList(state);
+   input.onchange=()=>void inspect(input.files?.[0]);recheck.onclick=()=>void inspect();apply.onclick=()=>void submit();drop.onclick=()=>void discard();download.onclick=()=>void (onExport?onExport():exportRemaining());listRetry.onclick=()=>void refreshList(state);if(mount){drop.hidden=true;for(const b of modal.querySelectorAll('.modal-footer .btn-secondary'))b.hidden=true;}
    modal.addEventListener('shown.bs.modal',render);
    modal.addEventListener('hide.bs.modal',()=>{const eligible=modal.contains(document.activeElement),s=state;cancelRead();closing={eligible,s,target:opener,changed:false};const changed=e=>{if(!modal.contains(e.target)&&e.target!==document.body)closing&&(closing.changed=true);};for(const e of ['pointerdown','keydown','input','focusin'])document.addEventListener(e,changed,true);closing.stop=()=>{for(const e of ['pointerdown','keydown','input','focusin'])document.removeEventListener(e,changed,true);};});
    modal.addEventListener('hidden.bs.modal',()=>{const c=closing;closing=null;c?.stop();if(c?.eligible&&!c.changed&&current(c.s)&&!document.querySelector('.modal.show')&&!document.querySelector('dialog[open]')&&c.target?.isConnected&&c.target.getClientRects().length&&!c.target.disabled)c.target.focus({preventScroll:true});});
-   modal.addEventListener('keydown',e=>{if(e.key!=='Tab'||!current(state)||root.CoopDialog?.hasPending?.()||document.querySelector('dialog[open]'))return;const nodes=[...modal.querySelectorAll('button,input,select,[tabindex]')].filter(n=>!n.disabled&&n.tabIndex>=0&&!n.closest('[hidden],[inert]')&&n.getClientRects().length);const i=nodes.indexOf(document.activeElement);if(i<0||(!e.shiftKey&&i===nodes.length-1)||(e.shiftKey&&i===0)){e.preventDefault();(e.shiftKey?nodes.at(-1):nodes[0])?.focus();}});
+   modal.addEventListener('keydown',e=>{if(mount||e.key!=='Tab'||!current(state)||root.CoopDialog?.hasPending?.()||document.querySelector('dialog[open]'))return;const nodes=[...modal.querySelectorAll('button,input,select,[tabindex]')].filter(n=>!n.disabled&&n.tabIndex>=0&&!n.closest('[hidden],[inert]')&&n.getClientRects().length);const i=nodes.indexOf(document.activeElement);if(i<0||(!e.shiftKey&&i===nodes.length-1)||(e.shiftKey&&i===0)){e.preventDefault();(e.shiftKey?nodes.at(-1):nodes[0])?.focus();}});
    root.addEventListener('beforeunload',e=>{if([...states.values()].some(s=>s.dirty||s.job)){e.preventDefault();e.returnValue='';}});
    root.addEventListener('pagehide',pause);
    if(root.frameElement)new MutationObserver(syncContext).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
@@ -89,7 +90,7 @@
    if(!s.file){s.read=null;return;}message(s,'파일과 연결 대상을 확인하고 있어요…');render();let timer,toolReady=false,rpcStarted=false;
    try{
     const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('timeout'));},15000);});
-    const result=await Promise.race([(async()=>{await ensureSpreadsheet();toolReady=true;if(!valid())return null;if(!s.rows.length){const bytes=await s.file.arrayBuffer();if(!valid())return null;s.rows=parse(root.XLSX.read(bytes,{type:'array',raw:true,cellDates:false,sheetRows:10002}),root.XLSX);}rpcStarted=true;let query=client.rpc('member_bank_import_admin',{p_action:'preview',p_coop_id:s.coop,p_actor_uid:s.actor,p_rows:s.rows});if(query.abortSignal)query=query.abortSignal(controller.signal);const response=await query;if(response.error)throw response.error;return response.data;})(),timeout]);
+    const result=await Promise.race([(async()=>{await ensureSpreadsheet();toolReady=true;if(!valid())return null;if(!s.rows.length){const bytes=await s.file.arrayBuffer();if(!valid())return null;s.rows=parse(root.XLSX.read(bytes,{type:'array',raw:true,cellDates:false,sheetRows:10002}),root.XLSX,{integrated:!!mount});}rpcStarted=true;let query=client.rpc('member_bank_import_admin',{p_action:'preview',p_coop_id:s.coop,p_actor_uid:s.actor,p_rows:s.rows});if(query.abortSignal)query=query.abortSignal(controller.signal);const response=await query;if(response.error)throw response.error;return response.data;})(),timeout]);
     if(!valid()||!result)return;if(!Array.isArray(result.rows)||result.rows.length!==s.rows.length||new Set(result.rows.map(r=>r.row_no)).size!==s.rows.length||result.rows.some(r=>!s.rows.some(x=>x.row_no===r.row_no)))throw Error('INVALID_PREVIEW');s.review=result;s.results.clear();s.dirty=result.rows.some(r=>!r.skipped);if(!s.dirty)root.ErpWorkspaceResume?.checkpoint(input);message(s,'반영 가능 '+result.rows.filter(x=>x.eligible).length+'행 · 확인 필요 '+result.rows.filter(x=>!x.eligible&&!x.skipped).length+'행. 연결 대상과 계좌를 검토한 뒤 반영해 주세요.');
    }catch(e){if(valid())message(s,e.code==='42501'?'현재 권한으로는 검사할 수 없습니다. 권한을 확인해 주세요.':e.message==='timeout'?'검사가 지연되고 있어요. 파일은 유지됩니다. 다시 검사해 주세요.':!toolReady?'파일 읽기 도구를 불러오지 못했어요. 파일을 유지한 채 다시 검사해 주세요.':rpcStarted?'연결 대상 조회에 실패했어요. 파일을 유지한 채 다시 검사해 주세요.':e.message||'파일을 확인하지 못했어요. 다시 검사해 주세요.');}
    finally{clearTimeout(timer);if(s.read===run){s.read=null;render();}}
@@ -137,14 +138,18 @@
    const chunks=[];for(let i=0;i<rows.length;i+=25)chunks.push({key:root.crypto.randomUUID(),rows:rows.slice(i,i+25)});
    s.job={chunks,index:0,total:rows.length,confirmed:0,running:false,unknown:false,pending:false};await run(s);
   }
-  function pause(){cancelRead();if(state?.confirmOwner)root.CoopDialog.cancelAll?.(state.confirmOwner);if(modal)root.bootstrap.Modal.getInstance(modal)?.hide();}
+  function pause(){cancelRead();if(state?.confirmOwner)root.CoopDialog.cancelAll?.(state.confirmOwner);if(modal&&!mount)root.bootstrap.Modal.getInstance(modal)?.hide();}
   function syncContext(){if(!modal||!state)return;if(!current(state)){pause();body.replaceChildren();status.textContent='';input.value='';}else if(visible())render();}
   function open({replacementFile=null}={}){
    build();const c=ctx();if(!c.allowed||!c.owner||!menu()||root.frameElement?.hidden)return false;
    if(replacementFile&&states.get(c.owner)?.job)return false;
-   cancelRead();state=states.get(c.owner)||fresh(c.owner);states.set(c.owner,state);opener=document.activeElement;showFile();if(!state.dirty&&!state.job)root.ErpWorkspaceResume?.checkpoint(input);root.bootstrap.Modal.getOrCreateInstance(modal).show();render();return true;
+   cancelRead();state=states.get(c.owner)||fresh(c.owner);states.set(c.owner,state);opener=document.activeElement;showFile();if(!state.dirty&&!state.job)root.ErpWorkspaceResume?.checkpoint(input);if(!mount)root.bootstrap.Modal.getOrCreateInstance(modal).show();render();return true;
   }
-  return Object.freeze({open,pause,syncContext,hasDraft:()=>!!states.get(ctx().owner)?.file});
+  return Object.freeze({open,pause,syncContext,hasDraft:()=>!!states.get(ctx().owner)?.file,hasUnsaved:()=>!!(states.get(ctx().owner)?.dirty||states.get(ctx().owner)?.job),pending:()=>!!states.get(ctx().owner)?.job,currentFile:()=>states.get(ctx().owner)?.file,
+   acceptFile:async selected=>{if(!open({replacementFile:selected}))return false;const s=state;if(s.file!==selected)await inspect(selected);if(current(s)&&s.file===selected)showFile();return true;},
+   invalidate:messageText=>{if(!state||state.job)return;cancelRead();state.review=null;state.dirty=!!state.file;if(messageText)message(state,messageText);render();},
+   resetDraft:()=>{if(!state||state.job||!current(state))return false;cancelRead();state=fresh(ctx().owner);states.set(state.owner,state);showFile();render();return true;},
+   remainingRows:()=>{const s=states.get(ctx().owner);return s?s.rows.filter(r=>!s.results.get(r.row_no)?.ok&&!s.review?.rows.find(v=>v.row_no===r.row_no)?.skipped):[];}});
  }
- root.MemberBankImport=Object.freeze({version:'1.0.0',headers,parse,create});
+ root.MemberBankImport=Object.freeze({version:'1.1.0',headers,parse,create});
 })(window);

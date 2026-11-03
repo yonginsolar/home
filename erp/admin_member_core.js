@@ -6911,14 +6911,9 @@ async function openMemberExcelUpload() {
                 if(transfer){if(input.disabled)return false;input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));}
                 return true;
             },
-            downloadBankTemplate:()=>{const a=document.createElement('a');a.href=new URL('../assets/templates/member_bank_accounts.xlsx',document.baseURI).href;a.download='조합원_계좌정보_양식.xlsx';a.click();},
             downloadTemplate:async(current)=>{
-                const tools=await window.AdminMemberAssets.ensureMemberWorkbook();await window.AdminMemberAssets.ensureSpreadsheet();
                 if(!current())return;
-                const wb=XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([tools.memberHeaders]),'조합원');
-                XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([tools.paymentHeaders]),'출자금 납입내역');
-                XLSX.writeFile(wb,'회원_출자금_통합양식.xlsx');
+                const a=document.createElement('a');a.href=new URL('../assets/templates/member_integrated.xlsx',document.baseURI).href;a.download='회원_출자금_계좌정보_통합양식.xlsx';a.click();
             }
         });
         memberExcelEntryController.open();
@@ -6946,7 +6941,8 @@ async function openMemberWorkbookModal({replacementFile=null,isCurrent=()=>true}
         const feature = await window.AdminMemberAssets.ensureMemberWorkbook();
         if (!capitalImportContext().allowed || before.owner !== capitalImportContext().owner || window.frameElement?.hidden || !isCurrent()) return false;
         if (!window.memberWorkbookController) window.memberWorkbookController = feature.create({
-            client: _supabase, getContext: capitalImportContext,
+            client: _supabase, getContext: ()=>({...capitalImportContext(),actorId:String(adminCertificateAuthId||'')}),
+            ensureBankImport:()=>window.AdminMemberAssets.ensureMemberBankImport(),
             normalizeMember: normalizeMemberImportRow, memberPayload: memberImportPayload,
             ensureSpreadsheet: () => window.AdminMemberAssets.ensureSpreadsheet(),
             refresh: async () => { const updated = await fetchMembers(); await refreshMemberDashboardAfterSave(); return updated === true; }
