@@ -1,4 +1,4 @@
-/* Integrated member/capital/bank workbook1.5.0. Original writers remain separately guarded. */
+/* Integrated member/capital/bank workbook1.5.1. Original writers remain separately guarded. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -915,7 +915,7 @@
       bankOpening=(async()=>{try{
         if(!ensureBankImport)throw Error('BANK_TOOL');const feature=await ensureBankImport();
         if(!same(s)||s.epoch!==ticket||!allowed(s)||!visible()||tab!=='members')return;
-        if(!bankController){bankController=feature.create({client,getContext:()=>({...context(),allowed:context().allowed&&!locked(state)&&!['reading','checking'].includes(state?.phase)}),ensureSpreadsheet,refresh,mount:bankPane,onClose:()=>{bankController.pause();tab='payments';render();},onExport:exportReview,onStateChange:()=>{if(state){if(!state.data?.members.length&&!state.data?.payments.length&&bankController?.currentFile()===state.file)state.dirty=bankController.hasUnsaved();render(false);}}});}
+        if(!bankController){bankController=feature.create({client,getContext:()=>({...context(),allowed:context().allowed&&!locked(state)&&!['reading','checking'].includes(state?.phase)}),ensureSpreadsheet,refresh,mount:bankPane,onClose:()=>{bankController.pause();tab='payments';render();},onExport:exportReview,onStateChange:()=>{if(state){const pendingMembers=state.data?.members.some(row=>!state.review?.members.some(v=>v.row_no===row.row_no&&(v.existing||v.skipped))),pendingPayments=state.data?.payments.some(row=>!state.review?.payments.some(v=>v.row_no===row.row_no&&v.skipped));if(!pendingMembers&&!pendingPayments&&bankController?.currentFile()===state.file)state.dirty=bankController.hasUnsaved();render(false);}}});}
         if(bankController.currentFile()===s.file){bankController.open();return;}
         await bankController.acceptFile(s.file);
       }catch(_){if(same(s)&&s.epoch===ticket&&allowed(s)&&visible()&&tab==='members'){notice.replaceChildren(document.createTextNode('계좌 검토 도구를 불러오지 못했어요. '));const retry=el('button','다시 확인');retry.type='button';retry.className='btn btn-outline-primary';retry.onclick=()=>void openAccounts();notice.append(retry);}}
@@ -1001,7 +1001,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!(state?.dirty||bankController?.hasUnsaved()) });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.5.0",
+    version: "1.5.1",
     create,
     parse,
     memberHeaders,
