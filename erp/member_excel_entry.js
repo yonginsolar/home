@@ -1,4 +1,4 @@
-/* Member Excel entry v1.0.5. Bank information joins the existing file entry. */
+/* Member Excel entry v1.0.6. Bank information uses an explicit separate review. */
 (function (root) {
     'use strict';
     const labels = {members:'회원 등록',capital:'출자금 추가',workbook:'회원·출자금 함께 등록',bank:'계좌정보 보완'};
@@ -10,9 +10,13 @@
             const rows = X.utils.sheet_to_json(sheet, {header:1,raw:true,defval:'',range:0});
             return (rows.find(row => row.some(value => String(value ?? '').trim())) || []).map(value => String(value ?? '').trim());
         };
+        if (wb.Sheets['계좌정보']) {
+            if (wb.SheetNames.some(name=>name!=='계좌정보'&&X.utils.sheet_to_json(wb.Sheets[name],{raw:true}).length)) throw Error('계좌정보는 별도 파일로 올려 주세요. 회원·출자금과 섞어 일부 정보만 반영하지 않습니다.');
+            return 'bank';
+        }
         if (wb.Sheets['조합원'] && wb.Sheets['출자금 납입내역']) return 'workbook';
         const first = wb.SheetNames[0], head = header(first), has = values => values.some(value => head.includes(value));
-        if (wb.Sheets['계좌정보'] || (has(['은행명','은행']) && head.includes('계좌번호') && !has(['유형','member_type','납입일','입금일']))) return 'bank';
+        if (has(['은행명','은행']) && head.includes('계좌번호') && !has(['유형','member_type','납입일','입금일'])) return 'bank';
         if (has(['유형','member_type']) && has(['이름','성명','name','단체명','법인명','상호']) && first !== '출자금 납입내역') return 'members';
         if (has(['납입일','입금일','날짜','deposit_date']) && has(['금액','입금액','출자금액','출자금','amount'])
             && has(['조합원번호','회원번호','member_id','이름·단체명','이름','성명','단체명','name'])) {
@@ -206,5 +210,5 @@
         }
         return Object.freeze({open,syncContext});
     }
-    root.MemberExcelEntry=Object.freeze({version:'1.0.5',create,classify});
+    root.MemberExcelEntry=Object.freeze({version:'1.0.6',create,classify});
 })(window);
