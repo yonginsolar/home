@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.266
+Version: v1.0.267
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.5" integrity="sha384-IcwaTuuPaMoh8p4EaYxvDbn0Ye+NrQUGy3diLEArvhVNaLjODZgpVZI/c3lJmmeh" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.266 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.267 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -9141,7 +9141,7 @@ const retry = document.getElementById('retryExtraCapitalAccountBtn');
 if (!value || !copyButton) return;
 document.getElementById('extraCapitalAccountCard')?.setAttribute('aria-busy',String(status === 'loading'));
 if (retry) {
-if (status !== 'loading') retry.classList.toggle('hidden',!!account);
+if (status !== 'loading') retry.classList.remove('hidden');
 retry.disabled = false;retry.setAttribute('aria-disabled',String(status === 'loading'));
 retry.textContent = status === 'loading' ? '확인 중…' : '계좌 다시 확인';
 }
@@ -9177,7 +9177,7 @@ state = extraCapitalDepositAccountState = {owner,coopId,data:null,promise:null,r
 }
 if (state.run?.context === context) return state.promise;
 if (state.run) invalidateExtraCapitalDepositAccountRead();
-if (!force && state.data) { renderExtraCapitalDepositAccount(state.data,'ready');return state.data; }
+if (!force && state.data && state.readyContext === context) { renderExtraCapitalDepositAccount(state.data,'ready');return state.data; }
 if (!force && ['timeout','failed','denied','limited','missing'].includes(state.status)) {
 renderExtraCapitalDepositAccount(null,state.status);return null;
 }
@@ -9220,9 +9220,10 @@ if (!account.bank || !account.accountNumber || !account.holder) {
 state.data = null;state.status = 'missing';renderExtraCapitalDepositAccount(null,'missing');return null;
 }
 const restore = run.focusRetry && document.activeElement === retry;
-state.data = account;state.status = 'ready';renderExtraCapitalDepositAccount(account,'ready');
+state.data = account;state.readyContext = context;state.status = 'ready';renderExtraCapitalDepositAccount(account,'ready');
 const copy = document.getElementById('copyExtraCapitalAccountBtn'), bounds = copy?.getBoundingClientRect();
-if (restore && current() && !document.hidden && bounds?.width && bounds.top >= 0 && bounds.bottom <= window.innerHeight) copy.focus({preventScroll:true});
+if (restore && current() && !document.hidden && bounds?.width && bounds.bottom > 0 && bounds.top < window.innerHeight
+    && bounds.right > 0 && bounds.left < window.innerWidth) copy.focus({preventScroll:true});
 return account;
 } catch (error) {
 if (!current()) return null;
