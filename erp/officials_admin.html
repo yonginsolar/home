@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.31 -->
+<!-- Version: v1.0.32 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -13,7 +13,7 @@
   <script src="/erp/business_notifications.js?v=20261017-notice-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.31 | officials_admin.html');</script>
+  <script>console.log('[Version] v1.0.32 | officials_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -473,8 +473,8 @@
     let voteImportEnabled = false;
     let currentUser = null;
     let officialDataAuthorized = false;
-    let committeeController=null,committeeLoading=null,committeeActive=false,committeeTabRevision=0;
-    function committeeAllowed(){return officialDataAuthorized && isMemberAdminConnected() &&
+    let committeeController=null,committeeLoading=null,committeeActive=false,committeeTabRevision=0,committeeAuthId='';
+    function committeeAllowed(){return !!committeeAuthId && officialDataAuthorized && isMemberAdminConnected() &&
       (hasPermission(permissionSet,'member.admin')===true || currentUser?.role==='admin' || currentUser?.role==='admin_all');}
     async function selectOfficialArea(useCommittee){
       const ticket=++committeeTabRevision;
@@ -500,7 +500,7 @@
         if(committeeLoading)await committeeLoading;
         if(ticket!==committeeTabRevision || !committeeActive || !committeeAllowed() || window.frameElement?.hidden)return;
         if(!committeeController)committeeController=window.CommitteeManagement.create({client:_supabase,container:document.getElementById('committeeManagementArea'),
-          getContext:()=>({actorId:currentUser?.id,coopId:currentCoopId,allowed:committeeAllowed()})});
+          getContext:()=>({actorId:committeeAuthId,coopId:currentCoopId,allowed:committeeAllowed()})});
         clearAlert();committeeController.activate();
       }catch(error){if(ticket===committeeTabRevision && committeeActive)showAlert('위원회 화면을 준비하지 못했습니다. 위원회를 다시 눌러 주세요.','warning');}
     }
@@ -1996,6 +1996,7 @@
       if (!userGate.ok) return false;
       const user = userGate.user;
       currentUser = user;
+      committeeAuthId = userGate.authUser?.id || '';
 
       permissionSet = await loadPermissions(user);
       const runtimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
