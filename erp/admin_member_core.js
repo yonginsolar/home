@@ -51,6 +51,7 @@ let memberOrgLogoUrl = '';
 let memberOrgOriginalLogoUrl = '';
 let memberOrgLogoRevision = 0;
 let memberOrgFaviconField = null;
+let memberOrgMediaLoading = false;
 let memberOrgLogoPreviewObjectUrl = '';
 const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   try {
@@ -387,6 +388,13 @@ async function openMemberCertificateSettingsModal() {
           ? 'initial_setup.html' : 'admin_employee.html?section=settings');
         return;
     }
+    if(memberOrgMediaLoading)return;
+    const mediaRuntime=g_adminMemberRuntime,mediaAuth=adminCertificateAuthId;
+    memberOrgMediaLoading=true;
+    try { await window.AdminMemberAssets?.ensureMedia?.(); }
+    catch (_) { if(mediaRuntime===g_adminMemberRuntime&&mediaAuth===adminCertificateAuthId&&!window.frameElement?.hidden)myAlert('설정 도구를 불러오지 못했어요. 입력은 유지됩니다. 다시 열어 주세요.','warning');return; }
+    finally {memberOrgMediaLoading=false;}
+    if(mediaRuntime!==g_adminMemberRuntime||mediaAuth!==adminCertificateAuthId||window.frameElement?.hidden)return;
     ensureMemberOrgProfileFields();
     const chairmanInput = document.getElementById('member-certificate-chairman-name');
     const shareUnitInput = document.getElementById('member-certificate-share-unit');
@@ -969,6 +977,7 @@ async function ensureAdminMemberSpreadsheetReady() {
 }
 
 async function ensureCertGeneratorReady() {
+    await window.AdminMemberAssets?.ensureCertificatePreview?.();
     if (typeof window.jspdf?.jsPDF !== 'function') await window.AdminMemberAssets.ensurePdf();
     if (typeof generateContributionCert === 'function' && typeof generateDonationReceipt === 'function') return;
     if (!g_certGeneratorEnsurePromise) {
@@ -6573,7 +6582,7 @@ requestAnimationFrame(update);
 // 기존 switchTab 함수를 찾아서 이 부분만 바꾸거나 함수 전체를 교체하세요.
 
 // [수정] 탭 전환 함수 (전체 코드)
-function switchTab(tabName) {
+function switchTab(tabName, options = {}) {
     if (!canAccessAdminMemberTab(tabName)) {
         const message = ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin'
             ? '문서관리 모듈 사용이 중지되었습니다.'
@@ -6636,7 +6645,7 @@ function switchTab(tabName) {
     }
     else if (tabName === 'members') {
         // 회원 탭은 자동 조회 대신 '검색 유도 화면' 표시
-        if(typeof renderEmptyState === 'function') renderEmptyState();
+        if(!options.preserveMemberList && typeof renderEmptyState === 'function') renderEmptyState();
     }
     else if (tabName === 'notifications') {
         void window.MemberNotificationAdmin?.open();
@@ -8997,6 +9006,9 @@ async function openAdminMemberConfirmation() {
         && g_member_detail_revision===revision && adminCertificateAuthId===authId
         && g_adminMemberRuntime?.coop_id===coopId && (!window.frameElement || !window.frameElement.hidden);
     if(!target || !memberId || !current())return;
+    try { await window.AdminMemberAssets?.ensureCertificatePreview?.(); }
+    catch (_) { if(current())myAlert('확인서 준비 기능을 불러오지 못했어요. 입력은 유지됩니다. 다시 시도해 주세요.','warning');return; }
+    if(!current())return;
     if(!window.MemberConfirmation)return myAlert('확인서 준비 기능을 불러오지 못했습니다. 다시 시도해 주세요.','error');
     await window.MemberConfirmation.open({client:_supabase,memberId,coopId,isCurrent:current,prepare:ensureCertGeneratorReady,notify:m=>myAlert(m,'warning'),authorize:async()=>{
         const access=await _supabase.rpc('get_my_erp_runtime');
@@ -9266,6 +9278,8 @@ async function submitIssueDoc() {
 
     try {
         if (docType !== 'donation') {
+            await window.AdminMemberAssets?.ensureCertificatePreview?.();
+            if(!current()||adminIssueDocRun!==run)return;
             if (!window.ContributionCertPreview) throw new Error('증명서 미리보기를 준비하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
             await hideIssueDocForPreview(run, current);
             if (!current() || adminIssueDocRun!==run) return;
@@ -9489,7 +9503,7 @@ function toggleEditMode(isEdit) {
 }
 
 // [교체] 주소 검색 (검색 결과 -> 기본창, 포커스 -> 상세창)
-function searchAddress() {
+async function searchAddress() {
 const editor = memberDetailEditState;
 if (!isCurrentMemberDetailEditor(editor) || !editor.editing || memberDetailSaving
     || window.frameElement?.hidden || !document.getElementById('memberDetailModal')?.classList.contains('show')) return;
@@ -9497,6 +9511,11 @@ const main = document.getElementById('md-addr'), detail = document.getElementByI
 const request = {editor,revision:g_member_detail_revision,main:main.value,detail:detail.value};
 memberAddressSearch = request;
 try {
+await window.AdminMemberAssets?.ensureAddress?.();
+if(memberAddressSearch!==request||!isCurrentMemberDetailEditor(editor)||!editor.editing||memberDetailSaving
+ ||request.revision!==g_member_detail_revision||window.frameElement?.hidden
+ ||!document.getElementById('memberDetailModal')?.classList.contains('show')
+ ||main.value!==request.main||detail.value!==request.detail||detail.disabled)return;
 new daum.Postcode({
 oncomplete: function(data) {
 if (memberAddressSearch !== request || !isCurrentMemberDetailEditor(editor) || !editor.editing || memberDetailSaving
@@ -11481,6 +11500,7 @@ async function saveChildMember() {
 // ================================================================
 async function initializeAdminMember() {
 
+    if(ADMIN_MEMBER_PAGE_SCOPE!=='member_admin')await window.AdminMemberAssets?.ensureMedia?.();
     setAdminMemberBootMessage('로그인 상태와 권한을 확인하고 있습니다.', false);
     const memberUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
         alertFn: function(msg) { setAdminMemberBootMessage(msg, true); },
@@ -11598,7 +11618,31 @@ async function initializeAdminMember() {
     }
 
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {
-        window.ErpWorkspaceTask = {ready:true, refresh:async function(options = {}) {
+        const memberRouteTab = value => {
+            try {
+                const target=new URL(value,location.href),here=new URL(location.href);
+                if(target.origin!==here.origin || target.hash || here.hash
+                    || target.pathname.replace(/\.html$/,'')!=='/erp/admin_member'
+                    || here.pathname.replace(/\.html$/,'')!=='/erp/admin_member'
+                    || target.searchParams.get('scope')!=='member_admin' || here.searchParams.get('scope')!=='member_admin'
+                    || [...target.searchParams.keys(),...here.searchParams.keys()].some(k=>!['scope','tab'].includes(k))
+                    || target.searchParams.getAll('scope').length!==1 || target.searchParams.getAll('tab').length>1
+                    || document.querySelector('.modal.show,dialog[open]') || memberOrgMediaLoading) return null;
+                const tab=target.searchParams.get('tab')||'dashboard';
+                return ['dashboard',...ADMIN_MEMBER_TABS.member_admin].includes(tab) && canAccessAdminMemberTab(tab) ? tab : null;
+            } catch (_) { return null; }
+        };
+        window.ErpWorkspaceTask = {ready:true,
+        canNavigateMemberRoute:value=>memberRouteTab(value)!==null,
+        navigateMemberRoute:function(value){
+            const tab=memberRouteTab(value);if(!tab)return false;
+            const target=new URL(value,location.href);target.pathname=target.pathname.replace(/\.html$/,'');
+            history.replaceState(history.state,'',target.href);
+            const previous=document.querySelector('.main-content > .tab-pane.active')?.id;
+            switchTab(tab,{preserveMemberList:true});
+            if(tab==='members' && previous!=='tab-members' && g_members.length>0) void fetchMembers();
+            return true;
+        }, refresh:async function(options = {}) {
             invalidateMemberRelationSearches();
             const sequence = ++memberFundRefreshSequence;
             memberFundListResume = null;

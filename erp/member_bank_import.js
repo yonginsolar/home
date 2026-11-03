@@ -1,4 +1,4 @@
-/* Bank import1.2.0. Account review can share the integrated workbook dialog. */
+/* Bank import1.2.1. Confirmed chunk progress stays synchronized without rebuilding inputs. */
 (function(root){
  'use strict';
  const headers=['조합원번호','이름·단체명','전화번호','은행명','계좌번호','예금주'];
@@ -36,8 +36,7 @@
    apply.disabled=!!state.read||state.confirming||!ctx().allowed||(!state.job&&!state.review?.rows.some(r=>r.eligible&&!state.excluded?.has(r.row_no)));
    if(state.job){apply.textContent=state.job.unknown||state.job.index===state.job.chunks.length?'등록 결과 확인':'계속 반영';apply.disabled=!!state.job.running||state.confirming;}
    else apply.textContent=(fillOnly?'빈 계좌정보 보완':'선택한 계좌 반영');
-   const job=state.job||state.lastJob;progress.hidden=!job;progress.max=job?.total||1;progress.value=job?.confirmed||0;
-   progress.setAttribute('aria-label',job?'처리 확인 '+job.confirmed+' / '+job.total+'행':'처리 진행');
+   updateProgress(state);
    listRetry.hidden=!state.listFailed;listRetry.disabled=!!state.listBusy;
    onStateChange();body.replaceChildren();
    for(const r of state.rows){
@@ -111,12 +110,17 @@
     if(!rows.length){message(s,'남은 행이 없습니다.');return;}const b=root.XLSX.utils.book_new(),sheet=root.XLSX.utils.json_to_sheet(rows,{header:headers});for(const [key,cell]of Object.entries(sheet))if(!key.startsWith('!'))cell.z='@';root.XLSX.utils.book_append_sheet(b,sheet,'계좌정보');root.XLSX.writeFile(b,'계좌정보_남은행.xlsx');
    }catch(_){if(activeRead(s,t))message(s,'파일을 내려받지 못했어요. 다시 시도해 주세요.');}
   }
+  function updateProgress(s){
+   if(!progress||!current(s)||!visible())return;const job=s.job||s.lastJob;
+   progress.hidden=!job;progress.max=job?.total||1;progress.value=job?.confirmed||0;
+   progress.setAttribute('aria-label',job?'처리 확인 '+job.confirmed+' / '+job.total+'행':'처리 진행');
+  }
   function finishChunk(s,job,index,result){
    if(s.job!==job||job.index!==index||result?.outcome!=='finished')return false;
    const expected=job.chunks[index].rows;if(!Array.isArray(result.rows)||result.rows.length!==expected.length||new Set(result.rows.map(r=>r.row_no)).size!==expected.length||result.rows.some(r=>typeof r.ok!=='boolean'||!expected.some(x=>x.row_no===r.row_no)))return false;
    for(const r of result.rows||[])s.results.set(r.row_no,r);job.confirmed+=job.chunks[index].rows.length;job.index++;job.unknown=false;
    for(const r of result.rows||[]){const v=s.review?.rows.find(x=>x.row_no===r.row_no);if(v)Object.assign(v,{eligible:false,skipped:!!r.ok,reason:r.ok?'반영 완료':'반영하지 못했습니다.'});}
-   message(s,'처리 확인 '+job.confirmed+' / '+job.total+'행 ('+Math.floor(job.confirmed/job.total*100)+'%).');return true;
+   updateProgress(s);message(s,'처리 확인 '+job.confirmed+' / '+job.total+'행 ('+Math.floor(job.confirmed/job.total*100)+'%).');return true;
   }
   async function refreshList(s){if(!current(s)||!visible()||(s.listBusy&&s.listRead?.epoch===epoch))return;const token={epoch};s.listRead=token;s.listBusy=true;render();try{const failed=await refresh()!==true;if(current(s,token.epoch))s.listFailed=failed;}catch(_){if(current(s,token.epoch))s.listFailed=true;}finally{if(s.listRead===token){s.listBusy=false;if(current(s,token.epoch)&&visible()){if(s.listFailed)message(s,'계좌 처리 결과는 유지됩니다. 명부만 다시 불러와 주세요.');render();}}}}
   async function run(s){
@@ -156,5 +160,5 @@
    resetDraft:()=>{if(!state||state.job||!current(state))return false;cancelRead();state=fresh(ctx().owner);states.set(state.owner,state);showFile();render();return true;},
    remainingRows:()=>{const s=states.get(ctx().owner);return s?s.rows.filter(r=>!s.results.get(r.row_no)?.ok&&!s.review?.rows.find(v=>v.row_no===r.row_no)?.skipped):[];}});
  }
- root.MemberBankImport=Object.freeze({version:'1.2.0',headers,parse,create});
+ root.MemberBankImport=Object.freeze({version:'1.2.1',headers,parse,create});
 })(window);

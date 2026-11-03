@@ -16,7 +16,7 @@
     ['btnSiteAdmin', '홈페이지 관리', 'admin_member.html?scope=site_admin&tab=site', 'site_admin', ['site.admin', 'member.admin'], '◫'],
     ['btnQuizAdmin', '퀴즈 관리', 'quiz_admin.html', 'site_admin', ['site.admin', 'member.admin'], '?'],
     ['btnProposalBuilder', '제안서 만들기', 'proposal_builder.html', 'site_admin', ['site.admin', 'member.admin'], '▧'],
-    ['btnOfficialsAdmin', '임원 관리', 'officials_admin.html', '', ['member.admin', 'signature.manage'], '♙'],
+    ['btnOfficialsAdmin', '임원·위원회 관리', 'officials_admin.html', '', ['member.admin', 'signature.manage'], '♙'],
     ['btnGovernanceHub', '회의·문서·서명', 'governance.html', '', ['member.admin', 'site.admin', 'minutes.manage', 'documents.manage', 'signature.manage'], '▱', true],
     ['btnAudit', '감사 로그', 'audit_logs.html', 'audit', ['audit.view'], '◷'],
     ['btnPerm', '권한 관리', 'permissions.html', 'permission', ['permission.manage'], '⚿']

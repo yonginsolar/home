@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.12 — honor an active task's explicit print-request workflow. */
+/* Persistent ERP workspace v1.2.13 — reuse explicitly compatible member tabs after fresh authorization. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -93,6 +93,14 @@
     return routes.route(entry.route) === entry.route;
   }
   function task(entry) { try { return entry.frame.contentWindow.ErpWorkspaceTask; } catch (_) { return null; } }
+  function memberAlias(target) {
+    // The child validates scope, all parameters and open editors. Other pages,
+    // deep links, tenants and business identifiers are never canonicalized here.
+    return [...new Set([activeEntry,...retained.values()])].find(entry => {
+      try { return canRetain(entry) && task(entry)?.canNavigateMemberRoute?.(target) === true; }
+      catch (_) { return false; }
+    });
+  }
   function canRetain(entry) {
     const adapter = task(entry);
     if (!eligible(entry) || adapter?.ready !== true || typeof adapter.refresh !== 'function') return false;
@@ -219,7 +227,7 @@
     const previous = activeEntry;
     // A retry of the visible prepared task must not manufacture a second context.
     const cached = force ? null : target === activeEntry.route && canRetain(activeEntry)
-      ? activeEntry : retained.get(target);
+      ? activeEntry : retained.get(target) || memberAlias(target);
     if (force && retained.has(target) && !changed(retained.get(target))) removeEntry(retained.get(target));
     park(); requested = target; loading();
     const ticket = ++transition;
@@ -259,6 +267,10 @@
           }
           await task(cached).refresh({runtime:access.runtime,dirty:changed(cached)});
           if (ticket !== transition) return;
+          if (cached.route !== target && task(cached)?.navigateMemberRoute?.(target) !== true) {
+            cancelLoading();status.textContent='작성 중인 화면을 보존했습니다. 창을 닫은 뒤 메뉴를 다시 선택해 주세요.';
+            status.hidden=false;error.hidden=false;return;
+          }
           frame.hidden=false; syncFrame(); attachDocument(frame.contentDocument,cached);
         } catch (failure) {
           if (ticket !== transition) return;

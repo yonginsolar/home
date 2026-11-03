@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.29 -->
+<!-- Version: v1.0.31 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -13,11 +13,11 @@
   <script src="/erp/business_notifications.js?v=20261017-notice-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.30 | officials_admin.html');</script>
+  <script>console.log('[Version] v1.0.31 | officials_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-  <title>임원·대의원·선관위원 관리</title>
+  <title>임원·위원회 관리</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
@@ -110,7 +110,7 @@
     <div class="panel">
       <div class="toolbar mb-3">
         <div>
-          <h1 class="h4 mb-1">임원·대의원·선관위원 관리</h1>
+          <h1 class="h4 mb-1">임원·위원회 관리</h1>
           <div class="helper">조합원과 임원의 기록은 구분해 관리합니다. 비조합원 이사도 따로 등록해 이사회 출석과 의사록 서명에 참여할 수 있습니다.</div>
         </div>
         <div class="d-flex gap-2">
@@ -121,7 +121,12 @@
 
       <div id="pageAlert" class="alert d-none" role="alert"></div>
 
-      <div class="row g-4">
+      <div class="d-flex flex-wrap gap-2 mb-3" role="group" aria-label="관리 대상">
+        <button type="button" class="btn btn-primary" id="officialRecordsTab" aria-pressed="true" onclick="selectOfficialArea(false)">임원·대의원·선관위원</button>
+        <button type="button" class="btn btn-outline-primary" id="committeeRecordsTab" aria-pressed="false" onclick="selectOfficialArea(true)" disabled>위원회</button>
+      </div>
+      <div id="committeeManagementArea" hidden></div>
+      <div class="row g-4" id="officialRecordsArea">
         <div class="col-lg-4">
           <div class="card border-0 shadow-sm mb-3">
             <div class="card-body">
@@ -468,6 +473,37 @@
     let voteImportEnabled = false;
     let currentUser = null;
     let officialDataAuthorized = false;
+    let committeeController=null,committeeLoading=null,committeeActive=false,committeeTabRevision=0;
+    function committeeAllowed(){return officialDataAuthorized && isMemberAdminConnected() &&
+      (hasPermission(permissionSet,'member.admin')===true || currentUser?.role==='admin' || currentUser?.role==='admin_all');}
+    async function selectOfficialArea(useCommittee){
+      const ticket=++committeeTabRevision;
+      if(useCommittee && !committeeAllowed())return;
+      committeeActive=useCommittee;
+      committeeController?.pause();
+      document.getElementById('officialRecordsArea').hidden=useCommittee;
+      document.getElementById('committeeManagementArea').hidden=!useCommittee;
+      for(const [id,selected]of [['officialRecordsTab',!useCommittee],['committeeRecordsTab',useCommittee]]){
+        const button=document.getElementById(id);button.setAttribute('aria-pressed',String(selected));
+        button.classList.toggle('btn-primary',selected);button.classList.toggle('btn-outline-primary',!selected);
+      }
+      if(!useCommittee)return;
+      try{
+        if(!window.CommitteeManagement && !committeeLoading)committeeLoading=new Promise((resolve,reject)=>{
+          const s=document.createElement('script');let done=false;
+          const finish=error=>{if(done)return;done=true;clearTimeout(timer);s.onload=s.onerror=null;if(error){s.remove();reject(error);}else resolve();};
+          const timer=setTimeout(()=>finish(new Error('COMMITTEE_TOOL_TIMEOUT')),15000);
+          s.src='committee_management.js?v=1.0.0';s.integrity='sha384-rGp27STiyHFXuDZq+pvnWuVLXj6ZFyc5uIB276UwhKBViPGKSBk5V+itwqIWZqmG';s.crossOrigin='anonymous';
+          s.onload=()=>finish(window.CommitteeManagement?.version==='1.0.0'?null:new Error('COMMITTEE_TOOL_UNAVAILABLE'));
+          s.onerror=()=>finish(new Error('COMMITTEE_TOOL_UNAVAILABLE'));document.head.append(s);
+        }).catch(error=>{committeeLoading=null;throw error;});
+        if(committeeLoading)await committeeLoading;
+        if(ticket!==committeeTabRevision || !committeeActive || !committeeAllowed() || window.frameElement?.hidden)return;
+        if(!committeeController)committeeController=window.CommitteeManagement.create({client:_supabase,container:document.getElementById('committeeManagementArea'),
+          getContext:()=>({actorId:currentUser?.id,coopId:currentCoopId,allowed:committeeAllowed()})});
+        clearAlert();committeeController.activate();
+      }catch(error){if(ticket===committeeTabRevision && committeeActive)showAlert('위원회 화면을 준비하지 못했습니다. 위원회를 다시 눌러 주세요.','warning');}
+    }
     let memberSearchSeq = 0;
     let memberSearchRequest = null;
     let importableElections = [];
@@ -2520,15 +2556,18 @@
       const ok = await ensureAccess();
       if (!ok) return;
       officialDataAuthorized = true;
+      document.getElementById('committeeRecordsTab').disabled=!committeeAllowed();
       await loadOfficialRoleCatalog();
       resetOfficialForm();
       await loadOfficials();
       window.ErpWorkspaceResume.register({modules:['member_admin','signature'],authorize:async()=>{
         officialDataAuthorized = false;
+        ++committeeTabRevision;committeeController?.pause();document.getElementById('committeeRecordsTab').disabled=true;
         const allowed = await ensureAccess();
         officialDataAuthorized = allowed === true;
+        document.getElementById('committeeRecordsTab').disabled=!committeeAllowed();
         return allowed;
-      },refresh:loadOfficials});
+      },refresh:async()=>{if(committeeActive && committeeAllowed())await selectOfficialArea(true);else await loadOfficials();}});
     }
 
     init();
