@@ -113,12 +113,16 @@
     const scope=otherScope(),panel=node('memberRegionOtherModal'),selection=otherSelection;
     if(!scope||!panel||!otherOpen||!selection){pauseOtherList();return;}
     if(otherOpening)return;
-    const after=reset?null:otherCursor,key=scope+'|'+selection.scope+'|'+String(after||'');
-    if(otherRead?.key===key)return otherRead.promise;
-    const more=node('member-other-members-more'),previousCount=reset?0:otherRows.length;
+    const after=reset?null:otherCursor,key=scope+'|'+selection.scope+'|'+String(after||''),more=node('member-other-members-more');
+    if(otherRead?.key===key){
+      // A deliberate reactivation renews focus,not the shared read itself.
+      if(!reset&&document.activeElement===more&&otherRead.moreFocus&&!panel.hasAttribute('inert')&&!document.querySelector('dialog[open]'))otherMoreFocus=otherRead.moreFocus;
+      return otherRead.promise;
+    }
+    const previousCount=reset?0:otherRows.length;
     otherMoreFocus=!reset&&document.activeElement===more?{button:more,panel,target:null}:null;
     const focus=otherMoreFocus;
-    otherRead?.controller.abort();const ticket=++otherSequence,c=otherContext(),job={key,controller:new AbortController(),promise:null};
+    otherRead?.controller.abort();const ticket=++otherSequence,c=otherContext(),job={key,controller:new AbortController(),promise:null,moreFocus:focus};
     otherRead=job;otherReady=false;otherControls();node('member-other-members-status').textContent='명단을 확인하고 있습니다…';
     const current=()=>ticket===otherSequence&&scope===otherScope()&&selection===otherSelection&&otherOpen;
     job.promise=(async()=>{let timer;try{
