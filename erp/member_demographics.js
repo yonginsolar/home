@@ -7,6 +7,7 @@
   let otherDeferredRefresh=null, otherRefreshEpoch=0;
   let otherFocusReturn=null;
   let otherMoreFocus=null;
+  let otherEnterHandoff=null;
   const labels = { yongin: ['수지구','기흥구','처인구','그 외','주소 미확인'], gyeonggi: ['경기도내','그 외','주소 미확인'] };
   const hwaseongLabels = ['만세구','효행구','병점구','동탄구','그외'];
   const colors = { '만세구':'#0d6efd','효행구':'#20c997','병점구':'#198754','동탄구':'#f5b301','그외':'#adb5bd','수지구':'#0d6efd','기흥구':'#20c997','처인구':'#198754','경기도내':'#ffc107','그 외':'#adb5bd','주소 미확인':'#6c757d' };
@@ -29,6 +30,7 @@
   }
   function pauseOtherList(clearContext=false,hide=true,preserveFocus=false,preserveStatistics=false) {
     otherMoreFocus=null;
+    otherEnterHandoff=null;
     ++otherSequence;otherRead?.controller.abort();otherRead=null;otherRows=[];otherCursor=null;otherReady=false;otherOpening=false;
     node('member-other-members-rows')?.replaceChildren();
     otherOpen=false;otherTotal=null;
@@ -62,6 +64,18 @@
     target.focus({preventScroll:true});
   }
   function observeOtherFocus(event) {
+    if(event.type==='keyup'){if(event.key==='Enter')otherEnterHandoff=null;return;}
+    const handoff=otherEnterHandoff;
+    if(handoff){
+      // A held Enter must not activate the button that just received focus.
+      if(event.type==='keydown'&&event.key==='Enter'&&event.repeat&&!event.isComposing&&
+        event.target===handoff.target&&document.activeElement===handoff.target&&handoff.current()&&
+        handoff.target.isConnected&&!handoff.target.hidden&&!handoff.target.disabled&&
+        handoff.panel.contains(handoff.target)&&!handoff.panel.hasAttribute('inert')&&!document.querySelector('dialog[open]')){
+        event.preventDefault();return;
+      }
+      if(!(event.type==='focusin'&&event.target===handoff.target))otherEnterHandoff=null;
+    }
     const more=otherMoreFocus;
     // Keep the owned handoff when the old control has just become unavailable.
     const completionEnter=more&&event.type==='keydown'&&event.key==='Enter'&&
@@ -93,7 +107,7 @@
   function bindOtherModal() {
     if(otherBound)return;
     const panel=node('memberRegionOtherModal');if(!panel)return;otherBound=true;
-    for(const type of ['pointerdown','keydown','focusin','input','change','wheel','touchmove'])document.addEventListener(type,observeOtherFocus,{capture:true,passive:type==='wheel'||type==='touchmove'});
+    for(const type of ['pointerdown','keydown','keyup','focusin','input','change','wheel','touchmove'])document.addEventListener(type,observeOtherFocus,{capture:true,passive:type==='wheel'||type==='touchmove'});
     panel.addEventListener('hide.bs.modal',()=>{if(otherOpen){prepareOtherFocusReturn();pauseOtherList(false,false);}});
     panel.addEventListener('hidden.bs.modal',()=>{flushOtherRefresh();const focus=otherFocusReturn;if(focus?.phase==='closing')global.requestAnimationFrame(()=>restoreOtherFocusReturn(focus));});
     panel.addEventListener('keydown',event=>{
@@ -125,6 +139,7 @@
       return otherRead.promise;
     }
     const previousCount=reset?0:otherRows.length;
+    otherEnterHandoff=null;
     otherMoreFocus=!reset&&document.activeElement===more?{button:more,panel,target:null}:null;
     const focus=otherMoreFocus;
     otherRead?.controller.abort();const ticket=++otherSequence,c=otherContext(),job={key,controller:new AbortController(),promise:null,moreFocus:focus};
@@ -168,6 +183,7 @@
       if(![document.body,document.documentElement,focus.button].includes(active)||!target?.isConnected||target.hidden||target.disabled)return;
       if(target===node('member-other-members-status'))target.setAttribute('tabindex','-1');
       target.focus({preventScroll:true});target.scrollIntoView({block:'nearest',inline:'nearest'});
+      if(target.tagName==='BUTTON'&&document.activeElement===target)otherEnterHandoff={target,panel,current};
     });}}})();return job.promise;
   }
   global.addEventListener('pagehide',()=>pauseOtherList(true));
