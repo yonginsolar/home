@@ -3,7 +3,7 @@
   let model = null, sequence = 0;
   const pending = new Map();
   let otherOptions=null, otherModelScope='', otherSequence=0, otherRead=null, otherRows=[], otherCursor=null, otherReady=false, otherOpening=false;
-  let otherSelection=null, otherOpen=false, otherOpener=null, otherBound=false;
+  let otherSelection=null, otherOpen=false, otherOpener=null, otherBound=false, otherTotal=null;
   const labels = { yongin: ['수지구','기흥구','처인구','그 외','주소 미확인'], gyeonggi: ['경기도내','그 외','주소 미확인'] };
   const hwaseongLabels = ['만세구','효행구','병점구','동탄구','그외'];
   const colors = { '만세구':'#0d6efd','효행구':'#20c997','병점구':'#198754','동탄구':'#f5b301','그외':'#adb5bd','수지구':'#0d6efd','기흥구':'#20c997','처인구':'#198754','경기도내':'#ffc107','그 외':'#adb5bd','주소 미확인':'#6c757d' };
@@ -22,7 +22,7 @@
   function pauseOtherList(clearContext=false,hide=true) {
     ++otherSequence;otherRead?.controller.abort();otherRead=null;otherRows=[];otherCursor=null;otherReady=false;otherOpening=false;
     node('member-other-members-rows')?.replaceChildren();
-    otherOpen=false;
+    otherOpen=false;otherTotal=null;
     const panel=node('memberRegionOtherModal');
     if(panel&&hide)global.bootstrap?.Modal.getInstance(panel)?.hide();
     if(clearContext){otherModelScope='';if(node('member-other-members-open'))node('member-other-members-open').hidden=true;}
@@ -75,9 +75,11 @@
       const {data,error}=await Promise.race([op,new Promise((_,reject)=>{timer=setTimeout(()=>{job.controller.abort();reject(Error('REGION_READ_TIMEOUT'));},15000);})]);
       if(!current())return;if(error)throw error;
       if(data?.coop_id!==c.coop||data.scope!==selection.scope||data.region!==selection.label||!Array.isArray(data.items)||!Number.isSafeInteger(data.total)||data.total<0)throw Error('REGION_READ_INVALID');
+      if(!reset&&otherTotal!==data.total)throw Error('REGION_LIST_CHANGED');
       const seen=new Set(reset?[]:otherRows.map(r=>r.id)),next=reset?[]:otherRows.slice();
       for(const row of data.items){if(!/^[0-9a-f-]{36}$/i.test(String(row.id)))throw Error('REGION_READ_INVALID');if(!seen.has(row.id)){next.push(row);seen.add(row.id);}}
-      otherRows=next;otherCursor=data.next_after_id;otherReady=true;
+      if(next.length>data.total)throw Error('REGION_LIST_CHANGED');
+      otherRows=next;otherCursor=data.next_after_id;otherReady=true;otherTotal=data.total;
       const box=node('member-other-members-rows');box.replaceChildren();
       for(const row of otherRows){const item=document.createElement('li');item.className='border rounded-3 p-3 mb-2';
         const name=document.createElement('h6');name.className='fw-bold';name.textContent=row.name||'이름 미등록';item.append(name);
@@ -94,7 +96,7 @@
       node('member-other-members-more').hidden=!data.has_more;
     }catch(error){if(!current())return;
       if(error.code==='42501'){otherRows=[];otherCursor=null;node('member-other-members-rows').replaceChildren();}
-      node('member-other-members-status').textContent=error.code==='42501'?'현재 권한으로 명단을 조회할 수 없습니다.':otherRows.length?'명단을 불러오지 못해 이전 목록을 표시하고 있습니다. 다시 확인해 주세요.':'명단을 불러오지 못했습니다. 다시 확인해 주세요.';
+      node('member-other-members-status').textContent=error.message==='REGION_LIST_CHANGED'?'조회 중 명단 인원이 변경되었습니다. 다시 확인을 눌러 처음부터 조회해 주세요.':error.code==='42501'?'현재 권한으로 명단을 조회할 수 없습니다.':otherRows.length?'명단을 불러오지 못해 이전 목록을 표시하고 있습니다. 다시 확인해 주세요.':'명단을 불러오지 못했습니다. 다시 확인해 주세요.';
     }finally{clearTimeout(timer);if(otherRead===job){otherRead=null;otherControls();}}})();return job.promise;
   }
   global.addEventListener('pagehide',()=>pauseOtherList());
