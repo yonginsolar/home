@@ -7281,6 +7281,8 @@ let memberChildState = null;
 let memberChildSaving = false;
 let memberFamilyRetry = null;
 let memberFamilyRead = null;
+let memberDisconnectConfirmation = null, memberDisconnectEpoch = 0;
+const memberDisconnectPending = new Map();
 let memberAddressSearch = null;
 let memberGroupSearchState = null;
 let memberGroupConfirmation = null;
@@ -7813,16 +7815,22 @@ function syncMemberFamilyReadUi() {
         bar.append(status,retry);pane.querySelector('table')?.before(bar);
     }
     const view = memberFamilyRetry, status = document.getElementById('member-family-status'), retry = document.getElementById('member-family-retry');
-    if (status) status.textContent = view?.message || '';
+    const disconnectBusy = !!view && [...memberDisconnectPending.values()].some(op => op.owner === view.owner && op.member === view.read.memberId);
+    if (status) status.textContent = view?.message || (disconnectBusy ? '연결 해제를 처리하는 중입니다.' : '');
     if (retry) {retry.hidden = !view;retry.disabled = false;retry.setAttribute('aria-disabled',String(view?.pending === true));}
     const tbody = document.getElementById('md-family-list');
     if (tbody) {
         tbody.inert = !!view && view.status !== 'ready';
         tbody.setAttribute('aria-busy',String(view?.pending === true));
-        tbody.querySelectorAll('button').forEach(button => {button.disabled = !!view && view.status !== 'ready';});
+        tbody.querySelectorAll('button').forEach(button => {
+            const busy = disconnectBusy && button.dataset.familyAction === 'disconnect';
+            button.disabled = (!!view && view.status !== 'ready') || busy;
+            if (button.dataset.familyAction === 'disconnect') button.setAttribute('aria-busy',String(busy));
+        });
     }
 }
 function cancelMemberFamilyRead(reset = false) {
+    invalidateMemberDisconnectConfirmation();
     const request = memberFamilyRead;memberFamilyRead = null;request?.cancel();
     if (reset) {
         memberFamilyRetry = null;
@@ -7854,6 +7862,36 @@ async function retryMemberFamily() {
         || window.frameElement?.hidden || !document.getElementById('memberDetailModal')?.classList.contains('show')) return;
     return loadMemberFamily(view.read.memberId,{verifyPermission:true});
 }
+function isCurrentMemberFamilyView(view = memberFamilyRetry) {
+    return !!view && memberFamilyRetry === view && view.status === 'ready' && !view.pending
+        && view.owner === memberDetailOwner() && isCurrentMemberDetailRead(view.read)
+        && view.read.memberId === String(document.getElementById('md-uid')?.value || '')
+        && !window.frameElement?.hidden && document.getElementById('memberDetailModal')?.classList.contains('show');
+}
+function invalidateMemberDisconnectConfirmation() {
+    const intent = memberDisconnectConfirmation;
+    memberDisconnectConfirmation = null;++memberDisconnectEpoch;
+    if (!intent || intent.started) return;
+    intent.cancelled = true;
+    const modal = document.getElementById('customConfirmModal');
+    const close = () => {
+        if (document.getElementById('btnConfirmYes') === intent.button && modal?.classList.contains('show'))
+            bootstrap.Modal.getInstance(modal)?.hide();
+    };
+    if (modal?.dataset.adminMemberModalOpening === '1') modal.addEventListener('shown.bs.modal',close,{once:true});
+    else close();
+}
+document.getElementById('md-family-list')?.addEventListener('click',event => {
+    const button = event.target.closest?.('[data-family-action]'), view = memberFamilyRetry;
+    if (!button || button.disabled || !isCurrentMemberFamilyView(view)) return;
+    const row = view.rows?.[Number(button.dataset.familyIndex)];
+    if (!row) return;
+    if (button.dataset.familyAction === 'detail') void openMemberDetail(row.member.id);
+    else if (button.dataset.familyAction === 'disconnect') confirmDisconnectManagedMember(row.managedId,row.member.name,row.member.member_type,row.managerId);
+});
+window.addEventListener('beforeunload',event => {
+    if (memberDisconnectPending.size) {event.preventDefault();event.returnValue = '';}
+});
 document.getElementById('childRegisterModal')?.addEventListener('input', () => {
     if (memberChildState) ++memberChildState.revision;
     retainMemberChildDraft();
@@ -7928,6 +7966,30 @@ function bindMemberCreateModalKeyboard() {
     });
 }
 bindMemberCreateModalKeyboard();
+
+function bindMemberDetailModalKeyboard() {
+    const editor = document.getElementById('memberDetailModal');
+    if (!editor || editor.dataset.detailKeyboardBound === '1') return;
+    editor.dataset.detailKeyboardBound = '1';
+    for (const root of [editor,document.getElementById('customConfirmModal')].filter(Boolean)) root.addEventListener('keydown',event => {
+        if (root !== editor && (!memberDisconnectConfirmation
+            || memberDisconnectConfirmation.button !== document.getElementById('btnConfirmYes'))) return;
+        if (event.key !== 'Tab' || event.isComposing || event.altKey || event.ctrlKey || event.metaKey
+            || !root.classList.contains('show') || root.hasAttribute('inert') || window.frameElement?.hidden
+            || getOpenAdminMemberModals().at(-1) !== root || window.CoopDialog?.hasPending?.()
+            || [...document.querySelectorAll('dialog[open]')].some(dialog => !dialog.contains(editor))) return;
+        const controls = [...root.querySelectorAll('button,a[href],input:not([type="hidden"]),select,textarea,[tabindex],[contenteditable="true"]')]
+            .filter(node => !node.matches(':disabled') && node.tabIndex >= 0 && !node.closest('[inert],[hidden]')
+                && node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden');
+        const first = controls[0], last = controls.at(-1), active = document.activeElement;
+        if (!first || (event.shiftKey ? active === first || active === root : active === last || active === root)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first)?.focus();
+            if (!first) root.focus({preventScroll:true});
+        }
+    },true);
+}
+bindMemberDetailModalKeyboard();
 
 function retainMemberConsultEdit() {
     const state = memberConsultState;
@@ -10057,43 +10119,38 @@ async function loadMemberFamily(parentId, options = {}) {
 
     // 3. 데이터 없음 처리
     if (familyRows.length === 0) {
-        return {html:'<tr><td colspan="5" class="text-center text-muted small py-3">연결된 가족이나 단체가 없습니다.</td></tr>'};
+        return {html:'<tr role="row"><td role="cell" colspan="5" class="text-center text-muted small py-3">연결된 가족이나 단체가 없습니다.</td></tr>',rows:[]};
     }
 
     // 4. 목록 렌더링
     let html = '';
 
-    familyRows.forEach(({ relationKind, member: m, managedId, managerId }) => {
+    familyRows.forEach(({ relationKind, member: m }, index) => {
         const typeBadge = getManagedFamilyRelationBadge(relationKind, m);
         const birthDisplay = formatManagedFamilyBirthDisplay(m);
         const statusClass = getManagedFamilyStatusClass(m.status);
-        const safeId = escapeJsString(m.id || '');
-        const safeManagedId = escapeJsString(managedId || '');
-        const safeManagerId = escapeJsString(managerId || '');
         const safeNameText = escapeHtml(m.name || '-');
         const safeBirthDisplay = escapeHtml(birthDisplay);
         const safeStatus = escapeHtml(m.status || '-');
-        const safeNameArg = escapeJsString(m.name || '');
-        const safeTypeArg = escapeJsString(m.member_type || '');
 
         html += `
-            <tr>
-                <td>${typeBadge}</td>
-                <td class="fw-bold">${safeNameText}</td>
-                <td class="small">${safeBirthDisplay}</td>
-                <td><span class="badge ${statusClass}">${safeStatus}</span></td>
-                <td class="d-flex gap-1 justify-content-center flex-wrap">
-                    <button type="button" class="btn btn-xs btn-outline-dark border" onclick="openMemberDetail('${safeId}')">
+            <tr role="row">
+                <td role="cell"><span class="member-family-label" aria-hidden="true">관계</span><span class="member-family-value">${typeBadge}</span></td>
+                <td role="cell" class="fw-bold"><span class="member-family-label" aria-hidden="true">이름</span><span class="member-family-value">${safeNameText}</span></td>
+                <td role="cell" class="small"><span class="member-family-label" aria-hidden="true">생년월일</span><span class="member-family-value">${safeBirthDisplay}</span></td>
+                <td role="cell"><span class="member-family-label" aria-hidden="true">상태</span><span class="member-family-value"><span class="badge ${statusClass}">${safeStatus}</span></span></td>
+                <td role="cell"><span class="member-family-label" aria-hidden="true">관리</span><div class="member-family-actions">
+                    <button type="button" class="btn btn-xs btn-outline-dark border" data-family-action="detail" data-family-index="${index}">
                         상세보기
                     </button>
-                    <button type="button" class="btn btn-xs btn-outline-danger border" onclick="confirmDisconnectManagedMember('${safeManagedId}', '${safeNameArg}', '${safeTypeArg}', '${safeManagerId}')">
+                    <button type="button" class="btn btn-xs btn-outline-danger border" data-family-action="disconnect" data-family-index="${index}">
                         연결 해제
                     </button>
-                </td>
+                </div></td>
             </tr>
         `;
     });
-    return {html};
+    return {html,rows:familyRows};
     }).catch(error => ({error}));
     request.promise = (async () => {
         try {
@@ -10111,8 +10168,8 @@ async function loadMemberFamily(parentId, options = {}) {
                 CoopSafeLog.warn?.('[loadMemberFamily] read unavailable', {status:status || 0,timeout:code === 'MEMBER_FAMILY_READ_TIMEOUT'});
                 return showMemberFamilyReadFailure(read,owner,message);
             }
-            view.pending = false;view.status = 'ready';view.message = '';tbody.innerHTML = result.html;
-            return {ok:true};
+            view.pending = false;view.status = 'ready';view.message = '';view.rows = result.rows;tbody.innerHTML = result.html;
+            return {ok:true,read};
         } finally {
             clearTimeout(timer);
             if (memberFamilyRead === request) {memberFamilyRead = null;syncMemberFamilyReadUi();}
@@ -10145,43 +10202,113 @@ function getManagedLinkErrorMessage(error) {
 }
 
 function confirmDisconnectManagedMember(managedId, managedName, memberType, managerId) {
-    const currentDetailId = g_current_member_id || document.getElementById('md-uid')?.value || '';
-    const resolvedManagerId = managerId || currentDetailId;
-    if (!currentDetailId) return myAlert('현재 상세 조합원 정보를 찾을 수 없습니다.', 'error');
-    if (!resolvedManagerId) return myAlert('관리자 연결 정보를 찾을 수 없습니다.', 'error');
-    if (!managedId) return myAlert('연결된 계정 정보를 찾을 수 없습니다.', 'error');
-
-    const typeLabel = String(memberType || '').includes('단체') ? '단체' : '개인/가족';
-    const displayName = managedName || '선택한 계정';
-    const msg = `'${displayName}' ${typeLabel} 연결을 해제하시겠습니까?\n계정은 삭제되지 않고, 현재 조합원과의 관리 연결만 해제됩니다.`;
-
-    myConfirm(msg, async () => {
-        showLoading(true);
-        const { error } = await _supabase.rpc('disconnect_managed_member', {
-            managed_uuid: managedId,
-            manager_uuid: resolvedManagerId
-        });
-        showLoading(false);
-
-        if (error) {
-            myAlert('연결 해제 실패: ' + getManagedLinkErrorMessage(error), 'error');
-            return;
+    const view = memberFamilyRetry;
+    if (!isCurrentMemberFamilyView(view) || memberDisconnectConfirmation
+        || [...memberDisconnectPending.values()].some(op => op.owner === view.owner && op.member === view.read.memberId)) return;
+    const row = view.rows?.find(item => String(item.managedId) === String(managedId)
+        && String(item.managerId) === String(managerId || view.read.memberId));
+    if (!row) return;
+    const intent = {view,owner:view.owner,member:view.read.memberId,epoch:memberDisconnectEpoch,
+        managed:String(row.managedId),manager:String(row.managerId),started:false,accepted:false,cancelled:false};
+    const current = () => !intent.cancelled && intent.epoch === memberDisconnectEpoch
+        && intent.owner === memberDetailOwner() && isCurrentMemberDetailRead(view.read)
+        && intent.member === String(document.getElementById('md-uid')?.value || '')
+        && !window.frameElement?.hidden && document.getElementById('memberDetailModal')?.classList.contains('show');
+    const message = text => {if (current() && memberFamilyRetry === view) {view.message = text;syncMemberFamilyReadUi();}};
+    memberDisconnectConfirmation = intent;
+    const typeLabel = String(row.member.member_type || '').includes('단체') ? '단체' : '개인/가족';
+    const msg = `'${row.member.name || '선택한 계정'}' ${typeLabel} 연결을 해제하시겠습니까?\n계정은 삭제되지 않고, 현재 조합원과의 관리 연결만 해제됩니다.`;
+    myConfirm(msg,async () => {
+        if (intent.started || !current() || !isCurrentMemberFamilyView(view)) return;
+        intent.started = true;
+        const key = JSON.stringify([intent.owner,intent.member,intent.managed,intent.manager]);
+        if (memberDisconnectPending.has(key)) return;
+        memberDisconnectPending.set(key,intent);
+        let writeTimer;
+        const boundedRead = async makeQuery => {
+            const controller = new AbortController();let timer;
+            try {
+                const query = makeQuery();
+                return await Promise.race([
+                    Promise.resolve(typeof query.abortSignal === 'function' ? query.abortSignal(controller.signal) : query),
+                    new Promise((_,reject) => {timer = setTimeout(() => {controller.abort();reject(new Error('DISCONNECT_READ_TIMEOUT'));},15000);})
+                ]);
+            } finally {clearTimeout(timer);}
+        };
+        try {
+            message('연결 해제 권한을 확인하는 중입니다.');
+            const gate = await boundedRead(() => _supabase.rpc('get_my_erp_runtime'));
+            if (!current()) return;
+            const runtime = gate?.data;
+            if (gate?.error || !runtime || runtime.is_active === false
+                || String(runtime.coop_id || '') !== String(g_adminMemberRuntime?.coop_id || '')
+                || !window.ErpRuntimeGuard.isModuleEnabled(runtime,'member_admin')
+                || !window.ErpRuntimeGuard.isModuleAssigned(runtime,'member_admin')) {
+                message('연결 해제 권한을 확인하지 못했습니다. 로그인·권한을 확인하고 목록을 다시 불러와 주세요.');return;
+            }
+            message('연결 해제를 처리하는 중입니다. 같은 요청을 다시 보내지 않습니다.');
+            writeTimer = setTimeout(() => message('아직 처리 결과를 확인하지 못했습니다. 목록 다시 불러오기로 현재 연결을 확인해 주세요.'),15000);
+            intent.dispatched = true;
+            let writeError;
+            try {
+                const result = await _supabase.rpc('disconnect_managed_member',{managed_uuid:intent.managed,manager_uuid:intent.manager});
+                writeError = result?.error;
+            } catch (error) {writeError = error;}
+            clearTimeout(writeTimer);
+            if (!current()) return;
+            let verified;
+            try {
+                verified = await boundedRead(() => scopeAdminTenant(_supabase.from('coop_members')
+                    .select('id, manager_id, rep_uuid').eq('id',intent.managed)).maybeSingle());
+            } catch (_) { /* An accepted write may still have succeeded. Never resend it here. */ }
+            if (!current()) return;
+            const member = verified?.data;
+            if (verified?.error || !member) {
+                message('처리 결과를 확인하지 못했습니다. 목록을 다시 불러와 현재 연결을 확인해 주세요.');return;
+            }
+            if (String(member.manager_id || member.rep_uuid || '') === intent.manager) {
+                const denied = ['42501','PGRST301'].includes(String(writeError?.code || '')) || [401,403].includes(Number(writeError?.status));
+                message(denied ? '연결 해제 권한을 확인하지 못했습니다. 로그인·권한을 확인한 뒤 다시 시도해 주세요.'
+                    : '연결이 아직 유지되어 있습니다. 목록을 다시 불러온 뒤 확인해 주세요.');return;
+            }
+            const cached = findCachedAdminMember(intent.managed);
+            if (cached) {cached.manager_id = member.manager_id;cached.rep_uuid = member.rep_uuid;}
+            const result = await loadMemberFamily(intent.member,{refresh:true});
+            if (result.ok && isCurrentMemberDetailRead(result.read) && memberFamilyRetry?.read === result.read
+                && intent.owner === memberDetailOwner() && !window.frameElement?.hidden
+                && document.getElementById('memberDetailModal')?.classList.contains('show')) {
+                memberFamilyRetry.message = '선택한 관리 연결이 해제된 것을 확인했습니다.';syncMemberFamilyReadUi();
+            }
+        } catch (_) {
+            message(intent.dispatched ? '처리 결과를 확인하지 못했습니다. 목록을 다시 불러와 현재 연결을 확인해 주세요.'
+                : '권한 확인이 지연되거나 연결되지 않았습니다. 해제 요청은 보내지 않았습니다. 목록을 다시 불러온 뒤 시도해 주세요.');
+        } finally {
+            clearTimeout(writeTimer);
+            if (memberDisconnectPending.get(key) === intent) memberDisconnectPending.delete(key);
+            if (memberDisconnectConfirmation === intent) memberDisconnectConfirmation = null;
+            syncMemberFamilyReadUi();
         }
-
-        const cached = findCachedAdminMember(managedId);
-        if (cached) {
-            cached.manager_id = null;
-            if (String(cached.member_type || '').includes('단체')) cached.rep_uuid = null;
-        }
-
-        const currentCached = findCachedAdminMember(currentDetailId);
-        if (currentCached && String(currentDetailId) === String(managedId)) {
-            currentCached.manager_id = null;
-        }
-
-        await loadMemberFamily(currentDetailId,{refresh:true});
-        myAlert('연결이 해제되었습니다.');
     });
+    const modal = document.getElementById('customConfirmModal'), button = document.getElementById('btnConfirmYes');
+    intent.button = button;
+    // Only this confirmation owns the latch; shared confirmation behavior in other menus is unchanged.
+    if (button) {
+        const accept = button.onclick;
+        button.onclick = event => {
+            if (intent.accepted || !current() || !isCurrentMemberFamilyView(view)) {event?.preventDefault();return;}
+            intent.accepted = true;
+            accept?.call(button,event);
+            if (modal?.dataset.adminMemberModalOpening === '1') modal.addEventListener('shown.bs.modal',() => {
+                if (document.getElementById('btnConfirmYes') === button && modal.classList.contains('show')) bootstrap.Modal.getInstance(modal)?.hide();
+            },{once:true});
+        };
+    }
+    modal?.addEventListener('hidden.bs.modal',() => {
+        if (!intent.accepted && !intent.started) {
+            intent.cancelled = true;
+            if (memberDisconnectConfirmation === intent) memberDisconnectConfirmation = null;
+        }
+    },{once:true});
 }
 
 // ================================================================
