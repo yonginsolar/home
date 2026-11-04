@@ -20,7 +20,12 @@
   function otherControls() {
     const locked=!!otherRead||otherOpening||!otherReady||!otherScope();
     node('member-other-members-rows')?.querySelectorAll('button').forEach(b=>{b.disabled=locked;});
-    const more=node('member-other-members-more');if(more)more.disabled=locked;
+    const more=node('member-other-members-more');if(more){
+      // Preserve the initiating keyboard target while its shared read is pending.
+      const ownedRead=!!otherRead&&otherMoreFocus?.button===more&&!!otherScope();
+      more.disabled=locked&&!ownedRead;
+      more.setAttribute('aria-disabled',String(locked));more.setAttribute('aria-busy',String(!!otherRead));
+    }
   }
   function pauseOtherList(clearContext=false,hide=true,preserveFocus=false,preserveStatistics=false) {
     otherMoreFocus=null;
@@ -210,8 +215,23 @@
     options.renderChart('age','chart-age','bar',{labels:ages.map(age=>age.label),datasets:[{label:'개인 조합원 수',data:ages.map(age=>count(age.count)),backgroundColor:'#ffc107'}]});
     node('member-demographic-age-status').textContent = `개인 정조합원 ${count(data.individual_count).toLocaleString()}명 기준 · 막대에 마우스를 올리거나 터치하면 성별 구성도 보여요.`;
   }
+  function statisticsContext(options) {
+    try{
+      if(typeof options?.statisticsContext==='function')return options.statisticsContext();
+      const c=options?.otherListContext?.()||{};
+      if(options?.regionsEnabled!==false)return c;
+      // Retained callers used named-list access for context. Site-profile age
+      // statistics keep the original dashboard guard,not named-list permission.
+      if(typeof adminCertificateAuthId==='undefined'||typeof g_adminMemberRuntime==='undefined'||
+        typeof canAccessAdminMemberTab!=='function'||typeof isAdminMemberRuntimeModuleEnabled!=='function')return {...c,allowed:false};
+      const auth=adminCertificateAuthId,coop=String(g_adminMemberRuntime?.coop_id||'');
+      return {auth,coop,
+        allowed:c.auth===auth&&String(c.coop||'')===coop&&canAccessAdminMemberTab('members')&&canAccessAdminMemberTab('dashboard')&&isAdminMemberRuntimeModuleEnabled('member_admin')&&g_adminMemberRuntime?.is_active!==false&&!node('main-system')?.classList.contains('hidden'),
+        active:c.active&&!global.frameElement?.hidden&&node('tab-dashboard')?.classList.contains('active')};
+    }catch{return {allowed:false,active:false};}
+  }
   function statisticsScope(options) {
-    const c=(options?.statisticsContext||options?.otherListContext)?.()||{};
+    const c=statisticsContext(options)||{};
     return options?.enabled&&c.allowed&&c.active&&c.auth&&c.coop&&!global.frameElement?.hidden?JSON.stringify([c.auth,c.coop,options.cacheKey||'',options.regionsEnabled!==false]):'';
   }
   function cancelStatisticsRead() {
@@ -253,7 +273,12 @@
     }
     if(statisticsRecovery?.key!==key)statisticsRecovery=null;
     syncStatisticsRecovery('loading');
-    if (!key) {if(keepFocus)otherFocusReturn=null;syncStatisticsRecovery();return null;}
+    if (!key) {
+      if(keepFocus)otherFocusReturn=null;syncStatisticsRecovery();
+      for(const scope of Object.keys(labels))node(`member-demographic-status-${scope}`).textContent='현재 상태에서는 구성 통계를 조회할 수 없습니다. 로그인과 접근 권한을 다시 확인해 주세요.';
+      node('member-demographic-age-status').textContent='현재 상태에서는 연령·성별 통계를 조회할 수 없습니다. 로그인과 접근 권한을 다시 확인해 주세요.';
+      return null;
+    }
     const job={key,client:options.client,controller:new AbortController(),cancel:null,promise:null};statisticsRead=job;
     const current=()=>statisticsRead===job&&seq===sequence&&statisticsScope(options)===key;
     job.promise=(async()=>{let timer;try {
