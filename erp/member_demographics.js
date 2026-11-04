@@ -4,6 +4,7 @@
   const pending = new Map();
   let otherOptions=null, otherModelScope='', otherSequence=0, otherRead=null, otherRows=[], otherCursor=null, otherReady=false, otherOpening=false;
   let otherSelection=null, otherOpen=false, otherOpener=null, otherBound=false, otherTotal=null;
+  let otherDeferredRefresh=null, otherRefreshEpoch=0;
   const labels = { yongin: ['수지구','기흥구','처인구','그 외','주소 미확인'], gyeonggi: ['경기도내','그 외','주소 미확인'] };
   const hwaseongLabels = ['만세구','효행구','병점구','동탄구','그외'];
   const colors = { '만세구':'#0d6efd','효행구':'#20c997','병점구':'#198754','동탄구':'#f5b301','그외':'#adb5bd','수지구':'#0d6efd','기흥구':'#20c997','처인구':'#198754','경기도내':'#ffc107','그 외':'#adb5bd','주소 미확인':'#6c757d' };
@@ -25,7 +26,7 @@
     otherOpen=false;otherTotal=null;
     const panel=node('memberRegionOtherModal');
     if(panel&&hide)global.bootstrap?.Modal.getInstance(panel)?.hide();
-    if(clearContext){otherModelScope='';if(node('member-other-members-open'))node('member-other-members-open').hidden=true;}
+    if(clearContext){++otherRefreshEpoch;otherDeferredRefresh=null;otherModelScope='';if(node('member-other-members-open'))node('member-other-members-open').hidden=true;}
     otherControls();
   }
   function closeOtherList() {
@@ -38,10 +39,26 @@
         (active===document.body||panel?.contains(active)||active===b)&&!document.querySelector('.modal.show')&&r?.bottom>0&&r.top<global.innerHeight)b.focus({preventScroll:true});
     });
   }
+  function deferDashboardRefresh(refresh) {
+    const scope=otherScope();
+    if(!otherOpen||!scope||scope!==otherModelScope||typeof refresh!=='function')return false;
+    otherDeferredRefresh={scope,options:otherOptions,epoch:otherRefreshEpoch,refresh};
+    return true;
+  }
+  function flushOtherRefresh() {
+    const work=otherDeferredRefresh;otherDeferredRefresh=null;
+    if(!work)return;
+    void Promise.resolve().then(()=>{
+      if(work.epoch!==otherRefreshEpoch||work.scope!==otherScope()||work.options!==otherOptions)return;
+      if(otherOpen){otherDeferredRefresh||=work;return;}
+      return work.refresh();
+    }).catch(()=>{});
+  }
   function bindOtherModal() {
     if(otherBound)return;
     const panel=node('memberRegionOtherModal');if(!panel)return;otherBound=true;
     panel.addEventListener('hide.bs.modal',()=>{if(otherOpen)pauseOtherList(false,false);});
+    panel.addEventListener('hidden.bs.modal',flushOtherRefresh);
     panel.addEventListener('keydown',event=>{
       if(!otherOpen||panel.hasAttribute('inert')||event.isComposing)return;
       if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();closeOtherList();return;}
@@ -81,10 +98,12 @@
       if(next.length>data.total)throw Error('REGION_LIST_CHANGED');
       otherRows=next;otherCursor=data.next_after_id;otherReady=true;otherTotal=data.total;
       const box=node('member-other-members-rows');box.replaceChildren();
-      for(const row of otherRows){const item=document.createElement('li');item.className='border rounded-3 p-3 mb-2';
-        const name=document.createElement('h6');name.className='fw-bold';name.textContent=row.name||'이름 미등록';item.append(name);
+      for(const [index,row] of otherRows.entries()){const item=document.createElement('li');item.className='border rounded-3 p-3 mb-2';item.dataset.memberOrdinal=String(index+1);
+        const name=document.createElement('h6');name.className='fw-bold d-flex flex-wrap align-items-center gap-2';
+        const ordinal=document.createElement('span');ordinal.className='badge text-bg-secondary';ordinal.textContent=`${index+1}번`;
+        const label=document.createElement('span');label.textContent=row.name||'이름 미등록';name.append(ordinal,label);item.append(name);
         const dl=document.createElement('dl');dl.className='row mb-2 small';
-        for(const [label,value]of [['조합원번호',row.member_id||'미등록'],['주소',row.address||'미등록'],['분류 사유',row.reason||'주소 표기를 확인해 주세요.']]){
+        for(const [label,value]of [['조합원번호',row.member_id||'미등록'],['주소',row.address||'미등록']]){
           const dt=document.createElement('dt'),dd=document.createElement('dd');dt.className='col-sm-3';dd.className='col-sm-9 text-break';dt.textContent=label;dd.textContent=value;dl.append(dt,dd);
         }item.append(dl);const b=document.createElement('button');b.type='button';b.className='btn btn-sm btn-outline-primary';b.textContent='회원 상세';
         b.addEventListener('click',async()=>{if(!current()||!otherReady||otherRead||otherOpening)return;otherOpening=true;otherControls();
@@ -99,7 +118,7 @@
       node('member-other-members-status').textContent=error.message==='REGION_LIST_CHANGED'?'조회 중 명단 인원이 변경되었습니다. 다시 확인을 눌러 처음부터 조회해 주세요.':error.code==='42501'?'현재 권한으로 명단을 조회할 수 없습니다.':otherRows.length?'명단을 불러오지 못해 이전 목록을 표시하고 있습니다. 다시 확인해 주세요.':'명단을 불러오지 못했습니다. 다시 확인해 주세요.';
     }finally{clearTimeout(timer);if(otherRead===job){otherRead=null;otherControls();}}})();return job.promise;
   }
-  global.addEventListener('pagehide',()=>pauseOtherList());
+  global.addEventListener('pagehide',()=>pauseOtherList(true));
   function ageTooltip(context) {
     const row = model?.age_groups?.find(item => item.label === context.label);
     if (!row) return '구성 정보를 확인하지 못했습니다.';
@@ -188,5 +207,5 @@
       if (pending.get(key)===request) pending.delete(key);
     }
   }
-  global.MemberDemographics=Object.freeze({load,openRegion,closeDetail,ageTooltip,openOtherList,loadOtherList,closeOtherList,pauseOtherList});
+  global.MemberDemographics=Object.freeze({load,openRegion,closeDetail,ageTooltip,openOtherList,loadOtherList,closeOtherList,pauseOtherList,deferDashboardRefresh});
 })(window);

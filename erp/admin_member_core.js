@@ -6821,6 +6821,7 @@ function refreshMemberDashboardAfterSave() {
     // A successful write invalidates pre-write reads, but hidden statistics wait
     // for their normal tab entry. Reuse the guarded lazy loader, not its private functions.
     invalidateAdminDashboardRead();
+    if (window.MemberDemographics?.deferDashboardRefresh?.(refreshMemberDashboardAfterSave)) return Promise.resolve();
     if (document.getElementById('tab-dashboard')?.classList.contains('active')) return loadDashboard();
     return Promise.resolve();
 }
