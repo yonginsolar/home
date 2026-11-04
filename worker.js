@@ -145,6 +145,7 @@ function textResponse(request,body,type,status=200){
 }
 
 function labelFor(p,pathname){
+  if(p.id==='federation-public')return '';
   const value=cleanPath(pathname).toLowerCase();
   const labels={
     '/signup':'조합원 가입','/membermanage':'조합원 관리','/privacy':'개인정보 처리방침','/terms':'이용약관',
@@ -205,6 +206,16 @@ function withProfileHeaders(response,p,blocked,headRequest=false,revalidate=fals
 
 class RemoveElement{element(element){element.remove();}}
 
+function federationResponse(request,response){
+  const url=new URL(request.url),p=profile('federation-public','연합회 현황판','연합회 현황판','조합원·출자금·운영 발전소와 발전량 집계를 확인하는 공개 현황판입니다.',url.origin);
+  if(request.method==='HEAD')return withProfileHeaders(response,p,true,true,true);
+  const rewritten=new HTMLRewriter()
+    .on('head',{element(e){e.prepend(headMetadata(p,url)+'<meta name="federation-public-head" content="1.0.0">',{html:true});}})
+    .on('head title, head link[rel="canonical"], head link[rel*="icon"], head link[rel="alternate"][type="application/rss+xml"], head script[type="application/ld+json"]',new RemoveElement())
+    .on('head meta',{element(e){const n=(e.getAttribute('name')||e.getAttribute('property')||'').toLowerCase();if(e.hasAttribute('charset')||n.startsWith('og:')||n.startsWith('twitter:')||['robots','description','keywords','application-name','apple-mobile-web-app-title','coop-tenant-profile','coop-tenant-name','tenant-metadata-version','federation-public-head'].includes(n))e.remove();}}).transform(response);
+  return withProfileHeaders(rewritten,p,true,false,true);
+}
+
 // Keep normal scripts, social popups, PDF workers and preview frames usable.
 // Public homepage previews may be embedded by the registered ERP hosts only;
 // private screens cannot be framed by another origin.
@@ -260,6 +271,11 @@ async function routeRequest(request,env){
     const branding=await publicBrand(request,env);
     if(branding.icon_url){try{const r=await fetch(branding.icon_url,{redirect:'manual',signal:AbortSignal.timeout(4000)});if(r.ok&&(r.headers.get('content-type')||'').startsWith('image/png'))return withProfileHeaders(r,p,false,request.method==='HEAD');}catch(_){/* Keep the local fallback usable without following a redirect. */}}
     const iconUrl=new URL(request.url);iconUrl.pathname=SUN_IMAGE;return env.ASSETS.fetch(new Request(iconUrl,request));
+  }
+  if(cleanPath(url.pathname)==='/erp/federation'&&['GET','HEAD'].includes(request.method)){
+    const response=await env.ASSETS.fetch(request);
+    if((response.headers.get('content-type')||'').toLowerCase().includes('text/html'))return federationResponse(request,response);
+    return response;
   }
   if(p.passThrough){
     const response=await env.ASSETS.fetch(request);

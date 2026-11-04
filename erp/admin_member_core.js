@@ -6360,6 +6360,7 @@ const oldInformationScope = g_adminMemberRuntime?.coop_id;
 g_adminMemberRuntime = runtime && typeof runtime === 'object' ? runtime : null;
 if (oldInformationScope !== g_adminMemberRuntime?.coop_id || !canAccessAdminMemberTab('members')) invalidateMemberRosterRead();
 if (oldInformationScope !== g_adminMemberRuntime?.coop_id) invalidateMemberInformationList(true);
+if (oldInformationScope !== g_adminMemberRuntime?.coop_id || !canAccessAdminMemberTab('members')) window.MemberDemographics?.pauseOtherList(true);
 const isSiteMemberProfile = isAdminMemberSiteProfile();
 const memberAdminEnabled = isAdminMemberRuntimeModuleEnabled('member_admin') && hasAdminMemberScopePermission('member_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
 // Cross-page shortcuts belong to the ERP's main menu, not member work tabs.
@@ -6606,6 +6607,7 @@ function switchTab(tabName, options = {}) {
     invalidateDonationListRead();
     invalidateUsageLedgerRead();
     if (tabName !== 'dashboard') invalidateMemberInformationList();
+    if (tabName !== 'dashboard') window.MemberDemographics?.pauseOtherList(true);
     if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) {
         invalidateMemberReturnSummaryRead();
         invalidateAdminDashboardRead();
@@ -8716,7 +8718,9 @@ async function loadAdminMemberQuizHistory(forceReload = false) {
     }
 } // End of loadAdminMemberQuizHistory
 
-async function openMemberDetail(id) {
+async function openMemberDetail(id, entryIsCurrent = null) {
+    const entryCurrent=()=>typeof entryIsCurrent!=='function'||entryIsCurrent();
+    if(!entryCurrent())return;
     if (memberDetailSaving || memberFundState?.busy || memberChildSaving) return;
     const editorOwner = memberDetailOwner();
     if (!editorOwner) return;
@@ -8740,10 +8744,10 @@ async function openMemberDetail(id) {
             g_member_detail_loading = true;
             if (typeof showLoading === 'function') showLoading(true);
             m = await fetchAdminMemberDetailRow(id);
-            if (requestRevision !== g_member_detail_revision || editorOwner !== memberDetailOwner()) return;
+            if (requestRevision !== g_member_detail_revision || editorOwner !== memberDetailOwner() || !entryCurrent()) return;
             if (m) m = upsertCachedAdminMember(m);
         } catch (err) {
-            if (requestRevision !== g_member_detail_revision) return;
+            if (requestRevision !== g_member_detail_revision || !entryCurrent()) return;
             const message = err?.message || err;
             return myAlert("데이터를 불러오지 못했습니다: " + message, 'error');
         } finally {
@@ -8751,7 +8755,7 @@ async function openMemberDetail(id) {
         }
     }
 
-    if (editorOwner !== memberDetailOwner()) return;
+    if (editorOwner !== memberDetailOwner() || !entryCurrent()) return;
     if (!m) return myAlert("데이터를 찾을 수 없습니다.", 'error');
     if (m.coop_id && String(m.coop_id) !== String(g_adminMemberRuntime?.coop_id)) return;
 
@@ -8764,19 +8768,19 @@ async function openMemberDetail(id) {
     let myBadgeCodes = [], badgeReadReady = false;
     if (isGroup) {
         accountManagerLabel = await resolveMemberAccountManagerLabel(m);
-        if (requestRevision !== g_member_detail_revision) return;
+        if (requestRevision !== g_member_detail_revision || !entryCurrent()) return;
     }
     if (canManageAdminMemberIndividualBadges()) {
         await ensureBadgesReady();
-        if (requestRevision !== g_member_detail_revision) return;
+        if (requestRevision !== g_member_detail_revision || !entryCurrent()) return;
         if (!g_badges || g_badges.length === 0) {
             const badges = await Badges.getAll(_supabase);
-            if (requestRevision !== g_member_detail_revision) return;
+            if (requestRevision !== g_member_detail_revision || !entryCurrent()) return;
             g_badges = badges;
         }
         const { data: myRows, error: badgeError } = await _supabase
             .from('coop_member_badges').select('badge_id').eq('member_uid', memberUid);
-        if (requestRevision !== g_member_detail_revision) return;
+        if (requestRevision !== g_member_detail_revision || !entryCurrent()) return;
         if (myRows && !badgeError) {
             badgeReadReady = myRows.every(row => g_badges.some(b => b.id == row.badge_id));
             myBadgeCodes = myRows.map(row => g_badges.find(b => b.id == row.badge_id)?.code)
@@ -8784,7 +8788,7 @@ async function openMemberDetail(id) {
         }
     }
 
-    if (editorOwner !== memberDetailOwner()) return;
+    if (editorOwner !== memberDetailOwner() || !entryCurrent()) return;
     g_current_member_id = memberUid;
     g_current_member_row = m;
     adminMemberParticipationLoadedFor = null;
@@ -8914,7 +8918,7 @@ async function openMemberDetail(id) {
         }
     }
     } catch (error) {
-        if (requestRevision === g_member_detail_revision) {
+        if (requestRevision === g_member_detail_revision && entryCurrent()) {
             CoopSafeLog.error('[openMemberDetail] load failed', error);
             myAlert('조합원 정보를 불러오지 못했습니다. 다시 열어주세요.', 'error');
         }
@@ -9127,6 +9131,7 @@ function bindAdminCertificateContext(authId) {
             invalidateAdminCertificatePreparation();
             invalidateMemberRosterRead();
             adminCertificateAuthId = '';
+            window.MemberDemographics?.pauseOtherList(true);
             invalidateMemberInformationList(true);
             clearMemberDetailEdits();
             window.ContributionCertPreview?.clear();
@@ -9144,6 +9149,7 @@ function bindAdminCertificateContext(authId) {
                 if (memberDetailEditState) ++memberDetailEditState.actionRevision;
             }
             invalidateMemberRosterRead();
+            window.MemberDemographics?.pauseOtherList(true);
             if (frame.hidden) {
                 invalidateDonationListRead();
                 invalidateMemberInformationList();

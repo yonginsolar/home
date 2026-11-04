@@ -378,6 +378,10 @@ function loadMemberDemographicCharts() {
     return MemberDemographics.load({
         client: _supabase, cacheKey: String(g_adminMemberRuntime?.coop_id || ''),
         enabled: true, regionsEnabled: !isAdminMemberSiteProfile(), renderChart,
+        otherListContext: () => ({auth:adminCertificateAuthId,coop:String(g_adminMemberRuntime?.coop_id||''),
+            allowed:!isAdminMemberSiteProfile()&&canAccessAdminMemberTab('members')&&canAccessAdminMemberTab('dashboard')&&g_adminMemberRuntime?.is_active!==false,
+            active:!window.frameElement?.hidden&&document.getElementById('tab-dashboard')?.classList.contains('active')}),
+        openOtherMember: (id,current) => openMemberDetail(id,current),
         clearCharts() { for (const key of ['location','locationGyeonggi','age']) { g_charts[key]?.destroy(); delete g_charts[key]; } }
     });
 }
