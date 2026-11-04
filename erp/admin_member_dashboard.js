@@ -378,6 +378,9 @@ function loadMemberDemographicCharts() {
     return MemberDemographics.load({
         client: _supabase, cacheKey: String(g_adminMemberRuntime?.coop_id || ''),
         enabled: true, regionsEnabled: !isAdminMemberSiteProfile(), renderChart,
+        statisticsContext: () => ({auth:adminCertificateAuthId,coop:String(g_adminMemberRuntime?.coop_id||''),
+            allowed:canAccessAdminMemberTab('members')&&canAccessAdminMemberTab('dashboard')&&isAdminMemberRuntimeModuleEnabled('member_admin')&&g_adminMemberRuntime?.is_active!==false&&!document.getElementById('main-system')?.classList.contains('hidden'),
+            active:!window.frameElement?.hidden&&document.getElementById('tab-dashboard')?.classList.contains('active')}),
         otherListContext: () => ({auth:adminCertificateAuthId,coop:String(g_adminMemberRuntime?.coop_id||''),
             allowed:!isAdminMemberSiteProfile()&&canAccessAdminMemberTab('members')&&canAccessAdminMemberTab('dashboard')&&g_adminMemberRuntime?.is_active!==false,
             active:!window.frameElement?.hidden&&document.getElementById('tab-dashboard')?.classList.contains('active')}),

@@ -1,11 +1,12 @@
 (function (global) {
   'use strict';
   let model = null, sequence = 0;
-  const pending = new Map();
+  let statisticsRead=null, statisticsRecovery=null;
   let otherOptions=null, otherModelScope='', otherSequence=0, otherRead=null, otherRows=[], otherCursor=null, otherReady=false, otherOpening=false;
   let otherSelection=null, otherOpen=false, otherOpener=null, otherBound=false, otherTotal=null;
   let otherDeferredRefresh=null, otherRefreshEpoch=0;
   let otherFocusReturn=null;
+  let otherMoreFocus=null;
   const labels = { yongin: ['수지구','기흥구','처인구','그 외','주소 미확인'], gyeonggi: ['경기도내','그 외','주소 미확인'] };
   const hwaseongLabels = ['만세구','효행구','병점구','동탄구','그외'];
   const colors = { '만세구':'#0d6efd','효행구':'#20c997','병점구':'#198754','동탄구':'#f5b301','그외':'#adb5bd','수지구':'#0d6efd','기흥구':'#20c997','처인구':'#198754','경기도내':'#ffc107','그 외':'#adb5bd','주소 미확인':'#6c757d' };
@@ -21,13 +22,14 @@
     node('member-other-members-rows')?.querySelectorAll('button').forEach(b=>{b.disabled=locked;});
     const more=node('member-other-members-more');if(more)more.disabled=locked;
   }
-  function pauseOtherList(clearContext=false,hide=true,preserveFocus=false) {
+  function pauseOtherList(clearContext=false,hide=true,preserveFocus=false,preserveStatistics=false) {
+    otherMoreFocus=null;
     ++otherSequence;otherRead?.controller.abort();otherRead=null;otherRows=[];otherCursor=null;otherReady=false;otherOpening=false;
     node('member-other-members-rows')?.replaceChildren();
     otherOpen=false;otherTotal=null;
     const panel=node('memberRegionOtherModal');
     if(panel&&hide)global.bootstrap?.Modal.getInstance(panel)?.hide();
-    if(clearContext){if(!preserveFocus)otherFocusReturn=null;++otherRefreshEpoch;otherDeferredRefresh=null;otherModelScope='';if(node('member-other-members-open'))node('member-other-members-open').hidden=true;}
+    if(clearContext){if(!preserveStatistics){cancelStatisticsRead();statisticsRecovery=null;syncStatisticsRecovery();}if(!preserveFocus)otherFocusReturn=null;++otherRefreshEpoch;otherDeferredRefresh=null;otherModelScope='';if(node('member-other-members-open'))node('member-other-members-open').hidden=true;}
     otherControls();
   }
   function closeOtherList() {
@@ -55,6 +57,9 @@
     target.focus({preventScroll:true});
   }
   function observeOtherFocus(event) {
+    const more=otherMoreFocus;
+    if(more&&!(event.type==='focusin'&&[document.body,document.documentElement,more.button].includes(event.target))&&
+      !(event.target===more.button&&((event.type==='keydown'&&['Enter',' ','Spacebar'].includes(event.key))||event.type==='pointerdown')))otherMoreFocus=null;
     const focus=otherFocusReturn;if(!focus||focus.panel?.contains(event.target))return;
     if(event.type==='focusin'&&(event.target===document.body||event.target===document.documentElement||event.target===focus.opener))return;
     otherFocusReturn=null;
@@ -105,6 +110,9 @@
     if(otherOpening)return;
     const after=reset?null:otherCursor,key=scope+'|'+selection.scope+'|'+String(after||'');
     if(otherRead?.key===key)return otherRead.promise;
+    const more=node('member-other-members-more'),previousCount=reset?0:otherRows.length;
+    otherMoreFocus=!reset&&document.activeElement===more?{button:more,panel,target:null}:null;
+    const focus=otherMoreFocus;
     otherRead?.controller.abort();const ticket=++otherSequence,c=otherContext(),job={key,controller:new AbortController(),promise:null};
     otherRead=job;otherReady=false;otherControls();node('member-other-members-status').textContent='명단을 확인하고 있습니다…';
     const current=()=>ticket===otherSequence&&scope===otherScope()&&selection===otherSelection&&otherOpen;
@@ -135,10 +143,18 @@
       }
       node('member-other-members-status').textContent=data.total?`그외 ${data.total.toLocaleString()}명 · ${otherRows.length.toLocaleString()}명 표시`:'그외로 분류된 정조합원이 없습니다.';
       node('member-other-members-more').hidden=!data.has_more;
+      if(focus)focus.target=box.children[previousCount]?.querySelector('button')||node('member-other-members-status');
     }catch(error){if(!current())return;
       if(error.code==='42501'){otherRows=[];otherCursor=null;node('member-other-members-rows').replaceChildren();}
       node('member-other-members-status').textContent=error.message==='REGION_LIST_CHANGED'?'조회 중 명단 인원이 변경되었습니다. 다시 확인을 눌러 처음부터 조회해 주세요.':error.code==='42501'?'현재 권한으로 명단을 조회할 수 없습니다.':otherRows.length?'명단을 불러오지 못해 이전 목록을 표시하고 있습니다. 다시 확인해 주세요.':'명단을 불러오지 못했습니다. 다시 확인해 주세요.';
-    }finally{clearTimeout(timer);if(otherRead===job){otherRead=null;otherControls();}}})();return job.promise;
+      if(focus)focus.target=node('member-other-members-retry');
+    }finally{clearTimeout(timer);if(otherRead===job){otherRead=null;otherControls();if(focus)global.requestAnimationFrame(()=>{
+      if(otherMoreFocus!==focus||!current()||panel.hasAttribute('inert')||document.querySelector('dialog[open]'))return;
+      otherMoreFocus=null;const active=document.activeElement,target=focus.target;
+      if(![document.body,document.documentElement,focus.button].includes(active)||!target?.isConnected||target.hidden||target.disabled)return;
+      if(target===node('member-other-members-status'))target.setAttribute('tabindex','-1');
+      target.focus({preventScroll:true});target.scrollIntoView({block:'nearest',inline:'nearest'});
+    });}}})();return job.promise;
   }
   global.addEventListener('pagehide',()=>pauseOtherList(true));
   function ageTooltip(context) {
@@ -194,11 +210,36 @@
     options.renderChart('age','chart-age','bar',{labels:ages.map(age=>age.label),datasets:[{label:'개인 조합원 수',data:ages.map(age=>count(age.count)),backgroundColor:'#ffc107'}]});
     node('member-demographic-age-status').textContent = `개인 정조합원 ${count(data.individual_count).toLocaleString()}명 기준 · 막대에 마우스를 올리거나 터치하면 성별 구성도 보여요.`;
   }
+  function statisticsScope(options) {
+    const c=(options?.statisticsContext||options?.otherListContext)?.()||{};
+    return options?.enabled&&c.allowed&&c.active&&c.auth&&c.coop&&!global.frameElement?.hidden?JSON.stringify([c.auth,c.coop,options.cacheKey||'',options.regionsEnabled!==false]):'';
+  }
+  function cancelStatisticsRead() {
+    ++sequence;const old=statisticsRead;statisticsRead=null;
+    old?.controller.abort();old?.cancel?.();
+  }
+  function syncStatisticsRecovery(state='') {
+    const panel=node('member-demographic-recovery'),status=node('member-demographic-recovery-status'),button=node('member-demographic-retry');
+    if(!panel||!status||!button)return;
+    panel.hidden=!statisticsRecovery;
+    const busy=state==='loading';
+    status.textContent=busy?'구성 통계를 다시 확인하고 있습니다…':state==='ready'?'구성 통계를 확인했습니다.':statisticsRecovery?.message||'';
+    button.hidden=statisticsRecovery?.denied===true;
+    button.setAttribute('aria-disabled',String(busy));button.setAttribute('aria-busy',String(busy));
+    button.textContent=busy?'확인 중…':'구성 다시 확인';
+  }
+  function retryStatistics() {
+    if(!otherOptions||!statisticsScope(otherOptions)||statisticsRecovery?.denied)return Promise.resolve(null);
+    return load(otherOptions);
+  }
   async function load(options) {
+    const key=statisticsScope(options);
+    if(statisticsRead?.key===key&&key&&statisticsRead.client===options.client)return statisticsRead.promise;
     const focus=otherFocusReturn,c=options.otherListContext?.()||{};
     const keepFocus=!!focus&&focus.phase==='awaiting-load'&&focus.owner===otherScope()&&c.allowed&&c.active&&focus.owner===JSON.stringify([c.auth,c.coop]);
     if(keepFocus)focus.phase='reading';
-    pauseOtherList(true,true,keepFocus);otherOptions=options;if(node('member-other-members-open'))node('member-other-members-open').hidden=true;
+    cancelStatisticsRead();
+    pauseOtherList(true,true,keepFocus,true);otherOptions=options;if(node('member-other-members-open'))node('member-other-members-open').hidden=true;
     const seq = ++sequence;
     closeDetail(keepFocus);
     model=null;
@@ -210,30 +251,41 @@
       const status=node(`member-demographic-status-${scope}`);
       if (status) status.textContent='구성을 확인하고 있습니다…';
     }
-    if (!options.enabled) {if(keepFocus)otherFocusReturn=null;return null;}
-    const key = `${options.cacheKey || ''}:${new Date().toDateString()}`;
-    let request;
-    try {
-      if (!pending.has(key)) pending.set(key,options.client.rpc('get_member_demographic_statistics'));
-      request=pending.get(key);
-      const {data,error} = await request;
-      if (error || !data || !Array.isArray(data.age_groups)) throw Error('DEMOGRAPHICS_UNAVAILABLE');
-      if (seq===sequence) draw(data,options);
+    if(statisticsRecovery?.key!==key)statisticsRecovery=null;
+    syncStatisticsRecovery('loading');
+    if (!key) {if(keepFocus)otherFocusReturn=null;syncStatisticsRecovery();return null;}
+    const job={key,client:options.client,controller:new AbortController(),cancel:null,promise:null};statisticsRead=job;
+    const current=()=>statisticsRead===job&&seq===sequence&&statisticsScope(options)===key;
+    job.promise=(async()=>{let timer;try {
+      let request=options.client.rpc('get_member_demographic_statistics');
+      if(typeof request.abortSignal==='function')request=request.abortSignal(job.controller.signal);
+      const {data,error,status}=await Promise.race([request,new Promise((_,reject)=>{
+        job.cancel=()=>reject(Error('DEMOGRAPHICS_CANCELLED'));
+        timer=setTimeout(()=>{job.controller.abort();reject(Error('DEMOGRAPHICS_TIMEOUT'));},15000);
+      })]);
+      if(!current())return null;
+      if(error)throw Object.assign(new Error('DEMOGRAPHICS_UNAVAILABLE'),{code:error.code,status:error.status||status});
+      if(!data||!Array.isArray(data.age_groups)||(data.coop_id&&data.coop_id!==c.coop))throw Error('DEMOGRAPHICS_UNAVAILABLE');
+      draw(data,options);syncStatisticsRecovery('ready');
       return data;
-    } catch (_) {
-      if (seq!==sequence) return null;
+    } catch (error) {
+      if (!current()) return null;
       model=null;
+      const denied=error.code==='42501'||[401,403].includes(error.status),limited=error.status===429||error.code==='429';
+      const message=denied?'현재 권한으로 구성 통계를 조회할 수 없습니다.':limited?'조회 요청이 많습니다. 잠시 후 다시 확인해 주세요.':error.message==='DEMOGRAPHICS_TIMEOUT'?'구성 통계 조회가 지연되고 있습니다. 다시 확인해 주세요.':'구성 통계를 불러오지 못했습니다. 다시 확인해 주세요.';
+      statisticsRecovery={key,denied,message};syncStatisticsRecovery();
       for (const scope of Object.keys(labels)) {
         node(`member-demographic-select-${scope}`).disabled=true;
-        node(`member-demographic-status-${scope}`).textContent='구성 통계를 확인하지 못했습니다. 다시 조회해 주세요.';
+        node(`member-demographic-status-${scope}`).textContent=message;
       }
       node('member-demographic-age-status').textContent='연령·성별 통계를 확인하지 못했습니다. 다시 조회해 주세요.';
       options.clearCharts?.();
       return null;
     } finally {
-      if (pending.get(key)===request) pending.delete(key);
-      if(keepFocus&&seq===sequence)global.requestAnimationFrame(()=>restoreOtherFocusReturn(focus));
-    }
+      clearTimeout(timer);job.cancel=null;
+      if(statisticsRead===job)statisticsRead=null;
+      if(keepFocus&&seq===sequence&&statisticsScope(options)===key)global.requestAnimationFrame(()=>restoreOtherFocusReturn(focus));
+    }})();return job.promise;
   }
-  global.MemberDemographics=Object.freeze({load,openRegion,closeDetail,ageTooltip,openOtherList,loadOtherList,closeOtherList,pauseOtherList,deferDashboardRefresh});
+  global.MemberDemographics=Object.freeze({load,retryStatistics,openRegion,closeDetail,ageTooltip,openOtherList,loadOtherList,closeOtherList,pauseOtherList,deferDashboardRefresh});
 })(window);
