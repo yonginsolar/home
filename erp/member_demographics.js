@@ -63,7 +63,12 @@
   }
   function observeOtherFocus(event) {
     const more=otherMoreFocus;
-    if(more&&!(event.type==='focusin'&&[document.body,document.documentElement,more.button].includes(event.target))&&
+    // Keep the owned handoff when the old control has just become unavailable.
+    const completionEnter=more&&event.type==='keydown'&&event.key==='Enter'&&
+      [document.body,document.documentElement].includes(event.target)&&[document.body,document.documentElement].includes(document.activeElement)&&
+      (more.button.hidden||more.button.disabled)&&more.target?.isConnected&&!more.target.hidden&&!more.target.disabled&&
+      more.panel.contains(more.target)&&!more.panel.hasAttribute('inert')&&!document.querySelector('dialog[open]');
+    if(more&&!completionEnter&&!(event.type==='focusin'&&[document.body,document.documentElement,more.button].includes(event.target))&&
       !(event.target===more.button&&((event.type==='keydown'&&['Enter',' ','Spacebar'].includes(event.key))||event.type==='pointerdown')))otherMoreFocus=null;
     const focus=otherFocusReturn;if(!focus||focus.panel?.contains(event.target))return;
     if(event.type==='focusin'&&(event.target===document.body||event.target===document.documentElement||event.target===focus.opener))return;
