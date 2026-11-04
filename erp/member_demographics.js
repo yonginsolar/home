@@ -5,6 +5,7 @@
   let otherOptions=null, otherModelScope='', otherSequence=0, otherRead=null, otherRows=[], otherCursor=null, otherReady=false, otherOpening=false;
   let otherSelection=null, otherOpen=false, otherOpener=null, otherBound=false, otherTotal=null;
   let otherDeferredRefresh=null, otherRefreshEpoch=0;
+  let otherFocusReturn=null;
   const labels = { yongin: ['수지구','기흥구','처인구','그 외','주소 미확인'], gyeonggi: ['경기도내','그 외','주소 미확인'] };
   const hwaseongLabels = ['만세구','효행구','병점구','동탄구','그외'];
   const colors = { '만세구':'#0d6efd','효행구':'#20c997','병점구':'#198754','동탄구':'#f5b301','그외':'#adb5bd','수지구':'#0d6efd','기흥구':'#20c997','처인구':'#198754','경기도내':'#ffc107','그 외':'#adb5bd','주소 미확인':'#6c757d' };
@@ -20,24 +21,43 @@
     node('member-other-members-rows')?.querySelectorAll('button').forEach(b=>{b.disabled=locked;});
     const more=node('member-other-members-more');if(more)more.disabled=locked;
   }
-  function pauseOtherList(clearContext=false,hide=true) {
+  function pauseOtherList(clearContext=false,hide=true,preserveFocus=false) {
     ++otherSequence;otherRead?.controller.abort();otherRead=null;otherRows=[];otherCursor=null;otherReady=false;otherOpening=false;
     node('member-other-members-rows')?.replaceChildren();
     otherOpen=false;otherTotal=null;
     const panel=node('memberRegionOtherModal');
     if(panel&&hide)global.bootstrap?.Modal.getInstance(panel)?.hide();
-    if(clearContext){++otherRefreshEpoch;otherDeferredRefresh=null;otherModelScope='';if(node('member-other-members-open'))node('member-other-members-open').hidden=true;}
+    if(clearContext){if(!preserveFocus)otherFocusReturn=null;++otherRefreshEpoch;otherDeferredRefresh=null;otherModelScope='';if(node('member-other-members-open'))node('member-other-members-open').hidden=true;}
     otherControls();
   }
   function closeOtherList() {
-    const panel=node('memberRegionOtherModal'),b=otherOpener,scope=otherScope(),selection=otherSelection;
-    const restore=panel?.contains(document.activeElement)||document.activeElement===document.body;
+    const focus=prepareOtherFocusReturn();
     pauseOtherList();
-    global.requestAnimationFrame(()=>{
-      const r=b?.getBoundingClientRect(),active=document.activeElement;
-      if(restore&&scope&&scope===otherScope()&&selection===otherSelection&&b?.isConnected&&!b.hidden&&!node('member-demographic-detail')?.hidden&&
-        (active===document.body||panel?.contains(active)||active===b)&&!document.querySelector('.modal.show')&&r?.bottom>0&&r.top<global.innerHeight)b.focus({preventScroll:true});
-    });
+    if(focus?.phase==='closing')global.requestAnimationFrame(()=>restoreOtherFocusReturn(focus));
+  }
+  function prepareOtherFocusReturn() {
+    const panel=node('memberRegionOtherModal'),owner=otherScope(),active=document.activeElement;
+    if(!otherOpen||!owner||!otherSelection||!(panel?.contains(active)||active===document.body))return null;
+    const waiting=otherDeferredRefresh?.scope===owner&&otherDeferredRefresh.epoch===otherRefreshEpoch;
+    return otherFocusReturn={owner,panel,opener:otherOpener,scope:otherSelection.scope,phase:waiting?'awaiting-load':'closing'};
+  }
+  function restoreOtherFocusReturn(focus) {
+    if(!focus||otherFocusReturn!==focus)return;
+    otherFocusReturn=null;
+    const active=document.activeElement;
+    if(otherOpen||focus.owner!==otherScope()||global.frameElement?.hidden||document.querySelector('.modal.show,dialog[open]')||
+      !(active===document.body||active===document.documentElement||active===focus.opener||focus.panel?.contains(active)))return;
+    const visible=el=>{const r=el?.getBoundingClientRect();return !!(el?.isConnected&&!el.hidden&&!el.disabled&&el.getClientRects().length&&r.bottom>0&&r.top<global.innerHeight&&r.right>0&&r.left<global.innerWidth);};
+    const select=node(`member-demographic-select-${focus.scope}`),status=node(`member-demographic-status-${focus.scope}`);
+    const target=visible(focus.opener)?focus.opener:visible(select)?select:visible(status)?status:null;
+    if(!target)return;
+    if(target===status)target.setAttribute('tabindex','-1');
+    target.focus({preventScroll:true});
+  }
+  function observeOtherFocus(event) {
+    const focus=otherFocusReturn;if(!focus||focus.panel?.contains(event.target))return;
+    if(event.type==='focusin'&&(event.target===document.body||event.target===document.documentElement||event.target===focus.opener))return;
+    otherFocusReturn=null;
   }
   function deferDashboardRefresh(refresh) {
     const scope=otherScope();
@@ -51,14 +71,16 @@
     void Promise.resolve().then(()=>{
       if(work.epoch!==otherRefreshEpoch||work.scope!==otherScope()||work.options!==otherOptions)return;
       if(otherOpen){otherDeferredRefresh||=work;return;}
-      return work.refresh();
+      const focus=otherFocusReturn;
+      return Promise.resolve(work.refresh()).then(()=>{if(focus?.phase==='awaiting-load')restoreOtherFocusReturn(focus);});
     }).catch(()=>{});
   }
   function bindOtherModal() {
     if(otherBound)return;
     const panel=node('memberRegionOtherModal');if(!panel)return;otherBound=true;
-    panel.addEventListener('hide.bs.modal',()=>{if(otherOpen)pauseOtherList(false,false);});
-    panel.addEventListener('hidden.bs.modal',flushOtherRefresh);
+    for(const type of ['pointerdown','keydown','focusin','input','change','wheel','touchmove'])document.addEventListener(type,observeOtherFocus,{capture:true,passive:type==='wheel'||type==='touchmove'});
+    panel.addEventListener('hide.bs.modal',()=>{if(otherOpen){prepareOtherFocusReturn();pauseOtherList(false,false);}});
+    panel.addEventListener('hidden.bs.modal',()=>{flushOtherRefresh();const focus=otherFocusReturn;if(focus?.phase==='closing')global.requestAnimationFrame(()=>restoreOtherFocusReturn(focus));});
     panel.addEventListener('keydown',event=>{
       if(!otherOpen||panel.hasAttribute('inert')||event.isComposing)return;
       if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();closeOtherList();return;}
@@ -72,7 +94,7 @@
   }
   async function openOtherList(button) {
     if(!otherSelection||otherOptions?.regionsEnabled===false||!otherScope()||otherModelScope!==otherScope())return;
-    bindOtherModal();otherOpener=button||node('member-other-members-open');otherOpen=true;
+    otherFocusReturn=null;bindOtherModal();otherOpener=button||node('member-other-members-open');otherOpen=true;
     node('member-other-members-title').textContent=`${otherSelection.scope==='gyeonggi'?'경기도':model.local_region_title||'용인'} · ${otherSelection.label} 조합원 명단`;
     global.bootstrap.Modal.getOrCreateInstance(node('memberRegionOtherModal')).show();
     return loadOtherList(true);
@@ -125,7 +147,8 @@
     return [`${count(row.count).toLocaleString()}명 (개인 조합원 중 ${percent(row.count, count(model.individual_count))})`,
       ...genderLabels.map(label => `${label} ${count(row.gender?.[label]).toLocaleString()}명 (${percent(row.gender?.[label], count(row.count))})`)];
   }
-  function closeDetail() {
+  function closeDetail(preserveFocus=false) {
+    if(!preserveFocus)otherFocusReturn=null;
     pauseOtherList();otherSelection=null;
     if(node('member-other-members-open'))node('member-other-members-open').hidden=true;
     if (node('member-demographic-detail')) node('member-demographic-detail').hidden = true;
@@ -134,6 +157,7 @@
   function openRegion(scope, label) {
     const row = model?.[scope]?.find(item => item.label === label);
     if (!row) return;
+    otherFocusReturn=null;
     pauseOtherList();
     otherSelection=['그외','그 외'].includes(label)?{scope,label}:null;
     const listButton=node('member-other-members-open');
@@ -171,9 +195,12 @@
     node('member-demographic-age-status').textContent = `개인 정조합원 ${count(data.individual_count).toLocaleString()}명 기준 · 막대에 마우스를 올리거나 터치하면 성별 구성도 보여요.`;
   }
   async function load(options) {
-    pauseOtherList(true);otherOptions=options;if(node('member-other-members-open'))node('member-other-members-open').hidden=true;
+    const focus=otherFocusReturn,c=options.otherListContext?.()||{};
+    const keepFocus=!!focus&&focus.phase==='awaiting-load'&&focus.owner===otherScope()&&c.allowed&&c.active&&focus.owner===JSON.stringify([c.auth,c.coop]);
+    if(keepFocus)focus.phase='reading';
+    pauseOtherList(true,true,keepFocus);otherOptions=options;if(node('member-other-members-open'))node('member-other-members-open').hidden=true;
     const seq = ++sequence;
-    closeDetail();
+    closeDetail(keepFocus);
     model=null;
     const title=node('member-demographic-local-title');if(title)title.textContent='👥 조합원 구성';
     options.clearCharts?.();
@@ -183,7 +210,7 @@
       const status=node(`member-demographic-status-${scope}`);
       if (status) status.textContent='구성을 확인하고 있습니다…';
     }
-    if (!options.enabled) return null;
+    if (!options.enabled) {if(keepFocus)otherFocusReturn=null;return null;}
     const key = `${options.cacheKey || ''}:${new Date().toDateString()}`;
     let request;
     try {
@@ -205,6 +232,7 @@
       return null;
     } finally {
       if (pending.get(key)===request) pending.delete(key);
+      if(keepFocus&&seq===sequence)global.requestAnimationFrame(()=>restoreOtherFocusReturn(focus));
     }
   }
   global.MemberDemographics=Object.freeze({load,openRegion,closeDetail,ageTooltip,openOtherList,loadOtherList,closeOtherList,pauseOtherList,deferDashboardRefresh});

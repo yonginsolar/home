@@ -9675,6 +9675,7 @@ async function saveMemberBasic() {
             if (savedJoinDetails?.outcome !== 'saved' || !savedJoinDetails.member) throw new Error('저장 결과를 확인하지 못했습니다. 작성한 내용은 유지됩니다. 최신 목록에서 반영 여부를 확인해 주세요.');
             basicSaved = true;
             acceptMemberBasicSave(editState, submitted, updates, false, savedJoinDetails);
+            void refreshMemberDashboardAfterSave();
 
             if (badgePatch) {
                 const { data: badgeResult, error: badgeError } = await _supabase.rpc('sync_member_badges_v2', badgePatch);
@@ -9698,7 +9699,6 @@ async function saveMemberBasic() {
             showLoading(false);
             resultMessage = '저장되었습니다.';
             void loadMemberInformationSummary();
-            void refreshMemberDashboardAfterSave();
             if (!document.getElementById('member-information-list-panel').hidden) void loadMemberInformationList(true);
 
             // 3. 리스트 갱신 (딜레이 확보)
