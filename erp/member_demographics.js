@@ -3,7 +3,8 @@
   let model = null, sequence = 0;
   const pending = new Map();
   const labels = { yongin: ['수지구','기흥구','처인구','그 외','주소 미확인'], gyeonggi: ['경기도내','그 외','주소 미확인'] };
-  const colors = { '수지구':'#0d6efd','기흥구':'#20c997','처인구':'#198754','경기도내':'#ffc107','그 외':'#adb5bd','주소 미확인':'#6c757d' };
+  const hwaseongLabels = ['만세구','효행구','병점구','동탄구','그외'];
+  const colors = { '만세구':'#0d6efd','효행구':'#20c997','병점구':'#198754','동탄구':'#f5b301','그외':'#adb5bd','수지구':'#0d6efd','기흥구':'#20c997','처인구':'#198754','경기도내':'#ffc107','그 외':'#adb5bd','주소 미확인':'#6c757d' };
   const genderLabels = ['남성','여성','미확인'];
   const node = id => document.getElementById(id);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -32,9 +33,13 @@
     node('member-demographic-detail').scrollIntoView({ behavior:'smooth',block:'nearest' });
   }
   function draw(data, options) {
-    model = data;
+    const isHwaseong=data.local_region_title==='화성';
+    model = isHwaseong ? {...data,yongin:hwaseongLabels.map(label=>data.yongin?.find(row=>row.label===label)||{label,count:0,individual_count:0,group_count:0,gender:{},ages:[]})} : data;
+    const title=node('member-demographic-local-title');if(title)title.textContent=`👥 조합원 구성 (${isHwaseong?'화성':'용인'})`;
+    node('member-demographic-select-yongin')?.setAttribute('aria-label',`${isHwaseong?'화성':'용인'} 지역별 구성 보기`);
     for (const scope of options.regionsEnabled === false ? [] : Object.keys(labels)) {
-      const rows = [...(data[scope] || [])].filter(row => count(row.count)>0).sort((a,b) => labels[scope].indexOf(a.label)-labels[scope].indexOf(b.label));
+      const order=scope==='yongin'&&isHwaseong?hwaseongLabels:labels[scope];
+      const rows = [...(model[scope] || [])].filter(row => count(row.count)>0||(scope==='yongin'&&isHwaseong)).sort((a,b) => order.indexOf(a.label)-order.indexOf(b.label));
       const select = node(`member-demographic-select-${scope}`);
       select.innerHTML = '<option value="">지역별 구성 보기</option>' + rows.map(row => `<option value="${escape(row.label)}">${escape(row.label)} · ${count(row.count).toLocaleString()}명</option>`).join('');
       select.disabled = rows.length===0;
@@ -52,6 +57,7 @@
     const seq = ++sequence;
     closeDetail();
     model=null;
+    const title=node('member-demographic-local-title');if(title)title.textContent='👥 조합원 구성';
     options.clearCharts?.();
     for (const scope of Object.keys(labels)) {
       const select=node(`member-demographic-select-${scope}`);
