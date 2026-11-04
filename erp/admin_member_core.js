@@ -6600,6 +6600,7 @@ function switchTab(tabName, options = {}) {
 
     if (!document.getElementById('tab-' + tabName)?.classList.contains('active')) {
         if (memberDetailEditState) ++memberDetailEditState.actionRevision;
+        cancelMemberConsultRead();
         cancelMemberExportPreparation();
         invalidateAdminCertificatePreparation();
         window.ContributionCertPreview?.clear();
@@ -7271,6 +7272,7 @@ let memberDetailSaving = false;
 const memberConsultDrafts = new Map();
 const memberConsultPending = new Set();
 let memberConsultState = null;
+let memberConsultRead = null, memberConsultReadView = null;
 let memberCreateState = null;
 let memberCreateSaving = false;
 const memberChildDrafts = new Map();
@@ -7729,6 +7731,7 @@ document.getElementById('fundEditorModal')?.addEventListener('hide.bs.modal',eve
 });
 
 function clearMemberDetailEdits() {
+    cancelMemberConsultRead(true);
     capitalImportController?.syncContext();
     window.memberWorkbookController?.syncContext();
     memberExcelEntryController?.syncContext();
@@ -7931,6 +7934,39 @@ function initializeMemberConsultEdit(owner, member) {
     document.getElementById('md-consult-input').value = memberConsultDrafts.get(key) || '';
     const button = document.getElementById('member-consult-submit');
     if (button) button.disabled = memberConsultPending.has(key);
+}
+
+function syncMemberConsultReadUi() {
+    const view = memberConsultReadView;
+    const status = document.getElementById('md-consult-status');
+    const retry = document.getElementById('md-consult-retry');
+    if (status) status.textContent = view?.message || '';
+    if (retry) {
+        retry.hidden = !view || view.status === 'unavailable';
+        retry.setAttribute('aria-disabled', String(view?.status === 'loading'));
+    }
+    document.getElementById('md-consult-list')?.setAttribute('aria-busy', String(view?.status === 'loading'));
+}
+
+function cancelMemberConsultRead(reset = false) {
+    const request = memberConsultRead;
+    memberConsultRead = null;
+    request?.cancel();
+    if (reset) {
+        memberConsultReadView = null;
+        document.getElementById('md-consult-list')?.replaceChildren();
+    } else if (memberConsultReadView?.status === 'loading') {
+        memberConsultReadView.status = 'interrupted';
+        memberConsultReadView.message = '조회가 중단되었습니다. 다시 확인해 주세요.';
+    }
+    syncMemberConsultReadUi();
+}
+
+function retryMemberConsultRead() {
+    const view = memberConsultReadView;
+    if (!view || view.owner !== memberDetailOwner() || view.member !== String(g_current_member_id || '')
+        || !document.getElementById('memberDetailModal')?.classList.contains('show') || window.frameElement?.hidden) return;
+    return loadConsultLogs(view.member);
 }
 
 document.getElementById('md-consult-input')?.addEventListener('input', retainMemberConsultEdit);
@@ -8282,6 +8318,7 @@ document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', 
     captureMemberFundDraft();
     retainMemberDetailEdit();
     retainMemberConsultEdit();
+    cancelMemberConsultRead();
     window.MemberNotificationAdmin?.clearDetail();
     window.ContributionCertPreview?.clear();
     ++g_member_detail_revision;
@@ -8732,6 +8769,7 @@ async function openMemberDetail(id, entryIsCurrent = null) {
     if (fundModal?.classList.contains('show')) bootstrap.Modal.getInstance(fundModal)?.hide();
     retainMemberDetailEdit();
     retainMemberConsultEdit();
+    cancelMemberConsultRead(true);
     retainMemberChildDraft();
     if (memberChildState) ++memberChildState.revision;
     window.ContributionCertPreview?.clear();
@@ -9148,6 +9186,7 @@ function bindAdminCertificateContext(authId) {
             // A hide/return in one turn must still cancel the original preparation.
             if (frame.hidden || records.some(record => record.oldValue === null)) {
                 invalidateAdminCertificatePreparation();
+                cancelMemberConsultRead();
                 if (memberDetailEditState) ++memberDetailEditState.actionRevision;
             }
             invalidateMemberRosterRead();
@@ -9188,7 +9227,7 @@ function bindAdminCertificateContext(authId) {
         observer.observe(frame, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
         window.addEventListener('pagehide', () => {invalidateMemberRosterRead();observer.disconnect();memberFundListResume=null;memberFundRefreshSequence++;}, { once: true });
     }
-    window.addEventListener('pagehide', () => { invalidateAdminCertificatePreparation(); invalidateMemberRosterRead(); });
+    window.addEventListener('pagehide', () => { cancelMemberConsultRead(); invalidateAdminCertificatePreparation(); invalidateMemberRosterRead(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden) { invalidateAdminCertificatePreparation(); invalidateMemberRosterRead(); } });
 }
 
@@ -9733,33 +9772,59 @@ async function saveMemberBasic() {
 
 
 // [수정] 상담 이력 로드 (최신이 위로 오도록 정렬 보강)
-async function loadConsultLogs(uuid) { // uuid는 유지(호출부 호환), 내부는 textId 사용
+async function loadConsultLogs(uuid, refresh = false) { // uuid는 유지(호출부 호환), 내부는 textId 사용
   const listEl = document.getElementById('md-consult-list');
   if (!listEl) return;
+  const member = String(uuid || g_current_member_id || ''), owner = memberDetailOwner();
+  if (!owner || member !== String(g_current_member_id || '') || window.frameElement?.hidden) return;
+  const textId = document.getElementById('md-id-text').innerText;
+  if (!refresh && memberConsultRead?.owner === owner && memberConsultRead.member === member
+      && memberConsultRead.textId === textId && isCurrentMemberDetailRead(memberConsultRead.read)) return memberConsultRead.promise;
+  cancelMemberConsultRead();
   const read = beginMemberDetailRead('consult', uuid || g_current_member_id);
   if (!isCurrentMemberDetailRead(read)) return;
-
-  const textId = document.getElementById('md-id-text').innerText;
+  if (memberConsultReadView?.owner !== owner || memberConsultReadView.member !== member
+      || memberConsultReadView.textId !== textId) listEl.replaceChildren();
+  const view = {owner,member,textId,status:'loading',message:'상담 이력을 불러오는 중입니다.'};
+  memberConsultReadView = view;
 
   if (!textId || textId === '-' || textId === 'ID없음') {
+    view.status = 'unavailable';view.message = '';
     listEl.innerHTML = '<div class="text-center text-muted py-3 small">조합원 번호가 없어 조회할 수 없습니다.</div>';
+    syncMemberConsultReadUi();
     return;
   }
-
-  listEl.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
-
-  const { data, error } = await Promise.resolve().then(() => _supabase.rpc('get_member_consultations', {
-    p_member_id: textId
-  })).catch(error => ({ data: null, error }));
-  if (!isCurrentMemberDetailRead(read)) return;
-
-  listEl.innerHTML = '';
-
+  const controller = new AbortController();
+  let timer, cancel;
+  const stopped = new Promise(resolve => {
+    cancel = () => { clearTimeout(timer);resolve({cancelled:true});controller.abort(); };
+    timer = setTimeout(() => { resolve({error:{code:'CONSULT_READ_TIMEOUT'}});controller.abort(); },15000);
+  });
+  const request = {owner,member,textId,read,cancel,promise:null};
+  memberConsultRead = request;
+  const current = () => memberConsultRead === request && memberConsultReadView === view
+      && isCurrentMemberDetailRead(read) && owner === memberDetailOwner() && !window.frameElement?.hidden;
+  syncMemberConsultReadUi();
+  request.promise = (async () => {
+  try {
+  const result = await Promise.race([stopped,Promise.resolve().then(() => {
+    if (!current()) return {cancelled:true};
+    const query = _supabase.rpc('get_member_consultations', {p_member_id:textId});
+    return typeof query.abortSignal === 'function' ? query.abortSignal(controller.signal) : query;
+  }).catch(error => ({error}))]);
+  if (result.cancelled || !current()) return;
+  const {data,error} = result;
   if (error) {
-    CoopSafeLog.error("상담 로드 에러:", error);
-    listEl.innerHTML = '<div class="text-center text-danger py-3 small">불러오기 실패</div>';
+    view.status = 'failed';
+    const code = String(error.code || ''), status = Number(error.status || result.status);
+    view.message = code === 'CONSULT_READ_TIMEOUT' ? '조회가 오래 걸리고 있습니다. 다시 확인해 주세요.'
+      : status === 429 || code === '429' ? '조회 요청이 많습니다. 잠시 후 다시 확인해 주세요.'
+      : [401,403].includes(status) || ['42501','PGRST301'].includes(code) ? '상담 이력 조회 권한을 확인하지 못했습니다. 로그인·권한을 확인한 뒤 다시 확인해 주세요.'
+      : '상담 이력을 불러오지 못했습니다. 다시 확인해 주세요.';
     return;
   }
+  view.status = 'ready';view.message = '';
+  listEl.innerHTML = '';
 
   if (!data || data.length === 0) {
     listEl.innerHTML = '<div class="text-center text-muted py-3 small">상담 이력이 없습니다.</div>';
@@ -9786,6 +9851,20 @@ async function loadConsultLogs(uuid) { // uuid는 유지(호출부 호환), 내�
       </div>
     `;
   });
+  } catch (_) {
+    if (current()) {
+      view.status = 'failed';
+      view.message = '상담 이력을 불러오지 못했습니다. 다시 확인해 주세요.';
+    }
+  } finally {
+    clearTimeout(timer);
+    if (memberConsultRead === request) {
+      memberConsultRead = null;
+      syncMemberConsultReadUi();
+    }
+  }
+  })();
+  return request.promise;
 }
 
 
@@ -9823,7 +9902,7 @@ if (memberConsultState?.key === state.key) {
         window.ErpWorkspaceResume?.checkpoint(inputEl);
     }
     retainMemberConsultEdit();
-    if (!window.frameElement?.hidden) void loadConsultLogs(state.member);
+    if (!window.frameElement?.hidden) void loadConsultLogs(state.member, true);
 } else if (memberConsultDrafts.get(state.key) === content) {
     memberConsultDrafts.delete(state.key);
 }

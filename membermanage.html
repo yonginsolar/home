@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.269
+Version: v1.0.270
 Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
 -->
 <html lang="ko">
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.5" integrity="sha384-IcwaTuuPaMoh8p4EaYxvDbn0Ye+NrQUGy3diLEArvhVNaLjODZgpVZI/c3lJmmeh" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.269 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.270 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -2213,8 +2213,12 @@ NO. <span id="infoMemberId">-</span>
 <button class="btn btn-sm btn-outline-secondary" onclick="openAddFamilyModal()">+ 추가</button>
 </div>
 <p class="text-muted small mb-3">미성년 자녀 및 단체 계정을 관리하기 위한 메뉴입니다. 성인 가족 간 계정 연결은 지원하지 않습니다.</p>
+<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+<span id="familyListStatus" class="small text-muted" role="status" aria-live="polite"></span>
+<button id="familyListRetry" type="button" class="btn btn-sm btn-outline-primary" hidden onclick="retryPortalFamilyList()">다시 확인</button>
+</div>
 <div id="familyListArea">
-<p class="text-muted small text-center py-3">등록된 구성원이 없습니다.</p>
+<p class="text-muted small text-center py-3">내정보에서 연결된 가족·단체를 확인할 수 있습니다.</p>
 </div></div>
 </div>
 </main>
@@ -2656,6 +2660,7 @@ beforeChange: () => {
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()
     || ['submitApplication','modifyApplication','cancelApplication','submitFamily','requestConnect','disconnectRelation','submitPost'].some(key => window.__memberAppLocks?.[key])) return false;
 ++portalDirectRevision;
+cancelPortalFamilyList();
 loadMemberCapitalRules.cancel?.();
 if (typeof invalidateExtraCapitalDepositAccountRead === 'function') invalidateExtraCapitalDepositAccountRead();
 retainPortalProfileEdit();retainPortalApplicationDraft();retainPortalPartnerDraft();
@@ -2703,9 +2708,10 @@ async function loadPortalPurposeExtras(key) {
 const state=portalDeferredViews;
 const current=()=>state&&state===portalDeferredViews&&state.owner===getFamilyRegistrationOwner()&&state.revision===portalProfileLoadRevision;
 if(!current()||isSiteMemberPortalProfile())return;
-if(key==='profile'&&!state.profile) {
-state.profile=true;void refreshMemberInformation(curMem);
-if(typeof loadFamilyList==='function')void loadFamilyList(state.member);
+if(key==='profile') {
+if(!state.profile){state.profile=true;void refreshMemberInformation(curMem);}
+if(!portalFamilyListView || portalFamilyListView.owner!==state.owner)void loadFamilyList(state.member);
+else syncPortalFamilyListUi();
 }
 if(key!=='activity'||state.activity)return;
 state.activity=true;checkSolarMapVisibility(portalDocumentRoles);void loadQuizPilotEntry();void loadBoard('free',null,20);
@@ -3410,6 +3416,31 @@ event.preventDefault();event.returnValue = '';
 const portalConnectDrafts = new Map();
 let portalConnectDraftOwner = '', portalConnectSearchRevision = 0, portalFamilyListRevision = 0;
 let portalConnectPending = null, portalFamilyListPending = null;
+let portalFamilyListView = null;
+function syncPortalFamilyListUi() {
+const view=portalFamilyListView;
+const status=document.getElementById('familyListStatus'), retry=document.getElementById('familyListRetry');
+if(status)status.textContent=view?.message||'';
+if(retry){retry.hidden=!view;retry.setAttribute('aria-disabled',String(view?.status==='loading'));}
+const area=document.getElementById('familyListArea');
+if(area){area.inert=!!view&&view.status!=='ready';area.setAttribute('aria-busy',String(view?.status==='loading'));}
+}
+function cancelPortalFamilyList(reset = false) {
+const request=portalFamilyListPending;portalFamilyListPending=null;++portalFamilyListRevision;
+request?.cancel();
+if(reset){portalFamilyListView=null;document.getElementById('familyListArea')?.replaceChildren();}
+else if(portalFamilyListView?.status==='loading'){
+portalFamilyListView.status='interrupted';portalFamilyListView.message='조회가 중단되었습니다. 다시 확인해 주세요.';
+}
+syncPortalFamilyListUi();
+}
+function retryPortalFamilyList() {
+const view=portalFamilyListView;
+if(!view||view.owner!==getFamilyRegistrationOwner()||isSiteMemberPortalProfile()
+ || (window.MemberPortalPurposeController?.isDirect&&window.MemberPortalPurposeController.getSelected()!=='profile'))return;
+return loadFamilyList(getActiveMemberProfileId());
+}
+window.addEventListener('pagehide',()=>cancelPortalFamilyList());
 function retainPortalConnectDraft() {
 const owner = getFamilyRegistrationOwner();
 if(!owner || familyRegistrationOwner !== owner) return;
@@ -3418,8 +3449,8 @@ if(keyword && identity) portalConnectDrafts.set(owner,{keyword:keyword.value,ide
 }
 function clearPortalConnectDrafts() {
 portalConnectDrafts.clear();portalConnectDraftOwner = '';
-++portalConnectSearchRevision;++portalFamilyListRevision;
-portalConnectPending = null;portalFamilyListPending = null;
+++portalConnectSearchRevision;cancelPortalFamilyList(true);
+portalConnectPending = null;
 for(const id of ['searchConnectInput','searchConnectIdentityInput']) { const n = document.getElementById(id);if(n) n.value = ''; }
 }
 function restorePortalConnectDraft() {
@@ -5338,8 +5369,8 @@ retainPortalProfileEdit();
 retainPortalApplicationDraft();
 retainPortalPartnerDraft();++portalPartnerReadRevision;++portalPartnerRequestRevision;
 window.PortalChildDrafts?.retain();
-retainPortalConnectDraft();++portalConnectSearchRevision;++portalFamilyListRevision;
-portalConnectPending = null;portalFamilyListPending = null;
+retainPortalConnectDraft();++portalConnectSearchRevision;cancelPortalFamilyList(true);
+portalConnectPending = null;
 ++portalApplicationGeneration;++portalApplicationRequest;
 const profileLoadRevision = ++portalProfileLoadRevision;
 const profileLoadActor = String(curAuth?.id || '');
@@ -10803,39 +10834,57 @@ area.innerHTML = '<p class="text-muted small text-center py-3">현재 계정 정
 return;
 }
 const owner = getFamilyRegistrationOwner();
-if(!owner || String(profileId) !== String(getActiveMemberProfileId())) return;
+if(!owner || String(profileId) !== String(getActiveMemberProfileId()) || isSiteMemberPortalProfile()
+ || (curMem?.coop_id&&currentMemberCoopId&&String(curMem.coop_id)!==String(currentMemberCoopId))
+ || (window.MemberPortalPurposeController?.isDirect&&window.MemberPortalPurposeController.getSelected()!=='profile')) return;
 if(portalFamilyListPending?.owner === owner) return portalFamilyListPending.promise;
-const request = {owner,revision:++portalFamilyListRevision};
-const current = () => portalFamilyListPending === request && request.revision === portalFamilyListRevision && owner === getFamilyRegistrationOwner();
+cancelPortalFamilyList();
+if(portalFamilyListView?.owner!==owner)area.replaceChildren();
+const view={owner,status:'loading',message:'가족·단체 목록을 불러오는 중입니다.'};portalFamilyListView=view;
+const controller=new AbortController();let timer,cancel;
+const stopped=new Promise(resolve=>{
+cancel=()=>{clearTimeout(timer);resolve({cancelled:true});controller.abort();};
+timer=setTimeout(()=>{resolve({error:{code:'FAMILY_LIST_TIMEOUT'}});controller.abort();},15000);
+});
+const request = {owner,coop:String(currentMemberCoopId||''),profileRevision:portalProfileLoadRevision,
+revision:++portalFamilyListRevision,cancel,promise:null};
+const current = () => portalFamilyListPending === request && request.revision === portalFamilyListRevision
+ && request.profileRevision === portalProfileLoadRevision && request.coop === String(currentMemberCoopId||'')
+ && owner === getFamilyRegistrationOwner();
 portalFamilyListPending = request;
-request.promise = Promise.resolve().then(async () => {
-
-try {
+syncPortalFamilyListUi();
+const readQuery=async query=>{
+const result=await (typeof query.abortSignal==='function'?query.abortSignal(controller.signal):query);
+if(result?.error)throw {...result.error,status:result.status||result.error.status};
+return result;
+};
+const work = Promise.resolve().then(async () => {
 if(!current()) return;
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
-const activeMember = (curMem && String(curMem.id || '') === String(profileId))
-? curMem
-: (await scopeMemberTenant(_supabase
+if(!current()) return;
+let activeMember = (curMem && String(curMem.id || '') === String(profileId)) ? curMem : null;
+if(!activeMember){
+const {data,error}=await readQuery(scopeMemberTenant(_supabase
     .from('coop_members')
     .select('id, name, preferred_name, preferred_name_position, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status, created_at'))
     .eq('id', profileId)
-    .maybeSingle()).data;
+    .maybeSingle());
+if(error)throw error;
+activeMember=data;
+}
 if(!current()) return;
 
-if (!activeMember) {
-area.innerHTML = '<p class="text-muted small text-center py-3">현재 계정 정보를 확인하지 못했습니다.</p>';
-return;
-}
+if (!activeMember || !coopId) throw {code:'FAMILY_PROFILE_UNAVAILABLE'};
 
 const familyRootId = activeMember.manager_id || activeMember.rep_uuid || activeMember.id;
 const relationRows = [];
 
 if (familyRootId && String(familyRootId) !== String(activeMember.id)) {
-const { data: managerRow, error: managerError } = await scopeMemberTenant(_supabase
+const { data: managerRow, error: managerError } = await readQuery(scopeMemberTenant(_supabase
     .from('coop_members')
     .select('id, name, preferred_name, preferred_name_position, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status'))
     .eq('id', familyRootId)
-    .maybeSingle();
+    .maybeSingle());
 if(!current()) return;
 if (managerError) throw managerError;
 if (managerRow) {
@@ -10849,12 +10898,12 @@ can_disconnect: true
 }
 }
 
-const { data: managedRows, error: managedError } = await _supabase
+const { data: managedRows, error: managedError } = await readQuery(_supabase
 .from('coop_members')
 .select('id, name, preferred_name, preferred_name_position, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status, created_at')
 .eq('coop_id', coopId)
 .eq('manager_id', familyRootId)
-.order('created_at', { ascending: true });
+.order('created_at', { ascending: true }));
 if(!current()) return;
 if (managedError) throw managedError;
 
@@ -10871,8 +10920,7 @@ can_disconnect: directLinkWithActive
 });
 
 if(relationRows.length === 0) {
-area.innerHTML = '<p class="text-muted small text-center py-3">연결된 가족/단체 계정이 없습니다.</p>';
-return;
+return {html:'<p class="text-muted small text-center py-3">연결된 가족/단체 계정이 없습니다.</p>'};
 }
 
 let html = '<ul class="list-group list-group-flush">';
@@ -10903,13 +10951,27 @@ html += `
                </li>`;
 });
 html += '</ul>';
-area.innerHTML = html;
-} catch (error) {
-if(!current()) return;
-CoopSafeLog.error("가족/단체 목록 로드 실패:", error);
-area.innerHTML = '<p class="text-danger small text-center py-3">가족/단체 목록을 불러오지 못했습니다.</p>';
-} finally { if(portalFamilyListPending === request) portalFamilyListPending = null; }
-});
+return {html};
+}).catch(error=>({error}));
+request.promise=(async()=>{
+try{
+const result=await Promise.race([work,stopped]);
+if(!current()||!result||result.cancelled)return;
+if(result.error){
+const error=result.error,code=String(error.code||''),status=Number(error.status||result.status);
+view.status='failed';
+view.message=code==='FAMILY_LIST_TIMEOUT'?'조회가 오래 걸리고 있습니다. 다시 확인해 주세요.'
+:status===429||code==='429'?'조회 요청이 많습니다. 잠시 후 다시 확인해 주세요.'
+:[401,403].includes(status)||['42501','PGRST301'].includes(code)?'목록 조회 권한을 확인하지 못했습니다. 로그인·권한을 확인한 뒤 다시 확인해 주세요.'
+:'가족·단체 목록을 불러오지 못했습니다. 다시 확인해 주세요.';
+return;
+}
+view.status='ready';view.message='';area.innerHTML=result.html;
+}finally{
+clearTimeout(timer);
+if(portalFamilyListPending===request){portalFamilyListPending=null;syncPortalFamilyListUi();}
+}
+})();
 return request.promise;
 } // End of loadFamilyList
 
