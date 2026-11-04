@@ -722,6 +722,7 @@ function bindIssueDocModalFocusGuard() {
 bindIssueDocModalFocusGuard();
 
 const ADMIN_MEMBER_MODAL_Z_INDEX = {
+    memberRegionOtherModal: 1055,
     excelModal: 1055,
     capitalImportModal: 1055,
     memberWorkbookModal: 1055,
