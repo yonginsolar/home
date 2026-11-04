@@ -277,6 +277,12 @@ async function routeRequest(request,env){
     if((response.headers.get('content-type')||'').toLowerCase().includes('text/html'))return federationResponse(request,response);
     return response;
   }
+  // Keep the pinned SRI contract of already-open pre-recovery ERP tabs.
+  if(url.pathname==='/erp/admin_member_dashboard.js'&&url.searchParams.get('v')==='20261104-region-list-1'&&['GET','HEAD'].includes(request.method)){
+    const target=new URL(request.url);target.pathname='/erp/admin_member_dashboard_20261104_legacy.js';target.search='';
+    const response=await env.ASSETS.fetch(new Request(target,request));
+    return p.passThrough?response:withProfileHeaders(response,p,noIndex(p,hostname,url.pathname),request.method==='HEAD');
+  }
   if(p.passThrough){
     const response=await env.ASSETS.fetch(request);
     if(request.method!=='GET'||!(response.headers.get('content-type')||'').includes('text/html'))return response;
