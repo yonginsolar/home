@@ -7802,6 +7802,10 @@ function retainMemberChildDraft() {
 function clearMemberFamilyRetry() {
     cancelMemberFamilyRead(true);
 }
+function hasPendingMemberFamilyDisconnect(view = memberFamilyRetry) {
+    return !!view && [...memberDisconnectPending.values()].some(op => op.owner === view.owner
+        && view.rows?.some(row => String(row.managedId) === op.managed && String(row.managerId) === op.manager));
+}
 function syncMemberFamilyReadUi() {
     const pane = document.getElementById('md-tab-family');
     if (pane && !document.getElementById('member-family-status')) {
@@ -7815,7 +7819,7 @@ function syncMemberFamilyReadUi() {
         bar.append(status,retry);pane.querySelector('table')?.before(bar);
     }
     const view = memberFamilyRetry, status = document.getElementById('member-family-status'), retry = document.getElementById('member-family-retry');
-    const disconnectBusy = !!view && [...memberDisconnectPending.values()].some(op => op.owner === view.owner && op.member === view.read.memberId);
+    const disconnectBusy = hasPendingMemberFamilyDisconnect(view);
     if (status) status.textContent = view?.message || (disconnectBusy ? '연결 해제를 처리하는 중입니다.' : '');
     if (retry) {retry.hidden = !view;retry.disabled = false;retry.setAttribute('aria-disabled',String(view?.pending === true));}
     const tbody = document.getElementById('md-family-list');
@@ -10203,8 +10207,7 @@ function getManagedLinkErrorMessage(error) {
 
 function confirmDisconnectManagedMember(managedId, managedName, memberType, managerId) {
     const view = memberFamilyRetry;
-    if (!isCurrentMemberFamilyView(view) || memberDisconnectConfirmation
-        || [...memberDisconnectPending.values()].some(op => op.owner === view.owner && op.member === view.read.memberId)) return;
+    if (!isCurrentMemberFamilyView(view) || memberDisconnectConfirmation || hasPendingMemberFamilyDisconnect(view)) return;
     const row = view.rows?.find(item => String(item.managedId) === String(managedId)
         && String(item.managerId) === String(managerId || view.read.memberId));
     if (!row) return;
@@ -10221,7 +10224,7 @@ function confirmDisconnectManagedMember(managedId, managedName, memberType, mana
     myConfirm(msg,async () => {
         if (intent.started || !current() || !isCurrentMemberFamilyView(view)) return;
         intent.started = true;
-        const key = JSON.stringify([intent.owner,intent.member,intent.managed,intent.manager]);
+        const key = JSON.stringify([intent.owner,intent.managed,intent.manager]);
         if (memberDisconnectPending.has(key)) return;
         memberDisconnectPending.set(key,intent);
         let writeTimer;
