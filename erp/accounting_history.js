@@ -1,4 +1,4 @@
-/* v1.0.2 — Keep confirmed ledger rows through a failed refresh; never process stale results. */
+/* v1.0.3 — Explain confirmed journal data without rewriting it or fetching more records. */
 (function(root){
   'use strict';
   const doc=root.document,ids=['journalHistoryFrom','journalHistoryTo','journalHistoryKeyword'];
@@ -63,5 +63,33 @@
   if(root.frameElement&&root.MutationObserver)new root.MutationObserver(()=>{
     if(root.frameElement.hidden&&!pending?.allowHidden)invalidate();else controls();
   }).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
-  root.CoopAccountingHistory=Object.freeze({load,clear,invalidate,isCurrent:ready,guard});
+  function describe(item){
+    const raw=String(item.rawDescription||''),tx=String(item.transId||''),debits=item.debits||[],credits=item.credits||[];
+    const cash=a=>/예금|현금|시재금/.test(String(a.account||''));
+    const cashNet=debits.filter(cash).reduce((n,a)=>n+Number(a.amount||0),0)-credits.filter(cash).reduce((n,a)=>n+Number(a.amount||0),0);
+    const side=(entries,account)=>entries.some(a=>a.account===account&&Number(a.amount)>0);
+    const donation=/^DON-\d+(?:$|-(?:REV|POST)-)/.test(tx)||/^\[기부금\]/.test(raw);
+    const capital=/^CAP-\d+(?:$|-(?:REV|POST)-)/.test(tx)||/^\[출자\]/.test(raw);
+    const salary=/^SAL-\d{4}-\d{2}(?:$|-)/.test(tx)||/^\[급여\]/.test(raw);
+    const reverse=/-REV-/.test(tx)||/\[정정취소\]/.test(raw),repost=/-POST-/.test(tx)||/\[정정재기표\]/.test(raw);
+    const base=donation?'기부금':capital?'출자금':salary?'급여':/^DIV-\d+(?:$|-)/.test(tx)?'배당금':'';
+    if(base&&reverse)return {title:`${base} 정정취소`,explanation:`기존 ${base} 기록을 되돌리는 전표입니다. 새 입금이나 지급 기록과 구분해 주세요.`};
+    if(base&&repost)return {title:`${base} 정정 반영`,explanation:`정정한 ${base} 내용을 다시 기록한 전표입니다.`};
+    if(/^FUND-RECLASS-DON-\d+-CAPITAL$/.test(tx)&&side(debits,'자산수증이익')&&side(credits,'출자금'))return {title:'기부금의 출자금 전환',explanation:'기부금으로 기록했던 금액을 출자금으로 옮긴 전표입니다. 새 입금은 아닙니다.'};
+    const method=donation&&/\/transfer(?:\s|$)/.test(raw)?' · 계좌이체':donation&&/\/cash(?:\s|$)/.test(raw)?' · 현금':'';
+    if(donation&&cashNet>0&&side(credits,'자산수증이익'))return {title:'기부금 입금'+method,explanation:'받은 기부금을 통장·현금의 증가와 자산수증이익으로 기록한 거래입니다.'};
+    if(capital&&cashNet>0&&side(credits,'출자금'))return {title:'출자금 입금',explanation:'조합원이 납입한 출자금을 통장·현금의 증가와 출자금으로 기록한 거래입니다.'};
+    if(salary&&cashNet===0&&debits.some(a=>/급여/.test(a.account)))return {title:'급여 발생 기록',explanation:'급여와 공제액·지급할 금액을 기록한 전표입니다. 통장에서 실제 지급한 전표와 구분됩니다.'};
+    if(salary&&cashNet<0)return {title:'급여 지급 전표',explanation:'급여 지급에 따른 통장·현금의 출금을 기록한 전표입니다.'};
+    const tax=raw.match(/부가가치세|부가세|원천세|지방소득세|법인세/);
+    if(tax&&cashNet<0&&!reverse&&!/환급|취소|반환/.test(raw))return {title:`${tax[0]} 관련 출금`,explanation:`${tax[0]}와 관련된 통장·현금의 출금을 기록한 전표입니다.`};
+    if(/^MONEY-/.test(tx)&&/^\[카드환급 정산\]/.test(raw)&&side(credits,'미수금')){
+      if(cashNet>0)return {title:'카드 환급금 입금',explanation:'카드 취소로 돌려받을 금액을 통장으로 받은 기록입니다.'};
+      if(cashNet===0&&side(debits,'미지급금'))return {title:'카드 환급금의 대금 차감',explanation:'돌려받을 금액을 카드대금에서 뺀 기록입니다. 통장 입금은 아닙니다.'};
+    }
+    if(/^MONEY-/.test(tx)&&/^\[착오입금 반환\]/.test(raw)&&cashNet<0&&side(debits,'가수금'))return {title:'착오입금 반환',explanation:'잘못 입금된 금액을 돌려주고 가수금을 줄인 기록입니다.'};
+    // A return/cancellation is not inferred from cash direction alone.
+    return {title:'',explanation:''};
+  }
+  root.CoopAccountingHistory=Object.freeze({load,clear,invalidate,isCurrent:ready,guard,describe});
 })(window);

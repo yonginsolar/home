@@ -85,6 +85,7 @@
 	    .readonly-input { background-color: #f8f9fa; cursor: pointer; }
 	    .history-mode .btn { min-width: 94px; }
         .history-plain-description { white-space: pre-line; overflow-wrap: anywhere; }
+        .history-readable-summary { word-break: keep-all; }
         .history-ledger-entry { padding: 0; overflow: hidden; }
         .history-ledger-head { padding: 12px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
         .history-ledger-table { min-width: 620px; table-layout: fixed; }
@@ -10128,6 +10129,7 @@ function buildDoubleEntryHistory(rows) {
             transId: group.transId,
             date: String(representative.Date || ''),
             description: cleanHistoryDescription(representative.Description || ''),
+            rawDescription: accountingHistoryToPlainText(representative.Description || ''),
             operator: String(representative.Operator || '작성자 미상'),
             debits,
             credits,
@@ -10162,8 +10164,10 @@ function renderHistoryDouble(rows, completePage = false) {
 
     items.forEach((item) => {
         const safeDate = escapeHtml(item.date || '-');
-        const safeDesc = escapeHtml(item.description || '일반 전표');
-        const safeOperator = escapeHtml(item.operator);
+        const readable = window.CoopAccountingHistory.describe(item);
+        const safeDesc = escapeHtml(item.rawDescription || item.description || '일반 전표');
+        const safeTitle = escapeHtml(readable.title || item.rawDescription || item.description || '일반 전표');
+        const safeOperator = escapeHtml(item.operator === '작성자 미상' ? '미상' : item.operator);
         const safeTransId = escapeHtml(item.transId || '');
         const safeRelatedTransIds = item.relatedTransIds.map((value) => escapeHtml(value)).join(' + ');
         const approvalDocId = parseApprovalDocIdFromTransId(item.transId);
@@ -10173,9 +10177,11 @@ function renderHistoryDouble(rows, completePage = false) {
                 approvalDocId,
                 'btn btn-link p-0 text-start fw-bold text-decoration-none align-baseline'
             )
-            : `<span class="fw-bold">${safeDesc}</span>`;
-        const detailHtml = approvalDocId && item.description
-            ? `<div class="small text-muted mt-1 history-plain-description">${safeDesc}</div>`
+            : `<span class="fw-bold">${safeTitle}</span>`;
+        const explanationHtml = readable.explanation
+            ? `<div class="small mt-1 history-plain-description history-readable-summary">${escapeHtml(readable.explanation)}</div>` : '';
+        const detailHtml = (approvalDocId || readable.title) && (item.rawDescription || item.description)
+            ? `<div class="small text-muted mt-1 history-plain-description">원래 적요: ${safeDesc}</div>`
             : '';
         const maxLines = Math.max(item.debits.length, item.credits.length, 1);
         const ledgerRows = [];
@@ -10220,7 +10226,8 @@ function renderHistoryDouble(rows, completePage = false) {
                 <div class="history-ledger-head d-flex justify-content-between align-items-start gap-3">
                     <div class="flex-grow-1">
                         <div>${titleHtml}</div>
-                        <div class="small text-muted mt-1">${safeDate} · ${safeOperator}${transMeta ? ` · ${transMeta}` : ''}${transactionCountMeta} · 분개 ${item.rowCount}행</div>
+                        ${explanationHtml}
+                        <div class="small text-muted mt-1 history-plain-description">${safeDate} · 작성자 ${safeOperator}${transMeta ? ` · 전표 ${transMeta}` : ''}${transactionCountMeta} · 분개 ${item.rowCount}행</div>
                         ${detailHtml}
                         ${classificationNote}
                     </div>
@@ -11267,7 +11274,7 @@ async function fetchLiabilitySum() {
  </div>
 </div>
 <script src="accounting_money_module.js?v=1.1.0"></script>
-<script src="accounting_history.js?v=1.0.2"></script>
+<script src="accounting_history.js?v=1.0.3"></script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>
