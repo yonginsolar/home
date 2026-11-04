@@ -1,6 +1,6 @@
-/* Federation pilot 0.1.0. Aggregate read + local simulation only; never writes, bills or notifies. */
+/* Federation pilot 0.1.1. Aggregate read + local simulation only; never writes, bills or notifies. */
 (function(root){'use strict';
- const fields=['fedBase','fedRate','fedMinimum','fedMaximum','fedRounding'];
+ const fields=['fedBase','fedRate','fedMinimum','fedMaximum','fedRounding'];const defaults={fedMinimum:'100000',fedRounding:'round'};
  function scaled(value,digits,optional=false){const s=String(value??'').trim().replaceAll(',','');if(optional&&!s)return 0n;const pattern=digits===0?/^\d{1,15}$/:new RegExp('^\\d{1,15}(?:\\.\\d{1,'+digits+'})?$');if(!pattern.test(s))throw Error('숫자 형식을 확인해 주세요.');const [a,b='']=s.split('.');return BigInt(a)*10n**BigInt(digits)+BigInt((b+'0'.repeat(digits)).slice(0,digits)||'0');}
  function fee(kwh,v){if(String(v.fedRate??'').trim()===''||kwh==null)return null;const units=scaled(kwh,3),rate=scaled(v.fedRate,4),base=scaled(v.fedBase,0,true),min=scaled(v.fedMinimum,0,true),max=String(v.fedMaximum??'').trim()===''?null:scaled(v.fedMaximum,0);if(max!==null&&max<min)throw Error('최대회비는 최소회비 이상으로 입력해 주세요.');const x=units*rate,den=10000000n;let n=base+(v.fedRounding==='ceil'?(x+den-1n)/den:v.fedRounding==='floor'?x/den:(x+den/2n)/den);if(n<min)n=min;if(max!==null&&n>max)n=max;return n.toString();}
  const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
@@ -10,13 +10,13 @@
   const $=id=>document.getElementById(id),year=$('federationYear'),filter=$('federationCoop'),retry=$('federationRetry'),status=$('federationStatus');
   let active=true,seq=0,actor='',data=null,authorized=false,pending=null,simulation=null;const drafts=new Map();
   const y=Number(new Intl.DateTimeFormat('en',{year:'numeric',timeZone:'Asia/Seoul'}).format(new Date()));
-  for(let n=y;n>=y-5;n--){const o=el('option',n+'년');o.value=String(n);year.append(o);}year.value=String(y);
+  for(let n=y;n>=y-5;n--){const o=el('option',n+'년');o.value=String(n);year.append(o);}year.value=String(y-1);
   const values=()=>Object.fromEntries(fields.map(id=>[id,$(id).value]));
   function message(text,error=false){status.textContent=text;status.dataset.error=String(error);}
   function clearData(){data=null;simulation=null;for(const id of ['fedMetrics','fedCoopCards','fedGeneration','fedPlants','fedDuesCards'])$(id).replaceChildren();$('federationReadAt').textContent='';filter.replaceChildren(el('option','전체 조합'));filter.firstChild.value='';}
   function sync(){retry.disabled=false;$('fedCalculate').disabled=!authorized||!!pending;}
   function cancel(){seq++;pending?.abort.abort();pending=null;sync();}
-  function owner(id){if(id===actor)return;const initial=actor?null:values();if(actor)drafts.set(actor,values());actor=id;cancel();authorized=false;clearData();const v=drafts.get(actor)||initial||{};for(const id of fields)$(id).value=v[id]??(id==='fedRounding'?'round':'');}
+  function owner(id){if(id===actor)return;const initial=actor?null:values();if(actor)drafts.set(actor,values());actor=id;cancel();authorized=false;clearData();const v=drafts.get(actor)||initial||{};for(const id of fields)$(id).value=v[id]??defaults[id]??'';}
   const selected=()=>!data?[]:data.coops.filter(c=>!filter.value||c.code===filter.value);
   function stats(card,items){const dl=el('dl',undefined,'stat-list');for(const [k,v]of items){const r=el('div');r.append(el('dt',k),el('dd',v));dl.append(r);}card.append(dl);}
   function card(title){const n=el('article',undefined,'surface');n.append(el('h3',title));return n;}
@@ -29,7 +29,7 @@
    const names=new Set(rows.map(c=>c.name));for(const p of data.plants.filter(p=>names.has(p.coop))){const n=card(p.name);n.append(el('p',p.coop,'muted'),el('span',p.type==='participation'?'참여 사업':p.status,'tag'));stats(n,[['발전소 전체 용량',num(p.capacity_kw,' kW')],['조합 참여 용량',num(p.attributed_capacity_kw,' kW')],['모니터 연결',p.monitor?'연결됨':'미연결']]);plants.append(n);}if(!plants.children.length)plants.append(el('p','등록된 발전소 정보가 없습니다.','muted'));renderDues();
   }
   async function refresh(){if(!active)return;const requested=Number(year.value);if(pending&&pending.year===requested)return pending.promise;cancel();authorized=false;const ticket=++seq,abort=new AbortController(),job={year:requested,abort,promise:null};pending=job;sync();message('로그인·열람 권한과 집계를 확인하고 있습니다.');let timer;
-   job.promise=(async()=>{try{const result=await Promise.race([(async()=>{const auth=await client.auth.getUser();if(auth.error||!auth.data?.user)throw{code:'AUTH_REQUIRED'};if(ticket!==seq||!active)return null;const id=auth.data.user.id;if(actor!==id){const initial=actor?null:values();if(actor)drafts.set(actor,values());actor=id;clearData();const v=drafts.get(id)||initial||{};for(const k of fields)$(k).value=v[k]??(k==='fedRounding'?'round':'');}const r=await client.rpc('federation_preview',{p_year:requested,p_space:'pilot'}).abortSignal(abort.signal);if(r.error)throw r.error;return{actor:id,data:r.data};})(),new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject({code:'READ_TIMEOUT'});},15000);})]);
+   job.promise=(async()=>{try{const result=await Promise.race([(async()=>{const auth=await client.auth.getUser();if(auth.error||!auth.data?.user)throw{code:'AUTH_REQUIRED'};if(ticket!==seq||!active)return null;const id=auth.data.user.id;if(actor!==id){const initial=actor?null:values();if(actor)drafts.set(actor,values());actor=id;clearData();const v=drafts.get(id)||initial||{};for(const k of fields)$(k).value=v[k]??defaults[k]??'';}const r=await client.rpc('federation_preview',{p_year:requested,p_space:'pilot'}).abortSignal(abort.signal);if(r.error)throw r.error;return{actor:id,data:r.data};})(),new Promise((_,reject)=>{timer=setTimeout(()=>{abort.abort();reject({code:'READ_TIMEOUT'});},15000);})]);
     if(ticket!==seq||!active||Number(year.value)!==requested||!result||result.actor!==actor)return;data=result.data;authorized=true;simulation=null;const previous=filter.value;filter.replaceChildren(el('option','전체 조합'));filter.firstChild.value='';for(const c of data.coops){const o=el('option',c.name);o.value=c.code;filter.append(o);}filter.value=[...filter.options].some(x=>x.value===previous)?previous:'';render();$('federationReadAt').textContent='현재 등록 기준 '+data.as_of+' · 발전량 '+data.year+'년';message('세부 자료는 각 탭에서 확인할 수 있습니다.');
    }catch(e){if(ticket!==seq||!active)return;const denied=e.code==='42501'||e.code==='AUTH_REQUIRED';if(denied)clearData();message(denied?'ERP 로그인과 연합회 시범 열람 권한을 확인해 주세요.':(e.code==='READ_TIMEOUT'?'조회가 지연되고 있습니다.':'집계를 확인하지 못했습니다.')+(data?' 이전 결과와 입력은 유지했습니다.':' 입력은 유지했습니다.')+' 다시 확인을 눌러 주세요.',true);}
    finally{clearTimeout(timer);if(ticket===seq){pending=null;sync();}}})();return job.promise;
@@ -40,7 +40,7 @@
   const tabs=[...document.querySelectorAll('[role=tab]')];function tab(n,focus=false){tabs.forEach((b,i)=>{b.setAttribute('aria-selected',String(i===n));b.tabIndex=i===n?0:-1;$(b.getAttribute('aria-controls')).hidden=i!==n;});if(focus)tabs[n].focus({preventScroll:true});}tabs.forEach((b,i)=>{b.onclick=()=>tab(i);b.onkeydown=e=>{let n;if(e.key==='ArrowRight')n=(i+1)%tabs.length;if(e.key==='ArrowLeft')n=(i+tabs.length-1)%tabs.length;if(e.key==='Home')n=0;if(e.key==='End')n=tabs.length-1;if(n!==undefined){e.preventDefault();tab(n,true);}};});
   client.auth.onAuthStateChange((event,session)=>{if(event==='INITIAL_SESSION')return;const next=session?.user?.id||'';if(next!==actor){owner(next);message('로그인이 바뀌었습니다. 다시 확인해 주세요.');sync();if(next&&active)setTimeout(()=>{if(active&&actor===next)void refresh();},0);}});
   function pause(){active=false;cancel();authorized=false;sync();}root.addEventListener('pagehide',pause);root.addEventListener('pageshow',e=>{if(e.persisted){active=true;void refresh();}});
-  return{refresh,pause,version:'0.1.0'};
+  return{refresh,pause,version:'0.1.1'};
  }
- root.FederationPreview={create,fee,scaled,version:'0.1.0'};
+ root.FederationPreview={create,fee,scaled,version:'0.1.1'};
 })(window);
