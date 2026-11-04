@@ -13,6 +13,7 @@
   <script>console.log('[Version] v1.0.193 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
+  <script src="accounting_capital_links.js?v=1.0.0"></script>
   <script src="accounting_report_save.js?v=1.0.0" integrity="sha384-AzLhwgwH2GCLUoGPmH84klNCeErIK1TS80qvB89ZFoXhSOEMec79STufobsxF1kw" crossorigin="anonymous"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
@@ -52,6 +53,10 @@
 
   <style>
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
+    #capitalLinkModal .modal-content { overflow:auto; }
+    #capitalLinkModal .modal-body { flex:1 0 6rem; width:100%; }
+    #capitalLinkModal .modal-title, #capitalLinkModal label span { min-width:0; overflow-wrap:anywhere; word-break:keep-all; }
+    #capitalLinkModal .btn { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
     body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
     .main-container { max-width: 1380px; width: min(100%, 1380px); margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 25px; }
     body.erp-page-accounting #accTab { flex-wrap: wrap; overflow: visible; gap: 4px; }
@@ -669,7 +674,7 @@
 	          <div class="card p-3 border-start border-5 border-success bg-light">
              <div class="d-flex justify-content-between align-items-center">
                <div><h6 class="fw-bold mb-1">💰 출자금 연동</h6><small class="text-muted">신규 입금 내역 전표 처리</small></div>
-               <button class="btn btn-success btn-sm text-white" onclick="confirmSync('capital')">실행</button>
+               <div class="d-flex flex-wrap gap-2"><button type="button" class="btn btn-outline-success btn-sm" onclick="openCapitalLinkReview(this)">이전 전표 연결 확인</button><button class="btn btn-success btn-sm text-white" onclick="confirmSync('capital')">실행</button></div>
              </div>
           </div>
           <div class="card p-3 border-start border-5 bg-light" style="border-color:#e91e63 !important;">
@@ -1458,6 +1463,12 @@ function acceptAccountingEditRow(kind,key,snapshot) {
     const row=[...root.querySelectorAll('[data-accounting-key]')].find(n=>n.dataset.accountingKey===String(key));
     if(row&&snapshot===accountingEditSnapshot(row))row.dataset.accountingBaseline=snapshot;
 }
+let capitalLinkUI=null;
+function openCapitalLinkReview(button) {
+    if(!accountingDataAuthorized||!canPerform('accounting.edit'))return;
+    if(!capitalLinkUI)capitalLinkUI=window.AccountingCapitalLinks.create({owner:accountingReadIdentity,scope:()=>accountingReadScope('tabSync'),current:accountingReadScopeCurrent,editable:()=>accountingDataAuthorized&&canPerform('accounting.edit'),client:()=>_supabase,confirm:message=>window.CoopDialog.confirm(message)});
+    capitalLinkUI.open(button);
+}
 function bindAccountingReadLifecycle() {
     for(const id of CLOSING_EXPLICIT_INPUT_IDS)document.getElementById(id).addEventListener('input',()=>{
         const input=document.getElementById(id);
@@ -1465,15 +1476,15 @@ function bindAccountingReadLifecycle() {
         closingYearExplicitInputs.set(closingActiveYear,{...(closingYearExplicitInputs.get(closingActiveYear)||{}),[id]:String(ERPNumberInput.raw(input.value))});
         if(id==='closingLegalInput')closingLegalManual=true;
     });
-    const cancelStale=()=>{for(const [kind,read] of accountingReadTasks)if(!read.current())cancelAccountingRead(kind);accountingReportSaveUI?.leave();};
+    const cancelStale=()=>{for(const [kind,read] of accountingReadTasks)if(!read.current())cancelAccountingRead(kind);accountingReportSaveUI?.leave();capitalLinkUI?.leave();};
     const expireDiscards=()=>{invalidateAccountingDiscard('asset');invalidateAccountingDiscard('queue');};
     for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('accTab').addEventListener(name,()=>{closingActionRevision++;if(name==='hidden.bs.tab')expireDiscards();cancelStale();});
     document.getElementById('closingModal').addEventListener('hidden.bs.modal',()=>{rememberClosingDraft();closingPreparedScope=null;cancelAccountingRead('closing');});
     document.getElementById('reportModal').addEventListener('hidden.bs.modal',()=>accountingReportSaveUI?.leave());
     if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden){closingActionRevision++;expireDiscards();}cancelStale();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
-    window.addEventListener('pagehide',()=>{expireDiscards();accountingReportSaveUI?.leave();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
+    window.addEventListener('pagehide',()=>{expireDiscards();accountingReportSaveUI?.leave();capitalLinkUI?.leave();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('beforeunload',event=>{
-        if(accountingReportSaveUI?.hasUnresolved()||assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
+        if(capitalLinkUI?.isBusy()||accountingReportSaveUI?.hasUnresolved()||assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
     });
 }
 
@@ -9185,7 +9196,7 @@ function confirmSync(type) {
                 `- 신규 전표: ${previewSummary.newCount}건`,
                 `- 정정(취소+재기표): ${previewSummary.correctionCount}건`,
                 `- 처리표시만 반영: ${previewSummary.markOnlyCount}건`,
-                `- 레거시 연결불가: ${previewSummary.legacySkipCount}건`
+                `- 이전 전표 연결 확인 필요: ${previewSummary.legacySkipCount}건 (이전 전표 연결 확인에서 조회)`
             ].join('\n');
 
             showConfirm("출자금 연동", previewMsg, async () => {
@@ -11246,6 +11257,15 @@ async function fetchLiabilitySum() {
     showAlert("조회 성공", `[${periodLabel}] 장부상 금액을 불러왔습니다.\n실제 고지서 금액과 다르다면 '금액' 란을 수정하세요.`);
 }
 </script>
+<div class="modal fade" id="capitalLinkModal" tabindex="-1" aria-labelledby="capitalLinkTitle" aria-hidden="true">
+ <div class="modal-dialog modal-dialog-centered" style="width:calc(100% - 2rem);max-width:900px;height:calc(100dvh - 2rem);margin:1rem auto;min-height:0">
+  <div class="modal-content" style="height:100%;min-height:0">
+   <div class="modal-header align-items-start flex-shrink-0"><h5 class="modal-title" id="capitalLinkTitle">이전 출자금 전표 연결</h5><button type="button" class="btn-close flex-shrink-0" data-bs-dismiss="modal" aria-label="닫기"></button></div>
+   <div class="modal-body" style="overflow:auto;min-height:0"><p id="capitalLinkStatus" role="status"></p><div id="capitalLinkItems"></div></div>
+   <div class="modal-footer flex-shrink-0"><button type="button" class="btn btn-outline-secondary" id="capitalLinkRefresh">다시 확인</button><button type="button" class="btn btn-success" id="capitalLinkCommit" disabled>선택한 전표 연결</button></div>
+  </div>
+ </div>
+</div>
 <script src="accounting_money_module.js?v=1.1.0"></script>
 <script src="accounting_history.js?v=1.0.2"></script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
