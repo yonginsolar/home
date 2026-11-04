@@ -7806,6 +7806,17 @@ function hasPendingMemberFamilyDisconnect(view = memberFamilyRetry) {
     return !!view && [...memberDisconnectPending.values()].some(op => op.owner === view.owner
         && view.rows?.some(row => String(row.managedId) === op.managed && String(row.managerId) === op.manager));
 }
+function refreshMemberFamilyAfterDisconnect(intent, settledView) {
+    const view = memberFamilyRetry;
+    if (!intent.dispatched || !view || view === settledView || view.owner !== intent.owner
+        || !['ready','loading'].includes(view.status) || view.owner !== memberDetailOwner()
+        || !isCurrentMemberDetailRead(view.read)
+        || ![intent.managed,intent.manager].includes(view.read.memberId)
+        || view.read.memberId !== String(document.getElementById('md-uid')?.value || '')
+        || window.frameElement?.hidden || !document.getElementById('memberDetailModal')?.classList.contains('show')) return;
+    // Read the current detail with fresh authority; never copy an old operation's result into it.
+    return loadMemberFamily(view.read.memberId,{refresh:true,verifyPermission:true});
+}
 function syncMemberFamilyReadUi() {
     const pane = document.getElementById('md-tab-family');
     if (pane && !document.getElementById('member-family-status')) {
@@ -10227,7 +10238,7 @@ function confirmDisconnectManagedMember(managedId, managedName, memberType, mana
         const key = JSON.stringify([intent.owner,intent.managed,intent.manager]);
         if (memberDisconnectPending.has(key)) return;
         memberDisconnectPending.set(key,intent);
-        let writeTimer;
+        let writeTimer, settledView = view;
         const boundedRead = async makeQuery => {
             const controller = new AbortController();let timer;
             try {
@@ -10276,7 +10287,9 @@ function confirmDisconnectManagedMember(managedId, managedName, memberType, mana
             }
             const cached = findCachedAdminMember(intent.managed);
             if (cached) {cached.manager_id = member.manager_id;cached.rep_uuid = member.rep_uuid;}
-            const result = await loadMemberFamily(intent.member,{refresh:true});
+            const refresh = loadMemberFamily(intent.member,{refresh:true});
+            settledView = memberFamilyRetry;
+            const result = await refresh;
             if (result.ok && isCurrentMemberDetailRead(result.read) && memberFamilyRetry?.read === result.read
                 && intent.owner === memberDetailOwner() && !window.frameElement?.hidden
                 && document.getElementById('memberDetailModal')?.classList.contains('show')) {
@@ -10290,6 +10303,7 @@ function confirmDisconnectManagedMember(managedId, managedName, memberType, mana
             if (memberDisconnectPending.get(key) === intent) memberDisconnectPending.delete(key);
             if (memberDisconnectConfirmation === intent) memberDisconnectConfirmation = null;
             syncMemberFamilyReadUi();
+            await refreshMemberFamilyAfterDisconnect(intent,settledView);
         }
     });
     const modal = document.getElementById('customConfirmModal'), button = document.getElementById('btnConfirmYes');
