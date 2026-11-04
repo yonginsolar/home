@@ -43,7 +43,8 @@ async function loadMemberInformationSummary() {
     if (sequence !== memberInformationSummaryRequest) return;
     document.getElementById('dashboard-information-count').textContent = `${Number(data.needs_completion || 0).toLocaleString()}명`;
     const fields = data.field_counts || {};
-    const breakdown = [['계좌정보', data.account_incomplete], ['주민등록번호', fields.rrn], ['전화번호', fields.phone], ['주소', fields.address]];
+    const breakdown = [['계좌정보', data.account_incomplete], ['주민등록번호', fields.rrn], ['전화번호', fields.phone], ['주소 누락', fields.address]];
+    if (Number(data.address_review || 0) > 0) breakdown.push(['주소 확인 필요',data.address_review]);
     for (const [field, label] of Object.entries({ name: '이름', business_number: '사업자·고유번호', representative_name: '대표자명', contact_name: '담당자명' })) {
       if (Number(fields[field] || 0) > 0) breakdown.push([label, fields[field]]);
     }
@@ -117,7 +118,7 @@ async function loadMemberInformationList(reset = true) {
     body.innerHTML = memberInformationRows.map(row => `<tr>
       <td><strong>${escapeHtml(row.name || '이름 미입력')}</strong><div class="small text-muted">${escapeHtml(row.member_id || '')}</div></td>
       <td>${escapeHtml(row.member_type || '개인')}</td>
-      <td>${escapeHtml(MemberInformation.fieldNames(row.missing_fields).join(', '))}</td>
+      <td>${row.missing_fields?.length ? `<div>누락: ${escapeHtml(MemberInformation.fieldNames(row.missing_fields).join(', '))}</div>` : ''}${row.review_fields?.includes('address') ? '<div class="text-warning-emphasis">주소 확인 필요 · 구를 분류할 수 없는 주소입니다.</div>' : ''}</td>
       <td><button type="button" class="btn btn-sm btn-outline-primary" data-information-member="${escapeHtml(row.id)}">정보 보완</button></td>
       </tr>`).join('');
     body.querySelectorAll('[data-information-member]').forEach(button => button.addEventListener('click', async () => {
