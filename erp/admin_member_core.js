@@ -7817,6 +7817,23 @@ function refreshMemberFamilyAfterDisconnect(intent, settledView) {
     // Read the current detail with fresh authority; never copy an old operation's result into it.
     return loadMemberFamily(view.read.memberId,{refresh:true,verifyPermission:true});
 }
+function syncMemberAccountManagerFromFamily(view, member, manager) {
+    if (!isCurrentMemberFamilyView(view) || String(member?.id || '') !== view.read.memberId) return;
+    const managerId = String(member.manager_id || '');
+    if (managerId && String(manager?.id || '') !== managerId) return;
+    for (const cached of new Set([findCachedAdminMember(view.read.memberId),g_current_member_row])) {
+        if (!cached || String(cached.id || '') !== view.read.memberId
+            || (cached.coop_id && String(cached.coop_id) !== String(g_adminMemberRuntime?.coop_id || ''))) continue;
+        cached.manager_id = managerId || null;
+        cached.manager_name = manager?.name || null;
+        cached.manager_member_id = manager?.member_id || null;
+    }
+    if (String(g_current_member_row?.member_type || '').includes('단체')) {
+        const label = document.getElementById('md-account-manager');
+        if (label) label.textContent = managerId
+            ? `${manager.name || '이름 없음'}${manager.member_id ? ` (${manager.member_id})` : ''}` : '미연결';
+    }
+}
 function syncMemberFamilyReadUi() {
     const pane = document.getElementById('md-tab-family');
     if (pane && !document.getElementById('member-family-status')) {
@@ -10105,7 +10122,7 @@ async function loadMemberFamily(parentId, options = {}) {
     if (currentMember?.manager_id) {
         const { data: parentData } = await readQuery(scopeAdminTenant(_supabase
             .from('coop_members')
-            .select(familySelect)
+            .select(familySelect + ', member_id')
             .eq('id', currentMember.manager_id))
             .maybeSingle());
         if (!current()) return {cancelled:true};
@@ -10134,7 +10151,7 @@ async function loadMemberFamily(parentId, options = {}) {
 
     // 3. 데이터 없음 처리
     if (familyRows.length === 0) {
-        return {html:'<tr role="row"><td role="cell" colspan="5" class="text-center text-muted small py-3">연결된 가족이나 단체가 없습니다.</td></tr>',rows:[]};
+        return {html:'<tr role="row"><td role="cell" colspan="5" class="text-center text-muted small py-3">연결된 가족이나 단체가 없습니다.</td></tr>',rows:[],member:currentMember,manager:parentMember};
     }
 
     // 4. 목록 렌더링
@@ -10165,7 +10182,7 @@ async function loadMemberFamily(parentId, options = {}) {
             </tr>
         `;
     });
-    return {html,rows:familyRows};
+    return {html,rows:familyRows,member:currentMember,manager:parentMember};
     }).catch(error => ({error}));
     request.promise = (async () => {
         try {
@@ -10184,6 +10201,7 @@ async function loadMemberFamily(parentId, options = {}) {
                 return showMemberFamilyReadFailure(read,owner,message);
             }
             view.pending = false;view.status = 'ready';view.message = '';view.rows = result.rows;tbody.innerHTML = result.html;
+            syncMemberAccountManagerFromFamily(view,result.member,result.manager);
             return {ok:true,read};
         } finally {
             clearTimeout(timer);
