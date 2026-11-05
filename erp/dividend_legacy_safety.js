@@ -1,4 +1,4 @@
-/* v1.0.0 — Scoped legacy usage workbook and calculation intents. Existing RPCs/authority unchanged. */
+/* v1.0.1 — Scoped legacy usage workbook and calculation intents. Existing RPCs/authority unchanged. */
 (() => {
     'use strict';
     const byOwner = new Map(), calculations = new Map();
@@ -71,6 +71,9 @@
     function build() {
         if (bound) return; bound = true;
         const modal = node('dividendModal'), pane = node('tab-div-batch'), file = node('div-excel-file');
+        node('div-excel-preview').querySelector('h6').textContent = '검토 내역';
+        const intro = pane.querySelector('.alert');
+        for (const part of intro.childNodes) if (part.nodeType === Node.TEXT_NODE) part.textContent = part.textContent.replace('다수의 조합원에게 배당금을 한 번에 지급합니다.', '여러 조합원의 이용실적 적립·차감을 한 번에 적용합니다.');
         const status = document.createElement('p'); status.id = 'usageWorkbookStatus'; status.className = 'small mt-2'; status.setAttribute('role','status');
         const actions = document.createElement('div'); actions.className = 'd-flex flex-wrap gap-2 mb-2';
         for (const [id,label,action] of [['usageWorkbookRetry','다시 확인',()=>state?.attempt?submit():read(state)],['usageWorkbookDiscard','초안 버리기',discard],['usageWorkbookExport','남은 행 다운로드',download]]) {
