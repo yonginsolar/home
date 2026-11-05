@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.117 | Change: 2026-11-05 - Distinguish withholding documents and align expense fields. -->
+<!-- Version: v1.2.118 | Change: 2026-11-05 - Scoped recoverable withholding reads and reconciled payment evidence. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.117 | approval.html');</script>
+  <script>console.log('[Version] v1.2.118 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1640,6 +1640,7 @@ let pendingCancelDocId = null;
 let pendingEvidenceDocId = null;
 let salaryExpenseState = null;
 let withholdingExpenseState = null;
+let approvalWithholdingRead = null, approvalWithholdingReadGeneration = 0;
 let approvalPayoutState = { kind: '', rows: [], selectedIds: new Set(), loading: false };
 let physicalRejectModalInstance = null;
 let cancelDraftModalInstance = null;
@@ -3397,6 +3398,7 @@ async function prepareApprovalSubmitAttachments(prefix = '') {
 }
 
 function resetApprovalComposerForm(options = {}) {
+    invalidateApprovalWithholdingRead();
     if(approvalSubmitPreviewState)relViewModal?.hide();
     if (window.CoopInsuranceNotice) {
         approvalInsuranceNoticeReader?.close();
@@ -3691,7 +3693,6 @@ async function loadApprovalDraftFromServer(draftId) {
             if (filingMonthEl && String(fields.withholding_filing_month || '').trim()) {
                 filingMonthEl.value = String(fields.withholding_filing_month || '').trim();
                 handleApprovalWithholdingMonthChange();
-                await loadApprovalWithholdingExpense();
                 const dueDateEl = document.getElementById('withholdingDueDate');
                 const nationalEl = document.getElementById('withholdingNationalTax');
                 const localEl = document.getElementById('withholdingLocalTax');
@@ -3701,8 +3702,8 @@ async function loadApprovalDraftFromServer(draftId) {
                 if (nationalEl && String(fields.withholding_national_tax || '').trim()) nationalEl.value = String(fields.withholding_national_tax || '').trim();
                 if (localEl && String(fields.withholding_local_tax || '').trim()) localEl.value = String(fields.withholding_local_tax || '').trim();
                 if (reasonEl) reasonEl.value = String(fields.withholding_adjustment_reason || '').trim();
-                if (paymentConfirmedEl && !paymentConfirmedEl.disabled) paymentConfirmedEl.checked = fields.withholding_payment_confirmed === true;
-                syncApprovalWithholdingExpenseTotal();
+                // Payment evidence is checked again after the complete draft has been restored.
+                if (paymentConfirmedEl) paymentConfirmedEl.checked = false;
             }
         }
         const insuranceDraftFieldMap = {
@@ -3834,6 +3835,7 @@ async function loadApprovalDraftFromServer(draftId) {
         rememberApprovalDraftStatusState();
         syncApprovalDraftStatusText();
         switchTab('draft');
+        if (String(fields.expense_sub_type || '').trim() === '원천세') void loadApprovalWithholdingExpense({keepDraftValues:true});
     } catch (error) {
         CoopSafeLog.error("Approval draft restore failed:", error);
         closeApprovalDraftModal({ force: true });
@@ -6152,6 +6154,7 @@ function getApprovalWithholdingPeriod(filingMonth = '') {
 } // End of getApprovalWithholdingPeriod
 
 function resetApprovalWithholdingExpenseUi(keepMonth = true) {
+    invalidateApprovalWithholdingRead();
     withholdingExpenseState = null;
     const monthEl = document.getElementById('withholdingFilingMonth');
     if (!keepMonth && monthEl) monthEl.value = '';
@@ -6206,17 +6209,81 @@ function getApprovalWithholdingRowsFromSalaryDoc(doc) {
     }));
 } // End of getApprovalWithholdingRowsFromSalaryDoc
 
+function captureApprovalWithholdingContext() {
+    return {owner:approvalSubmitOwner(),form:document.getElementById('draftForm'),
+        filing:String(document.getElementById('withholdingFilingMonth')?.value || '').trim()};
+} // End of captureApprovalWithholdingContext
+
+function isApprovalWithholdingContextCurrent(context) {
+    return !!context?.form && context.form === document.getElementById('draftForm')
+        && context.owner === approvalSubmitOwner() && context.filing === String(document.getElementById('withholdingFilingMonth')?.value || '').trim()
+        && activeApprovalTab === 'draft' && getCurrentDraftMainType() === '지출결의'
+        && document.getElementById('expenseSubType')?.value === '원천세'
+        && !window.frameElement?.hidden && canUseSalaryExpense();
+} // End of isApprovalWithholdingContextCurrent
+
+function syncApprovalWithholdingReadButton(busy = false, retry = false) {
+    const button = document.getElementById('btnLoadWithholding');
+    if (!button) return;
+    button.disabled = busy;
+    button.setAttribute('aria-busy', String(busy));
+    button.textContent = busy ? '계산 중…' : retry ? '다시 확인' : '🧾 급여 원천세 계산';
+} // End of syncApprovalWithholdingReadButton
+
+function invalidateApprovalWithholdingRead(message = '') {
+    const read = approvalWithholdingRead;
+    approvalWithholdingReadGeneration++;
+    approvalWithholdingRead = null;
+    if (!read) return;
+    read.cancel?.();
+    read.controller.abort();
+    if (read.context.owner === approvalSubmitOwner()) {
+        syncApprovalWithholdingReadButton(false, true);
+        const summary = document.getElementById('withholdingSummary');
+        if (summary && message) summary.textContent = message;
+    }
+} // End of invalidateApprovalWithholdingRead
+
+function isApprovalWithholdingStateCurrent(state = withholdingExpenseState) {
+    if (!state?.loaded || !state.verified || approvalWithholdingRead || !isApprovalWithholdingContextCurrent(state.context)) return false;
+    const period = getApprovalWithholdingPeriod(state.context.filing);
+    return ['filing_month','payment_month','salary_month'].every(key=>state[key] === period[key]);
+} // End of isApprovalWithholdingStateCurrent
+
+function getApprovalWithholdingPaymentProof(paymentRows, rows, period, sourceDocId) {
+    const expected = rows.reduce((sum,row)=>sum+Number(row.net_pay),0);
+    const evidence = Array.isArray(paymentRows) ? paymentRows : [];
+    const validAmount = value => Number.isSafeInteger(Number(value)) && Number(value) >= 0;
+    const validDate = value => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
+        const d = new Date(value+'T00:00:00Z');
+        return !Number.isNaN(d.getTime()) && d.toISOString().slice(0,10) === value;
+    };
+    let reason = '', total = 0;
+    if (!evidence.length) reason = '급여 지급 전표를 찾지 못했습니다.';
+    else if (!(Number.isSafeInteger(expected) && expected > 0) || rows.some(row=>!validAmount(row.net_pay))
+        || evidence.some(row=>row.Trans_ID !== `APR-${sourceDocId}` || row.Account !== '보통예금'
+            || !validDate(row.Date) || !validAmount(row.Credit) || !validAmount(row.Debit))) reason = '지급 전표의 날짜·금액을 확인하지 못했습니다.';
+    else if (evidence.some(row=>row.Date.slice(0,7) !== period.payment_month)) reason = '지급 전표가 선택한 급여 지급월과 다릅니다.';
+    else {
+        total = evidence.reduce((sum,row)=>sum+Number(row.Credit)-Number(row.Debit),0);
+        if (!Number.isSafeInteger(total) || total !== expected) reason = `전표 지급액 ${formatMoney(total)}원과 급여 실지급 합계 ${formatMoney(expected)}원이 다릅니다.`;
+    }
+    return {confirmed:!reason,reason,total,expected,date:!reason ? evidence.map(row=>row.Date).sort().at(-1) : null};
+} // End of getApprovalWithholdingPaymentProof
+
 async function findApprovalWithholdingDuplicate(paymentMonth, options = {}) {
     const safePaymentMonth = String(paymentMonth || '').trim();
     if (!/^\d{4}-\d{2}$/.test(safePaymentMonth)) return null;
     const excludeDocId = Number(options.excludeDocId || 0);
-    const { data, error } = await scopeApprovalTenant(_supabase
+    const query = scopeApprovalTenant(_supabase
         .from('ref_approval')
         .select('id,doc_type,status,title,content,expense_snapshot,created_at'))
         .in('status', ['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료'])
         .ilike('doc_type', '%지출%')
         .order('created_at', { ascending: false })
         .limit(250);
+    const { data, error } = await (options.signal && query.abortSignal ? query.abortSignal(options.signal) : query);
     if (error) throw error;
     const [year, month] = safePaymentMonth.split('-');
     const legacyMonthPattern = new RegExp(`${year}\\s*년\\s*${Number(month)}\\s*월`, 'u');
@@ -6234,32 +6301,48 @@ async function findApprovalWithholdingDuplicate(paymentMonth, options = {}) {
     }) || null;
 } // End of findApprovalWithholdingDuplicate
 
-async function loadApprovalWithholdingExpense() {
+async function loadApprovalWithholdingExpense(options = {}) {
     if (!canUseSalaryExpense()) return showAlert('급여 원천세 연동은 관리자/회계 권한에서만 사용할 수 있습니다.');
-    const filingMonth = String(document.getElementById('withholdingFilingMonth')?.value || '').trim();
+    const context = captureApprovalWithholdingContext();
+    if (!isApprovalWithholdingContextCurrent(context)) return false;
+    const filingMonth = context.filing;
     const period = getApprovalWithholdingPeriod(filingMonth);
     if (!period.filing_month) return showAlert('신고·납부월을 선택하세요.');
 
-    const btn = document.getElementById('btnLoadWithholding');
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = '계산 중...';
-    }
-    try {
-        const { data: salaryDocs, error: salaryDocError } = await scopeApprovalTenant(_supabase
+    if (approvalWithholdingRead && approvalWithholdingRead.context.owner === context.owner
+        && approvalWithholdingRead.context.filing === context.filing) return approvalWithholdingRead.promise;
+    invalidateApprovalWithholdingRead();
+    const read = {context,generation:approvalWithholdingReadGeneration,controller:new AbortController()};
+    approvalWithholdingRead = read;
+    const current = () => approvalWithholdingRead === read && read.generation === approvalWithholdingReadGeneration && isApprovalWithholdingContextCurrent(context);
+    const priorState = withholdingExpenseState;
+    if (priorState) priorState.verified = false;
+    const ids = ['withholdingNationalTax','withholdingLocalTax'];
+    const initialValues = ids.map(id=>String(document.getElementById(id)?.value || ''));
+    const preserveInitialValues = initialValues.map((value,index)=>!!options.keepDraftValues || (value !== ''
+        && (!priorState?.loaded || (priorState.context?.owner === context.owner
+            && Number(ERPNumberInput.raw(value)) !== Number(index === 0 ? priorState.proposed_national_tax : priorState.proposed_local_tax)))));
+    const initialBody = String(getApprovalEditorContent() || '');
+    const runQuery = query => query.abortSignal ? query.abortSignal(read.controller.signal) : query;
+    syncApprovalWithholdingReadButton(true);
+    let timer;
+    read.promise = (async () => { try {
+        const operation = (async () => {
+        const { data: salaryDocs, error: salaryDocError } = await runQuery(scopeApprovalTenant(_supabase
             .from('ref_approval')
             .select('id,doc_no,doc_type,status,title,amount,created_at,processed_at,salary_ledger_snapshot'))
             .eq('doc_type', '지출결의(급여)')
             .in('status', ['완료', '실물결재완료'])
             .order('created_at', { ascending: false })
-            .limit(60);
+            .limit(60));
+        if (!current()) throw new Error('STALE_WITHHOLDING_READ');
         if (salaryDocError) throw salaryDocError;
         const sourceDoc = (Array.isArray(salaryDocs) ? salaryDocs : []).find((doc) => {
             const sourceMonth = String(doc?.salary_ledger_snapshot?.year_month || doc?.salary_ledger_snapshot?.state?.yearMonth || '').trim();
             return sourceMonth === period.salary_month && getApprovalWithholdingRowsFromSalaryDoc(doc).length > 0;
         });
         if (!sourceDoc) {
-            throw new Error(`${formatYearMonthLabel(period.salary_month)} 급여 지출결의 완료본을 찾지 못했습니다. 급여 결재를 먼저 완료하세요.`);
+            throw Object.assign(new Error(`${formatYearMonthLabel(period.salary_month)} 급여 지출결의 완료본을 찾지 못했습니다. 급여 결재를 먼저 완료하세요.`), {code:'WITHHOLDING_NO_SALARY'});
         }
 
         const rows = getApprovalWithholdingRowsFromSalaryDoc(sourceDoc);
@@ -6272,19 +6355,29 @@ async function loadApprovalWithholdingExpense() {
         const proposedLocal = Math.max(0, calculatedLocal - adjustmentLocal);
 
         const [{ data: paymentRows, error: paymentError }, duplicateDoc] = await Promise.all([
-            _supabase.from('ac_journal')
+            runQuery(scopeApprovalTenant(_supabase.from('ac_journal')
                 .select('Trans_ID,Date,Account,Debit,Credit')
                 .eq('Trans_ID', `APR-${sourceDoc.id}`)
-                .eq('Account', '보통예금')
-                .gt('Credit', 0),
-            findApprovalWithholdingDuplicate(period.payment_month)
+                .eq('Account', '보통예금'))),
+            findApprovalWithholdingDuplicate(period.payment_month, {signal:read.controller.signal})
         ]);
+        if (!current()) throw new Error('STALE_WITHHOLDING_READ');
         if (paymentError) throw paymentError;
-        const paymentPosted = Array.isArray(paymentRows) && paymentRows.length > 0;
-        const paymentDate = paymentPosted ? String(paymentRows[0]?.Date || '').trim() : '';
+        return {sourceDoc,rows,calculatedIncome,calculatedLocal,adjustmentIncome,adjustmentLocal,proposedNational,proposedLocal,duplicateDoc,
+            proof:getApprovalWithholdingPaymentProof(paymentRows,rows,period,sourceDoc.id)};
+        })();
+        const result = await Promise.race([operation,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('WITHHOLDING_READ_TIMEOUT')),15000);}),new Promise(resolve=>{read.cancel=()=>resolve(null);})]);
+        if (!result || !current()) return false;
+        const {sourceDoc,rows,calculatedIncome,calculatedLocal,adjustmentIncome,adjustmentLocal,proposedNational,proposedLocal,duplicateDoc,proof} = result;
+        const paymentPosted = proof.confirmed, paymentDate = proof.date;
 
         withholdingExpenseState = {
             loaded: true,
+            verified: true,
+            context,
+            generatedBody: priorState?.context?.owner === context.owner ? priorState.generatedBody : undefined,
+            bodyProtected: (priorState?.context?.owner === context.owner && (priorState.bodyProtected
+                || (priorState.generatedBody && initialBody.trim() !== priorState.generatedBody))) || String(getApprovalEditorContent() || '') !== initialBody,
             ...period,
             source_salary_approval_id: Number(sourceDoc.id),
             source_salary_approval_no: String(sourceDoc.doc_no || '').trim(),
@@ -6305,8 +6398,9 @@ async function loadApprovalWithholdingExpense() {
 
         const nationalEl = document.getElementById('withholdingNationalTax');
         const localEl = document.getElementById('withholdingLocalTax');
-        if (nationalEl) nationalEl.value = String(proposedNational);
-        if (localEl) localEl.value = String(proposedLocal);
+        [nationalEl,localEl].forEach((el,index)=>{
+            if (el && el.value === initialValues[index] && !(preserveInitialValues[index] && initialValues[index] !== '')) el.value = String(index === 0 ? proposedNational : proposedLocal);
+        });
         const nationalBasis = document.getElementById('withholdingNationalBasis');
         const localBasis = document.getElementById('withholdingLocalBasis');
         if (nationalBasis) nationalBasis.textContent = `급여 공제 ${formatMoney(calculatedIncome)}원${adjustmentIncome > 0 ? ` − 정산 ${formatMoney(adjustmentIncome)}원` : ''}`;
@@ -6320,23 +6414,36 @@ async function loadApprovalWithholdingExpense() {
         if (paymentHelp) {
             paymentHelp.textContent = paymentPosted
                 ? `급여 지급 회계전표 확인됨${paymentDate ? ` · ${paymentDate}` : ''}`
-                : '급여 지급 회계전표를 찾지 못했습니다. 실제 지급을 확인한 뒤 직접 체크하세요.';
+                : `${proof.reason} 실제 지급월과 금액을 확인한 뒤 직접 체크하세요.`;
         }
         document.getElementById('withholdingAmountSection')?.classList.remove('hidden');
+        approvalWithholdingRead = null;
         syncApprovalWithholdingExpenseTotal();
+        syncApprovalWithholdingReadButton();
+        return true;
     } catch (error) {
-        resetApprovalWithholdingExpenseUi(true);
+        if (!current()) return false;
+        if (withholdingExpenseState) withholdingExpenseState.verified = false;
+        const message = error?.message === 'WITHHOLDING_READ_TIMEOUT' ? '조회 시간이 길어졌습니다. 입력은 유지했습니다. 다시 확인을 눌러 주세요.'
+            : (error?.status === 403 || error?.code === '42501') ? '이 급여를 조회할 권한이 없습니다. 권한을 확인한 뒤 다시 확인해 주세요.'
+            : (error?.status === 429 || error?.code === '429') ? '요청이 많아 조회하지 못했습니다. 잠시 후 다시 확인해 주세요.'
+            : error?.code === 'WITHHOLDING_NO_SALARY' ? error.message : '급여 원천세를 불러오지 못했습니다. 입력은 유지했습니다. 다시 확인해 주세요.';
         const summary = document.getElementById('withholdingSummary');
         if (summary) {
             summary.className = 'approval-withholding-result is-invalid mt-3';
-            summary.textContent = error?.message || String(error);
+            summary.textContent = message;
         }
+        syncApprovalWithholdingReadButton(false, true);
+        return false;
     } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = '🧾 급여 원천세 계산';
+        clearTimeout(timer);
+        if (approvalWithholdingRead === read) {
+            approvalWithholdingRead = null;
+            syncApprovalWithholdingReadButton(false, true);
         }
-    }
+        read.controller.abort();
+    } })();
+    return read.promise;
 } // End of loadApprovalWithholdingExpense
 
 function syncApprovalWithholdingExpenseTotal() {
@@ -6374,8 +6481,10 @@ function syncApprovalWithholdingExpenseTotal() {
     }
     const periodLabel = formatYearMonthLabel(state.payment_month);
     const currentBody = String(getApprovalEditorContent() || '').trim();
-    if (!currentBody || isApprovalAutoGeneratedTemplateContent(currentBody) || currentBody.includes('[급여 원천세 연동]')) {
+    if (state.generatedBody && currentBody !== state.generatedBody) state.bodyProtected = true;
+    if (!state.bodyProtected && (!currentBody || isApprovalAutoGeneratedTemplateContent(currentBody) || currentBody === state.generatedBody)) {
         setApprovalEditorContent(`${periodLabel} 지급분 급여 원천세 신고·납부를 위해 지출결의를 상신합니다.\n\n[급여 원천세 연동]\n- 급여 귀속월: ${formatYearMonthLabel(state.salary_month)}\n- 급여 지급월: ${periodLabel}\n- 신고·납부월: ${formatYearMonthLabel(state.filing_month)}\n- 국세(근로소득세): ${formatMoney(national)}원\n- 지방세(지방소득세): ${formatMoney(local)}원\n- 합계: ${formatMoney(total)}원`);
+        state.generatedBody = String(getApprovalEditorContent() || '').trim();
     }
     syncApprovalTitleInput('지출결의');
     updateJeongyeolUi();
@@ -6387,7 +6496,7 @@ function handleApprovalWithholdingManualChange() {
 
 function collectApprovalWithholdingExpenseInput() {
     const state = withholdingExpenseState;
-    if (!state?.loaded) return null;
+    if (!isApprovalWithholdingStateCurrent(state)) return null;
     const national = Math.max(0, Math.round(Number(ERPNumberInput.raw(document.getElementById('withholdingNationalTax')?.value) || 0)));
     const local = Math.max(0, Math.round(Number(ERPNumberInput.raw(document.getElementById('withholdingLocalTax')?.value) || 0)));
     return {
@@ -6419,6 +6528,8 @@ function collectApprovalWithholdingExpenseInput() {
 function validateApprovalWithholdingExpense(input) {
     const value = input && typeof input === 'object' ? input : {};
     const errors = [];
+    if (!isApprovalWithholdingStateCurrent() || ['filing_month','payment_month','salary_month'].some(key=>value[key] !== withholdingExpenseState?.[key])
+        || value.source_salary_approval_id !== withholdingExpenseState?.source_salary_approval_id) errors.push('조회 기준이 바뀌었거나 확인 중입니다. 급여 원천세를 다시 확인하세요.');
     if (!/^\d{4}-\d{2}$/.test(String(value.filing_month || ''))) errors.push('신고·납부월을 확인하세요.');
     if (!/^\d{4}-\d{2}$/.test(String(value.payment_month || ''))) errors.push('급여 지급월을 확인하세요.');
     if (!/^\d{4}-\d{2}$/.test(String(value.salary_month || ''))) errors.push('급여 귀속월을 확인하세요.');
@@ -9860,6 +9971,7 @@ window.onload = async function() {
     await window.ServiceContractApproval.load(_supabase);
     // Hold the existing composer in memory; resume refreshes reads, never rebuilds the form.
     window.ErpWorkspaceTask = {ready:true, refresh:async function() {
+        invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
         if(window.ExpoRuntimeBridge){
             const runtime=await window.ErpRuntimeGuard.getRuntime(_supabase);
             if(!runtime?.is_active||runtime.coop_id!==myInfo?.coop_id||runtime.modules?.approval===false
@@ -10399,6 +10511,7 @@ function handlePayrollMonthChange() {
 } // End of handlePayrollMonthChange
 
 function handleExpenseSubTypeChange() {
+    invalidateApprovalWithholdingRead('조회 기준이 바뀌었습니다. 다시 확인해 주세요.');
     const select = document.getElementById("expenseSubType");
     syncApprovalExpenseSubTypeOptions();
     syncApprovalExpenseDateUi();
@@ -11263,6 +11376,7 @@ function decorateTodoDelegation(doc) {
 
 function switchTab(tab, options = {}) {
     if(activeApprovalTab !== String(tab || 'draft').trim()){
+        invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
         approvalComposerInputRevision++;approvalRelViewRevision++;invalidateApprovalSubmitPreview();
     }
     activeApprovalTab = String(tab || 'draft').trim() || 'draft';
@@ -11523,6 +11637,7 @@ function prepareApprovalCategoryBodyChange(previousType, nextType) {
 // [수정] 카테고리 변경 핸들러 (반차 UI 제어 포함)
 // [수정] 카테고리 변경 핸들러 (관련 문서 UI 제어 추가)
 function handleCategoryChange() {
+    invalidateApprovalWithholdingRead('조회 기준이 바뀌었습니다. 다시 확인해 주세요.');
     window.ServiceContractApproval?.categoryChanged(document.getElementById('appCategory')?.value);
     syncApprovalExpenseDateUi();
     const categoryEl = document.getElementById("appCategory");
@@ -12418,8 +12533,10 @@ function bindApprovalSubmitPreviewControls() {
     form.dataset.submitPreviewBound='1';
     const changed=()=>{approvalComposerInputRevision++;syncApprovalSubmitControls();};
     form.addEventListener('input',changed);form.addEventListener('change',changed);
-    form.addEventListener('reset',()=>{approvalComposerInputRevision++;invalidateApprovalSubmitPreview();});
+    form.addEventListener('reset',()=>{approvalComposerInputRevision++;invalidateApprovalSubmitPreview();invalidateApprovalWithholdingRead();});
+    window.addEventListener('pagehide',()=>invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.'));
     if(window.frameElement)new MutationObserver(()=>{
+        invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
         if(window.frameElement.hidden){approvalComposerInputRevision++;approvalRelViewRevision++;invalidateApprovalSubmitPreview();}
     }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
 }
