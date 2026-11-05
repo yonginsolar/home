@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.3.30 | Change: 2026-10-20 - Open linked education details without resetting editor or filters. -->
+<!-- Version: v1.3.31 | Change: 2026-11-05 - Resolve external education source for the current cooperative. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -269,9 +269,10 @@
         </div>
         <div class="modal-body">
           <div id="formAlert" class="alert d-none" role="alert" tabindex="-1"></div>
+          <div class="alert alert-warning d-none" id="humanitiesSourceStatus" role="status">외부 교육 연결을 확인하지 못했습니다. <button type="button" class="btn btn-sm btn-outline-primary" onclick="loadHumanitiesSource()">다시 확인</button></div>
           <div class="border rounded-3 p-3 mb-3 d-none" id="humanitiesImportSection">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-              <div><strong>모두의 인문학에서 불러오기</strong><div class="small text-muted">용인모두의햇빛협동조합 교육만 불러옵니다. 입력칸에 불러온 뒤 필요한 내용을 수정하고 저장하세요.</div></div>
+              <div><strong>모두의 인문학에서 불러오기</strong><div class="small text-muted">현재 조합에 연결된 공개 교육을 불러옵니다. 입력칸에 불러온 뒤 필요한 내용을 수정하고 저장하세요.</div></div>
               <button type="button" class="btn btn-sm btn-outline-primary" id="openHumanitiesImportBtn">교육 찾기</button>
             </div>
             <div class="small text-success fw-bold mt-2 d-none" id="humanitiesImportSelection"></div>
@@ -586,6 +587,32 @@
     let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
     let humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
     let humanitiesImportState = { courses:[], loading:false, panelOpen:false, selectedCourseId:null };
+    let humanitiesSourceState = { owner:'', enabled:false, pending:null, revision:0, failed:false };
+    let humanitiesImportReadRevision = 0;
+    let humanitiesLinkReadRevision = 0;
+    function humanitiesSourceOwner() { return JSON.stringify([participationReadOwner.userId,participationReadOwner.coopId,participationReadOwner.revision]); }
+    function canUseHumanitiesSource() { return !!participationReadOwner.userId && humanitiesSourceState.owner===humanitiesSourceOwner() && humanitiesSourceState.enabled; }
+    function renderHumanitiesSourceControls() {
+      document.getElementById('humanitiesImportSection').classList.toggle('d-none', !canUseHumanitiesSource() || document.getElementById('eventType').value!=='EDUCATION' || !!formState.eventId);
+      document.getElementById('humanitiesSourceStatus').classList.toggle('d-none',humanitiesSourceState.owner!==humanitiesSourceOwner()||!humanitiesSourceState.failed||document.getElementById('eventType').value!=='EDUCATION');
+    }
+    async function loadHumanitiesSource() {
+      const owner=humanitiesSourceOwner(),coopId=participationReadOwner.coopId;
+      if(!participationReadOwner.userId||!coopId)return;
+      if(humanitiesSourceState.owner===owner&&humanitiesSourceState.pending)return humanitiesSourceState.pending;
+      const revision=++humanitiesSourceState.revision;
+      humanitiesSourceState.owner=owner;humanitiesSourceState.enabled=false;humanitiesSourceState.failed=false;renderHumanitiesSourceControls();
+      const controller=new AbortController();let timer;
+      const pending=(async()=>{
+        try {
+          const result=await Promise.race([callHumanitiesIntegration('admin_source_context',{},controller.signal),new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('SOURCE_TIMEOUT'));},15000);})]);
+          if(owner!==humanitiesSourceOwner()||revision!==humanitiesSourceState.revision||result.coop_id!==coopId)return;
+          humanitiesSourceState.enabled=result.enabled===true;
+        } catch(_) { if(owner===humanitiesSourceOwner()&&revision===humanitiesSourceState.revision)humanitiesSourceState.failed=true; }
+        finally { clearTimeout(timer);if(owner===humanitiesSourceOwner()&&revision===humanitiesSourceState.revision){humanitiesSourceState.pending=null;renderHumanitiesSourceControls();} }
+      })();
+      humanitiesSourceState.pending=pending;return pending;
+    }
     let humanitiesAttendeeImportRunning = false;
     let siteActivityPhotoRows = [];
     let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
@@ -1289,11 +1316,12 @@
       return `${PARTICIPATION_PUBLIC_ORIGIN}/membermanage.html?education_checkin=${encodeURIComponent(token)}`;
     } // End of educationQrLink
 
-    async function callHumanitiesIntegration(action, payload = {}) {
+    async function callHumanitiesIntegration(action, payload = {}, signal) {
       const { data:{ session } } = await _supabase.auth.getSession();
       if (!session?.access_token) throw new Error('ERP 관리자 로그인이 필요합니다.');
       const response = await fetch(HUMANITIES_INTEGRATION_URL, {
         method:'POST',
+        signal,
         headers:{
           apikey:COOP_PUBLISHABLE_KEY,
           Authorization:`Bearer ${session.access_token}`,
@@ -1332,25 +1360,31 @@
     } // End of renderHumanitiesImportResults
 
     async function searchHumanitiesImport() {
+      if(!canUseHumanitiesSource())return;
+      const owner=humanitiesSourceOwner(),revision=++humanitiesImportReadRevision,opening=eventOpenRevision;
+      const current=()=>canUseHumanitiesSource()&&owner===humanitiesSourceOwner()&&revision===humanitiesImportReadRevision&&opening===eventOpenRevision&&!formState.eventId;
       humanitiesImportState.loading = true;
       showAlert('humanitiesImportAlert', '');
       renderHumanitiesImportResults();
       try {
         const searchQuery = String(document.getElementById('humanitiesImportSearch').value || '').trim();
         const result = await callHumanitiesIntegration('admin_course_search', { search_query:searchQuery });
+        if(!current())return;
         humanitiesImportState.courses = Array.isArray(result.courses) ? result.courses : [];
         showAlert('humanitiesImportAlert', `불러올 수 있는 교육 ${humanitiesImportState.courses.length.toLocaleString()}개를 찾았습니다.`, humanitiesImportState.courses.length ? 'success' : 'warning');
       } catch (error) {
+        if(!current())return;
         humanitiesImportState.courses = [];
         showAlert('humanitiesImportAlert', error?.message || '교육 목록을 불러오지 못했습니다.', 'danger');
       } finally {
+        if(!current())return;
         humanitiesImportState.loading = false;
         renderHumanitiesImportResults();
       }
     } // End of searchHumanitiesImport
 
     function importHumanitiesCourse(courseId, button) {
-      if (!courseId || humanitiesImportState.loading) return;
+      if (!canUseHumanitiesSource() || !courseId || humanitiesImportState.loading) return;
       const course = humanitiesImportState.courses.find(function(item) { return String(item.id) === String(courseId); });
       if (!course) return;
       const venue = course.venue || {};
@@ -1374,6 +1408,7 @@
     } // End of importHumanitiesCourse
 
     function openHumanitiesImport() {
+      if(!canUseHumanitiesSource())return;
       humanitiesImportState.panelOpen = !humanitiesImportState.panelOpen;
       document.getElementById('humanitiesImportPanel').classList.toggle('d-none', !humanitiesImportState.panelOpen);
       if (!humanitiesImportState.panelOpen) return;
@@ -1570,6 +1605,8 @@
     } // End of renderHumanitiesResources
 
     async function loadHumanitiesLink(showMessage = false) {
+      const owner=humanitiesSourceOwner(),eventId=formState.eventId,opening=eventOpenRevision,revision=++humanitiesLinkReadRevision;
+      const current=()=>owner===humanitiesSourceOwner()&&eventId===formState.eventId&&opening===eventOpenRevision&&revision===humanitiesLinkReadRevision;
       if (!formState.eventId || document.getElementById('eventType').value !== 'EDUCATION') {
         humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
         renderHumanitiesLink();
@@ -1577,13 +1614,18 @@
         renderEducationQr();
         return;
       }
+      if(!canUseHumanitiesSource()){
+        if(humanitiesSourceState.owner!==owner||humanitiesSourceState.pending)await loadHumanitiesSource();
+        if(!current()||!canUseHumanitiesSource())return;
+      }
       humanitiesLinkState.panelOpen = showMessage || humanitiesLinkState.panelOpen;
       humanitiesLinkState.loading = true;
       renderHumanitiesLink();
       renderHumanitiesResources();
       try {
         const searchQuery = String(document.getElementById('humanitiesCourseSearch').value || '').trim();
-        const result = await callHumanitiesIntegration('admin_get', { search_query:searchQuery });
+        const result = await callHumanitiesIntegration('admin_get', { event_id:eventId, search_query:searchQuery });
+        if(!current()||!canUseHumanitiesSource())return;
         humanitiesLinkState = {
           link:result.link || null,
           course:result.humanities_course || null,
@@ -1604,6 +1646,7 @@
           humanitiesLinkState.candidates.length ? 'success' : 'warning');
         }
       } catch (error) {
+        if(!current()||!canUseHumanitiesSource())return;
         humanitiesLinkState.loading = false;
         renderHumanitiesLink();
         renderHumanitiesResources();
@@ -2035,7 +2078,7 @@
 
     function setEventTypeUi(type) {
       const education = type === 'EDUCATION';
-      document.getElementById('humanitiesImportSection').classList.toggle('d-none', !education || !!formState.eventId);
+      renderHumanitiesSourceControls();
       document.getElementById('sourceMinuteGroup').classList.toggle('d-none', education);
       document.getElementById('educationContentGroup').classList.toggle('d-none', !education);
       document.getElementById('instructorGroup').classList.toggle('d-none', !education);
@@ -3350,10 +3393,10 @@
       document.body.classList.toggle('participation-embedded', PARTICIPATION_EMBEDDED);
       document.getElementById('participationPageTitle').textContent = PARTICIPATION_EDUCATION_VIEW ? '교육·행사 관리' : '회의 출석 관리';
       document.getElementById('participationPageSubtitle').textContent = PARTICIPATION_EDUCATION_VIEW
-        ? '교육 신규 등록·모두의 인문학 불러오기, QR 체크인·알림과 조합원 참가 관리를 한 곳에서 관리합니다.'
+        ? '교육 신규 등록, QR 체크인·알림과 조합원 참가 관리를 한 곳에서 관리합니다.'
         : '이사회와 대의원 총회 참석·서명 현황을 문서관리 흐름에서 관리합니다.';
       document.getElementById('participationPageGuide').innerHTML = PARTICIPATION_EDUCATION_VIEW
-        ? '신규 교육 입력에서 용인모두의햇빛협동조합 교육을 불러온 뒤 필요한 내용을 수정해 저장할 수 있습니다. 조합원의 개인별 참여 이력은 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 읽기 전용으로 확인합니다.'
+        ? '교육 내용을 직접 입력하거나, 연결된 외부 교육이 있으면 불러와 작성할 수 있습니다. 조합원의 개인별 참여 이력은 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 읽기 전용으로 확인합니다.'
         : '회의 기본 자료는 문서관리에서 준비하고, 이 화면에서는 이사회·대의원 총회 출석과 서명을 관리합니다. 개인별 이력은 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 읽기 전용으로 확인합니다.';
       const typeFilter = document.getElementById('eventTypeFilter');
       const eventTypeSelect = document.getElementById('eventType');
@@ -3486,6 +3529,7 @@
       _supabase.auth.onAuthStateChange(function(event, nextSession) {
         if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== participationReadOwner.userId)) {
           participationReadOwner = { userId:null, coopId:null, revision:participationReadOwner.revision + 1 };
+          humanitiesSourceState.enabled=false;humanitiesSourceState.owner='';humanitiesSourceState.revision++;humanitiesSourceState.pending=null;humanitiesImportReadRevision++;renderHumanitiesSourceControls();
           meetingContextRevision++;
           meetingContextReady = false;
           meetingContextPending = null;
@@ -3497,7 +3541,8 @@
       });
       document.getElementById('eventTypeFilter').value = PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'ALL';
       await loadDashboard(true);
-      window.ErpWorkspaceResume.register({modules:[PARTICIPATION_EDUCATION_VIEW?'education':'minutes'],refresh:()=>loadDashboard(false)});
+      if(PARTICIPATION_EDUCATION_VIEW)void loadHumanitiesSource();
+      window.ErpWorkspaceResume.register({modules:[PARTICIPATION_EDUCATION_VIEW?'education':'minutes'],refresh:()=>{if(PARTICIPATION_EDUCATION_VIEW)void loadHumanitiesSource();return loadDashboard(false);}});
       const linkedEvent = new URLSearchParams(window.location.search).get('event') || '';
       if (PARTICIPATION_EDUCATION_VIEW && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(linkedEvent)) {
         await openEducationDetail(linkedEvent);

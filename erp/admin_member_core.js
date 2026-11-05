@@ -12940,6 +12940,8 @@ async function approveSelectedDividendBatch() {
     const submitted = {dividendBatchMinutesDocId:minutesDocId,dividendBatchMeetingDate:meetingDate,dividendBatchAgenda:agenda,dividendBatchResolutionResult:resolutionResult};
     if (!await workflow.confirmOnce('선택한 배당 회차에 총회 승인 근거를 반영할까요?',context,() => Object.entries(submitted).every(([id,value]) => getDividendBatchFormValue(id) === value))) return;
     {
+        const saveAttempt=workflow.saveStarted(context,batchId);
+        if(!saveAttempt)return;
         showLoading(true);
         const { error } = await _supabase.rpc('approve_dividend_batch_by_general_meeting', {
             p_batch_id: batchId,
@@ -12950,9 +12952,9 @@ async function approveSelectedDividendBatch() {
         });
         showLoading(false);
 
+        if (!error) workflow.saved(batchId,submitted,saveAttempt);
         if (!workflow.current(context)) return;
         if (error) return myAlert('총회 승인 반영 실패: ' + error.message, 'error');
-        workflow.saved(batchId,submitted);
         myAlert('총회 승인 근거가 반영되었습니다.');
         fetchDividendManageBatches(false);
     }
@@ -12970,6 +12972,8 @@ async function finalizeSelectedDividendBatch() {
 
     if (!await workflow.confirmOnce('선택한 배당 회차를 조합원 공개 상태로 확정할까요?',context,() => getDividendBatchFormValue('dividendBatchPaymentDueDate') === paymentDueDate)) return;
     {
+        const saveAttempt=workflow.saveStarted(context,batchId);
+        if(!saveAttempt)return;
         showLoading(true);
         const { data, error } = await _supabase.rpc('finalize_dividend_batch_with_payment_policy', {
             p_batch_id: batchId,
@@ -12982,11 +12986,11 @@ async function finalizeSelectedDividendBatch() {
             return;
         }
         const heldCount = Number(data?.held_item_count || 0);
+        workflow.saved(batchId,{dividendBatchPaymentDueDate:paymentDueDate},saveAttempt);
         const deadline = data?.account_change_deadline ? formatAdminMemberKstDateTime(data.account_change_deadline) : '지급예정일 전날 23:59';
         const notificationResult = await dispatchDividendKakaoNotifications(batchId, 'dividend_finalized', false);
         showLoading(false);
         if (!workflow.current(context)) return;
-        workflow.saved(batchId,{dividendBatchPaymentDueDate:paymentDueDate});
         await fetchDividendManageBatches(false);
         const notificationText = formatDividendNotificationDispatchResult(notificationResult);
         const alertType = getDividendNotificationDispatchAlertType(notificationResult);

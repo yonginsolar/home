@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.5';
+  const VERSION = '1.6.6';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -187,7 +187,7 @@
     const seenDirectors = new Set();
     return raw.slice(0, 24).flatMap((entry) => {
       if (!entry || typeof entry !== 'object') return [];
-      const kind = entry.kind === 'director' ? 'director' : 'other';
+      const kind = entry.kind === 'director' && !window.ProposalTenant?.generic(state.documentIssuer) ? 'director' : 'other';
       const name = String(entry.name || '').trim().slice(0, 80);
       const phone = String(entry.phone || '').trim().slice(0, 30);
       if (kind === 'director') {
@@ -386,6 +386,7 @@
       statsAsOf: textValue('statsAsOf'),
       keepNamsaOverlay: Boolean(el.keepNamsaOverlay.checked)
     };
+    model.issuer = state.documentIssuer;
     el.remainingKw.value = remainingKw === null ? '확인 필요' : trimNumber(remainingKw);
     document.querySelector('label[for="remainingKw"]').textContent = noMandatory ? '기준 설치안 용량(kW)' : '추가 의무용량(kW) · 자동 계산';
     return model;
@@ -695,6 +696,7 @@
     renderCustomOverlays(doc, model);
     appendBuilderStyles(doc);
     applyPhotoAspectRatio(doc, state.photoAspectRatio);
+    window.ProposalTenant.apply(doc, model);
     editableCandidates(doc).forEach((node, index) => {
       node.dataset.copyId = String(index);
       node.dataset.copyBase = node.textContent;
@@ -1153,13 +1155,16 @@
       refreshDocumentMetadata();
       const model = readModel();
       validateModel(model);
+      document.getElementById('proposalIssuerStatus').textContent = state.coopId!==window.ProposalTenant.mainId&&state.documentIssuer?.legacy
+        ? '이전 서식의 저장본을 유지합니다. 현재 조합 정보로 새로 작성하려면 「새 대상지 추가」를 선택해 주세요.'
+        : '제안 조합: '+String(state.documentIssuer?.name||'조합명 확인 필요');
       if (applyPending) commitPendingOverlayLabels();
       const html = buildPreviewDocument(model);
       state.previewFields = collectFields();
       state.formPending = false;
       saveDraft();
       state.manualDirty = state.loadedCopyEdits.length > 0;
-      setStatus('제안서 미리보기를 다시 만들고 있습니다.');
+      setStatus(state.coopId!==window.ProposalTenant.mainId&&state.documentIssuer?.legacy?'이전 서식의 저장본을 유지합니다. 현재 조합 정보로 새로 작성하려면 「새 대상지 추가」를 선택해 주세요.':'제안서 미리보기를 다시 만들고 있습니다.');
       state.resolvePreviewReady?.();
       state.previewReady = new Promise((resolve) => {
         state.resolvePreviewReady = resolve;
@@ -1229,7 +1234,7 @@
       draft[id] = input.type === 'checkbox' ? input.checked : input.hasAttribute('data-number-group') ? ERPNumberInput.raw(input.value) : input.value;
     });
     try {
-      localStorage.setItem(state.draftKey, JSON.stringify({ ...draft, useSamplePhoto: state.useSamplePhoto }));
+      localStorage.setItem(state.draftKey, JSON.stringify({ ...draft, useSamplePhoto: state.useSamplePhoto, proposalIssuer: state.documentIssuer }));
     } catch (error) {
       console.warn(`[proposal-builder ${VERSION}] draft save skipped`, error);
     }
@@ -1443,7 +1448,7 @@
       .map((node) => ({ index: Number(node.dataset.copyId), baseText: node.dataset.copyBase, text: node.innerText }))
       .filter(isSubstantiveCopyEdit);
     if (copyEdits.length > 400 || copyEdits.some((edit) => edit.text.length > 20000)) throw new Error('직접 수정한 문구가 저장 가능한 길이를 넘었습니다. 문장을 나누거나 길이를 줄여 주세요.');
-    return { format: 1, builderVersion: VERSION, fields: collectFields(),
+    return { format: 1, builderVersion: VERSION, issuer: state.documentIssuer, fields: collectFields(),
       photo: state.siteImageDataUrl, photoName: state.photoName,
       useSamplePhoto: state.useSamplePhoto, photoAspectRatio: state.photoAspectRatio,
       overlays: structuredClone(state.customOverlays), copyEdits };
@@ -1451,6 +1456,7 @@
 
   async function restoreSnapshot(snapshot) {
     if (snapshot?.format !== 1 || !snapshot.fields || typeof snapshot.fields !== 'object') throw new Error('지원하지 않는 제안서 저장 형식입니다.');
+    const issuer = window.ProposalTenant.restored(snapshot.issuer,state.coopId,state.issuer);
     const photo = typeof snapshot.photo === 'string' ? snapshot.photo : '';
     if (photo && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(photo) || photo.length > 17 * 1024 * 1024)) throw new Error('저장된 사진 형식을 확인할 수 없습니다.');
     if (photo) { const image = new Image(); image.src = photo; await image.decode(); }
@@ -1464,6 +1470,7 @@
       .filter(isSubstantiveCopyEdit)
       .slice(0, 400);
     state.documentEpoch = (state.documentEpoch || 0) + 1;
+    state.documentIssuer = issuer;
     window.clearTimeout(state.renderTimer); state.renderTimer = 0;
     state.imageSequence += 1;
     state.imageLoadError = null; state.imageLoadPromise = Promise.resolve();
@@ -1490,7 +1497,7 @@
   async function startSite(preset) {
     const fields = { ...collectFields(), ...(preset?.fields || window.ProposalPresets.blank()), visitCompanionsJson: '[]', visitDirector: '', visitDirectorPhone: '' };
     if (!fields.facilityName) fields.facilityName = '새 대상지';
-    await restoreSnapshot({ format: 1, fields, photo: '', overlays: [], copyEdits: [], useSamplePhoto: false });
+    await restoreSnapshot({ format: 1, issuer: state.issuer, fields, photo: '', overlays: [], copyEdits: [], useSamplePhoto: false });
     await refreshCoopStats();
     document.getElementById('facilityName').focus();
   }
@@ -1500,6 +1507,7 @@
       const legacy = /^(www\.)?yonginsolar\.kr$/.test(location.hostname) ? localStorage.getItem(DRAFT_KEY) : null;
       const draft = JSON.parse(localStorage.getItem(state.draftKey) || legacy || 'null');
       if (!draft || typeof draft !== 'object') return;
+      state.documentIssuer = window.ProposalTenant.restored(draft.proposalIssuer,state.coopId,state.issuer);
       state.useSamplePhoto = draft.useSamplePhoto ?? (draft.facilityName === '남사읍행정복지센터');
       setFields(draft);
       return true;
@@ -1521,7 +1529,8 @@
     const facility = String(facilityName || '').normalize('NFC')
       .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').trim() || '대상 시설';
     // Keep the requested spaces; the PDF printer adds the .pdf extension.
-    return `태양광 발전사업제안서_${facility}_용인모두의햇빛협동조합`;
+    const issuer = String(state.documentIssuer?.name || '').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g,'_');
+    return `태양광 발전사업제안서_${facility}_${issuer || '조합명 확인 필요'}`;
   }
 
   function dataUrlFromBlob(blob) {
@@ -1714,11 +1723,14 @@
   }
 
   async function resetSample() {
-    if (!(await window.CoopDialog.confirm('입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?'))) return;
+    const own = state.coopId !== window.ProposalTenant.mainId;
+    if (!(await window.CoopDialog.confirm(own?'입력값과 직접 수정한 문구를 지우고 새 제안서로 돌아갈까요?':'입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?'))) return;
     await state.library.resetLocally(async () => {
     el.form.reset();
+    state.documentIssuer = state.issuer;
+    if(own)window.ProposalTenant.initializeForm(document,state.issuer,window.ProposalPresets.blank());
     state.documentEpoch = (state.documentEpoch || 0) + 1;
-    state.useSamplePhoto = true;
+    state.useSamplePhoto = !own;
     setVisitCompanions([]);
     invalidateDirectorContact('동행 이사를 체크하면 등록된 연락처를 불러옵니다.');
     state.photoName = '';
@@ -1736,7 +1748,7 @@
     state.manualDirty = false;
     state.formPending = false;
     el.siteImage.value = '';
-    el.siteImageName.textContent = '남사읍 예시 위성사진 사용 중';
+    el.siteImageName.textContent = own?'대상지 사진 미등록':'남사읍 예시 위성사진 사용 중';
     syncExistingInstallationUi();
     updateOverlayControls();
     (await renderPreview());
@@ -1869,7 +1881,7 @@
         error.code = 'ERP_RUNTIME_GUARD_UNAVAILABLE';
         throw error;
       }
-      if (!window.ProposalPresets || !window.ProposalLibrary || !window.ProposalSections || !window.ProposalDrafts) throw new Error('PROPOSAL_LIBRARY_SCRIPT_UNAVAILABLE');
+      if (!window.ProposalPresets || !window.ProposalLibrary || !window.ProposalSections || !window.ProposalDrafts || !window.ProposalTenant) throw new Error('PROPOSAL_LIBRARY_SCRIPT_UNAVAILABLE');
       const client = getClient();
       el.bootMessage.textContent = 'ERP 로그인 상태를 확인하고 있습니다.';
       const userGate = await withTimeout(window.ErpRuntimeGuard.requireUser(client, {
@@ -1896,6 +1908,12 @@
       }
 
       state.coopId = String(userGate.user.coop_id || '').trim();
+      state.issuer = await withTimeout(window.ProposalTenant.load(client,state.coopId),'COOP_IDENTITY');
+      if(attempt!==state.bootAttempt)return;
+      state.documentIssuer = state.issuer;
+      window.ProposalPresets = window.ProposalTenant.presets(window.ProposalPresets,state.issuer);
+      window.ProposalTenant.initializeForm(document,state.issuer,window.ProposalPresets.blank());
+      if(state.coopId!==window.ProposalTenant.mainId)state.useSamplePhoto=false;
 
       el.bootMessage.textContent = '제안서 원본을 불러오고 있습니다.';
       const response = await withTimeout(fetch(TEMPLATE_URL, { credentials: 'same-origin', cache: 'no-store' }), 'TEMPLATE');

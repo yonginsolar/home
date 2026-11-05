@@ -6,6 +6,8 @@
     const drafts = new Map(), attempts = new Map(), reads = new Map(), createBaselines = new Map(), failedSelections = new Map();
     let epoch = 0, displayed = null, confirmation = null, createBusy = false, paymentBusy = false, createRevision = 0;
     let paymentReady = '', exportCache = null;
+    let observedActor = String(adminCertificateAuthId || ''), observedOwner = '';
+    const saveRevisions = new Map();
     const el = id => document.getElementById(id);
     const owner = () => adminCertificateAuthId && g_adminMemberRuntime?.coop_id && g_adminMemberRuntime.is_active !== false
         && canAccessAdminMemberTab('funds-manage') && !isAdminMemberSiteProfile()
@@ -13,7 +15,7 @@
     const pane = mode => el('sub-tab-dividend-' + (mode === 'manage' ? 'batches' : 'exports'));
     const active = mode => !!owner() && !window.frameElement?.hidden && el('tab-funds-manage')?.classList.contains('active') && pane(mode)?.classList.contains('active');
     const selected = mode => String((mode === 'manage' ? g_dividend_batch_state : g_dividend_export_state).selectedBatchId || '');
-    const context = (mode, batch = selected(mode)) => ({owner:owner(),epoch,mode,batch});
+    const context = (mode, batch = selected(mode)) => { const o=owner(); if(o)observedOwner=o; return {owner:o,epoch,mode,batch}; };
     const current = c => !!c?.owner && c.owner === owner() && c.epoch === epoch && active(c.mode) && (!c.batch || c.batch === selected(c.mode));
     const values = ids => Object.fromEntries(ids.map(id => [id, el(id)?.type === 'checkbox' ? el(id).checked : el(id)?.value || '']));
     const key = (o,b) => JSON.stringify([o,b]);
@@ -54,7 +56,15 @@
             event.preventDefault(); event.returnValue = '';
         }
     });
-    _supabase.auth?.onAuthStateChange?.((event) => { if (event === 'SIGNED_OUT' || event === 'SIGNED_IN') invalidate(); });
+    _supabase.auth?.onAuthStateChange?.((event,session) => {
+        if(event==='SIGNED_OUT'){observedActor='';observedOwner='';invalidate();return;}
+        if(event==='SIGNED_IN'){
+            const actor=String(session?.user?.id||'');
+            const same=!!actor&&actor===observedActor&&actor===String(adminCertificateAuthId||'')&&!!owner()&&owner()===observedOwner;
+            observedActor=actor;
+            if(!same){observedOwner='';invalidate();}
+        }
+    });
     if (window.frameElement) new MutationObserver(records => {
         if (window.frameElement.hidden || records.some(r => r.oldValue === null)) invalidate();
     }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
@@ -335,7 +345,14 @@
     window.DividendWorkflow = Object.freeze({invalidate,current,context,remember,confirmOnce,
         paymentCurrent:() => active('export') && paymentReady === selected('export') && !paymentBusy,
         paymentLock:value => { paymentBusy = value; },
-        saved:(id,snapshot) => { const d = drafts.get(key(owner(),id)); if (d) for (const field of Object.keys(snapshot)) d.baseline[field] = snapshot[field]; },
+        saveStarted:(c,id) => { if(!current(c))return null;remember();const k=key(c.owner,id),revision=(saveRevisions.get(k)||0)+1;saveRevisions.set(k,revision);return {owner:c.owner,batch:id,key:k,revision}; },
+        saved:(id,snapshot,attempt) => {
+            if(!attempt||attempt.batch!==id||saveRevisions.get(attempt.key)!==attempt.revision)return;
+            if(displayed?.owner===attempt.owner&&displayed.batch===id&&owner()===attempt.owner)remember();
+            const d=drafts.get(attempt.key);if(!d)return;
+            for(const field of Object.keys(snapshot))if(draftIds.includes(field))d.baseline[field]=snapshot[field];
+            if(displayed?.owner===attempt.owner&&displayed.batch===id&&current(context('manage',id)))status('dividendDraftStatus',JSON.stringify(d.value)!==JSON.stringify(d.baseline)?'저장하지 않은 입력을 이어서 작성 중입니다.':'');
+        },
         hasDraft:() => { remember(); return [...drafts.values()].some(d => d.owner === owner() && JSON.stringify(d.value) !== JSON.stringify(d.baseline)); }});
     const fileJobs = new Map();
     for (const name of ['downloadDividendBankTransferXlsx','downloadDividendTaxLedgerXlsx','downloadDividendHometaxPaymentStatementCsv','downloadDividendWithholdingSummaryCsv']) {

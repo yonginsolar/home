@@ -9,9 +9,9 @@
       ? m.visitCompanions.filter((entry) => entry && typeof entry === 'object' && String(entry.name || '').trim()).slice(0, 24)
       : (m.visitDirector ? [{ kind: 'director', name: m.visitDirector, phone: m.visitDirectorPhone }] : []);
     const people = [
-      ['이사장', '김민정', m.chairPhone],
+      ['이사장', m.issuer && !m.issuer.legacy ? (m.issuer.chairName || '이사장 확인 필요') : '김민정', m.chairPhone],
       ...companions.map((entry) => [entry.kind === 'director' ? '이사' : '동행', String(entry.name || '').trim(), String(entry.phone || '').trim()]),
-      ['사무국장', '김민호', m.officePhone]
+      [m.issuer && !m.issuer.legacy ? '담당자' : '사무국장', m.issuer && !m.issuer.legacy ? (m.issuer.contactName || '담당자 확인 필요') : '김민호', m.officePhone]
     ];
     const org = doc.createElement('b'); org.className = 'contact-org'; org.textContent = orgName;
     const location = doc.createElement('span'); location.className = 'contact-address'; location.textContent = address;

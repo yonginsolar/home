@@ -83,7 +83,8 @@
       const { data, error } = await request(hooks.client.from(TABLE).select(COLUMNS).eq('coop_id', hooks.coopId).order('updated_at', { ascending: false }).limit(200));
       if (error) throw error;
       rows = data || []; available = true; options();
-      say(`저장한 제안서 ${rows.length}개 · 공공기관 3곳 · 학교 4곳. 사진과 최종 수정 문구도 함께 보관합니다.`);
+      const presets=window.ProposalPresets.items;
+      say(`저장한 제안서 ${rows.length}개${presets.length?` · 공공기관 ${presets.filter(p=>p.fields.facilityType==='public').length}곳 · 학교 ${presets.filter(p=>p.fields.facilityType==='school').length}곳`:''}. 사진과 최종 수정 문구도 함께 보관합니다.`);
     }
     async function run(action) {
       if (busy) return;
