@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.120 | Change: 2026-11-05 - Bind physical rejection to its document and recover current template reads. -->
+<!-- Version: v1.2.121 | Change: 2026-11-05 - Recover reopened rejection controls and early template Escape. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.120 | approval.html');</script>
+  <script>console.log('[Version] v1.2.121 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8974,6 +8974,16 @@ function bindApprovalLegacyDialogs() {
     ['approvalTemplateModal','physicalRejectModal'].forEach(id => document.getElementById(id)?.addEventListener('click', event => {
         if (event.target.closest('[data-bs-dismiss="modal"]')) closeApprovalLegacyDialogs();
     }));
+    const templateModal = document.getElementById('approvalTemplateModal');
+    templateModal?.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented
+            || !templateModal.classList.contains('show') || event.target.closest('.modal') !== templateModal) return;
+        const dialog = event.target.closest('dialog,[role="dialog"]');
+        if (dialog && dialog !== templateModal) return;
+        event.preventDefault();
+        invalidateApprovalTemplateRead();
+        hideApprovalLegacyModal(approvalTemplateModalInstance, 'approvalTemplateModal');
+    });
     window.addEventListener('pagehide', closeApprovalLegacyDialogs);
     if (window.frameElement) new MutationObserver(closeApprovalLegacyDialogs)
         .observe(window.frameElement, {attributes:true,attributeFilter:['hidden']});
@@ -16097,7 +16107,8 @@ async function submitPhysicalReject() {
     } finally {
         op.busy = false;
         if (op.phase !== 'unknown' && physicalRejectRequests.get(op.key) === op) physicalRejectRequests.delete(op.key);
-        if (current()) syncPhysicalRejectButton(view);
+        const currentView = physicalRejectView;
+        if (currentView?.key === op.key && isPhysicalRejectViewCurrent(currentView)) syncPhysicalRejectButton(currentView);
     }
 }
 
