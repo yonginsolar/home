@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.119 | Change: 2026-11-05 - Preserve in-flight draft attachments and withholding read failure notice. -->
+<!-- Version: v1.2.120 | Change: 2026-11-05 - Bind physical rejection to its document and recover current template reads. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.119 | approval.html');</script>
+  <script>console.log('[Version] v1.2.120 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1564,7 +1564,7 @@
 <div class="modal fade" id="cancelDraftModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">🗑️ 상신 취소</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted fw-bold mb-2">취소 사유</label><textarea id="cancelDraftReason" class="form-control" rows="4" placeholder="취소 사유를 입력하세요."></textarea></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-danger btn-sm" id="btnCancelDraftSubmit" onclick="submitDraftCancel()">취소 확정</button></div></div></div></div>
 <div class="modal fade" id="evidenceUploadModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">📁 증빙제출</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label class="small text-muted fw-bold mb-2">증빙 파일</label><input type="file" id="evidenceDocInput" class="form-control" multiple accept=".pdf,.png,.jpg,.jpeg"><div class="small text-muted mt-2">업로드는 PDF 또는 이미지(PNG, JPG, JPEG) 파일만 가능합니다. 파일당 최대 10MB.</div></div><div><label class="small text-muted fw-bold mb-2">제출 메모</label><textarea id="evidenceNote" class="form-control" rows="3" placeholder="필요한 설명이 있으면 입력하세요."></textarea></div></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary btn-sm" id="btnEvidenceUploadSubmit" onclick="submitEvidenceUpload()">제출하기</button></div></div></div></div>
 <div class="modal fade" id="appDescPreviewModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-xl"><div class="modal-content"><div class="modal-header bg-light"><div><h6 class="modal-title fw-bold mb-1" id="appDescPreviewTitle">본문 미리보기</h6><div class="small text-muted" id="appDescPreviewMeta">HTML 렌더링 결과</div></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="appDescPreviewBody" class="html-preview-box"></div></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
-<div class="modal fade" id="approvalTemplateModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><div class="modal-header bg-light"><div><h6 class="modal-title fw-bold mb-1">지난 양식 선택</h6><div class="small text-muted" id="approvalTemplateMeta">불러오는 중...</div></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="list-group" id="approvalTemplateList" style="max-height:420px; overflow-y:auto;"></div></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary btn-sm" id="btnApplyApprovalTemplate" onclick="applySelectedApprovalTemplate()">양식 적용</button></div></div></div></div>
+<div class="modal fade" id="approvalTemplateModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><div class="modal-header bg-light"><div><h6 class="modal-title fw-bold mb-1">지난 양식 선택</h6><div class="small text-muted" id="approvalTemplateMeta" role="status">불러오는 중...</div></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="list-group" id="approvalTemplateList" style="max-height:420px; overflow-y:auto;"></div></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-outline-primary btn-sm" id="btnRetryApprovalTemplate" onclick="openApprovalTemplatePicker()" hidden>다시 확인</button><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary btn-sm" id="btnApplyApprovalTemplate" onclick="applySelectedApprovalTemplate()" disabled>양식 적용</button></div></div></div></div>
 <div class="modal fade" id="approvalDraftModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header bg-light"><div><h6 class="modal-title fw-bold mb-1">서버 임시저장</h6><div class="small text-muted" id="approvalDraftMeta">최대 10개까지 저장할 수 있습니다.</div></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="approvalDraftList"></div></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
 <div class="modal fade" id="attachmentPreviewModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-xl"><div class="modal-content"><div class="modal-header bg-light"><div><h6 class="modal-title fw-bold mb-1" id="attachmentPreviewTitle">첨부파일 바로보기</h6><div class="small text-muted" id="attachmentPreviewMeta">PDF와 이미지를 웹에서 바로 볼 수 있습니다.</div></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="attachmentPreviewBody" class="attachment-preview-box d-flex align-items-center justify-content-center text-muted">미리볼 파일을 불러오는 중입니다.</div></div><div class="modal-footer p-2 border-0"><a class="btn btn-outline-secondary btn-sm hidden" id="attachmentPreviewDownload" href="#" target="_blank" rel="noopener noreferrer">새 창 열기</a><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
 <div class="modal fade" id="delegationModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold">🧭 결재 위임 설정</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" id="delegationEnabled" checked><label class="form-check-label fw-bold" for="delegationEnabled">위임 활성화</label></div><div class="mb-2"><label class="small text-muted fw-bold">위임 대상</label><select class="form-select" id="delegationTarget"><option value="">선택하세요</option></select></div><div class="row g-2"><div class="col-6"><label class="small text-muted fw-bold">시작</label><input type="datetime-local" class="form-control" id="delegationStart"></div><div class="col-6"><label class="small text-muted fw-bold">종료</label><input type="datetime-local" class="form-control" id="delegationEnd"></div></div><div class="mt-2"><label class="small text-muted fw-bold">사유</label><textarea class="form-control" id="delegationReason" rows="3" placeholder="예: 연차 휴가 기간 대결재"></textarea></div><div class="small text-muted mt-2" id="delegationInfoText"></div></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="disableDelegationSettings()">위임 해제</button><button type="button" class="btn btn-primary btn-sm" id="btnSaveDelegation" onclick="saveDelegationSettings()">저장</button></div></div></div></div>
@@ -1653,6 +1653,10 @@ let attachmentPreviewModalInstance = null;
 let delegationModalInstance = null;
 let approvalTemplateCandidates = [];
 let approvalTemplateSelectedId = '';
+let approvalTemplateRead = null, approvalTemplateReadyContext = null, approvalTemplateGeneration = 0;
+let physicalRejectView = null;
+const physicalRejectRequests = new Map(), physicalRejectMemos = new Map();
+const approvalLegacyClosingFocus = new WeakMap();
 let approvalEditorMode = 'html';
 const approvalMobileEditorMedia = window.matchMedia('(max-width: 991.98px)');
 let approvalMobileCompact = approvalMobileEditorMedia.matches;
@@ -8898,6 +8902,83 @@ function mapApprovalDocTypeToMainCategory(docType) {
     return raw;
 }
 
+function waitApprovalLegacyRead(query, controller) {
+    let timer, onAbort;
+    const pending = new Promise((resolve, reject) => {
+        onAbort = () => reject(Object.assign(new Error('조회가 중단됐습니다.'), {code:'APPROVAL_READ_CANCELLED'}));
+        controller.signal.addEventListener('abort', onAbort, {once:true});
+        if (controller.signal.aborted) return onAbort();
+        timer = setTimeout(() => {
+            reject(Object.assign(new Error('조회 시간이 길어지고 있습니다. 다시 확인해 주세요.'), {code:'APPROVAL_READ_TIMEOUT'}));
+            controller.abort();
+        }, 15000);
+        Promise.resolve(query.abortSignal ? query.abortSignal(controller.signal) : query).then(resolve, reject);
+    });
+    return pending.finally(() => {clearTimeout(timer);controller.signal.removeEventListener('abort', onAbort);});
+}
+
+function isApprovalTemplateContextCurrent(context) {
+    return !!context && context.generation === approvalTemplateGeneration && context.owner === approvalSubmitOwner()
+        && context.epoch === approvalDraftComposerEpoch && context.form === document.getElementById('draftForm')
+        && context.category === getCurrentApprovalCategory() && context.permission === canPerform('approval.submit')
+        && !!myInfo?.emp_id && activeApprovalTab === 'draft' && !window.frameElement?.hidden
+        && document.getElementById('approvalTemplateModal')?.classList.contains('show');
+}
+
+function invalidateApprovalTemplateRead() {
+    approvalTemplateGeneration++;
+    const read = approvalTemplateRead;
+    approvalTemplateRead = null;
+    approvalTemplateReadyContext = null;
+    approvalTemplateCandidates = [];
+    approvalTemplateSelectedId = '';
+    read?.controller.abort();
+    const applyBtn = document.getElementById('btnApplyApprovalTemplate');
+    if (applyBtn) applyBtn.disabled = true;
+}
+
+function hideApprovalLegacyModal(instance, id) {
+    if (!instance) return;
+    const modal = document.getElementById(id), generation = approvalTemplateGeneration, view = physicalRejectView;
+    const ownsClose = () => id === 'approvalTemplateModal' ? generation === approvalTemplateGeneration : view === physicalRejectView;
+    // Pinned Bootstrap5.3 ignores hide() during its opening transition. Suppress only
+    // that obsolete instance's delayed autofocus, then restore its original config.
+    if (modal?.classList.contains('show') && instance._isTransitioning && instance._config) {
+        const prior = approvalLegacyClosingFocus.get(instance);
+        if (prior) prior.current = ownsClose;
+        else {
+            const closing = {focus:instance._config.focus,current:ownsClose};
+            approvalLegacyClosingFocus.set(instance, closing);
+            instance._config.focus = false;
+            modal.addEventListener('shown.bs.modal', () => {
+                approvalLegacyClosingFocus.delete(instance);
+                instance._config.focus = closing.focus;
+                if (closing.current()) instance.hide();
+                else if (closing.focus) instance._focustrap?.activate();
+            }, {once:true});
+        }
+    }
+    instance.hide();
+}
+
+function closeApprovalLegacyDialogs() {
+    invalidateApprovalTemplateRead();
+    hideApprovalLegacyModal(approvalTemplateModalInstance, 'approvalTemplateModal');
+    preservePhysicalRejectMemo();
+    physicalRejectView = null;
+    pendingPhysicalRejectDocId = null;
+    hideApprovalLegacyModal(physicalRejectModalInstance, 'physicalRejectModal');
+}
+
+function bindApprovalLegacyDialogs() {
+    ['approvalTemplateModal','physicalRejectModal'].forEach(id => document.getElementById(id)?.addEventListener('click', event => {
+        if (event.target.closest('[data-bs-dismiss="modal"]')) closeApprovalLegacyDialogs();
+    }));
+    window.addEventListener('pagehide', closeApprovalLegacyDialogs);
+    if (window.frameElement) new MutationObserver(closeApprovalLegacyDialogs)
+        .observe(window.frameElement, {attributes:true,attributeFilter:['hidden']});
+}
+
 function renderApprovalTemplateList() {
     const listEl = document.getElementById('approvalTemplateList');
     const applyBtn = document.getElementById('btnApplyApprovalTemplate');
@@ -8921,6 +9002,7 @@ function renderApprovalTemplateList() {
         item.type = 'button';
         item.className = `list-group-item list-group-item-action${isSelected ? ' active' : ''}`;
         item.addEventListener('click', () => {
+            if (!isApprovalTemplateContextCurrent(approvalTemplateReadyContext) || approvalTemplateRead) return;
             approvalTemplateSelectedId = idKey;
             renderApprovalTemplateList();
         });
@@ -8955,27 +9037,33 @@ async function openApprovalTemplatePicker() {
         return;
     }
     if (!approvalTemplateModalInstance) return;
-
+    if (approvalTemplateRead && isApprovalTemplateContextCurrent(approvalTemplateRead.context)) return approvalTemplateRead.promise;
+    if (activeApprovalTab !== 'draft' || window.frameElement?.hidden) return;
+    invalidateApprovalTemplateRead();
     const currentCategory = getCurrentApprovalCategory();
+    const context = {generation:approvalTemplateGeneration, owner:approvalSubmitOwner(), epoch:approvalDraftComposerEpoch,
+        category:currentCategory, form:document.getElementById('draftForm'), permission:canPerform('approval.submit')};
+    const read = {context,controller:new AbortController()};
+    approvalTemplateRead = read;
     const metaEl = document.getElementById('approvalTemplateMeta');
     const listEl = document.getElementById('approvalTemplateList');
+    const retryBtn = document.getElementById('btnRetryApprovalTemplate');
     if (metaEl) metaEl.textContent = '불러오는 중...';
     if (listEl) listEl.innerHTML = '<div class="text-center text-muted py-4">불러오는 중...</div>';
+    if (retryBtn) {retryBtn.setAttribute('aria-busy','true');retryBtn.textContent='불러오는 중…';}
     approvalTemplateModalInstance.show();
-
-    const { data, error } = await _supabase
+    const current = () => approvalTemplateRead === read && isApprovalTemplateContextCurrent(context);
+    read.promise = (async () => {
+    try {
+    const { data, error } = await waitApprovalLegacyRead(_supabase
         .from('ref_approval')
         .select('id, doc_type, title, content, created_at, receiver, via')
         .eq('coop_id', getApprovalScopedCoopId())
         .eq('drafter_id', myInfo.emp_id)
         .order('created_at', { ascending: false })
-        .limit(120);
-    if (error) {
-        if (metaEl) metaEl.textContent = '';
-        if (listEl) listEl.innerHTML = '';
-        showAlert('양식 조회 실패: ' + error.message);
-        return;
-    }
+        .limit(120), read.controller);
+    if (!current()) return false;
+    if (error) throw error;
 
     const allCandidates = (Array.isArray(data) ? data : []).filter(row => String(row?.content || '').trim());
     const sameCategory = allCandidates.filter(row => mapApprovalDocTypeToMainCategory(row?.doc_type) === currentCategory);
@@ -8987,10 +9075,33 @@ async function openApprovalTemplatePicker() {
         else if (sameCategory.length > 0) metaEl.textContent = `${currentCategory} 양식 ${sameCategory.length}건`;
         else metaEl.textContent = `${currentCategory} 양식이 없어 전체 ${allCandidates.length}건을 표시합니다.`;
     }
+    approvalTemplateReadyContext = context;
     renderApprovalTemplateList();
+    if (retryBtn) retryBtn.hidden = true;
+    return true;
+    } catch (error) {
+        if (!current()) return false;
+        approvalTemplateReadyContext = null;
+        const status = Number(error?.status || error?.statusCode || 0);
+        if (metaEl) metaEl.textContent = status === 403 || error?.code === '42501'
+            ? '현재 권한으로 양식을 조회할 수 없습니다.' : status === 429
+                ? '요청이 많습니다. 잠시 후 다시 확인해 주세요.' : error?.code === 'APPROVAL_READ_TIMEOUT'
+                    ? error.message : '양식을 불러오지 못했습니다. 다시 확인해 주세요.';
+        if (listEl) listEl.textContent = '';
+        if (retryBtn) retryBtn.hidden = false;
+        return false;
+    } finally {
+        if (approvalTemplateRead === read) {
+            approvalTemplateRead = null;
+            if (retryBtn) {retryBtn.setAttribute('aria-busy','false');retryBtn.textContent='다시 확인';}
+        }
+    }
+    })();
+    return read.promise;
 }
 
 function applySelectedApprovalTemplate() {
+    if (approvalTemplateRead || !isApprovalTemplateContextCurrent(approvalTemplateReadyContext)) return;
     const selected = approvalTemplateCandidates.find(row => String(row?.id || '') === String(approvalTemplateSelectedId));
     if (!selected) {
         showAlert('양식을 먼저 선택하세요.');
@@ -9029,7 +9140,7 @@ function applySelectedApprovalTemplate() {
         }
     }
 
-    approvalTemplateModalInstance.hide();
+    hideApprovalLegacyModal(approvalTemplateModalInstance, 'approvalTemplateModal');
     showAlert(`양식을 불러왔습니다.\n제목: ${selected.title || '제목 없음'}`);
 }
 
@@ -9826,6 +9937,7 @@ window.onload = async function() {
     evidenceUploadModalInstance = new bootstrap.Modal(document.getElementById('evidenceUploadModal'));
     appDescPreviewModalInstance = new bootstrap.Modal(document.getElementById('appDescPreviewModal'));
     approvalTemplateModalInstance = new bootstrap.Modal(document.getElementById('approvalTemplateModal'));
+    bindApprovalLegacyDialogs();
     approvalDraftModalInstance = new bootstrap.Modal(document.getElementById('approvalDraftModal'));
     attachmentPreviewModalInstance = new bootstrap.Modal(attachmentPreviewModalEl);
     delegationModalInstance = new bootstrap.Modal(document.getElementById('delegationModal'));
@@ -9942,7 +10054,17 @@ window.onload = async function() {
 
     const physicalRejectEl = document.getElementById('physicalRejectModal');
     if (physicalRejectEl) {
+        physicalRejectEl.addEventListener('shown.bs.modal', () => {
+            if (isPhysicalRejectViewCurrent(physicalRejectView) && document.activeElement === physicalRejectEl)
+                document.getElementById('physicalRejectReason')?.focus();
+        });
+        physicalRejectEl.addEventListener('hide.bs.modal', () => {
+            preservePhysicalRejectMemo();
+            physicalRejectView = null;
+            pendingPhysicalRejectDocId = null;
+        });
         physicalRejectEl.addEventListener('hidden.bs.modal', () => {
+            if (physicalRejectEl.classList.contains('show')) return;
             pendingPhysicalRejectDocId = null;
             const reasonEl = document.getElementById('physicalRejectReason');
             if (reasonEl) reasonEl.value = '';
@@ -9975,7 +10097,9 @@ window.onload = async function() {
     }
     const approvalTemplateEl = document.getElementById('approvalTemplateModal');
     if (approvalTemplateEl) {
+        approvalTemplateEl.addEventListener('hide.bs.modal', invalidateApprovalTemplateRead);
         approvalTemplateEl.addEventListener('hidden.bs.modal', () => {
+            if (approvalTemplateEl.classList.contains('show')) return;
             approvalTemplateCandidates = [];
             approvalTemplateSelectedId = '';
             const listEl = document.getElementById('approvalTemplateList');
@@ -11426,6 +11550,7 @@ function decorateTodoDelegation(doc) {
 
 function switchTab(tab, options = {}) {
     if(activeApprovalTab !== String(tab || 'draft').trim()){
+        closeApprovalLegacyDialogs();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
         approvalComposerInputRevision++;approvalRelViewRevision++;invalidateApprovalSubmitPreview();
     }
@@ -11687,6 +11812,7 @@ function prepareApprovalCategoryBodyChange(previousType, nextType) {
 // [수정] 카테고리 변경 핸들러 (반차 UI 제어 포함)
 // [수정] 카테고리 변경 핸들러 (관련 문서 UI 제어 추가)
 function handleCategoryChange() {
+    closeApprovalLegacyDialogs();
     invalidateApprovalWithholdingRead('조회 기준이 바뀌었습니다. 다시 확인해 주세요.');
     window.ServiceContractApproval?.categoryChanged(document.getElementById('appCategory')?.value);
     syncApprovalExpenseDateUi();
@@ -15837,84 +15963,142 @@ function startPhysicalComplete(docId) {
     input.click();
 }
 
+function preservePhysicalRejectMemo() {
+    const view = physicalRejectView;
+    if (view && view.owner === getApprovalActionOwner()) physicalRejectMemos.set(view.key, document.getElementById('physicalRejectReason')?.value || '');
+}
+
+function isPhysicalRejectViewCurrent(view) {
+    return !!view && physicalRejectView === view && view.owner === getApprovalActionOwner()
+        && canPerform('approval.physical') && !window.frameElement?.hidden
+        && document.getElementById('physicalRejectModal')?.classList.contains('show');
+}
+
+function syncPhysicalRejectButton(view = physicalRejectView) {
+    if (!view || physicalRejectView !== view || view.owner !== getApprovalActionOwner()) return;
+    const op = physicalRejectRequests.get(view.key), button = document.getElementById('btnPhysicalRejectSubmit');
+    if (button) {
+        button.disabled = !!op?.busy;
+        button.textContent = op?.busy ? '처리 중…' : op ? '처리 결과 확인' : '반려 처리';
+    }
+}
+
+function physicalRejectLineFingerprint(value) {
+    const normalize = item => Array.isArray(item) ? item.map(normalize) : item && typeof item === 'object'
+        ? Object.fromEntries(Object.keys(item).sort().map(key => [key,normalize(item[key])])) : item;
+    return JSON.stringify(normalize(value));
+}
+
 function startPhysicalReject(docId) {
     if (!canPerform('approval.physical')) return showAlert("처리 권한이 없습니다.");
-    pendingPhysicalRejectDocId = docId;
+    const id = Number(docId), owner = getApprovalActionOwner();
+    if (!Number.isSafeInteger(id) || id <= 0 || !owner || window.frameElement?.hidden) return;
+    preservePhysicalRejectMemo();
+    const view = {docId:id,owner,coopId:getApprovalScopedCoopId(),key:JSON.stringify([owner,id])};
+    physicalRejectView = view;
+    pendingPhysicalRejectDocId = id;
     const reasonEl = document.getElementById('physicalRejectReason');
-    if (reasonEl) reasonEl.value = '';
+    if (reasonEl) reasonEl.value = physicalRejectMemos.get(view.key) || '';
+    syncPhysicalRejectButton(view);
     if (physicalRejectModalInstance) {
         physicalRejectModalInstance.show();
-        setTimeout(() => reasonEl?.focus(), 120);
+        setTimeout(() => {if (isPhysicalRejectViewCurrent(view) && document.activeElement?.closest('#physicalRejectModal')) reasonEl?.focus();}, 120);
     }
 }
 
 async function submitPhysicalReject() {
     if (!canPerform('approval.physical')) return showAlert("처리 권한이 없습니다.");
-    if (!pendingPhysicalRejectDocId) return;
-
+    const view = physicalRejectView;
+    if (!isPhysicalRejectViewCurrent(view)) return;
+    const prior = physicalRejectRequests.get(view.key);
+    if (prior?.busy) return;
     const reasonEl = document.getElementById('physicalRejectReason');
-    const reason = String(reasonEl?.value || '').trim();
+    const reason = prior?.reason || String(reasonEl?.value || '').trim();
     if (!reason) return showAlert("반려 사유를 입력하세요.");
-
-    const submitBtn = document.getElementById('btnPhysicalRejectSubmit');
-    if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.textContent = "처리 중...";
-    }
-
-    const { data: doc, error: docErr } = await scopeApprovalTenant(_supabase
-        .from('ref_approval')
-        .select('id, status, approval_line, title, drafter_id'))
-        .eq('id', pendingPhysicalRejectDocId)
-        .single();
-
-    if (docErr || !doc) {
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.textContent = "반려 처리";
+    preservePhysicalRejectMemo();
+    const op = prior || {docId:view.docId,owner:view.owner,coopId:view.coopId,key:view.key,reason,phase:'reading'};
+    op.busy = true;
+    physicalRejectRequests.set(op.key, op);
+    syncPhysicalRejectButton(view);
+    const sameActor = () => op.owner === getApprovalActionOwner() && canPerform('approval.physical');
+    const current = () => isPhysicalRejectViewCurrent(view);
+    const readDoc = async () => {
+        const result = await waitApprovalLegacyRead(_supabase.from('ref_approval')
+            .select('id,status,approval_line,title,drafter_id,processed_at')
+            .eq('coop_id',op.coopId).eq('id',op.docId).single(), new AbortController());
+        if (result.error) throw result.error;
+        if (!result.data || Number(result.data.id) !== op.docId) throw new Error('PHYSICAL_DOCUMENT_UNAVAILABLE');
+        return result.data;
+    };
+    try {
+        let doc = await readDoc();
+        if (!sameActor()) return;
+        if (!prior) {
+            if (!current()) return;
+            if (doc.status !== '실물결재대기') {
+                showAlert('이미 처리되었거나 실물결재 대기 상태가 아닙니다. 목록을 다시 확인해 주세요.');
+                return;
+            }
+            op.doc = doc;
+            op.stamp = new Date().toISOString();
+            op.line = (Array.isArray(doc.approval_line) ? doc.approval_line : []).map(l => (l.position || '').includes('이사장')
+                ? {...l,status:'반려',processed_at:op.stamp,comment:op.reason} : l);
+            // Once dispatched, an uncertain response must never become a new UPDATE on retry.
+            op.phase = 'unknown';
+            const result = await waitApprovalLegacyRead(_supabase.from('ref_approval').update({
+                status:'반려',approval_line:op.line,current_approver:null,processed_at:op.stamp
+            }).eq('coop_id',op.coopId).eq('id',op.docId).eq('status','실물결재대기').select('id'), new AbortController());
+            if (result.error) {
+                const status = Number(result.status || result.error.status || 0);
+                const code = String(result.error.code || '');
+                if ((status >= 400 && status < 500 && status !== 408) || /^[0-9A-Z]{5}$/.test(code) || code.startsWith('PGRST')) {
+                    op.phase = 'failed';
+                    op.permissionDenied = status === 401 || status === 403 || code === '42501';
+                }
+                throw result.error;
+            }
+            if (!sameActor()) return;
+            doc = await readDoc();
+            if (!sameActor()) return;
         }
-        return showAlert("문서를 찾을 수 없습니다.");
-    }
-    if (doc.status !== '실물결재대기') {
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.textContent = "반려 처리";
+        const verified = doc.status === '반려' && Date.parse(doc.processed_at) === Date.parse(op.stamp)
+            && physicalRejectLineFingerprint(doc.approval_line) === physicalRejectLineFingerprint(op.line);
+        if (!verified) {
+            if (doc.status !== '실물결재대기') op.phase = 'settled';
+            if (current()) showAlert(doc.status === '실물결재대기'
+                ? '아직 반려 결과를 확인하지 못했습니다. 잠시 후 처리 결과 확인을 눌러 주세요.'
+                : '다른 처리 결과가 확인되었습니다. 목록을 다시 확인해 주세요.');
+            return;
         }
-        return showAlert("실물결재 대기 상태에서만 반려할 수 있습니다.");
-    }
-
-    const nowIso = new Date().toISOString();
-    let line = Array.isArray(doc.approval_line) ? doc.approval_line : [];
-    line = line.map(l => {
-        if ((l.position || '').includes('이사장')) {
-            return { ...l, status: '반려', processed_at: nowIso, comment: reason };
+        op.phase = 'settled';
+        if (!op.postProcessed) {
+            op.postProcessed = true;
+            await logAudit('approval.physical_reject', op.docId, '실물결재 반려', {reason:op.reason});
+            if (sameActor() && op.doc?.drafter_id && op.doc.drafter_id !== myInfo?.emp_id) {
+                await createNotification(op.doc.drafter_id, '실물결재 반려', `${op.doc.title || '문서'} 실물결재가 반려되었습니다.`,
+                    `approval.html?doc=${op.docId}`, {doc_id:op.docId,reason:op.reason});
+            }
         }
-        return l;
-    });
-
-    const { error: updateErr } = await scopeApprovalTenant(_supabase.from('ref_approval').update({
-        status: '반려',
-        approval_line: line,
-        current_approver: null,
-        processed_at: nowIso
-    })).eq('id', pendingPhysicalRejectDocId);
-
-    if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = "반려 처리";
+        if (physicalRejectMemos.get(op.key)?.trim() === op.reason) physicalRejectMemos.delete(op.key);
+        if (current()) {
+            if (String(reasonEl?.value || '').trim() === op.reason) {
+                if (reasonEl) reasonEl.value = '';
+                hideApprovalLegacyModal(physicalRejectModalInstance, 'physicalRejectModal');
+            }
+            showAlert('실물결재가 반려되었습니다.');
+            loadHistoryList();
+        }
+    } catch (error) {
+        if (current()) showAlert(op.phase === 'unknown'
+            ? '반려 결과를 아직 확인하지 못했습니다. 처리 결과 확인으로 확인해 주세요.'
+            : op.phase === 'settled' ? '반려는 완료됐지만 후속 안내를 마치지 못했습니다. 목록을 다시 확인해 주세요.'
+                : op.permissionDenied ? '현재 권한으로 반려 처리할 수 없습니다. 입력은 유지했습니다.'
+                : '문서 상태를 불러오지 못했습니다. 입력을 유지했으니 다시 확인해 주세요.');
+    } finally {
+        op.busy = false;
+        if (op.phase !== 'unknown' && physicalRejectRequests.get(op.key) === op) physicalRejectRequests.delete(op.key);
+        if (current()) syncPhysicalRejectButton(view);
     }
-    if (updateErr) return showAlert("실물결재 반려 처리 실패: " + updateErr.message);
-
-    await logAudit('approval.physical_reject', pendingPhysicalRejectDocId, '실물결재 반려', { reason });
-    if (doc?.drafter_id && doc.drafter_id !== myInfo?.emp_id) {
-        await createNotification(doc.drafter_id, '실물결재 반려', `${doc.title || '문서'} 실물결재가 반려되었습니다.`, `approval.html?doc=${pendingPhysicalRejectDocId}`, { doc_id: pendingPhysicalRejectDocId, reason });
-    }
-
-    if (physicalRejectModalInstance) physicalRejectModalInstance.hide();
-    pendingPhysicalRejectDocId = null;
-    if (reasonEl) reasonEl.value = '';
-    showAlert("실물결재가 반려되었습니다.");
-    loadHistoryList();
 }
 
 document.getElementById('signedDocInput').addEventListener('change', async (e) => {
