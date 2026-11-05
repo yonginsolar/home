@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.118 | Change: 2026-11-05 - Scoped recoverable withholding reads and reconciled payment evidence. -->
+<!-- Version: v1.2.119 | Change: 2026-11-05 - Preserve in-flight draft attachments and withholding read failure notice. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.118 | approval.html');</script>
+  <script>console.log('[Version] v1.2.119 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1619,6 +1619,7 @@ let approvalDraftCache = [];
 let currentApprovalDraftId = null;
 let approvalInsuranceNoticeReader = null, approvalInsuranceNoticeEpoch = 0;
 let approvalDraftSavedState = '', approvalDraftSaving = false, approvalDraftLastSaveFailed = false, approvalDraftSaveUncertain = false;
+let approvalDraftComposerEpoch = 0;
 let currentApprovalDraftUpdatedAt = '';
 let approvalDraftAttachmentRefs = [];
 let approvalAttachmentOrder = [];
@@ -3158,11 +3159,11 @@ function isApprovalComposerDirty() {
     });
 } // End of isApprovalComposerDirty
 
-function getApprovalDraftStatusState(payload = collectApprovalDraftFormPayload()) {
-    return JSON.stringify([payload, approvalDraftAttachmentRefs.map(item => item.rawRef || item.raw_ref || '')]);
+function getApprovalDraftStatusState(payload = collectApprovalDraftFormPayload(), attachments = approvalDraftAttachmentRefs) {
+    return JSON.stringify([payload, attachments.map(item => item.rawRef || item.raw_ref || '')]);
 }
-function rememberApprovalDraftStatusState(payload = collectApprovalDraftFormPayload()) {
-    approvalDraftSavedState = getApprovalDraftStatusState(payload);
+function rememberApprovalDraftStatusState(payload = collectApprovalDraftFormPayload(), attachments = approvalDraftAttachmentRefs) {
+    approvalDraftSavedState = getApprovalDraftStatusState(payload, attachments);
     approvalDraftLastSaveFailed = false;
     approvalDraftSaveUncertain = false;
 }
@@ -3266,7 +3267,7 @@ async function openApprovalDraftManager() {
     }
 } // End of openApprovalDraftManager
 
-async function persistApprovalDraftRecord(draftId, payload, attachmentItems) {
+async function persistApprovalDraftRecord(draftId, payload, attachmentItems, options = {}) {
     const normalizedAttachments = (Array.isArray(attachmentItems) ? attachmentItems : approvalDraftAttachmentRefs)
         .map((item) => normalizeApprovalDraftAttachmentItem(item))
         .filter(Boolean);
@@ -3288,6 +3289,7 @@ async function persistApprovalDraftRecord(draftId, payload, attachmentItems) {
     if (!savedDraft?.id) {
         throw new Error('APPROVAL_DRAFT_SAVE_FAILED');
     }
+    if (options.applySaved === false) return savedDraft;
     currentApprovalDraftId = Number(savedDraft.id);
     currentApprovalDraftUpdatedAt = savedDraft.updated_at || savedDraft.created_at || '';
     approvalDraftAttachmentRefs = (Array.isArray(savedDraft.attachment_links) ? savedDraft.attachment_links : normalizedAttachments)
@@ -3398,6 +3400,7 @@ async function prepareApprovalSubmitAttachments(prefix = '') {
 }
 
 function resetApprovalComposerForm(options = {}) {
+    approvalDraftComposerEpoch++;
     invalidateApprovalWithholdingRead();
     if(approvalSubmitPreviewState)relViewModal?.hide();
     if (window.CoopInsuranceNotice) {
@@ -3845,10 +3848,39 @@ async function loadApprovalDraftFromServer(draftId) {
     }
 } // End of loadApprovalDraftFromServer
 
+function reconcileApprovalDraftSavedAttachments(submitted, submittedItems, savedItems) {
+    const current = getApprovalOrderedAttachmentDescriptors();
+    const confirmed = new Map(savedItems.map(item => [item.rawRef, item]));
+    const replacements = new Map(submitted.map((descriptor,index) => [descriptor.id,
+        confirmed.get(normalizeApprovalDraftAttachmentItem(submittedItems[index])?.rawRef)]));
+    const next = current.map(descriptor => {
+        const saved = replacements.get(descriptor.id);
+        return saved ? {kind:'saved',item:saved} : descriptor;
+    });
+    const localFiles = next.filter(descriptor => descriptor.kind === 'local').map(descriptor => descriptor.file);
+    const input = document.getElementById('attachFile');
+    // Only confirmed files leave the local selection;new File objects keep their identity.
+    if (input) {
+        if (localFiles.length) input.files = buildAttachmentFileTransfer(localFiles).files;
+        else input.value = '';
+    }
+    approvalDraftAttachmentRefs = next.filter(descriptor => descriptor.kind === 'saved').map(descriptor => descriptor.item);
+    const rebuilt = buildApprovalAttachmentDescriptors();
+    const savedQueue = rebuilt.filter(descriptor => descriptor.kind === 'saved');
+    approvalAttachmentOrder = next.map(descriptor => descriptor.kind === 'saved'
+        ? savedQueue.shift()?.id : rebuilt.find(item => item.kind === 'local' && item.file === descriptor.file)?.id).filter(Boolean);
+} // End of reconcileApprovalDraftSavedAttachments
+
 async function saveApprovalDraft() {
     if (approvalDraftSaving) return;
     if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) return showAlert('권한 받을 사람·업무 권한을 선택하고 기존 결재선에서 결재자를 지정한 뒤 상신해 주세요.');
     if (!canPerform('approval.submit')) return showAlert('임시저장 권한이 없습니다.');
+    const context = {actor:approvalSubmitActor(),form:document.getElementById('draftForm'),
+        epoch:approvalDraftComposerEpoch,draftId:Number(currentApprovalDraftId || 0) || null,type:getCurrentDraftMainType()};
+    const current = () => context.actor === approvalSubmitActor() && context.form === document.getElementById('draftForm')
+        && context.epoch === approvalDraftComposerEpoch && context.draftId === (Number(currentApprovalDraftId || 0) || null)
+        && context.type === getCurrentDraftMainType() && canPerform('approval.submit');
+    const visible = () => current() && activeApprovalTab === 'draft' && !window.frameElement?.hidden;
     approvalDraftSaving = true; approvalDraftLastSaveFailed = false; approvalDraftSaveUncertain = false;
     syncApprovalDraftStatusText();
     const saveBtn = document.getElementById('btnSaveApprovalDraft');
@@ -3875,13 +3907,15 @@ async function saveApprovalDraft() {
 
     try {
         const latestDrafts = await fetchApprovalDraftList();
+        if (!current()) return;
         if (!currentApprovalDraftId && latestDrafts.length >= APPROVAL_DRAFT_LIMIT) {
+            if (!visible()) return;
             const openManager = await showConfirm(`임시저장은 최대 ${APPROVAL_DRAFT_LIMIT}개까지 저장할 수 있습니다.\n기존 초안 1개를 삭제한 뒤 다시 저장하세요.`, {
                 title: '임시저장 한도',
                 okText: '저장함 열기',
                 okClass: 'btn-primary'
             });
-            if (openManager) await openApprovalDraftManager();
+            if (openManager && visible()) await openApprovalDraftManager();
             return;
         }
 
@@ -3893,8 +3927,12 @@ async function saveApprovalDraft() {
 
         if (!draftId) {
             initialSaveStarted = true;
-            await persistApprovalDraftRecord(null, payload, mergedAttachments);
-            draftId = Number(currentApprovalDraftId || 0) || null;
+            const initialSaved = await persistApprovalDraftRecord(null, payload, mergedAttachments, {applySaved:false});
+            if (!current()) return;
+            draftId = Number(initialSaved.id || 0) || null;
+            currentApprovalDraftId = draftId;
+            context.draftId = draftId;
+            currentApprovalDraftUpdatedAt = initialSaved.updated_at || initialSaved.created_at || '';
         }
 
         if (!draftId) {
@@ -3903,6 +3941,7 @@ async function saveApprovalDraft() {
 
         if (pendingFiles.length > 0) {
             newlyUploadedAttachments = await uploadApprovalDraftAttachments(draftId, pendingFiles);
+            if (!current()) return;
             let uploadedIndex = 0;
             mergedAttachments = orderedAttachments.map((descriptor) => {
                 if (descriptor.kind === 'saved') return descriptor.item;
@@ -3913,25 +3952,32 @@ async function saveApprovalDraft() {
         }
 
         payload = collectApprovalDraftFormPayload();
+        if (!current()) return;
         finalSaveStarted = true;
-        await persistApprovalDraftRecord(draftId, payload, mergedAttachments);
+        const savedDraft = await persistApprovalDraftRecord(draftId, payload, mergedAttachments, {applySaved:false});
         finalSaveCompleted = true;
-        clearApprovalDraftLocalFiles();
-        resetApprovalAttachmentOrder();
+        if (!current()) return;
+        const savedItems = (Array.isArray(savedDraft.attachment_links) ? savedDraft.attachment_links : mergedAttachments)
+            .map(normalizeApprovalDraftAttachmentItem).filter(Boolean);
+        reconcileApprovalDraftSavedAttachments(orderedAttachments, mergedAttachments, savedItems);
+        currentApprovalDraftUpdatedAt = savedDraft.updated_at || savedDraft.created_at || '';
+        rememberApprovalDraftStatusState(payload, savedItems);
         updateFileList();
         await fetchApprovalDraftList();
+        if (!current()) return;
         renderApprovalDraftList();
-        showAlert(`임시저장되었습니다.\n제목: ${getApprovalDraftSummaryTitle(payload)}`);
+        if (visible()) showAlert(`임시저장되었습니다.\n제목: ${getApprovalDraftSummaryTitle(payload)}`);
     } catch (error) {
+        if (!current()) return;
         if (finalSaveCompleted) {
-            showAlert('임시저장은 완료됐지만 저장함 목록을 새로 불러오지 못했습니다. 저장함에서 다시 확인해 주세요.');
+            if (visible()) showAlert('임시저장은 완료됐지만 저장함 목록을 새로 불러오지 못했습니다. 저장함에서 다시 확인해 주세요.');
         } else if (finalSaveStarted || (initialSaveStarted && !currentApprovalDraftId)) {
             // A lost acknowledgement is not proof of a failed write. Preserve possible saved attachments.
             approvalDraftSaveUncertain = true;
-            showAlert('임시저장의 처리 결과를 확인하지 못했습니다. 작성 내용과 첨부는 유지했습니다. 다시 저장하기 전에 임시저장함을 확인해 주세요.');
+            if (visible()) showAlert('임시저장의 처리 결과를 확인하지 못했습니다. 작성 내용과 첨부는 유지했습니다. 다시 저장하기 전에 임시저장함을 확인해 주세요.');
         } else {
             approvalDraftLastSaveFailed = true;
-            showAlert(getApprovalDraftErrorMessage(error, '임시저장에 실패했습니다.'));
+            if (visible()) showAlert(getApprovalDraftErrorMessage(error, '임시저장에 실패했습니다.'));
         }
     } finally {
         approvalDraftSaving = false;
@@ -3991,6 +4037,7 @@ async function deleteApprovalDraft(draftId, options = {}) {
 } // End of deleteApprovalDraft
 
 async function removeSavedApprovalDraftAttachment(index) {
+    if (approvalDraftSaving) return showAlert('임시저장이 끝난 뒤 저장된 첨부를 삭제해 주세요.');
     const target = normalizeApprovalDraftAttachmentItem(approvalDraftAttachmentRefs[index]);
     if (!target) return;
     const ok = await showConfirm(`저장된 첨부를 삭제하시겠습니까?\n파일: ${target.displayName || '첨부파일'}`, {
@@ -3999,6 +4046,7 @@ async function removeSavedApprovalDraftAttachment(index) {
         okClass: 'btn-danger'
     });
     if (!ok) return;
+    if (approvalDraftSaving) return showAlert('임시저장이 끝난 뒤 저장된 첨부를 삭제해 주세요.');
 
     try {
         await deleteDraftAttachmentObjects([target]);
@@ -6461,6 +6509,8 @@ function syncApprovalWithholdingExpenseTotal() {
         amountInput.readOnly = true;
         amountInput.dataset.withholdingAutoAmount = '1';
     }
+    // Editable totals may change,but unverified evidence must not replace the current failure notice.
+    if (!isApprovalWithholdingStateCurrent(state)) return;
     const paymentConfirmed = !!document.getElementById('withholdingPaymentConfirmed')?.checked;
     const duplicate = state.duplicate_doc;
     const summary = document.getElementById('withholdingSummary');
