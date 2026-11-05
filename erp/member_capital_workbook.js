@@ -1,4 +1,4 @@
-/* Integrated member/capital/bank workbook1.5.3. Original writers remain separately guarded. */
+/* Integrated member/capital/bank workbook1.5.4. Original writers remain separately guarded. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -865,6 +865,9 @@
             : e.hint || "입력이나 현재 상태를 다시 검사해 주세요.",
         };
         if (attempt.run !== run) return;
+        // The active status read owns the UI. Keep refusal evidence above, but
+        // let that read finish before offering a fresh check after settlement.
+        if (s.phase === "result_checking") return;
         if (!wasUncertain && !attempt.uncertain && refused && attempt.writes.size === 1) {
           s.attempt = null;
           s.phase = "needs_check";
@@ -1088,7 +1091,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!(state?.dirty||bankController?.hasUnsaved()) });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.5.3",
+    version: "1.5.4",
     create,
     parse,
     memberHeaders,
