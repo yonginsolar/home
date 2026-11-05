@@ -277,9 +277,9 @@ async function routeRequest(request,env){
     if((response.headers.get('content-type')||'').toLowerCase().includes('text/html'))return federationResponse(request,response);
     return response;
   }
-  // Keep the pinned SRI contract of already-open pre-recovery ERP tabs.
-  if(url.pathname==='/erp/member_capital_workbook.js'&&url.searchParams.get('v')==='1.5.1'&&['GET','HEAD'].includes(request.method)){
-    const target=new URL(request.url);target.pathname='/erp/member_capital_workbook_1_5_1_legacy.js';target.search='';
+  // Preserve both pinned SRI contracts without refreshing existing ERP drafts.
+  if(url.pathname==='/erp/member_capital_workbook.js'&&['1.5.1','1.5.2'].includes(url.searchParams.get('v'))&&['GET','HEAD'].includes(request.method)){
+    const target=new URL(request.url);target.pathname=url.searchParams.get('v')==='1.5.1'?'/erp/member_capital_workbook_1_5_1_legacy.js':'/erp/member_capital_workbook_1_5_2_legacy.js';target.search='';
     const response=await env.ASSETS.fetch(new Request(target,request));
     return p.passThrough?response:withProfileHeaders(response,p,noIndex(p,hostname,url.pathname),request.method==='HEAD');
   }

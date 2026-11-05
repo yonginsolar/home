@@ -1,4 +1,4 @@
-/* Integrated member/capital/bank workbook1.5.2. Original writers remain separately guarded. */
+/* Integrated member/capital/bank workbook1.5.3. Original writers remain separately guarded. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -794,6 +794,9 @@
             JSON.stringify({ ...s.data, expected: s.review.expected }),
           ),
           uncertain: false,
+          writes: new Set(),
+          writeRevision: 0,
+          refusal: null,
           memberCount: s.review.members.filter(r => r.eligible ?? r.status === "ready").length,
           paymentCount: s.review.payments.filter(r => r.eligible ?? r.status === "ready").length,
           emailClearedCount: s.review.members.filter(r => r.eligible === true && r.email_resolution === "personal_cleared").length,
@@ -826,6 +829,7 @@
       s.phase = "saving";
       attempt.retryable = false;
       const run = {}; attempt.run = run;
+      attempt.writes.add(run);
       s.message = "회원과 납입 내역을 등록하는 중입니다…";
       render();
       const progress = startProgress(s, attempt.uncertain);
@@ -852,8 +856,16 @@
         }
         resultNotice = await acceptResult(s, attempt, r, epoch);
       } catch (e) {
-        if (!same(s) || s.attempt !== attempt || attempt.run !== run) return;
-        if (!wasUncertain && !attempt.uncertain && ["22023", "PT409", "42501", "55000"].includes(e.code)) {
+        if (!same(s) || s.attempt !== attempt) return;
+        const refused = ["22023", "PT409", "42501", "55000"].includes(e.code);
+        if (refused) attempt.refusal = {
+          code: e.code,
+          message: e.code === '42501'
+            ? root.CapitalExcelImport.errorMessage(e,{action:'apply',subject:s.data.payments.length?'출자금':'조합원'})
+            : e.hint || "입력이나 현재 상태를 다시 검사해 주세요.",
+        };
+        if (attempt.run !== run) return;
+        if (!wasUncertain && !attempt.uncertain && refused && attempt.writes.size === 1) {
           s.attempt = null;
           s.phase = "needs_check";
           s.review = null;
@@ -861,12 +873,17 @@
             :e.hint || "입력이나 현재 상태를 다시 검사해 주세요.";
         } else {
           attempt.uncertain = true;
+          attempt.retryable = false;
           s.phase = "uncertain";
-          s.message = "등록 여부를 아직 확인하지 못했습니다. 입력·파일은 유지했어요. ‘등록 결과 확인’을 눌러 주세요.";
+          s.message = attempt.refusal
+            ? attempt.refusal.message + "\n‘등록 결과 확인’으로 앞선 요청의 처리 여부를 확인해 주세요."
+            : "등록 여부를 아직 확인하지 못했습니다. 입력·파일은 유지했어요. ‘등록 결과 확인’을 눌러 주세요.";
         }
         resultNotice = s.message;
         render();
       } finally {
+        attempt.writes.delete(run);
+        attempt.writeRevision++;
         clearTimeout(deadline);
         finishProgress(progress);
         if (registrationProgress && resultNotice && same(s) && s.epoch === epoch && allowed(s) && visible()) {
@@ -877,7 +894,9 @@
     async function checkResult(s) {
       const attempt = s.attempt;
       if (!attempt || !allowed(s) || !visible() || s.phase !== 'uncertain') return;
-      const epoch = s.epoch, run = {}; attempt.readRun = run; attempt.retryable = false;
+      const epoch = s.epoch, run = {}, writeRevision = attempt.writeRevision,
+        writesSettled = attempt.writes.size === 0;
+      attempt.readRun = run; attempt.retryable = false;
       s.phase = 'result_checking'; s.message = '처음 요청한 등록 결과를 확인하고 있습니다…'; render();
       const ctl = new AbortController(); s.ctl = ctl;
       let timer;
@@ -892,8 +911,22 @@
           const notice = await acceptResult(s,attempt,r,epoch);
           if (registrationProgress && same(s) && s.epoch === epoch && allowed(s) && visible()) await root.CoopDialog.alert(notice,{title:s.phase==='saved'?'등록 완료':'등록 결과'});
         } else if (r?.outcome === 'pending' || r?.outcome === 'not_found') {
-          s.phase = 'uncertain'; attempt.retryable = r.outcome === 'not_found';
-          s.message = attempt.retryable ? '아직 서버에 등록 결과가 없습니다. ‘같은 요청으로 등록’을 누르면 처음 요청한 내용으로만 이어갑니다. 이미 처리됐다면 중복 등록하지 않습니다.' : '서버에서 등록을 처리 중이거나 다른 등록 작업을 마무리하고 있습니다. 잠시 뒤 ‘등록 결과 확인’을 눌러 주세요.';
+          // A refusal cannot release an older unresolved dispatch. The result read
+          // must start and finish after every local same-key apply has settled.
+          const canRecheck = r.outcome === 'not_found' && attempt.refusal && writesSettled &&
+            attempt.writes.size === 0 && attempt.writeRevision === writeRevision;
+          if (canRecheck) {
+            s.attempt = null;
+            s.epoch++;
+            s.phase = 'needs_check';
+            s.review = null;
+            s.message = attempt.refusal.message + "\n앞선 요청은 등록되지 않았습니다. ‘다시 검사’를 눌러 현재 내역을 확인해 주세요.";
+          } else {
+            s.phase = 'uncertain'; attempt.retryable = r.outcome === 'not_found' && !attempt.refusal;
+            s.message = attempt.refusal
+              ? attempt.refusal.message + "\n앞선 요청의 처리가 아직 확인되지 않았습니다. 잠시 뒤 ‘등록 결과 확인’을 눌러 주세요."
+              : attempt.retryable ? '아직 서버에 등록 결과가 없습니다. ‘같은 요청으로 등록’을 누르면 처음 요청한 내용으로만 이어갑니다. 이미 처리됐다면 중복 등록하지 않습니다.' : '서버에서 등록을 처리 중이거나 다른 등록 작업을 마무리하고 있습니다. 잠시 뒤 ‘등록 결과 확인’을 눌러 주세요.';
+          }
           render();
         } else throw Error('UNCONFIRMED');
       } catch (e) {
@@ -1055,7 +1088,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!(state?.dirty||bankController?.hasUnsaved()) });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.5.2",
+    version: "1.5.3",
     create,
     parse,
     memberHeaders,
