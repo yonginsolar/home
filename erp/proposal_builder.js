@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.6';
+  const VERSION = '1.6.7';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -1156,7 +1156,7 @@
       const model = readModel();
       validateModel(model);
       document.getElementById('proposalIssuerStatus').textContent = state.coopId!==window.ProposalTenant.mainId&&state.documentIssuer?.legacy
-        ? '이전 서식의 저장본을 유지합니다. 현재 조합 정보로 새로 작성하려면 「새 대상지 추가」를 선택해 주세요.'
+        ? '이전 서식의 저장본을 유지합니다. 현재 조합 정보로 새로 작성하려면 「새 공공시설 추가」 또는 「새 학교 추가」를 선택해 주세요.'
         : '제안 조합: '+String(state.documentIssuer?.name||'조합명 확인 필요');
       if (applyPending) commitPendingOverlayLabels();
       const html = buildPreviewDocument(model);
@@ -1164,7 +1164,7 @@
       state.formPending = false;
       saveDraft();
       state.manualDirty = state.loadedCopyEdits.length > 0;
-      setStatus(state.coopId!==window.ProposalTenant.mainId&&state.documentIssuer?.legacy?'이전 서식의 저장본을 유지합니다. 현재 조합 정보로 새로 작성하려면 「새 대상지 추가」를 선택해 주세요.':'제안서 미리보기를 다시 만들고 있습니다.');
+      setStatus(state.coopId!==window.ProposalTenant.mainId&&state.documentIssuer?.legacy?'이전 서식의 저장본을 유지합니다. 현재 조합 정보로 새로 작성하려면 「새 공공시설 추가」 또는 「새 학교 추가」를 선택해 주세요.':'제안서 미리보기를 다시 만들고 있습니다.');
       state.resolvePreviewReady?.();
       state.previewReady = new Promise((resolve) => {
         state.resolvePreviewReady = resolve;
