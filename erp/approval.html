@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.116 | Change: 2026-11-05 - Aligned expense fields and clarified withholding month labels. -->
+<!-- Version: v1.2.117 | Change: 2026-11-05 - Distinguish withholding documents and align expense fields. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.116 | approval.html');</script>
+  <script>console.log('[Version] v1.2.117 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -6225,6 +6225,10 @@ async function findApprovalWithholdingDuplicate(paymentMonth, options = {}) {
         const snapshotMonth = String(row?.expense_snapshot?.withholding_tax?.payment_month || '').trim();
         // A recorded payment month takes precedence over unrelated months in the body.
         if (/^\d{4}-(0[1-9]|1[0-2])$/.test(snapshotMonth)) return snapshotMonth === safePaymentMonth;
+        const taxDocument = String(row?.doc_type || '').includes('(원천세)')
+            || row?.expense_snapshot?.expense_sub_type === '원천세'
+            || /원천세|근로소득세/u.test(String(row?.title || ''));
+        if (!taxDocument) return false;
         const merged = `${row?.title || ''} ${row?.content || ''}`;
         return /원천세|근로소득세/u.test(merged) && legacyMonthPattern.test(merged);
     }) || null;
