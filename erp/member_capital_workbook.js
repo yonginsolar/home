@@ -1,4 +1,4 @@
-/* Integrated member/capital/bank workbook1.5.1. Original writers remain separately guarded. */
+/* Integrated member/capital/bank workbook1.5.2. Original writers remain separately guarded. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -147,12 +147,12 @@
       opener,
       activeProgress = null, bankController=null, bankPane=null, bankOpening=null;
     const context = () => getContext() || {},
-      same = (s) => s === state && s.owner === context().owner,
+      same = (s) => s === state && s.owner === context().owner && s.coopId === context().coopId,
       allowed = (s) => same(s) && context().allowed === true,
       visible = () =>
         modal?.classList.contains("show") && !root.frameElement?.hidden;
     const locked = (s) =>
-        ["saving", "confirming", "uncertain"].includes(s?.phase),
+        ["saving", "confirming", "uncertain", "result_checking"].includes(s?.phase),
       el = (tag, value) => {
         const n = document.createElement(tag);
         if (value !== undefined) n.textContent = value;
@@ -198,6 +198,11 @@
       finishProgress();
       state.epoch++;
       state.ctl?.abort();
+      if (["saving", "result_checking"].includes(state.phase)) {
+        state.phase = "uncertain";
+        if (state.attempt) { state.attempt.uncertain = true; state.attempt.retryable = false; }
+        state.message = "등록 요청은 유지했습니다. 다시 열어 ‘등록 결과 확인’을 눌러 주세요.";
+      }
       if (state.phase === "reading") state.phase = "pending";
       if (state.phase === "checking") state.phase = "needs_check";
       if (state.phase === "confirming") {
@@ -534,7 +539,7 @@
       for(const b of modal.querySelectorAll('[data-sheet]')){b.disabled=!can||busy;b.setAttribute('aria-pressed',String(b.dataset.sheet===tab));}
       clear.hidden=false;check.hidden=false;modal.querySelector('[data-export]').hidden=false;
       submit.textContent =
-        s?.phase === "uncertain" ? "등록 결과 확인" : registrationProgress ? "등록" : "등록 가능한 묶음 등록";
+        s?.phase === "result_checking" ? "등록 결과 확인 중…" : s?.phase === "uncertain" ? (s.attempt?.retryable ? "같은 요청으로 등록" : "등록 결과 확인") : registrationProgress ? "등록" : "등록 가능한 묶음 등록";
       status.textContent = s?.message || "";
       const eligibleMembers = s?.review?.members.filter(r => r.eligible === true).length || 0;
       const eligiblePayments = s?.review?.payments.filter(r => r.eligible === true).length || 0;
@@ -611,14 +616,14 @@
         }
       }
     }
-    async function request(action, payload, key, signal, frozenMatch) {
+    async function request(action, payload, key, signal, frozenMatch, coopId = context().coopId) {
       const M=root.CapitalMemberMatching;
-      const matching=frozenMatch||(M?.needed('workbook',payload)?M.envelope(payload,state?.choices):null);
+      const matching=frozenMatch !== undefined ? frozenMatch : (M?.needed('workbook',payload)?M.envelope(payload,state?.choices):null);
       let q = matching?client.rpc('capital_member_matching_admin',{
-        p_action:action,p_coop_id:context().coopId,p_kind:'workbook',p_data:matching,p_request_key:key||null
+        p_action:action,p_coop_id:coopId,p_kind:'workbook',p_data:matching,p_request_key:key||null
       }):client.rpc("member_workbook_admin", {
         p_action: action,
-        p_coop_id: context().coopId,
+        p_coop_id: coopId,
         p_data: payload,
         p_request_key: key || null,
       });
@@ -780,9 +785,11 @@
         (!ready(s) && s.phase !== "uncertain")
       )
         return;
+      if (s.phase === "uncertain" && !s.attempt?.retryable) return checkResult(s);
       if (!s.attempt)
         s.attempt = {
           key: root.crypto.randomUUID(),
+          coopId: s.coopId,
           payload: JSON.parse(
             JSON.stringify({ ...s.data, expected: s.review.expected }),
           ),
@@ -795,16 +802,16 @@
         };
       const attempt = s.attempt,
         epoch = s.epoch, wasUncertain=attempt.uncertain, submitFocused=document.activeElement===submit;
-      if(!attempt.matchData&&root.CapitalMemberMatching?.needed('workbook',attempt.payload))attempt.matchData=root.CapitalMemberMatching.envelope(attempt.payload,s.choices);
+      if(attempt.matchData === undefined)attempt.matchData=root.CapitalMemberMatching?.needed('workbook',attempt.payload)?root.CapitalMemberMatching.envelope(attempt.payload,s.choices):null;
       s.phase = "confirming";
       render();
       const yes = await root.CoopDialog.confirm(
-        wasUncertain ? "이전 등록 결과를 확인하고, 아직 처리되지 않았다면 같은 요청으로 등록을 이어갈까요?" : (attempt.memberCount ? "신규 회원 " + attempt.memberCount + "명과 납입 " : "납입 ") +
+        wasUncertain ? "서버에서 아직 등록 결과가 확인되지 않았습니다. 처음 요청한 내용 그대로 다시 등록할까요? 앞선 요청이 처리됐다면 같은 결과를 확인하며 중복 등록하지 않습니다." : (attempt.memberCount ? "신규 회원 " + attempt.memberCount + "명과 납입 " : "납입 ") +
           attempt.paymentCount +
           "건을 등록할까요?" + (attempt.emailClearedCount ? "\n개인 " + attempt.emailClearedCount + "명의 중복 이메일은 빈칸으로 등록합니다." : "") + (attempt.managerLinkCount ? "\n단체 " + attempt.managerLinkCount + "건은 같은 이메일의 개인을 관리자로 연결하고 단체 이메일은 비워 둡니다." : "") + (attempt.hasUnresolved ? "\n확인할 묶음은 검토 목록에 남습니다." : ""),
-        { title: "회원·출자금 등록", confirmText: wasUncertain ? "확인 후 이어가기" : "등록" },
+        { title: "회원·출자금 등록", confirmText: wasUncertain ? "같은 요청으로 등록" : "등록" },
       );
-      if (!same(s) || s.epoch !== epoch || !allowed(s) || !visible()) return;
+      if (!same(s) || s.epoch !== epoch || s.attempt !== attempt || s.phase !== 'confirming' || !allowed(s) || !visible()) return;
       if (!yes) {
         s.phase = attempt.uncertain ? "uncertain" : "ready";
         if (!attempt.uncertain) s.attempt = null;
@@ -817,13 +824,24 @@
         return;
       }
       s.phase = "saving";
+      attempt.retryable = false;
+      const run = {}; attempt.run = run;
       s.message = "회원과 납입 내역을 등록하는 중입니다…";
       render();
       const progress = startProgress(s, attempt.uncertain);
       let resultNotice = null;
+      // UI deadline only. Never cancel a possibly committed write or create a new key.
+      const deadline = setTimeout(() => {
+        if (!same(s) || s.attempt !== attempt || attempt.run !== run || s.epoch !== epoch || s.phase !== 'saving') return;
+        attempt.uncertain = true;
+        s.phase = "uncertain";
+        s.message = "등록에 시간이 걸리고 있습니다. 파일과 검토 내용은 유지했어요. ‘등록 결과 확인’으로 처리 상태를 확인해 주세요. 창을 닫아도 이 요청은 유지됩니다.";
+        finishProgress(progress);
+        render();
+      }, Math.min(60000, 20000 + Math.ceil((attempt.memberCount + attempt.paymentCount) / 100) * 5000));
       try {
-        const r = await request("apply", attempt.payload, attempt.key,null,attempt.matchData);
-        if (!same(s)) return;
+        const r = await request("apply", attempt.payload, attempt.key,null,attempt.matchData,attempt.coopId);
+        if (!same(s) || s.attempt !== attempt) return;
         if (!allowed(s)) {
           attempt.uncertain = true;
           s.phase = "uncertain";
@@ -832,6 +850,60 @@
           render();
           return;
         }
+        resultNotice = await acceptResult(s, attempt, r, epoch);
+      } catch (e) {
+        if (!same(s) || s.attempt !== attempt || attempt.run !== run) return;
+        if (!wasUncertain && !attempt.uncertain && ["22023", "PT409", "42501", "55000"].includes(e.code)) {
+          s.attempt = null;
+          s.phase = "needs_check";
+          s.review = null;
+          s.message = e.code==='42501'?root.CapitalExcelImport.errorMessage(e,{action:'apply',subject:s.data.payments.length?'출자금':'조합원'})
+            :e.hint || "입력이나 현재 상태를 다시 검사해 주세요.";
+        } else {
+          attempt.uncertain = true;
+          s.phase = "uncertain";
+          s.message = "등록 여부를 아직 확인하지 못했습니다. 입력·파일은 유지했어요. ‘등록 결과 확인’을 눌러 주세요.";
+        }
+        resultNotice = s.message;
+        render();
+      } finally {
+        clearTimeout(deadline);
+        finishProgress(progress);
+        if (registrationProgress && resultNotice && same(s) && s.epoch === epoch && allowed(s) && visible()) {
+          await root.CoopDialog.alert(resultNotice, { title: s.phase === 'saved' ? '등록 완료' : s.phase === 'uncertain' ? '등록 여부 확인 필요' : '등록 결과' });
+        }
+      }
+    }
+    async function checkResult(s) {
+      const attempt = s.attempt;
+      if (!attempt || !allowed(s) || !visible() || s.phase !== 'uncertain') return;
+      const epoch = s.epoch, run = {}; attempt.readRun = run; attempt.retryable = false;
+      s.phase = 'result_checking'; s.message = '처음 요청한 등록 결과를 확인하고 있습니다…'; render();
+      const ctl = new AbortController(); s.ctl = ctl;
+      let timer;
+      const current = () => same(s) && s.attempt === attempt && attempt.readRun === run && s.epoch === epoch && allowed(s) && visible();
+      try {
+        const r = await Promise.race([
+          request('status',attempt.payload,attempt.key,ctl.signal,attempt.matchData,attempt.coopId),
+          new Promise((_,reject) => {timer=setTimeout(()=>{ctl.abort();reject(Error('RESULT_TIMEOUT'));},15000);})
+        ]);
+        if (!current()) return;
+        if (['saved','partial'].includes(r?.outcome)) {
+          const notice = await acceptResult(s,attempt,r,epoch);
+          if (registrationProgress && same(s) && s.epoch === epoch && allowed(s) && visible()) await root.CoopDialog.alert(notice,{title:s.phase==='saved'?'등록 완료':'등록 결과'});
+        } else if (r?.outcome === 'pending' || r?.outcome === 'not_found') {
+          s.phase = 'uncertain'; attempt.retryable = r.outcome === 'not_found';
+          s.message = attempt.retryable ? '아직 서버에 등록 결과가 없습니다. ‘같은 요청으로 등록’을 누르면 처음 요청한 내용으로만 이어갑니다. 이미 처리됐다면 중복 등록하지 않습니다.' : '서버에서 등록을 처리 중이거나 다른 등록 작업을 마무리하고 있습니다. 잠시 뒤 ‘등록 결과 확인’을 눌러 주세요.';
+          render();
+        } else throw Error('UNCONFIRMED');
+      } catch (e) {
+        if (!current()) return;
+        s.phase = 'uncertain';
+        s.message = e.code === '42501' ? '현재 권한으로는 등록 결과를 확인할 수 없습니다. 파일과 원래 요청은 유지했습니다. 권한 확인 후 다시 시도해 주세요.' : e.status === 429 || e.code === '429' ? '요청이 많아 결과를 확인하지 못했습니다. 잠시 뒤 다시 확인해 주세요. 새 등록 요청은 보내지 않았습니다.' : '등록 결과를 확인하지 못했습니다. 실패로 확정된 것은 아닙니다. 파일을 다시 올리지 말고 ‘등록 결과 확인’을 눌러 주세요.';
+        render();
+      } finally { clearTimeout(timer); }
+    }
+    async function acceptResult(s, attempt, r, epoch) {
         if (!["saved","partial"].includes(r?.outcome)) throw Error("UNCONFIRMED");
         const successes = {members:new Set(),payments:new Set()}, failures = {members:{},payments:{}}, existing = new Set(), skipped = {members:new Set(),payments:new Set()};
         for (const k of ["members","payments"]) {
@@ -847,6 +919,8 @@
           }
         }
         if (r.member_count !== successes.members.size || r.payment_count !== successes.payments.size || (r.member_existing_count ?? 0) !== existing.size || (r.member_skipped_count ?? 0) !== skipped.members.size || (r.payment_skipped_count ?? 0) !== skipped.payments.size) throw Error("UNCONFIRMED");
+        // Either same-key response may finish first; close only this workbook's current progress.
+        if (activeProgress?.state === s) finishProgress(activeProgress);
         for (const k of ["members","payments"]) s.data[k] = s.data[k].filter(row => !successes[k].has(row.row_no) && !skipped[k].has(row.row_no));
         // Keep strong member references with unresolved payments, without re-registering them.
         if (!s.data.payments.length) s.data.members = s.data.members.filter(row => !existing.has(row.row_no));
@@ -857,7 +931,7 @@
         s.failures = failures;
         s.dirty = remaining > 0 || (!!s.accounts?.length&&(!bankController||bankController.hasUnsaved()));
         s.message = "등록 완료: 회원 " + r.member_count + "명·납입 " + r.payment_count + "건" + (remaining ? " · 남은 " + remaining + "행은 내려받아 수정하거나 다시 검사해 주세요." : "");
-        resultNotice = (r.member_count || r.payment_count ? "회원 " + r.member_count + "명·납입 " + r.payment_count + "건을 등록했습니다." : "등록된 항목이 없습니다.") + (remaining ? "\n남은 " + remaining + "행은 검토 목록에서 확인해 주세요." : "");
+        const resultNotice = (r.member_count || r.payment_count ? "회원 " + r.member_count + "명·납입 " + r.payment_count + "건을 등록했습니다." : "등록된 항목이 없습니다.") + (remaining ? "\n남은 " + remaining + "행은 검토 목록에서 확인해 주세요." : "");
         bankController?.invalidate('회원·납입 처리 후 연결 대상을 다시 검사해 주세요. 새 회원은 등록이 확인된 뒤 계좌를 연결합니다.');
         if (!remaining && !s.accounts?.length) {
           file.value = "";
@@ -866,7 +940,7 @@
         }
         render();
         try {
-          if (!r.member_count && !r.payment_count) return;
+          if (!r.member_count && !r.payment_count) return resultNotice;
           if ((await refresh?.()) === false) throw Error("REFRESH");
         } catch (_) {
           if (same(s) && s.epoch === epoch && allowed(s) && visible()) {
@@ -874,28 +948,7 @@
             render();
           }
         }
-      } catch (e) {
-        if (!same(s)) return;
-        if (!wasUncertain && ["22023", "PT409", "42501", "55000"].includes(e.code)) {
-          s.attempt = null;
-          s.phase = "needs_check";
-          s.review = null;
-          s.message = e.code==='42501'?root.CapitalExcelImport.errorMessage(e,{action:'apply',subject:s.data.payments.length?'출자금':'조합원'})
-            :e.hint || "입력이나 현재 상태를 다시 검사해 주세요.";
-        } else {
-          attempt.uncertain = true;
-          s.phase = "uncertain";
-          s.message =
-            root.CapitalExcelImport.errorMessage(e,{action:'apply',uncertain:wasUncertain});
-        }
-        resultNotice = s.message;
-        render();
-      } finally {
-        finishProgress(progress);
-        if (registrationProgress && resultNotice && same(s) && s.epoch === epoch && allowed(s) && visible()) {
-          await root.CoopDialog.alert(resultNotice, { title: s.phase === 'saved' ? '등록 완료' : s.phase === 'uncertain' ? '등록 여부 확인 필요' : '등록 결과' });
-        }
-      }
+        return resultNotice;
     }
     async function template() {
       const s = state,
@@ -972,6 +1025,7 @@
       if (!state)
         state = {
           owner: c.owner,
+          coopId: c.coopId,
           epoch: 0,
           file: null,
           data: null,
@@ -1001,7 +1055,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!(state?.dirty||bankController?.hasUnsaved()) });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.5.1",
+    version: "1.5.2",
     create,
     parse,
     memberHeaders,
