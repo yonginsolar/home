@@ -48,7 +48,7 @@
     let epoch=0, ticket=null, pendingSave=null, editorOwner=null, lastStart='';
     let startMenu={values:[]}, activeMode='annual', snapshotRetry=null;
 
-    function datePicker(field,caption,availability,explain){
+    function datePicker(field,caption,availability,guidance){
       const wrapper=make('div','leave-date-picker'),trigger=button('날짜 선택','btn btn-outline-secondary');
       const panel=make('div','border rounded p-1 mt-1 hidden'),head=make('div','leave-date-month mb-1');
       const previous=button('‹'),next=button('›'),monthText=make('strong','small');
@@ -82,8 +82,7 @@
           const weekday=(firstDay+i)%7,kind=model.clock?.calendar?.has(date)?'holiday':weekday===0?'sunday':weekday===6?'saturday':'';
           return {date,kind,reason:availability(date,model)};
         });
-        const explanation=explain?.(model)||'';
-        const key=JSON.stringify([year,month,field.value,explanation,entries]);
+        const key=JSON.stringify([year,month,field.value,entries]);
         if(key===lastKey)return;
         lastKey=key;previous.disabled=month<=1;next.disabled=month>=12;months.value=String(month);
         monthText.textContent=`${year}년`;const current=doc.activeElement?.dataset.leaveDate;
@@ -106,8 +105,8 @@
         const enabled=buttons.filter(b=>!b.disabled),tab=enabled.find(b=>b.dataset.leaveDate===current)||enabled.find(b=>b.dataset.leaveDate===field.value)||enabled[0];
         if(tab)tab.tabIndex=0;
         if(current)(tab||months).focus();
-        hint.textContent=explanation||(enabled.length?'근무일만 고를 수 있어요. 이미 신청한 휴가와는 겹칠 수 없어요.'
-          :(entries.find(e=>e.reason.includes('확인'))?.reason||'이 달에 선택할 수 있는 날짜가 없어요.'));
+        hint.textContent=enabled.length?(guidance||'근무일만 고를 수 있어요. 이미 신청한 휴가와는 겹칠 수 없어요.')
+          :(entries.find(e=>e.reason.includes('확인'))?.reason||'이 달에 선택할 수 있는 날짜가 없어요.');
       }
       function turn(to){if(to<1||to>12)return;month=to;refresh();}
       trigger.addEventListener('click',()=>{
@@ -244,10 +243,8 @@
     clockStartPicker.show(true);clockEndPicker.show(true);
     const annualStartField=doc.getElementById('mixedLeaveStartDate'),annualEndField=doc.getElementById('mixedLeaveEndDate');
     const annualStartPicker=annualStartField?datePicker(annualStartField,'휴가 시작일',(date,m)=>annualDateReason(date,'start',m)):null;
-    const annualEndPicker=annualEndField?datePicker(annualEndField,'휴가 종료일',(date,m)=>annualDateReason(date,'end',m),m=>{
-      const date=firstAnnualConflict(m);
-      return date?`${Number(date.slice(5,7))}월 ${Number(date.slice(8))}일에 이미 신청한 휴가가 있어요. 그 날짜를 포함하는 기간은 선택할 수 없어요.`:'';
-    }):null;
+    const annualEndPicker=annualEndField?datePicker(annualEndField,'휴가 종료일',(date,m)=>annualDateReason(date,'end',m),
+      '기간 중 이미 신청한 휴가가 있는 날은 이번 신청에서 제외돼요.'):null;
 
     function updateWeek(){weekTitle.textContent=`근무 요일 · ${days.filter(el=>el.checked).map(el=>el.parentElement.textContent.trim()).join('·')||'선택 안 함'}`;}
     function workBreak(){
@@ -414,20 +411,17 @@
     }
     function annualCalendar(){
       syncOwner();const model=calendarModel();
-      return {error:calendarError(model),day:date=>workdayStatus(date,model)};
+      return {error:calendarError(model),day:date=>annualDayStatus(date,model)};
     }
-    function firstAnnualConflict(model){
-      const start=annualStartField?.value;
-      if(!start||calendarError(model))return '';
-      return model.annualConflict??=([...model.prior.keys()].filter(day=>day>=start&&!workdayStatus(day,model).reason).sort()[0]||'');
+    function annualDayStatus(date,model){
+      const day=workdayStatus(date,model);
+      if(day.reason||!model.prior.has(date))return day;
+      return {reason:'이미 신청한 휴가가 있는 날짜예요.',booked:true};
     }
     function annualDateReason(date,side,model){
-      const issue=calendarError(model)||workdayStatus(date,model).reason;
+      const issue=calendarError(model)||annualDayStatus(date,model).reason;
       if(issue)return issue;
       if(side==='end'&&annualStartField?.value&&date<annualStartField.value)return '종료일은 시작일보다 빠를 수 없어요.';
-      if(model.prior.has(date))return '이미 신청한 휴가가 있는 날짜예요.';
-      const conflict=side==='end'?firstAnnualConflict(model):'';
-      if(conflict&&conflict<date)return `${conflict}에 이미 신청한 휴가가 있어요.`;
       return '';
     }
     function clockDateReason(date,side,model){const menu=getClockMenu(date,side,model);return menu.values.length?'':menu.message||'선택할 수 있는 시간이 없어요.';}
@@ -536,7 +530,7 @@
       editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.5.0'};
+    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.5.1'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
