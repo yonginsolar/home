@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.126 | Change: 2026-11-06 - Keep clock selection during form readiness checks. -->
+<!-- Version: v1.2.127 | Change: 2026-11-06 - Exclude reserved leave dates and times. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.126 | approval.html');</script>
+  <script>console.log('[Version] v1.2.127 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -44,8 +44,8 @@
   <script src="approval_service_contract.js?v=1.0.0"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
-  <script src="leave_time.js?v=20261106-3"></script>
-  <script src="approval_annual_leave.js?v=20261106-4"></script>
+  <script src="leave_time.js?v=20261106-4"></script>
+  <script src="approval_annual_leave.js?v=20261106-5"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -81,6 +81,14 @@
     #approvalAnnualClock .leave-entry-pair { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap:.5rem; }
     #approvalAnnualClock :is(input,select,fieldset) { min-width:0; width:100%; }
     #approvalAnnualClock input[type=checkbox] { width:auto; }
+    #mixedDayArea .leave-date-picker{min-width:0}
+    #mixedDayArea .leave-date-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center}
+    #mixedDayArea .leave-date-grid button{min-width:0;min-height:42px;padding:.15rem;overflow-wrap:anywhere}
+    #mixedDayArea .leave-date-grid button:disabled{opacity:.42;text-decoration:line-through}
+    #mixedDayArea .leave-date-picker>button{width:100%;min-width:0;text-align:start}
+    #mixedDayArea .leave-date-month{display:flex;align-items:center;justify-content:space-between;gap:.25rem}
+    #mixedDayArea .leave-date-month select{width:auto;min-width:0;max-width:5.5rem}
+    @media(max-width:600px){#approvalAnnualClock .leave-entry-pair{grid-template-columns:1fr}}
     .approval-expense-choice, #divExpensePaymentMethod, #divExpenseCardSelect { display:flex; flex-direction:column; }
     .approval-expense-choice > label, #divExpensePaymentMethod > label, #divExpenseCardSelect > label { min-height:1.5rem; margin-bottom:.25rem; }
     .approval-expense-choice > .form-select, #divExpensePaymentMethod > .form-select, #divExpenseCardSelect > .form-select { min-height:31px; margin-top:auto; }
@@ -4522,6 +4530,7 @@ function getApprovalAnnualLeaveUi() {
     if(approvalAnnualLeaveUi||!window.CoopApprovalAnnualLeave)return approvalAnnualLeaveUi;
     approvalAnnualLeaveUi=window.CoopApprovalAnnualLeave.create({document,
         snapshot:()=>leaveSnapshotState?.approvalClockOwner===getApprovalLeaveClockOwnerKey()?leaveSnapshotState:null,
+        prior:()=>getApprovalLeavePriorItems(),
         client:()=>_supabase,
         owner:()=>{
             const coop=getApprovalCoopId(),own=String(myInfo?.emp_id||'');
@@ -4530,7 +4539,8 @@ function getApprovalAnnualLeaveUi() {
             return coop&&own&&emp?{key:JSON.stringify([coop,own,emp,proxy]),self:!proxy}:null;
         },
         loadClock:retry=>{void loadApprovalLeaveClockSchedule({retry});},
-        changed:()=>{if(getCurrentApprovalCategory()==='휴가'&&getApprovalAnnualMode()==='clock')calcLeaveDays();}
+        reloadSnapshot:()=>calculateLeave(),
+        changed:()=>{if(getCurrentApprovalCategory()==='휴가'&&getApprovalAnnualMode()!=='legacy')calcLeaveDays();}
     });
     return approvalAnnualLeaveUi;
 }
@@ -4573,7 +4583,11 @@ function syncApprovalAnnualModeUi() {
     document.getElementById('mixedLeaveDetailEditor').classList.toggle('hidden',!legacy||!isApprovalMixedLeaveDetailMode());
     document.getElementById('approvalLeaveTotalLabel').textContent=activeClock?'차감 시간:':'신청 일수:';
     syncApprovalMixedRangeUi();
-    if(activeClock&&getCurrentApprovalCategory()==='휴가')getApprovalAnnualLeaveUi()?.activate();
+    if(annual&&getCurrentApprovalCategory()==='휴가'){
+        const ui=getApprovalAnnualLeaveUi();
+        ui?.setMode?.(mode);
+        if(activeClock)ui?.activate();
+    }else approvalAnnualLeaveUi?.setMode?.('legacy');
 }
 
 document.getElementById('approvalAnnualModes')?.addEventListener('change',()=>{syncApprovalAnnualModeUi();calcLeaveDays();});
@@ -5215,9 +5229,10 @@ function getApprovalMixedLeaveSummary(options = {}) {
     return window.LeaveLedger?.getLeaveSnapshotItems&&typeof checkApprovalLeaveOverlap==='function'?checkApprovalLeaveOverlap(summary):summary;
 }
 
-function checkApprovalLeaveOverlap(summary){
-    if(!summary?.items?.length||!window.LeaveLedger||!isApprovalDeductibleLeaveType(getApprovalCurrentLeaveTypeConfig())
-        ||leaveSnapshotState?.approvalClockOwner!==getApprovalLeaveClockOwnerKey())return summary;
+const approvalLeavePriorCache=new WeakMap();
+function getApprovalLeavePriorItems(){
+    if(!window.LeaveLedger||!leaveSnapshotState||leaveSnapshotState.approvalClockOwner!==getApprovalLeaveClockOwnerKey())return [];
+    if(approvalLeavePriorCache.has(leaveSnapshotState))return approvalLeavePriorCache.get(leaveSnapshotState);
     const ledger=window.LeaveLedger,prior=[];
     for(const doc of [...(leaveSnapshotState.pendingDocs||[]),...(leaveSnapshotState.docs||[])]){
         if(!String(doc?.doc_type||'').startsWith('휴가(')||!ledger.isDeductibleLeaveDoc(doc))continue;
@@ -5229,12 +5244,21 @@ function checkApprovalLeaveOverlap(summary){
         const [first,last]=label.split(/[~～]/);
         const start=dateValue(range?.start_date||first)||ledger.getLeaveStartIso(doc),end=dateValue(range?.end_date||last)||start;
         if(!CoopLeaveTime.isDate(start)||!CoopLeaveTime.isDate(end)||end<start)continue;
-        for(const item of summary.items){
-            const d=item.leave_date;
-            if(d<start||d>end||(start!==end&&isApprovalWeekendIsoDate(d)))continue;
+        if((new Date(end+'T00:00:00Z')-new Date(start+'T00:00:00Z'))/86400000>366)continue;
+        for(const date=new Date(start+'T00:00:00Z');date.toISOString().slice(0,10)<=end;date.setUTCDate(date.getUTCDate()+1)){
+            const d=date.toISOString().slice(0,10);
+            if(start!==end&&isApprovalWeekendIsoDate(d))continue;
             prior.push({leave_date:d,slot:start===end&&Number(doc.amount)<=.5?(label.includes('오후')?'pm':label.includes('오전')?'am':'full'):'full'});
         }
     }
+    approvalLeavePriorCache.set(leaveSnapshotState,prior);
+    return prior;
+}
+
+function checkApprovalLeaveOverlap(summary){
+    if(!summary?.items?.length||!window.LeaveLedger||!isApprovalDeductibleLeaveType(getApprovalCurrentLeaveTypeConfig())
+        ||leaveSnapshotState?.approvalClockOwner!==getApprovalLeaveClockOwnerKey())return summary;
+    const prior=getApprovalLeavePriorItems();
     const overlap=CoopLeaveTime.overlappingLeave(summary.items,prior,{periods:leaveSnapshotState.clockSchedule?.periods||[]});
     if(!overlap)return summary;
     return {...summary,ok:false,errors:[`${overlap}에 이미 신청한 휴가와 시간이 겹쳐요. 결재 대기 중인 휴가도 포함돼요.`,...(summary.errors||[])]};
@@ -13083,7 +13107,7 @@ function captureApprovalSubmitSnapshot() {
     if(!isSunVillageApproval())draft.approval_line=[...(draft.approval_line||[])].sort((a,b)=>Number(b.auth_level||0)-Number(a.auth_level||0));
     return {owner:approvalSubmitOwner(),form,revision:approvalComposerInputRevision,
         fingerprint:JSON.stringify([draft,
-            Array.from(form?.querySelectorAll('input,select,textarea') || []).filter(n=>n.type!=='file').map(n=>[n.id,n.name,n.value,n.checked]),
+            Array.from(form?.querySelectorAll('input,select,textarea') || []).filter(n=>n.type!=='file'&&!n.hasAttribute('data-approval-ui-only')).map(n=>[n.id,n.name,n.value,n.checked]),
             descriptors.map(n=>[n.kind,n.id,n.item?.rawRef,n.item?.displayName]),window.ServiceContractApproval?.snapshot() || null]),
         files:descriptors.filter(n=>n.kind==='local').map(n=>n.file)};
 }
@@ -13451,6 +13475,7 @@ function calcLeaveDays() {
     if (isApprovalMixedDayLeaveType(leaveConfig)) {
         ensureApprovalLeaveMixedRows();
         const summary = getApprovalMixedLeaveSummary({ requireComplete: false });
+        if(isApprovalAnnualConfig(leaveConfig)&&getApprovalAnnualMode()==='annual')approvalAnnualLeaveUi?.refreshDates?.();
         document.getElementById("leaveDaysBadge").innerText = isApprovalAnnualConfig(leaveConfig)&&getApprovalAnnualMode()==='clock'
             ? window.CoopApprovalAnnualLeave.formatDeduction(Math.round(summary.totalDays*480)) : formatApprovalWorkDays(summary.totalDays);
         document.getElementById("leaveDaysCalc").value = summary.totalDays;

@@ -33,20 +33,23 @@
   const half=work.a+Math.floor((work.b-work.a-(pause.b-pause.a))/2);
   return half>=pause.a?half+pause.b-pause.a:half;
  }
- function overlappingLeave(items,prior,policy){
-  const normalizeSlot=v=>({오전:'am',오후:'pm',morning:'am',afternoon:'pm',am:'am',pm:'pm',hour:'hour'})[v]||'full';
-  function coverage(i,date){
-   const slot=normalizeSlot(i.slot||i.slot_label);
+ function leaveCoverage(i,date,policy){
+   const slot=({오전:'am',오후:'pm',morning:'am',afternoon:'pm',am:'am',pm:'pm',hour:'hour'})[i.slot||i.slot_label]||'full';
    if(slot==='hour'&&i.time_input_mode!=='hours'){const window=breakWindow(i.start_time,i.end_time);if(window)return [window.a,window.b];}
    if(slot==='am')return [0,halfBoundary(policy,date)];
    if(slot==='pm')return [halfBoundary(policy,date),1440];
    return [0,1440];
-  }
+ }
+ function kstClock(now=new Date()){
+  const p=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(now).map(i=>[i.type,i.value]));
+  return {date:`${p.year}-${p.month}-${p.day}`,minute:Number(p.hour)*60+Number(p.minute)};
+ }
+ function overlappingLeave(items,prior,policy){
   for(const next of items||[]){
-   const day=next.leave_date,[a,b]=coverage(next,day);
+   const day=next.leave_date,[a,b]=leaveCoverage(next,day,policy);
    for(const old of prior||[]){
     if(old.leave_date!==day)continue;
-    const [c,d]=coverage(old,day);if(a<d&&c<b)return day;
+    const [c,d]=leaveCoverage(old,day,policy);if(a<d&&c<b)return day;
    }
   }
   return '';
@@ -107,5 +110,5 @@
  function roundDays(value){return Math.round((Number(value)||0)*DAY)/DAY;}
  function formatDays(value,dayMinutes=DAY){const day=Number(dayMinutes)>0?Number(dayMinutes):DAY;let minutes=Math.round((Number(value)||0)*DAY),sign=minutes<0?'-':'';minutes=Math.abs(minutes);const days=Math.floor(minutes/day),hours=(minutes%day)/60;return sign+days+'일 '+Number(hours.toFixed(4))+'시간';}
  function hoursToMinutes(value,max=1440){const n=Number(value),minutes=Math.round(n*60);if(!Number.isFinite(n)||n<=0||Math.abs(n*60-minutes)>1e-7||minutes>max)throw Error('시간은 0보다 큰 값으로 입력해 주세요.');return minutes;}
- root.CoopLeaveTime=Object.freeze({hourItem,dayItem,basisMinutes,roundDays,formatDays,hoursToMinutes,yearOf,isDate,inYear,breakWindow,dateSchedule,scheduledRange,formatMinutes,clockLabel,defaultBreakMinutes,defaultSchedule:DEFAULT_SCHEDULE,overlappingLeave,dayMinutes:DAY,version:'1.3.0'});
+ root.CoopLeaveTime=Object.freeze({hourItem,dayItem,basisMinutes,roundDays,formatDays,hoursToMinutes,yearOf,isDate,inYear,breakWindow,dateSchedule,scheduledRange,formatMinutes,clockLabel,defaultBreakMinutes,defaultSchedule:DEFAULT_SCHEDULE,overlappingLeave,leaveCoverage,kstClock,dayMinutes:DAY,version:'1.3.1'});
 })(window);
