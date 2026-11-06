@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.130 | Change: 2026-11-06 - Skip booked workdays inside annual leave ranges. -->
+<!-- Version: v1.2.131 | Change: 2026-11-06 - Include the unbooked half of an annual leave day. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.130 | approval.html');</script>
+  <script>console.log('[Version] v1.2.131 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261106-4"></script>
-  <script src="approval_annual_leave.js?v=20261106-8"></script>
+  <script src="approval_annual_leave.js?v=20261106-9"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -84,6 +84,7 @@
     #mixedDayArea .leave-date-picker{min-width:0}
     #mixedDayArea .leave-date-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center}
     #mixedDayArea .leave-date-grid button{min-width:0;min-height:42px;padding:.15rem;overflow-wrap:anywhere}
+    #mixedDayArea .leave-date-grid .leave-date-half{display:block;font-size:.7em;font-weight:700;line-height:1.15;word-break:keep-all}
     #mixedDayArea .leave-date-grid button:disabled{opacity:.42}
     #mixedLeaveRangeEditor > .row:first-child:has(.leave-date-picker:not(.hidden)){align-items:flex-start!important}
     #mixedDayArea .leave-date-grid [data-leave-day=saturday]{color:var(--bs-primary-text-emphasis,#0a58ca)}
@@ -5186,6 +5187,7 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
     const errors = [];
     const items = [];
     const excludedBookedDays = [];
+    const includedHalfDays = [];
 
     if (!range.start_date || !range.end_date) {
         if (requireComplete) errors.push('휴가 시작일과 종료일을 입력하세요.');
@@ -5200,29 +5202,37 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
         return { inputMode: 'range', ok: false, items, totalDays: 0, totalHours: 0, errors, range };
     }
     const workCalendar=options.workCalendar;
+    let startDay,endDay;
     if(workCalendar){
-        const issue=workCalendar.error||workCalendar.day(range.start_date).reason||workCalendar.day(range.end_date).reason;
+        startDay=workCalendar.day(range.start_date);
+        endDay=range.start_date===range.end_date?startDay:workCalendar.day(range.end_date);
+        const issue=workCalendar.error||startDay.reason||endDay.reason;
         if(issue)return {inputMode:'range',ok:false,items,totalDays:0,totalHours:0,errors:[issue],range};
     }
+    const addDay=(date,normalSlot,workDay)=>{
+        const slot=workDay?.slot||normalSlot;
+        if(workDay?.slot)includedHalfDays.push({date,slot});
+        items.push(buildApprovalMixedLeaveRangeItem(date,slot));
+    };
     if (range.start_date === range.end_date) {
         if (workCalendar||!isApprovalWeekendIsoDate(range.start_date)) {
-            items.push(buildApprovalMixedLeaveRangeItem(range.start_date, range.same_day_slot));
+            addDay(range.start_date,range.same_day_slot,startDay);
         }
     } else {
         const cursor = new Date(`${range.start_date}T00:00:00Z`);
         const end = new Date(`${range.end_date}T00:00:00Z`);
         while (cursor <= end) {
             const dateValue = cursor.toISOString().slice(0,10);
-            const workDay=workCalendar?.day(dateValue);
+            const workDay=dateValue===range.start_date?startDay:dateValue===range.end_date?endDay:workCalendar?.day(dateValue);
             if(workDay?.unknown)return {inputMode:'range',ok:false,items:[],totalDays:0,totalHours:0,errors:[workDay.reason],range};
             if(workDay?.booked)excludedBookedDays.push(dateValue);
             if (workDay?!workDay.reason:!isApprovalWeekendIsoDate(dateValue)) {
                 if (dateValue === range.start_date) {
-                    items.push(buildApprovalMixedLeaveRangeItem(dateValue, range.start_slot === 'pm' ? 'pm' : 'full'));
+                    addDay(dateValue,range.start_slot==='pm'?'pm':'full',workDay);
                 } else if (dateValue === range.end_date) {
-                    items.push(buildApprovalMixedLeaveRangeItem(dateValue, range.end_slot === 'am' ? 'am' : 'full'));
+                    addDay(dateValue,range.end_slot==='am'?'am':'full',workDay);
                 } else {
-                    items.push(buildApprovalMixedLeaveRangeItem(dateValue, 'full'));
+                    addDay(dateValue,'full',workDay);
                 }
             }
             cursor.setUTCDate(cursor.getUTCDate() + 1);
@@ -5231,8 +5241,9 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
 
     const totalDays = CoopLeaveTime.roundDays(items.reduce((sum, item) => sum + Number(item.deducted_days || 0), 0));
     const totalHours = items.reduce((sum, item) => sum + Number(item.deducted_hours || 0), 0);
-    if(excludedBookedDays.length&&options.exactDaysSupported===false){
-        return {inputMode:'range',ok:false,items:[],totalDays:0,totalHours:0,errors:['신청 날짜를 따로 기록할 수 없어요. 이미 신청한 휴가 앞뒤로 기간을 나누어 주세요.'],range};
+    if((excludedBookedDays.length||includedHalfDays.length)&&options.exactDaysSupported===false){
+        const reason=includedHalfDays.length?'남은 반나절을 따로 기록할 수 없어요. 사무국에 문의해 주세요.':'신청 날짜를 따로 기록할 수 없어요. 이미 신청한 휴가 앞뒤로 기간을 나누어 주세요.';
+        return {inputMode:'range',ok:false,items:[],totalDays:0,totalHours:0,errors:[reason],range};
     }
     if (items.length > 200) errors.push('한 번에 신청할 수 있는 근무일은 200일까지입니다. 기간을 나누어 신청해 주세요.');
     if (requireComplete && totalDays <= 0) {
@@ -5247,7 +5258,7 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
         totalHours,
         errors,
         range,
-        ...(workCalendar?{excludedBookedDays}:{})
+        ...(workCalendar?{excludedBookedDays,includedHalfDays}:{})
     };
 }
 
@@ -13518,9 +13529,11 @@ function calcLeaveDays() {
         if(isApprovalAnnualConfig(leaveConfig)&&getApprovalAnnualMode()==='annual')approvalAnnualLeaveUi?.refreshDates?.();
         const skipped=document.getElementById('mixedLeaveSkippedDates');
         if(skipped){
-            const dates=summary.ok?summary.excludedBookedDays||[]:[];
-            const visible=dates.slice(0,4).map(date=>`${Number(date.slice(5,7))}월 ${Number(date.slice(8))}일`).join(', ');
-            const text=dates.length?`이미 신청한 휴가 날짜는 제외했어요: ${visible}${dates.length>4?` 외 ${dates.length-4}일`:''}`:'';
+            const dates=summary.ok?summary.excludedBookedDays||[]:[],halves=summary.ok?summary.includedHalfDays||[]:[];
+            const dayLabel=date=>`${Number(date.slice(5,7))}월 ${Number(date.slice(8))}일`;
+            const list=(rows,format)=>rows.slice(0,4).map(format).join(', ')+(rows.length>4?` 외 ${rows.length-4}일`:'');
+            const text=[dates.length?`이미 신청한 휴가 날짜는 제외했어요: ${list(dates,dayLabel)}`:'',
+                halves.length?`남은 반나절만 포함했어요: ${list(halves,({date,slot})=>`${dayLabel(date)} ${slot==='am'?'오전':'오후'}`)}`:''].filter(Boolean).join(' · ');
             if(skipped.textContent!==text)skipped.textContent=text;
             skipped.classList.toggle('hidden',!text);
         }
