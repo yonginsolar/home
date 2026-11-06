@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.133 | Change: 2026-11-06 - Close departed previews and improve leave picker boundaries. -->
+<!-- Version: v1.2.134 | Change: 2026-11-06 - Require a confirmed work schedule before dependent leave submission. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.133 | approval.html');</script>
+  <script>console.log('[Version] v1.2.134 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261106-4"></script>
-  <script src="approval_annual_leave.js?v=20261106-11"></script>
+  <script src="approval_annual_leave.js?v=20261106-12"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -13153,9 +13153,9 @@ function captureApprovalSubmitSnapshot() {
     const draft=collectApprovalDraftFormPayload();
     if(!isSunVillageApproval())draft.approval_line=[...(draft.approval_line||[])].sort((a,b)=>Number(b.auth_level||0)-Number(a.auth_level||0));
     let annualCoverage=null;
-    if(getCurrentDraftMainType()==='휴가'&&draft.fields?.leave_annual_mode==='annual'&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
+    if(getCurrentDraftMainType()==='휴가'&&['annual','clock'].includes(draft.fields?.leave_annual_mode)&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
         const summary=getApprovalMixedLeaveSummary({requireComplete:true});
-        annualCoverage=[summary.ok,summary.items.map(i=>[i.leave_date,i.slot,i.deducted_minutes])];
+        annualCoverage=[summary.ok,summary.items.map(i=>[i.leave_date,i.slot,i.start_time,i.end_time,i.break_minutes,i.deducted_minutes])];
     }
     return {owner:approvalSubmitOwner(),form,revision:approvalComposerInputRevision,
         fingerprint:JSON.stringify([draft,annualCoverage,

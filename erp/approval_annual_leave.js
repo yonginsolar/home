@@ -45,7 +45,8 @@
     const scheduleDescription=make('p','small text-muted my-2');
     const scheduleSave=button('근무시간 저장','btn btn-sm btn-primary'),cancel=button('취소');
     let owner=null, pref=null, editOpen=false, localSchedule=null, localOwner=null, follows=true;
-    let epoch=0, ticket=null, pendingSave=null, editorOwner=null, lastStart='';
+    let epoch=0, ticket=null, editorOwner=null, editorBaseline=null, lastStart='';
+    const scheduleWrites=new Map(),unverifiedSchedules=new Set();
     let startMenu={values:[]}, activeMode='annual', snapshotRetry=null;
     const halfLabel=slot=>slot==='am'?'오전':slot==='pm'?'오후':'';
 
@@ -78,7 +79,7 @@
         trigger.textContent=field.value||'날짜 선택';
         trigger.setAttribute('aria-label',`${caption}: ${trigger.textContent}`);
         if(!open||!shown)return;
-        refreshLeave.classList.toggle('hidden',!!model.snapshot?.workBasis&&model.clock?.state!=='error'&&!ticket?.error);
+        refreshLeave.classList.toggle('hidden',!!model.snapshot?.workBasis&&model.clock?.state!=='error'&&!canRetryPersonal());
         refreshLeave.disabled=!!snapshotRetry;
         const year=Number(time.yearOf()),daysInMonth=new Date(Date.UTC(year,month,0)).getUTCDate();
         const firstDay=new Date(Date.UTC(year,month-1,1)).getUTCDay();
@@ -130,7 +131,7 @@
         snapshotRetry=Promise.resolve().then(()=>{
           const model=calendarModel();
           if(!model.snapshot?.workBasis)return ctx.reloadSnapshot?.();
-          return Promise.all([model.clock?.state==='error'?ctx.loadClock(true):null,ticket?.error?readPreference({reload:true}):null]);
+          return Promise.all([model.clock?.state==='error'?ctx.loadClock(true):null,canRetryPersonal()?readPreference({reload:true}):null]);
         }).catch(()=>{}).finally(()=>{snapshotRetry=null;refresh();});
         refreshLeave.disabled=true;
       });
@@ -240,7 +241,7 @@
     const dayRow=make('div','d-flex flex-wrap gap-2 mt-2');week.append(dayRow);
     const days=[['월',1],['화',2],['수',3],['목',4],['금',5],['토',6],['일',0]].map(([name,day])=>{
       const ch=input('checkbox',`annualWorkDay${day}`,'form-check-input me-1');ch.value=String(day);
-      const wrap=make('label');wrap.append(ch,name);dayRow.append(wrap);ch.addEventListener('change',()=>updateWeek());return ch;
+      const wrap=make('label');wrap.append(ch,name);dayRow.append(wrap);ch.addEventListener('change',()=>{updateWeek();ctx.changed();});return ch;
     });
     const actions=make('div','d-flex gap-2 flex-wrap mt-2');actions.append(scheduleSave,cancel);
     editor.append(make('legend','small fw-bold float-none w-auto mb-2','근무시간'),work,breakPair,breakDescription,week,actions,editStatus);
@@ -274,11 +275,17 @@
       updateWeek();syncWorkBreak();
     }
     function ownerState(){return ctx.owner();}
+    const pendingSchedule=()=>owner&&scheduleWrites.get(owner.key);
+    const personalNeedsRead=()=>owner?.self&&unverifiedSchedules.has(owner.key);
+    const canRetryPersonal=()=>owner?.self&&!pendingSchedule()&&!ticket?.loading&&(ticket?.error||personalNeedsRead());
+    const confirmedSchedule=()=>owner?.self?(pref&&!personalNeedsRead()?(pref.schedule||time.defaultSchedule):null):(localSchedule||time.defaultSchedule);
+    const fallbackSchedule=()=>pendingSchedule()?.phase==='saving'?null:confirmedSchedule();
+    const unappliedSchedule=()=>editOpen&&!same(readWork(),editorBaseline||confirmedSchedule()||time.defaultSchedule);
     function syncOwner(){
       const next=ownerState();
       if(next?.key===owner?.key)return;
-      epoch++;owner=next;pref=next?.self?null:{revision:0,schedule:null};ticket=null;pendingSave=null;
-      if(editorOwner!==next?.key){editOpen=false;putWork(null);editStatus.textContent='';editorOwner=null;}
+      epoch++;owner=next;pref=next?.self?null:{revision:0,schedule:null};ticket=null;
+      if(editorOwner!==next?.key){editOpen=false;putWork(null);editStatus.textContent='';editorOwner=null;editorBaseline=null;}
       if(localOwner!==next?.key){localSchedule=null;localOwner=null;}
     }
     function setText(el,value){if(el.textContent!==value)el.textContent=value;}
@@ -297,7 +304,7 @@
       lastStart=startDate.value;changed();
     });
     endDate.addEventListener('change',()=>{if(endDate.value!==lastEnd)end.put('');lastEnd=endDate.value;follows=false;changed();});
-    for(const field of [workStart,workEnd,breakStart])field.addEventListener('input',syncWorkBreak);
+    for(const field of [workStart,workEnd,breakStart])field.addEventListener('input',()=>{syncWorkBreak();ctx.changed();});
 
     function rpc(action,args,signal){return ctx.client().rpc(RPC,{p_action:action,...args}).abortSignal(signal);}
     async function withDeadline(run){
@@ -306,29 +313,34 @@
       finally{clearTimeout(timer);}
     }
     function validResponse(data){return Number.isInteger(data?.revision)&&data.revision>=0&&((data.revision===0&&data.schedule===null)||(data.revision>0&&data.schedule&&typeof data.schedule==='object'));}
-    async function readPreference({reload=false}={}){
+    async function readPreference({reload=false,afterWrite=null}={}){
       syncOwner();
-      if(!owner?.self||ticket?.loading||(!reload&&(pref||ticket)))return;
+      if(!owner?.self||ticket?.loading||(pendingSchedule()&&pendingSchedule()!==afterWrite)||(!reload&&(pref||ticket)))return;
       const mine=epoch,key=owner.key,current=()=>mine===epoch&&ownerState()?.key===key;
       ticket={loading:true};ctx.changed();
       try{
         const {data,error}=await withDeadline(signal=>rpc('read',{},signal));
         if(!current())return;
         if(error||!validResponse(data))throw Error('LEAVE_PREF_READ');
-        pref={revision:data.revision,schedule:data.schedule?cleanSchedule(data.schedule,time):null};ticket=null;
+        const wasUnverified=personalNeedsRead();
+        pref={revision:data.revision,schedule:data.schedule?cleanSchedule(data.schedule,time):null};unverifiedSchedules.delete(key);ticket=null;
+        if(wasUnverified&&editOpen)editorBaseline=confirmedSchedule();
       }catch(_){if(current())ticket={error:true};}
       finally{if(current())ctx.changed();}
     }
     function openEditor(explicit=true){
-      if(!editOpen){editOpen=true;editorOwner=owner?.key;putWork(pref?.schedule||localSchedule||time.defaultSchedule);editStatus.textContent='';}
+      if(!editOpen){editOpen=true;editorOwner=owner?.key;putWork(pref?.schedule||localSchedule||time.defaultSchedule);editorBaseline=readWork();editStatus.textContent='';}
       if(explicit){editor.classList.remove('hidden');workStart.focus();}
       ctx.changed();
     }
     edit.addEventListener('click',()=>openEditor());
-    cancel.addEventListener('click',()=>{editOpen=false;editStatus.textContent='';ctx.changed();if(!edit.classList.contains('hidden'))edit.focus();});
-    retry.addEventListener('click',()=>{void readPreference({reload:true});ctx.loadClock(true);});
+    cancel.addEventListener('click',()=>{if(pendingSchedule())return;editOpen=false;editorBaseline=null;editStatus.textContent='';ctx.changed();if(!edit.classList.contains('hidden'))edit.focus();});
+    retry.addEventListener('click',()=>{
+      if(canRetryPersonal())void readPreference({reload:true});
+      if(ctx.snapshot()?.clockSchedule?.state==='error')ctx.loadClock(true);
+    });
     scheduleSave.addEventListener('click',async()=>{
-      syncOwner();if(!owner||pendingSave)return;
+      syncOwner();if(!owner||pendingSchedule()||ticket?.loading)return;
       let value;
       try{
         const pause=workBreak();
@@ -336,28 +348,35 @@
         if(pause.duration&&(breakStart.value<=pause.work.start||pause.end>=pause.work.end))throw Error('휴게는 출근과 퇴근 사이에 지정해 주세요.');
         value=cleanSchedule(readWork(),time);
       }catch(e){setText(editStatus,e.message);return;}
-      if(!owner.self){localSchedule=value;localOwner=owner.key;editOpen=false;ctx.changed();return;}
-      if(!pref){setText(editStatus,'저장된 근무시간을 먼저 다시 확인해 주세요. 입력은 그대로 남아 있어요.');return;}
+      if(!owner.self){localSchedule=value;localOwner=owner.key;editOpen=false;editorBaseline=null;ctx.changed();return;}
+      if(!pref||personalNeedsRead()){setText(editStatus,'저장된 근무시간을 먼저 다시 확인해 주세요. 입력은 그대로 남아 있어요.');return;}
       const key=owner.key,mine=epoch,revision=pref.revision;
       const current=()=>mine===epoch&&ownerState()?.key===key;
-      const typed=readWork();pendingSave={value};scheduleSave.disabled=true;setText(editStatus,'근무시간 저장 중…');
+      const typed=readWork(),attempt={phase:'saving'};
+      scheduleWrites.set(key,attempt);setText(editStatus,'근무시간 저장 중…');ctx.changed();
       try{
         const {data,error}=await withDeadline(signal=>rpc('save',{p_schedule:value,p_expected_revision:revision},signal));
-        if(!current())return;
+        if(!current()){unverifiedSchedules.add(key);return;}
         if(error?.code==='PT409'){
+          attempt.phase='checking';unverifiedSchedules.add(key);
           setText(editStatus,'다른 창에서 근무시간을 바꿨어요. 입력은 남겨 두었으니 확인 후 다시 저장해 주세요.');
-          await readPreference({reload:true});return;
+          await readPreference({reload:true,afterWrite:attempt});return;
         }
         if(error||!validResponse(data)||!same(cleanSchedule(data.schedule,time),value))throw Error('LEAVE_PREF_SAVE');
-        pref={revision:data.revision,schedule:value};
-        if(same(typed,readWork())){editOpen=false;setText(editStatus,'');}
+        pref={revision:data.revision,schedule:value};unverifiedSchedules.delete(key);editorBaseline=typed;
+        if(same(typed,readWork())){editOpen=false;editorBaseline=null;setText(editStatus,'');}
         else setText(editStatus,'저장했습니다. 이후 바꾼 값은 아직 저장하지 않았어요.');
       }catch(_){
+        attempt.phase='checking';unverifiedSchedules.add(key);
         if(current()){
           setText(editStatus,'저장 결과를 확인하지 못했어요. 입력은 남겨 두었으니 다시 확인해 주세요.');
-          await readPreference({reload:true});
+          await readPreference({reload:true,afterWrite:attempt});
         }
-      }finally{if(current()){pendingSave=null;scheduleSave.disabled=false;ctx.changed();}}
+      }finally{
+        if(scheduleWrites.get(key)===attempt)scheduleWrites.delete(key);
+        if(current())ctx.changed();
+        else if(ownerState()?.key===key){syncOwner();void readPreference({reload:true});ctx.changed();}
+      }
     });
 
     function inspect(){
@@ -366,7 +385,7 @@
       const entry={leave_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get()};
       const policy={...(snapshot?.workBasis||{}),periods:clock?.periods||snapshot?.workBasis?.periods||[]};
       const calendar=clock?.year===time.yearOf()?clock?.calendar:null;
-      const fallback=owner?.self?(pref?pref.schedule||time.defaultSchedule:null):localSchedule||time.defaultSchedule;
+      const fallback=fallbackSchedule();
       const complete=Boolean(entry.leave_date&&entry.end_date&&entry.start_time&&entry.end_time);
       if(!complete)return {entry,complete,result:null,error:'시작·종료 날짜와 시간을 입력해 주세요.'};
       if(!time.inYear(entry.leave_date)||!time.inYear(entry.end_date))return {entry,complete,result:null,error:'시작일과 종료일은 올해 날짜로 선택해 주세요.'};
@@ -378,7 +397,7 @@
         const iso=date.toISOString().slice(0,10);
         if(!calendar.has(iso)&&!time.dateSchedule(policy,iso)){needsWork=true;break;}
       }
-      if(needsWork&&!fallback)return {entry,complete,result:null,needsWork,error:ticket?.error?'저장한 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':ticket?.loading?'저장한 근무시간을 확인하는 중이에요.':'차감 시간을 계산할 수 있도록 근무시간을 입력해 주세요.',retry:ticket?.error};
+      if(needsWork&&!fallback)return {entry,complete,result:null,needsWork,error:scheduleError(),retry:canRetryPersonal()};
       try{
         const result=time.scheduledRange({...entry,fallback_schedule:fallback,strict_bounds:true},policy,calendar);
         if(entry.start_time.slice(3)!==entry.end_time.slice(3)||result.totalMinutes<60||result.totalMinutes%60)
@@ -399,8 +418,7 @@
     }
     function scheduleFor(date,model){
       const contract=time.dateSchedule(model.policy,date);
-      const fallback=(owner?.self?pref&&(pref.schedule||time.defaultSchedule):localSchedule||time.defaultSchedule);
-      return {schedule:contract||fallback,fallback:!contract};
+      return {schedule:contract||fallbackSchedule(),fallback:!contract};
     }
     function crosses(intervals,a,b){return intervals.some(([lo,hi])=>a<hi&&lo<b);}
     function isWorkDay(date,schedule,model){return !model.clock?.calendar?.has(date)&&schedule.days.includes(new Date(date+'T00:00:00Z').getUTCDay());}
@@ -410,7 +428,9 @@
         return model.clock?.state==='error'?'근무일과 공휴일을 확인하지 못했어요. 다시 확인해 주세요.':'근무일과 공휴일을 확인하는 중이에요.';
       return '';
     }
-    const scheduleError=()=>ticket?.error?'저장한 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':'저장한 근무시간을 확인하는 중이에요.';
+    const scheduleError=()=>pendingSchedule()?.phase==='saving'?'근무시간을 저장하는 중이에요.':personalNeedsRead()
+      ?ticket?.loading?'최신 근무시간을 확인하는 중이에요.':'최신 근무시간을 확인하지 못했어요. 다시 확인해 주세요.'
+      :ticket?.error?'저장한 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':'저장한 근무시간을 확인하는 중이에요.';
     function workdayStatus(date,model){
       if(model.clock?.calendar?.has(date))return {reason:`${date}은 공휴일이에요.`};
       const {schedule}=scheduleFor(date,model);
@@ -419,7 +439,12 @@
     }
     function annualCalendar(){
       syncOwner();const model=calendarModel();
-      return {error:calendarError(model),day:date=>annualDayStatus(date,model)};
+      return {error:calendarError(model),day:date=>{
+        const day=annualDayStatus(date,model);
+        if(!day.reason&&!time.dateSchedule(model.policy,date)&&unappliedSchedule())
+          return {reason:'시간차에서 변경한 근무시간을 저장·적용하거나 취소한 뒤 계속해 주세요.',unknown:true};
+        return day;
+      }};
     }
     function annualDayStatus(date,model){
       const day=workdayStatus(date,model);
@@ -446,7 +471,7 @@
       const info=scheduleFor(date,model),{schedule}=info;
       let result;
       if(model.clock.calendar.has(date))result={...info,skip:true,message:`${date}은 공휴일이에요.`};
-      else if(!schedule)result={...info,message:scheduleError(),retry:ticket?.error};
+      else if(!schedule)result={...info,message:scheduleError(),retry:canRetryPersonal()};
       else if(!isWorkDay(date,schedule,model))result={...info,skip:true,message:`${date}은 근무일이 아니에요.`};
       else{
         const work=time.breakWindow(schedule.work_start,schedule.work_end),pause=time.breakWindow(schedule.break_start,schedule.break_end);
@@ -523,6 +548,12 @@
       if(mode!==activeMode){start.close();end.close();clockStartPicker.show(mode==='clock');clockEndPicker.show(mode==='clock');}
       activeMode=mode;annualStartPicker?.show(mode==='annual');annualEndPicker?.show(mode==='annual');refreshDates();
     }
+    function scheduleSubmitBlock(state){
+      if(state.needsWork===false)return '';
+      if(pendingSchedule()?.phase==='saving')return '근무시간 저장이 끝난 뒤 계속해 주세요.';
+      if(unappliedSchedule()&&!personalNeedsRead())return `근무시간 변경을 ${owner?.self?'저장':'적용'}하거나 취소한 뒤 계속해 주세요.`;
+      return '';
+    }
     function refresh(){
       syncOwner();const model=calendarModel();
       startMenu=getClockMenu(startDate.value,'start',model);
@@ -534,20 +565,21 @@
       if(retainedInvalid){state.result=null;state.error=startMenu.message||endMenu.message||(state.error&&!state.error.includes('입력해')?state.error:'이전에 선택한 시간이 현재 범위에 없어요. 시간을 다시 선택해 주세요.');}
       editor.classList.toggle('hidden',!editOpen);
       scheduleSave.textContent=owner?.self?'근무시간 저장':'이 신청에 적용';
-      scheduleSave.disabled=!!pendingSave||!owner||(owner.self&&!pref);
+      scheduleSave.disabled=!!pendingSchedule()||!!ticket?.loading||!owner||(owner.self&&(!pref||personalNeedsRead()));
+      cancel.disabled=!!pendingSchedule();
       const fallbackMenu=startMenu.fallback?startMenu:endMenu.fallback?endMenu:null;
-      edit.classList.toggle('hidden',!fallbackMenu||editOpen||(!pref&&owner?.self));
+      edit.classList.toggle('hidden',!fallbackMenu||editOpen||!!pendingSchedule()||(!pref&&owner?.self)||personalNeedsRead());
       const used=fallbackMenu?.schedule;
       setText(scheduleDescription,used?`${pref?.schedule||localSchedule?'근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
-      retry.classList.toggle('hidden',!state.retry&&!startMenu.retry&&!endMenu.retry);
-      setText(status,retainedInvalid||state.complete&&!state.result?state.error||'':startMenu.message||(start.get()?endMenu.message:'')||'');
+      retry.classList.toggle('hidden',!state.retry&&!startMenu.retry&&!endMenu.retry&&!(editOpen&&canRetryPersonal()));
+      setText(status,scheduleSubmitBlock(state)||(retainedInvalid||state.complete&&!state.result?state.error||'':startMenu.message||(start.get()?endMenu.message:'')||''));
       refreshDates(model);
       return state;
     }
     function summary({requireComplete=false}={}){
       const s=refresh(),items=s.result?.items||[],totalHours=(s.result?.totalMinutes||0)/60;
-      const edited=editOpen&&pref?.schedule&&!same(readWork(),pref.schedule);
-      const error=requireComplete&&edited?'근무시간 변경을 저장하거나 취소한 뒤 계속해 주세요.':s.complete||requireComplete?s.error:null;
+      const blocker=scheduleSubmitBlock(s);
+      const error=requireComplete&&blocker?blocker:s.complete||requireComplete?s.error:null;
       return {ok:!error&&(!requireComplete||items.length>0),inputMode:'detail',items,totalHours,totalDays:time.roundDays(totalHours/8),errors:error?[error]:[]};
     }
     function draft(){
@@ -557,14 +589,14 @@
       return body;
     }
     function restore(data){
-      epoch++;ticket=null;pendingSave=null;owner=ownerState();editorOwner=owner?.key;
+      epoch++;ticket=null;owner=ownerState();editorOwner=owner?.key;editorBaseline=null;
       const s=data||{};startDate.value=s.start_date||'';endDate.value=s.end_date||'';lastStart=startDate.value;lastEnd=endDate.value;
       start.put(s.start_time);end.put(s.end_time);follows=s.follows!==false;
       pref=null;localSchedule=owner&&!owner.self?s.local_schedule||null:null;localOwner=localSchedule?owner.key:null;
       editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.2'};
+    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.3'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
