@@ -369,12 +369,12 @@
     }
     edit.addEventListener('click',()=>openEditor());
     cancel.addEventListener('click',()=>{if(pendingSchedule())return;editOpen=false;editorBaseline=null;editStatus.textContent='';ctx.changed();if(!edit.classList.contains('hidden'))edit.focus();});
-    retry.addEventListener('click',()=>{if(!retry.classList.contains('hidden'))retryCalendarRead();});
-    function retryCalendarRead(){
+    retry.addEventListener('click',()=>{if(!retry.classList.contains('hidden'))retryCalendarRead(null,true);});
+    function retryCalendarRead(_,inline=false){
       syncOwner();
       if(!owner||snapshotRetry||ctx.snapshotRead?.()==='loading')return;
       const model=calendarModel(),ledger=!model.snapshot?.workBasis;
-      const attempt={key:owner.key,epoch,ledger};
+      const attempt={key:owner.key,epoch,ledger,inline};
       const current=()=>snapshotRetry===attempt&&epoch===attempt.epoch&&ownerState()?.key===attempt.key;
       snapshotRetry=attempt;
       void Promise.resolve().then(()=>{
@@ -383,7 +383,15 @@
         if(ledger)return !latest.snapshot?.workBasis?ctx.reloadSnapshot?.():null;
         return Promise.all([latest.clock?.state==='error'?ctx.loadClock(true):null,canRetryPersonal()?readPreference({reload:true}):null]);
       }).catch(()=>{}).finally(()=>{
-        if(current()){snapshotRetry=null;ctx.changed();refreshDates();}
+        if(current()){
+          const keepFocus=inline&&doc.activeElement===retry;
+          snapshotRetry=null;ctx.changed();refreshDates();
+          if(keepFocus&&retry.classList.contains('hidden')&&activeMode==='clock'&&!root.frameElement?.hidden
+              &&doc.hasFocus()&&area.getClientRects().length&&(doc.activeElement===retry||doc.activeElement===doc.body)){
+            const target=start.wrapper.querySelector('#annualClockStartTimePick:not(:disabled)')||doc.getElementById('annualClockStartDatePick');
+            target?.focus();
+          }
+        }
       });
       ctx.changed();refreshDates();
     }
@@ -632,8 +640,9 @@
       edit.classList.toggle('hidden',!fallbackMenu||editOpen||!!pendingSchedule()||(!pref&&owner?.self)||personalNeedsRead());
       const used=fallbackMenu?.schedule;
       setText(scheduleDescription,used?`${pref?.schedule||localSchedule?'근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
-      retry.classList.toggle('hidden',!snapshotRetry?.ledger&&!state.retry&&!startMenu.retry&&!endMenu.retry&&!(editOpen&&canRetryPersonal()));
-      retry.disabled=!owner||!!snapshotRetry||model.snapshotRead==='loading';
+      retry.classList.toggle('hidden',!snapshotRetry?.inline&&!snapshotRetry?.ledger&&!state.retry&&!startMenu.retry&&!endMenu.retry&&!(editOpen&&canRetryPersonal()));
+      retry.disabled=!owner;
+      retry.setAttribute('aria-disabled',String(!owner||!!snapshotRetry||model.snapshotRead==='loading'));
       const readMessage=state.ledgerFailed?state.error:snapshotRetry?.ledger&&model.snapshotRead==='loading'?calendarError(model):'';
       const inputMessage=retainedInvalid||state.complete&&!state.result?state.error:startMenu.message||(start.get()?endMenu.message:'');
       setText(status,readMessage||scheduleSubmitBlock(state)||inputMessage||'');
@@ -662,7 +671,7 @@
       editOpen=!!owner&&!!s.work_editor;putWork(editOpen?s.work_editor:localSchedule);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.6'};
+    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.7'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
