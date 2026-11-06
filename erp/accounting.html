@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.197 | Change: 2026-11-05 - Aligned entry fields and clearer tax reminder heading. -->
+<!-- Version: v1.0.198 | Change: 2026-11-06 - Journal editor for date and amount. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,12 +10,13 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.197 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.198 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.0"></script>
   <script src="accounting_report_save.js?v=1.0.0" integrity="sha384-AzLhwgwH2GCLUoGPmH84klNCeErIK1TS80qvB89ZFoXhSOEMec79STufobsxF1kw" crossorigin="anonymous"></script>
   <script src="accounting_bank_compare.js?v=1.1.2"></script>
+  <script src="accounting_journal_typo.js?v=1.1.0" integrity="sha384-m85gYkNm21TI8RCNtqcn9S4eqxMRG2/JuHPpDL694JYsXE4AKCCnqWV/ZQYzBr1X" crossorigin="anonymous" defer></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261105-tax-label-1"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
@@ -52,6 +53,10 @@
   <script src="accounting_payment_dates.js?v=1.2.1"></script>
 
   <style>
+    .accounting-typo-dialog { box-sizing:border-box; width:min(36rem, calc(100vw - 1rem)); max-width:calc(100vw - 1rem); height:min(37rem, calc(100dvh - 1rem)); max-height:calc(100dvh - 1rem); overflow:auto; overflow-wrap:anywhere; }
+    .accounting-typo-dialog::backdrop { background:rgba(0,0,0,.55); }
+    .accounting-typo-dialog textarea { min-width:0; }
+    .accounting-typo-dialog button { white-space:normal; overflow-wrap:anywhere; }
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
     #erpForm .accounting-entry-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap:.75rem; margin-left:0; margin-right:0; }
     #erpForm .accounting-entry-fields > div { width:auto; min-width:0; padding:0; display:flex; flex-direction:column; }
@@ -10224,8 +10229,8 @@ function renderHistoryDouble(rows, completePage = false) {
             : '';
         const transMeta = safeRelatedTransIds || safeTransId;
         const dateTransIds = [...new Set([item.transId, ...item.relatedTransIds].filter(Boolean))];
-        const dateButton = canPerform('accounting.edit') && item.transId
-            ? `<button class="btn btn-sm btn-outline-primary" data-history-process data-trans-ids="${escapeHtml(JSON.stringify(dateTransIds))}" onclick="editJournalDateByButton(this)">날짜 수정</button>` : '';
+        const editButton = canPerform('accounting.edit') && item.transId
+            ? `<button class="btn btn-sm btn-outline-primary" data-history-process data-trans-ids="${escapeHtml(JSON.stringify(dateTransIds))}" onclick="editJournalDateByButton(this)">수정</button>` : '';
         const transactionCountMeta = item.actualTransactionCount > 1 ? ` · 실제 전표 ${item.actualTransactionCount}건` : '';
 
         el.innerHTML += `
@@ -10238,7 +10243,7 @@ function renderHistoryDouble(rows, completePage = false) {
                         ${detailHtml}
                         ${classificationNote}
                     </div>
-                    <div class="d-flex align-items-center gap-2 flex-shrink-0 flex-wrap justify-content-end">${classificationBadge}${balanceBadge}${dateButton}${deleteButton}</div>
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0 flex-wrap justify-content-end">${classificationBadge}${balanceBadge}${editButton}${deleteButton}</div>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm history-ledger-table mb-0" aria-label="${safeDate} 복식 전표">
@@ -10272,13 +10277,24 @@ function renderHistoryDouble(rows, completePage = false) {
 }
 
 async function editJournalDateByButton(button) {
-    if (!canPerform('accounting.edit')) return showAlert('날짜 수정 권한이 없습니다.');
+    if (!canPerform('accounting.edit')) return showAlert('전표 수정 권한이 없습니다.');
     if (!window.CoopAccountingHistory.isCurrent()) return showAlert('전표를 다시 조회한 뒤 진행해 주세요.');
     let transIds;
     try { transIds = JSON.parse(button.dataset.transIds); } catch (_) { return showAlert('전표를 다시 불러와 주세요.'); }
-    await window.CoopPaymentDates.edit(_supabase, transIds, async () => {
-        await refreshDashboard(); await loadHistory();
-    });
+    if (!Array.isArray(transIds) || !transIds.length) return showAlert('전표를 다시 불러와 주세요.');
+    if (!window.CoopJournalTypo) return showAlert('수정 창을 불러오지 못했어요. 다시 시도해 주세요.');
+    const owner = myInfo;
+    const guard = window.CoopAccountingHistory.guard();
+    const current = () => accountingDataAuthorized && myInfo === owner && document.visibilityState !== 'hidden' &&
+        canPerform('accounting.edit') && guard();
+    if (!current() || !owner?.coop_id) return;
+    const identity = [owner.auth_user_id || owner.emp_id || owner.id, owner.coop_id];
+    if (!identity[0]) return;
+    await window.CoopJournalTypo.open({ client: _supabase, transId: transIds[0], transIds, owner: identity,
+        current, opener: button, refresh: async () => {
+            await refreshDashboard();
+            if (current()) await loadHistory();
+        } });
 }
 
 async function deleteTx(id, transId) {
