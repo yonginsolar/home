@@ -90,7 +90,8 @@
         const key=JSON.stringify([year,month,field.value,entries]);
         if(key===lastKey)return;
         lastKey=key;previous.disabled=month<=1;next.disabled=month>=12;months.value=String(month);
-        monthText.textContent=`${year}년`;const current=doc.activeElement?.dataset.leaveDate;
+        monthText.textContent=`${year}년`;
+        const active=doc.activeElement,current=grid.contains(active)?active?.dataset.leaveDate:null;
         grid.replaceChildren(...Array.from({length:firstDay},()=>make('span')));
         const buttons=[];
         entries.forEach(({date,kind,reason,slot},i)=>{
@@ -111,7 +112,7 @@
         });
         const enabled=buttons.filter(b=>!b.disabled),tab=enabled.find(b=>b.dataset.leaveDate===current)||enabled.find(b=>b.dataset.leaveDate===field.value)||enabled[0];
         if(tab)tab.tabIndex=0;
-        if(current)(tab||months).focus();
+        if(current&&!root.frameElement?.hidden)(tab||months).focus();
         hint.textContent=enabled.length?(guidance||'근무일만 고를 수 있어요. 이미 신청한 휴가와는 겹칠 수 없어요.')
           :(entries.find(e=>e.reason.includes('확인'))?.reason||'이 달에 선택할 수 있는 날짜가 없어요.');
       }
@@ -394,7 +395,7 @@
         const list=prior.get(row.leave_date)||[];list.push(time.leaveCoverage(row,row.leave_date,policy));prior.set(row.leave_date,list);
         if(['am','pm','morning','afternoon','오전','오후'].includes(row.slot||row.slot_label))bookedHalves.add(row.leave_date);
       }
-      return {snapshot,clock,policy,prior,bookedHalves};
+      return {snapshot,clock,policy,prior,bookedHalves,timedDays:new Map()};
     }
     function scheduleFor(date,model){
       const contract=time.dateSchedule(model.policy,date);
@@ -440,6 +441,53 @@
     }
     function clockDateReason(date,side,model){const menu=getClockMenu(date,side,model);return menu.values.length?'':menu.message||'선택할 수 있는 시간이 없어요.';}
     function netMinutes(from,to,pause){return Math.max(0,to-from-(pause?Math.max(0,Math.min(to,pause.b)-Math.max(from,pause.a)):0));}
+    function timedWorkday(date,model){
+      if(model.timedDays.has(date))return model.timedDays.get(date);
+      const info=scheduleFor(date,model),{schedule}=info;
+      let result;
+      if(model.clock.calendar.has(date))result={...info,skip:true,message:`${date}은 공휴일이에요.`};
+      else if(!schedule)result={...info,message:scheduleError(),retry:ticket?.error};
+      else if(!isWorkDay(date,schedule,model))result={...info,skip:true,message:`${date}은 근무일이 아니에요.`};
+      else{
+        const work=time.breakWindow(schedule.work_start,schedule.work_end),pause=time.breakWindow(schedule.break_start,schedule.break_end);
+        result=work?{...info,date,work,pause,busy:model.prior.get(date)||[],limit:time.basisMinutes(model.policy,date)}
+          :{...info,message:'근무 시작·종료 시각을 확인해 주세요.'};
+      }
+      model.timedDays.set(date,result);return result;
+    }
+    function* clockEndOptions(day,from,chosen,prefix){
+      if(prefix.days>=200||from<day.work.a||from>=day.work.b)return;
+      for(let minute=Math.floor(from/30)*30+30;minute<=day.work.b;minute+=30){
+        if(minute%60!==chosen%60||crosses(day.busy,from,minute))continue;
+        if(day.pause&&minute>day.pause.a&&minute<day.pause.b)continue;
+        const part=netMinutes(from,minute,day.pause),total=prefix.minutes+part;
+        if(part>0&&part<=day.limit&&total>=60&&total%60===0)yield minute;
+      }
+    }
+    function carryClockDay(day,from,prefix){
+      if(day.skip)return '';
+      if(!day.work)return day.message;
+      if(from<day.work.a||from>=day.work.b)return '근무 시작·종료 시각을 확인해 주세요.';
+      if(crosses(day.busy,from,day.work.b))return `${day.date}에 이미 신청한 휴가가 있어요.`;
+      const minutes=netMinutes(from,day.work.b,day.pause);
+      if(minutes>day.limit)return '하루 차감 시간이 근로시간을 초과해요.';
+      prefix.minutes+=minutes;if(minutes>0)prefix.days++;
+      return prefix.days>=200?'한 번에 신청할 수 있는 근무일은 200일까지입니다.':'';
+    }
+    function canFinishClockStart(day,minute,model){
+      const prefix={minutes:0,days:0};
+      if(!clockEndOptions(day,minute,minute,prefix).next().done)return true;
+      if(carryClockDay(day,minute,prefix))return false;
+      const cursor=new Date(day.date+'T00:00:00Z'),last=new Date(`${model.clock.year}-12-31T00:00:00Z`);
+      for(cursor.setUTCDate(cursor.getUTCDate()+1);cursor<=last;cursor.setUTCDate(cursor.getUTCDate()+1)){
+        const next=timedWorkday(cursor.toISOString().slice(0,10),model);
+        if(next.skip)continue;
+        if(!next.work)return false;
+        if(!clockEndOptions(next,next.work.a,minute,prefix).next().done)return true;
+        if(carryClockDay(next,next.work.a,prefix))return false;
+      }
+      return false;
+    }
     function getClockMenu(date,side,model){
       if(!date)return {values:[]};
       if(!time.inYear(date))return {values:[],message:'올해 날짜를 선택해 주세요.'};
@@ -447,51 +495,25 @@
       const clock=model.clock;
       if(!clock||clock.state!=='ready'||clock.year!==time.yearOf()||!clock.calendar)return {values:[],
         message:clock?.state==='error'?'근무일을 확인하지 못했어요. 다시 확인해 주세요.':'근무시간을 확인하는 중이에요.',retry:clock?.state==='error'};
-      const info=scheduleFor(date,model),{schedule}=info;
-      if(!schedule)return {values:[],message:scheduleError(),retry:ticket?.error};
-      if(!isWorkDay(date,schedule,model))return {...info,values:[],message:workdayStatus(date,model).reason};
-      const work=time.breakWindow(schedule.work_start,schedule.work_end),pause=time.breakWindow(schedule.break_start,schedule.break_end);
-      if(!work)return {...info,values:[],message:'근무 시작·종료 시각을 확인해 주세요.'};
-      const isEnd=side==='end',values=[];
-      const busy=model.prior.get(date)||[],sameDay=date===startDate.value;
-      const selectedStart=start.get()?Number(start.get().slice(0,2))*60+Number(start.get().slice(3)):null;
-      let beforeEnd=0;
-      if(isEnd&&selectedStart===null)return {...info,values};
-      if(isEnd&&!sameDay){
+      const day=timedWorkday(date,model),{work,pause,busy}=day,values=[];
+      if(!work)return {...day,values};
+      if(side==='end'){
+        if(!CLOCK.test(start.get())||!time.inYear(startDate.value))return {...day,values};
+        const [hours,minutes]=start.get().split(':').map(Number),chosen=hours*60+minutes;
+        const prefix={minutes:0,days:0},sameDay=date===startDate.value;
         for(const cursor=new Date(startDate.value+'T00:00:00Z'),last=new Date(date+'T00:00:00Z');cursor<last;cursor.setUTCDate(cursor.getUTCDate()+1)){
-          const day=cursor.toISOString().slice(0,10);
-          if(model.clock.calendar.has(day))continue;
-          const earlier=scheduleFor(day,model).schedule;
-          if(!earlier)return {...info,values,message:scheduleError()};
-          if(!isWorkDay(day,earlier,model))continue;
-          const span=time.breakWindow(earlier.work_start,earlier.work_end);
-          if(!span)return {...info,values,message:'근무 시작·종료 시각을 확인해 주세요.'};
-          const from=day===startDate.value?selectedStart:span.a;
-          if(crosses(model.prior.get(day)||[],from,span.b))return {...info,values,message:`${day}에 이미 신청한 휴가가 있어요.`};
-          beforeEnd+=netMinutes(from,span.b,time.breakWindow(earlier.break_start,earlier.break_end));
+          const earlier=timedWorkday(cursor.toISOString().slice(0,10),model);
+          const error=carryClockDay(earlier,earlier.date===startDate.value?chosen:earlier.work?.a,prefix);
+          if(error)return {...day,values,message:error};
         }
-      }
-      const canEnd=(from,minute,chosen=from,prefix=0)=>{
-        if(minute<=from||minute%60!==chosen%60||crosses(busy,from,minute))return false;
-        if(pause&&minute>pause.a&&minute<pause.b)return false;
-        const total=prefix+netMinutes(from,minute,pause);
-        return total>=60&&total%60===0;
-      };
-      const lower=Math.ceil((work.a+(isEnd?1:0))/30)*30,upper=work.b-(isEnd?0:1);
-      for(let minute=lower;minute<=upper;minute+=30){
-        if(isEnd){
-          if(!canEnd(sameDay?selectedStart:work.a,minute,selectedStart,beforeEnd))continue;
-        }else{
+        for(const minute of clockEndOptions(day,sameDay?chosen:work.a,chosen,prefix))values.push(time.clockLabel(minute));
+      }else{
+        for(let minute=Math.ceil(work.a/30)*30;minute<work.b;minute+=30){
           if(pause&&minute>=pause.a&&minute<pause.b||crosses(busy,minute,Math.min(minute+30,work.b)))continue;
-          if(crosses(busy,minute,work.b)){
-            let available=false;
-            for(let until=minute+60;until<=work.b;until+=60)if(canEnd(minute,until)){available=true;break;}
-            if(!available)continue;
-          }
+          if(canFinishClockStart(day,minute,model))values.push(time.clockLabel(minute));
         }
-        values.push(time.clockLabel(minute));
       }
-      return {...info,values,message:values.length?'':busy.length?reserved:'1시간 단위로 선택할 수 있는 시간이 없어요.'};
+      return {...day,values,message:values.length?'':busy.length?reserved:'1시간 단위로 선택할 수 있는 시간이 없어요.'};
     }
     function refreshDates(model=calendarModel()){
       if(activeMode==='annual'){annualStartPicker?.refresh(model);annualEndPicker?.refresh(model);}
@@ -542,7 +564,7 @@
       editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.1'};
+    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.2'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);

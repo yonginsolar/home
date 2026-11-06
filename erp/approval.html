@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.132 | Change: 2026-11-06 - Allow unbooked time on the current leave date. -->
+<!-- Version: v1.2.133 | Change: 2026-11-06 - Close departed previews and improve leave picker boundaries. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.132 | approval.html');</script>
+  <script>console.log('[Version] v1.2.133 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261106-4"></script>
-  <script src="approval_annual_leave.js?v=20261106-10"></script>
+  <script src="approval_annual_leave.js?v=20261106-11"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -3588,7 +3588,8 @@ function closeApprovalDraftModal(options = {}) {
 
 function waitForModalHidden(modalEl, timeoutMs = 500) {
     const isVisible = !!modalEl && (
-        modalEl.classList.contains('show')
+        modalEl.dataset.submitPreviewExit === '1'
+        || modalEl.classList.contains('show')
         || modalEl.style.display === 'block'
         || modalEl.getAttribute('aria-hidden') !== 'true'
     );
@@ -12059,7 +12060,7 @@ function switchTab(tab, options = {}) {
     if(activeApprovalTab !== String(tab || 'draft').trim()){
         closeApprovalLegacyDialogs();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
-        approvalComposerInputRevision++;approvalRelViewRevision++;invalidateApprovalSubmitPreview();
+        leaveApprovalSubmitPreview();
     }
     activeApprovalTab = String(tab || 'draft').trim() || 'draft';
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
@@ -13036,11 +13037,11 @@ async function openApprovalSubmitPreview() {
     let previewState;
     try {
         initializeApprovalRelatedModals();
-        if (approvalSubmitAttempt) return;
+        if (approvalSubmitAttempt || window.frameElement?.hidden) return;
         const modalEl=document.getElementById('relViewModal'),waitOwner=approvalSubmitOwner(),waitRevision=approvalComposerInputRevision;
         if(modalEl?.dataset.submitPreviewClosing==='1'){
-            await waitForModalHidden(modalEl);
-            if(modalEl.dataset.submitPreviewClosing==='1' || waitOwner!==approvalSubmitOwner() || waitRevision!==approvalComposerInputRevision)return;
+            await waitForModalHidden(modalEl,modalEl.dataset.submitPreviewExit==='1'?1500:undefined);
+            if(modalEl.dataset.submitPreviewClosing==='1' || waitOwner!==approvalSubmitOwner() || waitRevision!==approvalComposerInputRevision||window.frameElement?.hidden)return;
         }
         const leaveBlock=getApprovalAnnualSubmitBlock();
         if(leaveBlock){showAlert(leaveBlock);return;}
@@ -13175,6 +13176,26 @@ function invalidateApprovalSubmitPreview() {
     const button=document.getElementById('btnSubmitFromPreview');
     if(button)button.disabled=true;
 }
+function leaveApprovalSubmitPreview() {
+    const preview=approvalSubmitPreviewState;
+    approvalComposerInputRevision++;approvalRelViewRevision++;
+    invalidateApprovalSubmitPreview();
+    if(!preview||currentViewingDocId!==null||!relViewModal)return;
+    const modal=document.getElementById('relViewModal'),instance=relViewModal;
+    if(!modal||(!instance._isShown&&!modal.classList.contains('show')))return;
+    modal.dataset.submitPreviewExit='1';
+    if(instance._isShown&&instance._isTransitioning&&instance._config){
+        // Bootstrap ignores hide() during opening. Gate reuse and mute this opening's autofocus only.
+        modal.dataset.submitPreviewClosing='1';
+        const focus=instance._config.focus;instance._config.focus=false;
+        modal.addEventListener('shown.bs.modal',()=>{
+            instance._config.focus=focus;
+            if(modal.dataset.submitPreviewExit==='1'&&currentViewingDocId===null&&!approvalSubmitPreviewState)instance.hide();
+        },{once:true});
+        return;
+    }
+    instance.hide();
+}
 function getApprovalAnnualSubmitBlock() {
     if(getCurrentDraftMainType()!=='휴가'||!isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig()))return '';
     const summary=getApprovalMixedLeaveSummary({requireComplete:true});
@@ -13238,11 +13259,13 @@ function bindApprovalSubmitPreviewControls() {
     const changed=()=>{approvalComposerInputRevision++;syncApprovalSubmitControls();};
     form.addEventListener('input',changed);form.addEventListener('change',changed);
     form.addEventListener('reset',()=>{approvalComposerInputRevision++;invalidateApprovalSubmitPreview();invalidateApprovalWithholdingRead();});
-    window.addEventListener('pagehide',()=>invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.'));
-    if(window.frameElement)new MutationObserver(()=>{
+    window.addEventListener('pagehide',()=>{
+        invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');leaveApprovalSubmitPreview();
+    });
+    if(window.frameElement)new MutationObserver(records=>{
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
-        if(window.frameElement.hidden){approvalComposerInputRevision++;approvalRelViewRevision++;invalidateApprovalSubmitPreview();}
-    }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+        if(window.frameElement.hidden||records.some(record=>record.oldValue===null))leaveApprovalSubmitPreview();
+    }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
 }
 async function confirmApprovalMeetingNoticeSubmission(snapshot,link) {
     if(link){
@@ -16732,6 +16755,7 @@ function initializeApprovalRelatedModals() {
         relViewModalEl.addEventListener('hide.bs.modal', () => {relViewModalEl.dataset.submitPreviewClosing='1';approvalRelViewRevision++;invalidateApprovalSubmitPreview();});
         relViewModalEl.addEventListener('hidden.bs.modal', () => {
             relViewModalEl.dataset.submitPreviewClosing='0';
+            delete relViewModalEl.dataset.submitPreviewExit;
             resetRelViewObjectUrls();
             currentViewingDocId = null;
             syncRelViewActionArea(null);
@@ -17064,6 +17088,12 @@ async function openRelView(docId) {
     if (!safeDocId) {
         showAlert("문서를 불러올 수 없습니다.");
         return;
+    }
+    const modal=document.getElementById('relViewModal');
+    if(modal?.dataset.submitPreviewExit==='1'){
+        const owner=approvalSubmitOwner(),revision=approvalComposerInputRevision;
+        await waitForModalHidden(modal,1500);
+        if(modal.dataset.submitPreviewExit==='1'||owner!==approvalSubmitOwner()||revision!==approvalComposerInputRevision||window.frameElement?.hidden)return;
     }
     currentViewingDocId = safeDocId;
     const viewRevision=++approvalRelViewRevision,viewOwner=approvalSubmitOwner();
