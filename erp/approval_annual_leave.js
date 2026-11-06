@@ -387,7 +387,6 @@
       catch(e){return {entry,complete,needsWork,result:null,error:e.message};}
     }
     const reserved='이미 신청한 휴가가 있어 이 날짜에는 선택할 수 있는 시간이 없어요.';
-    const todayReserved='지금은 이미 신청한 휴가 시간이에요. 오늘은 선택할 수 없어요.';
     function calendarModel(){
       const snapshot=ctx.snapshot(),clock=snapshot?.clockSchedule;
       const policy={periods:clock?.periods||[]},prior=new Map(),bookedHalves=new Set();
@@ -395,7 +394,7 @@
         const list=prior.get(row.leave_date)||[];list.push(time.leaveCoverage(row,row.leave_date,policy));prior.set(row.leave_date,list);
         if(['am','pm','morning','afternoon','오전','오후'].includes(row.slot||row.slot_label))bookedHalves.add(row.leave_date);
       }
-      return {snapshot,clock,policy,prior,bookedHalves,now:time.kstClock(ctx.now?.())};
+      return {snapshot,clock,policy,prior,bookedHalves};
     }
     function scheduleFor(date,model){
       const contract=time.dateSchedule(model.policy,date);
@@ -456,8 +455,6 @@
       const isEnd=side==='end',values=[];
       const busy=model.prior.get(date)||[],sameDay=date===startDate.value;
       const selectedStart=start.get()?Number(start.get().slice(0,2))*60+Number(start.get().slice(3)):null;
-      if(date===model.now.date&&model.now.minute>=work.a&&model.now.minute<work.b&&crosses(busy,model.now.minute,model.now.minute+1))
-        return {...info,values:[],message:todayReserved};
       let beforeEnd=0;
       if(isEnd&&selectedStart===null)return {...info,values};
       if(isEnd&&!sameDay){
@@ -545,7 +542,7 @@
       editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.0'};
+    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.1'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
