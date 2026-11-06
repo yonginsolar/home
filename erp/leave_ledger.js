@@ -434,7 +434,8 @@
     var columns = opts.columns;
     var coopId = normalizeText(opts.coopId || getCurrentCoopId());
 
-    var result = await buildLeaveQuery(supabase, empId, statuses, columns, coopId);
+    var query = buildLeaveQuery(supabase, empId, statuses, columns, coopId);
+    var result = await (opts.signal ? query.abortSignal(opts.signal) : query);
     if (result.error) throw result.error;
     return result.data || [];
   }
@@ -462,7 +463,9 @@
       ? opts.pendingStatuses
       : DEFAULT_PENDING_STATUSES;
 
-    var rpc = await supabase.rpc('erp_leave_snapshot_base', { p_emp_id: empId });
+    var basisQuery = supabase.rpc('erp_leave_snapshot_base', { p_emp_id: empId });
+    var rpc = await (opts.signal ? basisQuery.abortSignal(opts.signal) : basisQuery);
+    if (opts.signal && opts.signal.aborted) throw new Error('LEAVE_SNAPSHOT_CANCELLED');
     if (rpc.error) throw rpc.error;
     var basis = rpc;
     if (!basis.data || !Number.isInteger(Number(basis.data.day_minutes)) || !Number.isFinite(Number(basis.data.balance_units))) {
@@ -474,7 +477,8 @@
     var baseRemainDays = roundLeaveDays(toNumber(rpc.data.balance_units, 0));
     var allDocs = await fetchLeaveApprovals(supabase, empId, {
       statuses: Array.from(new Set(reservedStatuses.concat(pendingStatuses))),
-      columns: opts.columns
+      columns: opts.columns,
+      signal: opts.signal
     });
     var docs = allDocs.filter(function (doc) {
       return statusIn(doc && doc.status, reservedStatuses);

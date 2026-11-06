@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.135 | Change: 2026-11-06 - Confirm uncertain schedule saves and keep proxy schedule drafts. -->
+<!-- Version: v1.2.136 | Change: 2026-11-06 - Scope leave retries and align calendar availability. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.135 | approval.html');</script>
+  <script>console.log('[Version] v1.2.136 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,8 +45,8 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261106-4"></script>
-  <script src="approval_annual_leave.js?v=20261106-13"></script>
-  <script src="leave_ledger.js?v=20261012-2"></script>
+  <script src="approval_annual_leave.js?v=20261106-14"></script>
+  <script src="leave_ledger.js?v=20261106-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_insurance_notice.js?v=1.1.1" integrity="sha384-HmicS2Afj/aL+WJ/EA3Btpvn1y5AZA4oMHXInN+JNegvYJQwE/wjIPSoWlGXENre" crossorigin="anonymous"></script>
@@ -2445,6 +2445,7 @@ async function refreshApprovalLeaveCancelCandidates(options = {}) {
     const summaryReservedDocs = Array.isArray(leaveSnapshotState?.summary?.reservedDocs) ? leaveSnapshotState.summary.reservedDocs : [];
     const candidateBase = sortApprovalLeaveCancelCandidates(summaryReservedDocs.filter((doc) => isApprovalLeaveReservedStatus(doc?.status)));
     const activeCancelTargetIds = await fetchApprovalActiveLeaveCancelRequestIds(targetEmpId, candidateBase.map((doc) => doc?.id));
+    if(options.isCurrent&&!options.isCurrent())return;
     approvalLeaveCancelCandidates = candidateBase.filter((doc) => !activeCancelTargetIds.has(String(doc?.id || '').trim()));
 
     const previousCategory = getCurrentDraftMainType();
@@ -2968,6 +2969,7 @@ async function annotateApprovalBusinessTripCancelRequestState(list) {
 } // End of annotateApprovalBusinessTripCancelRequestState
 
 async function refreshApprovalBusinessTripCancelCandidates(options = {}) {
+    if(options.isCurrent&&!options.isCurrent())return;
     const targetEmpId = getApprovalCurrentTargetEmpId();
     const previousCategory = getCurrentDraftMainType();
     if (!targetEmpId) {
@@ -2989,6 +2991,7 @@ async function refreshApprovalBusinessTripCancelCandidates(options = {}) {
         .eq('doc_type', '출장신청')
         .in('status', APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES)
         .order('created_at', { ascending: false });
+    if(options.isCurrent&&!options.isCurrent())return;
     if (error || !Array.isArray(data)) {
         CoopSafeLog.warn("business trip cancel candidates load failed:", error);
         approvalBusinessTripCancelCandidates = [];
@@ -2997,6 +3000,7 @@ async function refreshApprovalBusinessTripCancelCandidates(options = {}) {
             data.filter((doc) => isApprovalBusinessTripInCancelWindow(doc))
         );
         const activeCancelTargetIds = await fetchApprovalActiveBusinessTripCancelRequestIds(targetEmpId, candidateBase.map((doc) => doc?.id));
+        if(options.isCurrent&&!options.isCurrent())return;
         approvalBusinessTripCancelCandidates = candidateBase.filter((doc) => !activeCancelTargetIds.has(String(doc?.id || '').trim()));
     }
 
@@ -3534,7 +3538,7 @@ function resetApprovalComposerForm(options = {}) {
     if (proxyCheckEl) proxyCheckEl.checked = false;
     toggleProxyMode({ skipAutoRefresh });
     handleCategoryChange();
-    if (!skipAutoRefresh) calculateLeave();
+    if (!skipAutoRefresh) calculateLeave({force:true});
     normalizeApprovalInitialComposerTitle();
     updateFileList();
     approvalDraftSavedState = ''; approvalDraftLastSaveFailed = false; approvalDraftSaveUncertain = false;
@@ -4565,7 +4569,13 @@ function getApprovalAnnualLeaveUi() {
             return {key:JSON.stringify([myAuthUserId,coop,own,emp,proxy]),self:!proxy};
         },
         loadClock:retry=>loadApprovalLeaveClockSchedule({retry}),
-        reloadSnapshot:()=>calculateLeave(),
+        reloadSnapshot:()=>calculateLeave({snapshotOnly:true}),
+        snapshotRead:()=>calculateLeave.readState?.key===getApprovalLeaveClockOwnerKey()
+            &&calculateLeave.readState?.actor===myAuthUserId?calculateLeave.readState.state:'',
+        editWorkSchedule:()=>{
+            const mode=document.querySelector('input[name="approvalAnnualMode"][value="clock"]');
+            if(mode&&!mode.checked){mode.checked=true;mode.dispatchEvent(new Event('change',{bubbles:true}));}
+        },
         changed:()=>{if(getCurrentApprovalCategory()==='휴가'&&getApprovalAnnualMode()!=='legacy')calcLeaveDays();}
     });
     return approvalAnnualLeaveUi;
@@ -11507,14 +11517,22 @@ function syncApprovalPendingLeaveDaysBadge(days = null) {
 } // End of syncApprovalPendingLeaveDaysBadge
 
 // [수정] 연차 계산 (대리 상신 대상자 지원 + 결재완료 예정 차감 반영)
-async function calculateLeave() {
+async function calculateLeave({snapshotOnly=false,force=false}={}) {
     let targetId = myInfo.emp_id;
     // 대리상신 모드면 선택된 대상자의 연차 조회
     if (document.getElementById("chkProxy") && document.getElementById("chkProxy").checked) {
         targetId = document.getElementById("proxyTargetSelect").value;
     }
 
+    const ownerKey=getApprovalLeaveClockOwnerKey(),actor=myAuthUserId;
+    const pending=calculateLeave.request;
+    if(!force&&targetId&&pending?.key===ownerKey&&pending.actor===actor)return snapshotOnly?pending.read:pending.done;
+    pending?.controller.abort();
+    const lookupRevision = (calculateLeave.revision || 0) + 1;
+    calculateLeave.revision = lookupRevision;
+    const isCurrent = () => calculateLeave.revision === lookupRevision && actor===myAuthUserId && ownerKey===getApprovalLeaveClockOwnerKey();
     if (!targetId) {
+        calculateLeave.request=null;calculateLeave.readState=null;
         applyLeaveRemainToUi({ effectiveRemainDays: 0, reservedDays: 0 });
         leaveSnapshotState = null;
         syncApprovalSubmitControls();
@@ -11529,50 +11547,74 @@ async function calculateLeave() {
         return;
     }
 
-    const lookupRevision = (calculateLeave.revision || 0) + 1;
-    calculateLeave.revision = lookupRevision;
-    const ownerKey=getApprovalLeaveClockOwnerKey();
-    const isCurrent = () => calculateLeave.revision === lookupRevision && ownerKey===getApprovalLeaveClockOwnerKey();
+    const controller=new AbortController();
+    const request={key:ownerKey,actor,controller};
+    calculateLeave.request=request;
+    calculateLeave.readState={key:ownerKey,actor,state:'loading'};
     leaveSnapshotState = null;
     document.getElementById('remainDaysBadge').textContent = '조회 중';
     syncApprovalSubmitControls();
-    try {
-        if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
-            const loaded = await window.LeaveLedger.getLeaveSnapshot(_supabase, targetId, {
+    request.read=(async()=>{
+        let timer;
+        const ledger=window.LeaveLedger;
+        const hasLedger=typeof ledger?.getLeaveSnapshot==='function';
+        try{
+            const stopped=new Promise((_,reject)=>{
+                controller.signal.addEventListener('abort',()=>reject(new Error('LEAVE_SNAPSHOT_STOPPED')),{once:true});
+                timer=setTimeout(()=>controller.abort(),15000);
+            });
+            const lookup=hasLedger?ledger.getLeaveSnapshot(_supabase, targetId, {
                 columns: approvalLeaveSnapshotSupported ? APPROVAL_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT : undefined,
                 reservedStatuses: APPROVAL_LEAVE_RESERVED_STATUSES,
                 includeToday: true,
-                unknownAsReserved: false
-            });
-            if (!isCurrent()) return;
+                unknownAsReserved: false,
+                signal:controller.signal
+            }):_supabase.rpc('calculate_leave_days',{p_emp_id:targetId}).abortSignal(controller.signal);
+            const loaded=await Promise.race([lookup,stopped]);
+            if(!isCurrent())return '';
+            if(!hasLedger){
+                if(loaded.error)throw loaded.error;
+                applyLeaveRemainToUi({effectiveRemainDays:loaded.data??0,reservedDays:0});
+                approvalLeaveCancelCandidates=[];
+                calculateLeave.readState={key:ownerKey,actor,state:'unavailable'};
+                calcLeaveDays();
+                return 'legacy';
+            }
             leaveSnapshotState = {...loaded,approvalClockOwner:ownerKey};
+            calculateLeave.readState={key:ownerKey,actor,state:'ready'};
             applyLeaveRemainToUi(leaveSnapshotState);
             if(getCurrentApprovalCategory()==='휴가'&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())&&getApprovalAnnualMode()!=='legacy')getApprovalAnnualLeaveUi()?.activate();
             calcLeaveDays();
             if (getCurrentApprovalCategory()==='휴가' && isApprovalMixedLeaveDetailMode()
                 && collectApprovalLeaveMixedDraftItems().some(item=>item.slot==='hour'&&item.time_input_mode==='scheduled')) void loadApprovalLeaveClockSchedule();
-            await refreshApprovalLeaveCancelCandidates();
-            await refreshApprovalBusinessTripCancelCandidates();
-            return;
+            return 'ledger';
+        }catch(err){
+            if(isCurrent()){
+                if(!controller.signal.aborted)CoopSafeLog.error('Leave snapshot load failed:',err);
+                calculateLeave.readState={key:ownerKey,actor,state:'error'};
+                leaveSnapshotState=null;
+                document.getElementById('remainDaysBadge').textContent='조회 실패 · 다시 확인';
+                calcLeaveDays();
+            }
+            return '';
+        }finally{
+            clearTimeout(timer);
+            if(calculateLeave.request===request)calculateLeave.request=null;
         }
-    } catch (err) {
-        CoopSafeLog.error("Leave snapshot load failed:", err);
-        if (isCurrent()) { document.getElementById('remainDaysBadge').textContent='조회 실패'; leaveSnapshotState=null; }
-        return;
-    }
-
-    // 공통 모듈 로드 실패 시 기존 RPC 값으로 폴백
-    const { data: remain } = await _supabase.rpc('calculate_leave_days', { p_emp_id: targetId });
-    applyLeaveRemainToUi({ effectiveRemainDays: (remain !== null ? remain : 0), reservedDays: 0 });
-    leaveSnapshotState = null;
-    approvalLeaveCancelCandidates = [];
-    await refreshApprovalBusinessTripCancelCandidates();
-    const previousCategory = getCurrentDraftMainType();
-    renderApprovalCategoryOptions();
-    const currentCategory = getCurrentDraftMainType();
-    if (currentCategory === '휴가취소' || previousCategory === '휴가취소' || currentCategory === '출장취소' || previousCategory === '출장취소') {
-        handleCategoryChange();
-    }
+    })();
+    request.done=(async()=>{
+        const source=await request.read;
+        if(!source||!isCurrent())return;
+        if(source==='ledger')await refreshApprovalLeaveCancelCandidates({isCurrent});
+        if(!isCurrent())return;
+        await refreshApprovalBusinessTripCancelCandidates({isCurrent});
+        if(source!=='legacy'||!isCurrent())return;
+        const previousCategory=getCurrentDraftMainType();
+        renderApprovalCategoryOptions();
+        const currentCategory=getCurrentDraftMainType();
+        if([previousCategory,currentCategory].some(type=>type==='휴가취소'||type==='출장취소'))handleCategoryChange();
+    })().catch(error=>{if(isCurrent())CoopSafeLog.warn('Leave cancellation list load failed:',error);});
+    return snapshotOnly?request.read:request.done;
 }
 
 function showAlert(msg, onClose = null) {
@@ -14636,7 +14678,7 @@ async function handleDraftSubmit(e) {
         const noticeFailure = meetingNoticeFailureMessage(error, 'submit');
         if (errorText.includes('ANNUAL_LEAVE_PERIOD_ALREADY_REQUESTED')) {
             showAlert('이미 신청한 휴가와 날짜·시간이 겹쳐요. 결재 대기 중인 휴가도 포함되니 기존 신청을 확인해 주세요.');
-            void calculateLeave();
+            void calculateLeave({force:true});
         } else if (errorText.includes('ANNUAL_LEAVE_PERIOD_REQUIRED')) {
             showAlert('휴가 날짜를 확인할 수 없어요. 기간을 다시 선택해 주세요.');
         } else if (noticeFailure) {
