@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.128 | Change: 2026-11-06 - Add a touch-friendly leave time picker. -->
+<!-- Version: v1.2.129 | Change: 2026-11-06 - Align leave dates and enforce workdays and hourly intervals. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.128 | approval.html');</script>
+  <script>console.log('[Version] v1.2.129 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261106-4"></script>
-  <script src="approval_annual_leave.js?v=20261106-6"></script>
+  <script src="approval_annual_leave.js?v=20261106-7"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -85,6 +85,11 @@
     #mixedDayArea .leave-date-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center}
     #mixedDayArea .leave-date-grid button{min-width:0;min-height:42px;padding:.15rem;overflow-wrap:anywhere}
     #mixedDayArea .leave-date-grid button:disabled{opacity:.42;text-decoration:line-through}
+    #mixedLeaveRangeEditor > .row:first-child:has(.leave-date-picker:not(.hidden)){align-items:flex-start!important}
+    #mixedDayArea .leave-date-grid [data-leave-day=saturday]{color:var(--bs-primary-text-emphasis,#0a58ca)}
+    #mixedDayArea .leave-date-grid :is([data-leave-day=sunday],[data-leave-day=holiday]){color:var(--bs-danger-text-emphasis,#b02a37)}
+    #mixedDayArea .leave-date-grid button[data-leave-day]:disabled{opacity:.8}
+    #mixedDayArea .leave-date-grid button[data-leave-day][aria-pressed=true]:not(:disabled){background:var(--bs-primary-bg-subtle,#cfe2ff);border-color:var(--bs-primary,#0d6efd)}
     #mixedDayArea .leave-date-picker>button{width:100%;min-width:0;min-height:44px;text-align:start}
     #mixedDayArea .leave-date-month{display:flex;align-items:center;justify-content:space-between;gap:.25rem}
     #mixedDayArea .leave-date-month select{width:auto;min-width:0;max-width:5.5rem}
@@ -4555,7 +4560,7 @@ function getApprovalAnnualLeaveUi() {
             const emp=proxy?String(document.getElementById('proxyTargetSelect')?.value||''):own;
             return coop&&own&&emp?{key:JSON.stringify([coop,own,emp,proxy]),self:!proxy}:null;
         },
-        loadClock:retry=>{void loadApprovalLeaveClockSchedule({retry});},
+        loadClock:retry=>loadApprovalLeaveClockSchedule({retry}),
         reloadSnapshot:()=>calculateLeave(),
         changed:()=>{if(getCurrentApprovalCategory()==='휴가'&&getApprovalAnnualMode()!=='legacy')calcLeaveDays();}
     });
@@ -4603,7 +4608,7 @@ function syncApprovalAnnualModeUi() {
     if(annual&&getCurrentApprovalCategory()==='휴가'){
         const ui=getApprovalAnnualLeaveUi();
         ui?.setMode?.(mode);
-        if(activeClock)ui?.activate();
+        if(mode!=='legacy')ui?.activate();
     }else approvalAnnualLeaveUi?.setMode?.('legacy');
 }
 
@@ -5192,9 +5197,13 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
         errors.push('휴가 종료일은 시작일보다 빠를 수 없습니다.');
         return { inputMode: 'range', ok: false, items, totalDays: 0, totalHours: 0, errors, range };
     }
-
+    const workCalendar=options.workCalendar;
+    if(workCalendar){
+        const issue=workCalendar.error||workCalendar.day(range.start_date).reason||workCalendar.day(range.end_date).reason;
+        if(issue)return {inputMode:'range',ok:false,items,totalDays:0,totalHours:0,errors:[issue],range};
+    }
     if (range.start_date === range.end_date) {
-        if (!isApprovalWeekendIsoDate(range.start_date)) {
+        if (workCalendar||!isApprovalWeekendIsoDate(range.start_date)) {
             items.push(buildApprovalMixedLeaveRangeItem(range.start_date, range.same_day_slot));
         }
     } else {
@@ -5202,7 +5211,9 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
         const end = new Date(`${range.end_date}T00:00:00Z`);
         while (cursor <= end) {
             const dateValue = cursor.toISOString().slice(0,10);
-            if (!isApprovalWeekendIsoDate(dateValue)) {
+            const workDay=workCalendar?.day(dateValue);
+            if(workDay?.unknown)return {inputMode:'range',ok:false,items:[],totalDays:0,totalHours:0,errors:[workDay.reason],range};
+            if (workDay?!workDay.reason:!isApprovalWeekendIsoDate(dateValue)) {
                 if (dateValue === range.start_date) {
                     items.push(buildApprovalMixedLeaveRangeItem(dateValue, range.start_slot === 'pm' ? 'pm' : 'full'));
                 } else if (dateValue === range.end_date) {
@@ -5238,7 +5249,7 @@ function getApprovalMixedLeaveSummary(options = {}) {
     if(window.CoopApprovalAnnualLeave&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
         const mode=getApprovalAnnualMode();
         if(mode==='clock')return checkApprovalLeaveOverlap(getApprovalAnnualLeaveUi().summary(options));
-        if(mode==='annual')return checkApprovalLeaveOverlap(getApprovalMixedLeaveRangeSummary({...options,fullOnly:true}));
+        if(mode==='annual')return checkApprovalLeaveOverlap(getApprovalMixedLeaveRangeSummary({...options,fullOnly:true,workCalendar:getApprovalAnnualLeaveUi()?.annualCalendar?.()}));
     }
     const summary=isApprovalMixedLeaveDetailMode()
         ? getApprovalMixedLeaveDetailSummary(options)
@@ -11516,7 +11527,7 @@ async function calculateLeave() {
             if (!isCurrent()) return;
             leaveSnapshotState = {...loaded,approvalClockOwner:ownerKey};
             applyLeaveRemainToUi(leaveSnapshotState);
-            if(getCurrentApprovalCategory()==='휴가'&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())&&getApprovalAnnualMode()==='clock')getApprovalAnnualLeaveUi()?.activate();
+            if(getCurrentApprovalCategory()==='휴가'&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())&&getApprovalAnnualMode()!=='legacy')getApprovalAnnualLeaveUi()?.activate();
             calcLeaveDays();
             if (getCurrentApprovalCategory()==='휴가' && isApprovalMixedLeaveDetailMode()
                 && collectApprovalLeaveMixedDraftItems().some(item=>item.slot==='hour'&&item.time_input_mode==='scheduled')) void loadApprovalLeaveClockSchedule();
