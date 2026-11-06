@@ -53,7 +53,10 @@
       let value='',lastOptions=null;
       const option=(v,t=v)=>{const o=make('option','',t);o.value=v;return o;};
       const reflect=()=>{const next=[...clock.options].some(o=>o.value===value)?value:'';if(clock.value!==next)clock.value=next;};
-      clock.addEventListener('change',()=>{value=clock.value;changed();});
+      // The form rechecks submission on bubbling input, before change fires.
+      const picked=()=>{if(value===clock.value)return;value=clock.value;changed();};
+      clock.addEventListener('input',picked);
+      clock.addEventListener('change',picked);
       return {wrapper:label(title,clock),control:clock,get:()=>value,put:raw=>{value=String(raw||'').trim();reflect();},
         update(values){
           const key=values.join(',');
@@ -273,7 +276,7 @@
       editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();
-    return {summary,draft,restore,refresh,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.2.0'};
+    return {summary,draft,restore,refresh,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.2.1'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
