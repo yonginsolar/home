@@ -1,10 +1,65 @@
-/* Leave time 1.1.0. Stored units remain stable; displayed workday follows confirmed terms. */
+/* Leave time 1.2.0. Stored units remain stable; displayed workday follows confirmed terms. */
 (function(root){
  'use strict';
  const DAY=480;
  function basisMinutes(policy={},date){policy=policy||{};const rows=Array.isArray(policy.periods)?policy.periods:[];if(date){let value=DAY;for(const p of rows)if(String(p.effective_date)<=date)value=Number(p.day_minutes);return value;}return Number(policy.day_minutes)||DAY;}
  function dayItem(item,policy={}){const day=basisMinutes(policy,item.leave_date),minutes=item.slot==='full'?day:day/2;return {...item,basis_day_minutes:day,deducted_minutes:minutes,deducted_hours:minutes/60,deducted_days:minutes/DAY};}
  function minuteOfDay(v){if(!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(String(v||'')))throw Error('시작·종료 시간을 입력해 주세요.');const [h,m]=v.split(':').map(Number);return h*60+m;}
+ function yearOf(now=new Date()){
+  return new Intl.DateTimeFormat('en',{timeZone:'Asia/Seoul',year:'numeric'}).format(now);
+ }
+ function isDate(value){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(value||''))return false;
+  const d=new Date(value+'T00:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value;
+ }
+ function inYear(value,year=yearOf()){return isDate(value)&&value.slice(0,4)===String(year);}
+ function breakWindow(start,end){
+  try{const a=minuteOfDay(start),b=minuteOfDay(end);return b>a?{start,end,a,b}:null;}catch(_){return null;}
+ }
+ function dateSchedule(policy,date){
+  let p;
+  for(const row of policy?.periods||[])if(row.effective_date<=date)p=row;
+  const schedule=p?.schedule;
+  if(!schedule || (schedule.valid_until&&schedule.valid_until<date))return null;
+  return schedule;
+ }
+ function clockLabel(minutes){return `${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`;}
+ function scheduledRange(item,policy,calendar,year=yearOf()){
+  const {leave_date:date,end_date:endDate,start_time:startTime,end_time:endTime}=item;
+  if(!inYear(date,year)||!inYear(endDate,year))throw Error('시작일과 종료일은 올해 날짜로 선택해 주세요.');
+  if(!/:(00|30)$/.test(startTime)||!/:(00|30)$/.test(endTime))throw Error('시작·종료 시간을 00분 또는 30분 단위로 선택해 주세요.');
+  const start=minuteOfDay(startTime),end=minuteOfDay(endTime);
+  if(endDate<date||(endDate===date&&end<=start))throw Error('종료는 시작보다 늦어야 합니다.');
+  const manual=item.schedule_mode==='actual';
+  const actualWork=manual&&breakWindow(item.work_start,item.work_end);
+  if(manual&&!actualWork)throw Error('실제 근무 시작·종료 시각을 확인해 주세요.');
+  if(manual&&date!==endDate&&!item.work_days?.length)throw Error('기간 중 실제 근무하는 요일을 선택해 주세요.');
+  if(!calendar&&!(manual&&item.include_holidays))throw Error('공휴일을 확인하지 못했습니다. 다시 확인해 주세요.');
+  const items=[];let excludedBreak=0, grossWork=0;
+  const last=new Date(endDate+'T00:00:00Z');
+  for(const day=new Date(date+'T00:00:00Z');day<=last;day.setUTCDate(day.getUTCDate()+1)){
+   const iso=day.toISOString().slice(0,10),weekday=day.getUTCDay();
+   if(calendar?.has(iso)&&!(manual&&item.include_holidays))continue;
+   const schedule=manual?null:dateSchedule(policy,iso);
+   if(!manual&&!schedule)throw Error('기간 중 확인된 근무표가 없는 날짜가 있어요. 실제 근무시간을 직접 지정해 주세요.');
+   if(manual?(date!==endDate&&!item.work_days.includes(String(weekday))):!schedule.days.includes(weekday))continue;
+   const work=actualWork||breakWindow(schedule.work_start,schedule.work_end);
+   if(!work)throw Error('근무 시작·종료 시각을 확인해 주세요.');
+   const a=Math.max(work.a,iso===date?start:0),b=Math.min(work.b,iso===endDate?end:1440);
+   if(b<=a)continue;
+   const pause=manual?(item.break_mode==='none'?null:breakWindow(item.actual_break_start,item.actual_break_end)):breakWindow(schedule.break_start,schedule.break_end);
+   if((!manual||item.break_mode!=='none')&&!pause)throw Error('실제 휴게 시작·종료 시간을 확인하거나 휴게시간 없음을 선택해 주세요.');
+   if(pause&&(pause.a<work.a||pause.b>work.b))throw Error('휴게시간은 근무시간 안에서 지정해 주세요.');
+   const overlap=pause?Math.max(0,Math.min(b,pause.b)-Math.max(a,pause.a)):0;
+   excludedBreak+=overlap; grossWork+=b-a;
+   if(b-a===overlap)continue;
+   items.push(hourItem({leave_date:iso,start_time:clockLabel(a),end_time:clockLabel(b),time_input_mode:'range',break_minutes:overlap},policy));
+  }
+  if(!items.length)throw Error('선택한 기간에 차감할 근무시간이 없습니다.');
+  if(items.length>200)throw Error('한 번에 신청할 수 있는 근무일은 200일까지입니다.');
+  return {items,excludedBreak,grossWork,totalMinutes:grossWork-excludedBreak};
+ }
+ function formatMinutes(value){const minutes=Math.round(value);const hours=Math.floor(minutes/60);return [hours?`${hours}시간`:'',minutes%60||!hours?`${minutes%60}분`:''].filter(Boolean).join(' ');}
  function hourItem(item,policy={}){
   if(item.time_input_mode==='hours'||policy.periods){
    const day=basisMinutes(policy,item.leave_date);let minutes,breakMinutes=Number(item.break_minutes)||0;
@@ -22,5 +77,5 @@
  function roundDays(value){return Math.round((Number(value)||0)*DAY)/DAY;}
  function formatDays(value,dayMinutes=DAY){const day=Number(dayMinutes)>0?Number(dayMinutes):DAY;let minutes=Math.round((Number(value)||0)*DAY),sign=minutes<0?'-':'';minutes=Math.abs(minutes);const days=Math.floor(minutes/day),hours=(minutes%day)/60;return sign+days+'일 '+Number(hours.toFixed(4))+'시간';}
  function hoursToMinutes(value,max=1440){const n=Number(value),minutes=Math.round(n*60);if(!Number.isFinite(n)||n<=0||Math.abs(n*60-minutes)>1e-7||minutes>max)throw Error('시간은 0보다 큰 값으로 입력해 주세요.');return minutes;}
- root.CoopLeaveTime=Object.freeze({hourItem,dayItem,basisMinutes,roundDays,formatDays,hoursToMinutes,dayMinutes:DAY,version:'1.1.0'});
+ root.CoopLeaveTime=Object.freeze({hourItem,dayItem,basisMinutes,roundDays,formatDays,hoursToMinutes,yearOf,isDate,inYear,breakWindow,dateSchedule,scheduledRange,formatMinutes,dayMinutes:DAY,version:'1.2.0'});
 })(window);

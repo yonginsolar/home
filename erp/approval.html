@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.121 | Change: 2026-11-05 - Recover reopened rejection controls and early template Escape. -->
+<!-- Version: v1.2.122 | Change: 2026-11-06 - Current-year leave and half-hour time selection. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.121 | approval.html');</script>
+  <script>console.log('[Version] v1.2.122 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -44,7 +44,7 @@
   <script src="approval_service_contract.js?v=1.0.0"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
-  <script src="leave_time.js?v=20261012-2"></script>
+  <script src="leave_time.js?v=20261106-1"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -73,6 +73,10 @@
     .approval-leave-mixed-row + .approval-leave-mixed-row {
       margin-top: 8px;
     }
+    #mixedDayArea .row { min-width:0; margin-inline:0; }
+    #mixedDayArea .row > *, #mixedDayArea :is(input,select,fieldset) { min-width:0; max-width:100%; }
+    #mixedDayArea :is(label,legend,button,p) { overflow-wrap:anywhere; }
+    #mixedDayArea .badge { max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:start; }
     .approval-expense-choice, #divExpensePaymentMethod, #divExpenseCardSelect { display:flex; flex-direction:column; }
     .approval-expense-choice > label, #divExpensePaymentMethod > label, #divExpenseCardSelect > label { min-height:1.5rem; margin-bottom:.25rem; }
     .approval-expense-choice > .form-select, #divExpensePaymentMethod > .form-select, #divExpenseCardSelect > .form-select { min-height:31px; margin-top:auto; }
@@ -1234,30 +1238,30 @@
             </div>
 
             <div id="mixedDayArea" class="hidden">
-                <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-2">
                     <span class="fw-bold" id="mixedDayAreaTitle">📅 연차 사용 내역</span>
                     <span class="badge bg-primary">사용 가능 휴가: <span id="remainDaysBadgeMixed">0일 0시간</span></span>
                 </div>
-                <div class="small text-muted mb-2">시간차는 날짜별·시간별 세부 조정에서 시작·종료 시간을 입력하세요. 조합에 설정된 점심시간은 차감에서 제외합니다.</div>
+                <div class="small text-muted mb-2">올해 날짜를 선택하세요. 이미 지난 날짜도 신청할 수 있어요.</div>
                 <div id="mixedLeaveRangeEditor">
                     <div class="row g-2 align-items-end">
                         <div class="col-md-4">
-                            <label class="small text-muted fw-bold">휴가 시작일</label>
+                            <label class="small text-muted fw-bold" for="mixedLeaveStartDate">휴가 시작일</label>
                             <input type="date" class="form-control" id="mixedLeaveStartDate" onchange="handleApprovalMixedRangeChange()">
                         </div>
                         <div class="col-md-2">
-                            <label class="small text-muted fw-bold">시작일</label>
+                            <label class="small text-muted fw-bold" for="mixedLeaveStartSlot">시작일 사용 구분</label>
                             <select class="form-select" id="mixedLeaveStartSlot" onchange="handleApprovalMixedRangeChange()">
                                 <option value="full">전일</option>
                                 <option value="pm">오후부터</option>
                             </select>
                         </div>
                         <div class="col-md-4">
-                            <label class="small text-muted fw-bold">휴가 종료일</label>
+                            <label class="small text-muted fw-bold" for="mixedLeaveEndDate">휴가 종료일</label>
                             <input type="date" class="form-control" id="mixedLeaveEndDate" onchange="handleApprovalMixedRangeChange()">
                         </div>
                         <div class="col-md-2">
-                            <label class="small text-muted fw-bold">종료일</label>
+                            <label class="small text-muted fw-bold" for="mixedLeaveEndSlot">종료일 사용 구분</label>
                             <select class="form-select" id="mixedLeaveEndSlot" onchange="handleApprovalMixedRangeChange()">
                                 <option value="full">전일</option>
                                 <option value="am">오전까지</option>
@@ -1276,12 +1280,13 @@
                     </div>
                     <div class="small text-muted mt-2" id="mixedLeaveRangeHelp">예: 월요일 오후부터 화요일 오전까지는 1일로 계산됩니다.</div>
                 </div>
-                <div class="d-flex justify-content-between align-items-center mt-2">
+                <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="mixedLeaveTimeEntryBtn" onclick="openApprovalTimedLeaveEntry()">시간차 입력</button>
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="mixedLeaveDetailToggleBtn" onclick="toggleApprovalLeaveMixedDetailMode()">날짜별·시간별 세부 조정</button>
                     <input type="hidden" id="mixedLeaveDetailMode" value="0">
                 </div>
                 <div id="mixedLeaveDetailEditor" class="hidden mt-2">
-                    <div class="small text-muted mb-2">세부 조정 모드에서는 아래 날짜별 내역이 그대로 저장됩니다.</div>
+                    <div class="small text-muted mb-2">시간차는 선택한 기간 중 근무시간에 해당하는 만큼만 차감해요. 전일·오전·오후 연차도 함께 입력할 수 있어요.</div>
                     <div id="mixedLeaveRows"></div>
                     <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="addApprovalLeaveMixedRow()">+ 날짜 추가</button>
                 </div>
@@ -3129,7 +3134,7 @@ function collectApprovalDraftFormPayload() {
             leave_range_end_slot: mixedRange.end_slot,
             leave_range_same_day_slot: mixedRange.same_day_slot,
             leave_detail_mode: mixedDetailMode,
-            leave_items: mixedDetailMode ? collectApprovalLeaveMixedDraftItems() : [],
+            leave_items: collectApprovalLeaveMixedDraftItems().filter(item => mixedDetailMode || item.leave_date || item.slot !== 'full'),
             single_leave_date: String(document.getElementById('singleLeaveDate')?.value || '').trim(),
             half_date: String(document.getElementById('halfDate')?.value || '').trim(),
             half_slot: String(selectedHalf?.value || '').trim(),
@@ -3782,7 +3787,7 @@ async function loadApprovalDraftFromServer(draftId) {
         syncApprovalLeaveEndDate('leaveStart', 'leaveEnd');
         syncApprovalLeaveEndDate('mixedLeaveStartDate', 'mixedLeaveEndDate');
         const restoredMixedItems = normalizeApprovalMixedLeaveItems(fields.leave_items);
-        const hasLegacyMixedItems = restoredMixedItems.length > 0 && !String(fields.leave_range_start || '').trim() && !String(fields.leave_range_end || '').trim();
+        const hasLegacyMixedItems = fields.leave_detail_mode == null && restoredMixedItems.length > 0 && !String(fields.leave_range_start || '').trim() && !String(fields.leave_range_end || '').trim();
         renderApprovalLeaveMixedItems(restoredMixedItems);
         setApprovalLeaveMixedDetailMode(fields.leave_detail_mode === true || String(fields.leave_detail_mode || '').trim() === '1' || String(fields.leave_detail_mode || '').trim() === 'true' || hasLegacyMixedItems, { populateFromRange: false });
         syncApprovalMixedRangeUi();
@@ -4441,6 +4446,12 @@ function syncApprovalLeaveEndDate(startId, endId) {
 
     const startValue = String(startEl.value || '').trim();
     const endValue = String(endEl.value || '').trim();
+    if (endId === 'mixedLeaveEndDate') {
+        setApprovalLeaveYearLimits(startEl);
+        setApprovalLeaveYearLimits(endEl);
+        if (CoopLeaveTime.inYear(startValue)) endEl.min = startValue;
+        return false;
+    }
     endEl.min = startValue;
 
     if (!startValue || (endValue && endValue >= startValue)) return false;
@@ -4474,6 +4485,80 @@ function getApprovalLeaveMixedRowsContainer() {
 function getApprovalWorkBasis() {
     return leaveSnapshotState?.workBasis || { day_minutes: 480, periods: [] };
 }
+
+function getApprovalContractSchedulePeriods(periods, rows) {
+    return periods.map(period => {
+        const matches=rows.filter(row=>Number(row.version_no)===Number(period.version_no)
+            && [row.effective_date,row.contract_start].every(CoopLeaveTime.isDate)
+            && (row.effective_date>row.contract_start?row.effective_date:row.contract_start)===period.effective_date);
+        const row=matches.length===1?matches[0]:null;
+        if(!row||row.schedule_type!=='fixed'||period.work_time_basis!=='full_time'||Number(row.days_per_week)!==5
+            || !['월요일부터금요일까지','월~금','월요일~금요일'].includes(String(row.work_days||'').replace(/\s+/g,'')))return period;
+        const work=CoopLeaveTime.breakWindow(row.work_start,row.work_end),pause=CoopLeaveTime.breakWindow(row.break_start,row.break_end);
+        if(!work||!pause||pause.a<work.a||pause.b>work.b||work.b-work.a-(pause.b-pause.a)!==Number(period.day_minutes))return period;
+        if(row.indefinite==='false'&&!CoopLeaveTime.isDate(row.contract_end))return period;
+        return {...period,schedule:{work_start:work.start,work_end:work.end,break_start:pause.start,break_end:pause.end,
+            days:[1,2,3,4,5],valid_until:row.indefinite==='false'?row.contract_end:''}};
+    });
+}
+
+async function loadApprovalLeaveClockSchedule({retry=false}={}) {
+    const snapshot=leaveSnapshotState;
+    if(!snapshot?.workBasis)return;
+    const year=CoopLeaveTime.yearOf();
+    const coopId=getApprovalCoopId();
+    const targetId=String(document.getElementById('chkProxy')?.checked?document.getElementById('proxyTargetSelect')?.value:myInfo?.emp_id||'');
+    const previous=snapshot.clockSchedule;
+    if(!targetId||!coopId||previous?.state==='loading'||(previous?.year===year&&!retry))return;
+    const ticket={year,state:'loading'};
+    snapshot.clockSchedule=ticket;
+    const isCurrent=()=>leaveSnapshotState===snapshot&&snapshot.clockSchedule===ticket&&getApprovalCoopId()===coopId
+        && String(document.getElementById('chkProxy')?.checked?document.getElementById('proxyTargetSelect')?.value:myInfo?.emp_id||'')===targetId;
+    calcLeaveDays();
+    const controller=new AbortController();
+    let timer;
+    try{
+        const periods=Array.isArray(snapshot.workBasis.periods)?snapshot.workBasis.periods:[];
+        const holidays=_supabase.from('ref_public_holidays').select('holiday_date').eq('is_active',true).eq('is_holiday',true)
+            .gte('holiday_date',`${year}-01-01`).lte('holiday_date',`${year}-12-31`).abortSignal(controller.signal);
+        const contracts=periods.length?_supabase.from('erp_employment_contracts').select('effective_date,version_no,contract_start:terms->>contract_start_date,contract_end:terms->>contract_end_date,indefinite:terms->>indefinite_term,schedule_type:terms->>work_schedule_type,work_days:terms->>work_days,days_per_week:terms->>work_days_per_week,work_start:terms->>work_start_time,work_end:terms->>work_end_time,break_start:terms->>break_start_time,break_end:terms->>break_end_time')
+            .eq('coop_id',coopId).eq('emp_id',targetId).eq('status','completed').eq('terms->>contract_format_version','3').limit(129).abortSignal(controller.signal):Promise.resolve({data:[]});
+        const [holidayResult,contractResult]=await Promise.race([Promise.all([holidays,contracts]),new Promise((_,reject)=>{
+            timer=setTimeout(()=>{controller.abort();reject(new Error('LEAVE_SCHEDULE_TIMEOUT'));},15000);
+        })]);
+        if(!isCurrent())return;
+        if(holidayResult.error||!Array.isArray(holidayResult.data)||!holidayResult.data.length)throw new Error('LEAVE_HOLIDAY_LOOKUP_FAILED');
+        ticket.calendar=new Set(holidayResult.data.map(row=>row.holiday_date).filter(CoopLeaveTime.isDate));
+        if(contractResult.error||!Array.isArray(contractResult.data))throw new Error('LEAVE_CONTRACT_LOOKUP_FAILED');
+        ticket.periods=getApprovalContractSchedulePeriods(periods,contractResult.data);
+        ticket.state='ready';
+    }catch(_){if(isCurrent())ticket.state='error';}
+    finally{clearTimeout(timer);if(isCurrent())calcLeaveDays();}
+}
+
+function setApprovalLeaveYearLimits(input, enabled = true) {
+    if (!input) return;
+    const year = CoopLeaveTime.yearOf();
+    input.min = enabled ? `${year}-01-01` : '';
+    input.max = enabled ? `${year}-12-31` : '';
+}
+
+function openApprovalTimedLeaveEntry() {
+    const container = getApprovalLeaveMixedRowsContainer();
+    const existing = Array.from(container.querySelectorAll('.approval-leave-mixed-row'));
+    const hourly = existing.find(row => row.querySelector('[data-leave-mixed-slot]').value === 'hour');
+    setApprovalLeaveMixedDetailMode(true, { populateFromRange: false });
+    if (hourly) hourly.querySelector('[data-leave-mixed-date]').focus();
+    else {
+        const placeholder = existing.length === 1 && !existing[0].querySelector('[data-leave-mixed-date]').value && existing[0].querySelector('[data-leave-mixed-slot]').value === 'full';
+        if (placeholder) existing[0].remove();
+        const range = getApprovalMixedLeaveDateRange();
+        addApprovalLeaveMixedRow({ slot: 'hour', leave_date: range.start_date });
+        container.lastElementChild.querySelector('[data-leave-mixed-date]').focus();
+    }
+    calcLeaveDays();
+    void loadApprovalLeaveClockSchedule();
+}
 function formatApprovalWorkDays(value) {
     return CoopLeaveTime.formatDays(value, getApprovalWorkBasis().day_minutes);
 }
@@ -4490,7 +4575,7 @@ function setApprovalLeaveMixedDetailMode(enabled, options = {}) {
     if (modeEl) modeEl.value = useDetail ? '1' : '0';
     if (detailEditor) detailEditor.classList.toggle('hidden', !useDetail);
     if (toggleBtn) toggleBtn.textContent = useDetail ? '범위 입력으로 돌아가기' : '날짜별·시간별 세부 조정';
-    if (useDetail && options.populateFromRange !== false) {
+    if (useDetail && options.populateFromRange !== false && !collectApprovalLeaveMixedDraftItems().some(item => item.leave_date || item.slot !== 'full')) {
         const summary = getApprovalMixedLeaveRangeSummary({ requireComplete: false });
         if (summary.items.length > 0) {
             renderApprovalLeaveMixedItems(summary.items);
@@ -4503,9 +4588,11 @@ function setApprovalLeaveMixedDetailMode(enabled, options = {}) {
 function toggleApprovalLeaveMixedDetailMode() {
     setApprovalLeaveMixedDetailMode(!isApprovalMixedLeaveDetailMode(), { populateFromRange: true });
     calcLeaveDays();
+    if (isApprovalMixedLeaveDetailMode() && collectApprovalLeaveMixedDraftItems().some(item=>item.slot==='hour'&&item.time_input_mode==='scheduled')) void loadApprovalLeaveClockSchedule();
 }
 
 function syncApprovalMixedRangeUi() {
+    syncApprovalLeaveEndDate('mixedLeaveStartDate', 'mixedLeaveEndDate');
     const startValue = String(document.getElementById('mixedLeaveStartDate')?.value || '').trim();
     const endValue = String(document.getElementById('mixedLeaveEndDate')?.value || '').trim();
     const sameDayRow = document.getElementById('mixedLeaveSameDayRow');
@@ -4540,7 +4627,7 @@ function addApprovalLeaveMixedRow(initialItem = {}, options = {}) {
     row.className = 'approval-leave-mixed-row';
 
     const rowInner = document.createElement('div');
-    rowInner.className = 'row g-2 align-items-center';
+    rowInner.className = 'row g-2 align-items-end';
 
     const dateCol = document.createElement('div');
     dateCol.className = 'col-md-5';
@@ -4548,15 +4635,20 @@ function addApprovalLeaveMixedRow(initialItem = {}, options = {}) {
     dateInput.type = 'date';
     dateInput.className = 'form-control';
     dateInput.dataset.leaveMixedDate = '1';
+    dateInput.setAttribute('aria-label', '시작일');
+    setApprovalLeaveYearLimits(dateInput);
     dateInput.value = String(safeItem.leave_date || safeItem.date || '').trim();
-    dateInput.addEventListener('change', calcLeaveDays);
-    dateCol.appendChild(dateInput);
+    const dateLabel = document.createElement('label');
+    dateLabel.className = 'small text-muted d-block';
+    dateLabel.append('시작일', dateInput);
+    dateCol.append(dateLabel);
 
     const slotCol = document.createElement('div');
     slotCol.className = 'col-md-5';
     const slotSelect = document.createElement('select');
     slotSelect.className = 'form-select';
     slotSelect.dataset.leaveMixedSlot = '1';
+    slotSelect.setAttribute('aria-label', '연차 사용 구분');
     const selectedSlot = normalizeApprovalMixedLeaveSlot(safeItem.slot || safeItem.slot_label);
     APPROVAL_MIXED_LEAVE_SLOT_OPTIONS.forEach((item) => {
         const option = document.createElement('option');
@@ -4565,8 +4657,12 @@ function addApprovalLeaveMixedRow(initialItem = {}, options = {}) {
         option.selected = item.value === selectedSlot;
         slotSelect.appendChild(option);
     });
-    slotSelect.addEventListener('change', ()=>{row.querySelector('[data-leave-time-fields]').classList.toggle('hidden',slotSelect.value!=='hour');calcLeaveDays();});
-    slotCol.appendChild(slotSelect);
+    slotSelect.value = selectedSlot;
+    slotSelect.addEventListener('change', ()=>{row.querySelector('[data-leave-time-fields]').classList.toggle('hidden',slotSelect.value!=='hour');calcLeaveDays();if(slotSelect.value==='hour')void loadApprovalLeaveClockSchedule();});
+    const slotLabel = document.createElement('label');
+    slotLabel.className = 'small text-muted d-block';
+    slotLabel.append('연차 사용 구분', slotSelect);
+    slotCol.appendChild(slotLabel);
 
     const actionCol = document.createElement('div');
     actionCol.className = 'col-md-2 d-grid';
@@ -4590,7 +4686,24 @@ function addApprovalLeaveMixedRow(initialItem = {}, options = {}) {
     modeSelect.value=safeItem.time_input_mode||(safeItem.start_time?'range':'hours');modeCol.append(modeSelect);timeFields.prepend(modeCol);
     const hoursCol=document.createElement('div');hoursCol.className='col-12';const hoursLabel=document.createElement('label');hoursLabel.textContent='사용할 시간 (휴게시간 제외)';const hoursInput=document.createElement('input');hoursInput.type='number';hoursInput.min='0';hoursInput.step='any';hoursInput.className='form-control';hoursInput.dataset.leaveNetHours='1';hoursInput.value=safeItem.net_hours??(safeItem.entered_minutes!=null?String(safeItem.entered_minutes/60):'');hoursInput.addEventListener('input',calcLeaveDays);hoursCol.append(hoursLabel,hoursInput);timeFields.append(hoursCol);
     const breakCol=document.createElement('div');breakCol.className='col-12';const breakLabel=document.createElement('label');breakLabel.textContent='제외할 휴게시간 (분)';const breakInput=document.createElement('input');breakInput.type='number';breakInput.min='0';breakInput.step='1';breakInput.className='form-control';breakInput.dataset.leaveBreakMinutes='1';breakInput.value=String(safeItem.break_minutes??0);breakInput.addEventListener('input',calcLeaveDays);breakCol.append(breakLabel,breakInput);timeFields.append(breakCol);
-    const syncMode=()=>{const byHours=modeSelect.value==='hours';hoursCol.classList.toggle('hidden',!byHours);breakCol.classList.toggle('hidden',byHours);timeFields.querySelectorAll('[data-leave-time]').forEach(input=>input.parentElement.classList.toggle('hidden',byHours));};modeSelect.addEventListener('change',()=>{syncMode();calcLeaveDays();});syncMode();
+    const legacy = ['hours','range'].includes(safeItem.time_input_mode) || (!safeItem.time_input_mode && Boolean(safeItem.start_time || safeItem.end_time || safeItem.net_hours || safeItem.entered_minutes));
+    const timed = createApprovalScheduledLeaveFields(safeItem, dateInput);
+    timeFields.append(timed);
+    const scheduledOption = new Option('시작·종료 날짜와 시간 선택', 'scheduled');
+    modeSelect.prepend(scheduledOption);
+    modeSelect.setAttribute('aria-label', '시간차 입력 방식');
+    if (!legacy) for (const option of [...modeSelect.options]) if (option !== scheduledOption) option.remove();
+    modeSelect.value = legacy ? (safeItem.time_input_mode || (safeItem.net_hours || safeItem.entered_minutes ? 'hours' : 'range')) : 'scheduled';
+    modeCol.classList.toggle('hidden', !legacy);
+    const syncMode=()=>{
+        const scheduled=modeSelect.value==='scheduled',byHours=modeSelect.value==='hours';
+        timed.classList.toggle('hidden',!scheduled);
+        hoursCol.classList.toggle('hidden',!byHours);
+        breakCol.classList.toggle('hidden',scheduled||byHours);
+        timeFields.querySelectorAll('[data-leave-time]').forEach(input=>input.parentElement.classList.toggle('hidden',scheduled||byHours));
+    };
+    dateInput.addEventListener('change',()=>{timed.syncEndDate();calcLeaveDays();});
+    modeSelect.addEventListener('change',()=>{syncMode();calcLeaveDays();});syncMode();
     container.appendChild(row);
 
     if (!options.skipCalc) calcLeaveDays();
@@ -4601,6 +4714,134 @@ function removeApprovalLeaveMixedRow(buttonEl) {
     if (row) row.remove();
     ensureApprovalLeaveMixedRows();
     calcLeaveDays();
+}
+
+function createApprovalScheduledLeaveFields(item, startDate) {
+    const fields = document.createElement('div');
+    fields.className = 'col-12';
+    const grid = document.createElement('div');
+    grid.className = 'row g-2';
+    fields.append(grid);
+    const labelField = (title, input, width = 'col-sm-6') => {
+        const col = document.createElement('div');
+        col.className = width;
+        const label = document.createElement('label');
+        label.className = 'small text-muted d-block';
+        label.append(title, input);
+        col.append(label);
+        grid.append(col);
+        return col;
+    };
+    const input = (key, type, value = '') => {
+        const el = document.createElement('input');
+        el.className = 'form-control';
+        el.type = type;
+        el.dataset.leaveScheduled = key;
+        el.value = value;
+        el.addEventListener('change', calcLeaveDays);
+        return el;
+    };
+    const endDate = input('end_date', 'date', item.end_date ?? startDate.value);
+    let previousStart = startDate.value;
+    let followsStart = item.end_date_follows_start ?? (item.end_date == null || item.end_date === startDate.value);
+    endDate.addEventListener('change', () => { followsStart = false; });
+    fields.syncEndDate = (changed = true) => {
+        setApprovalLeaveYearLimits(startDate);
+        setApprovalLeaveYearLimits(endDate);
+        if (CoopLeaveTime.inYear(startDate.value)) endDate.min = startDate.value;
+        if (changed && followsStart && endDate.value === previousStart) endDate.value = startDate.value;
+        previousStart = startDate.value;
+    };
+    fields.syncEndDate(false);
+    endDate.followsStart = () => followsStart;
+    for (const [key, title] of [['start','시작'],['end','종료']]) {
+        if (key === 'end') labelField('종료일', endDate, 'col-12');
+        const selected = String(item[`${key}_time`] || '').split(':');
+        for (const [unit, name, values, index] of [
+            ['hour','시',Array.from({length:24}, (_, i) => String(i).padStart(2,'0')),0],
+            ['minute','분',['00','30'],1]
+        ]) {
+            const el = document.createElement('select');
+            el.className = 'form-select';
+            el.dataset.leaveScheduled = `${key}_${unit}`;
+            if (!index) el.append(new Option('선택', ''));
+            for (const value of values) el.append(new Option(`${value}${name}`, value));
+            const preferred = index ? item[`${key}_minute`] ?? selected[index] : selected[index];
+            el.value = values.includes(preferred) ? preferred : index ? '00' : '';
+            el.addEventListener('change', calcLeaveDays);
+            labelField(`${title} ${name}`, el, 'col-6 col-md-3');
+        }
+    }
+    const schedule = document.createElement('select');
+    schedule.className = 'form-select';
+    schedule.dataset.leaveScheduled = 'schedule_mode';
+    schedule.append(new Option('등록된 근무시간 사용','contract'),new Option('실제 근무시간 직접 지정','actual'));
+    schedule.value = item.schedule_mode || 'contract';
+    labelField('근무시간 기준',schedule,'col-12');
+    const workStart = labelField('출근 시각',input('work_start','time',item.work_start));
+    const workEnd = labelField('퇴근 시각',input('work_end','time',item.work_end));
+    const workDays = document.createElement('fieldset');
+    workDays.className = 'col-12';
+    const weekTitle = document.createElement('legend');
+    weekTitle.className = 'small text-muted mb-1';
+    weekTitle.textContent = '여러 날이면 실제 근무 요일 선택';
+    const dayChoices = document.createElement('div');
+    dayChoices.className = 'd-flex flex-wrap gap-2';
+    for(const [value,label] of [['1','월'],['2','화'],['3','수'],['4','목'],['5','금'],['6','토'],['0','일']]){
+        const wrap = document.createElement('label');
+        const check = input('work_day','checkbox',value);
+        check.className = 'form-check-input me-1';
+        check.checked = Array.isArray(item.work_days) && item.work_days.includes(value);
+        wrap.append(check,label);
+        dayChoices.append(wrap);
+    }
+    workDays.append(weekTitle,dayChoices);
+    grid.append(workDays);
+    const holiday = input('include_holidays','checkbox');
+    holiday.className = 'form-check-input me-1';
+    holiday.checked = item.include_holidays === true;
+    const holidayCol = labelField('선택한 요일의 공휴일에도 근무',holiday,'col-12');
+    const breakMode = document.createElement('select');
+    breakMode.className = 'form-select';
+    breakMode.dataset.leaveScheduled = 'break_mode';
+    for (const [key, label] of [['','선택'],['actual','실제 휴게시간 직접 지정'],['none','휴게시간 없음']]) breakMode.append(new Option(label,key));
+    breakMode.value = item.break_mode === 'company' ? '' : item.break_mode || '';
+    const breakCol = labelField('휴게시간', breakMode, 'col-12');
+    const pauseStart = labelField('휴게 시작 시각', input('actual_break_start','time',item.actual_break_start));
+    const pauseEnd = labelField('휴게 종료 시각', input('actual_break_end','time',item.actual_break_end));
+    const syncBreak = () => {
+        const manual=schedule.value==='actual';
+        [workStart,workEnd,workDays,holidayCol,breakCol].forEach(col=>col.classList.toggle('hidden',!manual));
+        [pauseStart,pauseEnd].forEach(col=>col.classList.toggle('hidden',!manual||breakMode.value!=='actual'));
+    };
+    schedule.addEventListener('change', () => { syncBreak(); calcLeaveDays(); });
+    breakMode.addEventListener('change', () => { syncBreak(); calcLeaveDays(); });
+    syncBreak();
+    const status = document.createElement('p');
+    status.className = 'small mb-0 mt-2 text-muted';
+    status.dataset.leaveScheduledStatus = '1';
+    status.setAttribute('role','status');
+    fields.append(status);
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn btn-sm btn-outline-secondary mt-2 hidden';
+    retry.dataset.leaveScheduleRetry = '1';
+    retry.textContent = '근무시간 다시 확인';
+    retry.addEventListener('click',()=>void loadApprovalLeaveClockSchedule({retry:true}));
+    fields.append(retry);
+    return fields;
+}
+
+function collectApprovalScheduledLeaveItem(row) {
+    const read = key => row.querySelector(`[data-leave-scheduled="${key}"]`)?.value || '';
+    const clock = key => read(`${key}_hour`) ? `${read(`${key}_hour`)}:${read(`${key}_minute`)}` : '';
+    return {leave_date:row.querySelector('[data-leave-mixed-date]')?.value||'',end_date:read('end_date'),
+        end_date_follows_start:row.querySelector('[data-leave-scheduled="end_date"]')?.followsStart?.() ?? true,
+        start_time:clock('start'),end_time:clock('end'),start_minute:read('start_minute'),end_minute:read('end_minute'),
+        schedule_mode:read('schedule_mode'),work_start:read('work_start'),work_end:read('work_end'),
+        work_days:[...row.querySelectorAll('[data-leave-scheduled="work_day"]:checked')].map(el=>el.value),
+        include_holidays:row.querySelector('[data-leave-scheduled="include_holidays"]')?.checked===true,
+        break_mode:read('break_mode'),actual_break_start:read('actual_break_start'),actual_break_end:read('actual_break_end')};
 }
 
 function getApprovalMixedLeaveDateRange() {
@@ -4628,6 +4869,7 @@ function normalizeApprovalMixedLeaveItems(rawValue) {
     })();
     return source.map((item) => {
         const meta = getApprovalMixedLeaveSlotMeta(item?.slot || item?.slot_label);
+        if (item?.time_input_mode === 'scheduled') return {...item, slot: meta.value};
         if (item?.deducted_days != null) return { ...item, slot: meta.value, slot_label: item.slot_label || meta.label, deducted_hours:item.deducted_hours ?? Number(item.deducted_days)*8, deducted_minutes:item.deducted_minutes ?? Math.round(Number(item.deducted_days)*480) };
         if(meta.value==='hour'){try{return CoopLeaveTime.hourItem(item,getApprovalWorkBasis());}catch(_){return {...item,slot:'hour',slot_label:'시간차',deducted_days:0,deducted_hours:0};}}
         return {
@@ -4640,11 +4882,16 @@ function normalizeApprovalMixedLeaveItems(rawValue) {
 }
 
 function collectApprovalLeaveMixedDraftItems(){
- return Array.from(getApprovalLeaveMixedRowsContainer()?.querySelectorAll('.approval-leave-mixed-row')||[]).map(row=>({
+ return Array.from(getApprovalLeaveMixedRowsContainer()?.querySelectorAll('.approval-leave-mixed-row')||[]).map(row=>{
+  const slot=row.querySelector('[data-leave-mixed-slot]')?.value||'full';
+  const mode=row.querySelector('[data-leave-time-mode]')?.value||'hours';
+  if(mode==='scheduled')return {...collectApprovalScheduledLeaveItem(row),slot,time_input_mode:'scheduled'};
+  return {
   leave_date:row.querySelector('[data-leave-mixed-date]')?.value||'',slot:row.querySelector('[data-leave-mixed-slot]')?.value||'full',
   start_time:row.querySelector('[data-leave-time="start_time"]')?.value||'',end_time:row.querySelector('[data-leave-time="end_time"]')?.value||'',
   time_input_mode:row.querySelector('[data-leave-time-mode]')?.value||'hours',net_hours:row.querySelector('[data-leave-net-hours]')?.value||'',break_minutes:row.querySelector('[data-leave-break-minutes]')?.value||'0'
- }));
+  };
+ });
 }
 
 function renderApprovalLeaveMixedItems(items) {
@@ -4660,9 +4907,9 @@ function renderApprovalLeaveMixedItems(items) {
 }
 
 function isApprovalWeekendIsoDate(isoDate) {
-    const date = new Date(`${isoDate}T00:00:00`);
+    const date = new Date(`${isoDate}T00:00:00Z`);
     if (Number.isNaN(date.getTime())) return false;
-    const day = date.getDay();
+    const day = date.getUTCDay();
     return day === 0 || day === 6;
 }
 
@@ -4682,24 +4929,65 @@ function getApprovalMixedLeaveDetailSummary(options = {}) {
         const dateValue = String(row.querySelector('[data-leave-mixed-date]')?.value || '').trim();
         const slotValue = normalizeApprovalMixedLeaveSlot(row.querySelector('[data-leave-mixed-slot]')?.value || 'full');
         let meta = getApprovalMixedLeaveSlotMeta(slotValue);
+        const scheduled = slotValue === 'hour' && row.querySelector('[data-leave-time-mode]').value === 'scheduled';
+        const status = row.querySelector('[data-leave-scheduled-status]');
+        const retry = row.querySelector('[data-leave-schedule-retry]');
+        if (retry) retry.classList.add('hidden');
+        if (status && !scheduled) status.textContent = '';
 
         if (!dateValue) {
+            if (status) status.textContent = '';
             if (requireComplete) errors.push(`${index + 1}번째 연차 날짜를 입력하세요.`);
             return;
         }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
-            errors.push(`${index + 1}번째 연차 날짜 형식이 올바르지 않습니다.`);
+        if (!CoopLeaveTime.inYear(dateValue)) {
+            if (status) status.textContent = '';
+            errors.push(`${index + 1}번째 연차 날짜는 올해 날짜로 선택해 주세요.`);
             return;
         }
         const dayItem = CoopLeaveTime.dayItem({leave_date:dateValue,slot:meta.value},getApprovalWorkBasis());
         meta = {...meta,days:dayItem.deducted_days,hours:dayItem.deducted_hours};
-        let hourItem;
+        let hourItems;
         if(slotValue==='hour'){
-            try{hourItem=CoopLeaveTime.hourItem({leave_date:dateValue,time_input_mode:row.querySelector('[data-leave-time-mode]').value,net_hours:row.querySelector('[data-leave-net-hours]').value,break_minutes:Number(row.querySelector('[data-leave-break-minutes]').value),start_time:row.querySelector('[data-leave-time="start_time"]').value,end_time:row.querySelector('[data-leave-time="end_time"]').value},getApprovalWorkBasis());meta={...meta,days:hourItem.deducted_days,hours:hourItem.deducted_hours};}
-            catch(error){if(requireComplete||row.querySelector('[data-leave-time="start_time"]').value||row.querySelector('[data-leave-time="end_time"]').value)errors.push(`${index+1}번째 ${error.message}`);return;}
-            const sameDate=items.filter(item=>item.leave_date===dateValue);
-            if(sameDate.some(item=>item.slot!=='hour'||item.time_input_mode==='hours'||hourItem.time_input_mode==='hours'||hourItem.start_time<item.end_time&&hourItem.end_time>item.start_time)){errors.push(`${dateValue} 휴가 시간이 겹칩니다. 시간만 입력할 때는 한 줄에 합쳐 주세요.`);return;}
-            if(sameDate.reduce((sum,item)=>sum+item.deducted_minutes,0)+hourItem.deducted_minutes>hourItem.basis_day_minutes){errors.push(`${dateValue}의 1일 근로시간을 초과했습니다.`);return;}
+            if (scheduled) {
+                const entry = collectApprovalScheduledLeaveItem(row);
+                const clock = leaveSnapshotState?.clockSchedule;
+                const calendar = clock?.year===CoopLeaveTime.yearOf()?clock.calendar:null;
+                status.textContent = '';
+                if (clock?.state==='error') retry.classList.remove('hidden');
+                if (!entry.start_time || !entry.end_time || !entry.end_date) {
+                    if (requireComplete) errors.push(`${index + 1}번째 시작·종료 날짜와 시간을 입력해 주세요.`);
+                    return;
+                }
+                if (!leaveSnapshotState?.workBasis) {
+                    status.textContent = '근로시간을 확인한 뒤 차감 시간을 계산할 수 있습니다.';
+                    return;
+                }
+                if (entry.schedule_mode==='contract' && (clock?.state!=='ready'||!calendar)) {
+                    status.textContent = clock?.state==='error'?'등록된 근무시간을 확인하지 못했습니다. 다시 확인하거나 실제 근무시간을 지정해 주세요.':'등록된 근무시간과 공휴일 확인 중입니다.';
+                    if (requireComplete) errors.push(status.textContent);
+                    return;
+                }
+                try {
+                    const result = CoopLeaveTime.scheduledRange(entry, {...getApprovalWorkBasis(),periods:clock?.periods||getApprovalWorkBasis().periods},calendar);
+                    hourItems = result.items;
+                    status.textContent = `근무일 ${hourItems.length}일 · 겹친 휴게 ${CoopLeaveTime.formatMinutes(result.excludedBreak)} · 차감 ${CoopLeaveTime.formatMinutes(result.totalMinutes)}`;
+                } catch (error) {
+                    status.textContent = error.message;
+                    errors.push(`${index + 1}번째 ${error.message}`);
+                    return;
+                }
+            } else {
+                try{hourItems=[CoopLeaveTime.hourItem({leave_date:dateValue,time_input_mode:row.querySelector('[data-leave-time-mode]').value,net_hours:row.querySelector('[data-leave-net-hours]').value,break_minutes:Number(row.querySelector('[data-leave-break-minutes]').value),start_time:row.querySelector('[data-leave-time="start_time"]').value,end_time:row.querySelector('[data-leave-time="end_time"]').value},getApprovalWorkBasis())];}
+                catch(error){if(requireComplete||row.querySelector('[data-leave-time="start_time"]').value||row.querySelector('[data-leave-time="end_time"]').value)errors.push(`${index+1}번째 ${error.message}`);return;}
+            }
+            for (const hourItem of hourItems) {
+                const sameDate=items.filter(item=>item.leave_date===hourItem.leave_date);
+                if(sameDate.some(item=>item.slot!=='hour'||item.time_input_mode==='hours'||hourItem.time_input_mode==='hours'||hourItem.start_time<item.end_time&&hourItem.end_time>item.start_time)){errors.push(`${hourItem.leave_date} 휴가 시간이 겹칩니다. 시간만 입력할 때는 한 줄에 합쳐 주세요.`);return;}
+                if(sameDate.reduce((sum,item)=>sum+item.deducted_minutes,0)+hourItem.deducted_minutes>hourItem.basis_day_minutes){errors.push(`${hourItem.leave_date}의 1일 근로시간을 초과했습니다.`);return;}
+            }
+            items.push(...hourItems);
+            return;
         }else if(items.some(item=>item.leave_date===dateValue&&item.slot==='hour')){errors.push(`${dateValue} 시간차와 전일·반차는 한 줄로 나누어 입력해 주세요.`);return;}
 
         const usedSlots = slotsByDate.get(dateValue) || new Set();
@@ -4718,7 +5006,7 @@ function getApprovalMixedLeaveDetailSummary(options = {}) {
         usedSlots.add(slotValue);
         slotsByDate.set(dateValue, usedSlots);
 
-        items.push(hourItem || {
+        items.push({
             leave_date: dateValue,
             slot: meta.value,
             slot_label: meta.label,
@@ -4734,6 +5022,7 @@ function getApprovalMixedLeaveDetailSummary(options = {}) {
     });
     const totalDays = CoopLeaveTime.roundDays(sortedItems.reduce((sum, item) => sum + Number(item.deducted_days || 0), 0));
     const totalHours = sortedItems.reduce((sum, item) => sum + Number(item.deducted_hours || 0), 0);
+    if (sortedItems.length > 200) errors.push('한 번에 신청할 수 있는 연차 내역은 200건까지입니다. 나누어 신청해 주세요.');
 
     return {
         inputMode: 'detail',
@@ -4765,8 +5054,8 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
         if (requireComplete) errors.push('휴가 시작일과 종료일을 입력하세요.');
         return { inputMode: 'range', ok: errors.length === 0 && !requireComplete, items, totalDays: 0, totalHours: 0, errors, range };
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(range.start_date) || !/^\d{4}-\d{2}-\d{2}$/.test(range.end_date)) {
-        errors.push('휴가 날짜 형식이 올바르지 않습니다.');
+    if (!CoopLeaveTime.inYear(range.start_date) || !CoopLeaveTime.inYear(range.end_date)) {
+        errors.push('시작일과 종료일은 올해 날짜로 선택해 주세요.');
         return { inputMode: 'range', ok: false, items, totalDays: 0, totalHours: 0, errors, range };
     }
     if (range.start_date > range.end_date) {
@@ -4779,10 +5068,10 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
             items.push(buildApprovalMixedLeaveRangeItem(range.start_date, range.same_day_slot));
         }
     } else {
-        const cursor = new Date(`${range.start_date}T00:00:00`);
-        const end = new Date(`${range.end_date}T00:00:00`);
+        const cursor = new Date(`${range.start_date}T00:00:00Z`);
+        const end = new Date(`${range.end_date}T00:00:00Z`);
         while (cursor <= end) {
-            const dateValue = formatApprovalKstDateISO(cursor, '');
+            const dateValue = cursor.toISOString().slice(0,10);
             if (!isApprovalWeekendIsoDate(dateValue)) {
                 if (dateValue === range.start_date) {
                     items.push(buildApprovalMixedLeaveRangeItem(dateValue, range.start_slot === 'pm' ? 'pm' : 'full'));
@@ -4792,12 +5081,13 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
                     items.push(buildApprovalMixedLeaveRangeItem(dateValue, 'full'));
                 }
             }
-            cursor.setDate(cursor.getDate() + 1);
+            cursor.setUTCDate(cursor.getUTCDate() + 1);
         }
     }
 
     const totalDays = CoopLeaveTime.roundDays(items.reduce((sum, item) => sum + Number(item.deducted_days || 0), 0));
     const totalHours = items.reduce((sum, item) => sum + Number(item.deducted_hours || 0), 0);
+    if (items.length > 200) errors.push('한 번에 신청할 수 있는 근무일은 200일까지입니다. 기간을 나누어 신청해 주세요.');
     if (requireComplete && totalDays <= 0) {
         errors.push('선택한 기간에 계산할 근무일이 없습니다.');
     }
@@ -5343,6 +5633,7 @@ async function refreshApprovalCompanyInfo(coopId) {
     try {
         const { data, error } = await _supabase.from('ref_company_info').select('key,value').eq('coop_id', coopId);
         if (error) throw error;
+        if (getApprovalCoopId() !== coopId) return null;
         const nextInfo = {};
         (data || []).forEach((row) => {
             nextInfo[row.key] = row.value;
@@ -11052,6 +11343,8 @@ async function calculateLeave() {
             leaveSnapshotState = loaded;
             applyLeaveRemainToUi(leaveSnapshotState);
             calcLeaveDays();
+            if (getCurrentApprovalCategory()==='휴가' && isApprovalMixedLeaveDetailMode()
+                && collectApprovalLeaveMixedDraftItems().some(item=>item.slot==='hour'&&item.time_input_mode==='scheduled')) void loadApprovalLeaveClockSchedule();
             await refreshApprovalLeaveCancelCandidates();
             await refreshApprovalBusinessTripCancelCandidates();
             return;
