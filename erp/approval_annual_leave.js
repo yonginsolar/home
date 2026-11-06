@@ -130,18 +130,84 @@
 
     function clockControl(side,title) {
       const clock=make('select','form-select');clock.id=`annualClock${side}Time`;
-      let value='',lastOptions=null;
+      clock.hidden=true;clock.classList.add('hidden');
+      const wrapper=make('div','leave-clock-picker'),heading=make('div','small fw-bold text-muted',title);
+      const trigger=button('','btn btn-outline-secondary leave-clock-trigger'),icon=make('span','leave-clock-icon');
+      const caption=make('span','leave-clock-caption'),arrow=make('span','leave-clock-chevron');
+      const panel=make('div','leave-clock-panel hidden'),hours=make('div','leave-clock-hours'),minutes=make('div','leave-clock-minutes');
+      const minuteTitle=make('div','leave-clock-step small fw-bold','분 선택');
+      heading.id=`${clock.id}Label`;clock.setAttribute('aria-labelledby',heading.id);
+      trigger.id=`${clock.id}Pick`;panel.id=`${clock.id}Panel`;
+      trigger.setAttribute('aria-expanded','false');trigger.setAttribute('aria-controls',panel.id);
+      icon.setAttribute('aria-hidden','true');arrow.setAttribute('aria-hidden','true');
+      hours.setAttribute('role','group');hours.setAttribute('aria-label',`${title} · 시 선택`);
+      minutes.setAttribute('role','group');minutes.setAttribute('aria-label',`${title} · 분 선택`);
+      trigger.append(icon,caption,arrow);
+      panel.append(make('div','leave-clock-step small fw-bold','시 선택'),hours,minuteTitle,minutes);
+      wrapper.append(heading,clock,trigger,panel);
+      let value='',lastOptions=null,values=[],open=false,hour='',lastView='',placeholder='날짜를 먼저 선택';
       const option=(v,t=v)=>{const o=make('option','',t);o.value=v;return o;};
       const reflect=()=>{const next=[...clock.options].some(o=>o.value===value)?value:'';if(clock.value!==next)clock.value=next;};
+      function close(focus=false){
+        open=false;panel.classList.add('hidden');trigger.setAttribute('aria-expanded','false');
+        if(focus&&!trigger.disabled)trigger.focus();
+      }
+      function render(){
+        const shown=clock.value||placeholder;
+        setText(caption,shown);trigger.setAttribute('aria-label',`${title}: ${shown}`);
+        trigger.classList.toggle('has-time',!!clock.value);
+        if(!open)return;
+        const available=[...new Set(values.map(v=>v.slice(0,2)))];
+        if(!available.includes(hour))hour=available.includes(clock.value.slice(0,2))?clock.value.slice(0,2):'';
+        const key=JSON.stringify([lastOptions,clock.value,hour]);if(key===lastView)return;lastView=key;
+        const current=doc.activeElement;
+        const focusedHour=hours.contains(current)?current.dataset.leaveClockHour:null;
+        const focusedMinute=minutes.contains(current)?current.dataset.leaveClockTime:null;
+        const hourButtons=available.map(h=>{
+          const b=button(`${h}시`,'btn leave-clock-option');b.dataset.leaveClockHour=h;
+          b.setAttribute('aria-pressed',String(hour===h));
+          b.addEventListener('click',()=>{hour=h;render();(minutes.querySelector('[aria-pressed="true"]')||minutes.querySelector('button'))?.focus();});
+          return b;
+        });
+        const minuteButtons=values.filter(v=>v.slice(0,2)===hour).map(v=>{
+          const b=button(`${v.slice(3)}분`,'btn leave-clock-option');b.dataset.leaveClockTime=v;
+          b.setAttribute('aria-label',`${v.slice(0,2)}시 ${v.slice(3)}분`);
+          b.setAttribute('aria-pressed',String(clock.value===v));
+          b.addEventListener('click',()=>{
+            if(!open||trigger.disabled||!values.includes(v))return;
+            close(true);if(clock.value===v)return;
+            clock.value=v;
+            clock.dispatchEvent(new root.Event('input',{bubbles:true}));
+            clock.dispatchEvent(new root.Event('change',{bubbles:true}));
+          });
+          return b;
+        });
+        hours.replaceChildren(...hourButtons);minutes.replaceChildren(...minuteButtons);
+        setText(minuteTitle,hour?`${hour}시 · 분 선택`:'시를 고르면 가능한 분이 표시돼요.');
+        if(focusedHour||focusedMinute)(hourButtons.find(b=>b.dataset.leaveClockHour===focusedHour)
+          ||minuteButtons.find(b=>b.dataset.leaveClockTime===focusedMinute)||hourButtons[0]||trigger).focus();
+      }
+      trigger.addEventListener('click',()=>{
+        if(open){close();return;}if(trigger.disabled)return;
+        open=true;hour=clock.value.slice(0,2);lastView='';panel.classList.remove('hidden');trigger.setAttribute('aria-expanded','true');render();
+        (hours.querySelector('[aria-pressed="true"]')||hours.querySelector('button'))?.focus();
+      });
+      wrapper.addEventListener('keydown',e=>{
+        if(e.repeat&&(e.key==='Enter'||e.key===' ')){e.preventDefault();return;}
+        if(open&&e.key==='Escape'&&!e.isComposing){e.preventDefault();e.stopPropagation();close(true);}
+      });
+      for(const event of ['click','focusin'])doc.addEventListener(event,e=>{if(open&&!wrapper.contains(e.target))close();},true);
       // The form rechecks submission on bubbling input, before change fires.
-      const picked=()=>{if(value===clock.value)return;value=clock.value;changed();};
+      const picked=()=>{if(value===clock.value)return;value=clock.value;render();changed();};
       clock.addEventListener('input',picked);
       clock.addEventListener('change',picked);
-      return {wrapper:label(title,clock),control:clock,get:()=>value,put:raw=>{value=String(raw||'').trim();reflect();},
-        update(values){
+      return {wrapper,close,get:()=>value,put:raw=>{close();value=String(raw||'').trim();reflect();render();},
+        update(next,enabled,emptyCaption){
+          values=next;placeholder=emptyCaption;
           const key=values.join(',');
           if(key!==lastOptions){lastOptions=key;clock.replaceChildren(option('','시간 선택'),...values.map(v=>option(v)));}
-          reflect();
+          reflect();clock.disabled=trigger.disabled=!enabled;
+          if(!enabled&&open)close();render();
         }};
     }
 
@@ -364,16 +430,15 @@
       else if(activeMode==='clock'){clockStartPicker.refresh(model);clockEndPicker.refresh(model);}
     }
     function setMode(mode){
-      if(mode!==activeMode){clockStartPicker.show(mode==='clock');clockEndPicker.show(mode==='clock');}
+      if(mode!==activeMode){start.close();end.close();clockStartPicker.show(mode==='clock');clockEndPicker.show(mode==='clock');}
       activeMode=mode;annualStartPicker?.show(mode==='annual');annualEndPicker?.show(mode==='annual');refreshDates();
     }
     function refresh(){
       syncOwner();const model=calendarModel();
       startMenu=getClockMenu(startDate.value,'start',model);
       const endMenu=getClockMenu(endDate.value,'end',model);
-      start.update(startMenu.values);end.update(endMenu.values);
-      start.control.disabled=!startMenu.values.length;
-      end.control.disabled=!startMenu.values.includes(start.get())||!endMenu.values.length;
+      start.update(startMenu.values,!!startMenu.values.length,startDate.value?(startMenu.values.length?'시간 선택':'선택 가능한 시간 없음'):'날짜를 먼저 선택');
+      end.update(endMenu.values,startMenu.values.includes(start.get())&&!!endMenu.values.length,endMenu.values.length?'시간 선택':'선택 가능한 시간 없음');
       syncDates();const state=inspect();
       const retainedInvalid=(start.get()&&!startMenu.values.includes(start.get()))||(end.get()&&!endMenu.values.includes(end.get()));
       if(retainedInvalid){state.result=null;state.error=startMenu.message||endMenu.message||(state.error&&!state.error.includes('입력해')?state.error:'이전에 선택한 시간이 현재 범위에 없어요. 시간을 다시 선택해 주세요.');}
@@ -409,7 +474,7 @@
       editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.3.0'};
+    return {summary,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.4.0'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
