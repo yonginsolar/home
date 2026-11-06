@@ -5,6 +5,12 @@
   const RPC = 'erp_self_leave_work_schedule';
   const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 
+  function formatDeduction(value){
+    const minutes=Math.max(0,Math.round(Number(value)||0));
+    if(minutes<480)return root.CoopLeaveTime.formatMinutes(minutes);
+    return `${Math.floor(minutes/480)}일 ${Math.floor(minutes%480/60)}시간${minutes%60?` ${minutes%60}분`:''}`;
+  }
+
   function cleanSchedule(raw, time) {
     const work = time.breakWindow(raw.work_start,raw.work_end);
     const pause = time.breakWindow(raw.break_start,raw.break_end);
@@ -40,11 +46,20 @@
     const scheduleSave=button('근무시간 저장','btn btn-sm btn-primary'),cancel=button('취소');
     let owner=null, pref=null, editOpen=false, localSchedule=null, localOwner=null, follows=true;
     let epoch=0, ticket=null, pendingSave=null, editorOwner=null, lastStart='';
+    let startMenu={values:[]};
 
     function clockControl(side,title) {
-      const clock=input('time',`annualClock${side}Time`);clock.step='1800';
-      clock.addEventListener('input',changed);clock.addEventListener('change',changed);
-      return {wrapper:label(title,clock),control:clock,put:raw=>{clock.value=String(raw||'').trim();},get:()=>clock.value};
+      const clock=make('select','form-select');clock.id=`annualClock${side}Time`;
+      let value='',lastOptions=null;
+      const option=(v,t=v)=>{const o=make('option','',t);o.value=v;return o;};
+      const reflect=()=>{const next=[...clock.options].some(o=>o.value===value)?value:'';if(clock.value!==next)clock.value=next;};
+      clock.addEventListener('change',()=>{value=clock.value;changed();});
+      return {wrapper:label(title,clock),control:clock,get:()=>value,put:raw=>{value=String(raw||'').trim();reflect();},
+        update(values){
+          const key=values.join(',');
+          if(key!==lastOptions){lastOptions=key;clock.replaceChildren(option('','시간 선택'),...values.map(v=>option(v)));}
+          reflect();
+        }};
     }
 
     const start=clockControl('Start','시작 시간'),end=clockControl('End','종료 시간');
@@ -95,9 +110,9 @@
       const year=time.yearOf();
       startDate.min=`${year}-01-01`;startDate.max=endDate.max=`${year}-12-31`;
       endDate.min=time.inYear(startDate.value)?startDate.value:startDate.min;
-      const ready=time.inYear(startDate.value)&&CLOCK.test(start.get());
+      const ready=time.inYear(startDate.value)&&startMenu.values.includes(start.get());
       endGroup.classList.toggle('hidden',!ready);
-      endDate.disabled=!ready;end.wrapper.querySelectorAll('input,select').forEach(el=>{el.disabled=!ready;});
+      endDate.disabled=!ready;
     }
     function changed(){syncDates();ctx.changed();}
     startDate.addEventListener('change',()=>{
@@ -190,23 +205,52 @@
       try{return {entry,complete,needsWork,fallback,result:time.scheduledRange({...entry,fallback_schedule:fallback,strict_bounds:true},policy,calendar)};}
       catch(e){return {entry,complete,needsWork,result:null,error:e.message};}
     }
-    function refresh(){
-      syncDates();const state=inspect();
-      const clock=ctx.snapshot()?.clockSchedule;
-      for(const [field,date,isEnd] of [[start.control,startDate.value,false],[end.control,endDate.value,true]]){
-        const bounds=time.dateSchedule({periods:clock?.periods||[]},date)||(owner?.self?pref?.schedule:localSchedule)||time.defaultSchedule;
-        const span=time.breakWindow(bounds.work_start,bounds.work_end);
-        field.min=span?time.clockLabel(Math.ceil((span.a+(isEnd?1:0))/30)*30):'';
-        field.max=span?time.clockLabel(Math.floor((span.b-(isEnd?0:1))/30)*30):'';
+    function getClockMenu(date,side,snapshot){
+      if(!date)return {values:[]};
+      if(!time.inYear(date))return {values:[],message:'올해 날짜를 선택해 주세요.'};
+      if(side==='end'&&startDate.value&&date<startDate.value)return {values:[],message:'종료는 시작보다 늦어야 해요.'};
+      const clock=snapshot?.clockSchedule;
+      if(!clock||clock.state!=='ready'||clock.year!==time.yearOf())return {values:[],
+        message:clock?.state==='error'?'근무일을 확인하지 못했어요. 다시 확인해 주세요.':'근무시간을 확인하는 중이에요.',retry:clock?.state==='error'};
+      const contract=time.dateSchedule({periods:clock.periods||[]},date);
+      const fallback=(owner?.self?pref&&(pref.schedule||time.defaultSchedule):localSchedule||time.defaultSchedule);
+      const schedule=contract||fallback;
+      if(!schedule)return {values:[],message:ticket?.error?'저장한 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':'저장한 근무시간을 확인하는 중이에요.',retry:ticket?.error};
+      const info={schedule,fallback:!contract};
+      const day=new Date(date+'T00:00:00Z').getUTCDay();
+      if(clock.calendar?.has(date)||!schedule.days.includes(day))return {...info,values:[],message:`${date}은 근무일이 아니에요.`};
+      const work=time.breakWindow(schedule.work_start,schedule.work_end),pause=time.breakWindow(schedule.break_start,schedule.break_end);
+      if(!work)return {...info,values:[],message:'근무 시작·종료 시각을 확인해 주세요.'};
+      const isEnd=side==='end',values=[];
+      const lower=Math.ceil((work.a+(isEnd?1:0))/30)*30,upper=work.b-(isEnd?0:1);
+      for(let minute=lower;minute<=upper;minute+=30){
+        if(pause&&(isEnd?minute>pause.a:minute>=pause.a)&&minute<pause.b)continue;
+        const v=time.clockLabel(minute);
+        if(isEnd&&date===startDate.value&&start.get()&&v<=start.get())continue;
+        values.push(v);
       }
+      return {...info,values,message:values.length?'':'이 날짜에는 선택할 수 있는 시간이 없어요.'};
+    }
+    function refresh(){
+      syncOwner();const snapshot=ctx.snapshot();
+      startMenu=getClockMenu(startDate.value,'start',snapshot);
+      const endMenu=getClockMenu(endDate.value,'end',snapshot);
+      start.update(startMenu.values);end.update(endMenu.values);
+      start.control.disabled=!startMenu.values.length;
+      end.control.disabled=!startMenu.values.includes(start.get())||!endMenu.values.length;
+      syncDates();const state=inspect();
+      const retainedInvalid=(start.get()&&startMenu.values.length&&!startMenu.values.includes(start.get()))
+        ||(end.get()&&endMenu.values.length&&!endMenu.values.includes(end.get()));
+      if(retainedInvalid){state.result=null;state.error=state.error&&!state.error.includes('입력해')?state.error:'이전에 선택한 시간이 현재 범위에 없어요. 시간을 다시 선택해 주세요.';}
       editor.classList.toggle('hidden',!editOpen);
       scheduleSave.textContent=owner?.self?'근무시간 저장':'이 신청에 적용';
       scheduleSave.disabled=!!pendingSave||!owner||(owner.self&&!pref);
-      edit.classList.toggle('hidden',!state.needsWork||editOpen||(!pref&&owner?.self));
-      const used=state.fallback;
-      setText(scheduleDescription,used&&state.needsWork?`${pref?.schedule||localSchedule?'근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
-      retry.classList.toggle('hidden',!state.retry);
-      setText(status,state.complete&&!state.result?state.error||'':'');
+      const fallbackMenu=startMenu.fallback?startMenu:endMenu.fallback?endMenu:null;
+      edit.classList.toggle('hidden',!fallbackMenu||editOpen||(!pref&&owner?.self));
+      const used=fallbackMenu?.schedule;
+      setText(scheduleDescription,used?`${pref?.schedule||localSchedule?'근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
+      retry.classList.toggle('hidden',!state.retry&&!startMenu.retry&&!endMenu.retry);
+      setText(status,retainedInvalid||state.complete&&!state.result?state.error||'':startMenu.message||(start.get()?endMenu.message:'')||'');
       return state;
     }
     function summary({requireComplete=false}={}){
@@ -229,7 +273,7 @@
       editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();
-    return {summary,draft,restore,refresh,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.1.0'};
+    return {summary,draft,restore,refresh,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.2.0'};
   }
-  root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule});
+  root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);

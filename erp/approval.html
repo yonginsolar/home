@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.124 | Change: 2026-11-06 - Work-hours time picker and overlapping leave protection. -->
+<!-- Version: v1.2.125 | Change: 2026-11-06 - Stable half-hour options and leave submit readiness. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.124 | approval.html');</script>
+  <script>console.log('[Version] v1.2.125 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261106-3"></script>
-  <script src="approval_annual_leave.js?v=20261106-2"></script>
+  <script src="approval_annual_leave.js?v=20261106-3"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -11445,6 +11445,7 @@ async function calculateLeave() {
     if (!targetId) {
         applyLeaveRemainToUi({ effectiveRemainDays: 0, reservedDays: 0 });
         leaveSnapshotState = null;
+        syncApprovalSubmitControls();
         approvalLeaveCancelCandidates = [];
         approvalBusinessTripCancelCandidates = [];
         const previousCategory = getCurrentDraftMainType();
@@ -11462,6 +11463,7 @@ async function calculateLeave() {
     const isCurrent = () => calculateLeave.revision === lookupRevision && ownerKey===getApprovalLeaveClockOwnerKey();
     leaveSnapshotState = null;
     document.getElementById('remainDaysBadge').textContent = '조회 중';
+    syncApprovalSubmitControls();
     try {
         if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
             const loaded = await window.LeaveLedger.getLeaveSnapshot(_supabase, targetId, {
@@ -12526,6 +12528,7 @@ function handleCategoryChange() {
     approvalLastCategory = type;
     syncApprovalExpenseDateUi();
     CoopPermissionRequest.setCategory(type);
+    syncApprovalSubmitControls();
 }
 
 async function changeApprovalMeetingNoticeKind() {
@@ -12969,6 +12972,8 @@ async function openApprovalSubmitPreview() {
             await waitForModalHidden(modalEl);
             if(modalEl.dataset.submitPreviewClosing==='1' || waitOwner!==approvalSubmitOwner() || waitRevision!==approvalComposerInputRevision)return;
         }
+        const leaveBlock=getApprovalAnnualSubmitBlock();
+        if(leaveBlock){showAlert(leaveBlock);return;}
         const previewDoc = buildApprovalSubmitPreviewData();
         currentViewingDocId = null;
         resetRelViewObjectUrls();
@@ -13095,19 +13100,32 @@ function invalidateApprovalSubmitPreview() {
     const button=document.getElementById('btnSubmitFromPreview');
     if(button)button.disabled=true;
 }
+function getApprovalAnnualSubmitBlock() {
+    if(getCurrentDraftMainType()!=='휴가'||!isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig()))return '';
+    const summary=getApprovalMixedLeaveSummary({requireComplete:true});
+    if(!summary.ok||!summary.totalDays)return summary.errors[0]||'휴가 날짜와 시간을 확인해 주세요.';
+    const validation=getApprovalLeaveValidationSummary(getApprovalCurrentLeaveTypeLabel());
+    return isApprovalLeaveValidationBlocked(validation,summary.totalDays)?getApprovalLeaveValidationMessage(validation):'';
+}
 function syncApprovalSubmitControls() {
+    const leaveBlock=getApprovalAnnualSubmitBlock();
     const button=document.getElementById('btnSubmit');
-    if(button)button.disabled=!!approvalSubmitAttempt || !canPerform('approval.submit');
+    if(button){
+        button.disabled=!!approvalSubmitAttempt || !canPerform('approval.submit') || !!leaveBlock;
+        if(leaveBlock)button.title=leaveBlock;else button.removeAttribute('title');
+    }
+    const openPreview=document.getElementById('btnSubmitPreview');
+    if(openPreview){openPreview.disabled=!!leaveBlock;if(leaveBlock)openPreview.title=leaveBlock;else openPreview.removeAttribute('title');}
     const previewButton=document.getElementById('btnSubmitFromPreview');
     if(!previewButton)return;
     const preview=approvalSubmitPreviewState;
     const current=!!preview && isApprovalSubmitSnapshotCurrent(preview.snapshot);
-    previewButton.disabled=!!approvalSubmitAttempt || !preview?.ready || !current;
+    previewButton.disabled=!!approvalSubmitAttempt || !preview?.ready || !current || !!leaveBlock;
     previewButton.textContent=approvalSubmitAttempt?'상신 준비 중…':'상신하기';
     if(preview){
         const hint=document.getElementById('relViewActionHint');
         if(hint)hint.textContent=!current?'작성 내용이 바뀌었습니다. 미리보기를 다시 열어 주세요.'
-            : !preview.ready?'첨부파일 미리보기를 준비하고 있습니다.':'';
+            : leaveBlock||(!preview.ready?'첨부파일 미리보기를 준비하고 있습니다.':'');
     }
 }
 function renderApprovalSubmitPreviewActions(preview) {
@@ -13122,7 +13140,7 @@ function renderApprovalSubmitPreviewActions(preview) {
 }
 function submitApprovalFromPreview() {
     const preview=approvalSubmitPreviewState;
-    if(approvalSubmitAttempt || !preview?.ready || !isApprovalSubmitSnapshotCurrent(preview.snapshot)
+    if(approvalSubmitAttempt || getApprovalAnnualSubmitBlock() || !preview?.ready || !isApprovalSubmitSnapshotCurrent(preview.snapshot)
         || !document.getElementById('relViewModal')?.classList.contains('show'))return;
     const form=preview.snapshot.form,button=document.getElementById('btnSubmit');
     if(!button || button.disabled)return;
@@ -13434,7 +13452,7 @@ function calcLeaveDays() {
         ensureApprovalLeaveMixedRows();
         const summary = getApprovalMixedLeaveSummary({ requireComplete: false });
         document.getElementById("leaveDaysBadge").innerText = isApprovalAnnualConfig(leaveConfig)&&getApprovalAnnualMode()==='clock'
-            ? CoopLeaveTime.formatMinutes(Math.round(summary.totalDays*480)) : formatApprovalWorkDays(summary.totalDays);
+            ? window.CoopApprovalAnnualLeave.formatDeduction(Math.round(summary.totalDays*480)) : formatApprovalWorkDays(summary.totalDays);
         document.getElementById("leaveDaysCalc").value = summary.totalDays;
         syncApprovalPendingLeaveDaysBadge(summary.totalDays);
 
@@ -13454,6 +13472,7 @@ function calcLeaveDays() {
                 msg.classList.add("hidden");
             }
         }
+        syncApprovalSubmitControls();
         return;
     }
 
@@ -14017,6 +14036,8 @@ async function handleDraftSubmit(e) {
     }
     if (!canPerform('approval.submit')) return showAlert("상신 권한이 없습니다.");
     if(approvalSubmitAttempt)return;
+    const leaveBlock=getApprovalAnnualSubmitBlock();
+    if(leaveBlock){syncApprovalSubmitControls();return showAlert(leaveBlock);}
     const submitAttempt={owner:approvalSubmitOwner(),actor:approvalSubmitActor(),preview:approvalSubmitPreviewState,
         focusTarget:approvalSubmitPreviewState?document.getElementById('btnSubmitFromPreview'):e.submitter};
     approvalSubmitAttempt=submitAttempt;
@@ -14418,7 +14439,6 @@ async function handleDraftSubmit(e) {
             docType: subType || mainType || '',
             fileNames: submitFileNames
         }));
-        btn.disabled = false;
         btn.innerText = "상신하기";
         return;
     }
@@ -14516,7 +14536,6 @@ async function handleDraftSubmit(e) {
         } else {
             showAlert("상신 실패: " + error.message);
         }
-        btn.disabled = false;
         btn.innerText = "상신하기";
         return;
     }
@@ -14568,7 +14587,6 @@ async function handleDraftSubmit(e) {
     const firstApproverName = firstApprover ? `${firstApprover.emp_name} ${firstApprover.position || ''}`.trim() : '-';
     if(submitAttempt.preview && approvalSubmitPreviewState===submitAttempt.preview)relViewModal?.hide();
     resetApprovalComposerForm();
-    btn.disabled = false;
     btn.innerText = "상신하기";
     const submitNotice = buildApprovalSubmitNotice(firstApproverName, insertedDoc?._notificationResult);
     if(activeApprovalTab==='draft' && !window.frameElement?.hidden)showAlert(submitNotice, () => {
