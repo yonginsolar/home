@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.136 | Change: 2026-11-06 - Scope leave retries and align calendar availability. -->
+<!-- Version: v1.2.137 | Change: 2026-11-06 - Show time-off read errors and ignore held Enter in date pickers. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.136 | approval.html');</script>
+  <script>console.log('[Version] v1.2.137 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261106-4"></script>
-  <script src="approval_annual_leave.js?v=20261106-14"></script>
+  <script src="approval_annual_leave.js?v=20261106-15"></script>
   <script src="leave_ledger.js?v=20261106-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -5275,12 +5275,10 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
 }
 
 function getApprovalMixedLeaveSummary(options = {}) {
+    const annualMode=window.CoopApprovalAnnualLeave&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())?getApprovalAnnualMode():'';
+    if(annualMode==='clock')return checkApprovalLeaveOverlap(getApprovalAnnualLeaveUi().summary(options));
     if (options.requireComplete && !leaveSnapshotState?.workBasis) return { ok:false, items:[], totalDays:0, totalHours:0, errors:['근로시간과 사용 가능 휴가를 먼저 조회해 주세요.'] };
-    if(window.CoopApprovalAnnualLeave&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
-        const mode=getApprovalAnnualMode();
-        if(mode==='clock')return checkApprovalLeaveOverlap(getApprovalAnnualLeaveUi().summary(options));
-        if(mode==='annual')return checkApprovalLeaveOverlap(getApprovalMixedLeaveRangeSummary({...options,fullOnly:true,workCalendar:getApprovalAnnualLeaveUi()?.annualCalendar?.(),exactDaysSupported:approvalLeaveSnapshotSupported}));
-    }
+    if(annualMode==='annual')return checkApprovalLeaveOverlap(getApprovalMixedLeaveRangeSummary({...options,fullOnly:true,workCalendar:getApprovalAnnualLeaveUi()?.annualCalendar?.(),exactDaysSupported:approvalLeaveSnapshotSupported}));
     const summary=isApprovalMixedLeaveDetailMode()
         ? getApprovalMixedLeaveDetailSummary(options)
         : getApprovalMixedLeaveRangeSummary(options);

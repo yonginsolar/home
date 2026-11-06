@@ -127,25 +127,13 @@
         (grid.querySelector('[tabindex="0"]')||months).focus();
       });
       previous.addEventListener('click',()=>turn(month-1));next.addEventListener('click',()=>turn(month+1));
-      refreshLeave.addEventListener('click',()=>{
-        syncOwner();
-        if(!owner||snapshotRetry||ctx.snapshotRead?.()==='loading')return;
-        const attempt={key:owner.key,epoch};
-        const current=()=>snapshotRetry===attempt&&epoch===attempt.epoch&&ownerState()?.key===attempt.key;
-        snapshotRetry=attempt;
-        void Promise.resolve().then(()=>{
-          if(!current())return;
-          const model=calendarModel();
-          if(!model.snapshot?.workBasis)return ctx.reloadSnapshot?.();
-          return Promise.all([model.clock?.state==='error'?ctx.loadClock(true):null,canRetryPersonal()?readPreference({reload:true}):null]);
-        }).catch(()=>{}).finally(()=>{
-          if(current()){snapshotRetry=null;refreshDates();}
-        });
-        refreshDates();
-      });
+      refreshLeave.addEventListener('click',retryCalendarRead);
       months.addEventListener('change',()=>turn(Number(months.value)));
       // Browsing the calendar is not a form input or a new leave selection.
       for(const event of ['input','change'])months.addEventListener(event,e=>e.stopPropagation());
+      wrapper.addEventListener('keydown',e=>{
+        if(e.repeat&&e.key==='Enter'&&e.target.closest('button'))e.preventDefault();
+      },true);
       panel.addEventListener('keydown',e=>{
         if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close(true);return;}
         const current=e.target.closest('[data-leave-date]');if(!current)return;
@@ -381,10 +369,24 @@
     }
     edit.addEventListener('click',()=>openEditor());
     cancel.addEventListener('click',()=>{if(pendingSchedule())return;editOpen=false;editorBaseline=null;editStatus.textContent='';ctx.changed();if(!edit.classList.contains('hidden'))edit.focus();});
-    retry.addEventListener('click',()=>{
-      if(canRetryPersonal())void readPreference({reload:true});
-      if(ctx.snapshot()?.clockSchedule?.state==='error')ctx.loadClock(true);
-    });
+    retry.addEventListener('click',()=>{if(!retry.classList.contains('hidden'))retryCalendarRead();});
+    function retryCalendarRead(){
+      syncOwner();
+      if(!owner||snapshotRetry||ctx.snapshotRead?.()==='loading')return;
+      const model=calendarModel(),ledger=!model.snapshot?.workBasis;
+      const attempt={key:owner.key,epoch,ledger};
+      const current=()=>snapshotRetry===attempt&&epoch===attempt.epoch&&ownerState()?.key===attempt.key;
+      snapshotRetry=attempt;
+      void Promise.resolve().then(()=>{
+        if(!current())return;
+        const latest=calendarModel();
+        if(ledger)return !latest.snapshot?.workBasis?ctx.reloadSnapshot?.():null;
+        return Promise.all([latest.clock?.state==='error'?ctx.loadClock(true):null,canRetryPersonal()?readPreference({reload:true}):null]);
+      }).catch(()=>{}).finally(()=>{
+        if(current()){snapshotRetry=null;ctx.changed();refreshDates();}
+      });
+      ctx.changed();refreshDates();
+    }
     scheduleSave.addEventListener('click',async()=>{
       syncOwner();if(!owner||pendingSchedule()||ticket?.loading)return;
       let value;
@@ -431,14 +433,15 @@
       }
     });
 
-    function inspect(){
+    function inspect(model){
       syncOwner();
-      const snapshot=ctx.snapshot(),clock=snapshot?.clockSchedule;
+      const {snapshot,clock}=model;
       const entry={leave_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get()};
       const policy={...(snapshot?.workBasis||{}),periods:clock?.periods||snapshot?.workBasis?.periods||[]};
       const calendar=clock?.year===time.yearOf()?clock?.calendar:null;
       const fallback=fallbackSchedule();
       const complete=Boolean(entry.leave_date&&entry.end_date&&entry.start_time&&entry.end_time);
+      if(ledgerReadFailed(model))return {entry,complete,result:null,error:calendarError(model),retry:true,ledgerFailed:true};
       if(!complete)return {entry,complete,result:null,error:'시작·종료 날짜와 시간을 입력해 주세요.'};
       if(!time.inYear(entry.leave_date)||!time.inYear(entry.end_date))return {entry,complete,result:null,error:'시작일과 종료일은 올해 날짜로 선택해 주세요.'};
       if(!CLOCK.test(entry.start_time)||!CLOCK.test(entry.end_time))return {entry,complete,result:null,error:'시간은 00분 또는 30분 단위로 선택해 주세요.'};
@@ -474,8 +477,11 @@
     }
     function crosses(intervals,a,b){return intervals.some(([lo,hi])=>a<hi&&lo<b);}
     function isWorkDay(date,schedule,model){return !model.clock?.calendar?.has(date)&&schedule.days.includes(new Date(date+'T00:00:00Z').getUTCDay());}
+    function ledgerReadFailed(model){
+      return !model.snapshot?.workBasis&&['error','unavailable'].includes(model.snapshotRead);
+    }
     function calendarError(model){
-      if(!model.snapshot?.workBasis)return ['error','unavailable'].includes(model.snapshotRead)
+      if(!model.snapshot?.workBasis)return ledgerReadFailed(model)
         ?'휴가 내역을 확인하지 못했어요. 다시 확인해 주세요.':'휴가 내역을 확인하는 중이에요.';
       if(model.clock?.state!=='ready'||model.clock.year!==time.yearOf()||!model.clock.calendar)
         return model.clock?.state==='error'?'근무일과 공휴일을 확인하지 못했어요. 다시 확인해 주세요.':'근무일과 공휴일을 확인하는 중이에요.';
@@ -570,6 +576,7 @@
       if(!date)return {values:[]};
       if(!time.inYear(date))return {values:[],message:'올해 날짜를 선택해 주세요.'};
       if(side==='end'&&startDate.value&&date<startDate.value)return {values:[],message:'종료는 시작보다 늦어야 해요.'};
+      if(!model.snapshot?.workBasis)return {values:[],message:calendarError(model),retry:ledgerReadFailed(model)};
       const clock=model.clock;
       if(!clock||clock.state!=='ready'||clock.year!==time.yearOf()||!clock.calendar)return {values:[],
         message:clock?.state==='error'?'근무일을 확인하지 못했어요. 다시 확인해 주세요.':'근무시간을 확인하는 중이에요.',retry:clock?.state==='error'};
@@ -603,7 +610,7 @@
       activeMode=mode;annualStartPicker?.show(mode==='annual');annualEndPicker?.show(mode==='annual');refreshDates();
     }
     function scheduleSubmitBlock(state){
-      if(state.needsWork===false)return '';
+      if(state.ledgerFailed||state.needsWork===false)return '';
       if(pendingSchedule()?.phase==='saving')return '근무시간 저장이 끝난 뒤 계속해 주세요.';
       if(unappliedSchedule()&&!personalNeedsRead())return `근무시간 변경을 ${owner?.self?'저장':'적용'}하거나 취소한 뒤 계속해 주세요.`;
       return '';
@@ -614,9 +621,9 @@
       const endMenu=getClockMenu(endDate.value,'end',model);
       start.update(startMenu.values,!!startMenu.values.length,'시간 선택');
       end.update(endMenu.values,startMenu.values.includes(start.get())&&!!endMenu.values.length,'시간 선택');
-      syncDates();const state=inspect();
+      syncDates();const state=inspect(model);
       const retainedInvalid=(start.get()&&!startMenu.values.includes(start.get()))||(end.get()&&!endMenu.values.includes(end.get()));
-      if(retainedInvalid){state.result=null;state.error=startMenu.message||endMenu.message||(state.error&&!state.error.includes('입력해')?state.error:'이전에 선택한 시간이 현재 범위에 없어요. 시간을 다시 선택해 주세요.');}
+      if(retainedInvalid&&!state.ledgerFailed){state.result=null;state.error=startMenu.message||endMenu.message||(state.error&&!state.error.includes('입력해')?state.error:'이전에 선택한 시간이 현재 범위에 없어요. 시간을 다시 선택해 주세요.');}
       editor.classList.toggle('hidden',!editOpen);
       scheduleSave.textContent=owner?.self?'근무시간 저장':'이 신청에 적용';
       scheduleSave.disabled=!!pendingSchedule()||!!ticket?.loading||!owner||(owner.self&&(!pref||personalNeedsRead()));
@@ -625,8 +632,11 @@
       edit.classList.toggle('hidden',!fallbackMenu||editOpen||!!pendingSchedule()||(!pref&&owner?.self)||personalNeedsRead());
       const used=fallbackMenu?.schedule;
       setText(scheduleDescription,used?`${pref?.schedule||localSchedule?'근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
-      retry.classList.toggle('hidden',!state.retry&&!startMenu.retry&&!endMenu.retry&&!(editOpen&&canRetryPersonal()));
-      setText(status,scheduleSubmitBlock(state)||(retainedInvalid||state.complete&&!state.result?state.error||'':startMenu.message||(start.get()?endMenu.message:'')||''));
+      retry.classList.toggle('hidden',!snapshotRetry?.ledger&&!state.retry&&!startMenu.retry&&!endMenu.retry&&!(editOpen&&canRetryPersonal()));
+      retry.disabled=!owner||!!snapshotRetry||model.snapshotRead==='loading';
+      const readMessage=state.ledgerFailed?state.error:snapshotRetry?.ledger&&model.snapshotRead==='loading'?calendarError(model):'';
+      const inputMessage=retainedInvalid||state.complete&&!state.result?state.error:startMenu.message||(start.get()?endMenu.message:'');
+      setText(status,readMessage||scheduleSubmitBlock(state)||inputMessage||'');
       refreshDates(model);
       return state;
     }
@@ -652,7 +662,7 @@
       editOpen=!!owner&&!!s.work_editor;putWork(editOpen?s.work_editor:localSchedule);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.5'};
+    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.6'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
