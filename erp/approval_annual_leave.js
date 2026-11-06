@@ -44,9 +44,9 @@
     const breakDescription=make('p','small text-muted mb-0');
     const scheduleDescription=make('p','small text-muted my-2');
     const scheduleSave=button('근무시간 저장','btn btn-sm btn-primary'),cancel=button('취소');
-    let owner=null, pref=null, editOpen=false, localSchedule=null, localOwner=null, follows=true;
-    let epoch=0, ticket=null, editorOwner=null, editorBaseline=null, lastStart='';
-    const scheduleWrites=new Map(),unverifiedSchedules=new Set();
+    let owner=null, pref=null, editOpen=false, localSchedule=null, follows=true;
+    let epoch=0, ticket=null, editorBaseline=null, lastStart='';
+    const scheduleWrites=new Map(),scheduleChecks=new Map(),proxyWorkDrafts=new Map();
     let startMenu={values:[]}, activeMode='annual', snapshotRetry=null;
     const halfLabel=slot=>slot==='am'?'오전':slot==='pm'?'오후':'';
 
@@ -276,17 +276,39 @@
     }
     function ownerState(){return ctx.owner();}
     const pendingSchedule=()=>owner&&scheduleWrites.get(owner.key);
-    const personalNeedsRead=()=>owner?.self&&unverifiedSchedules.has(owner.key);
+    const checkKey=key=>'erp.leave.schedule-check.v1:'+key;
+    function loadScheduleCheck(key){
+      if(scheduleChecks.has(key))return;
+      try{
+        const stored=root.sessionStorage.getItem(checkKey(key));
+        if(stored!==null&&/^\d+$/.test(stored)&&Number.isSafeInteger(Number(stored)))scheduleChecks.set(key,Number(stored));
+      }catch(_){/* In-page protection also works when browser storage is unavailable. */}
+    }
+    function setScheduleCheck(key,minimumRevision){
+      if(minimumRevision===null)scheduleChecks.delete(key);else scheduleChecks.set(key,minimumRevision);
+      try{
+        if(minimumRevision===null)root.sessionStorage.removeItem(checkKey(key));
+        else root.sessionStorage.setItem(checkKey(key),String(minimumRevision));
+      }catch(_){/* Never store the employee's work times or draft here. */}
+    }
+    const personalNeedsRead=()=>owner?.self&&scheduleChecks.has(owner.key);
     const canRetryPersonal=()=>owner?.self&&!pendingSchedule()&&!ticket?.loading&&(ticket?.error||personalNeedsRead());
     const confirmedSchedule=()=>owner?.self?(pref&&!personalNeedsRead()?(pref.schedule||time.defaultSchedule):null):(localSchedule||time.defaultSchedule);
     const fallbackSchedule=()=>pendingSchedule()?.phase==='saving'?null:confirmedSchedule();
     const unappliedSchedule=()=>editOpen&&!same(readWork(),editorBaseline||confirmedSchedule()||time.defaultSchedule);
+    const workEditorDraft=()=>({...readWork(),break_start:breakStart.value});
     function syncOwner(){
       const next=ownerState();
       if(next?.key===owner?.key)return;
+      if(owner&&!owner.self){
+        if(editOpen||localSchedule)proxyWorkDrafts.set(owner.key,{schedule:localSchedule,editor:editOpen?workEditorDraft():null,baseline:editorBaseline});
+        else proxyWorkDrafts.delete(owner.key);
+      }
       epoch++;owner=next;pref=next?.self?null:{revision:0,schedule:null};ticket=null;
-      if(editorOwner!==next?.key){editOpen=false;putWork(null);editStatus.textContent='';editorOwner=null;editorBaseline=null;}
-      if(localOwner!==next?.key){localSchedule=null;localOwner=null;}
+      if(next?.self)loadScheduleCheck(next.key);
+      const work=next&&!next.self?proxyWorkDrafts.get(next.key):null;
+      localSchedule=work?.schedule||null;editOpen=!!work?.editor;editorBaseline=work?.baseline||null;
+      putWork(work?.editor||localSchedule);editStatus.textContent='';
     }
     function setText(el,value){if(el.textContent!==value)el.textContent=value;}
     function syncDates(){
@@ -322,14 +344,21 @@
         const {data,error}=await withDeadline(signal=>rpc('read',{},signal));
         if(!current())return;
         if(error||!validResponse(data))throw Error('LEAVE_PREF_READ');
-        const wasUnverified=personalNeedsRead();
-        pref={revision:data.revision,schedule:data.schedule?cleanSchedule(data.schedule,time):null};unverifiedSchedules.delete(key);ticket=null;
-        if(wasUnverified&&editOpen)editorBaseline=confirmedSchedule();
+        const latest={revision:data.revision,schedule:data.schedule?cleanSchedule(data.schedule,time):null};
+        const minimumRevision=scheduleChecks.get(key);
+        // The original compare-and-set can still commit at its expected revision.
+        if(minimumRevision!==undefined&&latest.revision<minimumRevision){ticket={waiting:true};return;}
+        pref=latest;setScheduleCheck(key,null);ticket=null;
+        if(minimumRevision!==undefined&&editOpen){
+          editorBaseline=confirmedSchedule();
+          setText(editStatus,'최신 근무시간을 확인했어요. 입력값을 살펴보고 필요하면 저장해 주세요.');
+        }
       }catch(_){if(current())ticket={error:true};}
       finally{if(current())ctx.changed();}
     }
     function openEditor(explicit=true){
-      if(!editOpen){editOpen=true;editorOwner=owner?.key;putWork(pref?.schedule||localSchedule||time.defaultSchedule);editorBaseline=readWork();editStatus.textContent='';}
+      if(!owner||ownerState()?.key!==owner.key)return;
+      if(!editOpen){editOpen=true;putWork(pref?.schedule||localSchedule||time.defaultSchedule);editorBaseline=readWork();editStatus.textContent='';}
       if(explicit){editor.classList.remove('hidden');workStart.focus();}
       ctx.changed();
     }
@@ -348,26 +377,32 @@
         if(pause.duration&&(breakStart.value<=pause.work.start||pause.end>=pause.work.end))throw Error('휴게는 출근과 퇴근 사이에 지정해 주세요.');
         value=cleanSchedule(readWork(),time);
       }catch(e){setText(editStatus,e.message);return;}
-      if(!owner.self){localSchedule=value;localOwner=owner.key;editOpen=false;editorBaseline=null;ctx.changed();return;}
+      if(!owner.self){localSchedule=value;editOpen=false;editorBaseline=null;ctx.changed();return;}
       if(!pref||personalNeedsRead()){setText(editStatus,'저장된 근무시간을 먼저 다시 확인해 주세요. 입력은 그대로 남아 있어요.');return;}
       const key=owner.key,mine=epoch,revision=pref.revision;
       const current=()=>mine===epoch&&ownerState()?.key===key;
       const typed=readWork(),attempt={phase:'saving'};
+      // A lost response may still be followed by a commit. The same revision is
+      // safe only when this request could not change it (an exact no-op).
+      setScheduleCheck(key,revision>0&&same(pref.schedule,value)?revision:revision+1);
       scheduleWrites.set(key,attempt);setText(editStatus,'근무시간 저장 중…');ctx.changed();
       try{
         const {data,error}=await withDeadline(signal=>rpc('save',{p_schedule:value,p_expected_revision:revision},signal));
-        if(!current()){unverifiedSchedules.add(key);return;}
-        if(error?.code==='PT409'){
-          attempt.phase='checking';unverifiedSchedules.add(key);
-          setText(editStatus,'다른 창에서 근무시간을 바꿨어요. 입력은 남겨 두었으니 확인 후 다시 저장해 주세요.');
-          await readPreference({reload:true,afterWrite:attempt});return;
+        if(['PT409','PT400','42501'].includes(error?.code)){
+          attempt.phase='checking';setScheduleCheck(key,0);
+          if(current()){
+            setText(editStatus,error.code==='PT409'?'다른 창에서 근무시간을 바꿨어요. 입력은 남겨 두었으니 확인 후 다시 저장해 주세요.':'근무시간을 저장하지 못했어요. 최신 근무시간을 확인해 주세요.');
+            await readPreference({reload:true,afterWrite:attempt});
+          }
+          return;
         }
-        if(error||!validResponse(data)||!same(cleanSchedule(data.schedule,time),value))throw Error('LEAVE_PREF_SAVE');
-        pref={revision:data.revision,schedule:value};unverifiedSchedules.delete(key);editorBaseline=typed;
+        if(error||!validResponse(data)||data.revision<scheduleChecks.get(key)||!same(cleanSchedule(data.schedule,time),value))throw Error('LEAVE_PREF_SAVE');
+        if(!current()){setScheduleCheck(key,data.revision);return;}
+        pref={revision:data.revision,schedule:value};setScheduleCheck(key,null);editorBaseline=typed;
         if(same(typed,readWork())){editOpen=false;editorBaseline=null;setText(editStatus,'');}
         else setText(editStatus,'저장했습니다. 이후 바꾼 값은 아직 저장하지 않았어요.');
       }catch(_){
-        attempt.phase='checking';unverifiedSchedules.add(key);
+        attempt.phase='checking';
         if(current()){
           setText(editStatus,'저장 결과를 확인하지 못했어요. 입력은 남겨 두었으니 다시 확인해 주세요.');
           await readPreference({reload:true,afterWrite:attempt});
@@ -429,7 +464,7 @@
       return '';
     }
     const scheduleError=()=>pendingSchedule()?.phase==='saving'?'근무시간을 저장하는 중이에요.':personalNeedsRead()
-      ?ticket?.loading?'최신 근무시간을 확인하는 중이에요.':'최신 근무시간을 확인하지 못했어요. 다시 확인해 주세요.'
+      ?ticket?.loading?'최신 근무시간을 확인하는 중이에요.':ticket?.waiting?'저장 결과가 아직 확인되지 않았어요. 잠시 후 다시 확인해 주세요.':'최신 근무시간을 확인하지 못했어요. 다시 확인해 주세요.'
       :ticket?.error?'저장한 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':'저장한 근무시간을 확인하는 중이에요.';
     function workdayStatus(date,model){
       if(model.clock?.calendar?.has(date))return {reason:`${date}은 공휴일이에요.`};
@@ -583,20 +618,22 @@
       return {ok:!error&&(!requireComplete||items.length>0),inputMode:'detail',items,totalHours,totalDays:time.roundDays(totalHours/8),errors:error?[error]:[]};
     }
     function draft(){
+      syncOwner();
       const body={start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows};
-      if(editOpen)body.work_editor={...readWork(),break_start:breakStart.value};
+      if(editOpen)body.work_editor=workEditorDraft();
       if(localSchedule)body.local_schedule=localSchedule;
       return body;
     }
     function restore(data){
-      epoch++;ticket=null;owner=ownerState();editorOwner=owner?.key;editorBaseline=null;
+      epoch++;ticket=null;owner=ownerState();editorBaseline=null;proxyWorkDrafts.clear();
+      if(owner?.self)loadScheduleCheck(owner.key);
       const s=data||{};startDate.value=s.start_date||'';endDate.value=s.end_date||'';lastStart=startDate.value;lastEnd=endDate.value;
       start.put(s.start_time);end.put(s.end_time);follows=s.follows!==false;
-      pref=null;localSchedule=owner&&!owner.self?s.local_schedule||null:null;localOwner=localSchedule?owner.key:null;
-      editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
+      pref=null;localSchedule=owner&&!owner.self?s.local_schedule||null:null;
+      editOpen=!!owner&&!!s.work_editor;putWork(editOpen?s.work_editor:localSchedule);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.3'};
+    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.4'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
