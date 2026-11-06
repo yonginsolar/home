@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.123 | Change: 2026-11-06 - Simple annual and hourly leave entry. -->
+<!-- Version: v1.2.124 | Change: 2026-11-06 - Work-hours time picker and overlapping leave protection. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.123 | approval.html');</script>
+  <script>console.log('[Version] v1.2.124 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -44,8 +44,8 @@
   <script src="approval_service_contract.js?v=1.0.0"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
-  <script src="leave_time.js?v=20261106-2"></script>
-  <script src="approval_annual_leave.js?v=20261106-1"></script>
+  <script src="leave_time.js?v=20261106-3"></script>
+  <script src="approval_annual_leave.js?v=20261106-2"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -81,11 +81,6 @@
     #approvalAnnualClock .leave-entry-pair { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap:.5rem; }
     #approvalAnnualClock :is(input,select,fieldset) { min-width:0; width:100%; }
     #approvalAnnualClock input[type=checkbox] { width:auto; }
-    #approvalAnnualClock .leave-clock-desktop { display:none; }
-    @media (min-width:768px) and (pointer:fine) {
-      #approvalAnnualClock .leave-clock-desktop { display:block; }
-      #approvalAnnualClock .leave-clock-mobile { display:none; }
-    }
     .approval-expense-choice, #divExpensePaymentMethod, #divExpenseCardSelect { display:flex; flex-direction:column; }
     .approval-expense-choice > label, #divExpensePaymentMethod > label, #divExpenseCardSelect > label { min-height:1.5rem; margin-bottom:.25rem; }
     .approval-expense-choice > .form-select, #divExpensePaymentMethod > .form-select, #divExpenseCardSelect > .form-select { min-height:31px; margin-top:auto; }
@@ -5211,12 +5206,38 @@ function getApprovalMixedLeaveSummary(options = {}) {
     if (options.requireComplete && !leaveSnapshotState?.workBasis) return { ok:false, items:[], totalDays:0, totalHours:0, errors:['근로시간과 사용 가능 휴가를 먼저 조회해 주세요.'] };
     if(window.CoopApprovalAnnualLeave&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
         const mode=getApprovalAnnualMode();
-        if(mode==='clock')return getApprovalAnnualLeaveUi().summary(options);
-        if(mode==='annual')return getApprovalMixedLeaveRangeSummary({...options,fullOnly:true});
+        if(mode==='clock')return checkApprovalLeaveOverlap(getApprovalAnnualLeaveUi().summary(options));
+        if(mode==='annual')return checkApprovalLeaveOverlap(getApprovalMixedLeaveRangeSummary({...options,fullOnly:true}));
     }
-    return isApprovalMixedLeaveDetailMode()
+    const summary=isApprovalMixedLeaveDetailMode()
         ? getApprovalMixedLeaveDetailSummary(options)
         : getApprovalMixedLeaveRangeSummary(options);
+    return window.LeaveLedger?.getLeaveSnapshotItems&&typeof checkApprovalLeaveOverlap==='function'?checkApprovalLeaveOverlap(summary):summary;
+}
+
+function checkApprovalLeaveOverlap(summary){
+    if(!summary?.items?.length||!window.LeaveLedger||!isApprovalDeductibleLeaveType(getApprovalCurrentLeaveTypeConfig())
+        ||leaveSnapshotState?.approvalClockOwner!==getApprovalLeaveClockOwnerKey())return summary;
+    const ledger=window.LeaveLedger,prior=[];
+    for(const doc of [...(leaveSnapshotState.pendingDocs||[]),...(leaveSnapshotState.docs||[])]){
+        if(!String(doc?.doc_type||'').startsWith('휴가(')||!ledger.isDeductibleLeaveDoc(doc))continue;
+        const items=ledger.getLeaveSnapshotItems(doc);
+        const dated=items.map(i=>({...i,leave_date:i.leave_date||i.date||i.start_date})).filter(i=>CoopLeaveTime.isDate(i.leave_date));
+        if(dated.length){prior.push(...dated);continue;}
+        const label=ledger.extractLeavePeriodLabel(doc),range=ledger.getLeaveSnapshotMeta(doc)?.range;
+        const dateValue=text=>{const m=String(text||'').match(/(\d{4})[./-]\s*(\d{1,2})[./-]\s*(\d{1,2})(?!\d)/);return m?`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`:'';};
+        const [first,last]=label.split(/[~～]/);
+        const start=dateValue(range?.start_date||first)||ledger.getLeaveStartIso(doc),end=dateValue(range?.end_date||last)||start;
+        if(!CoopLeaveTime.isDate(start)||!CoopLeaveTime.isDate(end)||end<start)continue;
+        for(const item of summary.items){
+            const d=item.leave_date;
+            if(d<start||d>end||(start!==end&&isApprovalWeekendIsoDate(d)))continue;
+            prior.push({leave_date:d,slot:start===end&&Number(doc.amount)<=.5?(label.includes('오후')?'pm':label.includes('오전')?'am':'full'):'full'});
+        }
+    }
+    const overlap=CoopLeaveTime.overlappingLeave(summary.items,prior,{periods:leaveSnapshotState.clockSchedule?.periods||[]});
+    if(!overlap)return summary;
+    return {...summary,ok:false,errors:[`${overlap}에 이미 신청한 휴가와 시간이 겹쳐요. 결재 대기 중인 휴가도 포함돼요.`,...(summary.errors||[])]};
 }
 
 function getApprovalPreparedLeaveSummary(config, options = {}) {
@@ -5229,10 +5250,10 @@ function getApprovalPreparedLeaveSummary(config, options = {}) {
     const items=[];
     if(/^\d{4}-\d{2}-\d{2}$/.test(start)&&/^\d{4}-\d{2}-\d{2}$/.test(end)&&start<=end){
         const cursor=new Date(start+'T00:00:00Z'),last=new Date(end+'T00:00:00Z');
-        while(cursor<=last&&items.length<=200){const date=cursor.toISOString().slice(0,10);if(half||single||![0,6].includes(cursor.getUTCDay()))items.push({...CoopLeaveTime.dayItem({leave_date:date,slot:half?'am':'full'},getApprovalWorkBasis()),slot_label:half?'반차':'전일'});cursor.setUTCDate(cursor.getUTCDate()+1);}
+        while(cursor<=last&&items.length<=200){const date=cursor.toISOString().slice(0,10);if(half||single||![0,6].includes(cursor.getUTCDay()))items.push({...CoopLeaveTime.dayItem({leave_date:date,slot:half?(document.getElementById('pm')?.checked?'pm':'am'):'full'},getApprovalWorkBasis()),slot_label:half?'반차':'전일'});cursor.setUTCDate(cursor.getUTCDate()+1);}
     }
     const totalDays=CoopLeaveTime.roundDays(items.reduce((sum,item)=>sum+item.deducted_days,0));
-    return {inputMode:'range',items,totalDays,totalHours:items.reduce((sum,item)=>sum+item.deducted_hours,0),ok:items.length>0&&items.length<=200,errors:items.length>200?['휴가 기간이 너무 깁니다.']:items.length?[]:['휴가 날짜를 입력해 주세요.']};
+    return checkApprovalLeaveOverlap({inputMode:'range',items,totalDays,totalHours:items.reduce((sum,item)=>sum+item.deducted_hours,0),ok:items.length>0&&items.length<=200,errors:items.length>200?['휴가 기간이 너무 깁니다.']:items.length?[]:['휴가 날짜를 입력해 주세요.']});
 }
 
 function collectApprovalLeaveMixedItems(options = {}) {
@@ -14483,7 +14504,12 @@ async function handleDraftSubmit(e) {
         if(submitAttempt.owner!==approvalSubmitOwner() || window.frameElement?.hidden)return;
         const errorText = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
         const noticeFailure = meetingNoticeFailureMessage(error, 'submit');
-        if (noticeFailure) {
+        if (errorText.includes('ANNUAL_LEAVE_PERIOD_ALREADY_REQUESTED')) {
+            showAlert('이미 신청한 휴가와 날짜·시간이 겹쳐요. 결재 대기 중인 휴가도 포함되니 기존 신청을 확인해 주세요.');
+            void calculateLeave();
+        } else if (errorText.includes('ANNUAL_LEAVE_PERIOD_REQUIRED')) {
+            showAlert('휴가 날짜를 확인할 수 없어요. 기간을 다시 선택해 주세요.');
+        } else if (noticeFailure) {
             showAlert(noticeFailure);
         } else if (expenseSubType === '원천세' && (/23505/.test(errorText) || /ref_approval_unique_withholding_payment_month/.test(errorText))) {
             showAlert('같은 급여 지급월의 원천세 결재가 방금 먼저 등록되었습니다. 결재함에서 기존 문서를 확인하세요.');

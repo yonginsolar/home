@@ -27,7 +27,6 @@
     };
     const input = (type,id,cls='form-control') => { const el=make('input',cls);el.type=type;el.id=id;return el; };
     const button = (text,cls='btn btn-sm btn-outline-secondary') => { const b=make('button',cls,text);b.type='button';return b; };
-    const option = (value,text=value) => { const el=make('option','',text);el.value=value;return el; };
     const startDate=input('date','annualClockStartDate'),endDate=input('date','annualClockEndDate');
     const endGroup=make('div','leave-entry-pair mt-2 hidden');
     const status=make('p','small text-muted my-2');status.setAttribute('role','status');
@@ -35,37 +34,24 @@
     const editor=make('fieldset','border rounded p-2 mt-2 hidden');
     const editStatus=make('p','small mb-0 mt-2');editStatus.setAttribute('role','status');
     const workStart=input('time','annualWorkStart'),workEnd=input('time','annualWorkEnd');
-    const breakStart=input('time','annualWorkBreakStart'),breakEnd=input('time','annualWorkBreakEnd');
-    const hasBreak=input('checkbox','annualWorkHasBreak','form-check-input me-1');
+    const breakStart=input('time','annualWorkBreakStart');
+    const breakDescription=make('p','small text-muted mb-0');
+    const scheduleDescription=make('p','small text-muted my-2');
     const scheduleSave=button('근무시간 저장','btn btn-sm btn-primary'),cancel=button('취소');
     let owner=null, pref=null, editOpen=false, localSchedule=null, localOwner=null, follows=true;
     let epoch=0, ticket=null, pendingSave=null, editorOwner=null, lastStart='';
 
     function clockControl(side,title) {
-      const wrapper=make('div');
-      const mobile=make('select','form-select');mobile.id=`annualClock${side}Select`;
-      mobile.append(option('','시간 선택'));
-      for(let h=0;h<24;h++) for(const m of ['00','30'])mobile.append(option(`${String(h).padStart(2,'0')}:${m}`));
-      const desktop=input('text',`annualClock${side}Text`);desktop.placeholder='예: 09:30';desktop.maxLength=5;desktop.autocomplete='off';
-      desktop.setAttribute('list','approvalAnnualClockTimes');
-      const selectLabel=label(title,mobile),textLabel=label(title,desktop);
-      selectLabel.classList.add('leave-clock-mobile');textLabel.classList.add('leave-clock-desktop');wrapper.append(selectLabel,textLabel);
-      let value='';
-      const put = raw => {value=String(raw||'').trim();if(desktop.value!==value)desktop.value=value;mobile.value=CLOCK.test(value)?value:'';};
-      mobile.addEventListener('change',()=>{put(mobile.value);changed();});
-      desktop.addEventListener('input',()=>{value=desktop.value;mobile.value=CLOCK.test(value)?value:'';changed();});
-      desktop.addEventListener('blur',()=>{if(/^\d:[03]0$/.test(value))put(`0${value}`);changed();});
-      return {wrapper,put,get:()=>value};
+      const clock=input('time',`annualClock${side}Time`);clock.step='1800';
+      clock.addEventListener('input',changed);clock.addEventListener('change',changed);
+      return {wrapper:label(title,clock),control:clock,put:raw=>{clock.value=String(raw||'').trim();},get:()=>clock.value};
     }
 
     const start=clockControl('Start','시작 시간'),end=clockControl('End','종료 시간');
-    const choices=make('datalist');choices.id='approvalAnnualClockTimes';
-    [...start.wrapper.querySelector('select').options].slice(1).forEach(o=>choices.append(option(o.value)));
     const first=make('div','leave-entry-pair');first.append(label('시작일',startDate),start.wrapper);
     endGroup.append(label('종료일',endDate),end.wrapper);
     const work=make('div','leave-entry-pair mb-2');work.append(label('출근 시간',workStart),label('퇴근 시간',workEnd));
-    const breakPair=make('div','leave-entry-pair mt-2');breakPair.append(label('휴게 시작',breakStart),label('휴게 종료',breakEnd));
-    const breakChoice=make('label','small');breakChoice.append(hasBreak,'휴게시간 있음');
+    const breakPair=make('div','mt-2');breakPair.append(label('휴게 시작',breakStart));
     const week=make('details','small my-2'),weekTitle=make('summary');week.append(weekTitle);
     const dayRow=make('div','d-flex flex-wrap gap-2 mt-2');week.append(dayRow);
     const days=[['월',1],['화',2],['수',3],['목',4],['금',5],['토',6],['일',0]].map(([name,day])=>{
@@ -73,17 +59,28 @@
       const wrap=make('label');wrap.append(ch,name);dayRow.append(wrap);ch.addEventListener('change',()=>updateWeek());return ch;
     });
     const actions=make('div','d-flex gap-2 flex-wrap mt-2');actions.append(scheduleSave,cancel);
-    editor.append(make('legend','small fw-bold float-none w-auto mb-2','근무시간'),work,breakChoice,breakPair,week,actions,editStatus);
+    editor.append(make('legend','small fw-bold float-none w-auto mb-2','근무시간'),work,breakPair,breakDescription,week,actions,editStatus);
     const tools=make('div','d-flex gap-2 flex-wrap');tools.append(edit,retry);
-    area.append(choices,first,endGroup,status,tools,editor);
+    area.append(first,endGroup,status,scheduleDescription,tools,editor);
 
     function updateWeek(){weekTitle.textContent=`근무 요일 · ${days.filter(el=>el.checked).map(el=>el.parentElement.textContent.trim()).join('·')||'선택 안 함'}`;}
-    function readWork(){return {work_start:workStart.value,work_end:workEnd.value,break_start:hasBreak.checked?breakStart.value:'',break_end:hasBreak.checked?breakEnd.value:'',days:days.filter(el=>el.checked).map(el=>Number(el.value)).sort()};}
+    function workBreak(){
+      const work=time.breakWindow(workStart.value,workEnd.value),duration=time.defaultBreakMinutes(work);
+      const pause=time.breakWindow(breakStart.value,'23:59');
+      const end=duration&&pause&&pause.a+duration<1440?time.clockLabel(pause.a+duration):'';
+      return {work,duration,end};
+    }
+    function syncWorkBreak(){
+      const {work,duration,end}=workBreak();breakPair.classList.toggle('hidden',!duration);
+      if(work&&duration){breakStart.min=time.clockLabel(work.a+1);breakStart.max=time.clockLabel(work.b-duration-1);}
+      setText(breakDescription,duration?`휴게 ${time.formatMinutes(duration)}${end?` · ${end}까지`:''}`:work?'휴게시간 없음':'');
+    }
+    function readWork(){const pause=workBreak();return {work_start:workStart.value,work_end:workEnd.value,break_start:pause.duration?breakStart.value:'',break_end:pause.end,days:days.filter(el=>el.checked).map(el=>Number(el.value)).sort()};}
     function putWork(data){
-      const s=data||{};workStart.value=s.work_start||'';workEnd.value=s.work_end||'';
-      hasBreak.checked=s.has_break??Boolean(s.break_start||s.break_end);breakStart.value=s.break_start||'';breakEnd.value=s.break_end||'';
+      const s=data||time.defaultSchedule;workStart.value=s.work_start||'';workEnd.value=s.work_end||'';
+      breakStart.value=s.break_start||'';
       days.forEach(el=>{el.checked=(Array.isArray(s.days)?s.days:WEEK).includes(Number(el.value));});
-      updateWeek();breakPair.classList.toggle('hidden',!hasBreak.checked);
+      updateWeek();syncWorkBreak();
     }
     function ownerState(){return ctx.owner();}
     function syncOwner(){
@@ -108,7 +105,7 @@
       lastStart=startDate.value;changed();
     });
     endDate.addEventListener('change',()=>{follows=false;changed();});
-    hasBreak.addEventListener('change',()=>breakPair.classList.toggle('hidden',!hasBreak.checked));
+    for(const field of [workStart,workEnd,breakStart])field.addEventListener('input',syncWorkBreak);
 
     function rpc(action,args,signal){return ctx.client().rpc(RPC,{p_action:action,...args}).abortSignal(signal);}
     async function withDeadline(run){
@@ -131,7 +128,7 @@
       finally{if(current())ctx.changed();}
     }
     function openEditor(explicit=true){
-      if(!editOpen){editOpen=true;editorOwner=owner?.key;putWork(pref?.schedule||localSchedule);editStatus.textContent='';}
+      if(!editOpen){editOpen=true;editorOwner=owner?.key;putWork(pref?.schedule||localSchedule||time.defaultSchedule);editStatus.textContent='';}
       if(explicit){editor.classList.remove('hidden');workStart.focus();}
       ctx.changed();
     }
@@ -142,7 +139,9 @@
       syncOwner();if(!owner||pendingSave)return;
       let value;
       try{
-        if(hasBreak.checked&&(!breakStart.value||!breakEnd.value))throw Error('휴게 시작과 종료를 모두 입력해 주세요.');
+        const pause=workBreak();
+        if(pause.duration&&(!breakStart.value||!pause.end))throw Error('휴게 시작 시간을 입력해 주세요.');
+        if(pause.duration&&(breakStart.value<=pause.work.start||pause.end>=pause.work.end))throw Error('휴게는 출근과 퇴근 사이에 지정해 주세요.');
         value=cleanSchedule(readWork(),time);
       }catch(e){setText(editStatus,e.message);return;}
       if(!owner.self){localSchedule=value;localOwner=owner.key;editOpen=false;ctx.changed();return;}
@@ -175,7 +174,7 @@
       const entry={leave_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get()};
       const policy={...(snapshot?.workBasis||{}),periods:clock?.periods||snapshot?.workBasis?.periods||[]};
       const calendar=clock?.year===time.yearOf()?clock?.calendar:null;
-      const fallback=(owner?.self?pref?.schedule:localSchedule)||null;
+      const fallback=owner?.self?(pref?pref.schedule||time.defaultSchedule:null):localSchedule||time.defaultSchedule;
       const complete=Boolean(entry.leave_date&&entry.end_date&&entry.start_time&&entry.end_time);
       if(!complete)return {entry,complete,result:null,error:'시작·종료 날짜와 시간을 입력해 주세요.'};
       if(!time.inYear(entry.leave_date)||!time.inYear(entry.end_date))return {entry,complete,result:null,error:'시작일과 종료일은 올해 날짜로 선택해 주세요.'};
@@ -188,16 +187,24 @@
         if(!calendar.has(iso)&&!time.dateSchedule(policy,iso)){needsWork=true;break;}
       }
       if(needsWork&&!fallback)return {entry,complete,result:null,needsWork,error:ticket?.error?'저장한 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':ticket?.loading?'저장한 근무시간을 확인하는 중이에요.':'차감 시간을 계산할 수 있도록 근무시간을 입력해 주세요.',retry:ticket?.error};
-      try{return {entry,complete,needsWork,result:time.scheduledRange({...entry,fallback_schedule:fallback},policy,calendar)};}
+      try{return {entry,complete,needsWork,fallback,result:time.scheduledRange({...entry,fallback_schedule:fallback,strict_bounds:true},policy,calendar)};}
       catch(e){return {entry,complete,needsWork,result:null,error:e.message};}
     }
     function refresh(){
       syncDates();const state=inspect();
-      if(state.needsWork&&!pref?.schedule&&!localSchedule&&!ticket?.loading&&!ticket?.error&&!editOpen&&owner){editOpen=true;editorOwner=owner.key;putWork(null);}
-      editor.classList.toggle('hidden',!editOpen);cancel.classList.toggle('hidden',!(pref?.schedule||localSchedule));
+      const clock=ctx.snapshot()?.clockSchedule;
+      for(const [field,date,isEnd] of [[start.control,startDate.value,false],[end.control,endDate.value,true]]){
+        const bounds=time.dateSchedule({periods:clock?.periods||[]},date)||(owner?.self?pref?.schedule:localSchedule)||time.defaultSchedule;
+        const span=time.breakWindow(bounds.work_start,bounds.work_end);
+        field.min=span?time.clockLabel(Math.ceil((span.a+(isEnd?1:0))/30)*30):'';
+        field.max=span?time.clockLabel(Math.floor((span.b-(isEnd?0:1))/30)*30):'';
+      }
+      editor.classList.toggle('hidden',!editOpen);
       scheduleSave.textContent=owner?.self?'근무시간 저장':'이 신청에 적용';
       scheduleSave.disabled=!!pendingSave||!owner||(owner.self&&!pref);
-      edit.classList.toggle('hidden',!state.needsWork||editOpen||!(pref?.schedule||localSchedule));
+      edit.classList.toggle('hidden',!state.needsWork||editOpen||(!pref&&owner?.self));
+      const used=state.fallback;
+      setText(scheduleDescription,used&&state.needsWork?`${pref?.schedule||localSchedule?'근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
       retry.classList.toggle('hidden',!state.retry);
       setText(status,state.complete&&!state.result?state.error||'':'');
       return state;
@@ -210,7 +217,7 @@
     }
     function draft(){
       const body={start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows};
-      if(editOpen)body.work_editor={...readWork(),has_break:hasBreak.checked,break_start:breakStart.value,break_end:breakEnd.value};
+      if(editOpen)body.work_editor={...readWork(),break_start:breakStart.value};
       if(localSchedule)body.local_schedule=localSchedule;
       return body;
     }
@@ -222,7 +229,7 @@
       editOpen=!!s.work_editor;putWork(s.work_editor);editStatus.textContent='';syncDates();
     }
     putWork(null);syncDates();
-    return {summary,draft,restore,refresh,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.0.0'};
+    return {summary,draft,restore,refresh,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.1.0'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule});
 })(window);

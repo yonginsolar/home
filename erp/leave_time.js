@@ -24,6 +24,33 @@
   return schedule;
  }
  function clockLabel(minutes){return `${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}`;}
+ function defaultBreakMinutes(work){return !work?0:work.b-work.a>=480?60:work.b-work.a>=240?30:0;}
+ const DEFAULT_SCHEDULE=Object.freeze({work_start:'09:00',work_end:'18:00',break_start:'12:00',break_end:'13:00',days:Object.freeze([1,2,3,4,5])});
+ function halfBoundary(policy,date){
+  const s=dateSchedule(policy,date)||DEFAULT_SCHEDULE;
+  const work=breakWindow(s.work_start,s.work_end),pause=breakWindow(s.break_start,s.break_end);
+  if(!work||!pause)return 840;
+  const half=work.a+Math.floor((work.b-work.a-(pause.b-pause.a))/2);
+  return half>=pause.a?half+pause.b-pause.a:half;
+ }
+ function overlappingLeave(items,prior,policy){
+  const normalizeSlot=v=>({오전:'am',오후:'pm',morning:'am',afternoon:'pm',am:'am',pm:'pm',hour:'hour'})[v]||'full';
+  function coverage(i,date){
+   const slot=normalizeSlot(i.slot||i.slot_label);
+   if(slot==='hour'&&i.time_input_mode!=='hours'){const window=breakWindow(i.start_time,i.end_time);if(window)return [window.a,window.b];}
+   if(slot==='am')return [0,halfBoundary(policy,date)];
+   if(slot==='pm')return [halfBoundary(policy,date),1440];
+   return [0,1440];
+  }
+  for(const next of items||[]){
+   const day=next.leave_date,[a,b]=coverage(next,day);
+   for(const old of prior||[]){
+    if(old.leave_date!==day)continue;
+    const [c,d]=coverage(old,day);if(a<d&&c<b)return day;
+   }
+  }
+  return '';
+ }
  function scheduledRange(item,policy,calendar,year=yearOf()){
   const {leave_date:date,end_date:endDate,start_time:startTime,end_time:endTime}=item;
   if(!inYear(date,year)||!inYear(endDate,year))throw Error('시작일과 종료일은 올해 날짜로 선택해 주세요.');
@@ -39,12 +66,14 @@
   const last=new Date(endDate+'T00:00:00Z');
   for(const day=new Date(date+'T00:00:00Z');day<=last;day.setUTCDate(day.getUTCDate()+1)){
    const iso=day.toISOString().slice(0,10),weekday=day.getUTCDay();
-   if(calendar?.has(iso)&&!(manual&&item.include_holidays))continue;
+   const boundary=iso===date||iso===endDate;
+   if(calendar?.has(iso)&&!(manual&&item.include_holidays)){if(item.strict_bounds&&boundary)throw Error(`${iso}은 근무일이 아니에요.`);continue;}
    const schedule=manual?null:(dateSchedule(policy,iso)||item.fallback_schedule);
    if(!manual&&!schedule)throw Error('기간 중 확인된 근무표가 없는 날짜가 있어요. 실제 근무시간을 직접 지정해 주세요.');
-   if(manual?(date!==endDate&&!item.work_days.includes(String(weekday))):!schedule.days.includes(weekday))continue;
+   if(manual?(date!==endDate&&!item.work_days.includes(String(weekday))):!schedule.days.includes(weekday)){if(item.strict_bounds&&boundary)throw Error(`${iso}은 근무일이 아니에요.`);continue;}
    const work=actualWork||breakWindow(schedule.work_start,schedule.work_end);
    if(!work)throw Error('근무 시작·종료 시각을 확인해 주세요.');
+   if(item.strict_bounds&&((iso===date&&(start<work.a||start>=work.b))||(iso===endDate&&(end<=work.a||end>work.b))))throw Error(`시간차는 근무시간(${work.start}~${work.end}) 안에서 선택해 주세요.`);
    const a=Math.max(work.a,iso===date?start:0),b=Math.min(work.b,iso===endDate?end:1440);
    if(b<=a)continue;
    const pause=manual?(item.break_mode==='none'?null:breakWindow(item.actual_break_start,item.actual_break_end)):breakWindow(schedule.break_start,schedule.break_end);
@@ -78,5 +107,5 @@
  function roundDays(value){return Math.round((Number(value)||0)*DAY)/DAY;}
  function formatDays(value,dayMinutes=DAY){const day=Number(dayMinutes)>0?Number(dayMinutes):DAY;let minutes=Math.round((Number(value)||0)*DAY),sign=minutes<0?'-':'';minutes=Math.abs(minutes);const days=Math.floor(minutes/day),hours=(minutes%day)/60;return sign+days+'일 '+Number(hours.toFixed(4))+'시간';}
  function hoursToMinutes(value,max=1440){const n=Number(value),minutes=Math.round(n*60);if(!Number.isFinite(n)||n<=0||Math.abs(n*60-minutes)>1e-7||minutes>max)throw Error('시간은 0보다 큰 값으로 입력해 주세요.');return minutes;}
- root.CoopLeaveTime=Object.freeze({hourItem,dayItem,basisMinutes,roundDays,formatDays,hoursToMinutes,yearOf,isDate,inYear,breakWindow,dateSchedule,scheduledRange,formatMinutes,dayMinutes:DAY,version:'1.2.0'});
+ root.CoopLeaveTime=Object.freeze({hourItem,dayItem,basisMinutes,roundDays,formatDays,hoursToMinutes,yearOf,isDate,inYear,breakWindow,dateSchedule,scheduledRange,formatMinutes,clockLabel,defaultBreakMinutes,defaultSchedule:DEFAULT_SCHEDULE,overlappingLeave,dayMinutes:DAY,version:'1.3.0'});
 })(window);
