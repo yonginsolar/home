@@ -40,7 +40,7 @@
   for(const day=new Date(date+'T00:00:00Z');day<=last;day.setUTCDate(day.getUTCDate()+1)){
    const iso=day.toISOString().slice(0,10),weekday=day.getUTCDay();
    if(calendar?.has(iso)&&!(manual&&item.include_holidays))continue;
-   const schedule=manual?null:dateSchedule(policy,iso);
+   const schedule=manual?null:(dateSchedule(policy,iso)||item.fallback_schedule);
    if(!manual&&!schedule)throw Error('기간 중 확인된 근무표가 없는 날짜가 있어요. 실제 근무시간을 직접 지정해 주세요.');
    if(manual?(date!==endDate&&!item.work_days.includes(String(weekday))):!schedule.days.includes(weekday))continue;
    const work=actualWork||breakWindow(schedule.work_start,schedule.work_end);
@@ -48,7 +48,8 @@
    const a=Math.max(work.a,iso===date?start:0),b=Math.min(work.b,iso===endDate?end:1440);
    if(b<=a)continue;
    const pause=manual?(item.break_mode==='none'?null:breakWindow(item.actual_break_start,item.actual_break_end)):breakWindow(schedule.break_start,schedule.break_end);
-   if((!manual||item.break_mode!=='none')&&!pause)throw Error('실제 휴게 시작·종료 시간을 확인하거나 휴게시간 없음을 선택해 주세요.');
+   const noBreak=manual?item.break_mode==='none':schedule.break_start===''&&schedule.break_end==='';
+   if(!noBreak&&!pause)throw Error('실제 휴게 시작·종료 시간을 확인하거나 휴게시간 없음을 선택해 주세요.');
    if(pause&&(pause.a<work.a||pause.b>work.b))throw Error('휴게시간은 근무시간 안에서 지정해 주세요.');
    const overlap=pause?Math.max(0,Math.min(b,pause.b)-Math.max(a,pause.a)):0;
    excludedBreak+=overlap; grossWork+=b-a;

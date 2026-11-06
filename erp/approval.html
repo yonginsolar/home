@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.122 | Change: 2026-11-06 - Current-year leave and half-hour time selection. -->
+<!-- Version: v1.2.123 | Change: 2026-11-06 - Simple annual and hourly leave entry. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.122 | approval.html');</script>
+  <script>console.log('[Version] v1.2.123 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -44,7 +44,8 @@
   <script src="approval_service_contract.js?v=1.0.0"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
-  <script src="leave_time.js?v=20261106-1"></script>
+  <script src="leave_time.js?v=20261106-2"></script>
+  <script src="approval_annual_leave.js?v=20261106-1"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -77,6 +78,14 @@
     #mixedDayArea .row > *, #mixedDayArea :is(input,select,fieldset) { min-width:0; max-width:100%; }
     #mixedDayArea :is(label,legend,button,p) { overflow-wrap:anywhere; }
     #mixedDayArea .badge { max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:start; }
+    #approvalAnnualClock .leave-entry-pair { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap:.5rem; }
+    #approvalAnnualClock :is(input,select,fieldset) { min-width:0; width:100%; }
+    #approvalAnnualClock input[type=checkbox] { width:auto; }
+    #approvalAnnualClock .leave-clock-desktop { display:none; }
+    @media (min-width:768px) and (pointer:fine) {
+      #approvalAnnualClock .leave-clock-desktop { display:block; }
+      #approvalAnnualClock .leave-clock-mobile { display:none; }
+    }
     .approval-expense-choice, #divExpensePaymentMethod, #divExpenseCardSelect { display:flex; flex-direction:column; }
     .approval-expense-choice > label, #divExpensePaymentMethod > label, #divExpenseCardSelect > label { min-height:1.5rem; margin-bottom:.25rem; }
     .approval-expense-choice > .form-select, #divExpensePaymentMethod > .form-select, #divExpenseCardSelect > .form-select { min-height:31px; margin-top:auto; }
@@ -799,7 +808,7 @@
         <div class="col-12 hidden mb-3" id="divLeaveType">
             <label class="small text-muted fw-bold">휴가 종류</label>
             <select class="form-select" id="leaveTypeSelect" onchange="handleCategoryChange()">
-                <option value="연차">🟢 연차 (사용 가능 일수 차감)</option>
+                <option value="연차">연차</option>
                 <option value="생일반차">🎂 생일반차 (차감 X)</option>
                 <option value="생리휴가">🌸 생리휴가 (무급, 차감 X)</option>
                 <option value="경조사">💍 경조사 (증빙필수, 차감 X)</option>
@@ -1243,24 +1252,32 @@
                     <span class="badge bg-primary">사용 가능 휴가: <span id="remainDaysBadgeMixed">0일 0시간</span></span>
                 </div>
                 <div class="small text-muted mb-2">올해 날짜를 선택하세요. 이미 지난 날짜도 신청할 수 있어요.</div>
+                <fieldset id="approvalAnnualModes" class="mb-3 hidden">
+                    <legend class="small text-muted fw-bold mb-2">어떻게 사용하시나요?</legend>
+                    <div class="d-flex flex-wrap gap-3">
+                        <label><input type="radio" name="approvalAnnualMode" value="annual" checked> 연차</label>
+                        <label><input type="radio" name="approvalAnnualMode" value="clock"> 시간차</label>
+                        <label id="approvalAnnualLegacyChoice" class="hidden"><input type="radio" name="approvalAnnualMode" value="legacy" disabled> 기존 초안</label>
+                    </div>
+                </fieldset>
                 <div id="mixedLeaveRangeEditor">
                     <div class="row g-2 align-items-end">
-                        <div class="col-md-4">
+                        <div class="col-md">
                             <label class="small text-muted fw-bold" for="mixedLeaveStartDate">휴가 시작일</label>
-                            <input type="date" class="form-control" id="mixedLeaveStartDate" onchange="handleApprovalMixedRangeChange()">
+                            <input type="date" class="form-control" id="mixedLeaveStartDate" onchange="handleApprovalMixedRangeChange(event)">
                         </div>
-                        <div class="col-md-2">
+                        <div class="col-md-2" data-approval-old-leave>
                             <label class="small text-muted fw-bold" for="mixedLeaveStartSlot">시작일 사용 구분</label>
                             <select class="form-select" id="mixedLeaveStartSlot" onchange="handleApprovalMixedRangeChange()">
                                 <option value="full">전일</option>
                                 <option value="pm">오후부터</option>
                             </select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md">
                             <label class="small text-muted fw-bold" for="mixedLeaveEndDate">휴가 종료일</label>
-                            <input type="date" class="form-control" id="mixedLeaveEndDate" onchange="handleApprovalMixedRangeChange()">
+                            <input type="date" class="form-control" id="mixedLeaveEndDate" onchange="handleApprovalMixedRangeChange(event)">
                         </div>
-                        <div class="col-md-2">
+                        <div class="col-md-2" data-approval-old-leave>
                             <label class="small text-muted fw-bold" for="mixedLeaveEndSlot">종료일 사용 구분</label>
                             <select class="form-select" id="mixedLeaveEndSlot" onchange="handleApprovalMixedRangeChange()">
                                 <option value="full">전일</option>
@@ -1278,9 +1295,9 @@
                             </select>
                         </div>
                     </div>
-                    <div class="small text-muted mt-2" id="mixedLeaveRangeHelp">예: 월요일 오후부터 화요일 오전까지는 1일로 계산됩니다.</div>
+                    <div class="small text-muted mt-2" id="mixedLeaveRangeHelp" data-approval-old-leave>예: 월요일 오후부터 화요일 오전까지는 1일로 계산됩니다.</div>
                 </div>
-                <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+                <div class="d-flex flex-wrap gap-2 align-items-center mt-2" data-approval-old-leave>
                     <button type="button" class="btn btn-outline-primary btn-sm" id="mixedLeaveTimeEntryBtn" onclick="openApprovalTimedLeaveEntry()">시간차 입력</button>
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="mixedLeaveDetailToggleBtn" onclick="toggleApprovalLeaveMixedDetailMode()">날짜별·시간별 세부 조정</button>
                     <input type="hidden" id="mixedLeaveDetailMode" value="0">
@@ -1290,6 +1307,7 @@
                     <div id="mixedLeaveRows"></div>
                     <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="addApprovalLeaveMixedRow()">+ 날짜 추가</button>
                 </div>
+                <div id="approvalAnnualClock" class="hidden" aria-label="시간차 사용 기간"></div>
             </div>
 
             <div id="singleDayArea" class="hidden">
@@ -1319,7 +1337,7 @@
             </div>
 
             <div class="text-end small text-muted">
-              신청 일수: <span id="leaveDaysBadge" class="fw-bold text-dark">0일</span>
+              <span id="approvalLeaveTotalLabel">신청 일수:</span> <span id="leaveDaysBadge" class="fw-bold text-dark">0일</span>
               <input type="hidden" id="leaveDaysCalc" value="0">
             </div>
             <div class="text-danger small mt-1 hidden" id="leaveOverMsg">⛔ 사용 가능한 연차가 부족합니다!</div>
@@ -1676,6 +1694,7 @@ let relViewObjectUrls = [];
 let approvalAttachmentPreviewRevision = 0;
 let relAttachmentViewerRevision = 0;
 let leaveSnapshotState = null;
+let approvalAnnualLeaveUi = null;
 let historyStatusFilter = 'ALL';
 let historyDocTypeFilter = 'ALL';
 let historyPeriodFilter = 'ALL';
@@ -3135,6 +3154,10 @@ function collectApprovalDraftFormPayload() {
             leave_range_same_day_slot: mixedRange.same_day_slot,
             leave_detail_mode: mixedDetailMode,
             leave_items: collectApprovalLeaveMixedDraftItems().filter(item => mixedDetailMode || item.leave_date || item.slot !== 'full'),
+            leave_annual_mode: getApprovalAnnualMode(),
+            leave_annual_legacy: document.getElementById('approvalAnnualModes')?.dataset.hasLegacy==='1',
+            leave_annual_end_follows: document.getElementById('mixedLeaveEndDate')?.dataset.pinned!=='1',
+            leave_simple_clock: approvalAnnualLeaveUi?.draft()||null,
             single_leave_date: String(document.getElementById('singleLeaveDate')?.value || '').trim(),
             half_date: String(document.getElementById('halfDate')?.value || '').trim(),
             half_slot: String(selectedHalf?.value || '').trim(),
@@ -3477,6 +3500,7 @@ function resetApprovalComposerForm(options = {}) {
     if (jeongyeolToggleEl) jeongyeolToggleEl.checked = false;
     renderApprovalLeaveMixedItems([]);
     setApprovalLeaveMixedDetailMode(false, { populateFromRange: false });
+    restoreApprovalAnnualMode({});
     syncApprovalMixedRangeUi();
 
     const proxyCheckEl = document.getElementById('chkProxy');
@@ -3790,6 +3814,7 @@ async function loadApprovalDraftFromServer(draftId) {
         const hasLegacyMixedItems = fields.leave_detail_mode == null && restoredMixedItems.length > 0 && !String(fields.leave_range_start || '').trim() && !String(fields.leave_range_end || '').trim();
         renderApprovalLeaveMixedItems(restoredMixedItems);
         setApprovalLeaveMixedDetailMode(fields.leave_detail_mode === true || String(fields.leave_detail_mode || '').trim() === '1' || String(fields.leave_detail_mode || '').trim() === 'true' || hasLegacyMixedItems, { populateFromRange: false });
+        restoreApprovalAnnualMode(fields);
         syncApprovalMixedRangeUi();
         if (singleLeaveDateEl) singleLeaveDateEl.value = String(fields.single_leave_date || '').trim();
         if (halfDateEl) halfDateEl.value = String(fields.half_date || '').trim();
@@ -4324,7 +4349,13 @@ function isApprovalDeductibleLeaveType(configOrSubType, doc) {
     return config?.deductible === true;
 }
 
+function isApprovalAnnualConfig(config) {
+    return isApprovalMixedDayLeaveType(config)&&isApprovalDeductibleLeaveType(config)
+        &&[config?.id,config?.label,...normalizeApprovalLeaveTypeAliases(config?.aliases)].some(v=>v==='annual'||v==='연차');
+}
+
 function buildApprovalLeaveTypeOptionLabel(config) {
+    if(isApprovalAnnualConfig(config))return config.label;
     const durationLabel = isApprovalMixedDayLeaveType(config)
         ? '일자별'
         : (isApprovalHalfDayLeaveType(config)
@@ -4354,6 +4385,7 @@ function renderApprovalLeaveTypeOptions() {
         const option = document.createElement('option');
         option.value = item.id;
         option.textContent = buildApprovalLeaveTypeOptionLabel(item);
+        if(isApprovalHalfDayLeaveType(item)&&isApprovalDeductibleLeaveType(item)&&[item.id,item.label,...normalizeApprovalLeaveTypeAliases(item.aliases)].some(v=>v==='half_day'||v==='반차')){option.hidden=true;option.disabled=true;}
         selectEl.appendChild(option);
     });
 
@@ -4362,7 +4394,7 @@ function renderApprovalLeaveTypeOptions() {
         || item.label === previous
         || normalizeApprovalLeaveTypeAliases(item.aliases).includes(previous)
     ));
-    selectEl.value = previousMatch ? previousMatch.id : enabledItems[0].id;
+    selectEl.value = previousMatch ? previousMatch.id : (enabledItems.find(isApprovalAnnualConfig)?.id||[...selectEl.options].find(o=>!o.hidden)?.value||'');
 }
 
 function getApprovalDeductibleSubtypeTokens() {
@@ -4434,6 +4466,7 @@ function syncApprovalLeaveInputMode() {
     syncApprovalLeaveEndDate('leaveStart', 'leaveEnd');
     syncApprovalLeaveEndDate('mixedLeaveStartDate', 'mixedLeaveEndDate');
     if (mode === 'mixed_days') ensureApprovalLeaveMixedInputState();
+    syncApprovalAnnualModeUi();
     if (getCurrentApprovalCategory() === '휴가') {
         syncApprovalTitleInput('휴가');
     }
@@ -4486,6 +4519,70 @@ function getApprovalWorkBasis() {
     return leaveSnapshotState?.workBasis || { day_minutes: 480, periods: [] };
 }
 
+function getApprovalAnnualMode() {
+    return document.querySelector('input[name="approvalAnnualMode"]:checked')?.value||'annual';
+}
+
+function getApprovalAnnualLeaveUi() {
+    if(approvalAnnualLeaveUi||!window.CoopApprovalAnnualLeave)return approvalAnnualLeaveUi;
+    approvalAnnualLeaveUi=window.CoopApprovalAnnualLeave.create({document,
+        snapshot:()=>leaveSnapshotState?.approvalClockOwner===getApprovalLeaveClockOwnerKey()?leaveSnapshotState:null,
+        client:()=>_supabase,
+        owner:()=>{
+            const coop=getApprovalCoopId(),own=String(myInfo?.emp_id||'');
+            const proxy=document.getElementById('chkProxy')?.checked===true;
+            const emp=proxy?String(document.getElementById('proxyTargetSelect')?.value||''):own;
+            return coop&&own&&emp?{key:JSON.stringify([coop,own,emp,proxy]),self:!proxy}:null;
+        },
+        loadClock:retry=>{void loadApprovalLeaveClockSchedule({retry});},
+        changed:()=>{if(getCurrentApprovalCategory()==='휴가'&&getApprovalAnnualMode()==='clock')calcLeaveDays();}
+    });
+    return approvalAnnualLeaveUi;
+}
+
+function getApprovalLeaveClockOwnerKey(){
+    const target=document.getElementById('chkProxy')?.checked?document.getElementById('proxyTargetSelect')?.value:myInfo?.emp_id;
+    return JSON.stringify([getApprovalCoopId(),String(target||'')]);
+}
+
+function restoreApprovalAnnualMode(fields) {
+    const modes=document.getElementById('approvalAnnualModes');
+    if(!modes)return;
+    const oldDetail=[true,1,'1','true'].includes(fields.leave_detail_mode);
+    const oldRows=normalizeApprovalMixedLeaveItems(fields.leave_items).some(item=>item.leave_date||item.slot==='hour');
+    const oldHalf=[fields.leave_range_start_slot,fields.leave_range_end_slot,fields.leave_range_same_day_slot].some(value=>['am','pm','오전','오후'].includes(value));
+    const legacy=fields.leave_annual_legacy===true||(!fields.leave_annual_mode&&(oldDetail||oldRows||oldHalf));
+    modes.dataset.hasLegacy=legacy?'1':'0';
+    const choice=fields.leave_annual_mode==='clock'?'clock':legacy&&(!fields.leave_annual_mode||fields.leave_annual_mode==='legacy')?'legacy':'annual';
+    modes.querySelector(`input[value="${choice}"]`).checked=true;
+    document.getElementById('mixedLeaveEndDate').dataset.pinned=fields.leave_annual_end_follows===false?'1':'0';
+    document.getElementById('mixedLeaveStartDate').dataset.previousValue=document.getElementById('mixedLeaveStartDate').value;
+    if(fields.leave_simple_clock||approvalAnnualLeaveUi)getApprovalAnnualLeaveUi()?.restore(fields.leave_simple_clock);
+    syncApprovalAnnualModeUi();
+}
+
+function syncApprovalAnnualModeUi() {
+    const modes=document.getElementById('approvalAnnualModes');
+    if(!modes)return;
+    const annual=isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig());
+    const mode=getApprovalAnnualMode(),legacy=!annual||mode==='legacy';
+    modes.classList.toggle('hidden',!annual);
+    const showOld=modes.dataset.hasLegacy==='1';
+    const legacyChoice=document.getElementById('approvalAnnualLegacyChoice');
+    legacyChoice.classList.toggle('hidden',!showOld);
+    legacyChoice.querySelector('input').disabled=!showOld;
+    document.querySelectorAll('#mixedDayArea [data-approval-old-leave]').forEach(el=>el.classList.toggle('hidden',!legacy));
+    const activeClock=annual&&mode==='clock';
+    document.getElementById('approvalAnnualClock').classList.toggle('hidden',!activeClock);
+    document.getElementById('mixedLeaveRangeEditor').classList.toggle('hidden',activeClock);
+    document.getElementById('mixedLeaveDetailEditor').classList.toggle('hidden',!legacy||!isApprovalMixedLeaveDetailMode());
+    document.getElementById('approvalLeaveTotalLabel').textContent=activeClock?'차감 시간:':'신청 일수:';
+    syncApprovalMixedRangeUi();
+    if(activeClock&&getCurrentApprovalCategory()==='휴가')getApprovalAnnualLeaveUi()?.activate();
+}
+
+document.getElementById('approvalAnnualModes')?.addEventListener('change',()=>{syncApprovalAnnualModeUi();calcLeaveDays();});
+
 function getApprovalContractSchedulePeriods(periods, rows) {
     return periods.map(period => {
         const matches=rows.filter(row=>Number(row.version_no)===Number(period.version_no)
@@ -4504,7 +4601,7 @@ function getApprovalContractSchedulePeriods(periods, rows) {
 
 async function loadApprovalLeaveClockSchedule({retry=false}={}) {
     const snapshot=leaveSnapshotState;
-    if(!snapshot?.workBasis)return;
+    if(!snapshot?.workBasis||snapshot.approvalClockOwner!==getApprovalLeaveClockOwnerKey())return;
     const year=CoopLeaveTime.yearOf();
     const coopId=getApprovalCoopId();
     const targetId=String(document.getElementById('chkProxy')?.checked?document.getElementById('proxyTargetSelect')?.value:myInfo?.emp_id||'');
@@ -4597,13 +4694,19 @@ function syncApprovalMixedRangeUi() {
     const endValue = String(document.getElementById('mixedLeaveEndDate')?.value || '').trim();
     const sameDayRow = document.getElementById('mixedLeaveSameDayRow');
     const isSameDay = !!startValue && !!endValue && startValue === endValue;
-    if (sameDayRow) sameDayRow.classList.toggle('hidden', !isSameDay);
+    if (sameDayRow) sameDayRow.classList.toggle('hidden', !isSameDay||(window.CoopApprovalAnnualLeave&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())&&getApprovalAnnualMode()!=='legacy'));
 }
 
-function handleApprovalMixedRangeChange() {
+function handleApprovalMixedRangeChange(event) {
+    if(window.CoopApprovalAnnualLeave&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())&&getApprovalAnnualMode()==='annual'){
+        const start=document.getElementById('mixedLeaveStartDate'),end=document.getElementById('mixedLeaveEndDate');
+        if(event?.target===end)end.dataset.pinned=end.value?'1':'0';
+        else if(start.value&&(!end.value||(end.dataset.pinned!=='1'&&end.value===start.dataset.previousValue)))end.value=start.value;
+        start.dataset.previousValue=start.value;
+    }
     syncApprovalLeaveEndDate('mixedLeaveStartDate', 'mixedLeaveEndDate');
     syncApprovalMixedRangeUi();
-    if (!isApprovalMixedLeaveDetailMode()) calcLeaveDays();
+    if (!isApprovalMixedLeaveDetailMode()||(window.CoopApprovalAnnualLeave&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())&&getApprovalAnnualMode()==='annual')) calcLeaveDays();
 }
 
 function ensureApprovalLeaveMixedInputState() {
@@ -5047,6 +5150,7 @@ function buildApprovalMixedLeaveRangeItem(dateValue, slotValue) {
 function getApprovalMixedLeaveRangeSummary(options = {}) {
     const requireComplete = options.requireComplete === true;
     const range = getApprovalMixedLeaveDateRange();
+    if(options.fullOnly)range.start_slot=range.end_slot=range.same_day_slot='full';
     const errors = [];
     const items = [];
 
@@ -5105,6 +5209,11 @@ function getApprovalMixedLeaveRangeSummary(options = {}) {
 
 function getApprovalMixedLeaveSummary(options = {}) {
     if (options.requireComplete && !leaveSnapshotState?.workBasis) return { ok:false, items:[], totalDays:0, totalHours:0, errors:['근로시간과 사용 가능 휴가를 먼저 조회해 주세요.'] };
+    if(window.CoopApprovalAnnualLeave&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
+        const mode=getApprovalAnnualMode();
+        if(mode==='clock')return getApprovalAnnualLeaveUi().summary(options);
+        if(mode==='annual')return getApprovalMixedLeaveRangeSummary({...options,fullOnly:true});
+    }
     return isApprovalMixedLeaveDetailMode()
         ? getApprovalMixedLeaveDetailSummary(options)
         : getApprovalMixedLeaveRangeSummary(options);
@@ -11328,7 +11437,8 @@ async function calculateLeave() {
 
     const lookupRevision = (calculateLeave.revision || 0) + 1;
     calculateLeave.revision = lookupRevision;
-    const isCurrent = () => calculateLeave.revision === lookupRevision && targetId === (document.getElementById('chkProxy')?.checked ? document.getElementById('proxyTargetSelect')?.value : myInfo.emp_id);
+    const ownerKey=getApprovalLeaveClockOwnerKey();
+    const isCurrent = () => calculateLeave.revision === lookupRevision && ownerKey===getApprovalLeaveClockOwnerKey();
     leaveSnapshotState = null;
     document.getElementById('remainDaysBadge').textContent = '조회 중';
     try {
@@ -11340,8 +11450,9 @@ async function calculateLeave() {
                 unknownAsReserved: false
             });
             if (!isCurrent()) return;
-            leaveSnapshotState = loaded;
+            leaveSnapshotState = {...loaded,approvalClockOwner:ownerKey};
             applyLeaveRemainToUi(leaveSnapshotState);
+            if(getCurrentApprovalCategory()==='휴가'&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())&&getApprovalAnnualMode()==='clock')getApprovalAnnualLeaveUi()?.activate();
             calcLeaveDays();
             if (getCurrentApprovalCategory()==='휴가' && isApprovalMixedLeaveDetailMode()
                 && collectApprovalLeaveMixedDraftItems().some(item=>item.slot==='hour'&&item.time_input_mode==='scheduled')) void loadApprovalLeaveClockSchedule();
@@ -13301,7 +13412,8 @@ function calcLeaveDays() {
     if (isApprovalMixedDayLeaveType(leaveConfig)) {
         ensureApprovalLeaveMixedRows();
         const summary = getApprovalMixedLeaveSummary({ requireComplete: false });
-        document.getElementById("leaveDaysBadge").innerText = formatApprovalWorkDays(summary.totalDays);
+        document.getElementById("leaveDaysBadge").innerText = isApprovalAnnualConfig(leaveConfig)&&getApprovalAnnualMode()==='clock'
+            ? CoopLeaveTime.formatMinutes(Math.round(summary.totalDays*480)) : formatApprovalWorkDays(summary.totalDays);
         document.getElementById("leaveDaysCalc").value = summary.totalDays;
         syncApprovalPendingLeaveDaysBadge(summary.totalDays);
 
