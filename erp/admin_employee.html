@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.170
-Change: 2026-11-07 - Restore attendance controls after a busy menu return without changing drafts or save locks.
+Version: v1.0.171
+Change: 2026-11-07 - Keep attendance apply availability aligned with current reads and all detail save locks.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Restore attendance controls after a busy menu return withou
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.170 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.171 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1112,6 +1112,14 @@ function isEmployeeDetailSaving() {
         || employeeNotificationSaveInFlight || employeeLeaveSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight
         || (typeof payrollImportBatchController !== 'undefined' && payrollImportBatchController?.busy());
 }
+function syncEmployeeLeaveApplyState() {
+    const button = document.getElementById('employeeLeaveApplyBtn');
+    if (!button || !isEmployeeDetailTabVisible('tabLog')) return;
+    const key = `${getHrSettingsOwner()}|${String(currentEmpId || '')}|${employeeDetailRevision}|tabLog|`;
+    const entry = employeeDetailTabLoads.get(key), busy = isEmployeeDetailSaving();
+    button.disabled = busy || !entry?.ready || entry.viewState !== 'ready';
+    button.textContent = busy ? '저장 중…' : '✅ 반영하기';
+}
 function requestEmployeeDetailDiscard(action, {tabId = ''} = {}) {
     if (employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
     if (!(tabId ? hasUnsavedEmployeeDetailTab(tabId) : hasUnsavedEmployeeDetail())) { action(); return; }
@@ -1366,6 +1374,7 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
     return entry.pending;
 }
 function renderEmployeeLeaveReadState(entry, state) {
+    entry.viewState = state;
     const pane = document.getElementById('tabLog');
     if (!entry.hasContent && !entry.statusInitialized) setEmployeeDetailTabState('tabLog', 'loading');
     if (state === 'ready' && !entry.hasContent) {
@@ -1394,7 +1403,7 @@ function renderEmployeeLeaveReadState(entry, state) {
     pane.setAttribute('aria-busy', String(state === 'loading'));
     const summary = pane.querySelector('.leave-summary-card-button');
     if (summary) summary.hidden = state !== 'ready';
-    document.getElementById('employeeLeaveApplyBtn').disabled = state !== 'ready';
+    syncEmployeeLeaveApplyState();
     if (state === 'ready') syncExtraLeaveInputs();
 }
 function ensureEmployeeLeaveTab({force = false, allowBusy = false} = {}) {
@@ -3539,6 +3548,7 @@ async function saveDurunuriEligibilityProfile() {
     const controls = Array.from(document.querySelectorAll('#durunuriEligibilityCardWrap input,#durunuriEligibilityCardWrap select,#durunuriEligibilityCardWrap textarea'))
         .map(element => ({element, disabled:element.disabled}));
     saveDurunuriEligibilityProfile._inFlight = true;
+    syncEmployeeLeaveApplyState();
     controls.forEach(({element}) => {element.disabled = true;});
     const saveBtn = document.getElementById('btnSaveDurunuriEligibility');
     if (saveBtn) saveBtn.disabled = true;
@@ -3573,6 +3583,7 @@ async function saveDurunuriEligibilityProfile() {
         showAlert('두루누리 설정 저장 실패: ' + (e?.message || e));
     } finally {
         saveDurunuriEligibilityProfile._inFlight = false;
+        syncEmployeeLeaveApplyState();
         controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
         if (saveBtn) saveBtn.disabled = false;
     }
@@ -4578,6 +4589,9 @@ async function persistPayrollImportMapping() {
 } // End of persistPayrollImportMapping
 
 let payrollImportBatchController = null;
+new MutationObserver(syncEmployeeLeaveApplyState).observe(document.getElementById('btnApplyPayrollImport'), {
+    attributes:true, attributeFilter:['disabled']
+});
 function getPayrollImportBatchController() {
     if (!payrollImportBatchController) payrollImportBatchController = PayrollImportGuard.create({
         client: () => _supabase,
@@ -5895,6 +5909,7 @@ async function saveEmployeeModuleAccess() {
     const controls = [...document.querySelectorAll('[data-employee-module-key]')].map(element => ({element, disabled:element.disabled}));
     controls.forEach(({element}) => {element.disabled = true;});
     employeeModuleAccessSaveInFlight = true;
+    syncEmployeeLeaveApplyState();
     const selectAll=document.getElementById('employeeModuleSelectAllBtn');if(selectAll)selectAll.disabled=true;
     const disableAll=document.getElementById('employeeModuleDisableAllBtn');if(disableAll)disableAll.disabled=true;
     if (saveBtn) {
@@ -5926,6 +5941,7 @@ async function saveEmployeeModuleAccess() {
         }
     } finally {
         employeeModuleAccessSaveInFlight = false;
+        syncEmployeeLeaveApplyState();
         if(selectAll?.isConnected)selectAll.disabled=employeeModuleAccessSnapshot?.can_manage_access!==true||!employeeModuleAccessSnapshot?.modules?.some(m=>m.organization_enabled!==false);
         if(disableAll?.isConnected)disableAll.disabled=employeeModuleAccessSnapshot?.can_manage_access!==true||!employeeModuleAccessSnapshot?.modules?.length;
         controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
@@ -6040,6 +6056,7 @@ async function saveEmployeeNotificationAssignments() {
     const controls = [...document.querySelectorAll('[data-employee-notification-key]')].map(element => ({element, disabled:element.disabled}));
     controls.forEach(({element}) => {element.disabled = true;});
     employeeNotificationSaveInFlight = true;
+    syncEmployeeLeaveApplyState();
     if (saveBtn) {
         saveBtn.disabled = true;
         saveBtn.textContent = '저장 중...';
@@ -6062,6 +6079,7 @@ async function saveEmployeeNotificationAssignments() {
         showAlert('알림 담당 저장 실패: ' + String(error?.message || error || '저장하지 못했습니다.'));
     } finally {
         employeeNotificationSaveInFlight = false;
+        syncEmployeeLeaveApplyState();
         controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
         if (saveBtn && isCurrent()) {
             saveBtn.disabled = !employeeNotificationSnapshot || employeeNotificationSnapshot.employee?.is_active === false
@@ -6477,6 +6495,7 @@ async function saveBasicInfo() {
     const revision = employeeDetailRevision;
     const expected = { ...employeeBasicBaseline };
     employeeBasicSaveInFlight = true;
+    syncEmployeeLeaveApplyState();
     const lockedInputs = [];
     try {
     // 1. 값 가져오기
@@ -6568,6 +6587,7 @@ async function saveBasicInfo() {
     } finally {
         lockedInputs.forEach(([input, disabled]) => { input.disabled = disabled; });
         employeeBasicSaveInFlight = false;
+        syncEmployeeLeaveApplyState();
         syncEmployeeBasicAccessUi();
     }
 }
@@ -6582,6 +6602,7 @@ async function saveRRN() {
     const controls = Array.from(front.closest('.edit-mode').querySelectorAll('input,button'))
         .map(element => ({element, disabled:element.disabled}));
     saveRRN._inFlight = true;
+    syncEmployeeLeaveApplyState();
     controls.forEach(({element}) => {element.disabled = true;});
     try {
         const { error } = await _supabase.rpc('update_employee_rrn', { p_emp_id: empId, p_rrn: f + '-' + b });
@@ -6598,6 +6619,7 @@ async function saveRRN() {
         if (isCurrent()) showAlert('저장 결과 확인 실패: ' + (error?.message || '다시 확인해 주세요.'));
     } finally {
         saveRRN._inFlight = false;
+        syncEmployeeLeaveApplyState();
         controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
     }
 }
@@ -6672,6 +6694,7 @@ function doResign() {
 async function saveEmployeeResignation(context,date) {
     if (isEmployeeDetailSaving() || !isEmployeeResignationContextCurrent(context)) return false;
     employeeResignationSaveInFlight = true;
+    syncEmployeeLeaveApplyState();
     const controls = [...document.querySelectorAll('#resignModal input,#resignModal button,#btnResignArea button')]
         .map(element => ({element,disabled:element.disabled}));
     controls.forEach(({element}) => {element.disabled = true;});
@@ -6709,6 +6732,7 @@ async function saveEmployeeResignation(context,date) {
         return false;
     } finally {
         employeeResignationSaveInFlight = false;
+        syncEmployeeLeaveApplyState();
         controls.forEach(({element,disabled}) => {if (element.isConnected) element.disabled = disabled;});
     }
 }
@@ -7077,13 +7101,14 @@ async function deleteSalary() {
         async function() {
             if (String(selectedEmpId)!==String(currentEmpId) || revision!==employeeDetailRevision || owner!==getHrSettingsOwner() || month!==document.getElementById('salaryMonth').value) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
             salarySaveInFlight=true;
+            syncEmployeeLeaveApplyState();
             showLoading();
             try {
                 const { error } = await _supabase.rpc('erp_hr_payroll_delete', {p_emp_id:String(selectedEmpId),p_year_month:month,p_expected_key:context.savedRow.row_key});
                 if (error) return showAlert('삭제 실패: '+payrollSaveErrorMessage(error));
                 showAlert('삭제되었습니다.');
                 if (!hasUnsavedEmployeeDetailTab('tabSalary')) await loadSalaryData();
-            } finally { hideLoading();salarySaveInFlight=false; }
+            } finally { hideLoading();salarySaveInFlight=false;syncEmployeeLeaveApplyState(); }
         }
     );
 }
@@ -7464,7 +7489,8 @@ function saveSalary() {
             if (detailRevision !== employeeDetailRevision || String(selectedEmpId) !== String(currentEmpId) || month !== document.getElementById('salaryMonth').value) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
             if ([...confirmedDraft].some(([id,v])=>employeeDetailDraftValue(document.getElementById(id))!==v)) return showAlert('입력 내용이 변경되었습니다. 다시 확인해 주세요.');
             salarySaveInFlight=true;
-            try { await persistSalary(); } finally { salarySaveInFlight=false; }
+            syncEmployeeLeaveApplyState();
+            try { await persistSalary(); } finally { salarySaveInFlight=false;syncEmployeeLeaveApplyState(); }
         });
 }
 
@@ -8246,6 +8272,7 @@ async function saveLog() {
     if (!val || !reason) return showAlert('입력 필요');
     const savedDraft = snapshotEmployeeDetailTabDraft('tabLog');
     employeeLeaveSaveInFlight = true;
+    syncEmployeeLeaveApplyState();
     try {
         const rows = [{emp_id:empId,adj_type:type,days:val,reason}];
         const request = JSON.stringify(rows);
@@ -8266,6 +8293,7 @@ async function saveLog() {
         showAlert('반영 실패: ' + (error?.message || '연결을 확인해 주세요.'));
     } finally {
         employeeLeaveSaveInFlight = false;
+        syncEmployeeLeaveApplyState();
     }
 }
 
@@ -8291,7 +8319,7 @@ async function saveExtraLeave(){
   if(!payload.p_work_date||!payload.p_reason)throw Error('추가 근로일과 내용을 입력해 주세요.');
  }catch(error){return showAlert(error.message);}
  const signature=JSON.stringify(payload);if(extraLeaveRequest?.signature!==signature)extraLeaveRequest={signature,key:crypto.randomUUID()};payload.p_request_key=extraLeaveRequest.key;
- const saved=snapshotEmployeeDetailTabDraft('tabLog');employeeLeaveSaveInFlight=true;
+ const saved=snapshotEmployeeDetailTabDraft('tabLog');employeeLeaveSaveInFlight=true;syncEmployeeLeaveApplyState();
  try{
   const {data,error}=await _supabase.rpc('erp_hr_extra_leave',payload);if(error)throw error;
   if(empId!==currentEmpId||revision!==employeeDetailRevision||owner!==getHrSettingsOwner())return;
@@ -8301,7 +8329,7 @@ async function saveExtraLeave(){
   checkpointSavedEmployeeDetailTab('tabLog',saved);extraLeaveRequest=null;
   showAlert('추가 휴가 '+CoopLeaveTime.formatDays(payload.p_granted_minutes/480)+'를 반영했습니다.');await loadLeave();
  }catch(error){showAlert('추가 휴가 반영 실패: '+(error.message||'연결을 확인해 주세요.'));}
- finally{employeeLeaveSaveInFlight=false;}
+ finally{employeeLeaveSaveInFlight=false;syncEmployeeLeaveApplyState();}
 }
 
 function openAdminCertModal() { if(!window.ExpoRuntimeBridge)document.getElementById("adminCertPurpose").value = "관공서 제출용"; toggleAdminEtc(); adminCertModal.show(); }
