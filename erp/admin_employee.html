@@ -6206,10 +6206,10 @@ async function retryEmployeeIdentityInfo(kind) {
 async function openEmployeeContractTask(employee){
     const work=new URLSearchParams(location.search).get('work');
     if(work!=='contract_target')return openDetail(employee);
-    const owner=getHrSettingsOwner(),opener=document.activeElement;
+    const owner=getHrSettingsOwner(),opener=document.activeElement,revision=employeeDetailRevision+1;
     const modal=document.getElementById('detailModal');
     const reveal=()=>{
-        if(!isHrSettingsContextCurrent(owner)||String(currentEmpId)!==String(employee.emp_id)||window.frameElement?.hidden)return;
+        if(revision!==employeeDetailRevision||!isHrSettingsContextCurrent(owner)||String(currentEmpId)!==String(employee.emp_id)||window.frameElement?.hidden)return;
         const active=document.activeElement;
         if(active!==opener&&active!==document.body&&active!==modal)return;
         if(active?.matches('input,textarea,select,[contenteditable="true"]'))return;
@@ -6221,7 +6221,8 @@ async function openEmployeeContractTask(employee){
     };
     modal.addEventListener('shown.bs.modal',reveal,{once:true});
     await openDetail(employee);
-    if(!modal.classList.contains('show'))modal.removeEventListener('shown.bs.modal',reveal);
+    // Bootstrap starts the backdrop before adding .show; keep this exact opening's listener until shown.
+    if(revision!==employeeDetailRevision||String(currentEmpId)!==String(employee.emp_id))modal.removeEventListener('shown.bs.modal',reveal);
 }
 async function openDetail(u) {
     if (isEmployeeDetailSaving()) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
