@@ -46,7 +46,7 @@
     const scheduleSave=button('근무시간 저장','btn btn-sm btn-primary'),cancel=button('취소');
     let owner=null, pref=null, editOpen=false, localSchedule=null, follows=true;
     let epoch=0, ticket=null, editorBaseline=null, lastStart='';
-    const scheduleWrites=new Map(),scheduleChecks=new Map(),proxyWorkDrafts=new Map();
+    const scheduleWrites=new Map(),scheduleChecks=new Map(),proxyWorkDrafts=new Map(),clockDrafts=new Map();
     let startMenu={values:[]}, activeMode='annual', snapshotRetry=null;
     const halfLabel=slot=>slot==='am'?'오전':slot==='pm'?'오후':'';
 
@@ -141,7 +141,7 @@
         e.preventDefault();const all=[...grid.querySelectorAll('[data-leave-date]')];
         for(let i=all.indexOf(current)+step;i>=0&&i<all.length;i+=Math.sign(step))if(!all[i].disabled){current.tabIndex=-1;all[i].tabIndex=0;all[i].focus();break;}
       });
-      return {refresh,show(value){shown=value;field.hidden=value;field.classList.toggle('hidden',value);wrapper.classList.toggle('hidden',!value);if(!value)close();}};
+      return {refresh,close,show(value){shown=value;field.hidden=value;field.classList.toggle('hidden',value);wrapper.classList.toggle('hidden',!value);if(!value)close();}};
     }
 
     function clockControl(side,title) {
@@ -302,9 +302,16 @@
     const fallbackSchedule=()=>pendingSchedule()?.phase==='saving'?null:confirmedSchedule();
     const unappliedSchedule=()=>editOpen&&!same(readWork(),editorBaseline||confirmedSchedule()||time.defaultSchedule);
     const workEditorDraft=()=>({...readWork(),break_start:breakStart.value});
+    const readClockDraft=()=>({start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows});
+    function putClockDraft(data={}){
+      startDate.value=data.start_date||'';endDate.value=data.end_date||'';
+      lastStart=startDate.value;lastEnd=endDate.value;
+      start.put(data.start_time);end.put(data.end_time);follows=data.follows!==false;
+    }
     function syncOwner(){
       const next=ownerState();
       if(next?.key===owner?.key)return;
+      if(owner)clockDrafts.set(owner.key,readClockDraft());
       if(owner&&!owner.self){
         if(editOpen||localSchedule)proxyWorkDrafts.set(owner.key,{schedule:localSchedule,editor:editOpen?workEditorDraft():null,baseline:editorBaseline});
         else proxyWorkDrafts.delete(owner.key);
@@ -313,6 +320,8 @@
       if(next?.self)loadScheduleCheck(next.key);
       const work=next&&!next.self?proxyWorkDrafts.get(next.key):null;
       localSchedule=work?.schedule||null;editOpen=!!work?.editor;editorBaseline=work?.baseline||null;
+      clockStartPicker.close();clockEndPicker.close();
+      putClockDraft(next?clockDrafts.get(next.key):undefined);
       putWork(work?.editor||localSchedule);editStatus.textContent='';
     }
     function setText(el,value){if(el.textContent!==value)el.textContent=value;}
@@ -657,22 +666,22 @@
     }
     function draft(){
       syncOwner();
-      const body={start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows};
+      const body=readClockDraft();
       if(editOpen)body.work_editor=workEditorDraft();
       if(localSchedule)body.local_schedule=localSchedule;
       return body;
     }
     function restoreClockDraft(data){
-      const s=data||{};startDate.value=s.start_date||'';endDate.value=s.end_date||'';lastStart=startDate.value;lastEnd=endDate.value;
-      start.put(s.start_time);end.put(s.end_time);follows=s.follows!==false;
+      const s=data||{};putClockDraft(s);
       localSchedule=owner&&!owner.self?s.local_schedule||null:null;
       editorBaseline=null;
       editOpen=!!owner&&!!s.work_editor;putWork(editOpen?s.work_editor:localSchedule);editStatus.textContent='';syncDates();
     }
     function restore(data){
-      epoch++;ticket=null;snapshotRetry=null;owner=ownerState();pref=null;proxyWorkDrafts.clear();
+      epoch++;ticket=null;snapshotRetry=null;owner=ownerState();pref=null;proxyWorkDrafts.clear();clockDrafts.clear();
       if(owner?.self)loadScheduleCheck(owner.key);
-      restoreClockDraft(data);
+      restoreClockDraft(owner?data:null);
+      return !data||!!owner;
     }
     function restoreDeferred(data){
       // Capture the departing employee before applying the restored employee's fields.
@@ -682,7 +691,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.8'};
+    return {summary,annualCalendar,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.9'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);

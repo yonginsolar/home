@@ -1,4 +1,4 @@
-/* Integrated member/capital/bank workbook1.5.4. Original writers remain separately guarded. */
+/* Integrated member/capital/bank workbook1.5.5. Original writers remain separately guarded. */
 (function (root) {
   "use strict";
   const memberHeaders = [
@@ -145,7 +145,7 @@
       clear,
       tab = "payments",
       opener,
-      activeProgress = null, bankController=null, bankPane=null, bankOpening=null;
+      activeProgress = null, retryConfirmation = null, bankController=null, bankPane=null, bankOpening=null;
     const context = () => getContext() || {},
       same = (s) => s === state && s.owner === context().owner && s.coopId === context().coopId,
       allowed = (s) => same(s) && context().allowed === true,
@@ -163,6 +163,51 @@
       if (handle.dialog.open) handle.dialog.close();
       handle.dialog.remove();
       if (activeProgress === handle) activeProgress = null;
+    }
+    function finishRetryConfirmation(handle, yes=false, returnFocus=false) {
+      if (!handle || retryConfirmation !== handle) return false;
+      const {dialog,state:s,attempt,epoch,resolve} = handle;
+      const focused = dialog.contains(document.activeElement);
+      const current = same(s) && s.epoch === epoch && s.attempt === attempt && allowed(s) && visible();
+      retryConfirmation = null;
+      if (focused && current && dialog.open) dialog.close();
+      dialog.remove();
+      if (returnFocus && focused && current && document.hasFocus() && !submit.disabled
+          && [dialog,modal,submit,document.body].includes(document.activeElement)) {
+        submit.focus({preventScroll:true});
+      }
+      resolve(yes && current && s.phase === 'confirming');
+      return true;
+    }
+    function confirmRetry(s, attempt, message) {
+      return new Promise(resolve => {
+        const dialog=el('dialog'),title=el('h2','회원·출자금 등록'),body=el('p',message),actions=el('div');
+        dialog.className='member-workbook-progress';
+        dialog.dataset.workbookRetryConfirm='';
+        dialog.setAttribute('role','alertdialog');
+        dialog.setAttribute('aria-modal','true');
+        dialog.setAttribute('aria-labelledby','memberWorkbookRetryTitle');
+        dialog.setAttribute('aria-describedby','memberWorkbookRetryMessage');
+        title.id='memberWorkbookRetryTitle';title.className='h5';body.id='memberWorkbookRetryMessage';
+        actions.className='d-flex flex-wrap justify-content-end gap-2';
+        const cancel=el('button','취소'),accept=el('button','같은 요청으로 등록');
+        cancel.type=accept.type='button';
+        cancel.className='btn btn-outline-secondary';accept.className='btn btn-success';
+        accept.dataset.workbookRetryYes='';
+        actions.append(cancel,accept);dialog.append(title,body,actions);modal.append(dialog);
+        const handle={dialog,state:s,attempt,epoch:s.epoch,resolve};retryConfirmation=handle;
+        cancel.onclick=()=>finishRetryConfirmation(handle);
+        accept.onclick=()=>finishRetryConfirmation(handle,true);
+        dialog.addEventListener('cancel',e=>{e.preventDefault();finishRetryConfirmation(handle);});
+        dialog.addEventListener('close',()=>finishRetryConfirmation(handle));
+        dialog.addEventListener('keydown',e=>{
+          e.stopPropagation();
+          if(e.repeat&&(e.key==='Enter'||e.key===' '))e.preventDefault();
+          if(e.key==='Escape'){e.preventDefault();finishRetryConfirmation(handle);}
+        });
+        try { dialog.showModal();cancel.focus({preventScroll:true}); }
+        catch (_) { finishRetryConfirmation(handle); }
+      });
     }
     function startProgress(s, recovering) {
       if (!registrationProgress || !same(s) || !allowed(s) || !visible()) return null;
@@ -209,12 +254,13 @@
         state.phase = state.attempt?.uncertain ? "uncertain" : "ready";
         if (!state.attempt?.uncertain) state.attempt = null;
       }
+      finishRetryConfirmation(retryConfirmation);
       render();
     }
     function syncContext() {
       bankController?.syncContext();
       if (!state) return;
-      if (!context().owner || state.owner !== context().owner) {
+      if (!same(state)) {
         pause();
         state = null;
         file.value = "";
@@ -251,6 +297,7 @@
       summary = $("[data-summary]");
       table = $("table");
       submit = $("[data-submit]");
+      submit.addEventListener('keydown',e=>{if(e.repeat&&(e.key==='Enter'||e.key===' '))e.preventDefault();});
       check = $("[data-check]");
       clear = $("[data-clear]");
       file.onchange = () => {
@@ -808,12 +855,14 @@
       if(attempt.matchData === undefined)attempt.matchData=root.CapitalMemberMatching?.needed('workbook',attempt.payload)?root.CapitalMemberMatching.envelope(attempt.payload,s.choices):null;
       s.phase = "confirming";
       render();
-      const yes = await root.CoopDialog.confirm(
-        wasUncertain ? "서버에서 아직 등록 결과가 확인되지 않았습니다. 처음 요청한 내용 그대로 다시 등록할까요? 앞선 요청이 처리됐다면 같은 결과를 확인하며 중복 등록하지 않습니다." : (attempt.memberCount ? "신규 회원 " + attempt.memberCount + "명과 납입 " : "납입 ") +
+      const yes = await (wasUncertain ? confirmRetry(s,attempt,
+        "서버에서 아직 등록 결과가 확인되지 않았습니다. 처음 요청한 내용 그대로 다시 등록할까요? 앞선 요청이 처리됐다면 같은 결과를 확인하며 중복 등록하지 않습니다.")
+        : root.CoopDialog.confirm(
+        (attempt.memberCount ? "신규 회원 " + attempt.memberCount + "명과 납입 " : "납입 ") +
           attempt.paymentCount +
           "건을 등록할까요?" + (attempt.emailClearedCount ? "\n개인 " + attempt.emailClearedCount + "명의 중복 이메일은 빈칸으로 등록합니다." : "") + (attempt.managerLinkCount ? "\n단체 " + attempt.managerLinkCount + "건은 같은 이메일의 개인을 관리자로 연결하고 단체 이메일은 비워 둡니다." : "") + (attempt.hasUnresolved ? "\n확인할 묶음은 검토 목록에 남습니다." : ""),
-        { title: "회원·출자금 등록", confirmText: wasUncertain ? "같은 요청으로 등록" : "등록" },
-      );
+        { title: "회원·출자금 등록", confirmText: "등록" },
+      ));
       if (!same(s) || s.epoch !== epoch || s.attempt !== attempt || s.phase !== 'confirming' || !allowed(s) || !visible()) return;
       if (!yes) {
         s.phase = attempt.uncertain ? "uncertain" : "ready";
@@ -884,6 +933,7 @@
         }
         resultNotice = s.message;
         render();
+        if (retryConfirmation?.attempt === attempt && finishRetryConfirmation(retryConfirmation,false,true)) resultNotice = null;
       } finally {
         attempt.writes.delete(run);
         attempt.writeRevision++;
@@ -957,6 +1007,7 @@
         if (r.member_count !== successes.members.size || r.payment_count !== successes.payments.size || (r.member_existing_count ?? 0) !== existing.size || (r.member_skipped_count ?? 0) !== skipped.members.size || (r.payment_skipped_count ?? 0) !== skipped.payments.size) throw Error("UNCONFIRMED");
         // Either same-key response may finish first; close only this workbook's current progress.
         if (activeProgress?.state === s) finishProgress(activeProgress);
+        if (retryConfirmation?.attempt === attempt) finishRetryConfirmation(retryConfirmation);
         for (const k of ["members","payments"]) s.data[k] = s.data[k].filter(row => !successes[k].has(row.row_no) && !skipped[k].has(row.row_no));
         // Keep strong member references with unresolved payments, without re-registering them.
         if (!s.data.payments.length) s.data.members = s.data.members.filter(row => !existing.has(row.row_no));
@@ -1091,7 +1142,7 @@
     return Object.freeze({ open, syncContext, hasDraft: () => !!(state?.dirty||bankController?.hasUnsaved()) });
   }
   root.MemberCapitalWorkbook = Object.freeze({
-    version: "1.5.4",
+    version: "1.5.5",
     create,
     parse,
     memberHeaders,
