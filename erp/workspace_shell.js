@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.13 — reuse explicitly compatible member tabs after fresh authorization. */
+/* Persistent ERP workspace v1.2.14 — accept the current task's late readiness without a reload. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -8,7 +8,7 @@
   const routes = window.ErpWorkspaceRoute;
   let current = '', requested = '', client, ready = false, leaving = false, timer, slowTimer, probeTimer;
   let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', accessCoop = '', userId = '', transition = 0;
-  const retained = new Map(), attached = new WeakSet();
+  const retained = new Map(), attached = new WeakSet(), pendingReadyDocuments = new WeakSet();
   const RETAIN_LIMIT = 6;
   let accessPending = null, startupPending = null;
   let printableEntry = null, navigationPending = false;
@@ -215,13 +215,36 @@
     };
     probeTimer = setTimeout(inspect, 250);
   }
+  function notifyTaskReady(child, doc) {
+    const entry = activeEntry, ticket = transition;
+    try {
+      if (!ready || leaving || !requested || entry.frame.hidden || !entry.frame.isConnected
+        || entry.frame.contentWindow !== child || entry.frame.contentDocument !== doc
+        || !doc.body || routes.route(child.location.href) !== requested
+        || task(entry)?.ready !== true || typeof task(entry).refresh !== 'function') return false;
+      if (doc.readyState === 'loading') {
+        if (!pendingReadyDocuments.has(doc)) {
+          pendingReadyDocuments.add(doc);
+          doc.addEventListener('DOMContentLoaded', () => {
+            if (ticket === transition) notifyTaskReady(child, doc);
+          }, {once:true});
+        }
+        return false;
+      }
+      return preparedFrame(entry,ticket);
+    } catch (_) { return false; }
+  }
   function loading() {
     const text = error.querySelector('p');
     if (text) text.textContent = '화면을 불러오지 못했습니다.';
     error.hidden = true;
     cancelLoading();
     slowTimer = setTimeout(() => { status.textContent = '화면을 불러오고 있습니다…'; status.hidden = false; }, 300);
-    timer = setTimeout(() => { clearTimeout(probeTimer); status.hidden = true; error.hidden = false; }, 25000);
+    timer = setTimeout(() => {
+      clearTimeout(probeTimer);
+      if (preparedFrame(activeEntry, transition)) return;
+      status.hidden = true; error.hidden = false;
+    }, 25000);
   }
   function load(target, force = false) {
     const previous = activeEntry;
@@ -299,9 +322,11 @@
     activeEntry={frame:nextFrame,route:target,fields:new Map()};
     const entry=activeEntry;
     nextFrame.addEventListener('load',()=>frameLoaded(entry));
-    // Mount the browsing context and its listener before requesting navigation.
-    frame=nextFrame; document.getElementById('erpWorkspaceContent').append(nextFrame);
+    // Mount with the allowed destination already set, without an intermediate
+    // about:blank load event. Register the listener before the context is mounted.
+    frame=nextFrame;
     nextFrame.src = taskUrl.href;
+    document.getElementById('erpWorkspaceContent').append(nextFrame);
     watchFrame(entry,ticket);
   }
   function navigate(value) {
@@ -408,6 +433,10 @@
     // It is still owned by the retained map, not a superseded disposable frame.
     if (entry !== activeEntry) { if (retained.get(entry.route) !== entry) removeEntry(entry); return; }
     if (entry.frame.hidden) return;
+    try {
+      if (entry.frame.contentWindow.location.href === 'about:blank') return;
+      if (!requested && current === entry.route && attached.has(entry.frame.contentDocument)) return;
+    } catch (_) {}
     syncFrame();
     try { attachDocument(frame.contentDocument, entry); } catch (_) {}
   }
@@ -544,5 +573,5 @@
     try { await pending; }
     finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, version:'20261020.1'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, version:'20261107.1'};
 })();

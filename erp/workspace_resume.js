@@ -25,6 +25,12 @@
       if (!pending) pending = Promise.resolve().then(options.refresh).finally(() => { pending = null; });
       await pending;
     }};
+    notifyReady();
+  }
+  function notifyReady() {
+    if (window.parent === window) return false;
+    try { return window.parent.ErpWorkspaceShell?.notifyTaskReady?.(window, document) === true; }
+    catch (_) { return false; }
   }
   function checkpoint(root) {
     if (!root || root.ownerDocument !== document || window.parent === window) return false;
@@ -46,5 +52,5 @@
     // Standalone, external/public and unregistered destinations keep their original navigation.
     window.location.href = target.href;
   }
-  window.ErpWorkspaceResume = {register,checkpoint,navigate};
+  window.ErpWorkspaceResume = {register,checkpoint,navigate,notifyReady};
 })();

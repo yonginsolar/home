@@ -14,7 +14,9 @@
         smartaGuide: {src:local('accounting_smarta_guide.js?v=1.0.0'), integrity:'sha384-MHe/7q/URIf9NEtrnuV2o/LsZgpLANn3RxIdzSAjH+g8oLsyNCCusj2lgHOgSdXZ', ready:() => typeof root.CoopSmartaGuide?.mount === 'function'},
         financialEngine: {src:local('financial_statements_engine.js?v=1.1.0'),integrity:'sha384-tHgs9MvyMyqTqO0xgb085190rccIQa+mRTNiZDpLTrpvvs5qMnZ+MZhqgVRV9H/s',ready:()=>root.FinancialStatementsEngine?.version==='1.1.0'},
         financialStatements: {src:local('financial_statements.js?v=20261022-help-1'),integrity:'sha384-197uk3V7iE6wQHZ3ym5FaJlxM+YFII3EvoqIWWJ4nmSpSe+ZwGrMvoKi4/p1frPq',ready:()=>root.FinancialStatements?.version==='1.1.5'},
-        accountingTax: {src:local('accounting_tax_tasks_v1_2_1.js'),integrity:'sha384-DXDn0tpbEVnbON6KY6pqacJPNpejJSPYV4T/4E64SO9gFZfOPm8/mGOSODz8ug9d',ready:()=>root.AccountingTaxTasks?.version==='1.2.1'}
+        accountingTax: {src:local('accounting_tax_tasks_v1_2_1.js'),integrity:'sha384-DXDn0tpbEVnbON6KY6pqacJPNpejJSPYV4T/4E64SO9gFZfOPm8/mGOSODz8ug9d',ready:()=>root.AccountingTaxTasks?.version==='1.2.1'},
+        // The existing provider serves a rolling script, just as in member management.
+        postcode: {src:'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js',ready:()=>typeof root.daum?.Postcode==='function'}
     });
     const pending = new Map();
     function load(key) {
@@ -34,8 +36,10 @@
             };
             const timer = root.setTimeout(() => settle(new Error('ERP_ASSET_TIMEOUT')), 20000);
             script.src = asset.src;
-            script.integrity = asset.integrity;
-            script.crossOrigin = 'anonymous';
+            if (asset.integrity) {
+                script.integrity = asset.integrity;
+                script.crossOrigin = 'anonymous';
+            }
             script.async = true;
             script.onload = () => settle(asset.ready() ? null : new Error('ERP_ASSET_VERSION_MISMATCH'));
             script.onerror = () => settle(new Error('ERP_ASSET_LOAD_FAILED'));
