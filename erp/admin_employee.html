@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.167
+Version: v1.0.168
 Change: 2026-11-07 - Show active contract work and break hours with employee information.
 -->
 <html>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Show active contract work and break hours with employee inf
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.167 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.168 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -3243,7 +3243,7 @@ window.onload = async function() {
     const contractTargetEmployee = new URLSearchParams(location.search).get('employee');
     if (!window.ERPEmployeeSettingsView.isPage && contractTargetEmployee && isHrSettingsContextCurrent(getHrSettingsOwner())) {
         const target = employeeCache.find(row => String(row.emp_id) === contractTargetEmployee);
-        if (target) void openDetail(target);
+        if (target) void openEmployeeContractTask(target);
     }
     if (window.ERPEmployeeSettingsView.isPage) {
         hrSettingsReadyOwner = getHrSettingsOwner();
@@ -6202,6 +6202,26 @@ function loadEmployeeIdentityInfo(kind) {
 async function retryEmployeeIdentityInfo(kind) {
     if (!isEmployeeDetailTabVisible('tabInfo') || isEmployeeDetailSaving()) return;
     await loadEmployeeIdentityInfo(kind);
+}
+async function openEmployeeContractTask(employee){
+    const work=new URLSearchParams(location.search).get('work');
+    if(work!=='contract_target')return openDetail(employee);
+    const owner=getHrSettingsOwner(),opener=document.activeElement;
+    const modal=document.getElementById('detailModal');
+    const reveal=()=>{
+        if(!isHrSettingsContextCurrent(owner)||String(currentEmpId)!==String(employee.emp_id)||window.frameElement?.hidden)return;
+        const active=document.activeElement;
+        if(active!==opener&&active!==document.body&&active!==modal)return;
+        if(active?.matches('input,textarea,select,[contenteditable="true"]'))return;
+        const tab=document.querySelector('#empTab [href="#tabInfo"]');
+        bootstrap.Tab.getOrCreateInstance(tab).show();
+        const card=document.getElementById('employeeContractManagement');
+        card.setAttribute('tabindex','-1');card.scrollIntoView({block:'start'});
+        card.focus({preventScroll:true});
+    };
+    modal.addEventListener('shown.bs.modal',reveal,{once:true});
+    await openDetail(employee);
+    if(!modal.classList.contains('show'))modal.removeEventListener('shown.bs.modal',reveal);
 }
 async function openDetail(u) {
     if (isEmployeeDetailSaving()) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');

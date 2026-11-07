@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.86 | Change: 2026-11-07 - Refresh only read-only contract hours beside retained profile edits. -->
+<!-- Version: v1.0.87 | Change: 2026-11-07 - Reveal retained edits before the read-only hours card refreshes. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.86 | mypage.html');</script>
+<script>console.log('[Version] v1.0.87 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -405,9 +405,9 @@ const owner=getMypageDataOwner();
 const previous=mypageSectionLoads.get(key);
 if(previous?.owner===owner){if(previous.pending)return previous.pending;if(previous.loaded)return Promise.resolve(true);}
 const state={owner,loaded:false,pending:null};
-const isCurrent=()=>mypageDataAuthorized&&owner===getMypageDataOwner()&&mypageSectionLoads.get(key)===state&&isMypageDataVisible();
+const isCurrent=()=>mypageDataAuthorized&&owner===getMypageDataOwner()&&mypageSectionLoads.get(key)===state&&isMypageDataVisible()&&(key!=='contractHours'||!window.frameElement?.hidden);
 mypageSectionLoads.set(key,state);
-state.pending=Promise.resolve().then(()=>isCurrent()?loader(isCurrent):false).then(result=>{
+state.pending=Promise.resolve().then(()=>isCurrent()?(key==='contractHours'?loader(isCurrent,cancel=>{state.cancel=cancel;}):loader(isCurrent)):false).then(result=>{
 state.loaded=result!==false&&isCurrent();
 return state.loaded;
 }).catch(()=>false).finally(()=>{state.pending=null;});
@@ -424,17 +424,33 @@ function isMypageProfileEditing(){
 const save=document.getElementById('btnSaveInfo');
 return !!save&&!save.classList.contains('hidden');
 }
+function invalidateMypageContractHours(){
+const previous=mypageSectionLoads.get('contractHours');
+mypageSectionLoads.delete('contractHours');previous?.cancel?.();
+}
+function bindMypageContractHoursResume(){
+if(bindMypageContractHoursResume.bound)return;
+bindMypageContractHoursResume.bound=true;
+const frame=window.frameElement;
+const visible=()=>!frame?.hidden&&document.querySelector('.tab-content > .tab-pane.active')?.id==='tabInfo';
+if(frame)new MutationObserver(()=>{
+ invalidateMypageContractHours();
+ if(visible())void ensureMypageSection('contractHours');
+}).observe(frame,{attributes:true,attributeFilter:['hidden']});
+window.addEventListener('pagehide',invalidateMypageContractHours);
+}
 async function refreshMypageDataForResume(){
+bindMypageContractHoursResume();
+if(isMypageProfileEditing()){
+ // The host already rechecked access. Reveal the same editor before its read-only card finishes.
+ invalidateMypageContractHours();
+ if(!window.frameElement?.hidden&&document.querySelector('.tab-content > .tab-pane.active')?.id==='tabInfo')void ensureMypageSection('contractHours');
+ return;
+}
 // The host has just rechecked real Auth/runtime and holds this frame until refresh completes.
 mypageRefreshing=true;
 try{
 const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
-if(isMypageProfileEditing()){
- // Invalidate only this reader; profile fields, contacts, baselines and other drafts are untouched.
- mypageSectionLoads.delete('contractHours');
- if(pane==='tabInfo')await ensureMypageSection('contractHours');
- return;
-}
 mypageSectionLoads.clear();
 if(pane==='tabInsuranceStatus')await window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));
 else if(pane==='tabCalendar')await renderCalendar();
@@ -463,10 +479,11 @@ if(data.work_kind!=='fixed'||!times.every(s=>/^([01]\d|2[0-3]):[0-5]\d$/.test(s|
   ||!(times[0]<=times[2]&&times[2]<times[3]&&times[3]<=times[1]))return {text:status.unverified,original:true};
 return {text:`${basis}\n근무 ${times[0]}~${times[1]} · 휴게 ${times[2]}~${times[3]}`,original:false};
 }
-async function loadMypageContractHours(isCurrent){
+async function loadMypageContractHours(isCurrent,onCancel){
 const status=document.getElementById('myContractHours'),retry=document.getElementById('myContractHoursRetry'),original=document.getElementById('myContractHoursOriginal');
 const employee=myInfo,controller=new AbortController();
 let timer;
+onCancel?.(()=>controller.abort());
 status.textContent='조회 중…';retry.disabled=true;original.hidden=true;
 try{
  const response=await Promise.race([_supabase.rpc('erp_self_contract_work_schedule').abortSignal(controller.signal),
@@ -1429,6 +1446,7 @@ document.getElementById('lvRemain').textContent='…';
 applyMypageRuntimeProfileUi();
 setMypageBootStateReady();
 void loadMypageVisibleSections();
+bindMypageContractHoursResume();
 window.ErpWorkspaceResume.register({modules:['mypage'],refreshWhenDirty:isMypageProfileEditing,refresh:refreshMypageDataForResume});
 }catch(error){
 CoopSafeLog.error("[mypage] boot failed:", error);

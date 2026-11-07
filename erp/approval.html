@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.144 | Change: 2026-11-07 - Keep leave drafts and attachments with the selected employee. -->
+<!-- Version: v1.2.145 | Change: 2026-11-07 - Use registered work hours without editing them in leave requests. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.144 | approval.html');</script>
+  <script>console.log('[Version] v1.2.145 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script id="approvalLeaveTimeScript" src="leave_time.js?v=20261106-4"></script>
-  <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=20261107-5"></script>
+  <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=20261107-6"></script>
   <script src="leave_ledger.js?v=20261106-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -5027,8 +5027,8 @@ function createApprovalScheduledLeaveFields(item, startDate) {
     schedule.className = 'form-select';
     schedule.dataset.leaveScheduled = 'schedule_mode';
     schedule.append(new Option('등록된 근무시간 사용','contract'));
-    if(!isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())||item.schedule_mode==='actual'){
-        schedule.append(new Option('실제 근무시간 직접 지정','actual'));
+    if(item.schedule_mode==='actual'){
+        const previous=new Option('이전 직접 입력 (사용 불가)','actual');previous.disabled=true;previous.hidden=true;schedule.append(previous);
     }
     schedule.value = item.schedule_mode || 'contract';
     labelField('근무시간 기준',schedule,'col-12');
@@ -5064,7 +5064,7 @@ function createApprovalScheduledLeaveFields(item, startDate) {
     const pauseStart = labelField('휴게 시작 시각', input('actual_break_start','time',item.actual_break_start));
     const pauseEnd = labelField('휴게 종료 시각', input('actual_break_end','time',item.actual_break_end));
     const syncBreak = () => {
-        const manual=schedule.value==='actual';
+        const manual=false;
         [workStart,workEnd,workDays,holidayCol,breakCol].forEach(col=>col.classList.toggle('hidden',!manual));
         [pauseStart,pauseEnd].forEach(col=>col.classList.toggle('hidden',!manual||breakMode.value!=='actual'));
     };
@@ -5208,8 +5208,8 @@ function getApprovalMixedLeaveDetailSummary(options = {}) {
                 const clock = leaveSnapshotState?.clockSchedule;
                 const calendar = clock?.year===CoopLeaveTime.yearOf()?clock.calendar:null;
                 status.textContent = '';
-                if(entry.schedule_mode==='actual'&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
-                    status.textContent='이전 직접 입력값은 보관되어 있어요. 상신하려면 등록된 근무시간을 선택하고, 필요한 정정은 아래 요청으로 남겨 주세요.';
+                if(entry.schedule_mode==='actual'){
+                    status.textContent='등록된 근무시간을 선택해 주세요. 근무·휴게시간 입력은 인사 담당자에게 요청해 주세요.';
                     errors.push(`${index+1}번째 ${status.textContent}`);
                     return;
                 }
@@ -5223,7 +5223,7 @@ function getApprovalMixedLeaveDetailSummary(options = {}) {
                     return;
                 }
                 if (entry.schedule_mode==='contract' && (clock?.state!=='ready'||!calendar)) {
-                    status.textContent = clock?.state==='error'?'등록된 근무시간을 확인하지 못했습니다. 다시 확인하거나 실제 근무시간을 지정해 주세요.':'등록된 근무시간과 공휴일 확인 중입니다.';
+                    status.textContent = clock?.state==='error'?'등록된 근무시간을 확인하지 못했습니다. 다시 확인해 주세요.':'등록된 근무시간과 공휴일 확인 중입니다.';
                     if (requireComplete) errors.push(status.textContent);
                     return;
                 }

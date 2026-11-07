@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: v1.3.7 | 2026-10-21 — mark exhibition-only document previews and PDF output. */
+/* Version: v1.3.8 | 2026-11-07 — Open scoped contract tasks without changing existing editors. */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -461,6 +461,35 @@ function renderHistory() {
 
 function emptyWorkspace(message = '계약 이력을 선택해 주세요') {
   document.getElementById('workspace').innerHTML = `<div class="empty-state"><div class="fs-1 mb-3">🗂️</div><h2 class="h5 fw-bold">${escapeHtml(message)}</h2></div>`;
+}
+
+function showContractTask(){
+  const params=new URLSearchParams(location.search),task=params.get('work');
+  const titles={contract_missing:'근로계약서 등록',contract_terms:'근로조건 입력',contract_signatures:'계약 서명 확인'};
+  if(!titles[task]||!state.admin||state.forceSelf||!state.contractsLoaded||!state.employee
+    ||params.get('employee')!==state.employee.emp_id||state.editing||state.busy)return false;
+  const employee=state.employee,coop=state.user.coop_id;
+  const current=()=>state.admin&&!state.forceSelf&&state.contractsLoaded&&state.employee===employee
+    &&state.user.coop_id===coop&&!state.editing&&!state.busy&&!window.frameElement?.hidden;
+  const panel=document.createElement('section');panel.className='section-card';
+  const heading=document.createElement('h2');heading.className='h5 fw-bold';heading.textContent=`${employee.emp_name||'직원'} · ${titles[task]}`;panel.append(heading);
+  const actions=document.createElement('div');actions.className='d-flex flex-wrap gap-2';panel.append(actions);
+  const action=(label,run)=>{const b=document.createElement('button');b.type='button';b.className='btn btn-outline-primary';b.textContent=label;b.onclick=()=>{if(current())run();};actions.append(b);};
+  if(task==='contract_signatures'){
+    const waiting=state.contracts.filter(row=>row.status==='awaiting_signatures');
+    for(const row of waiting)action(row.title||'서명 대기 계약서 열기',()=>openContract(row.id));
+    if(!waiting.length){const p=document.createElement('p');p.textContent='현재 서명 대기 계약서가 없습니다.';panel.append(p);}
+  }else{
+    if(task==='contract_terms'){
+      const path=state.contracts.find(row=>row.status==='completed'&&row.file_path)?.file_path||employee.contract_url;
+      if(path)action('기존 계약서 보기',()=>void openStoredFile(path));
+      const note=document.createElement('p');note.textContent='계약서의 근무·휴게시간을 확인한 뒤 근로조건을 입력해 주세요.';panel.insertBefore(note,actions);
+    }
+    action(task==='contract_terms'?'서명한 계약서·근로조건 입력':'서명한 계약서 등록',()=>openUpload());
+    action('근로계약서 작성',()=>openNew('initial'));
+  }
+  document.getElementById('workspace').replaceChildren(panel);
+  return true;
 }
 
 function defaultTerms() {
@@ -1645,6 +1674,7 @@ async function boot() {
     document.getElementById('loadingScreen').classList.add('hidden');
     document.getElementById('appShell').classList.remove('hidden');
     if (!state.contracts.length) emptyWorkspace(state.admin && !state.forceSelf ? '새 계약서를 작성하거나 외부 계약서를 등록해 주세요' : '확인할 근로계약서가 없습니다');
+    showContractTask();
     window.ErpWorkspaceResume.register({modules:[moduleKey],busy:()=>state.busy,refresh:loadContracts});
   } catch (error) {
     console.error('[employment_contracts] boot failed', error);

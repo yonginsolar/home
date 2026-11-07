@@ -252,7 +252,8 @@
     const tools=make('div','d-flex gap-2 flex-wrap');tools.append(edit,remove);
     correctionPanel.append(correctionHint,correctionText,tools,editor);
     area.append(first,endGroup,status,scheduleDescription,retry);
-    area.after(correctionPanel);
+    // Preserve old correction drafts in memory/serialization, but no longer offer them in approvals.
+    editor.disabled=true;
     const clockStartPicker=datePicker(startDate,'시작일',(date,m)=>clockDateReason(date,'start',m));
     const clockEndPicker=datePicker(endDate,'종료일',(date,m)=>clockDateReason(date,'end',m));
     clockStartPicker.show(true);clockEndPicker.show(true);
@@ -281,7 +282,7 @@
     }
     function ownerState(){return ctx.owner();}
     const canRetryPersonal=()=>owner?.self&&ticket?.error===true;
-    const fallbackSchedule=()=>owner?.self?(pref?(pref.schedule||time.defaultSchedule):null):time.defaultSchedule;
+    const fallbackSchedule=()=>activeMode==='clock'?(owner?.self?pref?.schedule||null:null):(owner?.self&&pref?.schedule||time.defaultSchedule);
     const isCorrectionMode=()=>['annual','clock','legacy'].includes(activeMode);
     const unappliedSchedule=()=>editOpen&&!same(workEditorDraft(),editorBaseline);
     const workEditorDraft=()=>({...readWork(),break_start:breakStart.value});
@@ -345,7 +346,7 @@
       finally{if(current())ctx.changed();}
     }
     function correctionAllowed(){
-      return owner&&ownerState()?.key===owner.key&&isCorrectionMode()&&!root.frameElement?.hidden&&!correctionPanel.closest('.hidden');
+      return false;
     }
     function openEditor(){
       if(!correctionAllowed()||editOpen)return;
@@ -454,7 +455,7 @@
         return model.clock?.state==='error'?'근무일과 공휴일을 확인하지 못했어요. 다시 확인해 주세요.':'근무일과 공휴일을 확인하는 중이에요.';
       return '';
     }
-    const scheduleError=()=>ticket?.error?'기존 휴가 계산용 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':'기존 휴가 계산용 근무시간을 확인하는 중이에요.';
+    const scheduleError=()=>ticket?.error?'등록된 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':owner?.self&&!pref?'등록된 근무시간을 확인하는 중이에요.':'시간차를 신청하려면 근무·휴게시간을 먼저 등록해야 합니다. 인사 담당자에게 입력을 요청해 주세요.';
     function workdayStatus(date,model){
       if(model.clock?.calendar?.has(date))return {reason:`${date}은 공휴일이에요.`};
       const {schedule}=scheduleFor(date,model);
@@ -567,14 +568,13 @@
     }
     function setMode(mode){
       if(mode!==activeMode){start.close();end.close();clockStartPicker.show(mode==='clock');clockEndPicker.show(mode==='clock');}
-      activeMode=mode;annualStartPicker?.show(mode==='annual');annualEndPicker?.show(mode==='annual');refreshDates();
+      activeMode=mode;annualStartPicker?.show(mode==='annual');annualEndPicker?.show(mode==='annual');refresh();
     }
     function correctionBlock(){
-      syncOwner();
-      return owner&&isCorrectionMode()&&unappliedSchedule()?'작성 중인 근무시간 정정을 요청에 담거나 취소해 주세요.':'';
+      return '';
     }
     function refreshCorrection(){
-      correctionPanel.classList.toggle('hidden',!owner||!isCorrectionMode());
+      correctionPanel.classList.add('hidden');
       editor.classList.toggle('hidden',!editOpen);
       edit.classList.toggle('hidden',editOpen);
       remove.classList.toggle('hidden',editOpen||!correction);
@@ -593,7 +593,8 @@
       if(retainedInvalid&&!state.ledgerFailed){state.result=null;state.error=startMenu.message||endMenu.message||(state.error&&!state.error.includes('입력해')?state.error:'이전에 선택한 시간이 현재 범위에 없어요. 시간을 다시 선택해 주세요.');}
       const fallbackMenu=startMenu.fallback?startMenu:endMenu.fallback?endMenu:null;
       const used=fallbackMenu?.schedule;
-      setText(scheduleDescription,used?`${pref?.schedule?'기존 휴가 계산용 근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
+      setText(scheduleDescription,used?`등록된 근무시간 ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:
+        activeMode==='clock'&&!fallbackSchedule()&&!model.policy.periods.some(p=>p.schedule)?scheduleError():'');
       retry.classList.toggle('hidden',!snapshotRetry?.inline&&!snapshotRetry?.ledger&&!state.retry&&!startMenu.retry&&!endMenu.retry);
       retry.disabled=!owner;
       retry.setAttribute('aria-disabled',String(!owner||!!snapshotRetry||model.snapshotRead==='loading'));
@@ -636,8 +637,7 @@
       return body;
     }
     function getCorrection(){
-      syncOwner();
-      return owner&&isCorrectionMode()&&correction?{...correction,days:[...correction.days]}:null;
+      return null;
     }
     function restoreClockDraft(data){
       const s=data||{};putClockDraft(s);
@@ -663,7 +663,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.12'};
+    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.13'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);

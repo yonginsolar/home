@@ -1,4 +1,4 @@
-/* v1.2.0 — HR contract target/status counts; names are read only on explicit expansion. */
+/* v1.2.1 — Contract tasks link directly to the employee's required action. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -128,7 +128,7 @@
      const rows=data.items.slice(0,500);
      for(const [i,row]of rows.entries()){
       const a=el('a','d-block border rounded p-3 mb-2',`${i+1}. ${row.emp_name}`);
-      a.href=(task==='contract_target'?'admin_employee.html':'employment_contracts.html')+'?employee='+encodeURIComponent(row.emp_id);content.append(a);
+      a.href=(task==='contract_target'?'admin_employee.html':'employment_contracts.html')+'?employee='+encodeURIComponent(row.emp_id)+'&work='+task;content.append(a);
      }
      status.textContent=data.items.length>500?'500명까지 표시했습니다. 직원 관리에서 나머지 직원을 확인해 주세요.':rows.length?`${rows.length.toLocaleString('ko-KR')}명`:'현재 확인할 직원이 없습니다.';
     }catch(_){if(valid())status.textContent='명단을 불러오지 못했습니다. 다시 확인해 주세요.';}
