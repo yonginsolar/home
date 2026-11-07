@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.168
-Change: 2026-11-07 - Show active contract work and break hours with employee information.
+Version: v1.0.169
+Change: 2026-11-07 - Recover stalled attendance reads without replacing drafts or accepting stale responses.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Show active contract work and break hours with employee inf
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.168 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.169 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -644,7 +644,7 @@ Change: 2026-11-07 - Show active contract work and break hours with employee inf
             <div id="extraLeaveInputs" hidden><div class="mb-2"><label class="small text-muted">추가 근로일</label><input type="date" id="extraLeaveWorkDate" class="form-control"></div><div class="row g-2 mb-2"><div class="col-6"><label class="small text-muted">실제 추가 근로시간</label><input type="number" id="extraLeaveWorkHours" min="0.0166666667" max="24" step="any" class="form-control"></div><div class="col-6"><label class="small text-muted">부여할 추가 휴가시간</label><input type="number" id="extraLeaveGrantHours" min="0.0166666667" max="48" step="any" class="form-control"></div></div><div class="mb-2"><label class="small text-muted">추가 근로 내용</label><textarea id="extraLeaveReason" class="form-control" maxlength="1000" rows="3"></textarea></div><div class="small text-muted mb-2">법정 연차와 구분해 올해 추가 휴가로 기록합니다. 실제 근로시간과 부여할 휴가시간을 각각 입력하세요.</div></div>
             <div class="mb-2"><label class="small text-muted">일수</label><input type="number" id="logValue" class="form-control" placeholder="예: 1"></div>
             <div class="mb-3"><label class="small text-muted">사유</label><input type="text" id="logReason" class="form-control" placeholder="사유를 입력하세요"></div>
-            <button class="btn btn-primary w-100 btn-rounded" onclick="saveLog()">✅ 반영하기</button>
+            <button id="employeeLeaveApplyBtn" class="btn btn-primary w-100 btn-rounded" onclick="saveLog()">✅ 반영하기</button>
           </div>
           <div class="tab-pane fade" id="tabInsuranceStatus">
             <div class="d-flex justify-content-end mb-3"><a id="employeeInsuranceManageLink" class="btn btn-outline-primary btn-sm" href="hr_insurance.html">서류 관리·출력</a></div>
@@ -1295,14 +1295,18 @@ function setEmployeeDetailTabState(tabId, state) {
         status.append(retry);
     }
 }
-async function verifyEmployeeDetailTabAccess(owner) {
-    if (!owner || owner !== getHrSettingsOwner()) throw new Error('ERP_TASK_ACCESS_DENIED');
+async function verifyEmployeeDetailTabAccess(owner, readContext = null) {
+    const current = () => !readContext || (!readContext.signal.aborted && readContext.isCurrent());
+    if (!current() || !owner || owner !== getHrSettingsOwner()) throw new Error('ERP_TASK_ACCESS_DENIED');
     const identity = await _supabase.auth.getUser();
+    if (!current()) throw new Error('ERP_TASK_ACCESS_DENIED');
     if (identity.error) throw identity.error;
     const userId = identity.data?.user?.id;
     const expectedUserId = hrAuthorizedUserId;
     if (!userId || String(userId) !== expectedUserId) throw new Error('ERP_TASK_ACCESS_DENIED');
-    const access = await _supabase.rpc('get_my_erp_runtime');
+    const query = _supabase.rpc('get_my_erp_runtime');
+    const access = await (readContext ? query.abortSignal(readContext.signal) : query);
+    if (!current()) throw new Error('ERP_TASK_ACCESS_DENIED');
     if (access.error) throw access.error;
     const runtime = access.data;
     if (owner !== getHrSettingsOwner() || !runtime?.coop_id || String(runtime.coop_id) !== String(myInfo.coop_id)
@@ -1312,6 +1316,7 @@ async function verifyEmployeeDetailTabAccess(owner) {
     }
 }
 function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
+    if (tabId === 'tabLog') return ensureEmployeeLeaveTab({force});
     const loaders = {tabSalary:loadSalaryData,tabLog:loadLeave,tabModuleAccess:loadEmployeeModuleAccess,tabNotificationAccess:loadEmployeeNotificationAssignments};
     if (!loaders[tabId] || !isEmployeeDetailTabVisible(tabId) || isEmployeeDetailSaving()) return Promise.resolve();
     const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
@@ -1360,14 +1365,116 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
     })();
     return entry.pending;
 }
+function renderEmployeeLeaveReadState(entry, state) {
+    const pane = document.getElementById('tabLog');
+    if (!entry.hasContent && !entry.statusInitialized) setEmployeeDetailTabState('tabLog', 'loading');
+    if (state === 'ready' && !entry.hasContent) {
+        setEmployeeDetailTabState('tabLog', 'ready');
+        entry.hasContent = true;
+    }
+    const status = pane.querySelector('[data-detail-demand-status]');
+    if (!status) return;
+    status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    entry.statusInitialized = true;
+    entry.message ||= document.createElement('span');
+    if (!entry.retry) {
+        entry.retry = document.createElement('button');
+        entry.retry.type = 'button'; entry.retry.className = 'btn btn-sm btn-outline-primary ms-2 text-wrap';
+        entry.retry.textContent = '다시 확인'; entry.retry.dataset.employeeLeaveRetry = '1';
+        entry.retry.onclick = () => { void ensureEmployeeLeaveTab({force:true}); };
+        entry.retry.onkeydown = event => { if (event.repeat && ['Enter',' '].includes(event.key)) event.preventDefault(); };
+    }
+    if (entry.message.parentElement !== status || entry.retry.parentElement !== status) status.replaceChildren(entry.message, entry.retry);
+    entry.message.textContent = state === 'loading' ? '근태/포상 자료를 불러오는 중입니다.'
+        : entry.timedOut ? '조회가 지연됐습니다. 다시 확인해 주세요.' : '근태/포상 자료를 불러오지 못했습니다. 다시 확인해 주세요.';
+    entry.recovery ||= state === 'error';
+    entry.retry.hidden = state !== 'error' && !entry.recovery;
+    entry.retry.disabled = state === 'loading';
+    status.hidden = state === 'ready';
+    pane.setAttribute('aria-busy', String(state === 'loading'));
+    const summary = pane.querySelector('.leave-summary-card-button');
+    if (summary) summary.hidden = state !== 'ready';
+    document.getElementById('employeeLeaveApplyBtn').disabled = state !== 'ready';
+    if (state === 'ready') syncExtraLeaveInputs();
+}
+function ensureEmployeeLeaveTab({force = false, allowBusy = false} = {}) {
+    if (!isEmployeeDetailTabVisible('tabLog') || (!allowBusy && isEmployeeDetailSaving())) return Promise.resolve(false);
+    const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
+    if (!owner || !empId) return Promise.resolve(false);
+    const key = `${owner}|${empId}|${revision}|tabLog|`;
+    let entry = employeeDetailTabLoads.get(key);
+    if (entry?.pending) return entry.pending;
+    if (!entry) { entry = {ready:false,pending:null,readRevision:0,resume:false}; employeeDetailTabLoads.set(key, entry); }
+    const cached = entry.ready && !force ? entry.result : null;
+    const readRevision = ++entry.readRevision, controller = new AbortController();
+    const isOwned = () => owner === getHrSettingsOwner() && empId === String(currentEmpId || '') && revision === employeeDetailRevision;
+    const isMine = () => employeeDetailTabLoads.get(key) === entry && entry.readRevision === readRevision;
+    const isCurrent = () => isMine() && isOwned() && !controller.signal.aborted && isEmployeeDetailTabVisible('tabLog');
+    const restoreFocus = document.activeElement === entry.retry;
+    let movedFocus = false, timer;
+    const trackFocus = event => { if (event.target !== entry.retry && event.target !== document.body) movedFocus = true; };
+    if (restoreFocus) for (const event of ['focusin','pointerdown','keydown']) document.addEventListener(event, trackFocus, true);
+    entry.controller = controller; entry.context = {tabId:'tabLog',isOwned}; entry.resume = false; entry.ready = false; entry.timedOut = false;
+    currentEmployeeLeaveSnapshot = null; extraLeaveAccess = false;
+    document.querySelector('#logType option[value="extra"]').disabled = true;
+    renderEmployeeLeaveReadState(entry, 'loading');
+    const context = {empId,signal:controller.signal,isCurrent};
+    const task = async () => {
+        await verifyEmployeeDetailTabAccess(owner, context);
+        if (!isCurrent()) return null;
+        const result = cached || await loadLeave({readContext:context});
+        if (!isCurrent() || !result) return null;
+        if (!cached) await verifyEmployeeDetailTabAccess(owner, context);
+        if (!isCurrent()) return null;
+        return result;
+    };
+    entry.pending = (async () => {
+        try {
+            const result = await Promise.race([task(), new Promise((_,reject) => {
+                controller.signal.addEventListener('abort', () => reject(new Error('EMPLOYEE_LEAVE_READ_STOPPED')), {once:true});
+                timer = setTimeout(() => { if (isMine()) entry.timedOut = true; controller.abort(); }, 15000);
+            })]);
+            if (!isCurrent() || !result) return false;
+            currentEmployeeLeaveSnapshot = result.snapshot;
+            document.getElementById('displayLeaveRemain').innerText = CoopLeaveTime.formatDays(Number(result.snapshot.effectiveRemainDays || 0), result.snapshot.workBasis?.day_minutes || 480);
+            extraLeaveAccess = result.extraAllowed;
+            document.querySelector('#logType option[value="extra"]').disabled = !extraLeaveAccess;
+            entry.result = result; entry.ready = true;
+            renderEmployeeLeaveReadState(entry, 'ready');
+            if (!hasUnsavedEmployeeDetailTab('tabLog')) window.ErpWorkspaceResume?.checkpoint(document.getElementById('tabLog'));
+            return true;
+        } catch (_) {
+            if (isMine() && isOwned() && isEmployeeDetailTabVisible('tabLog')) {
+                entry.ready = false;
+                renderEmployeeLeaveReadState(entry, 'error');
+            }
+            return false;
+        } finally {
+            clearTimeout(timer);
+            if (restoreFocus) for (const event of ['focusin','pointerdown','keydown']) document.removeEventListener(event, trackFocus, true);
+            if (isMine()) {
+                entry.pending = null; entry.controller = null;
+                if (isOwned() && !isEmployeeDetailTabVisible('tabLog') && !entry.ready) entry.resume = true;
+                if (restoreFocus && !movedFocus && isOwned() && isEmployeeDetailTabVisible('tabLog') && document.hasFocus()
+                    && (document.activeElement === entry.retry || document.activeElement === document.body)) {
+                    const target = entry.ready ? document.getElementById('logType') : entry.retry;
+                    target?.focus({preventScroll:true});
+                }
+            }
+        }
+    })();
+    return entry.pending;
+}
 function interruptEmployeeDetailTabReads(tabId) {
     for (const entry of employeeDetailTabLoads.values()) {
         const context = entry.context;
         if (!entry.pending || !context?.isOwned() || (tabId && context.tabId !== tabId)
-            || !['tabModuleAccess','tabNotificationAccess'].includes(context.tabId)) continue;
+            || !['tabLog','tabModuleAccess','tabNotificationAccess'].includes(context.tabId)) continue;
         entry.readRevision++;
+        entry.controller?.abort();
         entry.pending = null;
         entry.resume = true;
+        if (context.tabId === 'tabLog') continue;
         const kind = context.tabId === 'tabModuleAccess' ? 'modules' : 'notifications';
         employeeDetailReadTokens[kind]++;
         if (kind === 'modules') employeeDetailReadTokens.approvedRights++;
@@ -1396,6 +1503,7 @@ function cancelEmployeeDetailReads() {
     employeeBasicAccess.allowed = false;
     employeeBasicAccess.state = 'idle';
     syncEmployeeBasicAccessUi();
+    for (const entry of employeeDetailTabLoads.values()) entry.controller?.abort();
     employeeDetailTabLoads.clear();
     Object.keys(employeeDetailReadTokens).forEach(key => { employeeDetailReadTokens[key] += 1; });
     employeeModuleAccessSnapshot = employeeNotificationSnapshot = null;
@@ -6246,6 +6354,7 @@ async function openDetail(u) {
     document.getElementById('logReason').value = '';
     resetExtraLeaveInputs();
     checkpointEmployeeDetailDraft(document.getElementById('tabLog'));
+    for (const entry of employeeDetailTabLoads.values()) entry.controller?.abort();
     employeeDetailTabLoads.clear();
     employeeIdentityReads.clear();
     employeeBasicAccess.state = 'idle'; employeeBasicAccess.allowed = false;
@@ -7500,44 +7609,29 @@ async function persistSalary() {
 }
 
 // [수정] 관리자용 연차 조회 (특정 직원 + 결재완료 예정 차감 반영)
-async function loadLeave() {
-    const empId = currentEmpId, revision = employeeDetailRevision;
-    const owner = getHrSettingsOwner();
-    const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId)
-        && owner === getHrSettingsOwner() && isEmployeeDetailTabVisible('tabLog');
-    try {
-        if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
-            const snapshot = await window.LeaveLedger.getLeaveSnapshot(_supabase, empId, {
+async function loadLeave({readContext} = {}) {
+    // Existing post-write refresh callers use the same bounded reader, not another writer.
+    if (!readContext) return ensureEmployeeLeaveTab({force:true,allowBusy:true});
+    const {empId,signal,isCurrent} = readContext;
+    if (!isCurrent()) return null;
+    let snapshot;
+    if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
+            snapshot = await window.LeaveLedger.getLeaveSnapshot(_supabase, empId, {
                 columns: 'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot',
                 reservedStatuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
                 includeToday: true,
-                unknownAsReserved: false
+                unknownAsReserved: false,
+                signal
             });
-            if (!isCurrent()) return;
-            currentEmployeeLeaveSnapshot = snapshot;
-            const remain = Number(snapshot?.effectiveRemainDays || 0);
-            document.getElementById("displayLeaveRemain").innerText = CoopLeaveTime.formatDays(remain, snapshot.workBasis?.day_minutes || 480);
-            await loadExtraLeaveAccess();
-            return true;
-        }
-    } catch (error) {
-        console.error(error);
-        if (isCurrent()) { document.getElementById('displayLeaveRemain').textContent='조회 실패'; currentEmployeeLeaveSnapshot=null; }
-        return false;
+    } else {
+        const query = _supabase.rpc('calculate_leave_days', {p_emp_id:empId});
+        const {data:remainDays,error} = await query.abortSignal(signal);
+        if (error) throw error;
+        snapshot = {effectiveRemainDays:Number(remainDays || 0),reservedDays:0,summary:{reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[]}};
     }
-
-    // 공통 모듈 미사용/오류 시 기존 RPC로 폴백
-    if (!isCurrent()) return;
-    const { data: remainDays, error } = await _supabase.rpc('calculate_leave_days', { p_emp_id: empId });
-    if (!isCurrent()) return;
-    if (error) {
-        showAlert("연차 조회 실패: " + error.message);
-        return;
-    }
-    currentEmployeeLeaveSnapshot = { effectiveRemainDays: Number(remainDays || 0), reservedDays: 0, summary: { reservedDocs: [], pastOrUsedDocs: [], unknownDateDocs: [] } };
-    document.getElementById("displayLeaveRemain").innerText = CoopLeaveTime.formatDays(remainDays);
-    await loadExtraLeaveAccess();
-    return true;
+    if (!isCurrent()) return null;
+    const extraAllowed = await loadExtraLeaveAccess({readContext});
+    return isCurrent() ? {snapshot,extraAllowed:extraAllowed === true} : null;
 }
 function getAdminEmployeeLeaveTypeCatalog() {
     return Array.isArray(hrLeaveTypeCatalog) && hrLeaveTypeCatalog.length > 0 ? hrLeaveTypeCatalog : getHrDefaultLeaveTypeCatalog();
@@ -8175,11 +8269,14 @@ async function saveLog() {
 let extraLeaveAccess=false,extraLeaveRequest=null;
 function syncExtraLeaveInputs(){const extra=document.getElementById('logType').value==='extra';document.getElementById('extraLeaveInputs').hidden=!extra;for(const id of ['logValue','logReason'])document.getElementById(id).parentElement.hidden=extra;}
 function resetExtraLeaveInputs(){for(const id of ['extraLeaveWorkDate','extraLeaveWorkHours','extraLeaveGrantHours','extraLeaveReason'])document.getElementById(id).value='';extraLeaveRequest=null;extraLeaveAccess=false;document.querySelector('#logType option[value="extra"]').disabled=true;syncExtraLeaveInputs();}
-async function loadExtraLeaveAccess(){
+async function loadExtraLeaveAccess({readContext} = {}){
  const empId=currentEmpId,revision=employeeDetailRevision,owner=getHrSettingsOwner();
- let data,error;try{({data,error}=await _supabase.rpc('erp_hr_extra_leave',{p_action:'access'}));}catch(caught){error=caught;}
- if(empId!==currentEmpId||revision!==employeeDetailRevision||owner!==getHrSettingsOwner())return;
- extraLeaveAccess=!error&&data?.allowed===true;document.querySelector('#logType option[value="extra"]').disabled=!extraLeaveAccess;
+ if(readContext&&!readContext.isCurrent())return false;
+ let data,error;try{const query=_supabase.rpc('erp_hr_extra_leave',{p_action:'access'});({data,error}=await(readContext?query.abortSignal(readContext.signal):query));}catch(caught){error=caught;}
+ if(empId!==currentEmpId||revision!==employeeDetailRevision||owner!==getHrSettingsOwner()||(readContext&&!readContext.isCurrent()))return false;
+ const allowed=!error&&data?.allowed===true;
+ if(!readContext){extraLeaveAccess=allowed;document.querySelector('#logType option[value="extra"]').disabled=!extraLeaveAccess;}
+ return allowed;
 }
 async function saveExtraLeave(){
  if(isEmployeeDetailSaving()||!currentEmpId)return;
