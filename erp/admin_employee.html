@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.172
-Change: 2026-11-07 - Keep attendance apply availability aligned with current reads and all detail save locks.
+Version: v1.0.173
+Change: 2026-11-07 - Explain unavailable extra leave and restore permitted modes without changing drafts or save guards.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Keep attendance apply availability aligned with current rea
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.172 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.173 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -644,7 +644,8 @@ Change: 2026-11-07 - Keep attendance apply availability aligned with current rea
             <div id="extraLeaveInputs" hidden><div class="mb-2"><label class="small text-muted">추가 근로일</label><input type="date" id="extraLeaveWorkDate" class="form-control"></div><div class="row g-2 mb-2"><div class="col-6"><label class="small text-muted">실제 추가 근로시간</label><input type="number" id="extraLeaveWorkHours" min="0.0166666667" max="24" step="any" class="form-control"></div><div class="col-6"><label class="small text-muted">부여할 추가 휴가시간</label><input type="number" id="extraLeaveGrantHours" min="0.0166666667" max="48" step="any" class="form-control"></div></div><div class="mb-2"><label class="small text-muted">추가 근로 내용</label><textarea id="extraLeaveReason" class="form-control" maxlength="1000" rows="3"></textarea></div><div class="small text-muted mb-2">법정 연차와 구분해 올해 추가 휴가로 기록합니다. 실제 근로시간과 부여할 휴가시간을 각각 입력하세요.</div></div>
             <div class="mb-2"><label class="small text-muted">일수</label><input type="number" id="logValue" class="form-control" placeholder="예: 1"></div>
             <div class="mb-3"><label class="small text-muted">사유</label><input type="text" id="logReason" class="form-control" placeholder="사유를 입력하세요"></div>
-            <button id="employeeLeaveApplyBtn" class="btn btn-primary w-100 btn-rounded" onclick="saveLog()">✅ 반영하기</button>
+            <p id="employeeLeaveApplyReason" class="small text-danger text-break mb-2" role="status" aria-live="polite" hidden></p>
+            <button id="employeeLeaveApplyBtn" class="btn btn-primary w-100 btn-rounded" aria-describedby="employeeLeaveApplyReason" onclick="saveLog()">✅ 반영하기</button>
           </div>
           <div class="tab-pane fade" id="tabInsuranceStatus">
             <div class="d-flex justify-content-end mb-3"><a id="employeeInsuranceManageLink" class="btn btn-outline-primary btn-sm" href="hr_insurance.html">서류 관리·출력</a></div>
@@ -1117,8 +1118,15 @@ function syncEmployeeLeaveApplyState() {
     if (!button || !isEmployeeDetailTabVisible('tabLog')) return;
     const key = `${getHrSettingsOwner()}|${String(currentEmpId || '')}|${employeeDetailRevision}|tabLog|`;
     const entry = employeeDetailTabLoads.get(key), busy = isEmployeeDetailSaving();
-    button.disabled = busy || !entry?.ready || entry.viewState !== 'ready';
+    const ready = entry?.ready === true && entry.viewState === 'ready';
+    const extraUnavailable = ready && document.getElementById('logType')?.value === 'extra' && !extraLeaveAccess;
+    button.disabled = busy || !ready || extraUnavailable;
     button.textContent = busy ? '저장 중…' : '✅ 반영하기';
+    const reason = document.getElementById('employeeLeaveApplyReason');
+    if (reason) {
+        reason.hidden = !extraUnavailable;
+        reason.textContent = extraUnavailable ? '추가 휴가를 부여할 권한을 확인하지 못했습니다.' : '';
+    }
 }
 function requestEmployeeDetailDiscard(action, {tabId = ''} = {}) {
     if (employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
@@ -8300,7 +8308,7 @@ async function saveLog() {
 }
 
 let extraLeaveAccess=false,extraLeaveRequest=null;
-function syncExtraLeaveInputs(){const extra=document.getElementById('logType').value==='extra';document.getElementById('extraLeaveInputs').hidden=!extra;for(const id of ['logValue','logReason'])document.getElementById(id).parentElement.hidden=extra;}
+function syncExtraLeaveInputs(){const extra=document.getElementById('logType').value==='extra';document.getElementById('extraLeaveInputs').hidden=!extra;for(const id of ['logValue','logReason'])document.getElementById(id).parentElement.hidden=extra;syncEmployeeLeaveApplyState();}
 function resetExtraLeaveInputs(){for(const id of ['extraLeaveWorkDate','extraLeaveWorkHours','extraLeaveGrantHours','extraLeaveReason'])document.getElementById(id).value='';extraLeaveRequest=null;extraLeaveAccess=false;document.querySelector('#logType option[value="extra"]').disabled=true;syncExtraLeaveInputs();}
 async function loadExtraLeaveAccess({readContext} = {}){
  const empId=currentEmpId,revision=employeeDetailRevision,owner=getHrSettingsOwner();
