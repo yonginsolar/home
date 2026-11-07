@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.174
-Change: 2026-11-07 - Checkpoint only the submitted attendance mode and preserve other-mode drafts.
+Version: v1.0.175
+Change: 2026-11-07 - Show employee detail immediately and prepare guarded information in parallel.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Checkpoint only the submitted attendance mode and preserve 
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.174 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.175 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -346,6 +346,8 @@ Change: 2026-11-07 - Checkpoint only the submitted attendance mode and preserve 
       <div class="modal-body">
         <div class="tab-content pt-2">
         <div class="tab-pane fade show active" id="tabInfo">
+  <div id="employeeDetailPrepareStatus" class="small text-muted mb-2" role="status" aria-live="polite" hidden><span></span><button type="button" class="btn btn-sm btn-outline-primary ms-2 text-wrap" onclick="void window.EmployeeDetailPreparation.start()" hidden>다시 확인</button></div>
+  <fieldset id="employeeDetailInfoFields" class="border-0 p-0 m-0 w-100">
   <div id="infoContainer">
     <div class="d-flex flex-wrap justify-content-end align-items-center gap-2 mb-2">
       <span id="employeeBasicAccessStatus" class="small text-muted" role="status"></span>
@@ -484,6 +486,7 @@ Change: 2026-11-07 - Checkpoint only the submitted attendance mode and preserve 
       <div class="col-12 mt-2 pt-2 border-top d-flex justify-content-end gap-2" id="btnResignArea"></div>
     </div>
   </div>
+  </fieldset>
 </div>
        <div class="tab-pane fade" id="tabSalary">
   <div id="salaryAlertBox" class="mb-3 d-none"></div>
@@ -1515,6 +1518,7 @@ function resumeEmployeeDetailTabReads() {
     return Promise.resolve();
 }
 function cancelEmployeeDetailReads() {
+    window.EmployeeDetailPreparation?.cancel();
     resetEmployeeContractHours();
     employeeInfoReadEpoch++;
     employeeInfoActiveReads.clear();
@@ -3500,9 +3504,10 @@ function syncDurunuriEligibilityUi() {
     }
 }
 
-async function loadDurunuriEligibilityProfile(empId, { preserveInput = false } = {}) {
+async function loadDurunuriEligibilityProfile(empId, { preserveInput = false, readContext = null } = {}) {
     const revision = employeeDetailRevision;
-    const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId);
+    const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId)
+        && (!readContext || readContext.isCurrent());
     if (!preserveInput) resetDurunuriEligibilityProfileUi();
     const module = getDurunuriModuleAdmin();
     const helpEl = document.getElementById('durunuriEligibilityHelp');
@@ -6108,6 +6113,7 @@ function employeeInfoContext() {
         && epoch === employeeInfoReadEpoch && isHrSettingsContextCurrent(owner)};
 }
 function interruptEmployeeInfoReads() {
+    window.EmployeeDetailPreparation?.interrupt();
     // Hide invalidates in-flight answers, not the user's editor or other detail tabs.
     employeeInfoReadEpoch++;
     resetEmployeeAddressSearch();
@@ -6126,6 +6132,8 @@ function interruptEmployeeInfoReads() {
 }
 async function resumeEmployeeInfoReads() {
     if (!isEmployeeDetailTabVisible('tabInfo') || isEmployeeDetailSaving()) return;
+    const preparation = window.EmployeeDetailPreparation?.resume();
+    if (preparation) return preparation;
     const reads = [];
     for (const [kind,context] of employeeInfoResumeReads) {
         employeeInfoResumeReads.delete(kind);
@@ -6365,6 +6373,7 @@ async function openEmployeeContractTask(employee){
 }
 async function openDetail(u) {
     if (isEmployeeDetailSaving()) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
+    if (window.EmployeeDetailPreparation?.pendingFor(u.emp_id)) return;
     if (hasUnsavedEmployeeDetail()) {
         requestEmployeeDetailDiscard(() => { void openDetail(u); });
         return;
@@ -6375,9 +6384,7 @@ async function openDetail(u) {
     resetEmployeeAddressSearch();
     employeeInfoActiveReads.clear();
     employeeInfoResumeReads.clear();
-    const revision = ++employeeDetailRevision;
-    const owner = getHrSettingsOwner();
-    const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id) && isHrSettingsContextCurrent(owner);
+    ++employeeDetailRevision;
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
     employeeSalarySelectedMonth = document.getElementById('salaryMonth').value;
     document.getElementById('logType').value = '지급';
@@ -6418,9 +6425,7 @@ async function openDetail(u) {
     document.getElementById("viewSalaryDate").innerText = u.salary_apply_date || "-"; document.getElementById("editSalary").value = u.base_salary || 0; document.getElementById("salaryApplyDate").value = u.salary_apply_date || "";
     updateMemberPullStatus('조합원 번호, 이메일, 이름 순으로 일치 대상을 찾아 값을 채웁니다.', 'muted');
 
-    await Promise.all([loadEmployeeBasicAccess(), loadEmployeeIdentityInfo('birth'), loadEmployeeIdentityInfo('emergency')]);
-    if (!isCurrent()) return;
-
+    resetDurunuriEligibilityProfileUi();
     toggleEditMode(false);
     document.getElementById("rrnFront").value = ""; document.getElementById("rrnBack").value = "";
 
@@ -6431,15 +6436,76 @@ async function openDetail(u) {
         : '직접 작성, 변경합의서 작성 또는 외부 작성 파일 등록';
 
     renderEmployeeResignationActions();
-    await loadDurunuriEligibilityProfile(u.emp_id);
-    if (!isCurrent()) return;
     resetEmployeeModuleAccessUi();
     resetEmployeeNotificationUi();
     checkpointEmployeeDetailDraft(document.getElementById('infoContainer'));
+    void window.EmployeeDetailPreparation.start();
     detailModal.show();
     void ensureEmployeeDetailTab(document.querySelector('#empTab .nav-link.active')?.getAttribute('href')?.slice(1));
     window.SunVillageTotalManagerAdmin?.load(currentEmpId);
 }
+
+window.EmployeeDetailPreparation = (() => {
+    let active;
+    function paint(state) {
+        document.getElementById('employeeDetailInfoFields').disabled = state !== 'ready';
+        const status = document.getElementById('employeeDetailPrepareStatus');
+        status.hidden = state === 'ready';
+        status.querySelector('span').textContent = state === 'loading'
+            ? '직원 상세 정보를 불러오는 중입니다.' : '직원 상세 정보를 확인하지 못했습니다. 다시 확인해 주세요.';
+        status.querySelector('button').hidden = state !== 'error';
+    }
+    function stop(resume = false) {
+        const ticket = active;
+        if (!ticket || ticket.stopped || !ticket.pending) return;
+        ticket.stopped = true; ticket.resume = resume;
+        clearTimeout(ticket.timer);
+        if (ticket.owned()) paint('error');
+        ticket.release(false);
+    }
+    function start() {
+        const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
+        if (!owner || !empId || !isHrSettingsContextCurrent(owner)) return Promise.resolve(false);
+        if (active?.owned() && !active.stopped) return active.pending || Promise.resolve(true);
+        stop();
+        const ticket = {owner,empId,revision,stopped:false,resume:false,pending:null};
+        ticket.owned = () => active === ticket && owner === getHrSettingsOwner()
+            && empId === String(currentEmpId || '') && revision === employeeDetailRevision;
+        const current = () => ticket.owned() && !ticket.stopped && isHrSettingsContextCurrent(owner);
+        active = ticket;
+        paint('loading');
+        const stopped = new Promise(resolve => { ticket.release = resolve; });
+        ticket.timer = setTimeout(() => {
+            if (!current()) return stop(true);
+            stop();
+            interruptEmployeeInfoReads();
+        }, 15000);
+        const work = Promise.resolve().then(async () => {
+            if (!current()) return false;
+            await Promise.all([
+                loadEmployeeBasicAccess(), loadEmployeeIdentityInfo('birth'), loadEmployeeIdentityInfo('emergency'),
+                loadDurunuriEligibilityProfile(empId, {readContext:{isCurrent:current}}).then(result => {
+                    if (current()) checkpointEmployeeDetailDraft(document.getElementById('durunuriEligibilityCardWrap'));
+                    return result;
+                })
+            ]);
+            if (!current()) return false;
+            paint('ready');
+            return true;
+        }).catch(() => {
+            if (current()) { stop(); interruptEmployeeInfoReads(); }
+            return false;
+        });
+        ticket.pending = Promise.race([work, stopped]).finally(() => {
+            clearTimeout(ticket.timer);
+            if (active === ticket) ticket.pending = null;
+        });
+        return ticket.pending;
+    }
+    return Object.freeze({start, interrupt:() => stop(true), cancel:() => { stop(); active = null; },
+        pendingFor:empId => !!active?.pending && !active.stopped && active.owned() && active.empId === String(empId),
+        resume:() => active?.resume && active.owned() ? start() : null});
+})();
 
 async function loadEmployeeInsuranceStatus() {
     const empId = currentEmpId;
