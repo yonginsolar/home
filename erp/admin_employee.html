@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.173
-Change: 2026-11-07 - Explain unavailable extra leave and restore permitted modes without changing drafts or save guards.
+Version: v1.0.174
+Change: 2026-11-07 - Checkpoint only the submitted attendance mode and preserve other-mode drafts.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Explain unavailable extra leave and restore permitted modes
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.173 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.174 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8280,7 +8280,7 @@ async function saveLog() {
     const val = Number(document.getElementById('logValue').value);
     const reason = document.getElementById('logReason').value;
     if (!val || !reason) return showAlert('입력 필요');
-    const savedDraft = snapshotEmployeeDetailTabDraft('tabLog');
+    const savedDraft = new Map([...snapshotEmployeeDetailTabDraft('tabLog')].filter(([id]) => ['logType','logValue','logReason'].includes(id)));
     employeeLeaveSaveInFlight = true;
     syncEmployeeLeaveApplyState();
     try {
@@ -8329,7 +8329,7 @@ async function saveExtraLeave(){
   if(!payload.p_work_date||!payload.p_reason)throw Error('추가 근로일과 내용을 입력해 주세요.');
  }catch(error){return showAlert(error.message);}
  const signature=JSON.stringify(payload);if(extraLeaveRequest?.signature!==signature)extraLeaveRequest={signature,key:crypto.randomUUID()};payload.p_request_key=extraLeaveRequest.key;
- const saved=snapshotEmployeeDetailTabDraft('tabLog');employeeLeaveSaveInFlight=true;syncEmployeeLeaveApplyState();
+ const saved=new Map([...snapshotEmployeeDetailTabDraft('tabLog')].filter(([id])=>['logType','extraLeaveWorkDate','extraLeaveWorkHours','extraLeaveGrantHours','extraLeaveReason'].includes(id)));employeeLeaveSaveInFlight=true;syncEmployeeLeaveApplyState();
  try{
   const {data,error}=await _supabase.rpc('erp_hr_extra_leave',payload);if(error)throw error;
   if(empId!==currentEmpId||revision!==employeeDetailRevision||owner!==getHrSettingsOwner())return;
