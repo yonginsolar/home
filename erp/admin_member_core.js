@@ -11972,6 +11972,7 @@ async function initializeAdminMember() {
             else if (pane === 'tab-funds-manage') await requestMemberFundListRefresh(sequence);
             else await fetchMemberReturnSummary();
         }};
+        window.ErpWorkspaceResume?.notifyReady?.();
     } else {
         window.ErpWorkspaceResume.register({modules:runtimeModuleKeys,refresh:async()=>{
             const pane=document.querySelector('.main-content > .tab-pane.active')?.id;
