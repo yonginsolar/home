@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.175
-Change: 2026-11-07 - Show employee detail immediately and prepare guarded information in parallel.
+Version: v1.0.176
+Change: 2026-11-07 - Keep retry focus inside current employee detail without interrupting other input.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Show employee detail immediately and prepare guarded inform
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.175 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.176 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -346,8 +346,8 @@ Change: 2026-11-07 - Show employee detail immediately and prepare guarded inform
       <div class="modal-body">
         <div class="tab-content pt-2">
         <div class="tab-pane fade show active" id="tabInfo">
-  <div id="employeeDetailPrepareStatus" class="small text-muted mb-2" role="status" aria-live="polite" hidden><span></span><button type="button" class="btn btn-sm btn-outline-primary ms-2 text-wrap" onclick="void window.EmployeeDetailPreparation.start()" hidden>다시 확인</button></div>
-  <fieldset id="employeeDetailInfoFields" class="border-0 p-0 m-0 w-100">
+  <div id="employeeDetailPrepareStatus" class="small text-muted mb-2" role="status" aria-live="polite" tabindex="-1" hidden><span></span><button type="button" class="btn btn-sm btn-outline-primary ms-2 text-wrap" onclick="void window.EmployeeDetailPreparation.start({restoreFocus:true})" hidden>다시 확인</button></div>
+  <fieldset id="employeeDetailInfoFields" class="border-0 p-0 m-0 w-100" tabindex="-1" aria-label="직원 정보 및 계약">
   <div id="infoContainer">
     <div class="d-flex flex-wrap justify-content-end align-items-center gap-2 mb-2">
       <span id="employeeBasicAccessStatus" class="small text-muted" role="status"></span>
@@ -6448,12 +6448,18 @@ async function openDetail(u) {
 window.EmployeeDetailPreparation = (() => {
     let active;
     function paint(state) {
-        document.getElementById('employeeDetailInfoFields').disabled = state !== 'ready';
+        const fields = document.getElementById('employeeDetailInfoFields');
         const status = document.getElementById('employeeDetailPrepareStatus');
+        const retry = status.querySelector('button');
+        const follow = active?.followFocus && active.owned() && document.hasFocus()
+            && isEmployeeDetailTabVisible('tabInfo') && isHrSettingsContextCurrent(active.owner);
+        if (state === 'loading' && follow && document.activeElement === retry) status.focus({preventScroll:true});
+        fields.disabled = state !== 'ready';
+        if (state === 'ready' && follow && document.activeElement === status) fields.focus({preventScroll:true});
         status.hidden = state === 'ready';
         status.querySelector('span').textContent = state === 'loading'
             ? '직원 상세 정보를 불러오는 중입니다.' : '직원 상세 정보를 확인하지 못했습니다. 다시 확인해 주세요.';
-        status.querySelector('button').hidden = state !== 'error';
+        retry.hidden = state !== 'error';
     }
     function stop(resume = false) {
         const ticket = active;
@@ -6463,12 +6469,12 @@ window.EmployeeDetailPreparation = (() => {
         if (ticket.owned()) paint('error');
         ticket.release(false);
     }
-    function start() {
+    function start({restoreFocus = false} = {}) {
         const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
         if (!owner || !empId || !isHrSettingsContextCurrent(owner)) return Promise.resolve(false);
         if (active?.owned() && !active.stopped) return active.pending || Promise.resolve(true);
         stop();
-        const ticket = {owner,empId,revision,stopped:false,resume:false,pending:null};
+        const ticket = {owner,empId,revision,stopped:false,resume:false,pending:null,followFocus:restoreFocus === true};
         ticket.owned = () => active === ticket && owner === getHrSettingsOwner()
             && empId === String(currentEmpId || '') && revision === employeeDetailRevision;
         const current = () => ticket.owned() && !ticket.stopped && isHrSettingsContextCurrent(owner);
