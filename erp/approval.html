@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.145 | Change: 2026-11-07 - Use registered work hours without editing them in leave requests. -->
+<!-- Version: v1.2.146 | Change: 2026-11-07 - Use registered part-time and target-specific legacy schedules for hourly leave. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.145 | approval.html');</script>
+  <script>console.log('[Version] v1.2.146 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script id="approvalLeaveTimeScript" src="leave_time.js?v=20261106-4"></script>
-  <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=20261107-6"></script>
+  <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=20261107-7"></script>
   <script src="leave_ledger.js?v=20261106-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -4737,13 +4737,24 @@ function getApprovalContractSchedulePeriods(periods, rows) {
             && [row.effective_date,row.contract_start].every(CoopLeaveTime.isDate)
             && (row.effective_date>row.contract_start?row.effective_date:row.contract_start)===period.effective_date);
         const row=matches.length===1?matches[0]:null;
-        if(!row||row.schedule_type!=='fixed'||period.work_time_basis!=='full_time'||Number(row.days_per_week)!==5
-            || !['월요일부터금요일까지','월~금','월요일~금요일'].includes(String(row.work_days||'').replace(/\s+/g,'')))return period;
+        if(!row||row.schedule_type!=='fixed'||!['full_time','part_time'].includes(period.work_time_basis))return period;
+        const text=String(row.work_days||'').replace(/\s+/g,'').replace(/^매주/,'').replace(/요일/g,'')
+            .replace(/부터/g,'~').replace(/까지$/,'').replace(/[～〜–-]/g,'~');
+        const week='일월화수목금토';
+        let days=[];
+        if(text==='평일')days=[1,2,3,4,5];
+        else if(/^[일월화수목금토]~[일월화수목금토]$/.test(text)){
+            const first=week.indexOf(text[0]),last=week.indexOf(text[2]);
+            for(let i=first;;i=(i+1)%7){days.push(i);if(i===last)break;}
+        }else if(/^[일월화수목금토](?:[,·ㆍ/및]?[일월화수목금토])*$/.test(text)){
+            days=[...text.replace(/[,·ㆍ/및]/g,'')].map(day=>week.indexOf(day));
+        }
+        if(!days.length||new Set(days).size!==days.length||days.length!==Number(row.days_per_week))return period;
         const work=CoopLeaveTime.breakWindow(row.work_start,row.work_end),pause=CoopLeaveTime.breakWindow(row.break_start,row.break_end);
         if(!work||!pause||pause.a<work.a||pause.b>work.b||work.b-work.a-(pause.b-pause.a)!==Number(period.day_minutes))return period;
         if(row.indefinite==='false'&&!CoopLeaveTime.isDate(row.contract_end))return period;
         return {...period,schedule:{work_start:work.start,work_end:work.end,break_start:pause.start,break_end:pause.end,
-            days:[1,2,3,4,5],valid_until:row.indefinite==='false'?row.contract_end:''}};
+            days:days.sort((a,b)=>a-b),valid_until:row.indefinite==='false'?row.contract_end:''}};
     });
 }
 

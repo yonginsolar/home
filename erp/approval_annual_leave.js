@@ -282,7 +282,12 @@
     }
     function ownerState(){return ctx.owner();}
     const canRetryPersonal=()=>owner?.self&&ticket?.error===true;
-    const fallbackSchedule=()=>activeMode==='clock'?(owner?.self?pref?.schedule||null:null):(owner?.self&&pref?.schedule||time.defaultSchedule);
+    const fallbackSchedule=()=>{
+      if(activeMode!=='clock')return owner?.self&&pref?.schedule||time.defaultSchedule;
+      if(owner?.self)return pref?.schedule||null;
+      const saved=owner&&ctx.snapshot()?.workBasis?.registered_schedule;
+      try{return saved?cleanSchedule(saved,time):null;}catch(_){return null;}
+    };
     const isCorrectionMode=()=>['annual','clock','legacy'].includes(activeMode);
     const unappliedSchedule=()=>editOpen&&!same(workEditorDraft(),editorBaseline);
     const workEditorDraft=()=>({...readWork(),break_start:breakStart.value});
@@ -663,7 +668,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.13'};
+    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.14'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
