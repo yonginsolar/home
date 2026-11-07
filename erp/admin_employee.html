@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.163
+Version: v1.0.164
 Change: 2026-11-07 - Show active contract work and break hours with employee information.
 -->
 <html>
@@ -14,7 +14,8 @@ Change: 2026-11-07 - Show active contract work and break hours with employee inf
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.163 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.164 | admin_employee.html');</script>
+  <script src="contract_followup.js?v=1.0.0" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -366,6 +367,7 @@ Change: 2026-11-07 - Show active contract work and break hours with employee inf
             <div id="employeeContractHours" class="text-break" style="white-space:pre-line" role="status" tabindex="-1">조회 중…</div>
             <button type="button" id="employeeContractHoursRetry" class="btn btn-sm btn-outline-primary mt-2" hidden onclick="loadEmployeeContractHours()">다시 조회</button>
           </section>
+          <section id="employeeContractFollowup" class="border-top pt-3 mt-3" hidden></section>
         </div>
       </div>
 
@@ -3185,7 +3187,7 @@ window.onload = async function() {
     if (!hrUserGate.ok) return;
     myInfo = hrUserGate.user;
     hrAuthorizedUserId = String(hrUserGate.authUser?.id || '');
-    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
+    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){window.HrContractFollowup?.invalidateOwner(getHrSettingsOwner());window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
     const villageWorkspace = await _supabase.rpc('sun_village_workspace_context');
     if (!villageWorkspace.error && villageWorkspace.data?.workspaces?.some(item => item?.is_current === true && item?.is_management_coop === false)) {
         location.replace('village_company_info.html');
@@ -3217,6 +3219,11 @@ window.onload = async function() {
     syncHrProfileCompanySettingsUi();
     syncHrStructureSettingsUi();
     syncHrModalStack();
+    const contractTargetEmployee = new URLSearchParams(location.search).get('employee');
+    if (!window.ERPEmployeeSettingsView.isPage && contractTargetEmployee && isHrSettingsContextCurrent(getHrSettingsOwner())) {
+        const target = employeeCache.find(row => String(row.emp_id) === contractTargetEmployee);
+        if (target) void openDetail(target);
+    }
     if (window.ERPEmployeeSettingsView.isPage) {
         hrSettingsReadyOwner = getHrSettingsOwner();
         showHrSettingsModal();
@@ -5993,6 +6000,7 @@ function verifyEmployeeInfoAccess(context) {
     return pending;
 }
 function resetEmployeeContractHours() {
+    window.HrContractFollowup?.suspend();
     const prior = employeeContractHoursRead;
     employeeContractHoursRead = null;
     prior?.controller.abort();
@@ -6031,6 +6039,8 @@ function employeeContractHoursText(data) {
 function loadEmployeeContractHours() {
     const context = employeeInfoContext();
     if (!context.isCurrent() || !isEmployeeDetailTabVisible('tabInfo')) return Promise.resolve(false);
+    window.HrContractFollowup?.mount({context,coop:String(myInfo.coop_id),client:_supabase,
+        root:document.getElementById('employeeContractFollowup'),visible:()=>isEmployeeDetailTabVisible('tabInfo')});
     if (employeeContractHoursRead?.key === `${context.owner}|${context.revision}|${context.empId}`) return employeeContractHoursRead.pending;
     const status = document.getElementById('employeeContractHours'), retry = document.getElementById('employeeContractHoursRetry');
     const ticket = {key:`${context.owner}|${context.revision}|${context.empId}`,controller:new AbortController()};
@@ -6080,7 +6090,7 @@ function syncEmployeeBasicAccessUi() {
     document.getElementById('employeeBasicAccessStatus').textContent = failed
         ? '수정 권한을 확인하지 못했습니다.' : employeeBasicAccess.state === 'loading' ? '수정 권한 확인 중…' : '';
     container.querySelectorAll('[data-employee-basic-section] input,[data-employee-basic-section] select,[data-employee-basic-section] button:not(#employeeContractHoursRetry)')
-        .forEach(element => { element.disabled = !allowed || employeeBasicSaveInFlight; });
+        .forEach(element => { if (!element.closest('#employeeContractFollowup')) element.disabled = !allowed || employeeBasicSaveInFlight; });
 }
 function loadEmployeeBasicAccess() {
     const context = employeeInfoContext();

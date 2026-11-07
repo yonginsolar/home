@@ -1,8 +1,10 @@
-/* v1.1.5 — Shared tax task counts, with existing scopes and lazy details preserved. */
+/* v1.2.0 — HR contract target/status counts; names are read only on explicit expansion. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
   tax:['세무 할 일','accounting.html?work=taxes'],
+  contract_target:['근로계약 대상 확인 필요',''],contract_missing:['계약 미등록',''],
+  contract_terms:['근로조건 입력 필요',''],contract_signatures:['계약 서명 대기',''],
   approval:['내 결재 대기','approval.html?tab=todo'], signup:['신규 가입 승인 대기','admin_member.html?scope=member_admin&tab=members&sub=signup-pending'], member:['처리 대기 조합원 신청','admin_member.html?scope=member_admin&tab=applications&sub=pending-all'],
   insurance:['준비 중인 입사·퇴사 서류','hr_insurance.html?work=pending'], receipts:['현금영수증 발급 대기','festival_receipts.html'],
   inventory:['입고 검수 대기','festival_receipts.html?work=inventory'], material:['아직 받지 않은 행사 재료비','festival_receipts.html'],
@@ -22,7 +24,7 @@
   container.replaceChildren();const sections=[],controllers=new Map(),panels=new Map();
   const key=()=>{const c=options.context();return c?`${c.coop_id}|${c.actor}`:'';};
   const owner=key();
-  let dialog=null,dialogReturnFocus=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0;
+  let dialog=null,dialogReturnFocus=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0,contractListGeneration=0,contractListController=null;
   const current=()=>!disposed&&key()===owner&&!!owner&&container.isConnected&&!container.closest('.hidden');
   async function read(section){
    const ticket=++readSequence,controller=new AbortController();controllers.set(controller,section);let timer;
@@ -31,7 +33,7 @@
    if(section==='summary'||section==='setup')lastSetupTicket=ticket;
    try{
     const requested=section==='tasks'?'tasks_v2':section;
-    const request=Promise.resolve().then(()=>{const q=options.client.rpc('erp_get_work_overview_tax',{p_section:requested});return q.abortSignal?q.abortSignal(controller.signal):q;});
+    const request=Promise.resolve().then(()=>{const q=options.client.rpc('erp_get_work_overview_contracts',{p_section:requested});return q.abortSignal?q.abortSignal(controller.signal):q;});
     const response=await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('READ_TIMEOUT'));},15000);})]);
     if(!current())throw Error('SCOPE_CHANGED');
     if(response.error)throw Error('READ_FAILED');
@@ -44,7 +46,7 @@
    if(ticket<lastTaskTicket)return false;
    const keys=new Set();let total=0;
    for(const item of data.items){
-    if(!['approval','signup','member','insurance','receipts','inventory','material','tax'].includes(item.key)||keys.has(item.key)||!Number.isSafeInteger(item.count)||item.count<0)throw Error('COUNT_UNAVAILABLE');
+    if(!['approval','signup','member','insurance','receipts','inventory','material','tax','contract_target','contract_missing','contract_terms','contract_signatures'].includes(item.key)||keys.has(item.key)||!Number.isSafeInteger(item.count)||item.count<0)throw Error('COUNT_UNAVAILABLE');
     keys.add(item.key);total+=item.count;
    }
    if(!Number.isSafeInteger(total))throw Error('COUNT_UNAVAILABLE');
@@ -93,8 +95,46 @@
    return summaryPending;
   }
   function closeDialog(restoreFocus=false){
+   contractListGeneration++;contractListController?.abort();contractListController=null;
    const closing=dialog,returnFocus=dialogReturnFocus;dialog=null;dialogReturnFocus=null;
    if(closing){closing.remove();if(restoreFocus)returnFocus?.();}
+  }
+  function showContractList(task,section){
+   showList(links[task][0],[],section);const opened=dialog;
+   opened.addEventListener('keydown',event=>{
+    if(event.key!=='Tab'||event.defaultPrevented)return;
+    const targets=[...opened.querySelectorAll('button:not(:disabled),a[href]')].filter(node=>!node.hidden);
+    if(!targets.length)return;
+    const i=targets.indexOf(document.activeElement);
+    if(event.shiftKey?i<=0:i<0||i===targets.length-1){event.preventDefault();targets[event.shiftKey?targets.length-1:0].focus({preventScroll:true});}
+   });
+   // Keep header, close/retry controls and the fixed dialog size while results change.
+   opened.querySelector('p')?.remove();opened.style.height='min(560px,80vh)';
+   const content=el('div',''),status=el('p','small text-muted','');status.setAttribute('role','status');
+   const retry=el('button','btn btn-sm btn-outline-primary me-2 mb-2','다시 확인');retry.type='button';
+   opened.insertBefore(status,opened.lastChild);opened.insertBefore(retry,opened.lastChild);opened.insertBefore(content,opened.lastChild);
+   async function load(){
+    if(!current()||dialog!==opened||retry.disabled)return;
+    const generation=++contractListGeneration,controller=new AbortController();contractListController=controller;
+    const valid=()=>current()&&dialog===opened&&generation===contractListGeneration;
+    let timer;retry.disabled=true;content.replaceChildren();status.textContent='불러오는 중…';
+    try{
+     const q=options.client.rpc('erp_hr_contract_followup',{p_action:'list',p_target:task});
+     const response=await Promise.race([q.abortSignal?q.abortSignal(controller.signal):q,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('READ_TIMEOUT'));},15000);})]);
+     if(!valid())return;
+     const data=response.data;
+     if(response.error||data?.coop_id!==options.context().coop_id||!Array.isArray(data.items)
+       ||data.items.some(row=>typeof row.emp_id!=='string'||typeof row.emp_name!=='string'||row.task!==task))throw Error('READ_FAILED');
+     const rows=data.items.slice(0,500);
+     for(const [i,row]of rows.entries()){
+      const a=el('a','d-block border rounded p-3 mb-2',`${i+1}. ${row.emp_name}`);
+      a.href=(task==='contract_target'?'admin_employee.html':'employment_contracts.html')+'?employee='+encodeURIComponent(row.emp_id);content.append(a);
+     }
+     status.textContent=data.items.length>500?'500명까지 표시했습니다. 직원 관리에서 나머지 직원을 확인해 주세요.':rows.length?`${rows.length.toLocaleString('ko-KR')}명`:'현재 확인할 직원이 없습니다.';
+    }catch(_){if(valid())status.textContent='명단을 불러오지 못했습니다. 다시 확인해 주세요.';}
+    finally{clearTimeout(timer);if(valid())retry.disabled=false;if(contractListController===controller)contractListController=null;}
+   }
+   retry.onclick=()=>void load();void load();
   }
   function showList(title,entries,section){
    closeDialog();const opener=document.activeElement;
@@ -136,10 +176,11 @@
       const row=el('div','d-flex align-items-center justify-content-between gap-3 border rounded p-2');
       let href=entry[1];
       if(item.key==='capital'&&data.items.some(x=>x.key==='company'))href='admin_employee.html?section=settings&focus=capital';
-      const choose=['receipts','material','domain'].includes(item.key);
+      const choose=['receipts','material','domain'].includes(item.key)||item.key.startsWith('contract_');
       const link=el(choose?'button':'a',choose?'btn btn-link text-start p-0 text-decoration-none':'text-decoration-none',entry[0]);
       if(choose){link.type='button';link.onclick=()=>{
        if(!isCurrent(serial)||busy||retrying||(section==='tasks'&&summaryPending))return;
+       if(item.key.startsWith('contract_')){showContractList(item.key,section);return;}
        if(item.key==='domain'){
         const addresses=(item.domains||[]).filter(x=>/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(x));
         showList('등록된 홈페이지·ERP 주소',addresses.map(x=>({label:'https://'+x})),section);
@@ -151,7 +192,7 @@
       row.append(link);
       if(section==='tasks') {
        if(!Number.isSafeInteger(item.count)||item.count<0)throw new Error('COUNT_UNAVAILABLE');
-       row.append(el('span',item.count?'badge text-bg-primary':'text-muted small',item.key==='tax'&&item.configured===false?(item.count?`${item.count.toLocaleString('ko-KR')}건 · 주기 확인`:'주기 미설정'):`${item.count.toLocaleString('ko-KR')}건`));
+       row.append(el('span',item.count?'badge text-bg-primary':'text-muted small',item.key==='tax'&&item.configured===false?(item.count?`${item.count.toLocaleString('ko-KR')}건 · 주기 확인`:'주기 미설정'):`${item.count.toLocaleString('ko-KR')}${item.key.startsWith('contract_')?'명':'건'}`));
       }else{
        if(!labels[item.state])throw new Error('STATE_UNAVAILABLE');
        const right=el('span','small text-end',labels[item.state]);
