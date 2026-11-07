@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.162
+Version: v1.0.163
 Change: 2026-11-07 - Show active contract work and break hours with employee information.
 -->
 <html>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Show active contract work and break hours with employee inf
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.162 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.163 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -362,7 +362,7 @@ Change: 2026-11-07 - Show active contract work and break hours with employee inf
             <div class="col-md-3"><label class="small text-muted">입사일</label><div class="view-mode fw-bold" id="viewHireDate">-</div><input type="date" id="editHireDate" class="form-control edit-mode"></div>
           </div>
           <section class="small border-top pt-3 mt-3" aria-labelledby="employeeContractHoursHeading">
-            <h3 id="employeeContractHoursHeading" class="fs-6 fw-bold mb-1">현재 계약 근무시간</h3>
+            <h3 id="employeeContractHoursHeading" class="fs-6 fw-bold mb-1">근무·휴게시간</h3>
             <div id="employeeContractHours" class="text-break" style="white-space:pre-line" role="status" tabindex="-1">조회 중…</div>
             <button type="button" id="employeeContractHoursRetry" class="btn btn-sm btn-outline-primary mt-2" hidden onclick="loadEmployeeContractHours()">다시 조회</button>
           </section>
@@ -6001,6 +6001,15 @@ function resetEmployeeContractHours() {
     retry.hidden = true; retry.disabled = false;
 }
 function employeeContractHoursText(data) {
+    if (data.state === 'legacy_saved') {
+        const {work_start:a,work_end:b,break_start:c,break_end:d,work_days:days} = data;
+        const valid = s=>/^([01]\d|2[0-3]):[0-5]\d$/.test(s || '');
+        if (!valid(a) || !valid(b) || !(a < b) || !Array.isArray(days) || !days.length
+            || !days.every(v=>Number.isInteger(v) && v>=0 && v<=6)
+            || !((c==='' && d==='') || (valid(c) && valid(d) && a<=c && c<d && d<=b))) throw new Error('CONTRACT_HOURS_RESPONSE_INVALID');
+        const labels=['일','월','화','수','목','금','토'];
+        return `기존 등록 근무·휴게시간\n근무 ${a}~${b} · 휴게 ${c ? `${c}~${d}` : '없음'}\n근무일 ${days.map(v=>labels[v]).join('·')}`;
+    }
     const messages = {
         missing:'현재 적용되는 완료 계약이 없습니다.',
         unstructured:'등록된 계약서 원문에서 근무시간과 휴게시간을 확인해 주세요.',

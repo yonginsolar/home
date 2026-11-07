@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.84 | Change: 2026-11-07 - Show the employee's own current contract hours. -->
+<!-- Version: v1.0.85 | Change: 2026-11-07 - Display preserved original-only work hours without changing contracts. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.84 | mypage.html');</script>
+<script>console.log('[Version] v1.0.85 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -177,7 +177,7 @@ body{padding:18px 14px 28px}
 <div class="tab-pane fade" id="tabAi"><div id="aiConnectionsRoot"></div></div>
 <div class="tab-pane fade show active" id="tabInfo">
 <section class="card p-3 border mb-3" aria-labelledby="myContractHoursTitle">
-<h5 class="fw-bold mb-1" id="myContractHoursTitle">현재 계약 근무시간</h5>
+<h5 class="fw-bold mb-1" id="myContractHoursTitle">근무·휴게시간</h5>
 <div class="small text-break" id="myContractHours" style="white-space:pre-line" role="status" tabindex="-1">조회 중…</div>
 <div class="d-flex flex-wrap gap-2">
 <button type="button" id="myContractHoursRetry" class="btn btn-sm btn-outline-primary mt-2" hidden onclick="ensureMypageSection('contractHours')">다시 조회</button>
@@ -421,6 +421,15 @@ if(pane==='tabInfo')return Promise.all([ensureMypageSection('emergency'),ensureM
 return Promise.resolve();
 }
 function formatMypageContractHours(data) {
+if(data.state==='legacy_saved'){
+ const {work_start:a,work_end:b,break_start:c,break_end:e,work_days:days}=data;
+ const valid=s=>/^([01]\d|2[0-3]):[0-5]\d$/.test(s||'');
+ if(!valid(a)||!valid(b)||!(a<b)||!Array.isArray(days)||!days.length
+   ||!days.every(v=>Number.isInteger(v)&&v>=0&&v<=6)
+   ||!((c===''&&e==='')||(valid(c)&&valid(e)&&a<=c&&c<e&&e<=b)))throw new Error('CONTRACT_HOURS_RESPONSE_INVALID');
+ const labels=['일','월','화','수','목','금','토'];
+ return {text:`기존 등록 근무·휴게시간\n근무 ${a}~${b} · 휴게 ${c?`${c}~${e}`:'없음'}\n근무일 ${days.map(v=>labels[v]).join('·')}`,original:false};
+}
 const status={missing:'현재 적용되는 완료 계약이 없습니다.',ended:'마지막으로 적용된 계약의 기간이 끝났습니다.',
 unstructured:'계약서에 근무·휴게 시각이 항목으로 등록되지 않았습니다.',unverified:'계약 근무시간을 확인할 수 없습니다.'};
 if(Object.hasOwn(status,data.state))return {text:status[data.state],original:data.state!=='missing'};
