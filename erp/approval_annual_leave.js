@@ -36,17 +36,21 @@
     const startDate=input('date','annualClockStartDate'),endDate=input('date','annualClockEndDate');
     const endGroup=make('div','leave-entry-pair mt-2 hidden');
     const status=make('p','small text-muted my-2');status.setAttribute('role','status');
-    const edit=button('근무시간 수정'),retry=button('다시 확인');
+    const edit=button('근무시간 정정 요청'),retry=button('다시 확인'),remove=button('요청 빼기');
+    edit.id='annualWorkCorrectionOpen';
+    remove.id='annualWorkCorrectionRemove';
     const editor=make('fieldset','border rounded p-2 mt-2 hidden');
     const editStatus=make('p','small mb-0 mt-2');editStatus.setAttribute('role','status');
     const workStart=input('time','annualWorkStart'),workEnd=input('time','annualWorkEnd');
     const breakStart=input('time','annualWorkBreakStart');
     const breakDescription=make('p','small text-muted mb-0');
     const scheduleDescription=make('p','small text-muted my-2');
-    const scheduleSave=button('근무시간 저장','btn btn-sm btn-primary'),cancel=button('취소');
-    let owner=null, pref=null, editOpen=false, localSchedule=null, follows=true;
+    const scheduleSave=button('요청 담기','btn btn-sm btn-primary'),cancel=button('취소');
+    scheduleSave.id='annualWorkCorrectionAdd';
+    cancel.id='annualWorkCorrectionCancel';
+    let owner=null, pref=null, editOpen=false, correction=null, follows=true;
     let epoch=0, ticket=null, editorBaseline=null, lastStart='';
-    const scheduleWrites=new Map(),scheduleChecks=new Map(),proxyWorkDrafts=new Map(),clockDrafts=new Map();
+    const correctionDrafts=new Map(),clockDrafts=new Map();
     let startMenu={values:[]}, activeMode='annual', snapshotRetry=null;
     const halfLabel=slot=>slot==='am'?'오전':slot==='pm'?'오후':'';
 
@@ -114,7 +118,7 @@
         const enabled=buttons.filter(b=>!b.disabled),tab=enabled.find(b=>b.dataset.leaveDate===current)||enabled.find(b=>b.dataset.leaveDate===field.value)||enabled[0];
         if(tab)tab.tabIndex=0;
         if(current&&!root.frameElement?.hidden)(tab||months).focus();
-        hint.textContent=entries.find(e=>e.workEdit)?.reason||(enabled.length
+        hint.textContent=(enabled.length
           ?guidance||'근무일만 고를 수 있어요. 이미 신청한 휴가와는 겹칠 수 없어요.'
           :entries.find(e=>e.reason.includes('확인'))?.reason||'이 달에 선택할 수 있는 날짜가 없어요.');
       }
@@ -240,9 +244,15 @@
       const wrap=make('label');wrap.append(ch,name);dayRow.append(wrap);ch.addEventListener('change',()=>{updateWeek();ctx.changed();});return ch;
     });
     const actions=make('div','d-flex gap-2 flex-wrap mt-2');actions.append(scheduleSave,cancel);
-    editor.append(make('legend','small fw-bold float-none w-auto mb-2','근무시간'),work,breakPair,breakDescription,week,actions,editStatus);
-    const tools=make('div','d-flex gap-2 flex-wrap');tools.append(edit,retry);
-    area.append(first,endGroup,status,scheduleDescription,tools,editor);
+    editor.append(make('legend','small fw-bold float-none w-auto mb-2','요청할 근무시간'),work,breakPair,breakDescription,week,actions,editStatus);
+    const correctionPanel=make('div','border-top pt-2 mt-3 hidden');
+    correctionPanel.id='annualWorkCorrection';
+    const correctionHint=make('p','small text-muted mb-2','정정 요청은 결재 문서에만 표시돼요. 이번 휴가 계산에는 적용되지 않으며, 계속 적용할 근무시간은 인사 담당자가 계약을 확인한 뒤 확정합니다.');
+    const correctionText=make('p','small mb-2');correctionText.setAttribute('role','status');
+    const tools=make('div','d-flex gap-2 flex-wrap');tools.append(edit,remove);
+    correctionPanel.append(correctionHint,correctionText,tools,editor);
+    area.append(first,endGroup,status,scheduleDescription,retry);
+    area.after(correctionPanel);
     const clockStartPicker=datePicker(startDate,'시작일',(date,m)=>clockDateReason(date,'start',m));
     const clockEndPicker=datePicker(endDate,'종료일',(date,m)=>clockDateReason(date,'end',m));
     clockStartPicker.show(true);clockEndPicker.show(true);
@@ -250,16 +260,6 @@
     const annualGuidance='이미 신청한 휴가는 제외하고, 반차가 있는 날은 비어 있는 반나절만 넣어요.';
     const annualStartPicker=annualStartField?datePicker(annualStartField,'휴가 시작일',(date,m)=>annualDateStatus(date,'start',m),annualGuidance):null;
     const annualEndPicker=annualEndField?datePicker(annualEndField,'휴가 종료일',(date,m)=>annualDateStatus(date,'end',m),annualGuidance):null;
-    const annualWorkHelp=make('div','small mt-2 hidden'),annualWorkAction=button('시간차에서 근무시간 확인');
-    annualWorkHelp.append(make('p','mb-1','수정 중인 근무시간이 필요한 날짜만 잠겨 있어요. 변경을 저장·적용하거나 취소한 뒤 선택해 주세요.'),annualWorkAction);
-    doc.getElementById('mixedLeaveRangeEditor')?.after(annualWorkHelp);
-    annualWorkAction.addEventListener('click',()=>{
-      syncOwner();
-      if(!owner||activeMode!=='annual'||!unappliedSchedule())return;
-      ctx.editWorkSchedule?.();
-      if(activeMode==='clock')openEditor();
-    });
-
     function updateWeek(){weekTitle.textContent=`근무 요일 · ${days.filter(el=>el.checked).map(el=>el.parentElement.textContent.trim()).join('·')||'선택 안 함'}`;}
     function workBreak(){
       const work=time.breakWindow(workStart.value,workEnd.value),duration=time.defaultBreakMinutes(work);
@@ -280,27 +280,10 @@
       updateWeek();syncWorkBreak();
     }
     function ownerState(){return ctx.owner();}
-    const pendingSchedule=()=>owner&&scheduleWrites.get(owner.key);
-    const checkKey=key=>'erp.leave.schedule-check.v1:'+key;
-    function loadScheduleCheck(key){
-      if(scheduleChecks.has(key))return;
-      try{
-        const stored=root.sessionStorage.getItem(checkKey(key));
-        if(stored!==null&&/^\d+$/.test(stored)&&Number.isSafeInteger(Number(stored)))scheduleChecks.set(key,Number(stored));
-      }catch(_){/* In-page protection also works when browser storage is unavailable. */}
-    }
-    function setScheduleCheck(key,minimumRevision){
-      if(minimumRevision===null)scheduleChecks.delete(key);else scheduleChecks.set(key,minimumRevision);
-      try{
-        if(minimumRevision===null)root.sessionStorage.removeItem(checkKey(key));
-        else root.sessionStorage.setItem(checkKey(key),String(minimumRevision));
-      }catch(_){/* Never store the employee's work times or draft here. */}
-    }
-    const personalNeedsRead=()=>owner?.self&&scheduleChecks.has(owner.key);
-    const canRetryPersonal=()=>owner?.self&&!pendingSchedule()&&!ticket?.loading&&(ticket?.error||personalNeedsRead());
-    const confirmedSchedule=()=>owner?.self?(pref&&!personalNeedsRead()?(pref.schedule||time.defaultSchedule):null):(localSchedule||time.defaultSchedule);
-    const fallbackSchedule=()=>pendingSchedule()?.phase==='saving'?null:confirmedSchedule();
-    const unappliedSchedule=()=>editOpen&&!same(readWork(),editorBaseline||confirmedSchedule()||time.defaultSchedule);
+    const canRetryPersonal=()=>owner?.self&&ticket?.error===true;
+    const fallbackSchedule=()=>owner?.self?(pref?(pref.schedule||time.defaultSchedule):null):time.defaultSchedule;
+    const isCorrectionMode=()=>['annual','clock','legacy'].includes(activeMode);
+    const unappliedSchedule=()=>editOpen&&!same(workEditorDraft(),editorBaseline);
     const workEditorDraft=()=>({...readWork(),break_start:breakStart.value});
     const readClockDraft=()=>({start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows});
     function putClockDraft(data={}){
@@ -312,17 +295,16 @@
       const next=ownerState();
       if(next?.key===owner?.key)return;
       if(owner)clockDrafts.set(owner.key,readClockDraft());
-      if(owner&&!owner.self){
-        if(editOpen||localSchedule)proxyWorkDrafts.set(owner.key,{schedule:localSchedule,editor:editOpen?workEditorDraft():null,baseline:editorBaseline});
-        else proxyWorkDrafts.delete(owner.key);
+      if(owner){
+        if(editOpen||correction)correctionDrafts.set(owner.key,{correction,editor:editOpen?workEditorDraft():null,baseline:editorBaseline});
+        else correctionDrafts.delete(owner.key);
       }
-      epoch++;owner=next;pref=next?.self?null:{revision:0,schedule:null};ticket=null;snapshotRetry=null;
-      if(next?.self)loadScheduleCheck(next.key);
-      const work=next&&!next.self?proxyWorkDrafts.get(next.key):null;
-      localSchedule=work?.schedule||null;editOpen=!!work?.editor;editorBaseline=work?.baseline||null;
+      epoch++;owner=next;pref=null;ticket=null;snapshotRetry=null;
+      const work=next?correctionDrafts.get(next.key):null;
+      correction=work?.correction||null;editOpen=!!work?.editor;editorBaseline=work?.baseline||null;
       clockStartPicker.close();clockEndPicker.close();
       putClockDraft(next?clockDrafts.get(next.key):undefined);
-      putWork(work?.editor||localSchedule);editStatus.textContent='';
+      putWork(work?.editor||correction);editStatus.textContent='';
     }
     function setText(el,value){if(el.textContent!==value)el.textContent=value;}
     function syncDates(){
@@ -342,42 +324,44 @@
     endDate.addEventListener('change',()=>{if(endDate.value!==lastEnd)end.put('');lastEnd=endDate.value;follows=false;changed();});
     for(const field of [workStart,workEnd,breakStart])field.addEventListener('input',()=>{syncWorkBreak();ctx.changed();});
 
-    function rpc(action,args,signal){return ctx.client().rpc(RPC,{p_action:action,...args}).abortSignal(signal);}
     async function withDeadline(run){
       const controller=new AbortController();let timer;
       try{return await Promise.race([run(controller.signal),new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('LEAVE_PREF_TIMEOUT'));},15000);})]);}
       finally{clearTimeout(timer);}
     }
     function validResponse(data){return Number.isInteger(data?.revision)&&data.revision>=0&&((data.revision===0&&data.schedule===null)||(data.revision>0&&data.schedule&&typeof data.schedule==='object'));}
-    async function readPreference({reload=false,afterWrite=null}={}){
+    async function readPreference({reload=false}={}){
       syncOwner();
-      if(!owner?.self||ticket?.loading||(pendingSchedule()&&pendingSchedule()!==afterWrite)||(!reload&&(pref||ticket)))return;
+      if(!owner?.self||ticket?.loading||(!reload&&(pref||ticket)))return;
       const mine=epoch,key=owner.key,current=()=>mine===epoch&&ownerState()?.key===key;
       ticket={loading:true};ctx.changed();
       try{
-        const {data,error}=await withDeadline(signal=>rpc('read',{},signal));
+        const {data,error}=await withDeadline(signal=>ctx.client().rpc(RPC,{p_action:'read'}).abortSignal(signal));
         if(!current())return;
         if(error||!validResponse(data))throw Error('LEAVE_PREF_READ');
-        const latest={revision:data.revision,schedule:data.schedule?cleanSchedule(data.schedule,time):null};
-        const minimumRevision=scheduleChecks.get(key);
-        // The original compare-and-set can still commit at its expected revision.
-        if(minimumRevision!==undefined&&latest.revision<minimumRevision){ticket={waiting:true};return;}
-        pref=latest;setScheduleCheck(key,null);ticket=null;
-        if(minimumRevision!==undefined&&editOpen){
-          editorBaseline=confirmedSchedule();
-          setText(editStatus,'최신 근무시간을 확인했어요. 입력값을 살펴보고 필요하면 저장해 주세요.');
-        }
+        pref={revision:data.revision,schedule:data.schedule?cleanSchedule(data.schedule,time):null};
+        ticket=null;
       }catch(_){if(current())ticket={error:true};}
       finally{if(current())ctx.changed();}
     }
-    function openEditor(explicit=true){
-      if(!owner||ownerState()?.key!==owner.key)return;
-      if(!editOpen){editOpen=true;putWork(pref?.schedule||localSchedule||time.defaultSchedule);editorBaseline=readWork();editStatus.textContent='';}
-      if(explicit){editor.classList.remove('hidden');workStart.focus();}
-      ctx.changed();
+    function correctionAllowed(){
+      return owner&&ownerState()?.key===owner.key&&isCorrectionMode()&&!root.frameElement?.hidden&&!correctionPanel.closest('.hidden');
+    }
+    function openEditor(){
+      if(!correctionAllowed()||editOpen)return;
+      const date=(activeMode==='clock'?startDate:annualStartField)?.value||time.kstClock(ctx.now?.()).date;
+      putWork(correction||scheduleFor(date,calendarModel()).schedule||fallbackSchedule());
+      editOpen=true;editorBaseline=workEditorDraft();editStatus.textContent='';
+      refreshCorrection();workStart.focus();ctx.changed();
+    }
+    function closeEditor(){
+      editOpen=false;editorBaseline=null;editStatus.textContent='';
+      refreshCorrection();edit.focus();ctx.changed();
     }
     edit.addEventListener('click',()=>openEditor());
-    cancel.addEventListener('click',()=>{if(pendingSchedule())return;editOpen=false;editorBaseline=null;editStatus.textContent='';ctx.changed();if(!edit.classList.contains('hidden'))edit.focus();});
+    correctionPanel.addEventListener('keydown',e=>{if(e.repeat&&e.key==='Enter'&&e.target.closest('button'))e.preventDefault();},true);
+    cancel.addEventListener('click',()=>{if(correctionAllowed()&&editOpen)closeEditor();});
+    remove.addEventListener('click',()=>{if(correctionAllowed()&&!editOpen&&correction){correction=null;refreshCorrection();edit.focus();ctx.changed();}});
     retry.addEventListener('click',()=>{if(!retry.classList.contains('hidden'))retryCalendarRead(null,true);});
     function retryCalendarRead(_,inline=false){
       syncOwner();
@@ -404,8 +388,8 @@
       });
       ctx.changed();refreshDates();
     }
-    scheduleSave.addEventListener('click',async()=>{
-      syncOwner();if(!owner||pendingSchedule()||ticket?.loading)return;
+    scheduleSave.addEventListener('click',()=>{
+      if(!correctionAllowed()||!editOpen)return;
       let value;
       try{
         const pause=workBreak();
@@ -413,41 +397,7 @@
         if(pause.duration&&(breakStart.value<=pause.work.start||pause.end>=pause.work.end))throw Error('휴게는 출근과 퇴근 사이에 지정해 주세요.');
         value=cleanSchedule(readWork(),time);
       }catch(e){setText(editStatus,e.message);return;}
-      if(!owner.self){localSchedule=value;editOpen=false;editorBaseline=null;ctx.changed();return;}
-      if(!pref||personalNeedsRead()){setText(editStatus,'저장된 근무시간을 먼저 다시 확인해 주세요. 입력은 그대로 남아 있어요.');return;}
-      const key=owner.key,mine=epoch,revision=pref.revision;
-      const current=()=>mine===epoch&&ownerState()?.key===key;
-      const typed=readWork(),attempt={phase:'saving'};
-      // A lost response may still be followed by a commit. The same revision is
-      // safe only when this request could not change it (an exact no-op).
-      setScheduleCheck(key,revision>0&&same(pref.schedule,value)?revision:revision+1);
-      scheduleWrites.set(key,attempt);setText(editStatus,'근무시간 저장 중…');ctx.changed();
-      try{
-        const {data,error}=await withDeadline(signal=>rpc('save',{p_schedule:value,p_expected_revision:revision},signal));
-        if(['PT409','PT400','42501'].includes(error?.code)){
-          attempt.phase='checking';setScheduleCheck(key,0);
-          if(current()){
-            setText(editStatus,error.code==='PT409'?'다른 창에서 근무시간을 바꿨어요. 입력은 남겨 두었으니 확인 후 다시 저장해 주세요.':'근무시간을 저장하지 못했어요. 최신 근무시간을 확인해 주세요.');
-            await readPreference({reload:true,afterWrite:attempt});
-          }
-          return;
-        }
-        if(error||!validResponse(data)||data.revision<scheduleChecks.get(key)||!same(cleanSchedule(data.schedule,time),value))throw Error('LEAVE_PREF_SAVE');
-        if(!current()){setScheduleCheck(key,data.revision);return;}
-        pref={revision:data.revision,schedule:value};setScheduleCheck(key,null);editorBaseline=typed;
-        if(same(typed,readWork())){editOpen=false;editorBaseline=null;setText(editStatus,'');}
-        else setText(editStatus,'저장했습니다. 이후 바꾼 값은 아직 저장하지 않았어요.');
-      }catch(_){
-        attempt.phase='checking';
-        if(current()){
-          setText(editStatus,'저장 결과를 확인하지 못했어요. 입력은 남겨 두었으니 다시 확인해 주세요.');
-          await readPreference({reload:true,afterWrite:attempt});
-        }
-      }finally{
-        if(scheduleWrites.get(key)===attempt)scheduleWrites.delete(key);
-        if(current())ctx.changed();
-        else if(ownerState()?.key===key){syncOwner();void readPreference({reload:true});ctx.changed();}
-      }
+      correction=value;closeEditor();
     });
 
     function inspect(model){
@@ -504,9 +454,7 @@
         return model.clock?.state==='error'?'근무일과 공휴일을 확인하지 못했어요. 다시 확인해 주세요.':'근무일과 공휴일을 확인하는 중이에요.';
       return '';
     }
-    const scheduleError=()=>pendingSchedule()?.phase==='saving'?'근무시간을 저장하는 중이에요.':personalNeedsRead()
-      ?ticket?.loading?'최신 근무시간을 확인하는 중이에요.':ticket?.waiting?'저장 결과가 아직 확인되지 않았어요. 잠시 후 다시 확인해 주세요.':'최신 근무시간을 확인하지 못했어요. 다시 확인해 주세요.'
-      :ticket?.error?'저장한 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':'저장한 근무시간을 확인하는 중이에요.';
+    const scheduleError=()=>ticket?.error?'기존 휴가 계산용 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':'기존 휴가 계산용 근무시간을 확인하는 중이에요.';
     function workdayStatus(date,model){
       if(model.clock?.calendar?.has(date))return {reason:`${date}은 공휴일이에요.`};
       const {schedule}=scheduleFor(date,model);
@@ -515,12 +463,7 @@
     }
     function annualCalendar(){
       syncOwner();const model=calendarModel();
-      return {error:calendarError(model),day:date=>annualDayAvailability(date,model)};
-    }
-    function annualDayAvailability(date,model){
-      const day=annualDayStatus(date,model);
-      return !day.reason&&!time.dateSchedule(model.policy,date)&&unappliedSchedule()
-        ?{reason:'시간차에서 변경한 근무시간을 저장·적용하거나 취소한 뒤 계속해 주세요.',unknown:true,workEdit:true}:day;
+      return {error:calendarError(model),day:date=>annualDayStatus(date,model)};
     }
     function annualDayStatus(date,model){
       const day=workdayStatus(date,model);
@@ -538,7 +481,7 @@
       const issue=calendarError(model);
       if(issue)return {reason:issue};
       if(side==='end'&&annualStartField?.value&&date<annualStartField.value)return {reason:'종료일은 시작일보다 빠를 수 없어요.'};
-      return annualDayAvailability(date,model);
+      return annualDayStatus(date,model);
     }
     function clockDateReason(date,side,model){const menu=getClockMenu(date,side,model);return menu.values.length?'':menu.message||'선택할 수 있는 시간이 없어요.';}
     function netMinutes(from,to,pause){return Math.max(0,to-from-(pause?Math.max(0,Math.min(to,pause.b)-Math.max(from,pause.a)):0));}
@@ -617,8 +560,8 @@
       }
       return {...day,values,message:values.length?'':busy.length?reserved:'1시간 단위로 선택할 수 있는 시간이 없어요.'};
     }
-    function refreshDates(model=calendarModel()){
-      annualWorkHelp.classList.toggle('hidden',activeMode!=='annual'||!owner||!unappliedSchedule()||!ctx.editWorkSchedule);
+    function refreshDates(model){
+      syncOwner();model??=calendarModel();refreshCorrection();
       if(activeMode==='annual'){annualStartPicker?.refresh(model);annualEndPicker?.refresh(model);}
       else if(activeMode==='clock'){clockStartPicker.refresh(model);clockEndPicker.refresh(model);}
     }
@@ -626,11 +569,18 @@
       if(mode!==activeMode){start.close();end.close();clockStartPicker.show(mode==='clock');clockEndPicker.show(mode==='clock');}
       activeMode=mode;annualStartPicker?.show(mode==='annual');annualEndPicker?.show(mode==='annual');refreshDates();
     }
-    function scheduleSubmitBlock(state){
-      if(state.ledgerFailed||state.needsWork===false)return '';
-      if(pendingSchedule()?.phase==='saving')return '근무시간 저장이 끝난 뒤 계속해 주세요.';
-      if(unappliedSchedule()&&!personalNeedsRead())return `근무시간 변경을 ${owner?.self?'저장':'적용'}하거나 취소한 뒤 계속해 주세요.`;
-      return '';
+    function correctionBlock(){
+      syncOwner();
+      return owner&&isCorrectionMode()&&unappliedSchedule()?'작성 중인 근무시간 정정을 요청에 담거나 취소해 주세요.':'';
+    }
+    function refreshCorrection(){
+      correctionPanel.classList.toggle('hidden',!owner||!isCorrectionMode());
+      editor.classList.toggle('hidden',!editOpen);
+      edit.classList.toggle('hidden',editOpen);
+      remove.classList.toggle('hidden',editOpen||!correction);
+      setText(edit,correction?'정정 요청 수정':'근무시간 정정 요청');
+      setText(correctionText,editOpen&&unappliedSchedule()?'작성 중인 정정을 요청에 담거나 취소한 뒤 상신해 주세요.':
+        correction?`결재에 담을 요청: ${correction.work_start}~${correction.work_end}${correction.break_start?` · 휴게 ${correction.break_start}~${correction.break_end}`:''}`:'');
     }
     function refresh(){
       syncOwner();const model=calendarModel();
@@ -641,45 +591,67 @@
       syncDates();const state=inspect(model);
       const retainedInvalid=(start.get()&&!startMenu.values.includes(start.get()))||(end.get()&&!endMenu.values.includes(end.get()));
       if(retainedInvalid&&!state.ledgerFailed){state.result=null;state.error=startMenu.message||endMenu.message||(state.error&&!state.error.includes('입력해')?state.error:'이전에 선택한 시간이 현재 범위에 없어요. 시간을 다시 선택해 주세요.');}
-      editor.classList.toggle('hidden',!editOpen);
-      scheduleSave.textContent=owner?.self?'근무시간 저장':'이 신청에 적용';
-      scheduleSave.disabled=!!pendingSchedule()||!!ticket?.loading||!owner||(owner.self&&(!pref||personalNeedsRead()));
-      cancel.disabled=!!pendingSchedule();
       const fallbackMenu=startMenu.fallback?startMenu:endMenu.fallback?endMenu:null;
-      edit.classList.toggle('hidden',!fallbackMenu||editOpen||!!pendingSchedule()||(!pref&&owner?.self)||personalNeedsRead());
       const used=fallbackMenu?.schedule;
-      setText(scheduleDescription,used?`${pref?.schedule||localSchedule?'근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
-      retry.classList.toggle('hidden',!snapshotRetry?.inline&&!snapshotRetry?.ledger&&!state.retry&&!startMenu.retry&&!endMenu.retry&&!(editOpen&&canRetryPersonal()));
+      setText(scheduleDescription,used?`${pref?.schedule?'기존 휴가 계산용 근무시간':'기본 근무시간'} ${used.work_start}~${used.work_end}${used.break_start?` · 휴게 ${used.break_start}~${used.break_end}`:''}`:'');
+      retry.classList.toggle('hidden',!snapshotRetry?.inline&&!snapshotRetry?.ledger&&!state.retry&&!startMenu.retry&&!endMenu.retry);
       retry.disabled=!owner;
       retry.setAttribute('aria-disabled',String(!owner||!!snapshotRetry||model.snapshotRead==='loading'));
       const readMessage=state.ledgerFailed?state.error:snapshotRetry?.ledger&&model.snapshotRead==='loading'?calendarError(model):'';
       const inputMessage=retainedInvalid||state.complete&&!state.result?state.error:startMenu.message||(start.get()?endMenu.message:'');
-      setText(status,readMessage||scheduleSubmitBlock(state)||inputMessage||'');
+      setText(status,readMessage||correctionBlock()||inputMessage||'');
       refreshDates(model);
       return state;
     }
     function summary({requireComplete=false}={}){
       const s=refresh(),items=s.result?.items||[],totalHours=(s.result?.totalMinutes||0)/60;
-      const blocker=scheduleSubmitBlock(s);
+      const blocker=correctionBlock();
       const error=requireComplete&&blocker?blocker:s.complete||requireComplete?s.error:null;
       return {ok:!error&&(!requireComplete||items.length>0),inputMode:'detail',items,totalHours,totalDays:time.roundDays(totalHours/8),errors:error?[error]:[]};
+    }
+    function calculationBasis(items){
+      syncOwner();
+      const model=calendarModel();
+      if(!owner||calendarError(model)||!Array.isArray(items))return [];
+      const groups=[];
+      for(const item of items){
+        const date=item?.leave_date;
+        if(!time.isDate(date))continue;
+        const {schedule,fallback}=scheduleFor(date,model);
+        if(!schedule)continue;
+        const source=!fallback?'contract':owner.self&&pref?.schedule?'personal':'default';
+        const entry={source,start:schedule.work_start,end:schedule.work_end,breakStart:schedule.break_start,breakEnd:schedule.break_end,
+          dayMinutes:item.basis_day_minutes||time.basisMinutes(model.snapshot.workBasis,date)};
+        const key=JSON.stringify(entry),previous=groups.at(-1);
+        if(previous?.key===key){previous.last=date;previous.days++;}
+        else groups.push({key,entry,first:date,last:date,days:1});
+      }
+      return groups.map(({entry,first,last,days})=>({...entry,first,last,days}));
     }
     function draft(){
       syncOwner();
       const body=readClockDraft();
-      if(editOpen)body.work_editor=workEditorDraft();
-      if(localSchedule)body.local_schedule=localSchedule;
+      if(editOpen){body.work_editor=workEditorDraft();body.work_editor_baseline=editorBaseline;}
+      if(correction)body.work_correction=correction;
       return body;
+    }
+    function getCorrection(){
+      syncOwner();
+      return owner&&isCorrectionMode()&&correction?{...correction,days:[...correction.days]}:null;
     }
     function restoreClockDraft(data){
       const s=data||{};putClockDraft(s);
-      localSchedule=owner&&!owner.self?s.local_schedule||null:null;
+      correction=null;
+      if(owner&&(s.work_correction||(!owner.self&&s.local_schedule))){
+        try{correction=cleanSchedule(s.work_correction||s.local_schedule,time);}catch(_){/* Ignore invalid saved request fields. */}
+      }
       editorBaseline=null;
-      editOpen=!!owner&&!!s.work_editor;putWork(editOpen?s.work_editor:localSchedule);editStatus.textContent='';syncDates();
+      editOpen=!!owner&&!!s.work_editor;putWork(editOpen?s.work_editor:correction);
+      if(editOpen){putWork(s.work_editor_baseline||correction);editorBaseline=workEditorDraft();putWork(s.work_editor);}
+      editStatus.textContent='';syncDates();refreshCorrection();
     }
     function restore(data){
-      epoch++;ticket=null;snapshotRetry=null;owner=ownerState();pref=null;proxyWorkDrafts.clear();clockDrafts.clear();
-      if(owner?.self)loadScheduleCheck(owner.key);
+      epoch++;ticket=null;snapshotRetry=null;owner=ownerState();pref=null;correctionDrafts.clear();clockDrafts.clear();
       restoreClockDraft(owner?data:null);
       return !data||!!owner;
     }
@@ -691,7 +663,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.9'};
+    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.12'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);

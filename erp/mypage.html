@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.83 | Change: 2026-10-22 - Match the current exhibition certificate dialog. -->
+<!-- Version: v1.0.84 | Change: 2026-11-07 - Show the employee's own current contract hours. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.83 | mypage.html');</script>
+<script>console.log('[Version] v1.0.84 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -176,6 +176,14 @@ body{padding:18px 14px 28px}
 <div class="tab-content">
 <div class="tab-pane fade" id="tabAi"><div id="aiConnectionsRoot"></div></div>
 <div class="tab-pane fade show active" id="tabInfo">
+<section class="card p-3 border mb-3" aria-labelledby="myContractHoursTitle">
+<h5 class="fw-bold mb-1" id="myContractHoursTitle">현재 계약 근무시간</h5>
+<div class="small text-break" id="myContractHours" style="white-space:pre-line" role="status" tabindex="-1">조회 중…</div>
+<div class="d-flex flex-wrap gap-2">
+<button type="button" id="myContractHoursRetry" class="btn btn-sm btn-outline-primary mt-2" hidden onclick="ensureMypageSection('contractHours')">다시 조회</button>
+<button type="button" id="myContractHoursOriginal" class="btn btn-sm btn-outline-secondary mt-2" hidden onclick="viewContract()">계약서 원문 확인</button>
+</div>
+</section>
 <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
 <h6 class="fw-bold m-0">📝 기본 정보 수정</h6>
 <div>
@@ -390,7 +398,7 @@ function getMypageDataOwner(){return `${String(myInfo?.coop_id||'')}|${String(my
 function isMypageDataVisible(){return !document.getElementById('mypagePageShell')?.classList.contains('hidden')&&(!window.frameElement?.hidden||mypageRefreshing);}
 function ensureMypageSection(key){
 if(!mypageDataAuthorized||!isMypageDataVisible()) return Promise.resolve(false);
-const loaders={salary:loadMypageSalaryTotal,notices:loadNotices,calendarSettings:loadMypageCalendarIcsSettings,telegram:loadMypageTelegramLinkStatus,overtime:loadMypageOvertimeSummary,emergency:loadEmergencyList,leave:calculateLeave,company:loadCompanyInfo};
+const loaders={salary:loadMypageSalaryTotal,notices:loadNotices,calendarSettings:loadMypageCalendarIcsSettings,telegram:loadMypageTelegramLinkStatus,overtime:loadMypageOvertimeSummary,emergency:loadEmergencyList,leave:calculateLeave,company:loadCompanyInfo,contractHours:loadMypageContractHours};
 const loader=loaders[key];
 if(!loader) return Promise.resolve(false);
 const owner=getMypageDataOwner();
@@ -409,8 +417,41 @@ function loadMypageVisibleSections(){
 const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
 if(pane==='tabSalary')return ensureMypageSection('salary');
 if(pane==='tabNotice')return ensureMypageSection('notices');
-if(pane==='tabInfo')return Promise.all([ensureMypageSection('emergency'),ensureMypageSection('leave'),ensureMypageSection('telegram'),ensureMypageSection('overtime')]);
+if(pane==='tabInfo')return Promise.all([ensureMypageSection('emergency'),ensureMypageSection('leave'),ensureMypageSection('telegram'),ensureMypageSection('overtime'),ensureMypageSection('contractHours')]);
 return Promise.resolve();
+}
+function formatMypageContractHours(data) {
+const status={missing:'현재 적용되는 완료 계약이 없습니다.',ended:'마지막으로 적용된 계약의 기간이 끝났습니다.',
+unstructured:'계약서에 근무·휴게 시각이 항목으로 등록되지 않았습니다.',unverified:'계약 근무시간을 확인할 수 없습니다.'};
+if(Object.hasOwn(status,data.state))return {text:status[data.state],original:data.state!=='missing'};
+if(data.state!=='ready'||!/^\d{4}-\d{2}-\d{2}$/.test(data.effective_date||''))throw new Error('CONTRACT_HOURS_RESPONSE_INVALID');
+const day=Number(data.daily_hours),week=Number(data.weekly_hours);
+const basis=`적용일 ${data.effective_date}${day>0&&week>0&&Number.isFinite(day)&&Number.isFinite(week)?` · 1일 ${day}시간 / 주 ${week}시간`:''}`;
+if(data.work_kind==='flexible')return {text:`${basis}\n협의·유연근무 · 근무 및 휴게 시각은 계약서 확인`,original:true};
+const times=[data.work_start,data.work_end,data.break_start,data.break_end];
+if(data.work_kind!=='fixed'||!times.every(s=>/^([01]\d|2[0-3]):[0-5]\d$/.test(s||''))
+  ||!(times[0]<=times[2]&&times[2]<times[3]&&times[3]<=times[1]))return {text:status.unverified,original:true};
+return {text:`${basis}\n근무 ${times[0]}~${times[1]} · 휴게 ${times[2]}~${times[3]}`,original:false};
+}
+async function loadMypageContractHours(isCurrent){
+const status=document.getElementById('myContractHours'),retry=document.getElementById('myContractHoursRetry'),original=document.getElementById('myContractHoursOriginal');
+const employee=myInfo,controller=new AbortController();
+let timer;
+status.textContent='조회 중…';retry.disabled=true;original.hidden=true;
+try{
+ const response=await Promise.race([_supabase.rpc('erp_self_contract_work_schedule').abortSignal(controller.signal),
+  new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('CONTRACT_HOURS_TIMEOUT'));},10000);})]);
+ if(!isCurrent())return false;
+ const data=response?.data;
+ if(response?.error||data?.emp_id!==String(employee.emp_id)||data.coop_id!==String(employee.coop_id))throw new Error('CONTRACT_HOURS_UNAVAILABLE');
+ const view=formatMypageContractHours(data);
+ status.textContent=view.text;original.hidden=!view.original;
+ if(document.hasFocus()&&document.activeElement===retry)status.focus({preventScroll:true});
+ retry.hidden=true;return true;
+}catch(_){
+ if(isCurrent()){status.textContent='계약 근무시간을 불러오지 못했습니다.';retry.hidden=false;}
+ return false;
+}finally{clearTimeout(timer);if(isCurrent())retry.disabled=false;}
 }
 let lastAlertFocusTarget=null;
 const MYPAGE_LEAVE_TYPE_CONFIG_KEY='approval_leave_type_catalog_json';
