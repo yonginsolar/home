@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.85 | Change: 2026-11-07 - Display preserved original-only work hours without changing contracts. -->
+<!-- Version: v1.0.86 | Change: 2026-11-07 - Refresh only read-only contract hours beside retained profile edits. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.85 | mypage.html');</script>
+<script>console.log('[Version] v1.0.86 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -419,6 +419,27 @@ if(pane==='tabSalary')return ensureMypageSection('salary');
 if(pane==='tabNotice')return ensureMypageSection('notices');
 if(pane==='tabInfo')return Promise.all([ensureMypageSection('emergency'),ensureMypageSection('leave'),ensureMypageSection('telegram'),ensureMypageSection('overtime'),ensureMypageSection('contractHours')]);
 return Promise.resolve();
+}
+function isMypageProfileEditing(){
+const save=document.getElementById('btnSaveInfo');
+return !!save&&!save.classList.contains('hidden');
+}
+async function refreshMypageDataForResume(){
+// The host has just rechecked real Auth/runtime and holds this frame until refresh completes.
+mypageRefreshing=true;
+try{
+const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
+if(isMypageProfileEditing()){
+ // Invalidate only this reader; profile fields, contacts, baselines and other drafts are untouched.
+ mypageSectionLoads.delete('contractHours');
+ if(pane==='tabInfo')await ensureMypageSection('contractHours');
+ return;
+}
+mypageSectionLoads.clear();
+if(pane==='tabInsuranceStatus')await window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));
+else if(pane==='tabCalendar')await renderCalendar();
+else await loadMypageVisibleSections();
+}finally{mypageRefreshing=false;}
 }
 function formatMypageContractHours(data) {
 if(data.state==='legacy_saved'){
@@ -1408,19 +1429,7 @@ document.getElementById('lvRemain').textContent='…';
 applyMypageRuntimeProfileUi();
 setMypageBootStateReady();
 void loadMypageVisibleSections();
-window.ErpWorkspaceResume.register({modules:['mypage'],refresh:async()=>{
-// The host has just rechecked real Auth/runtime and keeps this frame hidden until refresh completes.
-mypageRefreshing=true;
-try{
-mypageSectionLoads.clear();
-const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
-if(pane==='tabInsuranceStatus')await window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));
-else{
-if(pane==='tabCalendar')await renderCalendar();
-else await loadMypageVisibleSections();
-}
-}finally{mypageRefreshing=false;}
-}});
+window.ErpWorkspaceResume.register({modules:['mypage'],refreshWhenDirty:isMypageProfileEditing,refresh:refreshMypageDataForResume});
 }catch(error){
 CoopSafeLog.error("[mypage] boot failed:", error);
 showAlert(`마이페이지 초기화 중 오류가 발생했습니다.\n${error?.message || '잠시 후 다시 시도해 주세요.'}`);
