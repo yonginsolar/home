@@ -1,12 +1,15 @@
-/* v1.0.0 — HR-only classification, scoped drafts and same-request result recovery. */
+/* v1.0.1 — HR-only classification; shared owner/employee drafts across retained workspace routes. */
 (function(host){
  'use strict';
  const labels={unconfirmed:'미확인',required:'근로계약 대상',excluded:'비대상'};
- const drafts=new Map(),invalidOwners=new Set();let view=null,epoch=0;
+ let bank={drafts:new Map(),invalidOwners:new Set(),listeners:new Set()};
+ try{if(host.parent!==host&&host.parent.ErpWorkspaceShell){const key=Symbol.for('erp.hr.contractFollowup.v1');bank=host.parent[key]||(host.parent[key]=bank);}}catch(_){}
+ const {drafts,invalidOwners}=bank;let view=null,epoch=0,lastOwner='';
  const el=(tag,cls,text)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n;};
  function owned(v){return view===v&&v.epoch===epoch&&!invalidOwners.has(v.context.owner)&&v.context.isCurrent()&&v.visible();}
  function dirty(r){return r.loaded&&r.draft!==r.target;}
- function paint(r){if(view?.record===r)render(view);}
+ const update=r=>{if(view?.record===r)render(view);};bank.listeners.add(update);
+ function paint(r){for(const notify of bank.listeners){try{notify(r);}catch(_){/* A removed sibling frame cannot block this owner's result. */}}}
  function render(v){
   if(!owned(v))return;const r=v.record;
   v.select.value=r.draft;v.select.disabled=!r.loaded||r.reading||!!r.conflict;
@@ -70,6 +73,7 @@
   const context=options.context,root=options.root;
   if(!root||!context?.isCurrent()||invalidOwners.has(context.owner)||!options.visible())return;
   const key=context.owner+'|'+context.empId;
+  lastOwner=context.owner;
   if(view?.key===key&&owned(view))return;
   suspend();
   let record=drafts.get(key);if(!record){record={target:'unconfirmed',draft:'unconfirmed',revision:0,loaded:false};drafts.set(key,record);}
@@ -95,6 +99,8 @@
   };
   render(v);void read(v);
  }
- host.addEventListener('beforeunload',event=>{if([...drafts.values()].some(r=>dirty(r)||r.attempt)){event.preventDefault();event.returnValue='';}});
- host.HrContractFollowup=Object.freeze({mount,suspend,invalidateOwner:owner=>{invalidOwners.add(owner);suspend();},dirty:()=>[...drafts.values()].some(dirty)});
+ const ownRecords=()=>invalidOwners.has(lastOwner)?[]:[...drafts].filter(([key])=>key.startsWith(lastOwner+'|')).map(([,r])=>r);
+ host.addEventListener('beforeunload',event=>{if(ownRecords().some(r=>dirty(r)||r.attempt)){event.preventDefault();event.returnValue='';}});
+ host.addEventListener('unload',()=>bank.listeners.delete(update));
+ host.HrContractFollowup=Object.freeze({mount,suspend,invalidateOwner:owner=>{invalidOwners.add(owner);suspend();},dirty:()=>ownRecords().some(dirty)});
 })(window);
