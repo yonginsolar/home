@@ -625,7 +625,8 @@
         if(!time.isDate(date))continue;
         const {schedule,fallback}=scheduleFor(date,model);
         if(!schedule)continue;
-        const source=!fallback?'contract':owner.self&&pref?.schedule?'personal':'default';
+        const source=!fallback?'contract':owner.self&&pref?.schedule?'personal':
+          activeMode==='clock'&&!owner.self&&model.snapshot.workBasis.registered_schedule?'registered':'default';
         const entry={source,start:schedule.work_start,end:schedule.work_end,breakStart:schedule.break_start,breakEnd:schedule.break_end,
           dayMinutes:item.basis_day_minutes||time.basisMinutes(model.snapshot.workBasis,date)};
         const key=JSON.stringify(entry),previous=groups.at(-1);
@@ -668,7 +669,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.14'};
+    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.15'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
