@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.159
-Change: 2026-11-07 - Load the address search only when requested.
+Version: v1.0.162
+Change: 2026-11-07 - Show active contract work and break hours with employee information.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Load the address search only when requested.
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.159 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.162 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -361,6 +361,11 @@ Change: 2026-11-07 - Load the address search only when requested.
             </div>
             <div class="col-md-3"><label class="small text-muted">입사일</label><div class="view-mode fw-bold" id="viewHireDate">-</div><input type="date" id="editHireDate" class="form-control edit-mode"></div>
           </div>
+          <section class="small border-top pt-3 mt-3" aria-labelledby="employeeContractHoursHeading">
+            <h3 id="employeeContractHoursHeading" class="fs-6 fw-bold mb-1">현재 계약 근무시간</h3>
+            <div id="employeeContractHours" class="text-break" style="white-space:pre-line" role="status" tabindex="-1">조회 중…</div>
+            <button type="button" id="employeeContractHoursRetry" class="btn btn-sm btn-outline-primary mt-2" hidden onclick="loadEmployeeContractHours()">다시 조회</button>
+          </section>
         </div>
       </div>
 
@@ -1024,6 +1029,7 @@ let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
 let employeeDetailRevision = 0, employeeBasicSaveInFlight = false, employeeBasicBaseline = null;
+let employeeContractHoursRead = null;
 let employeeResignationSaveInFlight = false, employeeResignationContext = null;
 let employeeResumeReadContext = null;
 const employeeBasicAccess = {state:'idle',owner:'',empId:'',revision:0,allowed:false,pending:null};
@@ -1357,6 +1363,7 @@ function resumeEmployeeDetailTabReads() {
     return Promise.resolve();
 }
 function cancelEmployeeDetailReads() {
+    resetEmployeeContractHours();
     employeeInfoReadEpoch++;
     employeeInfoActiveReads.clear();
     employeeInfoResumeReads.clear();
@@ -5965,13 +5972,16 @@ function bindEmployeeInfoResume() {
     const frame = window.frameElement;
     if (!frame) return;
     let hidden = frame.hidden;
-    new MutationObserver(() => {
+    new MutationObserver(records => {
+        const parked = frame.hidden || records.some(record => record.oldValue === null);
+        if (parked) resetEmployeeContractHours();
+        if (!frame.hidden && (hidden || parked)) void loadEmployeeContractHours();
         if (frame.hidden === hidden) return;
         hidden = frame.hidden;
         if (hidden) { interruptEmployeeInfoReads(); interruptEmployeeDetailTabReads(); }
         // The shell exposes a retained frame only after fresh server authorization.
         else { void resumeEmployeeInfoReads(); void resumeEmployeeDetailTabReads(); }
-    }).observe(frame,{attributes:true,attributeFilter:['hidden']});
+    }).observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
 }
 function verifyEmployeeInfoAccess(context) {
     const key = `${context.owner}|${context.empId}|${context.revision}|${context.epoch}`;
@@ -5981,6 +5991,69 @@ function verifyEmployeeInfoAccess(context) {
     });
     employeeInfoAccessReads.set(key,pending);
     return pending;
+}
+function resetEmployeeContractHours() {
+    const prior = employeeContractHoursRead;
+    employeeContractHoursRead = null;
+    prior?.controller.abort();
+    document.getElementById('employeeContractHours').textContent = '조회 중…';
+    const retry = document.getElementById('employeeContractHoursRetry');
+    retry.hidden = true; retry.disabled = false;
+}
+function employeeContractHoursText(data) {
+    const messages = {
+        missing:'현재 적용되는 완료 계약이 없습니다.',
+        unstructured:'등록된 계약서 원문에서 근무시간과 휴게시간을 확인해 주세요.',
+        ended:'마지막으로 적용된 계약의 기간이 끝났습니다.',
+        unverified:'계약의 근무시간을 확인할 수 없습니다. 계약서 원문을 확인해 주세요.'
+    };
+    if (Object.hasOwn(messages, data.state)) return messages[data.state];
+    if (data.state !== 'ready' || !/^\d{4}-\d{2}-\d{2}$/.test(data.effective_date || '')) throw new Error('CONTRACT_HOURS_RESPONSE_INVALID');
+    const day = Number(data.daily_hours), week = Number(data.weekly_hours);
+    const summary = day>0 && week>0 && Number.isFinite(day) && Number.isFinite(week) ? ` · 1일 ${day}시간 / 주 ${week}시간` : '';
+    const apply = `적용일 ${data.effective_date}${summary}`;
+    if (data.work_kind === 'flexible') return `${apply}\n협의·유연근무 · 근무 및 휴게 시각은 계약서 확인`;
+    if (data.work_kind !== 'fixed') throw new Error('CONTRACT_HOURS_RESPONSE_INVALID');
+    const valid = s=>/^([01]\d|2[0-3]):[0-5]\d$/.test(s || '');
+    const {work_start:a,work_end:b,break_start:c,break_end:d} = data;
+    if (![a,b,c,d].every(valid) || !(a <= c && c < d && d <= b)) return messages.unverified;
+    return `${apply}\n근무 ${a}~${b} · 휴게 ${c}~${d}`;
+}
+function loadEmployeeContractHours() {
+    const context = employeeInfoContext();
+    if (!context.isCurrent() || !isEmployeeDetailTabVisible('tabInfo')) return Promise.resolve(false);
+    if (employeeContractHoursRead?.key === `${context.owner}|${context.revision}|${context.empId}`) return employeeContractHoursRead.pending;
+    const status = document.getElementById('employeeContractHours'), retry = document.getElementById('employeeContractHoursRetry');
+    const ticket = {key:`${context.owner}|${context.revision}|${context.empId}`,controller:new AbortController()};
+    const isCurrent = () => employeeContractHoursRead===ticket && context.isCurrent() && isEmployeeDetailTabVisible('tabInfo');
+    employeeContractHoursRead = ticket;
+    status.textContent = '조회 중…'; retry.disabled = true;
+    ticket.pending = (async () => {
+        let timer;
+        try {
+            const response = await Promise.race([
+                _supabase.rpc('erp_hr_contract_work_schedule',{p_emp_id:context.empId}).abortSignal(ticket.controller.signal),
+                new Promise((_,reject)=>{timer=setTimeout(()=>{ticket.controller.abort();reject(new Error('CONTRACT_HOURS_TIMEOUT'));},10000);})
+            ]);
+            if (!isCurrent()) return false;
+            const data = response?.data;
+            if (response?.error || data?.emp_id!==context.empId || data.coop_id!==String(myInfo.coop_id)) throw new Error('CONTRACT_HOURS_UNAVAILABLE');
+            status.textContent = employeeContractHoursText(data);
+            if (document.hasFocus() && document.activeElement===retry) status.focus({preventScroll:true});
+            retry.hidden = true;
+            return true;
+        } catch (_) {
+            if (isCurrent()) {
+                status.textContent = '계약 근무시간을 불러오지 못했습니다.';
+                retry.hidden = false;
+            }
+            return false;
+        } finally {
+            clearTimeout(timer);
+            if (employeeContractHoursRead===ticket) { employeeContractHoursRead=null; retry.disabled=false; }
+        }
+    })();
+    return ticket.pending;
 }
 function canEmployeeBasicEdit() {
     return employeeBasicAccess.state === 'ready' && employeeBasicAccess.allowed === true
@@ -5997,7 +6070,7 @@ function syncEmployeeBasicAccessUi() {
     document.getElementById('employeeBasicAccessRetry').hidden = !failed;
     document.getElementById('employeeBasicAccessStatus').textContent = failed
         ? '수정 권한을 확인하지 못했습니다.' : employeeBasicAccess.state === 'loading' ? '수정 권한 확인 중…' : '';
-    container.querySelectorAll('[data-employee-basic-section] input,[data-employee-basic-section] select,[data-employee-basic-section] button')
+    container.querySelectorAll('[data-employee-basic-section] input,[data-employee-basic-section] select,[data-employee-basic-section] button:not(#employeeContractHoursRetry)')
         .forEach(element => { element.disabled = !allowed || employeeBasicSaveInFlight; });
 }
 function loadEmployeeBasicAccess() {
@@ -6097,6 +6170,7 @@ async function openDetail(u) {
         return;
     }
     employeeDetailDraftBaseline.clear();
+    resetEmployeeContractHours();
     employeeInfoReadEpoch++;
     resetEmployeeAddressSearch();
     employeeInfoActiveReads.clear();
@@ -6174,13 +6248,17 @@ async function loadEmployeeInsuranceStatus() {
 document.querySelector('#empTab [href="#tabInsuranceStatus"]').addEventListener('shown.bs.tab', loadEmployeeInsuranceStatus);
 document.getElementById('empTab').addEventListener('shown.bs.tab', event => {
     void ensureEmployeeDetailTab(event.target.getAttribute('href')?.slice(1));
-    if (event.target.getAttribute('href') === '#tabInfo') void resumeEmployeeInfoReads();
+    if (event.target.getAttribute('href') === '#tabInfo') { void resumeEmployeeInfoReads(); void loadEmployeeContractHours(); }
+});
+document.getElementById('empTab').addEventListener('hide.bs.tab', event => {
+    if (event.target.getAttribute('href') === '#tabInfo') resetEmployeeContractHours();
 });
 document.getElementById('empTab').addEventListener('hidden.bs.tab', event => {
     interruptEmployeeDetailTabReads(event.target.getAttribute('href')?.slice(1));
 });
 document.getElementById('detailModal').addEventListener('shown.bs.modal', () => {
     void ensureEmployeeDetailTab(document.querySelector('#empTab .nav-link.active')?.getAttribute('href')?.slice(1));
+    void loadEmployeeContractHours();
 });
 bindEmployeeInfoResume();
 bindHrCalendarResume();
