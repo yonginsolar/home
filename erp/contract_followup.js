@@ -1,4 +1,4 @@
-/* v1.0.2 — Scoped saved checkpoints and owner/employee drafts across retained workspace routes. */
+/* v1.0.3 — Show recovery only when needed; preserve scoped employee drafts. */
 (function(host){
  'use strict';
  const labels={unconfirmed:'미확인',required:'근로계약 대상',excluded:'비대상'};
@@ -15,9 +15,12 @@
   v.select.value=r.draft;v.select.disabled=!r.loaded||r.reading||!!r.conflict;
   v.save.disabled=!r.loaded||!r.verified||r.reading||r.saving||!!r.conflict||(!r.attempt&&!dirty(r));
   v.save.textContent=r.saving?'저장 중…':r.attempt?'같은 요청으로 저장':'구분 저장';
-  v.retry.disabled=r.reading||r.saving;v.retry.textContent=r.attempt?'저장 결과 확인':'다시 확인';
+  const recovering=!!r.attempt||!!r.conflict||!!r.readFailed;
+  const retryFocused=document.activeElement===v.retry;
+  v.retry.hidden=!recovering;v.retry.disabled=r.reading||r.saving;v.retry.textContent=r.attempt?'저장 결과 확인':'다시 불러오기';
   v.discard.disabled=r.reading||r.saving||!!r.attempt||(!dirty(r)&&!r.conflict);
   v.status.textContent=r.message||(r.reading?'조회 중…':dirty(r)?'구분을 변경했습니다. 저장해 주세요.':'저장된 구분: '+labels[r.target]);
+  if(!recovering&&retryFocused&&document.hasFocus()&&!v.select.disabled)v.select.focus({preventScroll:true});
   if(r.loaded&&r.verified&&!r.reading&&!r.saving&&!r.attempt&&!dirty(r))host.ErpWorkspaceResume?.checkpoint(v.root);
  }
  async function rpc(v,args,signal){
@@ -32,7 +35,7 @@
   else if(!r.loaded||!dirty(r)&&!r.attempt){r.target=data.target;r.revision=data.revision;r.draft=data.target;r.conflict=false;r.message='';}
   else if(!r.attempt&&r.revision!==data.revision){r.conflict=true;r.message='다른 담당자가 구분을 변경했습니다. 선택은 유지했습니다. 변경사항을 버린 뒤 최신 구분에서 다시 선택해 주세요.';}
   else if(r.attempt){r.message='이전 저장 결과를 아직 확인하지 못했습니다. 같은 요청으로 저장하거나 결과를 다시 확인해 주세요.';}
-  r.loaded=true;r.verified=true;
+  r.loaded=true;r.verified=true;r.readFailed=false;
  }
  async function read(v){
   const r=v.record;if(!owned(v)||r.reading||r.saving)return;
@@ -41,7 +44,7 @@
    const response=await Promise.race([rpc(v,{p_action:'read',p_emp_id:v.context.empId,p_request_id:r.attempt?.key||null},controller.signal),
     new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('READ_TIMEOUT'));},15000);})]);
    if(!owned(v))return;if(response.error)throw Error('READ_FAILED');accept(v,response.data);
-  }catch(_){if(owned(v))r.message='구분을 확인하지 못했습니다. 선택을 유지한 채 다시 확인해 주세요.';}
+  }catch(_){if(owned(v)){r.readFailed=true;r.message='구분을 불러오지 못했습니다. 입력은 유지했으니 다시 불러와 주세요.';}}
   finally{clearTimeout(timer);if(r.readTicket===v){r.reading=false;r.readTicket=null;}if(v.controller===controller)v.controller=null;paint(r);}
  }
  async function save(v){
@@ -53,7 +56,7 @@
   const apply=response=>{
    if(r.attempt!==attempt)return;
    if(response.error){
-    if(!attempt.uncertain&&['PT409','22023','42501'].includes(response.error.code)){r.attempt=null;r.conflict=response.error.code==='PT409';r.message=r.conflict?'저장된 구분이 바뀌었습니다. 다시 확인해 주세요.':'구분을 저장하지 못했습니다. 권한과 선택을 다시 확인해 주세요.';}
+    if(!attempt.uncertain&&['PT409','22023','42501'].includes(response.error.code)){r.attempt=null;r.conflict=response.error.code==='PT409';r.verified=false;r.readFailed=true;r.message=r.conflict?'저장된 구분이 바뀌었습니다. 다시 불러와 주세요.':'구분을 저장하지 못했습니다. 다시 불러와 권한과 선택을 확인해 주세요.';}
     else{attempt.uncertain=true;r.message='저장 결과를 확인하지 못했습니다. 결과 확인을 먼저 이용해 주세요.';}
    }else{
     // Update only this employee's parked record, never a newer view or draft.
