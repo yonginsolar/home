@@ -1,4 +1,4 @@
-/* v1.0.1 — HR-only classification; shared owner/employee drafts across retained workspace routes. */
+/* v1.0.2 — Scoped saved checkpoints and owner/employee drafts across retained workspace routes. */
 (function(host){
  'use strict';
  const labels={unconfirmed:'미확인',required:'근로계약 대상',excluded:'비대상'};
@@ -18,6 +18,7 @@
   v.retry.disabled=r.reading||r.saving;v.retry.textContent=r.attempt?'저장 결과 확인':'다시 확인';
   v.discard.disabled=r.reading||r.saving||!!r.attempt||(!dirty(r)&&!r.conflict);
   v.status.textContent=r.message||(r.reading?'조회 중…':dirty(r)?'구분을 변경했습니다. 저장해 주세요.':'저장된 구분: '+labels[r.target]);
+  if(r.loaded&&r.verified&&!r.reading&&!r.saving&&!r.attempt&&!dirty(r))host.ErpWorkspaceResume?.checkpoint(v.root);
  }
  async function rpc(v,args,signal){
   const q=v.client.rpc('erp_hr_contract_followup',args);return await(q.abortSignal?q.abortSignal(signal):q);
