@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.138 | Change: 2026-11-06 - Require leave calendar readiness and retain retry focus. -->
+<!-- Version: v1.2.139 | Change: 2026-11-07 - Preserve proxy drafts and keyboard focus when recovering the leave calendar. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.138 | approval.html');</script>
+  <script>console.log('[Version] v1.2.139 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +45,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script id="approvalLeaveTimeScript" src="leave_time.js?v=20261106-4"></script>
-  <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=20261106-16"></script>
+  <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=20261107-1"></script>
   <script src="leave_ledger.js?v=20261106-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -4594,8 +4594,7 @@ function getApprovalAnnualLeaveUi() {
         changed:()=>{if(getCurrentApprovalCategory()==='휴가'&&getApprovalAnnualMode()!=='legacy')calcLeaveDays();}
     });
     const pending=approvalAnnualPendingClockDraft&&getApprovalPendingClockDraft();
-    if(approvalAnnualLeaveUi&&pending){
-        approvalAnnualLeaveUi.restore(pending);
+    if(pending&&approvalAnnualLeaveUi?.restoreDeferred?.(pending)){
         approvalAnnualPendingClockDraft=null;
     }
     return approvalAnnualLeaveUi;
@@ -4604,6 +4603,18 @@ function getApprovalAnnualLeaveUi() {
 async function retryApprovalAnnualRuntime() {
     if(approvalAnnualRuntimeLoading||getCurrentApprovalCategory()!=='휴가'
         ||!isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())||!['annual','clock'].includes(getApprovalAnnualMode()))return;
+    const retry=document.getElementById('approvalAnnualRuntimeRetry'), frame=window.frameElement;
+    const context=()=>JSON.stringify([getApprovalAnnualClockDraftOwner(),getApprovalAnnualMode(),approvalDraftComposerEpoch,activeApprovalTab]);
+    const originalContext=context();
+    let ownsFocus=document.activeElement===retry&&activeApprovalTab==='draft'&&!frame?.hidden;
+    const releaseFocus=()=>{ownsFocus=false;};
+    const wasHidden=records=>records.some(record=>record.oldValue===null)||frame?.hidden;
+    const observer=ownsFocus&&frame?new MutationObserver(records=>{if(wasHidden(records))releaseFocus();}):null;
+    if(ownsFocus){
+        retry.addEventListener('blur',releaseFocus,{once:true});
+        window.addEventListener('pagehide',releaseFocus,{once:true});
+        observer?.observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+    }
     approvalAnnualRuntimeLoading=true;
     syncApprovalAnnualModeUi();
     const load=(id,ready)=>{
@@ -4629,8 +4640,24 @@ async function retryApprovalAnnualRuntime() {
         await load('approvalAnnualRuntimeScript',()=>typeof window.CoopApprovalAnnualLeave?.create==='function');
     }catch(_){/* Keep the recovery action available and do not change the draft. */}
     finally{
+        const restoreFocus=ownsFocus&&!(observer&&wasHidden(observer.takeRecords()))
+            &&document.hasFocus()&&document.activeElement===retry&&context()===originalContext;
+        observer?.disconnect();
+        retry?.removeEventListener('blur',releaseFocus);
+        window.removeEventListener('pagehide',releaseFocus);
         approvalAnnualRuntimeLoading=false;
-        if(getCurrentApprovalCategory()==='휴가'){syncApprovalAnnualModeUi();calcLeaveDays();}
+        if(getCurrentApprovalCategory()==='휴가'){
+            syncApprovalAnnualModeUi();calcLeaveDays();
+            if(restoreFocus&&retry.closest('.hidden')&&activeApprovalTab==='draft'&&!frame?.hidden
+                &&(document.activeElement===retry||document.activeElement===document.body)){
+                const ids=getApprovalAnnualMode()==='clock'
+                    ?['annualClockStartTimePick','annualClockStartDatePick']:['mixedLeaveStartDatePick'];
+                for(const id of ids){
+                    const target=document.getElementById(id);
+                    if(target&&!target.disabled&&target.getClientRects().length){target.focus();break;}
+                }
+            }
+        }
     }
 }
 
@@ -4677,8 +4704,8 @@ function syncApprovalAnnualModeUi() {
         loadNotice.classList.toggle('hidden',!missing);
         if(missing){
             document.getElementById('approvalAnnualRuntimeStatus').textContent=approvalAnnualRuntimeLoading?'휴가 달력을 다시 불러오는 중이에요.':APPROVAL_ANNUAL_RUNTIME_ERROR;
-            document.getElementById('approvalAnnualRuntimeRetry').disabled=approvalAnnualRuntimeLoading;
         }
+        document.getElementById('approvalAnnualRuntimeRetry').setAttribute('aria-disabled',String(approvalAnnualRuntimeLoading));
     }
     document.getElementById('approvalAnnualClock').classList.toggle('hidden',!activeClock);
     document.getElementById('mixedLeaveRangeEditor').classList.toggle('hidden',activeClock);

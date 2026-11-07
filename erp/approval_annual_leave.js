@@ -662,16 +662,27 @@
       if(localSchedule)body.local_schedule=localSchedule;
       return body;
     }
-    function restore(data){
-      epoch++;ticket=null;snapshotRetry=null;owner=ownerState();editorBaseline=null;proxyWorkDrafts.clear();
-      if(owner?.self)loadScheduleCheck(owner.key);
+    function restoreClockDraft(data){
       const s=data||{};startDate.value=s.start_date||'';endDate.value=s.end_date||'';lastStart=startDate.value;lastEnd=endDate.value;
       start.put(s.start_time);end.put(s.end_time);follows=s.follows!==false;
-      pref=null;localSchedule=owner&&!owner.self?s.local_schedule||null:null;
+      localSchedule=owner&&!owner.self?s.local_schedule||null:null;
+      editorBaseline=null;
       editOpen=!!owner&&!!s.work_editor;putWork(editOpen?s.work_editor:localSchedule);editStatus.textContent='';syncDates();
     }
+    function restore(data){
+      epoch++;ticket=null;snapshotRetry=null;owner=ownerState();pref=null;proxyWorkDrafts.clear();
+      if(owner?.self)loadScheduleCheck(owner.key);
+      restoreClockDraft(data);
+    }
+    function restoreDeferred(data){
+      // Capture the departing employee before applying the restored employee's fields.
+      syncOwner();
+      if(!owner)return false;
+      restoreClockDraft(data);
+      return true;
+    }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,draft,restore,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.7'};
+    return {summary,annualCalendar,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.8'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
