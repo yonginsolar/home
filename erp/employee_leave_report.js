@@ -1,4 +1,4 @@
-/* Version: 1.0.3 | 2026-11-08. Current-view employee leave report reads only. */
+/* Version: 1.0.4 | 2026-11-08. Current-view employee leave report reads only. */
 (function (root) {
   'use strict';
   let view = null, active = null, sequence = 0, closing = false;
@@ -25,6 +25,10 @@
   }
   function currentParent(returnTo, closingReport = false) {
     if (!returnTo || root.frameElement?.hidden || !same(returnTo.context, returnTo.options.context())) return null;
+    // Parent keyboard ownership survives a legitimate parent-tab change. Report
+    // reads retain their separate, narrower Attendance-tab currentness check.
+    const parentCurrent = returnTo.options.isParentCurrent || returnTo.options.isCurrent;
+    if (!parentCurrent(returnTo.context)) return null;
     const parent = returnTo.options.parent?.();
     if (!parent?.root?.classList.contains('show') || parent.root.hidden
       || [...parent.root.ownerDocument.querySelectorAll('.modal.show,dialog[open],[role="dialog"][aria-modal="true"]')]
@@ -36,7 +40,7 @@
     const bridge = closing && view?.closingKeyboard;
     const returnTo = bridge ? bridge.returnTo : view?.returnedTo;
     const parent = currentParent(returnTo, !!bridge);
-    if (!parent || (bridge && (view.root.classList.contains('show') || !returnTo.options.isCurrent(returnTo.context)))) return;
+    if (!parent || (bridge && view.root.classList.contains('show'))) return;
     const doc = parent.root.ownerDocument;
     const layer = event.target?.closest?.('.modal,[role="dialog"],dialog[open]');
     const inParent = layer === parent.root;
@@ -67,7 +71,7 @@
   }
   function restoreParentKeyboard(returnTo) {
     const parent = currentParent(returnTo);
-    if (!parent || !returnTo.options.isCurrent(returnTo.context)) return;
+    if (!parent) return;
     view.returnedTo = returnTo;
     if (view.keyboardParent !== parent.root) {
       view.keyboardParent?.removeEventListener('keydown', parentTab);
