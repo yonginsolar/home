@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.187
-Change: 2026-11-08 - Ignore held Enter repeats on employee access retry.
+Version: v1.0.188
+Change: 2026-11-08 - Recover stalled employee registration preparation and statistics reads.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-08 - Ignore held Enter repeats on employee access retry.
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.187 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.188 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -124,6 +124,10 @@ Change: 2026-11-08 - Ignore held Enter repeats on employee access retry.
     }
     #annualYearTabs .btn { flex-basis: 0; min-height: 42px; }
     .modal-content { border-radius: 16px; border: none; box-shadow: 0 15px 50px rgba(0,0,0,0.1); }
+    @media (max-height: 600px) {
+      #inviteModal .modal-content, #statsModal .modal-content { overflow-y: auto; }
+      #inviteModal .modal-body, #statsModal .modal-body { overflow: visible; flex-shrink: 0; }
+    }
     .form-control, .form-select { border-radius: 8px; padding: 10px; font-size: 0.95rem; }
     .d-none { display: none !important; }
     .hidden { display: none !important; }
@@ -1276,6 +1280,140 @@ let employeeModuleAccessSaveInFlight = false;
 let inviteModuleAccessCatalog = null;
 let inviteCanManageAccess = false;
 let inviteModuleAccessLoadToken = 0;
+const employeeAuxReadStates = new Map();
+let employeeAuxReadLifecycleBound = false;
+
+function isEmployeeAuxReadVisible(modalId, owner) {
+    return isHrSettingsContextCurrent(owner)
+        && !document.getElementById('hrPageShell')?.classList.contains('hidden')
+        && document.getElementById(modalId)?.classList.contains('show');
+}
+function renderEmployeeAuxReadState(entry, state) {
+    const body = document.querySelector(`#${entry.modalId} .modal-body`);
+    if (!body) return;
+    if (!entry.status?.isConnected) {
+        entry.status = document.createElement('div');
+        entry.status.dataset.employeeAuxRead = entry.modalId;
+        entry.status.className = 'alert alert-light border mb-3 p-2';
+        entry.message = document.createElement('span');
+        entry.retry = document.createElement('button');
+        entry.retry.type = 'button'; entry.retry.className = 'btn btn-sm btn-outline-primary d-block mt-2 mw-100 text-wrap';
+        entry.retry.onclick = () => {
+            if (!entry.pending && isEmployeeAuxReadVisible(entry.modalId, entry.owner)) void entry.retryAction();
+        };
+        entry.retry.onkeydown = event => {
+            if (!event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && event.repeat && ['Enter',' '].includes(event.key)) event.preventDefault();
+        };
+        entry.status.append(entry.message, entry.retry); body.prepend(entry.status);
+    }
+    entry.status.hidden = state === 'ready'; entry.status.classList.toggle('d-none', state === 'ready');
+    entry.status.setAttribute('role','status'); entry.status.setAttribute('aria-live','polite');
+    entry.status.setAttribute('aria-busy', String(state === 'loading'));
+    entry.message.textContent = state === 'loading' ? entry.loadingMessage : entry.errorMessage;
+    entry.retry.textContent = state === 'loading' ? '확인 중…' : '다시 확인';
+    entry.retry.setAttribute('aria-disabled', String(state === 'loading'));
+    if (entry.modalId === 'statsModal') {
+        for (const child of body.children) {
+            if (child === entry.status) continue;
+            if (!entry.visibility.has(child)) entry.visibility.set(child, {hidden:child.hidden,none:child.classList.contains('d-none')});
+            const original = entry.visibility.get(child);
+            child.hidden = state === 'ready' ? original.hidden : true;
+            child.classList.toggle('d-none', state === 'ready' ? original.none : true);
+        }
+    }
+}
+function interruptEmployeeAuxReads(modalId = '', all = false) {
+    for (const entry of employeeAuxReadStates.values()) {
+        if (modalId && entry.modalId !== modalId) continue;
+        if (!entry.pending && !all) continue;
+        entry.revision++; entry.controller?.abort(); entry.controller = null; entry.pending = null;
+        if (entry.owner === getHrSettingsOwner()) { if (all) entry.lock?.(); renderEmployeeAuxReadState(entry,'error'); }
+    }
+}
+function bindEmployeeAuxReadLifecycle() {
+    if (employeeAuxReadLifecycleBound) return;
+    employeeAuxReadLifecycleBound = true;
+    const frame = window.frameElement;
+    if (frame) new MutationObserver(records => {
+        if (frame.hidden || records.some(record => record.oldValue === null)) interruptEmployeeAuxReads();
+    }).observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+    window.addEventListener('pagehide', () => interruptEmployeeAuxReads());
+}
+function runEmployeeAuxRead(modalId, options) {
+    const owner = getHrSettingsOwner();
+    if (!owner || !isHrSettingsContextCurrent(owner) || document.getElementById('hrPageShell')?.classList.contains('hidden')) return Promise.resolve(false);
+    bindEmployeeAuxReadLifecycle();
+    let entry = employeeAuxReadStates.get(modalId);
+    if (entry?.owner !== owner) {
+        entry?.controller?.abort(); entry?.status?.remove();
+        entry = {modalId,owner,revision:0,pending:null,controller:null,visibility:entry?.visibility || new Map()};
+        employeeAuxReadStates.set(modalId,entry);
+        const modal = document.getElementById(modalId);
+        if (!modal.dataset.employeeAuxReadBound) {
+            modal.dataset.employeeAuxReadBound = '1';
+            modal.addEventListener('hide.bs.modal', event => { if (!event.defaultPrevented) interruptEmployeeAuxReads(modalId); });
+        }
+    }
+    if (entry.pending) return entry.pending;
+    Object.assign(entry,{retryAction:options.retry,lock:options.loading,loadingMessage:options.loadingMessage,errorMessage:options.errorMessage});
+    const revision = ++entry.revision, controller = new AbortController(), trigger = document.activeElement;
+    const current = () => employeeAuxReadStates.get(modalId) === entry && entry.revision === revision
+        && !controller.signal.aborted && isEmployeeAuxReadVisible(modalId,owner);
+    const context = {owner,signal:controller.signal,isCurrent:current};
+    const followFocus = trigger === entry.retry;
+    let moved = false, timer;
+    const track = event => { if (event.target !== trigger && event.target !== entry.status) moved = true; };
+    if (followFocus) for (const event of ['focusin','pointerdown','keydown']) document.addEventListener(event,track,true);
+    entry.controller = controller;
+    options.loading?.(); renderEmployeeAuxReadState(entry,'loading');
+    const task = async () => {
+        const modal = document.getElementById(modalId);
+        if (!modal.classList.contains('show')) await new Promise((resolve,reject) => {
+            const clean = () => { modal.removeEventListener('shown.bs.modal',shown); controller.signal.removeEventListener('abort',stopped); };
+            const shown = () => { clean(); resolve(); };
+            const stopped = () => { clean(); reject(new Error('EMPLOYEE_AUX_OPEN_STOPPED')); };
+            modal.addEventListener('shown.bs.modal',shown,{once:true});
+            controller.signal.addEventListener('abort',stopped,{once:true});
+        });
+        await verifyEmployeeDetailTabAccess(owner,context);
+        if (!current()) return false;
+        const data = await options.read(context);
+        if (!current()) return false;
+        await verifyEmployeeDetailTabAccess(owner,context);
+        if (!current()) return false;
+        if (modalId === 'statsModal') renderEmployeeAuxReadState(entry,'ready');
+        options.apply(data); return true;
+    };
+    entry.pending = (async () => {
+        try {
+            const ready = await Promise.race([task(),new Promise((_,reject) => {
+                controller.signal.addEventListener('abort',()=>reject(new Error('EMPLOYEE_AUX_READ_STOPPED')),{once:true});
+                timer = setTimeout(()=>{reject(new Error('EMPLOYEE_AUX_READ_TIMEOUT'));controller.abort();},15000);
+            })]);
+            if (ready && current()) { renderEmployeeAuxReadState(entry,'ready'); return true; }
+            return false;
+        } catch (_) {
+            if (employeeAuxReadStates.get(modalId) === entry && entry.revision === revision
+                && isEmployeeAuxReadVisible(modalId,owner)) renderEmployeeAuxReadState(entry,'error');
+            return false;
+        } finally {
+            clearTimeout(timer);
+            if (followFocus) for (const event of ['focusin','pointerdown','keydown']) document.removeEventListener(event,track,true);
+            if (entry.revision === revision) {
+                entry.pending = null; entry.controller = null;
+                const box = trigger?.getBoundingClientRect();
+                if (followFocus && !moved && isEmployeeAuxReadVisible(modalId,owner) && document.hasFocus()
+                    && box && box.top >= 0 && box.bottom <= window.innerHeight
+                    && (document.activeElement === trigger || document.activeElement === document.body)) {
+                    const target = entry.status.hidden ? document.querySelector(`#${modalId} .modal-body`) : entry.retry;
+                    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex','-1');
+                    target.focus({preventScroll:true});
+                }
+            }
+        }
+    })();
+    return entry.pending;
+}
 let employeeNotificationSnapshot = null;
 let employeeNotificationSaveInFlight = false;
 const employeeDetailReadTokens = { modules: 0, approvedRights: 0, notifications: 0 };
@@ -3454,7 +3592,7 @@ window.onload = async function() {
     if (!hrUserGate.ok) return;
     myInfo = hrUserGate.user;
     hrAuthorizedUserId = String(hrUserGate.authUser?.id || '');
-    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){window.HrContractFollowup?.invalidateOwner(getHrSettingsOwner());window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
+    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){interruptEmployeeAuxReads('',true);window.HrContractFollowup?.invalidateOwner(getHrSettingsOwner());window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
     const villageWorkspace = await _supabase.rpc('sun_village_workspace_context');
     if (!villageWorkspace.error && villageWorkspace.data?.workspaces?.some(item => item?.is_current === true && item?.is_management_coop === false)) {
         location.replace('village_company_info.html');
@@ -5159,29 +5297,42 @@ function renderInviteModuleAccess(modules, canManageAccess = false) {
 } // End of renderInviteModuleAccess
 
 async function loadInviteModuleAccessCatalog() {
-    const loadToken = ++inviteModuleAccessLoadToken;
-    resetInviteModuleAccessUi();
-    try {
-        const sourceEmployee = (Array.isArray(employeeCache) ? employeeCache : []).find((employee) => isLoginRelevantEmployeeRow(employee));
-        const sourceEmpId = String(sourceEmployee?.emp_id || '').trim();
-        if (!sourceEmpId) throw new Error('권한 기준을 불러올 재직 직원이 없습니다.');
-
-        const { data, error } = await _supabase.rpc('erp_admin_get_employee_module_access', {
-            p_emp_id: sourceEmpId
-        });
-        if (error) throw error;
-        if (loadToken !== inviteModuleAccessLoadToken) return;
-        renderInviteModuleAccess(Array.isArray(data?.modules) ? data.modules : [], data?.can_manage_access === true);
-    } catch (error) {
-        if (loadToken !== inviteModuleAccessLoadToken) return;
-        console.error('invite module access catalog load failed:', error);
-        const status = document.getElementById('inviteModuleAccessStatus');
-        if (status) {
-            status.classList.remove('d-none');
-            status.classList.add('text-danger');
-            status.innerHTML = '업무 권한을 불러오지 못했습니다. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="loadInviteModuleAccessCatalog()">다시 불러오기</button>';
+    if (runInvite._inFlight) return false;
+    let loadToken;
+    return runEmployeeAuxRead('inviteModal', {
+        retry:loadInviteModuleAccessCatalog,
+        loadingMessage:'직원 등록을 준비하는 중입니다.',
+        errorMessage:'직원 등록 준비를 확인하지 못했습니다. 입력은 유지됩니다.',
+        loading:() => {
+            loadToken = ++inviteModuleAccessLoadToken;
+            inviteModuleAccessCatalog = null; inviteCanManageAccess = false;
+            document.getElementById('inviteSubmitBtn').disabled = true;
+            document.getElementById('newRole').disabled = true;
+            document.getElementById('inviteModuleResetBtn').disabled = true;
+            document.querySelectorAll('[data-invite-module-key]').forEach(element => { element.disabled = true; });
+        },
+        read:async context => {
+            const source = (Array.isArray(employeeCache) ? employeeCache : []).find(isLoginRelevantEmployeeRow);
+            const empId = String(source?.emp_id || '').trim();
+            if (!empId) throw new Error('EMPLOYEE_CATALOG_SOURCE_MISSING');
+            const query = _supabase.rpc('erp_admin_get_employee_module_access',{p_emp_id:empId});
+            const result = await (typeof query.abortSignal === 'function' ? query.abortSignal(context.signal) : query);
+            if (result.error) throw result.error;
+            if (!Array.isArray(result.data?.modules) || !result.data.modules.length) throw new Error('EMPLOYEE_CATALOG_INCOMPLETE');
+            return result.data;
+        },
+        apply:data => {
+            if (loadToken !== inviteModuleAccessLoadToken) throw new Error('EMPLOYEE_CATALOG_CHANGED');
+            const values = employeeInviteDraftValues();
+            renderInviteModuleAccess(data.modules, data.can_manage_access === true);
+            document.getElementById('newRole').value = values.get('newRole') || 'staff';
+            document.getElementById('inviteModuleResetBtn').disabled = data.can_manage_access !== true;
+            for (const element of document.querySelectorAll('[data-invite-module-key]')) {
+                const value = values.get('module:' + element.dataset.inviteModuleKey);
+                if (!element.disabled && ['inherit','enabled','disabled'].includes(value)) element.value = value;
+            }
         }
-    }
+    });
 } // End of loadInviteModuleAccessCatalog
 
 function setAllInviteModuleAccess(value = 'inherit') {
@@ -7432,8 +7583,9 @@ function salaryPaymentInputs() {
     return {...values,pay_basic:fixed-allowances,pay_bonus:bonus,pay_total:fixed+bonus};
 }
 
-async function getAdminEmployeePayrollRows(empId, from, to) {
-    const result = await _supabase.rpc('erp_hr_payroll_list',{p_emp_id:empId==null?null:String(empId),p_from_ym:from,p_to_ym:to});
+async function getAdminEmployeePayrollRows(empId, from, to, readContext = null) {
+    const query = _supabase.rpc('erp_hr_payroll_list',{p_emp_id:empId==null?null:String(empId),p_from_ym:from,p_to_ym:to});
+    const result = await (readContext && typeof query.abortSignal === 'function' ? query.abortSignal(readContext.signal) : query);
     if (result.error) throw result.error;
     if (!Array.isArray(result.data)) throw new Error('급여 조회 결과를 확인하지 못했습니다.');
     return result.data;
@@ -8857,51 +9009,45 @@ let statsDashboardOpen = false;
 
 // 1. 대시보드 열기 및 데이터 로드 메인 함수
 async function openStatsDashboard() {
-    if(!statsModalInstance) {
+    if (!isHrSettingsContextCurrent(getHrSettingsOwner())) return;
+    if (!statsModalInstance) {
         const modal = document.getElementById('statsModal');
         statsModalInstance = new bootstrap.Modal(modal);
         modal.addEventListener('hide.bs.modal', () => { statsDashboardOpen = false; });
     }
     statsDashboardOpen = true;
     statsModalInstance.show();
-    if (statsDashboardInFlight) return statsDashboardInFlight;
-
-    // 로딩 표시 (간략히)
-    document.getElementById("valAvgTime").innerText = "계산 중...";
-    const owner = myInfo;
-    const isCurrent = () => myInfo === owner && statsDashboardOpen
-        && !document.getElementById('hrPageShell')?.classList.contains('hidden') && !window.frameElement?.hidden;
-    statsDashboardInFlight = (async () => {
-    try {
-    await window.ErpWorkflowAssets.load('chart');
-    if (!isCurrent()) return;
-
-    // [데이터 확보] 전자결재(지출 포함) & 급여대장 동시에 조회 (병렬 처리)
-    // 최근 1년치 데이터만 조회하여 성능 최적화
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    const dateStr = oneYearAgo.toISOString();
-
-    const [approvalRes, salaryRes] = await Promise.all([
-        scopeEmployeeTenant(_supabase.from('ref_approval').select('*')).gte('created_at', dateStr).order('created_at', {ascending: true}),
-        getAdminEmployeePayrollRows(null,dateStr.slice(0,7),formatAdminEmployeeKstMonth()).then(data=>({data:data.filter(r=>r.created_at>=dateStr),error:null}))
-    ]);
-    if (!isCurrent()) return;
-
-    if(approvalRes.error || salaryRes.error) return showAlert("데이터 로드 실패");
-
-    const appList = approvalRes.data || [];
-    const salaryList = salaryRes.data || [];
-
-    // 2. 각 섹션별 분석 및 렌더링 실행
-    renderEfficiencyStats(appList);
-    renderRejectionStats(appList);
-    renderFinanceStats(appList, salaryList);
-    } catch (_) {
-        if (isCurrent()) { document.getElementById('valAvgTime').innerText = '-'; showAlert('통계를 불러오지 못했습니다. 창을 닫고 다시 열어 주세요.'); }
-    }
-    })().finally(() => { statsDashboardInFlight = null; });
-    return statsDashboardInFlight;
+    return loadEmployeeStatsDashboard();
+}
+function loadEmployeeStatsDashboard() {
+    const pending = runEmployeeAuxRead('statsModal', {
+        retry:loadEmployeeStatsDashboard,
+        loadingMessage:'통계를 불러오는 중입니다.',
+        errorMessage:'통계를 확인하지 못했습니다. 다시 확인해 주세요.',
+        read:async context => {
+            await window.ErpWorkflowAssets.load('chart');
+            if (!context.isCurrent()) throw new Error('EMPLOYEE_STATS_STOPPED');
+            const oneYearAgo = new Date(); oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+            const dateStr = oneYearAgo.toISOString();
+            const query = scopeEmployeeTenant(_supabase.from('ref_approval').select('*'))
+                .gte('created_at',dateStr).order('created_at',{ascending:true});
+            const [approvalRes,salaryList] = await Promise.all([
+                typeof query.abortSignal === 'function' ? query.abortSignal(context.signal) : query,
+                getAdminEmployeePayrollRows(null,dateStr.slice(0,7),formatAdminEmployeeKstMonth(),context)
+            ]);
+            if (approvalRes.error) throw approvalRes.error;
+            if (!Array.isArray(approvalRes.data)) throw new Error('EMPLOYEE_STATS_INCOMPLETE');
+            return {appList:approvalRes.data,salaryList:salaryList.filter(row=>row.created_at>=dateStr)};
+        },
+        apply:({appList,salaryList}) => {
+            renderEfficiencyStats(appList);
+            renderRejectionStats(appList);
+            renderFinanceStats(appList,salaryList);
+        }
+    });
+    statsDashboardInFlight = pending;
+    void pending.finally(() => { if (statsDashboardInFlight === pending) statsDashboardInFlight = null; });
+    return pending;
 }
 
 // ---------------------------------------------------------
