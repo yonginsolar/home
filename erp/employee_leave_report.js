@@ -1,4 +1,4 @@
-/* Version: 1.0.2 | 2026-11-08. Current-view employee leave report reads only. */
+/* Version: 1.0.3 | 2026-11-08. Current-view employee leave report reads only. */
 (function (root) {
   'use strict';
   let view = null, active = null, sequence = 0, closing = false;
@@ -23,28 +23,47 @@
       }
     } else if (view.root.classList.contains('show')) view.modal().hide();
   }
-  function currentParent(returnTo) {
+  function currentParent(returnTo, closingReport = false) {
     if (!returnTo || root.frameElement?.hidden || !same(returnTo.context, returnTo.options.context())) return null;
     const parent = returnTo.options.parent?.();
     if (!parent?.root?.classList.contains('show') || parent.root.hidden
       || [...parent.root.ownerDocument.querySelectorAll('.modal.show,dialog[open],[role="dialog"][aria-modal="true"]')]
-        .some(el => el !== parent.root)) return null;
+        .some(el => el !== parent.root && !(closingReport && el === view.root))) return null;
     return parent;
   }
   function parentTab(event) {
-    if (event.key !== 'Tab' || event.defaultPrevented || event.isComposing) return;
-    const parent = currentParent(view?.returnedTo);
-    if (!parent || event.target?.closest?.('.modal,[role="dialog"],dialog[open]') !== parent.root) return;
+    if (event.key !== 'Tab' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+    const bridge = closing && view?.closingKeyboard;
+    const returnTo = bridge ? bridge.returnTo : view?.returnedTo;
+    const parent = currentParent(returnTo, !!bridge);
+    if (!parent || (bridge && (view.root.classList.contains('show') || !returnTo.options.isCurrent(returnTo.context)))) return;
     const doc = parent.root.ownerDocument;
+    const layer = event.target?.closest?.('.modal,[role="dialog"],dialog[open]');
+    const inParent = layer === parent.root;
+    if (!inParent && (!bridge || bridge.movedOutside || !bridge.fromReport || !doc.hasFocus()
+      || !(layer === view.root || (event.target === doc.body && doc.activeElement === doc.body)))) return;
     const items = [...parent.root.querySelectorAll('a[href],button,input,textarea,select,[tabindex],[contenteditable="true"]')]
       .filter(el => el.tabIndex >= 0 && !el.matches(':disabled') && !el.closest('[inert]')
         && el.getClientRects().length && root.getComputedStyle(el).visibility === 'visible')
       .sort((a, b) => (a.tabIndex || Infinity) - (b.tabIndex || Infinity));
     const first = items[0], last = items.at(-1), activeElement = doc.activeElement;
-    const target = event.shiftKey && (activeElement === first || activeElement === parent.root) ? last
+    const target = !inParent ? (event.shiftKey ? last : first) || parent.root
+      : !first ? parent.root : event.shiftKey && (activeElement === first || activeElement === parent.root) ? last
       : !event.shiftKey && activeElement === last ? first : !first ? parent.root : null;
     // Native Tab can leave an iframe before Bootstrap's document focusin fires.
     if (target) { event.preventDefault(); target.focus({preventScroll:true}); }
+  }
+  function watchClosingFocus(event) {
+    const bridge = view?.closingKeyboard;
+    if (!bridge || event.target === view.doc.body || event.target === view.doc.documentElement) return;
+    const parent = bridge.returnTo?.options.parent?.();
+    if (!view.root.contains(event.target) && !parent?.root?.contains(event.target)) bridge.movedOutside = true;
+  }
+  function clearClosingKeyboard() {
+    if (!view) return;
+    view.doc.removeEventListener('keydown', parentTab, true);
+    for (const type of ['focusin','pointerdown']) view.doc.removeEventListener(type, watchClosingFocus, true);
+    view.closingKeyboard = null;
   }
   function restoreParentKeyboard(returnTo) {
     const parent = currentParent(returnTo);
@@ -100,15 +119,25 @@
     };
     options.root.addEventListener('click', openingDismiss, true);
     options.root.addEventListener('keydown', openingDismiss, true);
-    options.root.addEventListener('show.bs.modal', () => { view.opening = true; });
+    options.root.addEventListener('show.bs.modal', () => { clearClosingKeyboard(); view.opening = true; });
     options.root.addEventListener('shown.bs.modal', () => {
       view.opening = false;
       if (view.hideRequested) { view.hideRequested = false; view.modal().hide(); }
     });
+    options.root.addEventListener('hide.bs.modal', () => {
+      view.closingFromReport = options.root.contains(doc.activeElement);
+    }, true);
     options.root.addEventListener('hide.bs.modal', event => {
-      if (!event.defaultPrevented) { view.opening = false; closing = true; close(false); }
+      if (!event.defaultPrevented) {
+        view.opening = false; closing = true; close(false); clearClosingKeyboard();
+        view.closingKeyboard = {returnTo:view.returnTo, fromReport:view.closingFromReport, movedOutside:false};
+        // Only this owned hide-to-hidden interval, before the vendor trap ends.
+        doc.addEventListener('keydown', parentTab, true);
+        for (const type of ['focusin','pointerdown']) doc.addEventListener(type, watchClosingFocus, true);
+      }
     });
     options.root.addEventListener('hidden.bs.modal', () => {
+      clearClosingKeyboard();
       const returnTo = view.returnTo; view.returnTo = null;
       closing = false; view.opening = false; view.hideRequested = false;
       view.restoreFocus?.(); view.restoreFocus = null;
