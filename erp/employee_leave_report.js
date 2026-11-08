@@ -1,4 +1,4 @@
-/* Version: 1.0.0 | 2026-11-08. Current-view employee leave report reads only. */
+/* Version: 1.0.1 | 2026-11-08. Current-view employee leave report reads only. */
 (function (root) {
   'use strict';
   let view = null, active = null, sequence = 0, closing = false;
@@ -45,6 +45,20 @@
     retry.addEventListener('keydown', event => {
       if (event.repeat && ['Enter', ' '].includes(event.key)) event.preventDefault();
     });
+    const openingDismiss = event => {
+      if (view.root !== options.root || !view.opening || event.defaultPrevented || event.isComposing) return;
+      // This report is read-only. Leave nested dialogs and composing keys alone.
+      if (event.target?.closest?.('.modal,[role="dialog"],dialog[open]') !== options.root) return;
+      if (event.type === 'click') {
+        const button = event.target.closest('[data-bs-dismiss="modal"]');
+        if (!button || button.disabled || button.classList.contains('disabled')) return;
+      } else if (event.key !== 'Escape' || event.keyCode === 229) return;
+      // Bootstrap ignores hide() while opening, before emitting hide.bs.modal.
+      // Consume only this owned dismiss intent and use our existing deferred hide.
+      event.preventDefault(); event.stopPropagation(); close();
+    };
+    options.root.addEventListener('click', openingDismiss, true);
+    options.root.addEventListener('keydown', openingDismiss, true);
     options.root.addEventListener('show.bs.modal', () => { view.opening = true; });
     options.root.addEventListener('shown.bs.modal', () => {
       view.opening = false;
