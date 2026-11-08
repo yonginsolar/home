@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.190
+Version: v1.0.191
 Change: 2026-11-08 - Keep retry focus inside employee preparation and statistics after returning to the button.
 -->
 <html>
@@ -14,7 +14,7 @@ Change: 2026-11-08 - Keep retry focus inside employee preparation and statistics
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.190 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.191 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7009,16 +7009,29 @@ function openEmploymentContractManager() {
     requestEmployeeDetailDiscard(() => { ErpWorkspaceResume.navigate(target); });
 }
 
-function captureEmployeeDocumentContext() {
+function captureEmployeeDocumentContext({track = false} = {}) {
     const context = {empId:String(currentEmpId || ''),empName:String(currentEmpName || ''),
         coopId:String(myInfo?.coop_id || ''),actor:String(hrAuthorizedUserId || ''),owner:getHrSettingsOwner(),
         revision:employeeDetailRevision,epoch:employeeInfoReadEpoch,resignDate:currentEmpResignDate || null,
         filePath:document.getElementById('hiddenContractUrl').value};
     context.isOwned = () => !!context.owner && !!context.empId && context.owner === getHrSettingsOwner()
         && context.actor === String(hrAuthorizedUserId || '') && context.coopId === String(myInfo?.coop_id || '');
-    context.isCurrent = () => context.isOwned() && context.empId === String(currentEmpId || '')
+    let departed = false, observer;
+    const frame = window.frameElement, modal = document.getElementById('detailModal');
+    const leave = event => {if (!event?.defaultPrevented) departed = true;};
+    context.isCurrent = () => !departed && context.isOwned() && context.empId === String(currentEmpId || '')
         && context.revision === employeeDetailRevision && context.epoch === employeeInfoReadEpoch
         && !window.frameElement?.hidden && document.getElementById('detailModal').classList.contains('show');
+    context.release = () => {observer?.disconnect(); window.removeEventListener('pagehide',leave); modal.removeEventListener('hide.bs.modal',leave);};
+    if (track) {
+        if (frame) {
+            observer = new MutationObserver(records => {
+                if (frame.hidden || records.some(record => record.oldValue === null)) departed = true;
+            });
+            observer.observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+        }
+        window.addEventListener('pagehide',leave); modal.addEventListener('hide.bs.modal',leave);
+    }
     return context;
 }
 async function verifyEmployeeDocumentAccess(context) {
@@ -7038,9 +7051,10 @@ function runEmployeeDocumentOperation(handler, kind, context, task) {
     const previous = operations.get(key);
     if (previous) {
         if (context.isCurrent()) showAlert(employeeDocumentOperationMessage(previous));
+        context.release();
         return previous.promise || Promise.resolve(false);
     }
-    if (isEmployeeDetailSaving() || !context.isCurrent()) return Promise.resolve(false);
+    if (isEmployeeDetailSaving() || !context.isCurrent()) {context.release(); return Promise.resolve(false);}
     const entry = {kind,context,state:'pending',dispatched:false,active:true};
     operations.set(key,entry); handler._inFlight = true;
     // Stable buttons only: never rebuild inputs, checkpoints, files or cursor state.
@@ -7069,6 +7083,7 @@ function runEmployeeDocumentOperation(handler, kind, context, task) {
         return false;
     }).finally(() => {
         clearTimeout(timer); entry.active = false; handler._inFlight = false;
+        context.release();
         if (entry.state === 'cancelled') operations.delete(key);
         controls.forEach(({element,disabled}) => {if (element.isConnected) element.disabled = disabled;});
         syncEmployeeLeaveApplyState();
@@ -7083,19 +7098,20 @@ function runEmployeeDocumentOperation(handler, kind, context, task) {
 }
 
 async function reqDeletePermanent() {
-    const context = captureEmployeeDocumentContext();
-    if (!context.isCurrent() || isEmployeeDetailSaving() || !context.resignDate) return;
+    const context = captureEmployeeDocumentContext({track:true});
+    if (!context.isCurrent() || isEmployeeDetailSaving() || !context.resignDate) {context.release(); return;}
     const prior = reqDeletePermanent.operations?.get(context.owner + '|' + context.empId);
-    if (prior) return showAlert(employeeDocumentOperationMessage(prior));
-    if (hasUnsavedEmployeeDetail()) return showAlert('작성 중인 내용을 저장하거나 버린 뒤 삭제해 주세요.');
-    if (reqDeletePermanent.confirming?.isCurrent()) return;
+    if (prior) {context.release(); return showAlert(employeeDocumentOperationMessage(prior));}
+    if (hasUnsavedEmployeeDetail()) {context.release(); return showAlert('작성 중인 내용을 저장하거나 버린 뒤 삭제해 주세요.');}
+    if (reqDeletePermanent.confirming?.isCurrent()) {context.release(); return;}
+    reqDeletePermanent.confirming?.release();
     reqDeletePermanent.confirming = context;
     const confirmation = document.getElementById('confirmModal');
     confirmation.addEventListener('hidden.bs.modal', () => {
-        if (reqDeletePermanent.confirming === context) reqDeletePermanent.confirming = null;
+        if (reqDeletePermanent.confirming === context) {reqDeletePermanent.confirming = null; context.release();}
     }, {once:true});
     showConfirm('⚠️ 영구 삭제 경고', `${context.empName} 데이터를 모두 삭제하시겠습니까?`, () => {
-        if (reqDeletePermanent.confirming !== context || !context.isCurrent()) return false;
+        if (reqDeletePermanent.confirming !== context || !context.isCurrent()) {context.release(); return false;}
         reqDeletePermanent.confirming = null;
         return runEmployeeDocumentOperation(reqDeletePermanent,'delete',context,async entry => {
             const current = () => entry.active && context.isCurrent();
@@ -8837,11 +8853,11 @@ async function reqIssueCert() {
             isCurrent:()=>empId===currentEmpId&&revision===employeeDetailRevision&&owner===getHrSettingsOwner()&&readPurpose()===purpose&&document.getElementById('adminCertModal').classList.contains('show'),
             profile:buildAdminEmployeeCompanyPrintProfile,printer:values=>PrintService.printCert(values),onReady:()=>adminCertModal.hide(),alert:showAlert});
     }
-    const context = captureEmployeeDocumentContext();
-    if (!context.isCurrent() || isEmployeeDetailSaving() || !document.getElementById('adminCertModal').classList.contains('show')) return;
+    const context = captureEmployeeDocumentContext({track:true});
+    if (!context.isCurrent() || isEmployeeDetailSaving() || !document.getElementById('adminCertModal').classList.contains('show')) {context.release(); return;}
     const purpose = (document.getElementById('adminCertPurpose').value === '기타'
         ? document.getElementById('adminCertEtc').value : document.getElementById('adminCertPurpose').value).trim();
-    if (!purpose) return showAlert('용도를 입력해주세요.');
+    if (!purpose) {context.release(); return showAlert('용도를 입력해주세요.');}
     // Read view-dependent values before any asynchronous preparation.
     const hireDate = document.getElementById('viewHireDate').innerText;
     const address = document.getElementById('viewAddress').innerText;
