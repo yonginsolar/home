@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.191
+Version: v1.0.192
 Change: 2026-11-08 - Keep retry focus inside employee preparation and statistics after returning to the button.
 -->
 <html>
@@ -14,7 +14,7 @@ Change: 2026-11-08 - Keep retry focus inside employee preparation and statistics
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.191 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.192 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7009,20 +7009,46 @@ function openEmploymentContractManager() {
     requestEmployeeDetailDiscard(() => { ErpWorkspaceResume.navigate(target); });
 }
 
-function captureEmployeeDocumentContext({track = false} = {}) {
+function captureEmployeeDocumentContext({track = false, certificate = false} = {}) {
     const context = {empId:String(currentEmpId || ''),empName:String(currentEmpName || ''),
         coopId:String(myInfo?.coop_id || ''),actor:String(hrAuthorizedUserId || ''),owner:getHrSettingsOwner(),
         revision:employeeDetailRevision,epoch:employeeInfoReadEpoch,resignDate:currentEmpResignDate || null,
         filePath:document.getElementById('hiddenContractUrl').value};
     context.isOwned = () => !!context.owner && !!context.empId && context.owner === getHrSettingsOwner()
         && context.actor === String(hrAuthorizedUserId || '') && context.coopId === String(myInfo?.coop_id || '');
-    let departed = false, observer;
+    let departed = false, observer, automaticCertificateHide = false;
     const frame = window.frameElement, modal = document.getElementById('detailModal');
+    const certificateModal = document.getElementById('adminCertModal');
+    const certificateIntent = openAdminCertModal.intent;
     const leave = event => {if (!event?.defaultPrevented) departed = true;};
+    const cancelCertificate = () => {departed = true; context.onCancel?.();};
+    const certificateHide = event => {if (!automaticCertificateHide && !event.defaultPrevented) cancelCertificate();};
+    const certificateDismiss = event => {
+        const dismiss = event.type === 'click' && event.target.closest?.('[data-bs-dismiss="modal"]');
+        const escape = event.type === 'keydown' && event.key === 'Escape' && !event.isComposing && event.keyCode !== 229;
+        if (event.defaultPrevented || (!dismiss && !escape) || event.target.closest?.('.modal') !== certificateModal) return;
+        cancelCertificate();
+        // Bootstrap ignores hide during opening. Close only this original opening
+        // when shown, never a newer explicit opening or another modal.
+        const finishClose = () => {if (certificateIntent === openAdminCertModal.intent) adminCertModal.hide();};
+        const cleanupClose = () => {certificateModal.removeEventListener('shown.bs.modal',finishClose);};
+        certificateModal.addEventListener('shown.bs.modal',finishClose,{once:true});
+        certificateModal.addEventListener('hidden.bs.modal',cleanupClose,{once:true});
+        finishClose();
+    };
+    context.hideCertificateDialog = () => {
+        automaticCertificateHide = true;
+        try {adminCertModal.hide();} finally {automaticCertificateHide = false;}
+    };
     context.isCurrent = () => !departed && context.isOwned() && context.empId === String(currentEmpId || '')
         && context.revision === employeeDetailRevision && context.epoch === employeeInfoReadEpoch
         && !window.frameElement?.hidden && document.getElementById('detailModal').classList.contains('show');
-    context.release = () => {observer?.disconnect(); window.removeEventListener('pagehide',leave); modal.removeEventListener('hide.bs.modal',leave);};
+    context.release = () => {
+        observer?.disconnect(); window.removeEventListener('pagehide',leave); modal.removeEventListener('hide.bs.modal',leave);
+        certificateModal.removeEventListener('hide.bs.modal',certificateHide);
+        certificateModal.removeEventListener('click',certificateDismiss,true);
+        certificateModal.removeEventListener('keydown',certificateDismiss,true);
+    };
     if (track) {
         if (frame) {
             observer = new MutationObserver(records => {
@@ -7031,6 +7057,11 @@ function captureEmployeeDocumentContext({track = false} = {}) {
             observer.observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
         }
         window.addEventListener('pagehide',leave); modal.addEventListener('hide.bs.modal',leave);
+        if (certificate) {
+            certificateModal.addEventListener('hide.bs.modal',certificateHide);
+            certificateModal.addEventListener('click',certificateDismiss,true);
+            certificateModal.addEventListener('keydown',certificateDismiss,true);
+        }
     }
     return context;
 }
@@ -7043,33 +7074,59 @@ async function verifyEmployeeDocumentAccess(context) {
 }
 function employeeDocumentOperationMessage(entry) {
     if (entry.state === 'done') return entry.kind === 'delete' ? '삭제 결과가 확인되었습니다.' : '증명서 발급 결과가 확인되었습니다.';
+    if (entry.state === 'rejected') return entry.rejection === 'permission'
+        ? '권한이 없어 처리하지 못했습니다. 권한을 확인한 뒤 다시 시도해 주세요.'
+        : entry.rejection === 'limit' ? '요청이 많아 처리되지 않았습니다. 잠시 뒤 다시 시도해 주세요.'
+            : '요청이 거절되어 처리되지 않았습니다. 내용을 확인한 뒤 다시 시도해 주세요.';
     return entry.state === 'pending' ? '처리 중입니다. 잠시 기다려 주세요.'
         : '처리 결과를 확인하지 못했습니다. 중복 처리를 막기 위해 다시 실행하지 않았습니다. 처리 내역을 확인해 주세요.';
+}
+function checkEmployeeDocumentWriteResult(entry, result) {
+    const error = result?.error;
+    if (!error) {
+        if (!result || !Object.hasOwn(result,'data')) throw new Error('EMPLOYEE_DOCUMENT_RESPONSE_UNKNOWN');
+        entry.completedSteps++;
+        return result.data;
+    }
+    const status = Number(result.status ?? error.status ?? error.statusCode);
+    const code = String(error.code || '').toUpperCase();
+    const permission = [401,403].includes(status) || ['42501','PGRST301','PGRST302','PT401','PT403'].includes(code);
+    const limited = status === 429 || code === 'PT429';
+    const credibleStatus = !Number.isFinite(status) || [400,401,403,404,405,409,415,422,429].includes(status);
+    const rejected = credibleStatus && (permission || limited || [400,404,405,409,415,422].includes(status)
+        || ['22023','22P02','23502','23503','23505','P0001','PT400','PT409','PT422'].includes(code));
+    // A later error cannot undo an earlier successful Storage/row step.
+    // Transport errors, timeouts, malformed replies and 5xx remain uncertain.
+    if (entry.completedSteps === 0 && rejected) entry.rejection = permission ? 'permission' : limited ? 'limit' : 'request';
+    throw error;
 }
 function runEmployeeDocumentOperation(handler, kind, context, task) {
     const operations = handler.operations || (handler.operations = new Map()), key = context.owner + '|' + context.empId;
     const previous = operations.get(key);
-    if (previous) {
+    if (previous && previous.state !== 'rejected') {
         if (context.isCurrent()) showAlert(employeeDocumentOperationMessage(previous));
         context.release();
         return previous.promise || Promise.resolve(false);
     }
     if (isEmployeeDetailSaving() || !context.isCurrent()) {context.release(); return Promise.resolve(false);}
-    const entry = {kind,context,state:'pending',dispatched:false,active:true};
+    const entry = {kind,context,state:'pending',dispatched:false,completedSteps:0,active:true};
     operations.set(key,entry); handler._inFlight = true;
     // Stable buttons only: never rebuild inputs, checkpoints, files or cursor state.
     const controls = [...document.querySelectorAll(kind === 'delete' ? '#btnResignArea button' : '#adminCertModal .modal-footer button')]
         .map(element => ({element,disabled:element.disabled}));
     controls.forEach(({element}) => {element.disabled = true;});
     let timer;
+    const cancelled = new Promise((_,reject) => {
+        context.onCancel = () => {entry.active = false; reject(new Error('EMPLOYEE_DOCUMENT_CANCELLED'));};
+    });
     const work = Promise.resolve().then(() => task(entry)).then(result => {
         entry.state = result === true ? 'done' : entry.dispatched ? 'unknown' : 'cancelled';
         return result;
     }).catch(error => {
-        if (entry.state !== 'done') entry.state = entry.dispatched ? 'unknown' : 'cancelled';
+        if (entry.state !== 'done') entry.state = entry.rejection ? 'rejected' : entry.dispatched ? 'unknown' : 'cancelled';
         throw error;
     });
-    entry.promise = Promise.race([work,new Promise((_,reject) => {
+    entry.promise = Promise.race([work,cancelled,new Promise((_,reject) => {
         timer = setTimeout(() => {entry.active = false;reject(new Error('EMPLOYEE_DOCUMENT_TIMEOUT'));},30000);
     })]).then(result => {
         if (result && context.isCurrent()) {
@@ -7077,12 +7134,12 @@ function runEmployeeDocumentOperation(handler, kind, context, task) {
         }
         return result;
     }).catch(() => {
-        if (entry.state !== 'done') entry.state = entry.dispatched ? 'unknown' : 'cancelled';
+        if (entry.state !== 'done') entry.state = entry.rejection ? 'rejected' : entry.dispatched ? 'unknown' : 'cancelled';
         if (context.isCurrent()) showAlert(entry.dispatched ? employeeDocumentOperationMessage(entry)
             : '처리를 시작하지 못했습니다. 현재 직원과 권한을 다시 확인해 주세요.');
         return false;
     }).finally(() => {
-        clearTimeout(timer); entry.active = false; handler._inFlight = false;
+        clearTimeout(timer); entry.active = false; handler._inFlight = false; context.onCancel = null;
         context.release();
         if (entry.state === 'cancelled') operations.delete(key);
         controls.forEach(({element,disabled}) => {if (element.isConnected) element.disabled = disabled;});
@@ -7101,7 +7158,7 @@ async function reqDeletePermanent() {
     const context = captureEmployeeDocumentContext({track:true});
     if (!context.isCurrent() || isEmployeeDetailSaving() || !context.resignDate) {context.release(); return;}
     const prior = reqDeletePermanent.operations?.get(context.owner + '|' + context.empId);
-    if (prior) {context.release(); return showAlert(employeeDocumentOperationMessage(prior));}
+    if (prior && prior.state !== 'rejected') {context.release(); return showAlert(employeeDocumentOperationMessage(prior));}
     if (hasUnsavedEmployeeDetail()) {context.release(); return showAlert('작성 중인 내용을 저장하거나 버린 뒤 삭제해 주세요.');}
     if (reqDeletePermanent.confirming?.isCurrent()) {context.release(); return;}
     reqDeletePermanent.confirming?.release();
@@ -7125,8 +7182,7 @@ async function reqDeletePermanent() {
             const filePath = context.filePath;
             if (filePath && !filePath.startsWith('http')) {
                 entry.dispatched = true;
-                const {error} = await _supabase.storage.from('contracts').remove([filePath]);
-                if (error) throw error;
+                checkEmployeeDocumentWriteResult(entry,await _supabase.storage.from('contracts').remove([filePath]));
             }
             // Once dispatched, finish only this original target under the original actor/coop.
             // Menu/employee changes never substitute mutable currentEmpId into a later step.
@@ -7136,8 +7192,7 @@ async function reqDeletePermanent() {
                 entry.dispatched = true;
                 let query = _supabase.from(tableName).delete().eq('coop_id',context.coopId).eq('emp_id',context.empId);
                 if (tableName === 'ref_employees') query = query.eq('resign_date',context.resignDate).select('emp_id');
-                const {data,error} = await query;
-                if (error) throw error;
+                const data = checkEmployeeDocumentWriteResult(entry,await query);
                 if (tableName === 'ref_employees' && (!Array.isArray(data) || data.length !== 1 || String(data[0].emp_id) !== context.empId)) {
                     throw new Error('EMPLOYEE_DELETE_NOT_CONFIRMED');
                 }
@@ -8835,10 +8890,11 @@ function openAdminCertModal() {
         const context = captureEmployeeDocumentContext();
         if (!context.isCurrent() || isEmployeeDetailSaving()) return;
         const key = context.owner + '|' + context.empId, previous = reqIssueCert.operations?.get(key);
-        if (previous && previous.state !== 'done') return showAlert(employeeDocumentOperationMessage(previous));
-        // A new explicit opening is a new issuance intention only after confirmed completion.
+        if (previous && !['done','rejected'].includes(previous.state)) return showAlert(employeeDocumentOperationMessage(previous));
+        // A new explicit opening follows confirmed completion or first-stage rejection.
         if (previous) reqIssueCert.operations.delete(key);
         document.getElementById('adminCertPurpose').value = '관공서 제출용';
+        openAdminCertModal.intent = (openAdminCertModal.intent || 0) + 1;
     }
     toggleAdminEtc(); adminCertModal.show();
 }
@@ -8853,7 +8909,7 @@ async function reqIssueCert() {
             isCurrent:()=>empId===currentEmpId&&revision===employeeDetailRevision&&owner===getHrSettingsOwner()&&readPurpose()===purpose&&document.getElementById('adminCertModal').classList.contains('show'),
             profile:buildAdminEmployeeCompanyPrintProfile,printer:values=>PrintService.printCert(values),onReady:()=>adminCertModal.hide(),alert:showAlert});
     }
-    const context = captureEmployeeDocumentContext({track:true});
+    const context = captureEmployeeDocumentContext({track:true,certificate:true});
     if (!context.isCurrent() || isEmployeeDetailSaving() || !document.getElementById('adminCertModal').classList.contains('show')) {context.release(); return;}
     const purpose = (document.getElementById('adminCertPurpose').value === '기타'
         ? document.getElementById('adminCertEtc').value : document.getElementById('adminCertPurpose').value).trim();
@@ -8868,7 +8924,7 @@ async function reqIssueCert() {
         await verifyEmployeeDocumentAccess(context);
         if (!current()) return false;
         ensureAdminEmployeeCompanyPrintProfile(companyProfile,certType);
-        adminCertModal.hide();
+        context.hideCertificateDialog();
         const {data:birthDate,error:birthError} = await _supabase.rpc('get_emp_birthdate',{p_emp_id:context.empId});
         if (!current()) return false;
         if (birthError) throw birthError;
@@ -8879,10 +8935,9 @@ async function reqIssueCert() {
         await verifyEmployeeDocumentAccess(context);
         if (!current()) return false;
         entry.dispatched = true;
-        const {data:newCert,error} = await _supabase.rpc('issue_certificate',{
+        const newCert = checkEmployeeDocumentWriteResult(entry,await _supabase.rpc('issue_certificate',{
             p_emp_id:context.empId,p_emp_name:context.empName,p_purpose:purpose,p_type:certType
-        });
-        if (error) throw error;
+        }));
         if (!newCert?.cert_num || String(newCert.emp_id) !== context.empId
             || (newCert.coop_id != null && String(newCert.coop_id) !== context.coopId)) throw new Error('CERTIFICATE_NOT_CONFIRMED');
         // A confirmed late issuance stays completed, but cannot print over a newer view.
