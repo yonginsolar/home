@@ -1,4 +1,4 @@
-/* Version: 1.0.1 | 2026-11-08. Current-view employee leave report reads only. */
+/* Version: 1.0.2 | 2026-11-08. Current-view employee leave report reads only. */
 (function (root) {
   'use strict';
   let view = null, active = null, sequence = 0, closing = false;
@@ -22,6 +22,47 @@
         modal._config.focus = false;
       }
     } else if (view.root.classList.contains('show')) view.modal().hide();
+  }
+  function currentParent(returnTo) {
+    if (!returnTo || root.frameElement?.hidden || !same(returnTo.context, returnTo.options.context())) return null;
+    const parent = returnTo.options.parent?.();
+    if (!parent?.root?.classList.contains('show') || parent.root.hidden
+      || [...parent.root.ownerDocument.querySelectorAll('.modal.show,dialog[open],[role="dialog"][aria-modal="true"]')]
+        .some(el => el !== parent.root)) return null;
+    return parent;
+  }
+  function parentTab(event) {
+    if (event.key !== 'Tab' || event.defaultPrevented || event.isComposing) return;
+    const parent = currentParent(view?.returnedTo);
+    if (!parent || event.target?.closest?.('.modal,[role="dialog"],dialog[open]') !== parent.root) return;
+    const doc = parent.root.ownerDocument;
+    const items = [...parent.root.querySelectorAll('a[href],button,input,textarea,select,[tabindex],[contenteditable="true"]')]
+      .filter(el => el.tabIndex >= 0 && !el.matches(':disabled') && !el.closest('[inert]')
+        && el.getClientRects().length && root.getComputedStyle(el).visibility === 'visible')
+      .sort((a, b) => (a.tabIndex || Infinity) - (b.tabIndex || Infinity));
+    const first = items[0], last = items.at(-1), activeElement = doc.activeElement;
+    const target = event.shiftKey && (activeElement === first || activeElement === parent.root) ? last
+      : !event.shiftKey && activeElement === last ? first : !first ? parent.root : null;
+    // Native Tab can leave an iframe before Bootstrap's document focusin fires.
+    if (target) { event.preventDefault(); target.focus({preventScroll:true}); }
+  }
+  function restoreParentKeyboard(returnTo) {
+    const parent = currentParent(returnTo);
+    if (!parent || !returnTo.options.isCurrent(returnTo.context)) return;
+    view.returnedTo = returnTo;
+    if (view.keyboardParent !== parent.root) {
+      view.keyboardParent?.removeEventListener('keydown', parentTab);
+      view.keyboardParent = parent.root;
+      parent.root.addEventListener('keydown', parentTab);
+    }
+    const trap = parent.modal?._focustrap;
+    if (!trap?._config || typeof trap.activate !== 'function' || typeof trap.deactivate !== 'function') return;
+    // Pinned Bootstrap 5.3 shares document trap listeners: child teardown removes
+    // the parent's listeners but leaves its active flag. Rebind without focus().
+    const autofocus = trap._config.autofocus;
+    trap.deactivate();
+    try { trap._config.autofocus = false; trap.activate(); }
+    finally { trap._config.autofocus = autofocus; }
   }
   function mount(options) {
     if (view?.root === options.root) return view;
@@ -68,8 +109,10 @@
       if (!event.defaultPrevented) { view.opening = false; closing = true; close(false); }
     });
     options.root.addEventListener('hidden.bs.modal', () => {
+      const returnTo = view.returnTo; view.returnTo = null;
       closing = false; view.opening = false; view.hideRequested = false;
       view.restoreFocus?.(); view.restoreFocus = null;
+      restoreParentKeyboard(returnTo);
     });
     return view;
   }
@@ -107,6 +150,7 @@
     close(false);
     const read = {...context, options, retrying, generation:sequence, controller:new AbortController()};
     active = read;
+    ui.returnTo = {options, context};
     read.isCurrent = () => current(read);
     read.signal = read.controller.signal;
     if (!retrying) ui.modal().show();
