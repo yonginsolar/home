@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: v1.3.9 | 2026-11-08 — Scope interactive reads and retain verified history on retry. */
+/* Version: v1.3.10 | 2026-11-08 — Verify detail against current history and bound self-history reads. */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -57,21 +57,30 @@ const contractCompanyKeys = ['company_name','orgName','chairman_name','ceoName',
 const contractDetailReads = new Map();
 let contractHistoryRead = null;
 let contractReadVisit = 0;
+let contractPreviewRead = null;
 
 function contractReadScope() {
   return JSON.stringify([state.user?.id, state.user?.coop_id, state.employee?.emp_id,
     state.admin, state.forceSelf, Array.from(state.permissions).sort()]);
 }
 
+function isContractHistoryReady(id) {
+  return state.contractsLoaded && !state.contractsLoading && !state.contractLoadError
+    && state.contractsScope === contractReadScope()
+    && (!id || state.contracts.some(contract => contract.id === id));
+}
+
 function contractReadOwner() {
   const revision = ++state.detailRevision;
+  const historyRevision = state.contractLoadRevision;
   const scope = contractReadScope();
-  const readKey = `${scope}:${contractReadVisit}`;
+  const readKey = `${scope}:${contractReadVisit}:${historyRevision}`;
   const employeeId = state.employee?.emp_id;
   const coopId = state.user?.coop_id;
   const draft = contractEditorSnapshot();
   const editing = state.editing;
   return { employeeId, coopId, scope, readKey, isCurrent: () => revision === state.detailRevision
+    && historyRevision === state.contractLoadRevision && isContractHistoryReady()
     && scope === contractReadScope() && !window.frameElement?.hidden
     && employeeId === state.employee?.emp_id && coopId === state.user?.coop_id
     && editing === state.editing && draft === contractEditorSnapshot() };
@@ -85,6 +94,7 @@ function coalesceContractRead(key, read) {
 }
 
 async function readContractDetail(id, owner) {
+  if (!owner.isCurrent()) return null;
   return coalesceContractRead(`contract:${owner.readKey}:${id}`, async () => {
     if (state.admin && !state.forceSelf) {
       return readHrContract('detail', {p_emp_id:owner.employeeId,p_contract_id:id});
@@ -97,6 +107,7 @@ async function readContractDetail(id, owner) {
 }
 
 async function loadContractDefaults(owner) {
+  if (!owner.isCurrent()) return false;
   if (state.admin && !state.forceSelf) {
     const data = await coalesceContractRead(`defaults:${owner.readKey}`,
       () => readHrContract('defaults', {p_emp_id:owner.employeeId}));
@@ -268,6 +279,38 @@ function updateContractReadActions() {
   document.querySelectorAll('[data-new-kind], #openUploadButton').forEach((button) => {
     button.disabled = state.busy || !state.employee || !state.contractsLoaded;
   });
+  updateContractPreviewReadActions();
+}
+
+function contractHistoryStamp(contract) {
+  const updated = contract?.updated_at;
+  const timestamp = Date.parse(updated);
+  return JSON.stringify([contract?.id, contract?.status, contract?.version_no,
+    contract?.source_type, updated ? Number.isFinite(timestamp) ? timestamp : updated : null]);
+}
+
+function isContractPreviewReady() {
+  return Boolean(contractPreviewRead && contractPreviewRead.scope === contractReadScope()
+    && isContractHistoryReady(contractPreviewRead.id)
+    && contractHistoryStamp(state.contracts.find(contract => contract.id === contractPreviewRead.id)) === contractPreviewRead.stamp);
+}
+
+function updateContractPreviewReadActions() {
+  const notice = document.getElementById('contractPreviewReadStatus');
+  if (!notice || !contractPreviewRead) return;
+  const ready = isContractPreviewReady();
+  notice.hidden = ready;
+  notice.textContent = state.contractsLoading ? '계약 이력을 다시 확인하고 있습니다.'
+    : '계약 이력을 다시 확인한 뒤 문서를 선택해 주세요.';
+  document.querySelectorAll('[data-verified-contract-action]').forEach(button => {
+    if (!ready) {
+      if (button.dataset.contractReadDisabled === undefined) button.dataset.contractReadDisabled = button.disabled && !state.busy ? '1' : '0';
+      button.disabled = true;
+    } else if (!state.busy && button.dataset.contractReadDisabled !== undefined) {
+      button.disabled = button.dataset.contractReadDisabled === '1';
+      delete button.dataset.contractReadDisabled;
+    }
+  });
 }
 
 function normalizeError(error) {
@@ -405,12 +448,7 @@ function loadContracts() {
     for (let offset = 0; ; offset += 500) {
     const { data, error } = state.admin && !state.forceSelf
       ? {data:await readHrContract('history', {p_emp_id:employeeId,p_offset:offset}),error:null}
-      : await db.from('erp_employment_contracts')
-      .select(contractHistoryColumns)
-      .eq('coop_id', coopId)
-      .eq('emp_id', employeeId)
-      .order('version_no', { ascending: false }).order('id', { ascending: false })
-      .range(offset, offset + 499);
+      : await readSelfContractHistoryPage(coopId, employeeId, offset);
     if (!isCurrent()) return false;
     if (error) throw error;
     rows.push(...(data || []));
@@ -433,6 +471,23 @@ function loadContracts() {
   }
   })();
   return flight.promise;
+}
+
+async function readSelfContractHistoryPage(coopId, employeeId, offset) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    const deadline = new Promise((_, reject) => { timer = setTimeout(() => {
+      reject(new Error('계약 이력 조회가 지연되고 있습니다. 다시 확인해 주세요.'));
+      controller.abort();
+    }, 15000); });
+    return await Promise.race([
+      db.from('erp_employment_contracts').select(contractHistoryColumns)
+        .eq('coop_id', coopId).eq('emp_id', employeeId)
+        .order('version_no', {ascending:false}).order('id', {ascending:false})
+        .range(offset, offset + 499).abortSignal(controller.signal), deadline
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 function contractReadDenied(error) {
@@ -1169,12 +1224,13 @@ async function saveDraft(submitAfter, button) {
 }
 
 function openContract(id, options = {}) {
-  if (!state.contractsLoaded || (state.busy && !options.afterSave)) return;
+  if (!isContractHistoryReady(id) || (state.busy && !options.afterSave)) return;
   if (options.afterSave) { resetContractEditTracking(); showContract(id); return; }
   requestContractTransition(() => { resetContractEditTracking(); showContract(id); });
 }
 
 async function showContract(id) {
+  if (!isContractHistoryReady(id)) return;
   const owner = contractReadOwner();
   try {
   if (!await loadContractDefaults(owner)) return;
@@ -1198,6 +1254,7 @@ async function showContract(id) {
 }
 
 function renderPreview(contract, unsaved) {
+  contractPreviewRead = unsaved ? null : {scope:contractReadScope(),id:contract.id,stamp:contractHistoryStamp(contract)};
   const paper = contract.source_type === 'upload'
     ? `<div class="section-card"><h3 class="h5 fw-bold">외부 작성 계약서</h3><p>${escapeHtml(contract.original_file_name || contract.title)}</p><p>등록일 ${escapeHtml(formatDate(contract.created_at))} · 적용일 ${escapeHtml(formatDate(contract.effective_date))}</p>${contract.terms?.work_time_basis ? `<h4 class="h6 fw-bold mt-4">등록한 근로조건</h4><dl>${Array.from(buildTermSectionSummaries(contract.terms)).map(([label, value]) => `<dt class="mt-3">${escapeHtml(label)}</dt><dd class="mb-0" style="white-space:pre-wrap;word-break:keep-all">${escapeHtml(value)}</dd>`).join('')}</dl>` : ''}</div>`
     : renderContractDocument(contract);
@@ -1216,7 +1273,17 @@ function renderPreview(contract, unsaved) {
         ${contract.source_type !== 'upload' ? '<button type="button" class="btn btn-dark" id="printContractButton">인쇄</button>' : ''}
       </div>
     </div>
+    ${!unsaved ? '<div id="contractPreviewReadStatus" class="alert alert-warning py-2 no-print" role="status" hidden></div>' : ''}
     ${paper}`;
+  if (!unsaved) {
+    workspace.querySelectorAll('.contract-actions button').forEach(button => {
+      button.setAttribute('data-verified-contract-action', '');
+      button.addEventListener('click', event => {
+        if (!isContractPreviewReady() || state.busy) { event.preventDefault(); event.stopImmediatePropagation(); }
+      });
+    });
+    updateContractPreviewReadActions();
+  }
   document.getElementById('returnEditorButton')?.addEventListener('click', () => renderEditor(true));
   document.getElementById('openFileButton')?.addEventListener('click', () => openStoredFile(contract.file_path));
   document.getElementById('employerSignButton')?.addEventListener('click', (event) => signContract(contract.id, 'employer', event.currentTarget));
