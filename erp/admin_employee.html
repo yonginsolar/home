@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.189
+Version: v1.0.190
 Change: 2026-11-08 - Keep retry focus inside employee preparation and statistics after returning to the button.
 -->
 <html>
@@ -14,7 +14,7 @@ Change: 2026-11-08 - Keep retry focus inside employee preparation and statistics
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.189 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.190 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1125,6 +1125,8 @@ function hasUnsavedEmployeeDetailTab(tabId) {
 function isEmployeeDetailSaving() {
     return employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight
         || employeeNotificationSaveInFlight || employeeLeaveSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight
+        || (typeof reqDeletePermanent !== 'undefined' && reqDeletePermanent._inFlight)
+        || (typeof reqIssueCert !== 'undefined' && reqIssueCert._inFlight)
         || (typeof payrollImportBatchController !== 'undefined' && payrollImportBatchController?.busy());
 }
 function syncEmployeeLeaveApplyState() {
@@ -7007,35 +7009,130 @@ function openEmploymentContractManager() {
     requestEmployeeDetailDiscard(() => { ErpWorkspaceResume.navigate(target); });
 }
 
-async function reqDeletePermanent() {
-    showConfirm("⚠️ 영구 삭제 경고", `${currentEmpName} 데이터를 모두 삭제하시겠습니까?`, async function() {
-        if (reqDeletePermanent._inFlight) return;
-        reqDeletePermanent._inFlight = true;
-        try {
-            detailModal.hide();
-            const filePath = document.getElementById("hiddenContractUrl").value;
-            if (filePath && !filePath.startsWith('http')) {
-                const { error: fileRemoveError } = await _supabase.storage.from('contracts').remove([filePath]);
-                if (fileRemoveError) console.warn('계약서 파일 삭제 실패:', fileRemoveError.message);
-            }
-
-            const deletions = ['hr_salary', 'hr_leave_adj', 'hr_salary_contracts', 'log_cert', 'ref_employees'];
-            for (const tableName of deletions) {
-                const { error } = await scopeEmployeeTenant(_supabase.from(tableName).delete()).eq('emp_id', currentEmpId);
-                if (error) throw new Error(`${tableName} 삭제 실패: ${error.message}`);
-            }
-
-            await logHrAudit('hr.employee.delete_permanent', `${currentEmpName} 영구 삭제`, {
-                emp_id: currentEmpId,
-                contract_removed: !!filePath
-            });
-            showAlert("삭제되었습니다.");
-            loadList();
-        } catch (e) {
-            showAlert("삭제 실패: " + e.message);
-        } finally {
-            reqDeletePermanent._inFlight = false;
+function captureEmployeeDocumentContext() {
+    const context = {empId:String(currentEmpId || ''),empName:String(currentEmpName || ''),
+        coopId:String(myInfo?.coop_id || ''),actor:String(hrAuthorizedUserId || ''),owner:getHrSettingsOwner(),
+        revision:employeeDetailRevision,epoch:employeeInfoReadEpoch,resignDate:currentEmpResignDate || null,
+        filePath:document.getElementById('hiddenContractUrl').value};
+    context.isOwned = () => !!context.owner && !!context.empId && context.owner === getHrSettingsOwner()
+        && context.actor === String(hrAuthorizedUserId || '') && context.coopId === String(myInfo?.coop_id || '');
+    context.isCurrent = () => context.isOwned() && context.empId === String(currentEmpId || '')
+        && context.revision === employeeDetailRevision && context.epoch === employeeInfoReadEpoch
+        && !window.frameElement?.hidden && document.getElementById('detailModal').classList.contains('show');
+    return context;
+}
+async function verifyEmployeeDocumentAccess(context) {
+    if (!context.isOwned()) throw new Error('ERP_TASK_ACCESS_DENIED');
+    await verifyEmployeeDetailTabAccess(context.owner);
+    if (!context.isOwned()) throw new Error('ERP_TASK_ACCESS_DENIED');
+    const {data,error} = await _supabase.rpc('is_erp_privileged');
+    if (error || data !== true || !context.isOwned()) throw new Error('ERP_TASK_ACCESS_DENIED');
+}
+function employeeDocumentOperationMessage(entry) {
+    if (entry.state === 'done') return entry.kind === 'delete' ? '삭제 결과가 확인되었습니다.' : '증명서 발급 결과가 확인되었습니다.';
+    return entry.state === 'pending' ? '처리 중입니다. 잠시 기다려 주세요.'
+        : '처리 결과를 확인하지 못했습니다. 중복 처리를 막기 위해 다시 실행하지 않았습니다. 처리 내역을 확인해 주세요.';
+}
+function runEmployeeDocumentOperation(handler, kind, context, task) {
+    const operations = handler.operations || (handler.operations = new Map()), key = context.owner + '|' + context.empId;
+    const previous = operations.get(key);
+    if (previous) {
+        if (context.isCurrent()) showAlert(employeeDocumentOperationMessage(previous));
+        return previous.promise || Promise.resolve(false);
+    }
+    if (isEmployeeDetailSaving() || !context.isCurrent()) return Promise.resolve(false);
+    const entry = {kind,context,state:'pending',dispatched:false,active:true};
+    operations.set(key,entry); handler._inFlight = true;
+    // Stable buttons only: never rebuild inputs, checkpoints, files or cursor state.
+    const controls = [...document.querySelectorAll(kind === 'delete' ? '#btnResignArea button' : '#adminCertModal .modal-footer button')]
+        .map(element => ({element,disabled:element.disabled}));
+    controls.forEach(({element}) => {element.disabled = true;});
+    let timer;
+    const work = Promise.resolve().then(() => task(entry)).then(result => {
+        entry.state = result === true ? 'done' : entry.dispatched ? 'unknown' : 'cancelled';
+        return result;
+    }).catch(error => {
+        if (entry.state !== 'done') entry.state = entry.dispatched ? 'unknown' : 'cancelled';
+        throw error;
+    });
+    entry.promise = Promise.race([work,new Promise((_,reject) => {
+        timer = setTimeout(() => {entry.active = false;reject(new Error('EMPLOYEE_DOCUMENT_TIMEOUT'));},30000);
+    })]).then(result => {
+        if (result && context.isCurrent()) {
+            if (kind === 'delete') showAlert('삭제되었습니다.');
         }
+        return result;
+    }).catch(() => {
+        if (entry.state !== 'done') entry.state = entry.dispatched ? 'unknown' : 'cancelled';
+        if (context.isCurrent()) showAlert(entry.dispatched ? employeeDocumentOperationMessage(entry)
+            : '처리를 시작하지 못했습니다. 현재 직원과 권한을 다시 확인해 주세요.');
+        return false;
+    }).finally(() => {
+        clearTimeout(timer); entry.active = false; handler._inFlight = false;
+        if (entry.state === 'cancelled') operations.delete(key);
+        controls.forEach(({element,disabled}) => {if (element.isConnected) element.disabled = disabled;});
+        syncEmployeeLeaveApplyState();
+        if (kind === 'delete' && entry.state === 'done' && context.isCurrent()) {
+            if (!hasUnsavedEmployeeDetail()) detailModal.hide();
+            void loadList();
+        }
+    });
+    // A late result may settle this original operation, but never revive its old UI.
+    void work.catch(() => {});
+    return entry.promise;
+}
+
+async function reqDeletePermanent() {
+    const context = captureEmployeeDocumentContext();
+    if (!context.isCurrent() || isEmployeeDetailSaving() || !context.resignDate) return;
+    const prior = reqDeletePermanent.operations?.get(context.owner + '|' + context.empId);
+    if (prior) return showAlert(employeeDocumentOperationMessage(prior));
+    if (hasUnsavedEmployeeDetail()) return showAlert('작성 중인 내용을 저장하거나 버린 뒤 삭제해 주세요.');
+    if (reqDeletePermanent.confirming?.isCurrent()) return;
+    reqDeletePermanent.confirming = context;
+    const confirmation = document.getElementById('confirmModal');
+    confirmation.addEventListener('hidden.bs.modal', () => {
+        if (reqDeletePermanent.confirming === context) reqDeletePermanent.confirming = null;
+    }, {once:true});
+    showConfirm('⚠️ 영구 삭제 경고', `${context.empName} 데이터를 모두 삭제하시겠습니까?`, () => {
+        if (reqDeletePermanent.confirming !== context || !context.isCurrent()) return false;
+        reqDeletePermanent.confirming = null;
+        return runEmployeeDocumentOperation(reqDeletePermanent,'delete',context,async entry => {
+            const current = () => entry.active && context.isCurrent();
+            await verifyEmployeeDocumentAccess(context);
+            if (!current() || hasUnsavedEmployeeDetail()) return false;
+            const {data:employee,error:readError} = await _supabase.from('ref_employees')
+                .select('emp_id,resign_date,contract_url').eq('coop_id',context.coopId).eq('emp_id',context.empId).single();
+            if (!current()) return false;
+            if (readError || !employee || employee.resign_date !== context.resignDate
+                || String(employee.contract_url || '') !== context.filePath) throw new Error('EMPLOYEE_CHANGED');
+            const filePath = context.filePath;
+            if (filePath && !filePath.startsWith('http')) {
+                entry.dispatched = true;
+                const {error} = await _supabase.storage.from('contracts').remove([filePath]);
+                if (error) throw error;
+            }
+            // Once dispatched, finish only this original target under the original actor/coop.
+            // Menu/employee changes never substitute mutable currentEmpId into a later step.
+            for (const tableName of ['hr_salary','hr_leave_adj','hr_salary_contracts','log_cert','ref_employees']) {
+                await verifyEmployeeDocumentAccess(context);
+                if (!context.isOwned() || (!entry.dispatched && !current())) return false;
+                entry.dispatched = true;
+                let query = _supabase.from(tableName).delete().eq('coop_id',context.coopId).eq('emp_id',context.empId);
+                if (tableName === 'ref_employees') query = query.eq('resign_date',context.resignDate).select('emp_id');
+                const {data,error} = await query;
+                if (error) throw error;
+                if (tableName === 'ref_employees' && (!Array.isArray(data) || data.length !== 1 || String(data[0].emp_id) !== context.empId)) {
+                    throw new Error('EMPLOYEE_DELETE_NOT_CONFIRMED');
+                }
+            }
+            try {
+                await logHrAudit('hr.employee.delete_permanent', `${context.empName} 영구 삭제`, {
+                    emp_id:context.empId,contract_removed:!!filePath
+                });
+            } catch (_) { /* Confirmed deletion is not retried because its audit reply failed. */ }
+            return true;
+        });
     });
 }
 function renderEmployeeResignationActions() {
@@ -8717,10 +8814,20 @@ async function saveExtraLeave(){
  finally{employeeLeaveSaveInFlight=false;syncEmployeeLeaveApplyState();}
 }
 
-function openAdminCertModal() { if(!window.ExpoRuntimeBridge)document.getElementById("adminCertPurpose").value = "관공서 제출용"; toggleAdminEtc(); adminCertModal.show(); }
+function openAdminCertModal() {
+    if (!window.ExpoRuntimeBridge) {
+        const context = captureEmployeeDocumentContext();
+        if (!context.isCurrent() || isEmployeeDetailSaving()) return;
+        const key = context.owner + '|' + context.empId, previous = reqIssueCert.operations?.get(key);
+        if (previous && previous.state !== 'done') return showAlert(employeeDocumentOperationMessage(previous));
+        // A new explicit opening is a new issuance intention only after confirmed completion.
+        if (previous) reqIssueCert.operations.delete(key);
+        document.getElementById('adminCertPurpose').value = '관공서 제출용';
+    }
+    toggleAdminEtc(); adminCertModal.show();
+}
 function toggleAdminEtc() { const v = document.getElementById("adminCertPurpose").value; const e = document.getElementById("adminCertEtc"); if(v==='기타') { e.style.display='block'; e.focus(); } else e.style.display='none'; }
 
-// [최종 수정] 관리자용 재직증명서 발급 (DB 함수 사용으로 중복 방지 및 로직 통일)
 async function reqIssueCert() {
     if(window.ExpoRuntimeBridge){
         const empId=currentEmpId,revision=employeeDetailRevision,owner=getHrSettingsOwner();
@@ -8730,77 +8837,58 @@ async function reqIssueCert() {
             isCurrent:()=>empId===currentEmpId&&revision===employeeDetailRevision&&owner===getHrSettingsOwner()&&readPurpose()===purpose&&document.getElementById('adminCertModal').classList.contains('show'),
             profile:buildAdminEmployeeCompanyPrintProfile,printer:values=>PrintService.printCert(values),onReady:()=>adminCertModal.hide(),alert:showAlert});
     }
-    // 1. 용도 확인
-    let purpose = document.getElementById("adminCertPurpose").value;
-    if(purpose === '기타') purpose = document.getElementById("adminCertEtc").value;
-    if(!purpose) return showAlert("용도를 입력해주세요.");
-    adminCertModal.hide();
-
-    // 2. 생년월일 조회 (기존 로직 유지)
-    const { data: birthDate } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: currentEmpId });
-    const birthStr = birthDate || "미등록";
-    const certType = currentEmpResignDate ? '경력증명서' : '재직증명서';
-    const certStatement = currentEmpResignDate ? '위와 같이 근무하였음을 증명합니다.' : '위와 같이 재직하고 있음을 증명합니다.';
-
-    // [핵심 변경] 클라이언트 카운팅 삭제 -> DB RPC 함수 호출로 대체
-    // 관리자가 발급하더라도 DB가 순번을 매겨야 안전합니다.
-    const { data: newCert, error } = await _supabase.rpc('issue_certificate', {
-        p_emp_id: currentEmpId,
-        p_emp_name: currentEmpName,
-        p_purpose: purpose,
-        p_type: certType
+    const context = captureEmployeeDocumentContext();
+    if (!context.isCurrent() || isEmployeeDetailSaving() || !document.getElementById('adminCertModal').classList.contains('show')) return;
+    const purpose = (document.getElementById('adminCertPurpose').value === '기타'
+        ? document.getElementById('adminCertEtc').value : document.getElementById('adminCertPurpose').value).trim();
+    if (!purpose) return showAlert('용도를 입력해주세요.');
+    // Read view-dependent values before any asynchronous preparation.
+    const hireDate = document.getElementById('viewHireDate').innerText;
+    const address = document.getElementById('viewAddress').innerText;
+    const companyProfile = {...buildAdminEmployeeCompanyPrintProfile()};
+    const certType = context.resignDate ? '경력증명서' : '재직증명서';
+    return runEmployeeDocumentOperation(reqIssueCert,'certificate',context,async entry => {
+        const current = () => entry.active && context.isCurrent();
+        await verifyEmployeeDocumentAccess(context);
+        if (!current()) return false;
+        ensureAdminEmployeeCompanyPrintProfile(companyProfile,certType);
+        adminCertModal.hide();
+        const {data:birthDate,error:birthError} = await _supabase.rpc('get_emp_birthdate',{p_emp_id:context.empId});
+        if (!current()) return false;
+        if (birthError) throw birthError;
+        const {data:employee,error:employeeError} = await _supabase.from('ref_employees')
+            .select('department,position').eq('coop_id',context.coopId).eq('emp_id',context.empId).single();
+        if (!current()) return false;
+        if (employeeError || !employee) throw new Error('EMPLOYEE_READ_FAILED');
+        await verifyEmployeeDocumentAccess(context);
+        if (!current()) return false;
+        entry.dispatched = true;
+        const {data:newCert,error} = await _supabase.rpc('issue_certificate',{
+            p_emp_id:context.empId,p_emp_name:context.empName,p_purpose:purpose,p_type:certType
+        });
+        if (error) throw error;
+        if (!newCert?.cert_num || String(newCert.emp_id) !== context.empId
+            || (newCert.coop_id != null && String(newCert.coop_id) !== context.coopId)) throw new Error('CERTIFICATE_NOT_CONFIRMED');
+        // A confirmed late issuance stays completed, but cannot print over a newer view.
+        if (!current()) return true;
+        let tenure = '-';
+        if (hireDate && hireDate !== '-') {
+            const diff = (context.resignDate ? new Date(context.resignDate) : new Date()) - new Date(hireDate);
+            const years = Math.floor(diff / (1000*60*60*24*365));
+            const months = Math.floor((diff % (1000*60*60*24*365)) / (1000*60*60*24*30));
+            tenure = `${hireDate}~${context.resignDate || '현재'} (${years}년 ${months}개월)`;
+        }
+        entry.state = 'done';
+        PrintService.printCert({
+            docNum:newCert.cert_num,name:context.empName,birth:birthDate || '미등록',
+            dept:employee.department || '',pos:employee.position || '',address,tenure,purpose,
+            today:new Date().toLocaleDateString('ko-KR',{timeZone:KST_TZ_ADMIN_EMP,year:'numeric',month:'long',day:'numeric'}),
+            certTitle:certType,employmentStatement:context.resignDate ? '위와 같이 근무하였음을 증명합니다.' : '위와 같이 재직하고 있음을 증명합니다.',
+            chairman:companyProfile.chairmanName,compName:companyProfile.companyName,compAddr:companyProfile.address,
+            contact:companyProfile.contact,logo:companyProfile.logoUrl,seal:companyProfile.sealUrl,siteUrl:''
+        });
+        return true;
     });
-
-    if (error) {
-        console.error(error);
-        return showAlert("발급 중 오류 발생: " + error.message);
-    }
-
-    // 3. 재직 기간 계산 (UI 로직)
-    const hireDate = document.getElementById("viewHireDate").innerText;
-    let tenureStr = "-";
-    if(hireDate && hireDate !== '-') {
-        const join = new Date(hireDate);
-        const endBase = currentEmpResignDate ? new Date(currentEmpResignDate) : new Date();
-        const diff = endBase - join;
-        const y = Math.floor(diff / (1000*60*60*24*365));
-        const m = Math.floor((diff % (1000*60*60*24*365)) / (1000*60*60*24*30));
-        tenureStr = `${hireDate}~${currentEmpResignDate || '현재'} (${y}년 ${m}개월)`;
-    }
-
-    // 4. 회사 정보 준비
-    const companyProfile = buildAdminEmployeeCompanyPrintProfile();
-    ensureAdminEmployeeCompanyPrintProfile(companyProfile, certType);
-
-    // 부서/직급 정보 확인
-    let dept="", pos="";
-    const { data: empData } = await scopeEmployeeTenant(_supabase.from('ref_employees').select('department, position')).eq('emp_id', currentEmpId).single();
-    if(empData) { dept = empData.department; pos = empData.position; }
-
-    // 5. 인쇄 데이터 패키징 (DB에서 받은 안전한 cert_num 사용)
-    const certData = {
-        docNum: newCert.cert_num, // DB가 생성한 번호
-        name: currentEmpName,
-        birth: birthStr,
-        dept: dept,
-        pos: pos,
-        address: document.getElementById("viewAddress").innerText,
-        tenure: tenureStr,
-        purpose: purpose,
-        today: new Date().toLocaleDateString('ko-KR', { timeZone: KST_TZ_ADMIN_EMP, year: 'numeric', month: 'long', day: 'numeric' }),
-        certTitle: certType,
-        employmentStatement: certStatement,
-        chairman: companyProfile.chairmanName,
-        compName: companyProfile.companyName,
-        compAddr: companyProfile.address,
-        contact: companyProfile.contact,
-        logo: companyProfile.logoUrl,
-        seal: companyProfile.sealUrl,
-        siteUrl: ''
-    };
-
-    // 6. 인쇄 서비스 호출
-    PrintService.printCert(certData);
 }
 
 async function printSalaryAdmin() {
