@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: 1.0.2 | 2026-11-08. Retain interrupted reads across repeated menu suspension. */
+/* Version: 1.0.3 | 2026-11-08. Recover current-view designation reads without changing authority. */
 (() => {
   'use strict';
 
@@ -7,12 +7,44 @@
   let selectedEmpId = '';
   let savedValue = false;
   let busy = false;
-  let activeRead=null, resumeRead=null;
+  let activeRead=null, resumeRead=null, failedRead=null;
   const owner=()=>typeof getHrSettingsOwner==='function'?getHrSettingsOwner():'';
   const revision=()=>typeof employeeDetailRevision==='number'?employeeDetailRevision:0;
   const owned=read=>read.owner===owner()&&read.revision===revision()
     &&read.empId===String(currentEmpId||'')&&read.empId===selectedEmpId
     &&(typeof isHrSettingsContextCurrent!=='function'||isHrSettingsContextCurrent(read.owner));
+
+  function stopRead(read) {
+    if(!read)return;
+    clearTimeout(read.timer);read.controller?.abort();read.cancel?.();
+  }
+
+  function clearReadNotice(followFocus=false) {
+    const notice=$('sunVillageTotalManagerReadNotice'),retry=$('sunVillageTotalManagerRetry');
+    if(followFocus&&retry&&document.activeElement===retry&&document.hasFocus()&&!window.frameElement?.hidden){
+      const nav=$('sunVillageTotalManagerTabNav');
+      const active=document.querySelector('#empTab .nav-link.active');
+      const target=!nav?.hidden?nav?.querySelector('a'):active?.closest('[hidden]')?document.querySelector('#empTab a[href="#tabInfo"]'):active;
+      target?.focus({preventScroll:true});
+    }
+    if(notice){notice.hidden=true;notice.setAttribute('aria-busy','false');}
+    if(retry){retry.hidden=false;retry.setAttribute('aria-disabled','false');}
+  }
+
+  function paintReadNotice(message, pending=false, retryable=true) {
+    const notice=$('sunVillageTotalManagerReadNotice'),retry=$('sunVillageTotalManagerRetry');
+    if(!notice||!retry)return;
+    $('sunVillageTotalManagerReadMessage').textContent=message;
+    notice.hidden=false;notice.setAttribute('aria-busy',String(pending));
+    if(!retryable&&document.activeElement===retry&&document.hasFocus()&&!window.frameElement?.hidden)notice.focus({preventScroll:true});
+    retry.hidden=!retryable;retry.setAttribute('aria-disabled',String(pending||!retryable));
+  }
+
+  function retryRead() {
+    const read=failedRead;
+    if(!read||!read.retryable||activeRead||busy||!owned(read)||window.frameElement?.hidden)return;
+    return load(read.empId,{retry:true});
+  }
 
   function messageFor(error) {
     const code = String(error?.message || error || '');
@@ -29,10 +61,13 @@
     button.disabled = busy || checkbox.disabled || checkbox.checked === savedValue;
   }
 
-  async function load(empId) {
+  async function load(empId, options={}) {
+    const previous=activeRead;
     selectedEmpId = String(empId || '').trim();
-    const read={empId:selectedEmpId,owner:owner(),revision:revision()};
-    activeRead=read;resumeRead=null;
+    const read={empId:selectedEmpId,owner:owner(),revision:revision(),controller:new AbortController()};
+    activeRead=read;resumeRead=null;failedRead=null;stopRead(previous);
+    if(options.retry)paintReadNotice('마을 관리자 지정 상태를 다시 확인하는 중입니다.',true);
+    else clearReadNotice();
     const current=()=>activeRead===read&&owned(read)&&!window.frameElement?.hidden;
     const nav = $('sunVillageTotalManagerTabNav');
     const status = $('sunVillageTotalManagerStatus');
@@ -48,12 +83,20 @@
     if (window.ExpoRuntimeBridge) {activeRead=null;return;}
     if (!selectedEmpId || typeof _supabase === 'undefined'||!current()) {activeRead=null;return;}
     try {
-      const { data, error } = await _supabase.rpc('sun_village_total_manager_context', {
+      const cancelled=new Promise(resolve=>{read.cancel=()=>resolve(null);});
+      const timeout=new Promise((_,reject)=>{read.timer=setTimeout(()=>{
+        read.controller.abort();reject(new Error('MANAGER_CONTEXT_TIMEOUT'));
+      },15000);});
+      const request = _supabase.rpc('sun_village_total_manager_context', {
         p_emp_id: selectedEmpId
       });
-      if (error) throw error;
+      const response=await Promise.race([typeof request.abortSignal==='function'?request.abortSignal(read.controller.signal):request,timeout,cancelled]);
+      if(!current()||!response)return;
+      const {data,error}=response;
+      if (error) {read.httpStatus=response.status;throw error;}
+      if(!data||typeof data.enabled!=='boolean'||(data.enabled&&typeof data.can_assign!=='boolean'))throw new Error('MANAGER_CONTEXT_UNAVAILABLE');
       if (!current()) return;
-      if (!data?.enabled || !data?.can_assign) return;
+      if (!data?.enabled || !data?.can_assign) {clearReadNotice(options.retry);return;}
       nav.hidden = false;
       savedValue = data.target_assigned === true;
       checkbox.checked = savedValue;
@@ -64,11 +107,17 @@
           ? '이 직원의 ERP 로그인이 연결되면 지정할 수 있습니다.'
           : savedValue ? '현재 전체 관리자로 지정되어 있습니다.' : '현재 전체 관리자로 지정되지 않았습니다.';
       updateSaveState();
+      clearReadNotice(options.retry);
     } catch (error) {
       if (!current()) return;
       console.warn('Sun village manager status unavailable:', String(error?.code || 'unknown'));
       status.textContent = '지정 상태를 확인하지 못했습니다.';
-    } finally { if(activeRead===read)activeRead=null; }
+      const httpStatus=Number(error?.status||read.httpStatus);
+      const denied=String(error?.code||'')==='42501'||httpStatus===401||httpStatus===403;
+      const limited=httpStatus===429;
+      read.retryable=!denied&&!limited;failedRead=read;
+      paintReadNotice(denied?'현재 권한으로 마을 관리자 지정 상태를 확인할 수 없습니다.':limited?'조회 요청이 많아 잠시 제한되었습니다. 잠시 후 직원 상세를 다시 열어 주세요.':'마을 관리자 지정 상태를 확인하지 못했습니다. 다시 확인해 주세요.',false,read.retryable);
+    } finally { clearTimeout(read.timer);if(activeRead===read)activeRead=null; }
   }
 
   async function save() {
@@ -110,12 +159,17 @@
   document.addEventListener('DOMContentLoaded', () => {
     $('sunVillageTotalManagerEnabled')?.addEventListener('change', updateSaveState);
     $('sunVillageTotalManagerSave')?.addEventListener('click', save);
+    $('sunVillageTotalManagerRetry')?.addEventListener('click', retryRead);
   });
   window.SunVillageTotalManagerAdmin = { load,
-    suspend(resume=false){resumeRead=resume?(activeRead||resumeRead):null;activeRead=null;},
+    suspend(resume=false){
+      const read=activeRead;resumeRead=resume?(read||resumeRead):null;activeRead=null;stopRead(read);
+      if(!resume){failedRead=null;clearReadNotice();}
+    },
     resume(){
       const read=resumeRead;
-      if(!read||window.frameElement?.hidden)return;
+      if(window.frameElement?.hidden)return;
+      if(!read){if(failedRead&&!owned(failedRead)){failedRead=null;clearReadNotice();}return;}
       resumeRead=null;
       if(owned(read))return load(read.empId);
     }
