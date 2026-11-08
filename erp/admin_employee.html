@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.192
-Change: 2026-11-08 - Keep retry focus inside employee preparation and statistics after returning to the button.
+Version: v1.0.193
+Change: 2026-11-08 - Keep certificate keyboard navigation inside its current owned dialog.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-08 - Keep retry focus inside employee preparation and statistics
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.192 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.193 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8885,6 +8885,44 @@ async function saveExtraLeave(){
  finally{employeeLeaveSaveInFlight=false;syncEmployeeLeaveApplyState();}
 }
 
+function bindEmployeeCertificateKeyboard(context) {
+    bindEmployeeCertificateKeyboard.dispose?.();
+    const modal = document.getElementById('adminCertModal');
+    const keydown = event => {
+        if (event.key !== 'Tab' || event.defaultPrevented || event.isComposing || event.keyCode === 229
+            || !context.isOwned() || context.empId !== String(currentEmpId || '')
+            || context.revision !== employeeDetailRevision || !isHrSettingsContextCurrent(context.owner)
+            || window.frameElement?.hidden || !document.hasFocus() || modal.hidden
+            || !modal.classList.contains('show') || !modal.getClientRects().length
+            || !document.getElementById('detailModal').classList.contains('show')
+            || event.target.closest?.('.modal,[role="dialog"],dialog[open]') !== modal
+            || !modal.contains(document.activeElement)) return;
+        // Only explicit navigation inside this dialog; never restore focus later.
+        const otherDialog = [...document.querySelectorAll('.modal.show,dialog[open],[role="dialog"][aria-modal="true"]')]
+            .some(element => element !== modal && element.id !== 'detailModal' && element.getClientRects().length);
+        if (otherDialog) return;
+        const items = [...modal.querySelectorAll('a[href],button,input,textarea,select,[tabindex],[contenteditable="true"]')]
+            .filter(element => element.tabIndex >= 0 && !element.matches(':disabled')
+                && !element.closest('[inert]') && element.getClientRects().length
+                && !['hidden','collapse'].includes(getComputedStyle(element).visibility))
+            .sort((a,b) => (a.tabIndex || Infinity) - (b.tabIndex || Infinity));
+        const active = document.activeElement, first = items[0], last = items.at(-1);
+        const target = !first ? modal
+            : event.shiftKey && (active === first || active === modal) ? last
+                : !event.shiftKey && (active === last || active === modal) ? first : null;
+        if (target) {event.preventDefault(); target.focus();}
+    };
+    const dispose = () => {
+        modal.removeEventListener('keydown',keydown);
+        modal.removeEventListener('hidden.bs.modal',dispose);
+        window.removeEventListener('pagehide',dispose);
+        if (bindEmployeeCertificateKeyboard.dispose === dispose) bindEmployeeCertificateKeyboard.dispose = null;
+    };
+    bindEmployeeCertificateKeyboard.dispose = dispose;
+    modal.addEventListener('keydown',keydown);
+    modal.addEventListener('hidden.bs.modal',dispose);
+    window.addEventListener('pagehide',dispose);
+}
 function openAdminCertModal() {
     if (!window.ExpoRuntimeBridge) {
         const context = captureEmployeeDocumentContext();
@@ -8895,6 +8933,7 @@ function openAdminCertModal() {
         if (previous) reqIssueCert.operations.delete(key);
         document.getElementById('adminCertPurpose').value = '관공서 제출용';
         openAdminCertModal.intent = (openAdminCertModal.intent || 0) + 1;
+        bindEmployeeCertificateKeyboard(context);
     }
     toggleAdminEtc(); adminCertModal.show();
 }
