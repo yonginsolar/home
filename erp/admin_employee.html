@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.184
+Version: v1.0.185
 Change: 2026-11-08 - Preserve employee keyboard boundary across closing tab changes.
 -->
 <html>
@@ -14,7 +14,7 @@ Change: 2026-11-08 - Preserve employee keyboard boundary across closing tab chan
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.184 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.185 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1331,7 +1331,7 @@ async function verifyEmployeeDetailTabAccess(owner, readContext = null) {
     const expectedUserId = hrAuthorizedUserId;
     if (!userId || String(userId) !== expectedUserId) throw new Error('ERP_TASK_ACCESS_DENIED');
     const query = _supabase.rpc('get_my_erp_runtime');
-    const access = await (readContext ? query.abortSignal(readContext.signal) : query);
+    const access = await (readContext && typeof query.abortSignal === 'function' ? query.abortSignal(readContext.signal) : query);
     if (!current()) throw new Error('ERP_TASK_ACCESS_DENIED');
     if (access.error) throw access.error;
     const runtime = access.data;
@@ -1343,6 +1343,7 @@ async function verifyEmployeeDetailTabAccess(owner, readContext = null) {
 }
 function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
     if (tabId === 'tabLog') return ensureEmployeeLeaveTab({force});
+    if (['tabModuleAccess','tabNotificationAccess'].includes(tabId)) return ensureEmployeeAccessTab(tabId, {force});
     const loaders = {tabSalary:loadSalaryData,tabLog:loadLeave,tabModuleAccess:loadEmployeeModuleAccess,tabNotificationAccess:loadEmployeeNotificationAssignments};
     if (!loaders[tabId] || !isEmployeeDetailTabVisible(tabId) || isEmployeeDetailSaving()) return Promise.resolve();
     const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
@@ -1386,6 +1387,103 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
             if (entry.readRevision === readRevision) {
                 entry.pending = null;
                 if (isOwned() && !isEmployeeDetailTabVisible(tabId) && !entry.ready) entry.resume = true;
+            }
+        }
+    })();
+    return entry.pending;
+}
+function renderEmployeeAccessReadState(entry, state) {
+    const pane = document.getElementById(entry.context.tabId);
+    let status = pane.querySelector('[data-detail-demand-status]');
+    if (!status) {
+        status = document.createElement('div');
+        status.dataset.detailDemandStatus = '1'; status.className = 'text-center text-muted py-4';
+        pane.prepend(status);
+    }
+    if (entry.status !== status || !entry.retry?.isConnected) {
+        entry.status = status;
+        entry.message = document.createElement('span');
+        entry.retry = document.createElement('button'); entry.retry.type = 'button';
+        entry.retry.className = 'btn btn-sm btn-outline-primary ms-2';
+        entry.retry.onclick = () => { if (!entry.pending && entry.context.isOwned()) void ensureEmployeeAccessTab(entry.context.tabId, {force:true}); };
+        status.replaceChildren(entry.message, entry.retry);
+    }
+    if (!employeeDetailTabVisibility.has(pane.id)) employeeDetailTabVisibility.set(pane.id, new Map());
+    const visibility = employeeDetailTabVisibility.get(pane.id);
+    for (const child of pane.children) {
+        if (child === status) continue;
+        if (!visibility.has(child)) visibility.set(child, child.hidden);
+        child.hidden = state === 'ready' ? visibility.get(child) : true;
+    }
+    status.hidden = state === 'ready';
+    status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    status.setAttribute('aria-busy', String(state === 'loading'));
+    entry.message.textContent = state === 'error' ? '자료를 불러오지 못했습니다. 입력한 내용은 유지됩니다.' : '자료를 불러오는 중입니다.';
+    entry.retry.textContent = state === 'loading' ? '확인 중…' : '다시 확인';
+    entry.retry.setAttribute('aria-disabled', String(state === 'loading'));
+}
+function ensureEmployeeAccessTab(tabId, {force = false, refresh = false} = {}) {
+    if (!['tabModuleAccess','tabNotificationAccess'].includes(tabId) || !isEmployeeDetailTabVisible(tabId) || isEmployeeDetailSaving()) return Promise.resolve(false);
+    const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
+    if (!owner || !empId) return Promise.resolve(false);
+    const key = `${owner}|${empId}|${revision}|${tabId}|`;
+    let entry = employeeDetailTabLoads.get(key);
+    if (entry?.pending) return entry.pending;
+    const refreshModule = tabId === 'tabModuleAccess' && (refresh || entry?.refreshRequired === true);
+    const hasDraft = hasUnsavedEmployeeDetailTab(tabId), wasReady = !refreshModule && (hasDraft || (entry?.ready === true && !force));
+    if (!entry) { entry = {ready:false,pending:null,readRevision:0,resume:false}; employeeDetailTabLoads.set(key, entry); }
+    const readRevision = ++entry.readRevision, controller = new AbortController();
+    const isMine = () => entry.readRevision === readRevision;
+    const isOwned = () => owner === getHrSettingsOwner() && empId === String(currentEmpId || '') && revision === employeeDetailRevision;
+    const isCurrent = () => isMine() && isOwned() && !controller.signal.aborted && isEmployeeDetailTabVisible(tabId);
+    const context = {tabId,isOwned,isCurrent,signal:controller.signal,refresh:refreshModule};
+    const trigger = document.activeElement;
+    const followFocus = trigger === entry.retry || (refreshModule && trigger?.id === 'employeeModuleAccessRefreshBtn');
+    let movedFocus = false, timer;
+    const trackFocus = event => { if (event.target !== trigger && event.target !== entry.retry && event.target !== entry.status) movedFocus = true; };
+    if (followFocus) for (const event of ['focusin','pointerdown','keydown']) document.addEventListener(event, trackFocus, true);
+    entry.context = context; entry.controller = controller; entry.resume = false; entry.ready = false;
+    entry.refreshRequired = refreshModule;
+    renderEmployeeAccessReadState(entry, 'loading');
+    const task = async () => {
+        await verifyEmployeeDetailTabAccess(owner, context);
+        if (!isCurrent()) return false;
+        if (!wasReady) {
+            const loaded = await (tabId === 'tabModuleAccess' ? loadEmployeeModuleAccess({readContext:context}) : loadEmployeeNotificationAssignments({readContext:context}));
+            if (!isCurrent() || loaded !== true) throw new Error('EMPLOYEE_DETAIL_READ_INCOMPLETE');
+            await verifyEmployeeDetailTabAccess(owner, context);
+        }
+        return isCurrent();
+    };
+    entry.pending = (async () => {
+        try {
+            const loaded = await Promise.race([task(), new Promise((_, reject) => {
+                controller.signal.addEventListener('abort', () => reject(new Error('EMPLOYEE_ACCESS_READ_STOPPED')), {once:true});
+                timer = setTimeout(() => controller.abort(), 15000);
+            })]);
+            if (!isCurrent() || !loaded) return false;
+            entry.ready = true;
+            entry.refreshRequired = false;
+            renderEmployeeAccessReadState(entry, 'ready');
+            if (!hasUnsavedEmployeeDetailTab(tabId)) window.ErpWorkspaceResume?.checkpoint(document.getElementById(tabId));
+            return true;
+        } catch (_) {
+            if (isMine() && isOwned() && isEmployeeDetailTabVisible(tabId)) renderEmployeeAccessReadState(entry, 'error');
+            return false;
+        } finally {
+            clearTimeout(timer);
+            if (followFocus) for (const event of ['focusin','pointerdown','keydown']) document.removeEventListener(event, trackFocus, true);
+            if (isMine()) {
+                entry.pending = null; entry.controller = null;
+                if (isOwned() && !isEmployeeDetailTabVisible(tabId) && !entry.ready) entry.resume = true;
+                if (followFocus && !movedFocus && isOwned() && isEmployeeDetailTabVisible(tabId) && document.hasFocus()
+                    && (document.activeElement === entry.retry || document.activeElement === document.body)) {
+                    if (entry.ready) {
+                        const pane = document.getElementById(tabId);
+                        if (!pane.hasAttribute('tabindex')) pane.setAttribute('tabindex', '-1');
+                        pane.focus({preventScroll:true});
+                    } else entry.retry.focus({preventScroll:true});
+                }
             }
         }
     })();
@@ -5842,35 +5940,36 @@ function disableAllEmployeeModules() {
 }
 
 async function refreshEmployeeModuleAccessKeepingDraft() {
-    if(employeeModuleAccessSaveInFlight)return;
-    const {empId,isCurrent}=beginEmployeeDetailRead('modules',{requireVisible:true});if(!empId)return;
-    const button=document.getElementById('employeeModuleAccessRefreshBtn');if(button)button.disabled=true;
-    try{
-        const request=_supabase.rpc('erp_admin_get_employee_module_access',{p_emp_id:empId});
-        const result=await(request.abortSignal?request.abortSignal(AbortSignal.timeout(15000)):request);
-        if(!isCurrent())return;if(result.error)throw result.error;
-        const pending=[];
-        document.querySelectorAll('[data-employee-module-key]').forEach(n=>{const old=employeeModuleAccessSnapshot?.modules?.find(m=>m.module_key===n.dataset.employeeModuleKey);if(old&&n.value!==getEmployeeModuleAccessSelectValue(old.override_enabled))pending.push([n.dataset.employeeModuleKey,n.value]);});
-        renderEmployeeModuleAccess(result.data);
-        for(const [key,value]of pending){const n=[...document.querySelectorAll('[data-employee-module-key]')].find(n=>n.dataset.employeeModuleKey===key);if(n){n.value=value;n.dispatchEvent(new Event('change',{bubbles:true}));}}
-        showAlert('최신 권한을 확인했습니다. 작성 중인 변경 내용은 유지됩니다.');
-    }catch(_){if(isCurrent())showAlert('권한을 확인하지 못했습니다. 작성 중인 내용은 유지됩니다. 다시 시도해 주세요.');}
-    finally{if(button?.isConnected)button.disabled=false;}
+    const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
+    const loaded = await ensureEmployeeAccessTab('tabModuleAccess', {force:true,refresh:true});
+    if (loaded && owner === getHrSettingsOwner() && empId === String(currentEmpId || '') && revision === employeeDetailRevision
+        && isEmployeeDetailTabVisible('tabModuleAccess')) showAlert('최신 권한을 확인했습니다. 작성 중인 변경 내용은 유지됩니다.');
 }
 
-async function loadEmployeeModuleAccess() {
+async function loadEmployeeModuleAccess({readContext = null} = {}) {
     if (employeeModuleAccessSaveInFlight) return;
-    const { empId, isCurrent } = beginEmployeeDetailRead('modules', {requireVisible:true});
+    const { empId, isCurrent: isViewCurrent } = beginEmployeeDetailRead('modules', {requireVisible:true});
+    const isCurrent = () => isViewCurrent() && (!readContext || readContext.isCurrent());
     if (!empId) return;
     employeeDetailReadTokens.approvedRights += 1;
-    resetEmployeeModuleAccessUi();
+    if (!readContext?.refresh) resetEmployeeModuleAccessUi();
     try {
-        const { data, error } = await _supabase.rpc('erp_admin_get_employee_module_access', { p_emp_id: empId });
+        const query = _supabase.rpc('erp_admin_get_employee_module_access', { p_emp_id: empId });
+        const { data, error } = await (readContext && typeof query.abortSignal === 'function' ? query.abortSignal(readContext.signal) : query);
         if (!isCurrent()) return;
         if (error) throw error;
+        const pending = [];
+        if (readContext?.refresh) document.querySelectorAll('[data-employee-module-key]').forEach(element => {
+            const old = employeeModuleAccessSnapshot?.modules?.find(module => module.module_key === element.dataset.employeeModuleKey);
+            if (old && element.value !== getEmployeeModuleAccessSelectValue(old.override_enabled)) pending.push([element.dataset.employeeModuleKey, element.value]);
+        });
         renderEmployeeModuleAccess(data || {});
-        await loadEmployeeApprovedRights(empId);
-        return isCurrent();
+        for (const [key, value] of pending) {
+            const element = [...document.querySelectorAll('[data-employee-module-key]')].find(node => node.dataset.employeeModuleKey === key);
+            if (element) { element.value = value; element.dispatchEvent(new Event('change', {bubbles:true})); }
+        }
+        const rightsReady = await loadEmployeeApprovedRights(empId, {readContext});
+        return isCurrent() && rightsReady !== false;
     } catch (error) {
         if (!isCurrent()) return;
         const status = document.getElementById('employeeModuleAccessStatus');
@@ -5882,18 +5981,21 @@ async function loadEmployeeModuleAccess() {
     }
 } // End of loadEmployeeModuleAccess
 
-async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim()) {
+async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim(), {readContext = null} = {}) {
     const list = document.getElementById('employeeApprovedRights');
     if (!list || !empId || empId !== String(currentEmpId || '').trim()) return;
     const { isCurrent } = beginEmployeeDetailRead('approvedRights', {requireVisible:true});
+    const isReadCurrent = () => isCurrent() && (!readContext || readContext.isCurrent());
     list.textContent = '결재 권한을 확인하는 중입니다.';
     let data, error;
-    try { ({data, error} = await _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId })); }
-    catch (_) { if (isCurrent()) list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return; }
-    if (!isCurrent()) return;
+    try {
+        const query = _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId });
+        ({data, error} = await (readContext && typeof query.abortSignal === 'function' ? query.abortSignal(readContext.signal) : query));
+    } catch (_) { if (isReadCurrent()) list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return false; }
+    if (!isReadCurrent()) return false;
     list.replaceChildren();
-    if (error) { list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return; }
-    if (!Array.isArray(data) || !data.length) { list.textContent = '결재로 추가한 권한이 없습니다.'; return; }
+    if (error) { list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return false; }
+    if (!Array.isArray(data) || !data.length) { list.textContent = '결재로 추가한 권한이 없습니다.'; return true; }
     data.forEach(right => {
         const row = document.createElement('div'); row.className = 'd-flex align-items-center justify-content-between border rounded p-2 mb-2 gap-2';
         const label = document.createElement('span'); label.textContent = right.label;
@@ -5911,6 +6013,7 @@ async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').tri
         }); };
         row.append(label, button); list.append(row);
     });
+    return true;
 }
 
 async function saveEmployeeModuleAccess() {
@@ -6042,13 +6145,15 @@ function renderEmployeeNotificationAssignments(payload) {
     checkpointEmployeeDetailDraft(document.getElementById('tabNotificationAccess'));
 } // End of renderEmployeeNotificationAssignments
 
-async function loadEmployeeNotificationAssignments() {
+async function loadEmployeeNotificationAssignments({readContext = null} = {}) {
     if (employeeNotificationSaveInFlight) return;
-    const { empId, isCurrent } = beginEmployeeDetailRead('notifications', {requireVisible:true});
+    const { empId, isCurrent: isViewCurrent } = beginEmployeeDetailRead('notifications', {requireVisible:true});
+    const isCurrent = () => isViewCurrent() && (!readContext || readContext.isCurrent());
     if (!empId) return;
     resetEmployeeNotificationUi();
     try {
-        const { data, error } = await _supabase.rpc('erp_admin_get_employee_notification_assignments', { p_emp_id: empId });
+        const query = _supabase.rpc('erp_admin_get_employee_notification_assignments', { p_emp_id: empId });
+        const { data, error } = await (readContext && typeof query.abortSignal === 'function' ? query.abortSignal(readContext.signal) : query);
         if (!isCurrent()) return;
         if (error) throw error;
         renderEmployeeNotificationAssignments(data || {});
