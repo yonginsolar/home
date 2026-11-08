@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: v1.3.8 | 2026-11-07 — Open scoped contract tasks without changing existing editors. */
+/* Version: v1.3.9 | 2026-11-08 — Scope interactive reads and retain verified history on retry. */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -27,6 +27,7 @@ const state = {
   contractsLoading: false,
   contractsLoaded: false,
   contractLoadError: false,
+  contractsScope: '',
   company: {},
   editing: null,
   uploadAttempt: null,
@@ -54,14 +55,24 @@ const contractHistoryColumns = 'id,coop_id,emp_id,document_kind,source_type,titl
 const employeeListColumns = 'emp_id,emp_name,display_emp_no,contract_url,coop_id,is_active,resign_date';
 const contractCompanyKeys = ['company_name','orgName','chairman_name','ceoName','company_address','address','bizNum','business_number','company_contact_name','company_contact','company_contact_phone','company_contact_email','company_email','email'];
 const contractDetailReads = new Map();
+let contractHistoryRead = null;
+let contractReadVisit = 0;
+
+function contractReadScope() {
+  return JSON.stringify([state.user?.id, state.user?.coop_id, state.employee?.emp_id,
+    state.admin, state.forceSelf, Array.from(state.permissions).sort()]);
+}
 
 function contractReadOwner() {
   const revision = ++state.detailRevision;
+  const scope = contractReadScope();
+  const readKey = `${scope}:${contractReadVisit}`;
   const employeeId = state.employee?.emp_id;
   const coopId = state.user?.coop_id;
   const draft = contractEditorSnapshot();
   const editing = state.editing;
-  return { employeeId, coopId, isCurrent: () => revision === state.detailRevision
+  return { employeeId, coopId, scope, readKey, isCurrent: () => revision === state.detailRevision
+    && scope === contractReadScope() && !window.frameElement?.hidden
     && employeeId === state.employee?.emp_id && coopId === state.user?.coop_id
     && editing === state.editing && draft === contractEditorSnapshot() };
 }
@@ -74,7 +85,7 @@ function coalesceContractRead(key, read) {
 }
 
 async function readContractDetail(id, owner) {
-  return coalesceContractRead(`contract:${owner.coopId}:${owner.employeeId}:${id}`, async () => {
+  return coalesceContractRead(`contract:${owner.readKey}:${id}`, async () => {
     if (state.admin && !state.forceSelf) {
       return readHrContract('detail', {p_emp_id:owner.employeeId,p_contract_id:id});
     }
@@ -87,7 +98,7 @@ async function readContractDetail(id, owner) {
 
 async function loadContractDefaults(owner) {
   if (state.admin && !state.forceSelf) {
-    const data = await coalesceContractRead(`defaults:${owner.coopId}:${owner.employeeId}`,
+    const data = await coalesceContractRead(`defaults:${owner.readKey}`,
       () => readHrContract('defaults', {p_emp_id:owner.employeeId}));
     if (!owner.isCurrent()) return false;
     if (!data?.employee || data.employee.emp_id !== owner.employeeId || data.employee.coop_id !== owner.coopId) throw new Error('EMPLOYEE_NOT_FOUND');
@@ -96,12 +107,12 @@ async function loadContractDefaults(owner) {
     return true;
   }
   const [company, employee] = await Promise.all([
-    coalesceContractRead(`company:${owner.coopId}`, async () => {
+    coalesceContractRead(`company:${owner.readKey}`, async () => {
       const { data, error } = await db.from('ref_company_info').select('key,value').eq('coop_id', owner.coopId).in('key', contractCompanyKeys);
       if (error) throw error;
       return Object.fromEntries((data || []).map(row => [row.key, row.value]));
     }),
-    coalesceContractRead(`employee:${owner.coopId}:${owner.employeeId}`, async () => {
+    coalesceContractRead(`employee:${owner.readKey}`, async () => {
       const { data, error } = await db.from('ref_employees')
         .select('emp_id,emp_name,position,department,address,email,hire_date,base_salary,coop_id')
         .eq('coop_id', owner.coopId).eq('emp_id', owner.employeeId).single();
@@ -369,18 +380,26 @@ function bindInitialContractEmployee() {
   return false;
 }
 
-async function loadContracts() {
+function loadContracts() {
+  const scope = contractReadScope();
+  // A post-save read must not reuse a history request started before the save.
+  const key = `${scope}:${state.busy ? 'saving' : 'reading'}`;
+  if (contractHistoryRead?.key === key && contractHistoryRead.isCurrent()) return contractHistoryRead.promise;
   const revision = ++state.contractLoadRevision;
   const employeeId = state.employee?.emp_id;
   const coopId = state.user?.coop_id;
   const isCurrent = () => revision === state.contractLoadRevision
-    && employeeId === state.employee?.emp_id && coopId === state.user?.coop_id;
-  state.contracts = [];
+    && scope === contractReadScope();
+  if (state.contractsScope !== scope) state.contracts = [];
+  state.contractsScope = scope;
   state.contractsLoaded = false;
   state.contractLoadError = false;
   state.contractsLoading = Boolean(employeeId && coopId);
   renderHistory();
-  if (!state.contractsLoading) return false;
+  if (!state.contractsLoading) return Promise.resolve(false);
+  const flight = {key, isCurrent, promise:null};
+  contractHistoryRead = flight;
+  flight.promise = (async () => {
   try {
     const rows = [];
     for (let offset = 0; ; offset += 500) {
@@ -400,8 +419,9 @@ async function loadContracts() {
     state.contracts = rows;
     state.contractsLoaded = true;
     return true;
-  } catch (_) {
+  } catch (error) {
     if (!isCurrent()) return false;
+    if (contractReadDenied(error)) state.contracts = [];
     state.contractLoadError = true;
     return false;
   } finally {
@@ -409,7 +429,16 @@ async function loadContracts() {
       state.contractsLoading = false;
       renderHistory();
     }
+    if (contractHistoryRead === flight) contractHistoryRead = null;
   }
+  })();
+  return flight.promise;
+}
+
+function contractReadDenied(error) {
+  return [401, 403].includes(Number(error?.status || error?.statusCode))
+    || /42501|PGRST30[123]|FORBIDDEN|ACCESS_DENIED|PERMISSION|HR_ADMIN_REQUIRED|UNAUTHORIZED|AUTH_REQUIRED/i
+      .test(`${error?.code || ''} ${error?.message || ''}`);
 }
 
 function kindLabel(kind) {
@@ -426,31 +455,24 @@ function renderHistory() {
   const legacyWrap = document.getElementById('legacyContractWrap');
   updateContractReadActions();
   heading.textContent = `${state.employee?.emp_name || '직원'} 계약 이력`;
-  if (state.contractsLoading || state.contractLoadError) {
-    list.innerHTML = state.contractsLoading
-      ? '<div class="small text-muted py-3" role="status">계약 이력을 불러오고 있습니다.</div>'
-      : '<div class="small text-danger py-3" role="alert">계약 이력을 불러오지 못했습니다. 새로고침 버튼으로 다시 시도해 주세요.</div>';
-    legacyWrap.classList.add('hidden');
-    legacyWrap.innerHTML = '';
-    return;
-  }
-  if (!state.contracts.length) {
-    list.innerHTML = '<div class="small text-muted py-3">등록된 계약 이력이 없습니다.</div>';
-  } else {
-    list.innerHTML = state.contracts.map((contract) => `
-      <button type="button" class="history-item w-100 text-start" data-contract-id="${escapeHtml(contract.id)}">
+  const unverified = !state.contractsLoaded;
+  const notice = state.contractsLoading
+    ? '<div class="small text-muted py-3" role="status">계약 이력을 불러오고 있습니다.</div>'
+    : state.contractLoadError
+      ? `<div class="small text-danger py-3" role="alert">계약 이력을 불러오지 못했습니다.${state.contracts.length ? ' 이전 목록을 표시합니다.' : ''} 새로고침 버튼으로 다시 확인해 주세요.</div>` : '';
+  list.innerHTML = notice + (state.contracts.length ? state.contracts.map((contract) => `
+      <button type="button" class="history-item w-100 text-start" data-contract-id="${escapeHtml(contract.id)}" ${unverified ? 'disabled' : ''}>
         <div class="d-flex justify-content-between gap-2 align-items-start">
           <span class="history-title">${escapeHtml(contract.title)}</span>
           <span class="status-pill status-${escapeHtml(contract.status)}">${escapeHtml(statusLabel(contract.status))}</span>
         </div>
         <div class="history-meta">v${contract.version_no} · ${escapeHtml(kindLabel(contract.document_kind))}<br>적용일 ${escapeHtml(formatDate(contract.effective_date))}</div>
-      </button>`).join('');
+      </button>`).join('') : notice ? '' : '<div class="small text-muted py-3">등록된 계약 이력이 없습니다.</div>');
     list.querySelectorAll('[data-contract-id]').forEach((button) => {
       button.addEventListener('click', () => openContract(button.dataset.contractId));
     });
-  }
 
-  const legacyPath = asText(state.employee?.contract_url);
+  const legacyPath = unverified ? '' : asText(state.employee?.contract_url);
   const registeredPath = state.contracts.some((contract) => contract.file_path === legacyPath);
   legacyWrap.classList.toggle('hidden', !legacyPath || registeredPath);
   legacyWrap.innerHTML = legacyPath && !registeredPath
@@ -1157,6 +1179,7 @@ async function showContract(id) {
   try {
   if (!await loadContractDefaults(owner)) return;
   const contract = await readContractDetail(id, owner);
+  if (!owner.isCurrent()) return;
   let parent = contract.document_kind === 'amendment' && contract.parent_contract_id
     ? await readContractDetail(contract.parent_contract_id, owner) : null;
   if (!owner.isCurrent()) return;
@@ -1619,9 +1642,15 @@ async function registerUpload(event) {
 }
 
 function observeContractAttachmentContext() {
-  const invalidateAttachment = () => { state.attachmentRevision++; };
-  window.addEventListener('pagehide', invalidateAttachment);
-  if (window.frameElement) new MutationObserver(invalidateAttachment).observe(window.frameElement, {attributes:true,attributeFilter:['hidden']});
+  const invalidateReads = () => { state.attachmentRevision++; state.detailRevision++; contractReadVisit++; };
+  window.addEventListener('pagehide', invalidateReads);
+  // Inspect oldValue as well: a hide/show in one task still ends the old visit.
+  if (window.frameElement) new MutationObserver((records) => {
+    state.attachmentRevision++;
+    if (window.frameElement.hidden || records.some(record => record.oldValue === null)) {
+      state.detailRevision++; contractReadVisit++;
+    }
+  }).observe(window.frameElement, {attributes:true,attributeOldValue:true,attributeFilter:['hidden']});
 }
 
 async function boot() {
