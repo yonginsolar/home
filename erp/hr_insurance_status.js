@@ -1,4 +1,4 @@
-/* Version: 1.0.0 | 2026-10-06. Read-only, permission checked on server. */
+/* Version: 1.0.1 | 2026-11-08. Bounded current-view reads; original server permissions. */
 'use strict';
 (() => {
   const roots = new WeakMap();
@@ -19,7 +19,7 @@
       <div class="row g-3">${kinds.map(kind=>{
         const c=cases.find(item=>item.kind===kind);
         return `<div class="col-12 col-lg-6"><section class="border rounded-3 p-3 h-100 bg-white"><h3 class="h6 fw-bold">${escape(names[kind])}</h3>
-          <span class="badge ${c?.status==='completed'?'bg-success':c?.status==='submitted'?'bg-primary':'bg-secondary'}">${escape(c?labels[c.status]||'상태 확인 필요':'등록된 서류 없음')}</span>
+          <span class="badge text-wrap mw-100 ${c?.status==='completed'?'bg-success':c?.status==='submitted'?'bg-primary':'bg-secondary'}">${escape(c?labels[c.status]||'상태 확인 필요':'등록된 서류 없음')}</span>
           ${c?`<dl class="row small mb-0 mt-3"><dt class="col-5">기준일</dt><dd class="col-7">${date(c.event_date)}</dd>${c.request_date?`<dt class="col-5">요청일</dt><dd class="col-7">${date(c.request_date)}</dd>`:''}<dt class="col-5">기관 제출일</dt><dd class="col-7">${date(c.submitted_date)}</dd><dt class="col-5">처리 완료일</dt><dd class="col-7">${date(c.completed_date)}</dd></dl>`:'<p class="small text-secondary mt-3 mb-0">아직 ERP에 기록된 서류가 없습니다. 실제 제출 여부는 담당자에게 확인해 주세요.</p>'}
           </section></div>`;
       }).join('')}</div>${retired?'<p class="small text-secondary mt-3">이직확인서의 요청일과 기관 제출일을 위에서 확인할 수 있습니다. 기록이 없거나 변경이 필요하면 인사 담당자에게 문의해 주세요.</p>':''}
@@ -28,25 +28,45 @@
   }
   async function mount(db, root, options={}) {
     if (!root) return;
-    const state={generation:Symbol(), pending:false};
+    roots.get(root)?.stop();
+    const state={pending:null, stop(){
+      const read=state.pending;
+      if (!read) return;
+      state.pending=null; clearTimeout(read.timer); read.controller.abort(); read.cancel();
+    }};
     roots.set(root,state);
-    root.innerHTML='<div class="d-flex justify-content-between align-items-center gap-2 mb-3"><h2 class="h6 fw-bold mb-0">🧾 4대보험 서류·이직확인서</h2><button type="button" class="btn btn-outline-secondary btn-sm" data-refresh>새로고침</button></div><div data-result aria-live="polite"></div>';
+    root.innerHTML='<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><h2 class="h6 fw-bold mb-0">🧾 4대보험 서류·이직확인서</h2><button type="button" class="btn btn-outline-secondary btn-sm text-wrap" data-refresh>다시 확인</button></div><div data-result aria-live="polite"></div>';
     const button=root.querySelector('[data-refresh]'), result=root.querySelector('[data-result]');
+    const owned=()=>roots.get(root)===state&&result.parentNode===root&&root.isConnected&&options.isCurrent?.()!==false;
+    state.current=owned;
     async function load() {
-      if (state.pending || roots.get(root)!==state) return;
-      state.pending=true; button.disabled=true;
+      if (state.pending || !owned()) return;
+      const read={controller:new AbortController()};state.pending=read;
+      const current=()=>owned()&&state.pending===read;
+      button.setAttribute('aria-disabled','true');result.setAttribute('aria-busy','true');
       result.innerHTML='<p class="text-secondary" role="status">서류 상태를 불러오는 중입니다.</p>';
       try {
-        const {data,error}=await db.rpc('erp_hr_insurance_status',options.empId?{p_emp_id:options.empId}:{});
-        if (roots.get(root)!==state) return;
+        const cancelled=new Promise(resolve=>{read.cancel=()=>resolve(null);});
+        const timeout=new Promise((_,reject)=>{read.timer=setTimeout(()=>{
+          read.controller.abort();reject(new Error('STATUS_TIMEOUT'));
+        },15000);});
+        const request=db.rpc('erp_hr_insurance_status',options.empId?{p_emp_id:options.empId}:{});
+        const response=await Promise.race([typeof request.abortSignal==='function'?request.abortSignal(read.controller.signal):request,timeout,cancelled]);
+        if (!current()||!response) return;
+        const {data,error}=response;
         if (error || !data || !Array.isArray(data.cases)) throw new Error('STATUS_UNAVAILABLE');
         result.innerHTML=render(data,!!options.admin);
       } catch (_) {
-        if (roots.get(root)===state) result.innerHTML='<p class="alert alert-warning mb-0">서류 상태를 확인하지 못했습니다. 연결·조회 권한을 확인한 뒤 새로고침해 주세요.</p>';
-      } finally { state.pending=false; if(roots.get(root)===state) button.disabled=false; }
+        if (current()) result.innerHTML='<p class="alert alert-warning mb-0">서류 상태를 확인하지 못했습니다. 다시 확인해 주세요.</p>';
+      } finally {
+        clearTimeout(read.timer);
+        if (state.pending===read) state.pending=null;
+        if (owned()) {button.setAttribute('aria-disabled','false');result.setAttribute('aria-busy','false');}
+      }
     }
     button.addEventListener('click',load);
     await load();
   }
-  window.HrInsuranceStatus={version:'1.0.0',mount};
+  function suspend(root) { roots.get(root)?.stop();roots.delete(root); }
+  window.HrInsuranceStatus={version:'1.0.1',mount,suspend,isMounted:root=>roots.get(root)?.current()===true};
 })();

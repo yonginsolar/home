@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.87 | Change: 2026-11-07 - Reveal retained edits before the read-only hours card refreshes. -->
+<!-- Version: v1.0.88 | Change: 2026-11-08 - Recover current-view insurance reads without changing retained profile edits. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.87 | mypage.html');</script>
+<script>console.log('[Version] v1.0.88 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -123,7 +123,7 @@ body{padding:18px 14px 28px}
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <link rel="stylesheet" href="./tab_workspace.css?v=1.0.0">
   <script src="tab_workspace.js?v=1.0.0" defer></script>
-  <script src="hr_insurance_status.js?v=1.0.0" defer></script>
+  <script src="hr_insurance_status.js?v=1.0.1" defer></script>
   <meta name="erp-mobile-revision" content="20261007.2">
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
   <meta name="erp-workspace-revision" content="20261010.9">
@@ -434,6 +434,9 @@ bindMypageContractHoursResume.bound=true;
 const frame=window.frameElement;
 const visible=()=>!frame?.hidden&&document.querySelector('.tab-content > .tab-pane.active')?.id==='tabInfo';
 if(frame)new MutationObserver(()=>{
+ if(frame.hidden)window.HrInsuranceStatus?.suspend(document.getElementById('myInsuranceStatus'));
+ else if(document.getElementById('tabInsuranceStatus')?.classList.contains('active')
+  &&!window.HrInsuranceStatus?.isMounted?.(document.getElementById('myInsuranceStatus')))void loadMypageInsuranceStatus();
  invalidateMypageContractHours();
  if(visible())void ensureMypageSection('contractHours');
 }).observe(frame,{attributes:true,attributeFilter:['hidden']});
@@ -452,10 +455,18 @@ mypageRefreshing=true;
 try{
 const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
 mypageSectionLoads.clear();
-if(pane==='tabInsuranceStatus')await window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));
+if(pane==='tabInsuranceStatus')await loadMypageInsuranceStatus();
 else if(pane==='tabCalendar')await renderCalendar();
 else await loadMypageVisibleSections();
 }finally{mypageRefreshing=false;}
+}
+function loadMypageInsuranceStatus(){
+const owner=getMypageDataOwner(),account=myInfo;
+if(!mypageDataAuthorized||!isMypageDataVisible())return Promise.resolve(false);
+return window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'),{
+ isCurrent:()=>mypageDataAuthorized&&account===myInfo&&owner===getMypageDataOwner()&&isMypageDataVisible()
+  &&document.getElementById('tabInsuranceStatus').classList.contains('active')
+});
 }
 function formatMypageContractHours(data) {
 if(data.state==='legacy_saved'){
@@ -1438,7 +1449,8 @@ applyMypageRuntimeProfileUi();
 document.getElementById("salaryMonth").value=formatMypageKstMonth();
 document.getElementById('tab-calendar-btn').addEventListener('shown.bs.tab',function(e){renderCalendar()});
 document.getElementById('tab-ai-btn').addEventListener('shown.bs.tab',function(){window.ErpAiConnections.mount(_supabase,document.getElementById('aiConnectionsRoot'));});
-document.getElementById('tab-insurance-btn').addEventListener('shown.bs.tab',function(){void window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));});
+document.getElementById('tab-insurance-btn').addEventListener('shown.bs.tab',function(){void loadMypageInsuranceStatus();});
+document.getElementById('tab-insurance-btn').addEventListener('hide.bs.tab',function(){window.HrInsuranceStatus?.suspend(document.getElementById('myInsuranceStatus'));});
 document.getElementById('myTab').addEventListener('shown.bs.tab',()=>{void loadMypageVisibleSections();});
 await loadProfile();
 document.querySelectorAll('.readonly-field').forEach(node=>{node.readOnly=true;});

@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.176
-Change: 2026-11-07 - Keep retry focus inside current employee detail without interrupting other input.
+Version: v1.0.177
+Change: 2026-11-08 - Recover insurance reads and keep designation responses scoped to the current employee view.
 -->
 <html>
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-07 - Keep retry focus inside current employee detail without int
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.176 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.177 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -59,7 +59,7 @@ Change: 2026-11-07 - Keep retry focus inside current employee detail without int
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261012-2"></script>
   <script src="leave_ledger.js?v=20261012-2"></script>
-  <script src="sun_village_total_manager_admin.js?v=20261021-expo-scope" defer></script>
+  <script src="sun_village_total_manager_admin.js?v=1.0.1" defer></script>
 
 <link rel="stylesheet" href="annual_settings.css?v=1.3.0">
 <script src="annual_settings.js?v=1.3.1"></script>
@@ -185,7 +185,7 @@ Change: 2026-11-07 - Keep retry focus inside current employee detail without int
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <link rel="stylesheet" href="./tab_workspace.css?v=1.0.0">
   <script src="tab_workspace.js?v=1.0.0" defer></script>
-  <script src="hr_insurance_status.js?v=1.0.0" defer></script>
+  <script src="hr_insurance_status.js?v=1.0.1" defer></script>
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
   <script src="/erp/workspace_nav.js?v=20261014-setup2" defer></script>
@@ -1518,6 +1518,8 @@ function resumeEmployeeDetailTabReads() {
     return Promise.resolve();
 }
 function cancelEmployeeDetailReads() {
+    window.HrInsuranceStatus?.suspend(document.getElementById('employeeInsuranceStatus'));
+    window.SunVillageTotalManagerAdmin?.suspend();
     window.EmployeeDetailPreparation?.cancel();
     resetEmployeeContractHours();
     employeeInfoReadEpoch++;
@@ -6149,8 +6151,16 @@ function bindEmployeeInfoResume() {
     let hidden = frame.hidden;
     new MutationObserver(records => {
         const parked = frame.hidden || records.some(record => record.oldValue === null);
-        if (parked) resetEmployeeContractHours();
-        if (!frame.hidden && (hidden || parked)) void loadEmployeeContractHours();
+        if (parked) {
+            resetEmployeeContractHours();
+            window.HrInsuranceStatus?.suspend(document.getElementById('employeeInsuranceStatus'));
+            window.SunVillageTotalManagerAdmin?.suspend(true);
+        }
+        if (!frame.hidden && (hidden || parked)) {
+            void loadEmployeeContractHours();
+            if (document.getElementById('tabInsuranceStatus')?.classList.contains('active')) void loadEmployeeInsuranceStatus();
+            void window.SunVillageTotalManagerAdmin?.resume();
+        }
         if (frame.hidden === hidden) return;
         hidden = frame.hidden;
         if (hidden) { interruptEmployeeInfoReads(); interruptEmployeeDetailTabReads(); }
@@ -6514,9 +6524,12 @@ window.EmployeeDetailPreparation = (() => {
 })();
 
 async function loadEmployeeInsuranceStatus() {
-    const empId = currentEmpId;
-    if (!empId) return;
-    await window.HrInsuranceStatus.mount(_supabase, document.getElementById('employeeInsuranceStatus'), {empId, admin:true});
+    const empId = String(currentEmpId||''), owner=getHrSettingsOwner(), revision=employeeDetailRevision;
+    if (!empId||!isHrSettingsContextCurrent(owner)) return;
+    await window.HrInsuranceStatus.mount(_supabase, document.getElementById('employeeInsuranceStatus'), {empId, admin:true,
+        isCurrent:()=>owner===getHrSettingsOwner()&&revision===employeeDetailRevision&&empId===String(currentEmpId||'')
+            &&isHrSettingsContextCurrent(owner)&&!window.frameElement?.hidden
+            &&document.getElementById('tabInsuranceStatus').classList.contains('active')});
 }
 document.querySelector('#empTab [href="#tabInsuranceStatus"]').addEventListener('shown.bs.tab', loadEmployeeInsuranceStatus);
 document.getElementById('empTab').addEventListener('shown.bs.tab', event => {
@@ -6524,6 +6537,7 @@ document.getElementById('empTab').addEventListener('shown.bs.tab', event => {
     if (event.target.getAttribute('href') === '#tabInfo') { void resumeEmployeeInfoReads(); void loadEmployeeContractHours(); }
 });
 document.getElementById('empTab').addEventListener('hide.bs.tab', event => {
+    if (event.target.getAttribute('href') === '#tabInsuranceStatus') window.HrInsuranceStatus?.suspend(document.getElementById('employeeInsuranceStatus'));
     if (event.target.getAttribute('href') === '#tabInfo') resetEmployeeContractHours();
 });
 document.getElementById('empTab').addEventListener('hidden.bs.tab', event => {

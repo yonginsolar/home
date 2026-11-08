@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* ERP employee detail: appoint the operating cooperative's village manager. */
+/* Version: 1.0.1 | 2026-11-08. Current-view designation reads; original writer/authority. */
 (() => {
   'use strict';
 
@@ -7,6 +7,12 @@
   let selectedEmpId = '';
   let savedValue = false;
   let busy = false;
+  let activeRead=null, resumeRead=null;
+  const owner=()=>typeof getHrSettingsOwner==='function'?getHrSettingsOwner():'';
+  const revision=()=>typeof employeeDetailRevision==='number'?employeeDetailRevision:0;
+  const owned=read=>read.owner===owner()&&read.revision===revision()
+    &&read.empId===String(currentEmpId||'')&&read.empId===selectedEmpId
+    &&(typeof isHrSettingsContextCurrent!=='function'||isHrSettingsContextCurrent(read.owner));
 
   function messageFor(error) {
     const code = String(error?.message || error || '');
@@ -25,25 +31,28 @@
 
   async function load(empId) {
     selectedEmpId = String(empId || '').trim();
+    const read={empId:selectedEmpId,owner:owner(),revision:revision()};
+    activeRead=read;resumeRead=null;
+    const current=()=>activeRead===read&&owned(read)&&!window.frameElement?.hidden;
     const nav = $('sunVillageTotalManagerTabNav');
     const status = $('sunVillageTotalManagerStatus');
     const checkbox = $('sunVillageTotalManagerEnabled');
     const button = $('sunVillageTotalManagerSave');
-    if (!nav || !status || !checkbox || !button) return;
+    if (!nav || !status || !checkbox || !button) {activeRead=null;return;}
     nav.hidden = true;
     checkbox.checked = false;
     checkbox.disabled = true;
     button.disabled = true;
     status.textContent = '지정 상태를 확인하는 중입니다.';
     // Expo rooms are standalone fictional cooperatives, never village operators.
-    if (window.ExpoRuntimeBridge) return;
-    if (!selectedEmpId || typeof _supabase === 'undefined') return;
+    if (window.ExpoRuntimeBridge) {activeRead=null;return;}
+    if (!selectedEmpId || typeof _supabase === 'undefined'||!current()) {activeRead=null;return;}
     try {
       const { data, error } = await _supabase.rpc('sun_village_total_manager_context', {
         p_emp_id: selectedEmpId
       });
       if (error) throw error;
-      if (selectedEmpId !== String(empId || '').trim() || selectedEmpId !== String(currentEmpId || '')) return;
+      if (!current()) return;
       if (!data?.enabled || !data?.can_assign) return;
       nav.hidden = false;
       savedValue = data.target_assigned === true;
@@ -56,9 +65,10 @@
           : savedValue ? '현재 전체 관리자로 지정되어 있습니다.' : '현재 전체 관리자로 지정되지 않았습니다.';
       updateSaveState();
     } catch (error) {
+      if (!current()) return;
       console.warn('Sun village manager status unavailable:', String(error?.code || 'unknown'));
       status.textContent = '지정 상태를 확인하지 못했습니다.';
-    }
+    } finally { if(activeRead===read)activeRead=null; }
   }
 
   async function save() {
@@ -101,5 +111,8 @@
     $('sunVillageTotalManagerEnabled')?.addEventListener('change', updateSaveState);
     $('sunVillageTotalManagerSave')?.addEventListener('click', save);
   });
-  window.SunVillageTotalManagerAdmin = { load };
+  window.SunVillageTotalManagerAdmin = { load,
+    suspend(resume=false){resumeRead=resume?activeRead:null;activeRead=null;},
+    resume(){const read=resumeRead;resumeRead=null;if(read&&owned(read)&&!window.frameElement?.hidden)return load(read.empId);}
+  };
 })();
