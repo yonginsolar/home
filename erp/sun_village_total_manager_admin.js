@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: 1.0.1 | 2026-11-08. Current-view designation reads; original writer/authority. */
+/* Version: 1.0.2 | 2026-11-08. Retain interrupted reads across repeated menu suspension. */
 (() => {
   'use strict';
 
@@ -112,7 +112,12 @@
     $('sunVillageTotalManagerSave')?.addEventListener('click', save);
   });
   window.SunVillageTotalManagerAdmin = { load,
-    suspend(resume=false){resumeRead=resume?activeRead:null;activeRead=null;},
-    resume(){const read=resumeRead;resumeRead=null;if(read&&owned(read)&&!window.frameElement?.hidden)return load(read.empId);}
+    suspend(resume=false){resumeRead=resume?(activeRead||resumeRead):null;activeRead=null;},
+    resume(){
+      const read=resumeRead;
+      if(!read||window.frameElement?.hidden)return;
+      resumeRead=null;
+      if(owned(read))return load(read.empId);
+    }
   };
 })();

@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.88 | Change: 2026-11-08 - Recover current-view insurance reads without changing retained profile edits. -->
+<!-- Version: v1.0.89 | Change: 2026-11-08 - Keep insurance retries current after same-account profile reloads. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.88 | mypage.html');</script>
+<script>console.log('[Version] v1.0.89 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -461,10 +461,11 @@ else await loadMypageVisibleSections();
 }finally{mypageRefreshing=false;}
 }
 function loadMypageInsuranceStatus(){
-const owner=getMypageDataOwner(),account=myInfo;
+const owner=getMypageDataOwner(),context={account:myInfo};
 if(!mypageDataAuthorized||!isMypageDataVisible())return Promise.resolve(false);
+loadMypageInsuranceStatus.readContext=context;
 return window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'),{
- isCurrent:()=>mypageDataAuthorized&&account===myInfo&&owner===getMypageDataOwner()&&isMypageDataVisible()
+ isCurrent:()=>mypageDataAuthorized&&context.account===myInfo&&owner===getMypageDataOwner()&&isMypageDataVisible()
   &&document.getElementById('tabInsuranceStatus').classList.contains('active')
 });
 }
@@ -1532,7 +1533,11 @@ async function loadProfile() {
     const { data, error } = await scopeMypageEmployee(_supabase.from('ref_employees').select('*')).eq('emp_id', myInfo.emp_id).single();
     if(error||!data)throw error||new Error('PROFILE_UNAVAILABLE');
     if (data) {
+        const previous=myInfo;
         myInfo = data;
+        const read=loadMypageInsuranceStatus.readContext;
+        if(read?.account===previous&&previous.coop_id&&previous.emp_id
+            &&['id','coop_id','emp_id'].every(key=>String(previous[key]??'')===String(data[key]??'')))read.account=data;
         localStorage.setItem('erp_user', JSON.stringify(data));
     }
     applyMypageCertificateUi();
