@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.193
-Change: 2026-11-08 - Keep certificate keyboard navigation inside its current owned dialog.
+Version: v1.0.194
+Change: 2026-11-09 - Recover stalled salary reads without replacing held drafts.
 -->
 <html>
 <head>
@@ -1484,6 +1484,38 @@ async function verifyEmployeeDetailTabAccess(owner, readContext = null) {
         throw new Error('ERP_TASK_ACCESS_DENIED');
     }
 }
+function renderEmployeeSalaryReadState(entry, state) {
+    const pane = document.getElementById('tabSalary');
+    let status = pane.querySelector('[data-detail-demand-status]');
+    if (!status) {
+        status = document.createElement('div');
+        status.dataset.detailDemandStatus = '1'; status.className = 'text-center text-muted py-4';
+        pane.prepend(status);
+    }
+    if (entry.status !== status || !entry.retry?.isConnected) {
+        entry.status = status; entry.message = document.createElement('span');
+        entry.retry = document.createElement('button'); entry.retry.type = 'button';
+        entry.retry.className = 'btn btn-sm btn-outline-primary ms-2 text-wrap';
+        entry.retry.onclick = () => { if (!entry.pending && entry.context.isOwned()) void ensureEmployeeDetailTab('tabSalary', {force:true}); };
+        entry.retry.onkeydown = event => {
+            if (!event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && event.key === 'Enter' && event.repeat) event.preventDefault();
+        };
+        status.replaceChildren(entry.message, entry.retry);
+    }
+    if (!employeeDetailTabVisibility.has(pane.id)) employeeDetailTabVisibility.set(pane.id, new Map());
+    const visibility = employeeDetailTabVisibility.get(pane.id);
+    for (const child of pane.children) {
+        if (child === status) continue;
+        if (!visibility.has(child)) visibility.set(child, child.hidden);
+        child.hidden = state === 'ready' ? visibility.get(child) : true;
+    }
+    status.hidden = state === 'ready';
+    status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    status.setAttribute('aria-busy', String(state === 'loading'));
+    entry.message.textContent = state === 'error' ? '급여 자료를 확인하지 못했습니다. 입력한 내용은 유지됩니다.' : '급여 자료를 확인하는 중입니다.';
+    entry.retry.textContent = state === 'loading' ? '확인 중…' : '다시 확인';
+    entry.retry.setAttribute('aria-disabled', String(state === 'loading'));
+}
 function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
     if (tabId === 'tabLog') return ensureEmployeeLeaveTab({force});
     if (['tabModuleAccess','tabNotificationAccess'].includes(tabId)) return ensureEmployeeAccessTab(tabId, {force});
@@ -1493,43 +1525,66 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
     if (!owner || !empId) return Promise.resolve();
     const month = tabId === 'tabSalary' ? document.getElementById('salaryMonth').value : '';
     const key = `${owner}|${empId}|${revision}|${tabId}|${month}`;
+    for (const [previousKey, previous] of employeeDetailTabLoads) {
+        if (previousKey === key || previous.context?.tabId !== 'tabSalary' || !previous.pending) continue;
+        previous.readRevision++; previous.controller?.abort(); previous.pending = null; previous.resume = true;
+    }
     let entry = employeeDetailTabLoads.get(key);
     if (entry?.pending) return entry.pending;
     const hasDraft = hasUnsavedEmployeeDetailTab(tabId);
     // Retry authorization after a failed return, but never replace a held draft.
     const wasReady = hasDraft || (entry?.ready === true && !force);
     if (!entry) { entry = {ready:false,pending:null,readRevision:0,resume:false}; employeeDetailTabLoads.set(key, entry); }
-    const readRevision = ++entry.readRevision;
+    const readRevision = ++entry.readRevision, controller = new AbortController();
     const isOwned = () => owner === getHrSettingsOwner() && empId === String(currentEmpId || '')
         && revision === employeeDetailRevision
         && (tabId !== 'tabSalary' || month === document.getElementById('salaryMonth').value);
-    const isCurrent = () => isOwned() && entry.readRevision === readRevision && isEmployeeDetailTabVisible(tabId);
-    entry.context = {tabId,isOwned};
-    entry.resume = false;
-    if (!wasReady) setEmployeeDetailTabState(tabId, 'loading');
+    const isCurrent = () => isOwned() && entry.readRevision === readRevision && !controller.signal.aborted && isEmployeeDetailTabVisible(tabId);
+    const context = {tabId,isOwned,isCurrent,signal:controller.signal};
+    const trigger = document.activeElement, followFocus = trigger === entry.retry;
+    let moved = false, timer;
+    const track = event => { if (event.target !== trigger && event.target !== entry.retry && event.target !== entry.status) moved = true; };
+    if (followFocus) for (const name of ['focusin','pointerdown','keydown']) document.addEventListener(name,track,true);
+    entry.context = context; entry.controller = controller; entry.resume = false; entry.ready = false;
+    renderEmployeeSalaryReadState(entry, 'loading');
+    const task = async () => {
+        await verifyEmployeeDetailTabAccess(owner, context);
+        if (!isCurrent()) return false;
+        if (!wasReady) {
+            const loaded = await loaders[tabId]({readContext:context});
+            if (!isCurrent() || loaded !== true) throw new Error('EMPLOYEE_DETAIL_READ_INCOMPLETE');
+            await verifyEmployeeDetailTabAccess(owner, context);
+        }
+        return isCurrent();
+    };
     entry.pending = (async () => {
         try {
-            await verifyEmployeeDetailTabAccess(owner);
-            if (!isCurrent()) return;
-            if (wasReady) {
-                entry.ready = true;
-                setEmployeeDetailTabState(tabId, 'ready');
-                return;
-            }
-            const loaded = await loaders[tabId]();
-            if (!isCurrent()) return;
-            await verifyEmployeeDetailTabAccess(owner);
-            if (!isCurrent()) return;
-            if (loaded !== true) throw new Error('EMPLOYEE_DETAIL_READ_INCOMPLETE');
+            const loaded = await Promise.race([task(), new Promise((_, reject) => {
+                controller.signal.addEventListener('abort', () => reject(new Error('EMPLOYEE_SALARY_READ_STOPPED')), {once:true});
+                timer = setTimeout(() => controller.abort(), 15000);
+            })]);
+            if (!isCurrent() || !loaded) return false;
             entry.ready = true;
-            setEmployeeDetailTabState(tabId, 'ready');
-            window.ErpWorkspaceResume?.checkpoint(document.getElementById(tabId));
+            renderEmployeeSalaryReadState(entry, 'ready');
+            if (!hasUnsavedEmployeeDetailTab(tabId)) window.ErpWorkspaceResume?.checkpoint(document.getElementById(tabId));
+            return true;
         } catch (_) {
-            if (isCurrent()) { entry.ready = false; setEmployeeDetailTabState(tabId, 'error'); }
+            if (entry.readRevision === readRevision && isOwned() && isEmployeeDetailTabVisible(tabId)) renderEmployeeSalaryReadState(entry, 'error');
+            return false;
         } finally {
+            clearTimeout(timer);
+            if (followFocus) for (const name of ['focusin','pointerdown','keydown']) document.removeEventListener(name,track,true);
             if (entry.readRevision === readRevision) {
-                entry.pending = null;
+                entry.pending = null; entry.controller = null;
                 if (isOwned() && !isEmployeeDetailTabVisible(tabId) && !entry.ready) entry.resume = true;
+                const box = trigger?.getBoundingClientRect();
+                if (followFocus && !moved && isOwned() && isEmployeeDetailTabVisible(tabId) && document.hasFocus()
+                    && box && box.top >= 0 && box.bottom <= window.innerHeight
+                    && (document.activeElement === entry.retry || document.activeElement === document.body)) {
+                    const target = entry.ready ? document.getElementById(tabId) : entry.retry;
+                    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex','-1');
+                    target.focus({preventScroll:true});
+                }
             }
         }
     })();
@@ -1741,12 +1796,12 @@ function interruptEmployeeDetailTabReads(tabId) {
     for (const entry of employeeDetailTabLoads.values()) {
         const context = entry.context;
         if (!entry.pending || !context?.isOwned() || (tabId && context.tabId !== tabId)
-            || !['tabLog','tabModuleAccess','tabNotificationAccess'].includes(context.tabId)) continue;
+            || !['tabSalary','tabLog','tabModuleAccess','tabNotificationAccess'].includes(context.tabId)) continue;
         entry.readRevision++;
         entry.controller?.abort();
         entry.pending = null;
         entry.resume = true;
-        if (context.tabId === 'tabLog') continue;
+        if (context.tabId === 'tabLog' || context.tabId === 'tabSalary') continue;
         const kind = context.tabId === 'tabModuleAccess' ? 'modules' : 'notifications';
         employeeDetailReadTokens[kind]++;
         if (kind === 'modules') employeeDetailReadTokens.approvedRights++;
@@ -3867,7 +3922,8 @@ function resetDurunuriSupportState() {
     if (bizEl) bizEl.value = 0;
 }
 
-async function loadDurunuriSupportState(month, empId) {
+async function loadDurunuriSupportState(month, empId, readContext = null) {
+    if (readContext && !readContext.isCurrent()) return;
     const revision = employeeDetailRevision, salaryRevision = employeeSalaryLoadRevision;
     resetDurunuriSupportState();
     const ym = String(month || '').trim();
@@ -3877,7 +3933,8 @@ async function loadDurunuriSupportState(month, empId) {
     if (!module) return;
     try {
         const supportMap = await module.getSupportMap(_supabase, ym);
-        if (revision !== employeeDetailRevision || salaryRevision !== employeeSalaryLoadRevision || eid !== String(currentEmpId)) return;
+        if (revision !== employeeDetailRevision || salaryRevision !== employeeSalaryLoadRevision || eid !== String(currentEmpId)
+            || (readContext && !readContext.isCurrent())) return;
         const support = supportMap?.[eid] || null;
         currentDurunuriSupport = {
             emp_support: Math.max(0, Number(support?.emp_support || 0)),
@@ -3890,6 +3947,7 @@ async function loadDurunuriSupportState(month, empId) {
         if (empEl) empEl.value = Math.round(currentDurunuriSupport.emp_support);
         if (bizEl) bizEl.value = Math.round(currentDurunuriSupport.biz_support);
     } catch (e) {
+        if (readContext && !readContext.isCurrent()) return;
         console.warn('Durunuri support load failed:', e?.message || e);
     }
 }
@@ -7405,12 +7463,13 @@ function syncSalaryTaxPreview() {
 } // End of syncSalaryTaxPreview
 
 // [수정] 급여 데이터 로드 (삭제 버튼 제어 로직 추가)
-async function loadSalaryData() {
+async function loadSalaryData({readContext} = {}) {
+    if (readContext && !readContext.isCurrent()) return false;
     const empId = currentEmpId, revision = employeeDetailRevision, salaryRevision = ++employeeSalaryLoadRevision;
     const owner = getHrSettingsOwner();
     const isCurrent = () => revision === employeeDetailRevision && salaryRevision === employeeSalaryLoadRevision && String(empId) === String(currentEmpId)
         && owner === getHrSettingsOwner() && isEmployeeDetailTabVisible('tabSalary')
-        && month === document.getElementById('salaryMonth').value;
+        && month === document.getElementById('salaryMonth').value && (!readContext || readContext.isCurrent());
     const month = document.getElementById("salaryMonth").value;
     const initialDraft = snapshotEmployeeDetailTabDraft('tabSalary');
     const draftUntouched = () => [...initialDraft].every(([id,value]) => employeeDetailDraftValue(document.getElementById(id)) === value);
@@ -7449,16 +7508,18 @@ async function loadSalaryData() {
     }
 
     let saved = null, salaryError = null;
-    try { saved = (await getAdminEmployeePayrollRows(empId, month, month))[0] || null; }
+    try { saved = (await getAdminEmployeePayrollRows(empId, month, month, readContext))[0] || null; }
     catch (error) { salaryError = error; }
     if (!isCurrent() || !draftUntouched()) return false;
-    if (salaryError) { setEmployeeDetailTabState('tabSalary', 'error'); return false; }
+    if (salaryError) { if (readContext) throw salaryError; setEmployeeDetailTabState('tabSalary', 'error'); return false; }
     let contractBasis = saved?.contract_snapshot || null;
     if (!saved) {
-        const result = await _supabase.rpc('erp_contract_payroll_basis', {p_emp_id:String(empId),p_year_month:month});
+        const query = _supabase.rpc('erp_contract_payroll_basis', {p_emp_id:String(empId),p_year_month:month});
+        const result = await (readContext && typeof query.abortSignal === 'function' ? query.abortSignal(readContext.signal) : query);
         if (!isCurrent() || !draftUntouched()) return false;
         if (result.error || !Array.isArray(result.data?.segments) || !result.data?.basis_key) {
             document.getElementById('salaryContractBasis').textContent = '계약 기준을 불러오지 못했습니다. 다시 조회해 주세요.';
+            if (readContext) throw new Error('EMPLOYEE_SALARY_BASIS_UNAVAILABLE');
             setEmployeeDetailTabState('tabSalary', 'error'); return false;
         }
         contractBasis = result.data;
@@ -7492,7 +7553,7 @@ async function loadSalaryData() {
         .gte('created_at', startDate)
         .lte('created_at', endDate);
     if (!isCurrent()) return;
-    if (unpaidError) { setEmployeeDetailTabState('tabSalary', 'error'); return false; }
+    if (unpaidError) { if (readContext) throw unpaidError; setEmployeeDetailTabState('tabSalary', 'error'); return false; }
 
     if (unpaidDocs && unpaidDocs.length > 0) {
         let totalUnpaidDays = 0;
@@ -7510,6 +7571,7 @@ async function loadSalaryData() {
     // -----------------------------------------------------
 
     const previousMeal = !saved && !contractDefaults.linked ? await getAdminEmployeePreviousMonthMeal(empId, month) : {found:false,amount:0};
+    if (!isCurrent()) return false;
     const adjustedSalary = saved ? await getAdjustedSalaryRowWithDurunuri({...saved,year_month:month},month) : null;
     if (!isCurrent() || !draftUntouched()) return false;
     currentPayrollContractContext = {basis:contractBasis,defaults:contractDefaults,saved:!!saved,savedRow:saved,empId:String(empId),month,owner};
@@ -7607,7 +7669,7 @@ async function loadSalaryData() {
     currentPayrollContractContext.moneyInput = salaryMoneyInputSignature();
     syncSalaryTaxPreview();
     checkpointEmployeeDetailDraft(document.getElementById('tabSalary'));
-    await loadDurunuriSupportState(month, empId);
+    await loadDurunuriSupportState(month, empId, readContext);
     if (!isCurrent()) return;
     return true;
 }

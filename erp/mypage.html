@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.89 | Change: 2026-11-08 - Keep insurance retries current after same-account profile reloads. -->
+<!-- Version: v1.0.90 | Change: 2026-11-09 - Preserve unfinished emergency contact rows and input nodes. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -391,7 +391,7 @@ let mypageCalendarIcsSettings={enabled:false,feedToken:'',sourceCatalog:null};
 let mypageDataAuthorized=false;
 let mypageRefreshing=false;
 let mypageProfileBaseline='',mypageProfileRestoring=false;
-function mypageProfileValues(){return JSON.stringify({fields:['myMemberId','myPhone','myEmail','myAddress','myBank','myAccount'].map(id=>document.getElementById(id)?.value||''),contacts:tempEmergencyList});}
+function mypageProfileValues(){return JSON.stringify({fields:['myMemberId','myPhone','myEmail','myAddress','myBank','myAccount'].map(id=>document.getElementById(id)?.value||''),contacts:tempEmergencyList,contactDrafts:[...document.querySelectorAll('#emergencyListBody tr[data-emergency-draft]')].map(row=>[...row.querySelectorAll('input')].map(input=>input.value)).filter(values=>values.some(value=>value!==''))});}
 window.addEventListener('beforeunload',event=>{if(mypageProfileRestoring||(!document.getElementById('btnSaveInfo')?.classList.contains('hidden')&&mypageProfileBaseline&&mypageProfileValues()!==mypageProfileBaseline)){event.preventDefault();event.returnValue='';}});
 const mypageSectionLoads=new Map();
 function getMypageDataOwner(){return `${String(myInfo?.coop_id||'')}|${String(myInfo?.emp_id||'')}`;}
@@ -1651,7 +1651,8 @@ catch{if(isCurrent()){document.getElementById('btnEditInfo').disabled=true;docum
 function renderEmergencyTable(){
 const b=document.getElementById("emergencyListBody");
 const isEditing=!document.getElementById("btnSaveInfo").classList.contains('hidden');
-b.innerHTML="";
+// Keep unfinished rows connected so another row's action cannot lose a cursor.
+for(const row of [...b.children])if(!isEditing||!row.hasAttribute('data-emergency-draft'))row.remove();
 tempEmergencyList.forEach((r,i)=>{
 const tr=document.createElement('tr');
 const tdName=document.createElement('td');
@@ -1666,17 +1667,17 @@ const btn=document.createElement('button');
 btn.className="btn btn-sm btn-outline-danger py-0";
 btn.type="button";
 btn.textContent="×";
-btn.onclick=()=>removeTempEm(i);
+btn.onclick=()=>{if(tr.isConnected)removeTempEm(i);};
 tdAct.appendChild(btn);
 }
 tr.appendChild(tdName);
 tr.appendChild(tdRel);
 tr.appendChild(tdPhone);
 tr.appendChild(tdAct);
-b.appendChild(tr);
+b.insertBefore(tr,b.querySelector('[data-emergency-draft]'));
 })}
-function addEmergencyUI(){const b=document.getElementById("emergencyListBody"),t=document.createElement('tr');t.innerHTML=`<td><input type="text" class="form-control form-control-sm" id="newEmName" placeholder="이름"></td><td><input type="text" class="form-control form-control-sm" id="newEmRel" placeholder="관계"></td><td><input type="text" class="form-control form-control-sm" id="newEmPhone" placeholder="연락처" oninput="autoHyphen(this)"></td><td><button class="btn btn-sm btn-primary py-0" onclick="confirmAddEm(this)">V</button></td>`;b.appendChild(t)}
-function confirmAddEm(b){const t=b.closest('tr'),n=t.querySelector('#newEmName').value,r=t.querySelector('#newEmRel').value,p=t.querySelector('#newEmPhone').value;if(!n||!r)return;tempEmergencyList.push({contact_name:n,relation:r,phone:p});renderEmergencyTable()}
+function addEmergencyUI(){const b=document.getElementById("emergencyListBody"),t=document.createElement('tr');t.dataset.emergencyDraft='1';t.innerHTML=`<td><input type="text" class="form-control form-control-sm" id="newEmName" placeholder="이름"></td><td><input type="text" class="form-control form-control-sm" id="newEmRel" placeholder="관계"></td><td><input type="text" class="form-control form-control-sm" id="newEmPhone" placeholder="연락처" oninput="autoHyphen(this)"></td><td><button type="button" class="btn btn-sm btn-primary py-0" onclick="confirmAddEm(this)">V</button></td>`;b.appendChild(t)}
+function confirmAddEm(b){const t=b.closest('tr');if(!t?.isConnected||!t.hasAttribute('data-emergency-draft'))return;const n=t.querySelector('#newEmName').value,r=t.querySelector('#newEmRel').value,p=t.querySelector('#newEmPhone').value;if(!n||!r)return;tempEmergencyList.push({contact_name:n,relation:r,phone:p});t.remove();renderEmergencyTable()}
 function removeTempEm(i){tempEmergencyList.splice(i,1);renderEmergencyTable()}
 function parseMypageDotDateToIso(value){
 const raw=String(value||'').trim();
