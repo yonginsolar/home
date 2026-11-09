@@ -293,6 +293,11 @@ async function routeRequest(request,env){
     const response=await env.ASSETS.fetch(new Request(target,request));
     return p.passThrough?response:withProfileHeaders(response,p,noIndex(p,hostname,url.pathname),request.method==='HEAD');
   }
+  if(url.pathname==='/erp/admin_member_site.js'&&url.searchParams.get('v')==='20261109-sunlit-1'&&['GET','HEAD'].includes(request.method)){
+    const target=new URL(request.url);target.pathname='/erp/admin_member_site_20261109_sunlit_legacy.js';target.search='';
+    const response=await env.ASSETS.fetch(new Request(target,request));
+    return p.passThrough?response:withProfileHeaders(response,p,noIndex(p,hostname,url.pathname),request.method==='HEAD');
+  }
   if(p.passThrough){
     const response=await env.ASSETS.fetch(request);
     if(request.method!=='GET'||!(response.headers.get('content-type')||'').includes('text/html'))return response;

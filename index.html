@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.182
-Change: 2026-11-09 - Match homepage header, menu and footer colors to each composition.
+Version: v1.0.183
+Change: 2026-11-09 - Optional card and public photo enhancements.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -13,7 +13,7 @@ Change: 2026-11-09 - Match homepage header, menu and footer colors to each compo
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.182 | index.html');</script>
+<script>console.log('[Version] v1.0.183 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1876,6 +1876,8 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   <link rel="stylesheet" href="shared/home_design.css?v=20261015-2">
   <link rel="stylesheet" href="shared/home_sunlit.css?v=1.0.0" integrity="sha384-DLU1uCWeCDeFCHjkCPd4MxOsD07CtGSxMXkyZa3xHYeDCpiMCXK4XOAyB5olTrlN" crossorigin="anonymous">
   <link rel="stylesheet" href="shared/home_chrome.css?v=1.0.0" integrity="sha384-n+fNndz4uEFiuAmxlqPz+RMfDjU10RqNIMJuAo50q/6p1QYZudXUFJA5SU+GpQjv" crossorigin="anonymous">
+  <link rel="stylesheet" href="shared/home_enhancements.css?v=1.0.0" integrity="sha384-gmW2mGQEm8ScRGrMklgTpq0eUdZHWrx4qVxAEosUizRvuUxKkJYYg/mqsgR0R0Nl" crossorigin="anonymous">
+  <script src="shared/home_enhancements.js?v=1.0.0" integrity="sha384-Lj+0RN9ISOuLoPx9UfqnEjbxrbyDJ8ivWO26gnKI7U5mYTtLAPeC5ponETjgdJaw" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 
@@ -2527,6 +2529,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
              <img id="plant-modal-img" src="" class="w-100 h-100" style="object-fit:cover;" alt="발전소 전경">
         </div>
 
+        <div id="plant-modal-compare" class="mb-3" hidden></div>
         <ul class="list-group list-group-flush" id="plant-modal-info-list">
            </ul>
 
@@ -2894,6 +2897,8 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
             : (isSiteMemberProfile ? 'simple' : 'community');
         document.body.classList.remove('home-template-community', 'home-template-simple', 'home-template-brand', 'home-template-editorial', 'home-template-campaign', 'home-template-sunlit');
         document.body.classList.add(`home-template-${homeTemplate}`);
+        if (window.CoopHomeEnhancements) window.CoopHomeEnhancements.apply(settings);
+        else window.__COOP_HOME_ENHANCEMENTS_PENDING__ = settings.home_display_options?.enhancements || {};
         window.__PUBLIC_HOME_TEMPLATE__ = homeTemplate;
         window.__PUBLIC_SITE_MEMBER_PROFILE__ = isSiteMemberProfile;
         document.body.classList.toggle('home-layout-designed', CoopHomeDesign.normalizeLayout(settings.home_layout_mode) === 'designed');
@@ -5572,6 +5577,7 @@ function prepareActivityArticleLinks(contentEl) {
 }
 
 async function openActivityDetail(id, triggerEl = null) {
+    window.CoopHomeEnhancements?.closeZoom(false);
     const revision = ++g_activity_detail_revision;
     const hash = window.location.hash;
     const isCurrent = () => revision === g_activity_detail_revision && hash === window.location.hash;
@@ -5645,6 +5651,7 @@ async function openActivityDetail(id, triggerEl = null) {
         }
     }
 
+    window.CoopHomeEnhancements?.bindActivity(modalEl,galleryUrls,url=>window.CoopDisplayImages?.display(safeUrl(url)) || safeUrl(url));
     if (!modalEl) {
         homeShowAlert('활동 내역 화면을 준비하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
         return;
@@ -5673,6 +5680,7 @@ async function openActivityDetail(id, triggerEl = null) {
 window.openActivityDetail = openActivityDetail;
 
 function closeActivityDetailFallback() {
+    window.CoopHomeEnhancements?.closeZoom(false);
     invalidateActivityDetailRequest();
     const modalEl = document.getElementById('activityDetailModal');
     restoreActivityDetailFocus();
@@ -5894,6 +5902,7 @@ function openPlantDetail(id) {
     const imgEl = document.getElementById('plant-modal-img');
     imgEl.dataset.originalSrc = safeUrl(p.image_url) || '';
     imgEl.src = window.CoopDisplayImages?.display(safeUrl(p.image_url)) || safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
+    window.CoopHomeEnhancements?.bindPlant(p,url=>window.CoopDisplayImages?.display(url) || url);
 
     // 2) 리스트 구성 (동적으로 생성)
 	    const listContainer = document.getElementById('plant-modal-info-list');
@@ -6890,6 +6899,7 @@ function openOpsContactModal() {
           <div id="activityDetailCoverWrap" style="display:none;">
             <img id="activityDetailCover" class="activity-detail-cover" alt="">
           </div>
+          <button id="activity-photo-zoom" type="button" class="btn btn-sm btn-outline-secondary my-2" hidden>사진 크게 보기</button>
           <div id="activityDetailContent" class="activity-detail-content"></div>
         </div>
       </div>
