@@ -1,4 +1,4 @@
-/* v1.0.5 — Public-only homepage adapter with card details from the same snapshot. */
+/* v1.0.6 — Public-only homepage adapter with full-card detail targets. */
 (function (global) {
   'use strict';
 
@@ -148,10 +148,10 @@
         if (plant.detail_enabled === true && typeof options.onPlantDetails === 'function') {
           card.classList.add('public-plant-card');
           const name = plant.full_name || plant.short_name || '태양광 발전소';
-          const button = element('button', 'btn btn-sm btn-outline-primary mt-2 public-plant-card-action', '상세 정보');
+          const button = element('button', 'public-plant-card-action');
           button.type = 'button';
           button.setAttribute('aria-haspopup', 'dialog');
-          button.setAttribute('aria-label', `${name} 상세 정보`);
+          button.setAttribute('aria-label', `${name} 상세 보기`);
           if (plant.display_order != null) button.dataset.publicPlantKey = `${plant.display_order}:${name}`;
           const statusLabels = {generating:'발전 중',night:'야간',stopped:'정지',offline:'연결 끊김'};
           const operating = ['live','stale'].includes(plant.data_state) && Object.hasOwn(statusLabels,plant.operational_state)
