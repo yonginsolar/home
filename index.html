@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.194
-Change: 2026-11-09 - Show a compact construction list and open each plant's public details on demand.
+Version: v1.0.195
+Change: 2026-11-09 - Preserve construction cards and open plant details instead of photo-only zoom.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -13,7 +13,7 @@ Change: 2026-11-09 - Show a compact construction list and open each plant's publ
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.194 | index.html');</script>
+<script>console.log('[Version] v1.0.195 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1856,20 +1856,14 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 #progress[data-sunlit-public-progress]:not([hidden]) { display: block !important; }
 #progress[data-sunlit-public-progress]:not([data-progress-content]):not([data-home-load-state="ready"]):not([data-home-load-state="failed"]) [data-progress-loading],
 #progress[data-sunlit-public-progress][data-home-load-state="ready"]:not([data-progress-content="present"]) [data-progress-empty] { display: block; }
-#progress .progress-plant-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr)); gap:12px; }
-#progress .progress-plant-list .progress-plant-card { width:auto; max-width:none; min-width:0; margin:0; }
-#progress .progress-plant-entry {
-  display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 10px;
-  width:100%; height:100%; padding:clamp(14px,2.4vw,22px); border-radius:14px;
-  border:1px solid var(--bs-border-color,#d5dfda); color:var(--bs-body-color,#20252a);
-  background:var(--bs-body-bg,#fff); text-align:start; word-break:keep-all; overflow-wrap:anywhere;
+#progress :is(.progress-plant-photo-button,.progress-plant-name-button) {
+  padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:start;
 }
-#progress .progress-plant-entry:is(:hover,:focus-visible) { border-color:var(--home-header-accent,#286146); }
-#progress .progress-plant-entry:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
-#progress .progress-plant-name { font-size:1.1em; font-weight:750; line-height:1.35; }
-#progress .progress-plant-summary { grid-column:1/-1; display:flex; gap:5px 16px; flex-wrap:wrap; }
-#progress .progress-plant-summary > span { min-width:0; }
-#progress .progress-plant-summary small { color:var(--bs-secondary-color,#46545b); }
+#progress .progress-plant-photo-button { display:block; width:100%; height:100%; border-radius:inherit; }
+#progress .progress-plant-name-button { max-width:100%; word-break:keep-all; overflow-wrap:anywhere; }
+#progress .progress-plant-name-button:is(:hover,:focus-visible) { text-decoration:underline; text-underline-offset:.16em; }
+#progress :is(.progress-plant-photo-button,.progress-plant-name-button):focus-visible { outline:2px solid currentColor; outline-offset:2px; }
+#progress .progress-plant-photo-button:focus-visible { outline-offset:-3px; }
 #progressPlantDetailModal { --bs-modal-width:34rem; }
 #progressPlantDetailModal .modal-content { height:32rem; max-height:calc(100vh - 1rem); max-height:calc(100dvh - 1rem); }
 #progressPlantDetailModal .modal-body { min-height:0; word-break:keep-all; overflow-wrap:anywhere; }
@@ -6159,6 +6153,21 @@ function openPlantDetail(id) {
     new bootstrap.Modal(document.getElementById('plantDetailModal')).show();
 }
 
+    function scrollProgressPlants(direction) {
+        const viewport = document.getElementById('progress-scroll-viewport');
+        if (!viewport) return;
+
+        const firstCard = viewport.querySelector('.progress-plant-card');
+        const cardRect = firstCard ? firstCard.getBoundingClientRect() : null;
+        const baseDistance = cardRect ? cardRect.width + 24 : viewport.clientWidth * 0.85;
+        const scrollDirection = Number(direction || 1) < 0 ? -1 : 1;
+
+        viewport.scrollBy({
+            left: Math.round(baseDistance * scrollDirection),
+            behavior: 'smooth'
+        });
+    }
+
     let g_progress_reveal_observer = null;
     let g_progress_reveal_fallback_cleanup = null;
 
@@ -6340,7 +6349,7 @@ function openPlantDetail(id) {
                 && !document.querySelector('.modal.show, dialog[open]')) trigger.focus({preventScroll:true});
         }, {once:true});
 
-        // The list never requests an image. Show only a registered, successfully loaded public photo.
+        // The detail photo is independent of the card image and only shows on successful load.
         const rawImage = text(plant.image_url);
         const imageUrl = rawImage && safeUrl(rawImage);
         if (!imageUrl) return;
@@ -6375,39 +6384,102 @@ function openPlantDetail(id) {
         section.style.display = publicHiddenSectionIds.has('progress') ? 'none' : 'block';
         syncPublicSectionLinks();
 
-        const list = document.createElement('div');
-        list.className = 'progress-plant-list';
-        for (const plant of inProgressPlants) {
-            const stage = getPublicPlantProgressStage(plant.progress_rate);
-            const article = document.createElement('article');
-            article.className = 'progress-plant-card';
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'progress-plant-entry';
-            button.setAttribute('aria-haspopup', 'dialog');
-            const name = document.createElement('span');
-            name.className = 'progress-plant-name';
-            name.textContent = plant.name || '발전소';
-            const arrow = document.createElement('i');
-            arrow.className = 'bi bi-chevron-right';
-            arrow.setAttribute('aria-hidden', 'true');
-            const summary = document.createElement('span');
-            summary.className = 'progress-plant-summary';
-            for (const [label, value] of [['현재 단계', stage.currentTitle], ['예정 용량', getProgressPlantCapacity(plant)]]) {
-                const item = document.createElement('span');
-                const caption = document.createElement('small');
-                caption.textContent = label;
-                item.append(caption, ' ', value);
-                summary.append(item);
+        let cardHtml = '';
+        inProgressPlants.forEach(p => {
+            const stage = getPublicPlantProgressStage(p.progress_rate);
+            const img = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
+            const safeName = escapeHtml(p.name || '발전소');
+	            const safeStatus = escapeHtml(p.status || '');
+	            const safeLocation = escapeHtml(p.location || '미정');
+	            const safeArea = escapeHtml(String(p.area || '-'));
+	            const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
+	            const safeCompletion = escapeHtml(String(p.completion_date || '미정'));
+                    const projectType = normalizePublicPlantProjectType(p.project_type);
+                    const typeBadge = getPublicPlantTypeBadgeHtml(p);
+                    const participationSummary = escapeHtml(getPublicParticipationSummary(p));
+                    const safeOwnerName = escapeHtml(p.project_owner_name || '');
+                    const safePublicNote = escapeHtml(p.public_note || '');
+
+            cardHtml += `
+            <article class="progress-plant-card">
+                <div class="count-box progress-plant-card-inner">
+
+                  <div class="row align-items-center">
+                      <div class="col-md-5 mb-3 mb-md-0">
+                          <div class="progress-plant-image">
+                            <button type="button" class="progress-plant-photo-button" data-progress-plant-detail aria-haspopup="dialog" aria-label="${safeName} 상세 보기">
+                              <img ${buildOptimizedImageAttrs(img,{width:640})} alt="">
+                            </button>
+                          </div>
+                      </div>
+                      <div class="col-md-7">
+	                          <div class="d-flex align-items-center mb-2 progress-plant-title-row">
+	                              <span class="badge bg-warning text-dark me-2">${safeStatus}</span>
+	                                      <span class="me-2">${typeBadge}</span>
+	                              <h3><button type="button" class="progress-plant-name-button" data-progress-plant-detail aria-haspopup="dialog">${safeName}</button></h3>
+	                          </div>
+
+	                          <ul class="list-unstyled text-muted small mb-3">
+	                              <li><i class="bi bi-geo-alt me-1"></i> 위치: ${safeLocation}</li>
+	                              <li><i class="bi bi-aspect-ratio me-1"></i> 면적: ${safeArea}</li>
+	                              <li><i class="bi bi-lightning-charge me-1"></i> ${projectType === 'participation' ? '전체 사업 용량' : '용량(예정)'}: ${safeCapacity}kW</li>
+                                      ${projectType === 'participation' && safeOwnerName ? `<li><i class="bi bi-building me-1"></i> 사업 주체: ${safeOwnerName}</li>` : ''}
+                                      ${projectType === 'participation' && participationSummary ? `<li><i class="bi bi-people me-1"></i> 조합 참여분: ${participationSummary}</li>` : ''}
+	                              <li><i class="bi bi-calendar-check me-1"></i> 준공(예정): ${safeCompletion}</li>
+	                          </ul>
+
+                                  ${projectType === 'participation' && safePublicNote ? `<p class="small text-muted mb-3">${safePublicNote}</p>` : ''}
+
+                                  <div class="progress-stage-summary" aria-label="발전소 건립 단계">
+                                      <div class="progress-stage-card is-current">
+                                          <span class="progress-stage-label">현재 상황</span>
+                                          <strong class="progress-stage-title">${stage.currentTitle}</strong>
+                                      </div>
+                                      <i class="bi bi-chevron-right progress-stage-arrow" aria-hidden="true"></i>
+                                      <div class="progress-stage-card is-next">
+                                          <span class="progress-stage-label">다음 단계</span>
+                                          <strong class="progress-stage-title">${stage.nextTitle}</strong>
+                                      </div>
+                                  </div>
+
+                          <div class="progress progress-plant-bar">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar"
+                                 style="width: ${stage.barWidth}%;"
+                                 aria-valuenow="${stage.position}" aria-valuemin="1" aria-valuemax="${stage.total}">
+                                 ${stage.position} / ${stage.total}단계
+                            </div>
+                          </div>
+                      </div>
+                  </div>
+                </div>
+            </article>`;
+        });
+        const controlClass = inProgressPlants.length > 1 ? '' : ' is-single';
+        container.innerHTML = `
+            <div class="progress-scroll-toolbar${controlClass}">
+                <div class="progress-scroll-hint">
+                    <i class="bi bi-arrow-left-right"></i>
+                    <span>가로로 넘기며 발전소별 진행 상황을 볼 수 있습니다.</span>
+                </div>
+                <div class="progress-scroll-controls" aria-label="발전소 건립 현황 이동">
+                    <button type="button" class="progress-scroll-button" onclick="scrollProgressPlants(-1)" aria-label="이전 발전소 건립 현황 보기">
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    <button type="button" class="progress-scroll-button" onclick="scrollProgressPlants(1)" aria-label="다음 발전소 건립 현황 보기">
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="progress-scroll-viewport" id="progress-scroll-viewport">
+                ${cardHtml}
+            </div>`;
+        container.querySelectorAll('.progress-plant-card').forEach((card, index) => {
+            for (const button of card.querySelectorAll('[data-progress-plant-detail]')) {
+                button.addEventListener('click', event => {
+                    if (!event.defaultPrevented) openProgressPlantDetail(inProgressPlants[index], button);
+                });
             }
-            button.append(name, arrow, summary);
-            button.addEventListener('click', event => {
-                if (!event.defaultPrevented) openProgressPlantDetail(plant, button);
-            });
-            article.append(button);
-            list.append(article);
-        }
-        container.replaceChildren(list);
+        });
         setupProgressReveal(section);
         if (window.location.hash === '#progress' && !section.hasAttribute('data-sunlit-public-progress')) {
             window.requestAnimationFrame(function revealLinkedProgressSection() {
