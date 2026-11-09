@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v1.3.1 — keep HR termination attempts scoped across dialog reopens. */
+/* v1.3.2 — share HR termination-result reads across dialog reopens. */
 (function () {
   'use strict';
   const LABELS = { help: '사용 안내', accounting: '회계', approvals: '전자결재', documents: '문서함', inventory: '재고', events: '행사 매출', member_stats: '조합원 통계' };
@@ -103,8 +103,35 @@
       }
     });
   }
+  function readAdminRevokeStatus(scope, attempt, call) {
+    if (scope.attempt !== attempt || attempt.phase !== 'unknown' || attempt.statusRead) return;
+    const ticket = { beganWhilePending: attempt.pending };
+    attempt.statusRead = ticket;
+    attempt.statusMessage = '';
+    notifyAdmin(scope);
+    const current = () => scope.attempt === attempt && attempt.phase === 'unknown' && attempt.statusRead === ticket;
+    void (async () => {
+      try {
+        const result = await call('status', { id: attempt.id });
+        if (!current()) return;
+        if (['revoked', 'expired', 'not_found'].includes(result.state) ||
+            (result.state === 'active' && !ticket.beganWhilePending && !attempt.pending)) {
+          attempt.phase = 'done'; attempt.state = result.state;
+        } else {
+          attempt.statusMessage = result.state === 'active'
+            ? '아직 종료를 확인하지 못했습니다. 같은 연결을 다시 종료하지 않고 결과만 확인할 수 있습니다.'
+            : '종료 결과를 확인하지 못했습니다. 다시 확인해 주세요.';
+        }
+      } catch {
+        if (current()) attempt.statusMessage = '종료 결과를 확인하지 못했습니다. 다시 확인해 주세요.';
+      } finally {
+        if (attempt.statusRead === ticket) attempt.statusRead = null;
+        if (scope.attempt === attempt) notifyAdmin(scope);
+      }
+    })();
+  }
   window.ErpAiConnections = {
-    version: '1.3.1',
+    version: '1.3.2',
     mount(client, root) {
       if (!root || root.dataset.aiMounted) return;
       root.dataset.aiMounted = '1'; root.classList.add('ai-panel');
@@ -301,7 +328,7 @@
       const sync = () => {
         const attempt = scope.attempt;
         for (const control of [active, history, refresh, more, ...buttons]) {
-          control.setAttribute('aria-disabled', String(busy || !!selected || (!!attempt && (control !== refresh || attempt.phase !== 'unknown')) ||
+          control.setAttribute('aria-disabled', String(busy || !!selected || (!!attempt && (control !== refresh || attempt.phase !== 'unknown' || !!attempt.statusRead)) ||
             (buttons.has(control) && (!listReady || scope.inFlight.has(control.dataset.aiConnectionId)))));
         }
         active.setAttribute('aria-pressed', String(!past)); history.setAttribute('aria-pressed', String(past));
@@ -392,7 +419,8 @@
           sync();
         } else {
           status.textContent = attempt.phase === 'sending' ? '연결을 종료하고 있습니다.'
-            : '종료 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.';
+            : attempt.statusRead ? '종료 결과를 확인하고 있습니다.'
+            : attempt.statusMessage || '종료 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.';
         }
       };
       const switchList = (next) => {
@@ -400,31 +428,11 @@
         past = next; cursor = null; more.hidden = true; list.replaceChildren(); buttons.clear(); load();
       };
       active.onclick = () => switchList(false); history.onclick = () => switchList(true);
-      refresh.onclick = async () => {
+      refresh.onclick = () => {
         if (!alive() || busy || selected) return;
         const attempt = scope.attempt;
         if (!attempt) return load();
-        if (attempt.phase !== 'unknown') return;
-        const beganWhilePending = attempt.pending;
-        busy = true; sync(); status.textContent = '종료 결과를 확인하고 있습니다.';
-        try {
-          const result = await call('status', { id: attempt.id });
-          if (!alive() || scope.attempt !== attempt || attempt.phase !== 'unknown') return;
-          if (['revoked', 'expired', 'not_found'].includes(result.state) || (result.state === 'active' && !beganWhilePending && !attempt.pending)) {
-            attempt.phase = 'done'; attempt.state = result.state;
-          } else if (result.state === 'active') {
-            status.textContent = '아직 종료를 확인하지 못했습니다. 같은 연결을 다시 종료하지 않고 결과만 확인할 수 있습니다.';
-          } else {
-            status.textContent = '종료 결과를 확인하지 못했습니다. 다시 확인해 주세요.';
-          }
-        } catch { if (alive() && attempt.phase === 'unknown') status.textContent = '종료 결과를 확인하지 못했습니다. 다시 확인해 주세요.'; }
-        finally {
-          busy = false;
-          if (alive()) {
-            if (scope.attempt?.phase === 'done' || scope.attempt?.phase === 'denied') showAttempt();
-            else sync();
-          }
-        }
+        readAdminRevokeStatus(scope, attempt, call);
       };
       more.onclick = () => load(true);
       const dispose = () => {

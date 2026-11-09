@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.196
-Change: 2026-11-09 - Keep AI termination state and cancel stale dialog openings.
+Version: v1.0.197
+Change: 2026-11-09 - Make the employee roster searchable and responsive.
 -->
 <html>
 <head>
@@ -189,6 +189,9 @@ Change: 2026-11-09 - Keep AI termination state and cancel stale dialog openings.
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
+  <link rel="stylesheet" href="/erp/erp_palette.css?v=1.0.0" integrity="sha384-Q4SLjWvt6mfxBkeAZ7tJM0NA2HVAOsGJKBHupNsyjJ943mTY5sSRiDPFS8WQSY3j" crossorigin="anonymous" data-erp-palette-style>
+  <script src="/erp/erp_palette.js?v=1.0.0" integrity="sha384-eqzWMk2JERd7XhuNeGNbJ48/w3Hit4umqaZoA6gO9BLNrCkvVuoF8YKOipNIJB1y" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="./employee_roster.css?v=1.0.0">
   <link rel="stylesheet" href="./tab_workspace.css?v=1.0.0">
   <script src="tab_workspace.js?v=1.0.0" defer></script>
   <script src="hr_insurance_status.js?v=1.0.1" defer></script>
@@ -217,25 +220,55 @@ Change: 2026-11-09 - Keep AI termination state and cancel stale dialog openings.
     </div>
     <div class="hr-page-actions">
       <button class="btn btn-light btn-sm btn-rounded" onclick="location.href='index.html'" data-erp-home-link>🏠 홈</button>
-      <button class="btn btn-outline-secondary btn-sm btn-rounded" data-workspace-submenu onclick="openOrgChartModal()">🏢 조직도</button>
-      <button class="btn btn-outline-dark btn-sm btn-rounded" data-workspace-submenu onclick="openLedgerModal()">📊 급여대장 보기</button>
-      <button class="btn btn-outline-primary btn-sm btn-rounded" data-workspace-submenu onclick="ErpWorkspaceResume.navigate('hr_insurance.html')">🧾 입사·퇴사 신고</button>
-      <button class="btn btn-outline-primary btn-sm btn-rounded" data-workspace-submenu onclick="openStatsDashboard()">📈 통계</button>
-      <button class="btn btn-outline-primary btn-sm btn-rounded" type="button" id="employeeAiConnections" hidden>AI 연결</button>
-      <button class="btn btn-primary btn-sm btn-rounded shadow-sm" onclick="openInviteModal()">✨ 직원 등록</button>
-      <a class="btn btn-outline-primary btn-sm btn-rounded" id="employeeSetupWorkLink" href="initial_setup.html" hidden>조합 초기 설정</a>
+      <button class="btn btn-primary btn-rounded" type="button" onclick="openInviteModal()">직원 등록</button>
     </div>
   </div>
   <div id="employeeInitialSetupAccess" hidden></div>
-  <div class="hr-toolbar">
-    <button class="btn btn-outline-primary btn-sm btn-rounded" onclick="openBulkLeaveModal()">🌿 전체 휴가 관리</button>
-    <button class="btn btn-outline-success btn-sm btn-rounded" onclick="openPayrollImportModal()">📥 급여 엑셀 입력</button>
-  </div>
-  <div class="table-responsive erp-desktop-scroll">
-    <div id="employeeTelegramReadStatus" class="small text-secondary mb-2" hidden></div>
-    <table class="table table-hover align-middle" style="font-size: 0.95rem;">
-      <thead class="table-light text-secondary small"><tr><th>사번</th><th>이름 / 부서</th><th>직급</th><th>상태</th><th>Telegram</th><th>시스템 권한</th></tr></thead>
-      <tbody id="empListBody"><tr><td colspan="6" class="text-center p-4 text-muted">로딩 중... ⏳</td></tr></tbody>
+  <section class="employee-roster-query" aria-label="직원 찾기">
+    <div class="employee-roster-search">
+      <label for="employeeRosterSearch" class="form-label">직원 검색</label>
+      <input type="search" class="form-control" id="employeeRosterSearch" data-erp-query-control placeholder="이름, 사번, 부서" autocomplete="off" aria-controls="employeeRosterTable">
+    </div>
+    <div class="employee-roster-filters" role="group" aria-label="재직 상태" id="employeeRosterFilters">
+      <button type="button" class="btn btn-outline-primary" data-roster-filter="all" aria-pressed="true" aria-controls="employeeRosterTable">전체</button>
+      <button type="button" class="btn btn-outline-primary" data-roster-filter="active" aria-pressed="false" aria-controls="employeeRosterTable">재직</button>
+      <button type="button" class="btn btn-outline-primary" data-roster-filter="resigned" aria-pressed="false" aria-controls="employeeRosterTable">퇴사</button>
+    </div>
+  </section>
+  <details class="employee-roster-tools">
+    <summary>인사 업무 도구</summary>
+    <div class="employee-roster-tool-groups">
+      <section aria-labelledby="employeePayTools">
+        <h2 id="employeePayTools">급여·휴가</h2>
+        <div class="employee-roster-tool-actions">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-workspace-submenu onclick="openLedgerModal()">급여대장 보기</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="openPayrollImportModal()">급여 엑셀 입력</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="openBulkLeaveModal()">전체 휴가 관리</button>
+        </div>
+      </section>
+      <section aria-labelledby="employeeOrgTools">
+        <h2 id="employeeOrgTools">조직·신고</h2>
+        <div class="employee-roster-tool-actions">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-workspace-submenu onclick="openOrgChartModal()">조직도</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-workspace-submenu onclick="ErpWorkspaceResume.navigate('hr_insurance.html')">입사·퇴사 신고</button>
+          <a class="btn btn-outline-secondary btn-sm" id="employeeSetupWorkLink" href="initial_setup.html" hidden>조합 초기 설정</a>
+        </div>
+      </section>
+      <section aria-labelledby="employeeAdminTools">
+        <h2 id="employeeAdminTools">운영 도구</h2>
+        <div class="employee-roster-tool-actions hr-toolbar">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-workspace-submenu onclick="openStatsDashboard()">통계</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="employeeAiConnections" hidden>AI 연결</button>
+        </div>
+      </section>
+    </div>
+  </details>
+  <div id="employeeRosterCount" class="employee-roster-count small text-secondary" role="status"></div>
+  <div id="employeeTelegramReadStatus" class="small text-secondary mb-2" hidden></div>
+  <div class="table-responsive employee-roster-table-wrap">
+    <table class="table table-hover align-middle employee-roster-table" id="employeeRosterTable" role="table" aria-label="직원 목록">
+      <thead class="table-light text-secondary small" role="rowgroup"><tr role="row"><th scope="col" role="columnheader">사번</th><th scope="col" role="columnheader">이름 / 부서</th><th scope="col" role="columnheader">직급</th><th scope="col" role="columnheader">상태</th><th scope="col" role="columnheader">Telegram</th><th scope="col" role="columnheader">시스템 권한</th></tr></thead>
+      <tbody id="empListBody" role="rowgroup"><tr role="row"><td role="cell" colspan="6" class="text-center p-4 text-muted">직원 목록을 불러오는 중입니다.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -332,16 +365,16 @@ Change: 2026-11-09 - Keep AI termination state and cancel stale dialog openings.
   </div>
 </div>
 
-<div class="modal fade" id="detailModal" tabindex="-1">
+<div class="modal fade" id="detailModal" tabindex="-1" aria-labelledby="detailName">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header border-0 pb-0 d-flex justify-content-between align-items-start">
-        <div><h5 class="modal-title fw-bold" id="detailName"></h5><span class="text-muted small" id="detailId"></span></div>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <div><h5 class="modal-title fw-bold" id="detailName"></h5><div class="employee-detail-meta"><span class="text-muted small" id="detailId"></span><span id="employeeDetailEmploymentStatus"></span></div></div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="직원 상세 닫기"></button>
       </div>
       <nav class="employee-detail-tabs" aria-label="직원 상세 메뉴">
           <ul class="nav nav-tabs" id="empTab" role="tablist">
-            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabInfo">📝 정보 & 계약</a></li>
+            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabInfo">📝 정보·계약</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabSalary">💰 급여 관리</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabLog">📅 근태/포상</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabInsuranceStatus">🧾 신고 서류</a></li>
@@ -1855,6 +1888,8 @@ function cancelEmployeeDetailReads() {
 let telegramApprovalLinkStatusMap = {};
 const employeeTelegramRead = {state:'idle',owner:'',revision:0,pending:null};
 let employeeListReadRevision = 0;
+let employeeRosterFilter = 'all';
+let employeeRosterReturn = null;
 const HR_MODAL_BASE_Z_INDEX = 1050;
 let hrModalStackOrderSeed = 0;
 let calendarIcsSettings = {
@@ -3700,7 +3735,7 @@ window.onload = async function() {
             const canOpen = () => epoch === openEpoch && current();
             aiButton.setAttribute('aria-busy', 'true');
             try {
-                await import('./ai_connection.js?v=1.3.1');
+                await import('./ai_connection.js?v=1.3.2');
                 if (!canOpen()) return;
                 closeEmployeeAiConnections = window.ErpAiConnections.openAdmin(_supabase, {
                     coopId: String(myInfo.coop_id), actor: hrAuthorizedUserId, current, opener: aiButton
@@ -5034,6 +5069,66 @@ function isEmployeeListReadContextCurrent(owner) {
     return isHrSettingsContextCurrent(owner) || !!owner && owner === getHrSettingsOwner()
         && employeeResumeReadContext?.owner === owner && window.frameElement?.id === 'erpWorkspaceFrame';
 }
+function normalizeEmployeeRosterQuery(value) {
+    return String(value ?? '').normalize('NFKC').toLocaleLowerCase('ko-KR').trim();
+}
+function applyEmployeeRosterFilter() {
+    const tbody = document.getElementById('empListBody');
+    if (!tbody?.hasAttribute('data-roster-ready')) return;
+    const tokens = normalizeEmployeeRosterQuery(document.getElementById('employeeRosterSearch').value).split(/\s+/).filter(Boolean);
+    const rows = Array.from(tbody.querySelectorAll('[data-employee-row]'));
+    let visible = 0;
+    for (const row of rows) {
+        row.hidden = (employeeRosterFilter !== 'all' && row.dataset.rosterStatus !== employeeRosterFilter)
+            || !tokens.every(token => row.dataset.rosterQuery.includes(token));
+        if (!row.hidden) visible++;
+    }
+    const empty = tbody.querySelector('[data-roster-empty]');
+    if (empty) {
+        empty.hidden = visible !== 0;
+        empty.firstElementChild.textContent = rows.length ? '검색 조건에 맞는 직원이 없습니다.' : '등록된 직원이 없습니다.';
+    }
+    document.getElementById('employeeRosterCount').textContent = `직원 ${visible.toLocaleString('ko-KR')}명 · 전체 ${rows.length.toLocaleString('ko-KR')}명`;
+}
+function updateEmployeeRosterRowStatus(row, resignDate, now = new Date()) {
+    const resigned = !!resignDate;
+    const threshold = new Date(now);
+    threshold.setFullYear(threshold.getFullYear() - 3);
+    const expired = resigned && new Date(resignDate) <= threshold;
+    row.dataset.rosterStatus = resigned ? 'resigned' : 'active';
+    row.style.opacity = resigned ? '0.7' : '';
+    row.style.backgroundColor = expired ? '#fff5f5' : '';
+    row.cells[3].innerHTML = expired ? '<span class="badge bg-danger">3년 경과</span>'
+        : resigned ? '<span class="badge bg-secondary">퇴사</span>' : '<span class="badge bg-success">재직</span>';
+    return expired;
+}
+function bindEmployeeRoster() {
+    const search = document.getElementById('employeeRosterSearch');
+    if (!search || search.dataset.rosterBound) return;
+    search.dataset.rosterBound = '1';
+    search.addEventListener('input', applyEmployeeRosterFilter);
+    const filters = document.getElementById('employeeRosterFilters');
+    filters.addEventListener('click', event => {
+        const button = event.target.closest('[data-roster-filter]');
+        if (!button || !filters.contains(button)) return;
+        employeeRosterFilter = button.dataset.rosterFilter;
+        for (const option of filters.querySelectorAll('[data-roster-filter]')) {
+            option.setAttribute('aria-pressed', String(option === button));
+        }
+        applyEmployeeRosterFilter();
+    });
+    const modal = document.getElementById('detailModal');
+    modal.addEventListener('hidden.bs.modal', () => {
+        const origin = employeeRosterReturn;
+        employeeRosterReturn = null;
+        if (!origin || !isHrSettingsContextCurrent(origin.owner)) return;
+        const focused = document.activeElement;
+        if (focused && focused !== document.body && focused !== modal && !modal.contains(focused)) return;
+        const row = Array.from(document.querySelectorAll('#empListBody [data-employee-row]')).find(item => item.dataset.employeeRow === origin.id);
+        const target = row && !row.hidden ? row.querySelector('.employee-roster-name') : search;
+        if (target?.getClientRects().length) target.focus({preventScroll:true});
+    });
+}
 async function loadList() {
     if (window.ERPEmployeeSettingsView?.isPage) {
         const owner = getHrSettingsOwner();
@@ -5064,6 +5159,9 @@ async function loadList() {
         && (!window.frameElement?.hidden || !!readContext && readContext === employeeResumeReadContext);
     const isCurrentList = () => listRevision === employeeListReadRevision && isReadCurrent();
     if (!isCurrentList()) return;
+    bindEmployeeRoster();
+    tbody.removeAttribute('data-roster-ready');
+    document.getElementById('employeeRosterCount').textContent = '';
     tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4">로딩 중...</td></tr>';
     const { data: list, error } = await _supabase.rpc('erp_hr_list_employees', {p_choices_only:false});
     if (!isCurrentList()) return;
@@ -5078,28 +5176,35 @@ async function loadList() {
     if (!isCurrentList()) return;
     employeeCache = Array.isArray(list) ? list.slice().sort(compareEmployeesByDisplayNo) : [];
     tbody.innerHTML = "";
-    const threeYearsAgo = new Date();
-    threeYearsAgo.setFullYear(threeYearsAgo.getFullYear() - 3);
+    const now = new Date();
     let expiredCount = 0;
     employeeCache.forEach(u => {
-        let isResigned = !!u.resign_date;
-        let isExpired = false;
-        if (isResigned && new Date(u.resign_date) <= threeYearsAgo) { isExpired = true; expiredCount++; }
-        let statusBadge = isResigned ? (isExpired ? `<span class="badge bg-danger">3년 경과</span>` : `<span class="badge bg-secondary">퇴사</span>`) : `<span class="badge bg-success">재직</span>`;
-        let roleBadge = getRoleBadge(u.role);
+        const roleBadge = getRoleBadge(u.role);
         const tr = document.createElement("tr");
+        tr.setAttribute('role','row');
         tr.dataset.employeeRow = String(u.emp_id);
-        if (isResigned) tr.style.opacity = "0.7";
-        if (isExpired) tr.style.backgroundColor = "#fff5f5";
-        tr.onclick = () => openDetail(u);
+        tr.dataset.rosterQuery = normalizeEmployeeRosterQuery([u.emp_name,getEmployeeDisplayNoValue(u),u.department].join(' '));
         const safeEmpId = escapeHtml(getEmployeeDisplayNoValue(u));
         const safeName = escapeHtml(u.emp_name);
         const safeDept = escapeHtml(u.department || '-');
         const safePos = escapeHtml(u.position || '');
         const telegramStatusHtml = buildEmployeeTelegramStatusHtml(u.emp_id);
-        tr.innerHTML = `<td class="fw-bold text-secondary">${safeEmpId}</td><td><div class="fw-bold">${safeName}</div><div class="small text-muted">${safeDept}</div></td><td>${safePos}</td><td>${statusBadge}</td><td data-employee-telegram-status="${escapeHtml(u.emp_id)}">${telegramStatusHtml}</td><td>${roleBadge}</td>`;
+        tr.innerHTML = `<td role="cell" data-roster-cell="number" class="fw-bold text-secondary"><span class="employee-roster-label" aria-hidden="true">사번</span>${safeEmpId}</td><td role="cell" data-roster-cell="name"><button type="button" class="employee-roster-name" aria-haspopup="dialog">${safeName || '직원 상세'}</button><div class="small text-muted">${safeDept}</div></td><td role="cell" data-roster-cell="position"><span class="employee-roster-label" aria-hidden="true">직급</span>${safePos || '-'}</td><td role="cell" data-roster-cell="status"></td><td role="cell" data-roster-cell="telegram"><span class="employee-roster-label" aria-hidden="true">Telegram</span><div data-employee-telegram-status="${escapeHtml(u.emp_id)}">${telegramStatusHtml}</div></td><td role="cell" data-roster-cell="role"><span class="employee-roster-label" aria-hidden="true">시스템 권한</span>${roleBadge}</td>`;
+        if (updateEmployeeRosterRowStatus(tr,u.resign_date,now)) expiredCount++;
+        const opener = tr.querySelector('.employee-roster-name');
+        tr.onclick = event => {
+            const clicked = event.target.closest('button');
+            if (tr.hidden || !isHrSettingsContextCurrent(owner) || (clicked && clicked !== opener)) return;
+            void openDetail(u, opener);
+        };
         tbody.appendChild(tr);
     });
+    const empty = document.createElement('tr');
+    empty.setAttribute('data-roster-empty',''); empty.setAttribute('role','row');
+    empty.innerHTML = '<td role="cell" colspan="6" class="text-center p-4 text-muted"></td>';
+    tbody.appendChild(empty);
+    tbody.setAttribute('data-roster-ready','');
+    applyEmployeeRosterFilter();
     if (expiredCount > 0 && !hasCheckedExpired) {
         showConfirm(`⚠️ 개인정보 파기 알림\n퇴사 후 3년 경과자 ${expiredCount}명 발견. 삭제하시겠습니까?`, () => showAlert("목록에서 붉은색 직원을 삭제하세요."));
         hasCheckedExpired = true;
@@ -6746,13 +6851,21 @@ async function openEmployeeContractTask(employee){
     // Bootstrap starts the backdrop before adding .show; keep this exact opening's listener until shown.
     if(revision!==employeeDetailRevision||String(currentEmpId)!==String(employee.emp_id))modal.removeEventListener('shown.bs.modal',reveal);
 }
-async function openDetail(u) {
+async function openDetail(u, rosterOpener = null) {
     if (isEmployeeDetailSaving()) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
     if (window.EmployeeDetailPreparation?.pendingFor(u.emp_id)) return;
     if (hasUnsavedEmployeeDetail()) {
-        requestEmployeeDetailDiscard(() => { void openDetail(u); });
+        requestEmployeeDetailDiscard(() => { void openDetail(u, rosterOpener); });
         return;
     }
+    const detailRoot = document.getElementById('detailModal');
+    if (!detailRoot.classList.contains('show')) {
+        const initialTab = document.querySelector('#empTab [href="#tabInfo"]');
+        if (initialTab && !initialTab.classList.contains('active')) bootstrap.Tab.getOrCreateInstance(initialTab).show();
+        const detailBody = detailRoot.querySelector('.modal-body');
+        if (detailBody) detailBody.scrollTop = 0;
+    }
+    employeeRosterReturn = rosterOpener ? {id:String(u.emp_id),owner:getHrSettingsOwner()} : null;
     employeeDetailDraftBaseline.clear();
     window.EmployeeLeaveReport?.close();
     resetEmployeeContractHours();
@@ -7298,6 +7411,11 @@ async function reqDeletePermanent() {
     });
 }
 function renderEmployeeResignationActions() {
+    const employment = document.getElementById('employeeDetailEmploymentStatus');
+    if (employment) {
+        employment.className = currentEmpResignDate ? 'badge bg-secondary' : 'badge bg-success';
+        employment.textContent = currentEmpResignDate ? '퇴사' : '재직';
+    }
     const area = document.getElementById('btnResignArea');
     if (!area) return;
     area.innerHTML = currentEmpResignDate
@@ -7340,9 +7458,9 @@ async function saveEmployeeResignation(context,date) {
         employeeCache.filter(row => String(row.emp_id) === context.empId).forEach(row => {row.resign_date = date;});
         document.querySelectorAll('[data-employee-row]').forEach(row => {
             if (row.dataset.employeeRow !== context.empId) return;
-            row.style.opacity = date ? '0.7' : ''; row.style.backgroundColor = '';
-            row.cells[3].innerHTML = date ? '<span class="badge bg-secondary">퇴사</span>' : '<span class="badge bg-success">재직</span>';
+            updateEmployeeRosterRowStatus(row,date);
         });
+        applyEmployeeRosterFilter();
         renderEmployeeResignationActions();
         resignModal.hide();
         showAlert(date ? '퇴사 처리가 반영되었습니다.' : '퇴사 취소가 반영되었습니다.');
