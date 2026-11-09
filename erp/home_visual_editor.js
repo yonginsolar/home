@@ -75,9 +75,14 @@
     const photoExit=document.getElementById('site-home-photo-preview-exit');if(photoExit)photoExit.disabled=!allowed;
     syncContext();
   }
-  function setPane(pane){
+  function setPane(pane,keepSettingsOnWide=false){
     const workspace=document.getElementById('site-home-visual-workspace');
     if(!workspace)return;
+    // Use the original desktop toggle's explicit state before the layout changes.
+    // No new pane or editor instance, and no focus move during rotation.
+    if(keepSettingsOnWide&&pane==='settings'&&narrowScreen?.matches&&!workspace.classList.contains('is-legal-edit')){
+      root.CoopSiteInlineHost?.keepSettingsOpen?.();
+    }
     workspace.dataset.homePane=pane;
     for(const button of document.querySelectorAll('[data-home-pane-select]'))button.setAttribute('aria-pressed',String(button.dataset.homePaneSelect===pane));
   }
@@ -87,7 +92,7 @@
     for(const [pane,label,area] of [['settings','설정','site-home-settings-pane'],['preview','미리보기','site-home-preview-pane']]){
       const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';
       button.dataset.homePaneSelect=pane;button.textContent=label;button.setAttribute('aria-controls',area);
-      button.onclick=()=>setPane(pane);views.append(button);
+      button.onclick=()=>setPane(pane,true);views.append(button);
     }
     const experience=document.createElement('div');experience.id='site-home-photo-preview-banner';experience.className='home-photo-preview-banner';experience.hidden=true;
     const note=document.createElement('span');note.textContent='사진 체험 중';note.setAttribute('role','status');
@@ -100,6 +105,7 @@
       const active=document.activeElement;
       if(workspace.querySelector('.home-visual-inspector')?.contains(active))setPane('settings');
       else if(workspace.querySelector('.home-visual-stage')?.contains(active))setPane('preview');
+      else if(workspace.classList.contains('show-settings')&&!workspace.classList.contains('is-legal-edit'))setPane('settings');
     });
   }
   function mountZoom(stage,shell){
@@ -155,7 +161,7 @@
     const legalTabs=document.getElementById('site-legal-document-tabs');if(legalTabs)legalTabs.hidden=!legal;
     document.getElementById('site-home-preview-shell').hidden=legal;
     document.getElementById('site-home-legal-preview').hidden=!legal;
-    if(changed || (navigate && narrowScreen?.matches))setPane(area==='hero'?'preview':'settings');
+    if(changed || (navigate && narrowScreen?.matches))setPane(area==='hero'?'preview':'settings',true);
     if(legal)window.CoopSiteLegalEditor?.refreshPreview();
     if(navigate && !legal) {
       const frame=document.getElementById('site-home-preview-frame');
@@ -323,11 +329,21 @@
     if(!frame?.src || event.source!==frame.contentWindow || event.origin!==new URL(frame.src).origin) return;
     if(event.data?.type==='coop-home-preview-order')syncOrder(null,event.data.ids);
     if(event.data?.type==='coop-home-preview-area') {
+      const {area,photoRequest}=event.data;
+      if(Number.isSafeInteger(photoRequest)&&photoRequest>0&&['activities','portfolio'].includes(area)){
+        if(typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site'))return;
+        // The parent owns the mode. A click received immediately after Exit
+        // must route to the editor even if the iframe still paints photo mode.
+        if(document.getElementById('site-home-photo-preview-mode')?.getAttribute('aria-pressed')==='true'){
+          frame.contentWindow.postMessage({type:'coop-home-preview-photo-open',photoRequest},event.origin);
+          return;
+        }
+      }
       if(!select(event.data.area,false))return;
-      if(narrowScreen?.matches)setPane('settings');
+      if(narrowScreen?.matches)setPane('settings',true);
       if(event.data.area==='activities' && typeof event.data.itemId==='string' && typeof openActivityModal==='function')void openActivityModal(event.data.itemId);
       if(event.data.area==='legal')window.CoopSiteLegalEditor?.select(event.data.legalKind);
     }
   });
-  root.CoopHomeVisualEditor=Object.freeze({version:'20261109-editor-usability-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
+  root.CoopHomeVisualEditor=Object.freeze({version:'20261109-editor-continuity-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
 })(window);

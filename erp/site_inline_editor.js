@@ -9,7 +9,7 @@
   contactPhone:['contact','site-home-contact-phone','plain',40],contactEmail:['contact','site-home-contact-email','plain',160],contactAddress:['contact','site-home-contact-address','plain',240],
   activityTitle:['activities','activity-title','plain',300],activityContent:['activities','activity-content','rich',100000]
  });
- let dialog,moved=[],flushWait=null,lastRejected=false;
+ let dialog,moved=[],flushWait=null,lastRejected=false,setSettingsOpen=null;
  const historyValues=new Map();
  function styleInput(group){
   const id=`site-text-styles-${group}`;let input=document.getElementById(id);
@@ -107,7 +107,9 @@
   for(const group of ['home','about','activities'])styleInput(group);
   const workspace=document.getElementById('site-home-visual-workspace'),toolbar=document.querySelector('.home-visual-toolbar');if(!workspace||!toolbar||document.getElementById('home-inline-settings-toggle'))return;
   let explicitSettings=false;
-  const toggle=document.createElement('button');toggle.id='home-inline-settings-toggle';toggle.type='button';toggle.className='btn btn-sm btn-outline-secondary';toggle.textContent='세부 설정';toggle.setAttribute('aria-expanded','false');toggle.onclick=()=>{const open=workspace.classList.toggle('show-settings');explicitSettings=open;toggle.setAttribute('aria-expanded',String(open));};toolbar.append(toggle);
+  const toggle=document.createElement('button');toggle.id='home-inline-settings-toggle';toggle.type='button';toggle.className='btn btn-sm btn-outline-secondary';toggle.textContent='세부 설정';toggle.setAttribute('aria-expanded','false');
+  setSettingsOpen=open=>{explicitSettings=open;workspace.classList.toggle('show-settings',open);toggle.setAttribute('aria-expanded',String(open));};
+  toggle.onclick=()=>setSettingsOpen(!workspace.classList.contains('show-settings'));toolbar.append(toggle);
   const actions=document.createElement('div');actions.className='home-inline-save-actions';toolbar.append(actions);
   const zone=document.createElement('div');zone.className='home-inline-save-zone';toolbar.append(zone);
   const status=document.createElement('span');status.id='home-inline-save-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');zone.append(status,actions);
@@ -215,5 +217,5 @@
   else if(data.type==='coop-home-inline-section')sectionAction(data.area,data.action);
   else if(data.type==='coop-home-inline-flushed'&&flushWait){clearTimeout(flushWait.timer);flushWait.resolve(data.ok===true&&!lastRejected);flushWait=null;}
  });
- root.CoopSiteInlineHost=Object.freeze({collect,update,mount,closeDialog,flush,setStyles,readStyles,bannerLinks,bannerPhoto,fieldKeys:Object.keys(fields)});
+ root.CoopSiteInlineHost=Object.freeze({collect,update,mount,closeDialog,flush,setStyles,readStyles,bannerLinks,bannerPhoto,keepSettingsOpen(){if(permitted())setSettingsOpen?.(true);},fieldKeys:Object.keys(fields)});
 })(window);

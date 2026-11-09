@@ -3,7 +3,8 @@
   'use strict';
   if(new URLSearchParams(location.search).get('home_preview')!=='1'||window.parent===window) return;
   const areas=['hero','about','impact','progress','portfolio','status','activities','partners','history','faq','contact','documents','calculator','ops-system','game-hall'];
-  let parentOrigin='',draft={};
+  let parentOrigin='',draft={},photoController=false,explicitPhotoMode,pendingPhoto=null,photoSequence=0,replayingPhoto=null;
+  const photoMode=()=>explicitPhotoMode??(draft.photo_inspect===true);
   const rendered = {};
   function imageUrl(value){
     const url=String(value||'');
@@ -65,9 +66,10 @@
     if(node)window.scrollTo({top:window.scrollY+node.getBoundingClientRect().top,behavior:'instant'});
   }
   function closeFinishedPhotoExperience(event){
-    if(draft.photo_inspect!==true)window.bootstrap?.Modal?.getInstance(event.currentTarget)?.hide();
+    if(!photoMode())window.bootstrap?.Modal?.getInstance(event.currentTarget)?.hide();
   }
   function exitPhotoExperience(){
+    pendingPhoto=null;
     if(typeof invalidateActivityDetailRequest==='function')invalidateActivityDetailRequest();
     window.CoopHomeEnhancements?.closeZoom(false);
     for(const id of ['plantDetailModal','activityDetailModal']){
@@ -80,7 +82,7 @@
     }
   }
   window.CoopSitePreview=Object.freeze({
-    get:key=>draft[key],apply(value){const wasInspecting=draft.photo_inspect===true;draft=value&&typeof value==='object'?value:{};if(wasInspecting&&draft.photo_inspect!==true)exitPhotoExperience();return refresh(false);},refresh,finishActivities,invalidate(key){delete rendered[key];},
+    get:key=>key==='photo_inspect'?photoMode():draft[key],apply(value){const wasInspecting=photoMode();draft=value&&typeof value==='object'?value:{};if(wasInspecting&&!photoMode())exitPhotoExperience();return refresh(false);},refresh,finishActivities,invalidate(key){delete rendered[key];},
     activityRows(rows){
       if(!draft.activity)return rows;
       const filtered=(Array.isArray(rows)?rows:[]).filter(row=>String(row.id)!==draft.activity.id);
@@ -93,18 +95,32 @@
     if(url.protocol!==location.protocol||url.port!==location.port||url.hostname.replace(/^(www|erp)\./,'')!==location.hostname.replace(/^(www|erp)\./,''))return;
     if(event.data?.type==='coop-home-preview-settings'){
       parentOrigin=event.origin;document.documentElement.dataset.homeVisualEdit='true';
+      if(event.data.settings?.site_preview?.photo_controller===true)photoController=true;
     }
-    if(parentOrigin===event.origin&&['coop-home-preview-select','coop-home-preview-navigate'].includes(event.data?.type))navigate(event.data.area);
+    if(parentOrigin!==event.origin)return;
+    if(event.data?.type==='coop-home-preview-photo-mode'&&typeof event.data.enabled==='boolean'){
+      const wasInspecting=photoMode();
+      photoController=true;explicitPhotoMode=event.data.enabled;
+      if(wasInspecting&&!photoMode())exitPhotoExperience();
+    }else if(event.data?.type==='coop-home-preview-photo-open'){
+      const request=pendingPhoto;
+      if(!photoController||!request||event.data.photoRequest!==request.id)return;
+      pendingPhoto=null;
+      if(!photoMode()||!request.trigger.isConnected)return;
+      replayingPhoto=request.trigger;
+      try{request.trigger.click();}finally{replayingPhoto=null;}
+    }else if(['coop-home-preview-select','coop-home-preview-navigate'].includes(event.data?.type))navigate(event.data.area);
   });
   const plantDetailSelector='#portfolio #power-plants-container button[data-home-photo-preview-plant]';
   const activityDetailSelector='#activities #activities-container .activity-card[data-activity-id]';
-  document.addEventListener('click',event=>{
-    if(!parentOrigin)return;
+  function routeInteraction(event){
+    if(!parentOrigin||replayingPhoto===event.target)return;
     if(event.target.closest('#plantDetailModal a[href],#activityDetailModal a[href]')){
       event.preventDefault();event.stopImmediatePropagation();return;
     }
     const detail=event.target.closest(plantDetailSelector+','+activityDetailSelector);
-    if(draft.photo_inspect===true&&detail&&!event.target.closest('a[href]'))return;
+    const isPhotoTarget=!!detail&&!event.target.closest('a[href]');
+    if(isPhotoTarget&&!photoController&&photoMode())return;
     const legal=event.target.closest('a[href*="privacy"],a[href*="terms"],a[href*="signup"]');
     const certification=event.target.closest('#public-site-certifications,#public-hero-certifications');
     const section=event.target.closest(areas.map(id=>`#${id}`).join(','));
@@ -114,8 +130,22 @@
     const message={type:'coop-home-preview-area',area};
     const card=event.target.closest('.activity-card[data-activity-id]');
     if(card){try{message.itemId=decodeURIComponent(card.dataset.activityId);}catch(_){}}
+    if(isPhotoTarget&&photoController){
+      const trigger=event.target.closest('button')||detail;
+      pendingPhoto={id:++photoSequence,trigger};
+      message.photoRequest=pendingPhoto.id;
+    }
     if(legal)message.legalKind=legal.getAttribute('href').includes('privacy')?'privacy':legal.getAttribute('href').includes('terms')?'terms':'signup_purpose';
     window.parent.postMessage(message,parentOrigin);
+  }
+  document.addEventListener('click',routeInteraction,true);
+  document.addEventListener('keydown',event=>{
+    // Public news cards are role=button articles with their own key handler,
+    // unlike nested native buttons which already dispatch a click.
+    if(!parentOrigin||event.isComposing||event.keyCode===229||!['Enter',' '].includes(event.key)||
+       !event.target.matches?.(activityDetailSelector+'[role="button"]'))return;
+    if(event.repeat){event.preventDefault();event.stopImmediatePropagation();return;}
+    routeInteraction(event);
   },true);
   const style=document.createElement('style');
   style.textContent=`html[data-home-visual-edit] :is(${areas.map(id=>'#'+id).join(',')}){cursor:pointer} html[data-home-visual-edit] :is(${areas.map(id=>'#'+id).join(',')}):hover{outline:3px solid #2baf84;outline-offset:-3px} html[data-home-preview] [data-aos]{opacity:1!important;transform:none!important} .home-preview-article{flex:0 0 100%;padding:24px;border:1px solid #dbe3e9;border-radius:12px;background:var(--surface-color,#fff);word-break:keep-all;overflow-wrap:break-word}`;
