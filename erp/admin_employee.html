@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.200
+Version: v1.0.201
 Change: 2026-11-09 - Make the employee roster searchable and responsive.
 -->
 <html>
@@ -1477,7 +1477,8 @@ function runEmployeeAuxRead(modalId, options) {
 let employeeNotificationSnapshot = null;
 let employeeNotificationSaveInFlight = false;
 let employeeApprovedRightsView = null;
-const employeeApprovedRightsWrites = new Set();
+// Scoped to the retained workspace, by actor/cooperative/employee and permission key.
+const employeeApprovedRightsWrites = new Map();
 const employeeDetailReadTokens = { modules: 0, approvedRights: 0, notifications: 0 };
 function beginEmployeeDetailRead(kind, {requireVisible = false} = {}) {
     const empId = String(currentEmpId || '').trim();
@@ -6405,14 +6406,30 @@ function suspendEmployeeApprovedRights(reset = false) {
         employeeApprovedRightsView = null;
         setEmployeeApprovedRightsBusy(false);
     }
+    document.getElementById('employeeApprovedRightsRetry').textContent = '목록 다시 확인';
     setEmployeeAccessResult('employeeApprovedRightsNotice');
+}
+
+function syncEmployeeApprovedRightsWriteState(view) {
+    const operations = [...(employeeApprovedRightsWrites.get(view.key)?.values() || [])];
+    if (!view.visible()) return false;
+    const waiting = operations.some(operation => operation.waiting);
+    const unknown = operations.some(operation => !operation.waiting && !operation.absent);
+    document.getElementById('employeeApprovedRightsRetry').textContent = unknown ? '결과 확인' : '목록 다시 확인';
+    if (unknown) setEmployeeAccessResult('employeeApprovedRightsNotice', '권한 회수 결과 미확인. 결과 확인은 현재 권한 목록만 불러옵니다.', true);
+    if (waiting) {
+        document.getElementById('employeeApprovedRights').textContent = '권한 회수 결과를 확인하는 중입니다.';
+        setEmployeeApprovedRightsBusy(true);
+    }
+    return waiting;
 }
 
 function resumeEmployeeApprovedRights(force = false) {
     if (!isEmployeeDetailTabVisible('tabModuleAccess') || document.getElementById('employeeApprovedRightsSection').hidden) return;
     const view = getEmployeeApprovedRightsView();
-    if (view && !view.confirm && !employeeApprovedRightsWrites.has(view.key) && (force || view.needsRead)) {
-        if (force && !view.read) setEmployeeAccessResult('employeeApprovedRightsNotice');
+    if (!view || view.confirm) return;
+    if (force && !view.read) setEmployeeAccessResult('employeeApprovedRightsNotice');
+    if (!syncEmployeeApprovedRightsWriteState(view) && (force || view.needsRead)) {
         return loadEmployeeApprovedRights(view.empId);
     }
 }
@@ -6425,7 +6442,10 @@ function renderEmployeeApprovedRights(view, rights) {
         const row = document.createElement('div'); row.className = 'd-flex align-items-center justify-content-between border rounded p-2 mb-2 gap-2';
         const label = document.createElement('span'); label.textContent = right.label;
         const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-outline-danger btn-sm'; button.textContent = '권한 회수';
-        button.onclick = () => void revokeEmployeeApprovedRight(view, right, button);
+        if (employeeApprovedRightsWrites.get(view.key)?.has(right.key)) {
+            button.disabled = true;
+            button.textContent = '결과 미확인';
+        } else button.onclick = () => void revokeEmployeeApprovedRight(view, right, button);
         row.append(label, button); list.append(row);
     });
 }
@@ -6435,9 +6455,10 @@ function isEmployeeApprovedRightsResult(data) {
 }
 
 async function revokeEmployeeApprovedRight(view, right, button) {
+    const operationsForView = () => employeeApprovedRightsWrites.get(view.key);
     const canStart = () => view.visible() && button.isConnected && !document.getElementById('employeeApprovedRightsSection').hidden
         && !view.needsRead && !view.read
-        && !employeeApprovedRightsWrites.has(view.key);
+        && !operationsForView()?.has(right.key) && ![...(operationsForView()?.values() || [])].some(operation => operation.waiting);
     if (!canStart() || view.confirm || !right.key) return;
     const intent = {epoch:view.epoch};
     view.confirm = intent;
@@ -6454,29 +6475,57 @@ async function revokeEmployeeApprovedRight(view, right, button) {
     const list = document.getElementById('employeeApprovedRights');
     const resultId = 'employeeApprovedRightsNotice';
     const originalScreen = () => view.visible() && view.epoch === intent.epoch;
-    employeeApprovedRightsWrites.add(view.key);
+    const operations = operationsForView() || new Map();
+    const operation = {waiting:true, confirmed:false, absent:false};
+    operations.set(right.key, operation);
+    employeeApprovedRightsWrites.set(view.key, operations);
+    const forget = () => {
+        operations.delete(right.key);
+        if (!operations.size) employeeApprovedRightsWrites.delete(view.key);
+    };
+    const showUnknown = () => {
+        if (!operation.waiting) return;
+        operation.waiting = false;
+        const current = employeeApprovedRightsView;
+        if (current?.key !== view.key || !current.visible() || current.read) return;
+        list.textContent = '결과 확인을 눌러 현재 권한을 확인해 주세요.';
+        setEmployeeApprovedRightsBusy(false);
+        syncEmployeeApprovedRightsWriteState(current);
+    };
     view.needsRead = true;
     setEmployeeAccessResult(resultId);
-    setEmployeeApprovedRightsBusy(true);
     if (document.activeElement === button) document.getElementById('employeeApprovedRightsRetry').focus({preventScroll:true});
-    list.textContent = '권한 회수 결과를 확인하는 중입니다.';
+    syncEmployeeApprovedRightsWriteState(view);
+    // UI deadline only. Aborting transport cannot prove that the server did not commit.
+    const timer = setTimeout(showUnknown, 15000);
     try {
         const {data,error} = await _supabase.rpc('erp_admin_approved_permissions', {p_emp_id:view.empId, p_revoke_key:right.key});
+        if (operation.waiting && error?.code === '42501') {
+            forget();
+            if (originalScreen()) {
+                list.textContent = '목록을 다시 확인해 주세요.';
+                setEmployeeAccessResult(resultId, '현재 권한으로는 회수할 수 없습니다.', true);
+            }
+            return;
+        }
         if (error || !isEmployeeApprovedRightsResult(data) || data.some(item => item.key === right.key)) throw new Error('EMPLOYEE_RIGHT_RESULT_UNVERIFIED');
+        if (!operation.waiting) {
+            operation.confirmed = true;
+            return; // A fresh list, not this late response, owns the screen and focus.
+        }
+        forget();
         if (originalScreen()) {
             view.needsRead = false;
             renderEmployeeApprovedRights(view, data);
             setEmployeeAccessResult(resultId,'결재로 추가한 권한을 회수했습니다.');
+            syncEmployeeApprovedRightsWriteState(view);
         }
     } catch (_) {
-        if (originalScreen()) {
-            list.textContent = '권한 회수 결과를 확인하지 못했습니다.';
-            setEmployeeAccessResult(resultId,'목록을 다시 확인한 뒤 현재 권한을 확인해 주세요.',true);
-        }
+        showUnknown();
     } finally {
-        employeeApprovedRightsWrites.delete(view.key);
-        const currentView = employeeApprovedRightsView;
-        if (currentView?.key === view.key && currentView.visible() && !currentView.read) {
+        clearTimeout(timer);
+        const current = employeeApprovedRightsView;
+        if (operation.waiting && current?.key === view.key && current.visible() && !current.read) {
             setEmployeeApprovedRightsBusy(false);
             if (!originalScreen()) void resumeEmployeeApprovedRights();
         }
@@ -6487,7 +6536,7 @@ function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim(), {
     const view = getEmployeeApprovedRightsView();
     if (!view?.visible() || empId !== view.empId || (readContext && !readContext.isCurrent())) return Promise.resolve(false);
     if (view.read) return view.read.pending;
-    if (employeeApprovedRightsWrites.has(view.key)) return Promise.resolve(true);
+    if (syncEmployeeApprovedRightsWriteState(view)) return Promise.resolve(true);
     const list = document.getElementById('employeeApprovedRights');
     const controller = new AbortController(), read = {controller, pending:null};
     view.read = read;
@@ -6500,10 +6549,14 @@ function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim(), {
     readContext?.signal?.addEventListener('abort', abort, {once:true});
     read.pending = (async () => {
         let timer;
+        const confirmedBeforeRead = new Set();
         try {
             const work = async () => {
                 if (!readContext) await verifyEmployeeDetailTabAccess(view.owner, context);
                 if (!context.isCurrent()) return null;
+                employeeApprovedRightsWrites.get(view.key)?.forEach(operation => {
+                    if (operation.confirmed) confirmedBeforeRead.add(operation);
+                });
                 const query = _supabase.rpc('erp_admin_approved_permissions', {p_emp_id:view.empId});
                 return typeof query.abortSignal === 'function' ? query.abortSignal(controller.signal) : query;
             };
@@ -6515,7 +6568,17 @@ function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim(), {
             if (!context.isCurrent()) return false;
             if (!response || response.error || !isEmployeeApprovedRightsResult(response.data)) throw new Error('EMPLOYEE_RIGHT_READ_FAILED');
             view.needsRead = false;
+            const operations = employeeApprovedRightsWrites.get(view.key);
+            if (operations?.size) {
+                for (const [key, operation] of operations) {
+                    operation.absent = !response.data.some(right => right.key === key);
+                    if (confirmedBeforeRead.has(operation) || (operation.absent && operation.confirmed)) operations.delete(key);
+                }
+                if (!operations.size) employeeApprovedRightsWrites.delete(view.key);
+                setEmployeeAccessResult('employeeApprovedRightsNotice');
+            }
             renderEmployeeApprovedRights(view, response.data);
+            syncEmployeeApprovedRightsWriteState(view);
             return true;
         } catch (_) {
             if (isViewCurrent()) list.textContent = '결재로 추가한 권한을 확인하지 못했습니다. 목록을 다시 확인해 주세요.';
