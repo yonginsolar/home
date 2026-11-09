@@ -1,4 +1,4 @@
-/* v1.0.3 — Public-only homepage adapter. Never reads monitor administration tables. */
+/* v1.0.4 — Public-only homepage adapter. Never reads monitor administration tables. */
 (function (global) {
   'use strict';
 
@@ -114,6 +114,7 @@
       const today = kstDay(now);
       writeStats([sum(plants.map(p => todayValue(p, today))), sum(plants.map(p => monthValue(p, now))),
         sum(plants.map(p => metric(p, 'lifetime_kwh'))), plants.length]);
+      options.onGenerationMonths?.(plants, now, plant => monthValue(plant, now));
       const updated = timeLabel(data.last_updated);
       if (stamp) stamp.textContent = updated ? `${updated} 기준` : '발전량 수집 대기 중';
       const delayed = plants.some(p => !p.fetched_at || p.data_state !== 'live'
@@ -187,6 +188,7 @@
           lastLoaded = Date.now();
         } catch (_) {
           if (disposed) return;
+          options.onGenerationMonthsIssue?.(hasData);
           statusMessage.textContent = hasData ? '갱신이 지연되어 마지막으로 확인한 자료를 보여드립니다.'
             : '발전 현황을 불러오지 못했습니다.';
           if (!hasData) {

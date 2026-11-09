@@ -2,7 +2,7 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.189
+Version: v1.0.190
 Change: 2026-11-09 - Safe photo preview, slide selection and initial fit.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
@@ -13,7 +13,7 @@ Change: 2026-11-09 - Safe photo preview, slide selection and initial fit.
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.189 | index.html');</script>
+<script>console.log('[Version] v1.0.190 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1864,11 +1864,13 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   <script src="shared/partner_logo_theme.js?v=20261012-1"></script>
   <link href="shared/theme.css?v=20261026-mobile-ui-1" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
+  <link href="shared/public_generation_trend.css?v=20261109-1" rel="stylesheet">
+  <script src="shared/public_generation_trend.js?v=20261109-1" defer></script>
   <script src="shared/home_design.js?v=20261009-3"></script>
 <script src="shared/site_text_styles.js?v=20261009-17" defer></script>
 <script src="shared/home_display_options.js?v=1.3.1" defer></script>
 <script src="shared/site_inline_editor.js?v=20261019-shortcuts-1" defer></script>
-<script src="shared/home_preview_editor.js?v=20261109-photo-intent-1" defer></script>
+<script src="shared/home_preview_editor.js?v=20261109-photo-restart-1" defer></script>
 <script src="shared/hero_banner.js?v=1.5.1" defer></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
 <script src="shared/home_progressive.js?v=20261023-3" integrity="sha384-px6WJAuCM53uUaqxVd38tnhTQoEuGSl7o9+9m0SydxN2p6AZ2QMi52Mf9fpUuz3i" crossorigin="anonymous" defer></script>
@@ -2130,6 +2132,29 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
             </div>
           </div>
         </div>
+        <section id="public-generation-trend" class="generation-trend" aria-labelledby="public-generation-trend-title" hidden>
+          <div class="generation-trend-meta">
+            <div>
+              <h3 id="public-generation-trend-title">최근 12개월 발전량</h3>
+              <p data-generation-range></p>
+            </div>
+            <p>단위: kWh</p>
+          </div>
+          <p class="generation-trend-message" data-generation-message role="status"></p>
+          <div class="generation-trend-chart" data-generation-chart aria-hidden="true" hidden>
+            <div class="generation-trend-axis" data-generation-axis></div>
+            <div class="generation-trend-bars" data-generation-bars></div>
+          </div>
+          <p class="generation-trend-legend" data-generation-legend hidden></p>
+          <details hidden>
+            <summary>월별 수치 보기</summary>
+            <table aria-label="최근 12개월 월별 발전량">
+              <thead><tr><th scope="col">월</th><th scope="col">발전량</th><th scope="col">상태</th></tr></thead>
+              <tbody data-generation-values></tbody>
+            </table>
+          </details>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-generation-retry hidden>월별 발전량 다시 불러오기</button>
+        </section>
       </div>
     </section>
 
@@ -2574,7 +2599,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
   <script src="shared/route_guard.js?v=20260401-1"></script>
-  <script src="shared/public_power_monitor.js?v=20261007-4"></script>
+  <script src="shared/public_power_monitor.js?v=20261109-1"></script>
  <script src="/shared/daily_patch_notes.js?v=20261019-1" integrity="sha384-M/werDU95RS3yyX4R8KvWSkengMa84XWJCZDXvvKGfYJdJ4jXKlMKXKvgi9lXPHf" crossorigin="anonymous"></script>
  <script src="home_patch_note.js?v=20261019-archive-1"></script>
   <script>
@@ -4587,13 +4612,23 @@ function renderPublicPowerStats(stats) {
 	        : '발전량 입력 대기 중';
 	    }
 
+let g_public_generation_trend = null;
+function getPublicGenerationTrend() {
+      return g_public_generation_trend ||= window.CoopPublicGenerationTrend?.create({
+        host: document.getElementById('public-generation-trend'), client: _client,
+        getContext: getPublicSiteContext, read: readPublicHome
+      }) || null;
+    }
+
 let g_public_home_monitor = null;
 async function getPublicHomeMonitor() {
       if (g_public_home_monitor) return g_public_home_monitor;
       const context = await getPublicSiteContext();
       if (g_public_home_monitor) return g_public_home_monitor;
       g_public_home_monitor = window.CoopPublicPowerMonitor?.create({
-        context, hostname: window.location.hostname, client: _client
+        context, hostname: window.location.hostname, client: _client,
+        onGenerationMonths: (plants, now, current) => getPublicGenerationTrend()?.renderMonitor(plants, now, current),
+        onGenerationMonthsIssue: retain => getPublicGenerationTrend()?.monitorIssue(retain)
       }) || null;
       return g_public_home_monitor;
     }
@@ -4603,10 +4638,12 @@ async function fetchPowerGenerationStats(attempt) {
       if (monitor) { await monitor.refresh(); return; }
       const { data, error } = await readPublicHome(signal => _client.rpc('get_public_power_generation_stats').abortSignal(signal), attempt);
       if (error) {
+        void getPublicGenerationTrend()?.refreshLogs();
         console.warn('fetchPowerGenerationStats failed:', error);
         return false;
       }
       renderPublicPowerStats(data || {});
+      void getPublicGenerationTrend()?.refreshLogs(data?.latest_generation_date === null);
     }
 
 /* =================================================================

@@ -115,8 +115,8 @@
         (!live||(live.active&&live.revision===viewRevision))&&(!mode||(mode.enabled&&mode.revision===modeRevision));
     };
   }
-  function exitPhotoExperience(){
-    cancelPendingPhotoOpen();
+  function exitPhotoExperience(keepNewerSelection=false){
+    if(!keepNewerSelection)cancelPendingPhotoOpen();
     if(typeof invalidateActivityDetailRequest==='function')invalidateActivityDetailRequest();
     window.CoopHomeEnhancements?.closeZoom(false);
     for(const id of ['plantDetailModal','activityDetailModal']){
@@ -164,15 +164,18 @@
       const {photoModeRevision:revision,modeChangedAt}=event.data;
       const versioned=Number.isSafeInteger(revision)&&revision>=0&&Number.isFinite(modeChangedAt);
       if(photoModeRevision!==null&&(!versioned||revision<photoModeRevision))return;
+      let keepNewerSelection=false;
       if(versioned&&revision!==photoModeRevision){
         const request=pendingPhoto;
         // Keep an early new-mode click if its context is newer than this message.
-        if(request&&(request.liveModeRevision!=null?request.liveModeRevision>=revision:request.clickedAt>modeChangedAt))photoOpenRevision++;
+        keepNewerSelection=!!request&&(request.liveModeRevision!=null?request.liveModeRevision>revision:request.clickedAt>modeChangedAt);
+        if(keepNewerSelection)photoOpenRevision++;
+        else if(event.data.enabled&&request?.liveModeRevision===revision)photoOpenRevision++;
         else cancelPendingPhotoOpen();
         photoModeRevision=revision;
       }
       photoController=true;explicitPhotoMode=event.data.enabled;
-      if(wasInspecting&&!photoMode())exitPhotoExperience();
+      if(wasInspecting&&!photoMode())exitPhotoExperience(keepNewerSelection);
       else openApprovedPhoto();
     }else if(event.data?.type==='coop-home-preview-photo-open'){
       const request=pendingPhoto;
