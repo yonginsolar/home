@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: 1.0.3 | 2026-11-08. Recover current-view designation reads without changing authority. */
+/* Version: 1.0.4 | 2026-11-09. Scope designation to the employee access section. */
 (() => {
   'use strict';
 
@@ -7,12 +7,15 @@
   let selectedEmpId = '';
   let savedValue = false;
   let busy = false;
-  let activeRead=null, resumeRead=null, failedRead=null;
+  let activeRead=null, resumeRead=null, failedRead=null, readyRead=null, viewEpoch=0;
   const owner=()=>typeof getHrSettingsOwner==='function'?getHrSettingsOwner():'';
   const revision=()=>typeof employeeDetailRevision==='number'?employeeDetailRevision:0;
-  const owned=read=>read.owner===owner()&&read.revision===revision()
-    &&read.empId===String(currentEmpId||'')&&read.empId===selectedEmpId
-    &&(typeof isHrSettingsContextCurrent!=='function'||isHrSettingsContextCurrent(read.owner));
+  const grouped=()=>$('tabAccessGroup');
+  const section=()=>grouped()?$('tabSunVillageTotalManager'):$('sunVillageTotalManagerTabNav');
+  const visible=()=>!window.frameElement?.hidden&&(!grouped()||isEmployeeDetailTabVisible('tabAccessGroup'));
+  const sameSelection=read=>read.owner===owner()&&read.revision===revision()
+    &&read.empId===String(currentEmpId||'')&&read.empId===selectedEmpId;
+  const owned=read=>sameSelection(read)&&(typeof isHrSettingsContextCurrent!=='function'||isHrSettingsContextCurrent(read.owner));
 
   function stopRead(read) {
     if(!read)return;
@@ -21,10 +24,11 @@
 
   function clearReadNotice(followFocus=false) {
     const notice=$('sunVillageTotalManagerReadNotice'),retry=$('sunVillageTotalManagerRetry');
-    if(followFocus&&retry&&document.activeElement===retry&&document.hasFocus()&&!window.frameElement?.hidden){
+    if(followFocus&&retry&&document.activeElement===retry&&document.hasFocus()&&visible()){
       const nav=$('sunVillageTotalManagerTabNav');
       const active=document.querySelector('#empTab .nav-link.active');
-      const target=!nav?.hidden?nav?.querySelector('a'):active?.closest('[hidden]')?document.querySelector('#empTab a[href="#tabInfo"]'):active;
+      const target=grouped()?(!section()?.hidden?$('sunVillageTotalManagerHeading'):active)
+        :!nav?.hidden?nav?.querySelector('a'):active?.closest('[hidden]')?document.querySelector('#empTab a[href="#tabInfo"]'):active;
       target?.focus({preventScroll:true});
     }
     if(notice){notice.hidden=true;notice.setAttribute('aria-busy','false');}
@@ -42,7 +46,7 @@
 
   function retryRead() {
     const read=failedRead;
-    if(!read||!read.retryable||activeRead||busy||!owned(read)||window.frameElement?.hidden)return;
+    if(!read||!read.retryable||activeRead||busy||!owned(read)||!visible())return;
     return load(read.empId,{retry:true});
   }
 
@@ -61,15 +65,34 @@
     button.disabled = busy || checkbox.disabled || checkbox.checked === savedValue;
   }
 
+  function select(empId) {
+    viewEpoch++;
+    const previous=activeRead;
+    activeRead=resumeRead=failedRead=readyRead=null;
+    stopRead(previous); clearReadNotice();
+    selectedEmpId=String(empId||'').trim(); savedValue=false;
+    const panel=section(),checkbox=$('sunVillageTotalManagerEnabled'),button=$('sunVillageTotalManagerSave');
+    if(panel)panel.hidden=true;
+    if(checkbox){checkbox.checked=false;checkbox.disabled=true;}
+    if(button)button.disabled=true;
+  }
+
+  function ensure() {
+    if(!visible()||!selectedEmpId||busy)return;
+    if(activeRead&&owned(activeRead))return;
+    if(readyRead&&owned(readyRead)||failedRead&&owned(failedRead))return;
+    return load(selectedEmpId,{retry:resumeRead?.retry===true});
+  }
+
   async function load(empId, options={}) {
     const previous=activeRead;
     selectedEmpId = String(empId || '').trim();
-    const read={empId:selectedEmpId,owner:owner(),revision:revision(),controller:new AbortController()};
-    activeRead=read;resumeRead=null;failedRead=null;stopRead(previous);
+    const read={empId:selectedEmpId,owner:owner(),revision:revision(),controller:new AbortController(),retry:options.retry===true};
+    activeRead=read;resumeRead=null;failedRead=null;readyRead=null;stopRead(previous);
     if(options.retry)paintReadNotice('마을 관리자 지정 상태를 다시 확인하는 중입니다.',true);
     else clearReadNotice();
-    const current=()=>activeRead===read&&owned(read)&&!window.frameElement?.hidden;
-    const nav = $('sunVillageTotalManagerTabNav');
+    const current=()=>activeRead===read&&owned(read)&&visible();
+    const nav = section();
     const status = $('sunVillageTotalManagerStatus');
     const checkbox = $('sunVillageTotalManagerEnabled');
     const button = $('sunVillageTotalManagerSave');
@@ -80,7 +103,7 @@
     button.disabled = true;
     status.textContent = '지정 상태를 확인하는 중입니다.';
     // Expo rooms are standalone fictional cooperatives, never village operators.
-    if (window.ExpoRuntimeBridge) {activeRead=null;return;}
+    if (window.ExpoRuntimeBridge) {readyRead=read;activeRead=null;return;}
     if (!selectedEmpId || typeof _supabase === 'undefined'||!current()) {activeRead=null;return;}
     try {
       const cancelled=new Promise(resolve=>{read.cancel=()=>resolve(null);});
@@ -96,6 +119,7 @@
       if (error) {read.httpStatus=response.status;throw error;}
       if(!data||typeof data.enabled!=='boolean'||(data.enabled&&typeof data.can_assign!=='boolean'))throw new Error('MANAGER_CONTEXT_UNAVAILABLE');
       if (!current()) return;
+      readyRead=read;
       if (!data?.enabled || !data?.can_assign) {clearReadNotice(options.retry);return;}
       nav.hidden = false;
       savedValue = data.target_assigned === true;
@@ -107,6 +131,7 @@
           ? '이 직원의 ERP 로그인이 연결되면 지정할 수 있습니다.'
           : savedValue ? '현재 전체 관리자로 지정되어 있습니다.' : '현재 전체 관리자로 지정되지 않았습니다.';
       updateSaveState();
+      if(grouped())checkpointEmployeeDetailDraft(checkbox);
       clearReadNotice(options.retry);
     } catch (error) {
       if (!current()) return;
@@ -124,35 +149,36 @@
     const checkbox = $('sunVillageTotalManagerEnabled');
     const button = $('sunVillageTotalManagerSave');
     const status = $('sunVillageTotalManagerStatus');
-    if (!selectedEmpId || !checkbox || !button || busy || checkbox.checked === savedValue) return;
-    const empId = selectedEmpId;
+    const target=readyRead, epoch=viewEpoch;
+    if (!target || !owned(target) || !visible() || section()?.hidden || !checkbox || !button
+        || checkbox.disabled || busy || checkbox.checked === savedValue) return;
+    const empId = target.empId;
     const enabled = checkbox.checked;
     const action = enabled ? '전체 관리자로 지정' : '전체 관리자에서 해제';
-    if (!(await window.CoopDialog.confirm(`${currentEmpName || '선택한 직원'}을(를) 햇빛소득마을 ${action}할까요?`))) {
-      checkbox.checked = savedValue;
-      updateSaveState();
-      return;
-    }
     busy = true;
     updateSaveState();
-    status.textContent = '관리자 지정을 저장하는 중입니다.';
     try {
+      const confirmed=await window.CoopDialog.confirm(`${currentEmpName || '선택한 직원'}을(를) 햇빛소득마을 ${action}할까요?`);
+      if (!confirmed || target!==readyRead || epoch!==viewEpoch || !owned(target) || !visible()
+          || checkbox.disabled || checkbox.checked!==enabled) return;
+      status.textContent = '관리자 지정을 저장하는 중입니다.';
       const { data, error } = await _supabase.rpc('sun_village_set_total_manager', {
         p_emp_id: empId, p_enabled: enabled
       });
       if (error) throw error;
-      if (selectedEmpId !== empId) return;
+      if (target!==readyRead || !sameSelection(target)) return;
       savedValue = data?.target_assigned === true;
-      checkbox.checked = savedValue;
+      if(checkbox.checked===enabled)checkbox.checked = savedValue;
+      if(grouped())checkpointSavedEmployeeDetailTab('tabSunVillageTotalManager',new Map([[checkbox.id,savedValue]]));
       status.textContent = savedValue
         ? '전체 관리자로 지정했습니다. 햇빛소득마을 운영관리에서 마을별 관리자를 지정할 수 있습니다.'
         : '전체 관리자 지정을 해제했습니다.';
     } catch (error) {
-      checkbox.checked = savedValue;
-      status.textContent = messageFor(error);
+      if(target===readyRead&&sameSelection(target))status.textContent = messageFor(error);
     } finally {
       busy = false;
       updateSaveState();
+      if(grouped()&&target!==readyRead)void ensure();
     }
   }
 
@@ -161,8 +187,9 @@
     $('sunVillageTotalManagerSave')?.addEventListener('click', save);
     $('sunVillageTotalManagerRetry')?.addEventListener('click', retryRead);
   });
-  window.SunVillageTotalManagerAdmin = { load,
+  window.SunVillageTotalManagerAdmin = { load, select, ensure,
     suspend(resume=false){
+      viewEpoch++;
       const read=activeRead;resumeRead=resume?(read||resumeRead):null;activeRead=null;stopRead(read);
       if(!resume){failedRead=null;clearReadNotice();}
     },
