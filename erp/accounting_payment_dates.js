@@ -1,4 +1,4 @@
-/* v1.2.1 — scrollable confirmation forms; do not confirm a future automatic debit. */
+/* v1.2.2 — defer undated payments without canceling the rest of the review. */
 (function () {
     'use strict';
     let active = null, editing = false, draftOwner = '';
@@ -71,26 +71,26 @@
             if (owner !== draftOwner) { drafts.clear(); draftOwner = owner; }
             const cards = options.cards || [];
             const ui = dialog('결제수단·사용일 확인', 'expensePaymentDateModal');
-            ui.body.append(el('p', 'text-muted', '실제로 이체하거나 카드를 사용한 건을 선택해 주세요. 신용카드는 사용액만 기록하며 카드대금 출금과 구분합니다.'));
+            ui.cancel.textContent = '전체 취소';
+            ui.body.append(el('p', 'text-muted', '실제로 이체하거나 카드를 사용한 건을 선택해 주세요. 날짜를 비워 둔 건은 다음에 연동할 수 있습니다. 신용카드는 사용액만 기록합니다.'));
             const controls = candidates.map(({ doc, approvedDate, scheduledDate }, index) => {
                 const prepaid = doc.expense_snapshot?.execution?.prepaid === true;
                 const insurance = window.CoopInsurancePayment.isInsurance(doc);
+                const automatic = insurance && window.CoopInsurancePayment.isAuto(doc.expense_snapshot?.insurance);
                 const sig = signature(doc), held = drafts.get(String(doc.id));
-                const draft = held?.signature === sig ? held : { signature: sig, confirmed: prepaid, date: prepaid ? String(doc.expense_snapshot.execution.date || '') : scheduledDate || approvedDate, method: 'auto', card_alias: '', card_type: '' };
+                const draft = held?.signature === sig ? held : { signature: sig, confirmed: prepaid, date: prepaid ? String(doc.expense_snapshot.execution.date || '') : automatic ? '' : scheduledDate || approvedDate, method: 'auto', card_alias: '', card_type: '' };
                 drafts.set(String(doc.id), draft);
                 const section = el('section', 'border rounded p-3 mb-3');
                 section.append(el('h6', 'fw-bold', doc.title || '지출결의'),
                     el('p', 'mb-2', `${Number(doc.amount).toLocaleString()}원${prepaid ? ' · 선지출' : ''}`));
-                if (insurance) section.append(el('p', 'small text-muted', window.CoopInsurancePayment.label(doc.expense_snapshot?.insurance)));
                 const row = el('div', 'form-check mb-2'), check = el('input', 'form-check-input');
                 check.type = 'checkbox'; check.id = `expensePaidCheck${index}`; check.checked = draft.confirmed;
-                const automatic = insurance && window.CoopInsurancePayment.isAuto(doc.expense_snapshot?.insurance);
                 const checkLabel = el('label', 'form-check-label', automatic ? '자동이체 출금을 확인했습니다.' : insurance ? '실제 납부를 확인했습니다.' : '이체 또는 카드 사용을 확인했습니다.'); checkLabel.htmlFor = check.id;
                 row.append(check, checkLabel);
                 const date = el('input', 'form-control'); date.type = 'date'; date.id = `expensePaidDate${index}`;
                 date.max = today; date.value = draft.date;
                 if (automatic) date.min = doc.expense_snapshot.insurance.due_date;
-                date.disabled = !check.checked || prepaid; date.required = !prepaid;
+                date.disabled = !check.checked || prepaid;
                 const label = el('label', 'form-label', '실제 지출일'); label.htmlFor = date.id;
                 let method, card;
                 if (canChooseMethod(doc)) {
@@ -108,7 +108,7 @@
                 } else {
                     const s=doc.expense_snapshot||{};
                     section.append(el('p','small mb-2',insurance?window.CoopInsurancePayment.label(s.insurance):s.payment_method==='credit_card'?`신용카드 · ${s.card_alias||''}`:s.payment_method==='check_card'?`체크카드 · ${s.card_alias||''}`:'계좌 이체'));
-                    label.textContent=['credit_card','check_card'].includes(s.payment_method)?'카드 사용일':'실제 지출(이체)일';
+                    label.textContent=automatic?'실제 출금일':['credit_card','check_card'].includes(s.payment_method)?'카드 사용일':'실제 지출(이체)일';
                 }
                 check.addEventListener('change', () => { draft.confirmed=check.checked;date.disabled = !check.checked || prepaid; });
                 date.addEventListener('input',()=>{draft.date=date.value;});
@@ -117,13 +117,28 @@
                 ui.body.append(section); return { doc, check, date, prepaid, draft };
             });
             let result = null, submitted = false;
-            ui.submit.textContent = '연동 내용 확인';
+            const paymentFor = ({ check, date, prepaid, draft }) => ({
+                ...draft, confirmed: check.checked && (prepaid || Boolean(date.value)), date: date.value
+            });
+            const updateAction = () => {
+                const ready = controls.some(control => {
+                    const payment = paymentFor(control);
+                    return !validate(payment, today) && !window.CoopInsurancePayment.syncPaymentError(control.doc, payment, today);
+                });
+                ui.submit.textContent = ready ? '연동 내용 확인' : '다음에 연동';
+            };
+            for (const { check, date } of controls) {
+                check.addEventListener('change', updateAction);
+                date.addEventListener('input', updateAction);
+                date.addEventListener('change', updateAction);
+            }
+            updateAction();
             ui.root.addEventListener('hidden.bs.modal', () => { ui.modal.dispose(); ui.root.remove(); active = null; resolve(result); }, { once: true });
             ui.form.addEventListener('submit', event => {
                 event.preventDefault(); if (submitted) return;
                 const values = new Map();
                 for (const control of controls) {
-                    const payment = { ...control.draft, confirmed: control.check.checked, date: control.date.value, signature: signature(control.doc) };
+                    const payment = { ...paymentFor(control), signature: signature(control.doc) };
                     if (payment.confirmed) {
                         const message = window.CoopInsurancePayment.syncPaymentError(control.doc, payment, today) || validate(payment, today);
                         if (message) { ui.error.textContent = message; return; }
@@ -199,5 +214,5 @@
             ui.modal.show();
         } catch (error) { editing = false; if (ui) ui.root.remove(); window.showAlert('날짜 수정 확인', error.message); }
     }
-    window.CoopPaymentDates = { version: '1.2.1', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, edit };
+    window.CoopPaymentDates = { version: '1.2.2', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, edit };
 })();

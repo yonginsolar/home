@@ -6,6 +6,16 @@
         const parsed = new Date(`${value}T00:00:00Z`);
         return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
     };
+    const submissionDateFormat = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+    function submissionDate(value) {
+        if (typeof value !== 'string') return '';
+        if (validDate(value)) return value;
+        if (!validDate(value.slice(0, 10)) || !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) return '';
+        const submitted = new Date(value);
+        return Number.isNaN(submitted.getTime()) ? '' : submissionDateFormat.format(submitted);
+    }
     function validate(payment, today) {
         if (payment?.confirmed !== true) return '납부 확인을 선택하지 않아 이번 연동에서 제외했습니다.';
         if (!validDate(payment.date)) return '실제 납부일을 입력해 주세요.';
@@ -84,6 +94,7 @@
             const controls = candidates.map(({ doc, tax }, index) => {
                 const section = element('section', 'border rounded p-3 mb-3');
                 section.append(element('h6', 'fw-bold', doc.title || '원천세 신고·납부'));
+                section.append(element('p', 'small text-muted mb-2', `상신일: ${submissionDate(doc.created_at) || '확인할 수 없음'}`));
                 section.append(element('p', 'mb-2', `국세 ${tax.nationalAmount.toLocaleString()}원 · 지방세 ${tax.localAmount.toLocaleString()}원`));
                 const checkRow = element('div', 'form-check mb-3');
                 const check = element('input', 'form-check-input');
