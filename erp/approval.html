@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.147 | Change: 2026-11-07 - Identify the proxy employee's registered schedule in the leave calculation basis. -->
+<!-- Version: v1.2.148 | Change: 2026-11-09 - Align approval list cards, actions and status. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.147 | approval.html');</script>
+  <script>console.log('[Version] v1.2.148 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -690,6 +690,44 @@
     }
     .history-filter-select {
       min-width: 140px;
+    }
+    :is(#todoList,#pendingList,#historyList).approval-doc-grid {
+      display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .8rem; align-items: stretch;
+    }
+    .approval-doc-grid > :not(.approval-doc-card) { grid-column: 1/-1; }
+    .approval-doc-grid > .approval-doc-card {
+      display: flex; flex-direction: column; gap: .55rem; min-width: 0; min-height: 11rem;
+      border: 1px solid #d8e3ef; border-radius: .85rem; padding: .9rem;
+      box-shadow: 0 4px 14px rgba(29,57,92,.055);
+      overflow-wrap: anywhere;
+    }
+    .approval-doc-meta, .approval-doc-meta-group, .approval-doc-actions {
+      display: flex; flex-wrap: wrap; align-items: center; min-width: 0; gap: .35rem .45rem;
+    }
+    .approval-doc-meta { justify-content: space-between; }
+    .approval-doc-date { color: #475569; font-variant-numeric: tabular-nums; }
+    .approval-doc-card .badge, .approval-doc-card .btn {
+      min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
+    }
+    .approval-doc-card .badge { margin-inline: 0 !important; line-height: 1.3; }
+    .approval-doc-card .approval-doc-state { border: 1px solid currentColor; font-weight: 750; border-radius: 999px; }
+    .approval-doc-state[data-state="pending"] { color:#714800; background:#fff5dd; }
+    .approval-doc-state[data-state="done"] { color:#15583c; background:#e8f8ef; }
+    .approval-doc-state[data-state="rejected"] { color:#8b2830; background:#fff0f1; }
+    .approval-doc-state[data-state="canceled"], .approval-doc-state[data-state="unknown"] { color:#475569; background:#f1f5f9; }
+    .approval-doc-card .approval-doc-title { line-height: 1.4; margin: 0; }
+    .approval-doc-actions {
+      margin-top: auto; padding-top: .55rem; border-top: 1px solid #e8eef6; justify-content: flex-end;
+    }
+    .approval-doc-actions:empty { display: none; }
+    .approval-doc-card .btn { margin-inline: 0 !important; min-height: 2rem; }
+    @media screen and (max-width: 991.98px) {
+      :is(#todoList,#pendingList,#historyList).approval-doc-grid { grid-template-columns: minmax(0,1fr); }
+      .approval-doc-grid > .approval-doc-card { min-height: 0; }
+      .approval-doc-actions { justify-content: flex-start; }
+    }
+    @media print {
+      :is(#todoList,#pendingList,#historyList).approval-doc-grid { grid-template-columns: minmax(0,1fr); }
     }
     .delegate-banner {
       border: 1px solid #dbeafe;
@@ -1554,8 +1592,8 @@
     </form>
   </div>
 
-  <div id="view-todo" class="hidden"><div id="todoList" class="list-group"></div></div>
-  <div id="view-pending" class="hidden"><div id="pendingList" class="list-group"></div></div>
+  <div id="view-todo" class="hidden"><div id="todoList" class="list-group approval-doc-grid"></div></div>
+  <div id="view-pending" class="hidden"><div id="pendingList" class="list-group approval-doc-grid"></div></div>
   <div id="view-history" class="hidden">
     <div class="input-group mb-3">
       <input data-erp-query-control type="text" class="form-control" id="searchKeyword" placeholder="제목 또는 내용 검색 (최근 30일 외 문서는 검색 시 조회)" onkeyup="filterHistory()">
@@ -1603,7 +1641,7 @@
       </div>
     </div>
     <div id="historyResultCount" class="small text-muted mb-2" role="status"></div>
-    <div id="historyList" class="list-group"></div>
+    <div id="historyList" class="list-group approval-doc-grid"></div>
   </div>
 </div>
 
@@ -16406,9 +16444,8 @@ function exportHistoryCsv() {
 // [수정] 문서 렌더링 (가승인 버튼 포함)
 // [수정] 문서 렌더링 (관련 문서 링크 버튼 추가)
 function renderDocs(target, list, isTodo) {
-    target.innerHTML = "";
     if(!list || list.length===0) { target.innerHTML = '<div class="p-3 text-center text-muted">없음</div>'; return; }
-    list.forEach(doc => {
+    const cards = list.map(doc => {
         const approvalLine = Array.isArray(doc.approval_line) ? doc.approval_line : [];
         const safeDocType = escapeHtml(formatApprovalDocTypeLabel(doc || doc.doc_type));
         const jeongyeolMeta = getJeongyeolMetaFromDoc(doc);
@@ -16430,7 +16467,7 @@ function renderDocs(target, list, isTodo) {
             : '';
         const safeTitle = escapeHtml(doc.title);
         const titleDocId = toPositiveDocId(doc.id);
-        const titleHtml = `<h6 class="fw-bold mb-1">${safeTitle}</h6>`;
+        const titleHtml = `<h6 class="approval-doc-title fw-bold">${safeTitle}</h6>`;
         const safeDate = escapeHtml(formatApprovalKstDateISO(doc.created_at, '-'));
         const lineHtml = approvalLine.map(s => {
             const status = s.status || '';
@@ -16475,7 +16512,13 @@ function renderDocs(target, list, isTodo) {
             relBtn = `<button type="button" class="btn btn-sm btn-outline-info ms-2" style="font-size: 0.75rem;" onclick="openRelView(${relId})">🔗 ${relLabel}</button>`;
         }
 
+        const physicalTodo = isTodo && (String(doc?.status || '') === '실물결재대기' || doc?._physical_pending);
+        const statusLabel = physicalTodo ? '실물결재 대기' : String(doc.status || '').trim();
+        const knownStatus = physicalTodo ? '실물결재대기' : statusLabel;
+        const statusGroup = (Object.keys(HISTORY_STATUS_GROUPS).find(group => HISTORY_STATUS_GROUPS[group].includes(knownStatus)) || 'UNKNOWN').toLowerCase();
+        const statusHtml = `<span class="badge approval-doc-state" data-state="${statusGroup}">${escapeHtml(statusLabel || '상태 미확인')}</span>`;
         let btnHtml = "";
+        let noticeHtml = "";
         if (isTodo) {
             const delegated = doc?._delegated_from || null;
             const delegatedName = delegated ? escapeHtml(delegated.delegator_name || delegated.delegator_emp_id || '') : '';
@@ -16486,14 +16529,16 @@ function renderDocs(target, list, isTodo) {
             if (titleDocId) {
                 todoActions.push(`<button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="openRelView(${titleDocId})">👁️ 바로보기</button>`);
             }
-            if (String(doc?.status || '') === '실물결재대기' || doc?._physical_pending) {
+            if (physicalTodo) {
                 if (isChairmanApprovalUser() && canPerform('approval.process')) {
-                    btnHtml = `<div class="mt-2 text-end">${delegatedBadge}${todoActions.join('')}<span class="badge bg-warning text-dark me-1">실물결재 대기</span><button type="button" class="btn btn-sm btn-success me-1" onclick="procDoc(${doc.id},'승인')">전자 승인</button><button type="button" class="btn btn-sm btn-danger" onclick="procDoc(${doc.id},'반려')">전자 반려</button><div class="small text-muted mt-2">이사장은 실물결재대기 문서를 이 화면에서 전자 승인 또는 반려할 수 있습니다.</div></div>`;
+                    btnHtml = `${delegatedBadge}${todoActions.join('')}<button type="button" class="btn btn-sm btn-success me-1" onclick="procDoc(${doc.id},'승인')">전자 승인</button><button type="button" class="btn btn-sm btn-danger" onclick="procDoc(${doc.id},'반려')">전자 반려</button>`;
+                    noticeHtml = '<div class="small text-muted">이사장은 실물결재대기 문서를 이 화면에서 전자 승인 또는 반려할 수 있습니다.</div>';
                 } else {
-                    btnHtml = `<div class="mt-2 text-end">${delegatedBadge}${todoActions.join('')}<span class="badge bg-warning text-dark">실물결재 대기</span><div class="small text-muted mt-2">실물 서명 후 사무국장이 서명본을 첨부하면 완료됩니다.</div></div>`;
+                    btnHtml = `${delegatedBadge}${todoActions.join('')}`;
+                    noticeHtml = '<div class="small text-muted">실물 서명 후 사무국장이 서명본을 첨부하면 완료됩니다.</div>';
                 }
             } else {
-                btnHtml = `<div class="mt-2 text-end">${delegatedBadge}${todoActions.join('')}<button type="button" class="btn btn-sm btn-success me-1" onclick="procDoc(${doc.id},'승인')">${getApprovalPositiveActionLabel()}</button><button type="button" class="btn btn-sm btn-danger" onclick="procDoc(${doc.id},'반려')">반려</button></div>`;
+                btnHtml = `${delegatedBadge}${todoActions.join('')}<button type="button" class="btn btn-sm btn-success me-1" onclick="procDoc(${doc.id},'승인')">${getApprovalPositiveActionLabel()}</button><button type="button" class="btn btn-sm btn-danger" onclick="procDoc(${doc.id},'반려')">반려</button>`;
             }
         } else {
             const actions = [];
@@ -16542,23 +16587,12 @@ function renderDocs(target, list, isTodo) {
                 actions.push('<span class="small text-muted">첨부는 바로보기에서 함께 확인할 수 있습니다.</span>');
             }
 
-            const badgeClass = (doc.status === '완료' || doc.status === '실물결재완료')
-                ? 'bg-success'
-                : (doc.status === '반려' || doc.status === '결재취소')
-                    ? 'bg-danger'
-                    : 'bg-warning';
-            const safeStatus = escapeHtml(doc.status);
-            const badgeHtml = `<span class="badge ${badgeClass}">${safeStatus}</span>`;
-
-            if (actions.length > 0) {
-                btnHtml = `<div class="mt-2 text-end">${badgeHtml} ${actions.join(' ')}</div>`;
-            } else {
-                btnHtml = `<div class="mt-2 text-end">${badgeHtml}</div>`;
-            }
+            btnHtml = actions.join(' ');
         }
 
-        target.innerHTML += `<div class="list-group-item shadow-sm mb-3 border-0 p-3"><div class="d-flex justify-content-between mb-2"><div><span class="badge bg-primary me-1">${safeDocType}</span>${jeongyeolBadge}${evidencePendingBadge}${attachmentBadge}${signedDocBadge}${relBtn}</div><small class="text-muted">${safeDate}${ageBadge}</small></div>${titleHtml}<div class="small mb-2">${lineHtml}</div>${reasonHtml}${btnHtml}</div>`;
+        return `<div class="list-group-item approval-doc-card"><div class="approval-doc-meta"><div class="approval-doc-meta-group"><span class="badge bg-primary">${safeDocType}</span>${statusHtml}${jeongyeolBadge}${evidencePendingBadge}${attachmentBadge}${signedDocBadge}</div><div class="approval-doc-meta-group"><small class="approval-doc-date">${safeDate}</small>${ageBadge}</div></div>${titleHtml}<div class="small">${lineHtml}</div>${reasonHtml}${noticeHtml}<div class="approval-doc-actions">${relBtn}${btnHtml}</div></div>`;
     });
+    target.innerHTML = cards.join('');
 }
 function chooseExpoApprovalExample() {
     const bridge = window.ExpoRuntimeBridge;
