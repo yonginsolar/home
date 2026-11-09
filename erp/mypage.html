@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.91 | Change: 2026-11-09 - Task tabs and shared ERP color preference. -->
+<!-- Version: v1.0.92 | Change: 2026-11-09 - Personal AI connection controls and separate guides. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -43,8 +43,8 @@
 <script src="payroll_durunuri_module.js?v=20260901-1"></script>
 <script src="leave_time.js?v=20261012-2"></script>
 <script src="leave_ledger.js?v=20261012-2"></script>
-<link rel="stylesheet" href="ai_connection.css?v=1.2.0">
-<script src="ai_connection.js?v=1.2.4-uimodal-20261013-1"></script>
+<link rel="stylesheet" href="ai_connection.css?v=1.3.0">
+<script src="ai_connection.js?v=1.3.0"></script>
   
 <style>
 body{background-color:#f0f2f5;padding:28px 20px 40px;font-family:'Malgun Gothic',sans-serif}
@@ -1496,7 +1496,20 @@ document.getElementById('salaryMonth').addEventListener('input',()=>{
 });
 document.getElementById('tab-salary-btn').addEventListener('hide.bs.tab',invalidateMypageSalaryRead);
 document.getElementById('tab-calendar-btn').addEventListener('shown.bs.tab',function(e){renderCalendar()});
-document.getElementById('tab-ai-btn').addEventListener('shown.bs.tab',function(){window.ErpAiConnections.mount(_supabase,document.getElementById('aiConnectionsRoot'));});
+const myAiRoot = document.getElementById('aiConnectionsRoot');
+const myAiTab = document.getElementById('tab-ai-btn');
+myAiTab.addEventListener('shown.bs.tab', () => window.ErpAiConnections?.mount(_supabase, myAiRoot));
+myAiTab.addEventListener('hide.bs.tab', () => myAiRoot.aiPause?.());
+window.addEventListener('pagehide', () => myAiRoot.aiPause?.());
+if (window.frameElement) new MutationObserver(records => {
+    if (window.frameElement?.hidden || records.some(record => record.oldValue === null)) myAiRoot.aiPause?.();
+}).observe(window.frameElement, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
+let myAiAuthUser = '';
+_supabase.auth.onAuthStateChange((event, session) => {
+    const next = session?.user?.id || '';
+    if (event === 'SIGNED_OUT' || (next && myAiAuthUser && next !== myAiAuthUser)) myAiRoot.aiInvalidate?.();
+    if (next) myAiAuthUser = next;
+});
 document.getElementById('tab-cert-btn').addEventListener('shown.bs.tab',function(){void loadMypageInsuranceStatus();});
 document.getElementById('tab-cert-btn').addEventListener('hide.bs.tab',function(){window.HrInsuranceStatus?.suspend(document.getElementById('myInsuranceStatus'));});
 document.getElementById('myTab').addEventListener('shown.bs.tab',()=>{void loadMypageVisibleSections();});

@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.194
-Change: 2026-11-09 - Recover stalled salary reads without replacing held drafts.
+Version: v1.0.195
+Change: 2026-11-09 - Tenant-scoped employee AI connection controls.
 -->
 <html>
 <head>
@@ -16,6 +16,7 @@ Change: 2026-11-09 - Recover stalled salary reads without replacing held drafts.
 <meta name="erp-security-revision" content="20261004.2">
   <script>console.log('[Version] v1.0.193 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
+  <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -220,6 +221,7 @@ Change: 2026-11-09 - Recover stalled salary reads without replacing held drafts.
       <button class="btn btn-outline-dark btn-sm btn-rounded" data-workspace-submenu onclick="openLedgerModal()">📊 급여대장 보기</button>
       <button class="btn btn-outline-primary btn-sm btn-rounded" data-workspace-submenu onclick="ErpWorkspaceResume.navigate('hr_insurance.html')">🧾 입사·퇴사 신고</button>
       <button class="btn btn-outline-primary btn-sm btn-rounded" data-workspace-submenu onclick="openStatsDashboard()">📈 통계</button>
+      <button class="btn btn-outline-primary btn-sm btn-rounded" type="button" id="employeeAiConnections" hidden>AI 연결</button>
       <button class="btn btn-primary btn-sm btn-rounded shadow-sm" onclick="openInviteModal()">✨ 직원 등록</button>
       <a class="btn btn-outline-primary btn-sm btn-rounded" id="employeeSetupWorkLink" href="initial_setup.html" hidden>조합 초기 설정</a>
     </div>
@@ -1275,6 +1277,7 @@ const normalBulkLeaveState = {owner:'',draft:null,epoch:0,closing:false,reopen:f
 let hasCheckedExpired = false;
 let myInfo = null;
 let hrAuthorizedUserId = '';
+let closeEmployeeAiConnections = null;
 let permissionSet = new Set();
 let hrRuntimeProfile = 'legacy_full';
 let employeeModuleAccessSnapshot = null;
@@ -3653,7 +3656,7 @@ window.onload = async function() {
     if (!hrUserGate.ok) return;
     myInfo = hrUserGate.user;
     hrAuthorizedUserId = String(hrUserGate.authUser?.id || '');
-    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){interruptEmployeeAuxReads('',true);window.HrContractFollowup?.invalidateOwner(getHrSettingsOwner());window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
+    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){document.getElementById('employeeAiConnections').hidden=true;closeEmployeeAiConnections?.();interruptEmployeeAuxReads('',true);window.HrContractFollowup?.invalidateOwner(getHrSettingsOwner());window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
     const villageWorkspace = await _supabase.rpc('sun_village_workspace_context');
     if (!villageWorkspace.error && villageWorkspace.data?.workspaces?.some(item => item?.is_current === true && item?.is_management_coop === false)) {
         location.replace('village_company_info.html');
@@ -3678,6 +3681,26 @@ window.onload = async function() {
     applyHrRuntimeProfileUi();
 
     hrSettingsAuthorized = true;
+    if (!window.ERPEmployeeSettingsView.isPage && hrRuntimeProfile !== 'site_member' && permissionSet.has('hr.admin')) {
+        const aiButton = document.getElementById('employeeAiConnections');
+        aiButton.hidden = false;
+        aiButton.onclick = async () => {
+            if (aiButton.getAttribute('aria-busy') === 'true' || document.querySelector('.ai-admin-dialog[open]')) return;
+            const owner = getHrSettingsOwner();
+            const current = () => !aiButton.hidden && isHrSettingsContextCurrent(owner);
+            if (!current()) return;
+            aiButton.setAttribute('aria-busy', 'true');
+            try {
+                await import('./ai_connection.js?v=1.3.0');
+                if (!current()) return;
+                closeEmployeeAiConnections = window.ErpAiConnections.openAdmin(_supabase, {
+                    coopId: String(myInfo.coop_id), current, opener: aiButton
+                });
+            } catch {
+                if (current()) showAlert('AI 연결 창을 열지 못했습니다. 다시 눌러 주세요.');
+            } finally { aiButton.removeAttribute('aria-busy'); }
+        };
+    }
     if (!window.ERPEmployeeSettingsView.isPage) void window.ERPInitialSetupEmployee.attach(_supabase);
     await Promise.all([window.ERPEmployeeSettingsView.isPage ? loadCoopSettingsEmployees() : loadList(), loadCompanyInfo({throwOnError:true})]);
     await loadSettings({ loadAuxiliary: false, throwOnError: true });
@@ -6872,7 +6895,7 @@ document.getElementById('empTab').addEventListener('shown.bs.tab', event => {
 });
 document.getElementById('empTab').addEventListener('hide.bs.tab', event => {
     if (event.target.getAttribute('href') === '#tabInsuranceStatus') window.HrInsuranceStatus?.suspend(document.getElementById('employeeInsuranceStatus'));
-    if (event.target.getAttribute('href') === '#tabInfo') resetEmployeeContractHours();
+    if (event.target.getAttribute('href') === '#tabInfo') { resetEmployeeAddressSearch(); resetEmployeeContractHours(); }
 });
 document.getElementById('empTab').addEventListener('hidden.bs.tab', event => {
     interruptEmployeeDetailTabReads(event.target.getAttribute('href')?.slice(1));

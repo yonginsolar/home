@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v1.2.4 — meeting-transcript drafting examples; ERP tools remain read-only. */
+/* v1.3.0 — personal and HR management of existing ERP AI connections. */
 (function () {
   'use strict';
   const LABELS = { help: '사용 안내', accounting: '회계', approvals: '전자결재', documents: '문서함', inventory: '재고', events: '행사 매출', member_stats: '조합원 통계' };
@@ -48,18 +48,43 @@
   ];
   async function rpc(client, action, data = {}) {
     const result = await client.rpc('erp_ai_connections', { p_action: action, p_data: data });
-    if (result.error) throw new Error('접근 권한이나 연결 유효기간을 확인해 주세요. 잠시 후 다시 시도할 수 있습니다.');
+    if (result.error) throw Object.assign(new Error('접근 권한이나 연결 유효기간을 확인해 주세요. 잠시 후 다시 시도할 수 있습니다.'), { code: result.error.code });
     return result.data;
   }
+  const connectionState = (c) => c.revoked_at ? 'revoked' : Date.parse(c.expires_at) > Date.now() ? 'active' : 'expired';
+  const stateLabel = (state) => ({ active: '사용 중', revoked: '종료됨', expired: '유효기간 만료' })[state];
+  const button = (label, style = 'secondary') => {
+    const b = element('button', label, 'btn btn-outline-' + style); b.type = 'button';
+    b.addEventListener('keydown', e => { if (e.repeat && !e.isComposing && ['Enter', ' '].includes(e.key)) e.preventDefault(); });
+    return b;
+  };
+  const accordion = (label) => {
+    const box = element('details', undefined, 'ai-box ai-accordion');
+    const summary = element('summary', label);
+    const body = element('div', undefined, 'ai-accordion-body');
+    box.append(summary, body); return { box, summary, body };
+  };
+  function deadline(work) {
+    let timeout;
+    return Promise.race([work, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), 15000); })])
+      .finally(() => clearTimeout(timeout));
+  }
   window.ErpAiConnections = {
-    version: '1.2.4',
+    version: '1.3.0',
     mount(client, root) {
       if (!root || root.dataset.aiMounted) return;
       root.dataset.aiMounted = '1'; root.classList.add('ai-panel');
       root.append(element('h2', '🤖 AI 연결'));
-      root.append(element('p', '사용하는 AI에서 허용된 업무 자료를 찾아보고, 내용을 정리하거나 문서 초안을 작성할 수 있습니다. 작성한 초안의 검토와 자료 등록·수정·승인은 기존 ERP 화면에서 진행합니다.'));
-      const addressBox = element('div', undefined, 'ai-box');
-      addressBox.append(element('h3', '1. 사용할 AI를 골라 주세요', 'h5'));
+      const connections = accordion('내 AI 연결');
+      const list = element('div');
+      const listStatus = element('p', '', 'ai-muted'); listStatus.setAttribute('role', 'status');
+      const refresh = button('연결 목록 다시 확인');
+      connections.body.append(listStatus, list, refresh);
+      const setup = accordion('연결 방법');
+      const usage = accordion('사용 방법');
+      root.append(connections.box, setup.box, usage.box);
+      const addressBox = setup.body;
+      addressBox.append(element('h3', '사용할 AI를 골라 주세요', 'h5'));
       addressBox.append(element('p', 'AI를 고르면 해당 서비스의 설정 순서가 나옵니다. 처음 한 번 ERP에 로그인하고 전달할 분야를 직접 선택하면, 유효기간 안에는 연결을 다시 사용합니다.'));
       const picker = element('div', undefined, 'ai-client-picker'); picker.setAttribute('role', 'group'); picker.setAttribute('aria-label', '사용할 AI 선택');
       const clientButtons = {};
@@ -78,20 +103,16 @@
       const prompt = element('button', '연결 안내 복사', 'btn btn-outline-secondary'); prompt.type = 'button';
       const verify = element('button', '연결 확인 질문 복사', 'btn btn-primary'); verify.type = 'button';
       copy.disabled = true; prompt.disabled = true; verify.disabled = true;
-      const actions = element('div', undefined, 'ai-actions'); actions.append(copy, prompt, verify); addressBox.append(actions);
+      const actions = element('div', undefined, 'ai-actions'); actions.append(copy, prompt); addressBox.append(actions);
       addressBox.append(element('p', '주소는 AI의 연결 설정에 붙여넣습니다. 브라우저에서 직접 열거나 안내를 채팅에 붙여넣는 것만으로 인증이 완료되지는 않습니다.', 'ai-muted'));
       const preview = element('details', undefined, 'ai-setup-preview');
       preview.append(element('summary', 'AI에 붙여넣을 연결 요청 문구 보기'));
       const setupText = element('pre', '연결 정보를 확인하고 있습니다.', 'ai-prompt-text'); preview.append(setupText); addressBox.append(preview);
-      root.append(addressBox);
-      const allowed = element('p'); root.append(allowed);
-      root.append(element('h3', '2. 연결 후 이렇게 물어보세요', 'h5'));
-      root.append(element('p', '문구를 복사해 AI에 붙여넣고 기간이나 검색어를 원하는 내용으로 바꿔 보세요. 내 업무 권한에 맞는 예시이며, 실제 조회는 연결할 때 선택한 분야에서만 가능합니다.', 'ai-muted'));
-      const examples = element('div', undefined, 'ai-example-grid'); examples.setAttribute('aria-label', '업무별 AI 질문 예시'); root.append(examples);
-      root.append(element('h3', '연결된 AI', 'h5'));
-      const list = element('div'); root.append(list);
-      const refresh = element('button', '연결 목록 새로고침', 'btn btn-outline-secondary'); refresh.type = 'button'; root.append(refresh);
-      const logs = element('details', undefined, 'ai-box'); logs.append(element('summary', '최근 조회 기록')); const logBody = element('div'); logs.append(logBody); root.append(logs);
+      const allowed = element('p');
+      usage.body.append(allowed, verify);
+      usage.body.append(element('p', '예시를 복사해 AI에 붙여넣고 기간이나 검색어를 바꿔 보세요. 실제 조회는 연결할 때 선택한 분야에서만 가능합니다.', 'ai-muted'));
+      const examples = element('div', undefined, 'ai-example-grid'); examples.setAttribute('aria-label', '업무별 AI 질문 예시'); usage.body.append(examples);
+      const logSection = accordion('최근 조회 기록'); const logs = logSection.box; const logBody = logSection.body; root.append(logs);
       const status = element('p', '', 'ai-status'); status.setAttribute('role', 'status'); root.append(status);
       const manualCopy = element('textarea', undefined, 'ai-copy-fallback'); manualCopy.readOnly = true; manualCopy.hidden = true; manualCopy.rows = 6; manualCopy.setAttribute('aria-label', '직접 복사할 문구'); root.append(manualCopy);
       let selected = 'chatgpt'; let ready = false;
@@ -126,56 +147,246 @@
         }
       };
       renderGuide();
-      let loading = false;
+      let loading = false; let invalidated = false; let changedView = 0; let firstList = true; let listReady = false;
+      let mutation = null; let checkingId = null; let hasLogs = false;
+      const revokeButtons = new Set();
+      const syncButtons = () => {
+        refresh.setAttribute('aria-disabled', String(loading || !!mutation));
+        revokeButtons.forEach(b => { b.setAttribute('aria-disabled', String(loading || !!mutation || !listReady || !!checkingId)); });
+      };
+      const current = () => !invalidated && !window.frameElement?.hidden;
+      root.aiPause = () => { changedView++; };
+      root.aiInvalidate = () => { invalidated = true; changedView++; root.replaceChildren(); };
       const load = async () => {
-        if (loading) return; loading = true; refresh.disabled = true; status.textContent = '연결 정보를 확인하고 있습니다.';
-        ready = false; address.value = ''; allowed.textContent = ''; list.replaceChildren(); copy.disabled = true; prompt.disabled = true; verify.disabled = true; renderGuide(); examples.replaceChildren(element('p', '내 업무 권한에 맞는 예시를 확인하고 있습니다.', 'ai-muted'));
-        setupText.textContent = '연결 정보를 확인하고 있습니다.'; manualCopy.hidden = true; manualCopy.value = '';
+        if (loading || invalidated) return;
+        loading = true; syncButtons(); listStatus.textContent = '연결 정보를 확인하고 있습니다.';
         try {
-          const d = await rpc(client, 'list');
-          if (typeof d.host !== 'string' || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(d.host) || d.host.includes('..')) throw new Error('현재 조합의 연결 주소를 확인하지 못했습니다.');
+          const checked = checkingId ? await deadline(rpc(client, 'status', { id: checkingId })) : null;
+          if (invalidated) return;
+          const d = await deadline(rpc(client, 'list'));
+          if (invalidated) return;
+          if (typeof d?.host !== 'string' || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(d.host) || d.host.includes('..') || !Array.isArray(d.connections)) throw new Error('현재 조합의 연결 주소를 확인하지 못했습니다.');
           address.value = 'https://' + d.host + '/ai/mcp';
-          ready = true; renderGuide(); renderExamples(d.scopes);
+          if (!ready || allowed.textContent !== d.coop_name + ' · 현재 조회 가능한 분야: ' + labels(d.scopes)) {
+            ready = true; renderGuide(); renderExamples(d.scopes);
+          }
           copy.disabled = false; prompt.disabled = false; verify.disabled = false;
           allowed.textContent = d.coop_name + ' · 현재 조회 가능한 분야: ' + labels(d.scopes);
-          list.replaceChildren();
+          const count = d.connections.filter(c => connectionState(c) === 'active').length;
+          connections.summary.textContent = '내 AI 연결 · ' + count + '개 사용 중';
+          if (firstList && !count) connections.box.open = true;
+          firstList = false; listReady = true;
+          const restore = current() && list.contains?.(document.activeElement);
+          list.replaceChildren(); revokeButtons.clear();
           if (!d.connections.length) list.append(element('p', '아직 연결된 AI가 없습니다.', 'ai-muted'));
           for (const c of d.connections) {
             const row = element('div', undefined, 'ai-connection'); const info = element('div');
             info.append(element('strong', c.name), element('p', labels(c.scopes)), element('p', '최근 AI 요청: ' + date(c.last_used_at), 'ai-muted'));
-            const active = !c.revoked_at && new Date(c.expires_at) > new Date();
-            info.append(element('p', active ? (c.last_used_at ? 'AI 요청 확인' : '권한 허용 · AI 요청 대기') : '연결 종료', 'ai-connection-state'));
-            if (active && !c.last_used_at) info.append(element('p', 'AI에서 ERP 연결을 선택한 뒤 연결 확인 질문을 보내 주세요.', 'ai-muted'));
-            info.append(element('p', active ? '유효기간: ' + date(c.expires_at) : '연결 종료', 'ai-muted')); row.append(info);
-            if (active) {
-              const revoke = element('button', '연결 해제', 'btn btn-outline-danger'); revoke.type = 'button';
+            const state = connectionState(c);
+            info.append(element('p', stateLabel(state), 'ai-connection-state'));
+            if (state === 'active' && !c.last_used_at) info.append(element('p', '아직 AI에서 조회한 기록이 없습니다.', 'ai-muted'));
+            info.append(element('p', (state === 'revoked' ? '종료: ' : '유효기간: ') + date(c.revoked_at || c.expires_at), 'ai-muted')); row.append(info);
+            if (state === 'active') {
+              const revoke = button('연결 종료', 'danger'); revokeButtons.add(revoke);
+              revoke.setAttribute('aria-label', c.name + ' 연결 종료');
               revoke.addEventListener('click', async () => {
-                if (!(await window.CoopDialog.confirm('이 AI의 조회 연결을 해제할까요? 다시 연결하려면 새로 로그인해야 합니다.'))) return;
-                revoke.disabled = true;
-                try { await rpc(client, 'revoke', { id: c.id }); await load(); } catch (e) { status.textContent = e.message; revoke.disabled = false; }
+                if (!current() || loading || !listReady || mutation || checkingId) return;
+                const view = changedView;
+                mutation = c.id; syncButtons();
+                try {
+                  if (!(await window.CoopDialog.confirm(c.name + '의 ERP 접근을 종료할까요? 다시 연결하려면 ERP에서 접근을 허용해야 합니다.')) || !current() || view !== changedView) return;
+                  checkingId = c.id;
+                  try { await deadline(rpc(client, 'revoke', { id: c.id })); } catch { /* Confirm with a fresh read. */ }
+                  await load();
+                } catch { if (current() && view === changedView) listStatus.textContent = '종료 확인창을 열지 못했습니다. 다시 시도해 주세요.'; }
+                finally { mutation = null; syncButtons(); }
               }); row.append(revoke);
             }
             list.append(row);
           }
-          status.textContent = '';
-        } catch (e) { ready = false; address.value = ''; renderGuide(); status.textContent = e.message; copy.disabled = true; prompt.disabled = true; verify.disabled = true; setupText.textContent = '연결 정보를 확인한 뒤 요청 문구를 표시합니다.'; examples.replaceChildren(element('p', '업무 권한을 확인하지 못해 예시를 표시하지 않았습니다.', 'ai-muted')); } finally { loading = false; refresh.disabled = false; }
+          if (restore) refresh.focus({ preventScroll: true });
+          const checkedState = checked?.state;
+          listStatus.textContent = !checkingId ? '' : checkedState === 'revoked' ? 'ERP 접근을 종료했습니다.'
+            : checkedState === 'expired' ? '연결 유효기간이 만료되었습니다.'
+            : checkedState === 'active' ? '아직 사용 중으로 표시됩니다. 잠시 후 확인하거나 다시 종료할 수 있습니다.'
+            : '목록에서 이전 연결의 종료 결과를 확인하지 못했습니다.';
+          checkingId = null;
+        } catch (e) {
+          if (invalidated) return;
+          listReady = false; ready = false; address.value = ''; allowed.textContent = '';
+          copy.disabled = true; prompt.disabled = true; verify.disabled = true; renderGuide();
+          manualCopy.hidden = true; manualCopy.value = '';
+          if (e?.code === '42501') { list.replaceChildren(); revokeButtons.clear(); connections.summary.textContent = '내 AI 연결'; }
+          listStatus.textContent = checkingId ? '종료 결과를 확인하지 못했습니다. 연결 목록을 다시 확인해 주세요.' : '연결 목록을 확인하지 못했습니다. 다시 확인해 주세요.';
+          examples.replaceChildren(element('p', '업무 권한을 확인하지 못해 예시를 표시하지 않았습니다.', 'ai-muted'));
+          if (firstList) connections.box.open = true;
+        } finally { loading = false; syncButtons(); }
       };
       copy.addEventListener('click', () => copyText(address.value));
       prompt.addEventListener('click', () => copyText(setupText.textContent));
       verify.addEventListener('click', () => copyText(verificationPrompt(address.value)));
-      refresh.addEventListener('click', load);
+      refresh.addEventListener('click', () => { if (!mutation && current()) return load(); });
       logs.addEventListener('toggle', async () => {
-        if (!logs.open) return;
+        if (!logs.open || invalidated || hasLogs) return;
+        hasLogs = true;
         try {
-          const data = await rpc(client, 'logs'); logBody.replaceChildren();
+          const data = await deadline(rpc(client, 'logs')); if (invalidated) return; logBody.replaceChildren();
           if (!data.length) { logBody.append(element('p', '아직 조회 기록이 없습니다.')); return; }
           const table = element('table', undefined, 'ai-log-table'); const head = element('tr');
           for (const h of ['일시', 'AI · 작업', '결과']) head.append(element('th', h)); table.append(head);
           for (const r of data) { const row = element('tr'); row.append(element('td', date(r.used_at)), element('td', r.name + ' · ' + (TOOLS[r.tool] || '조회')), element('td', r.result === 'OK' ? (r.tool === 'erp_help' ? '안내 확인' : r.row_count + '건 조회') : '접근 또는 요청 차단')); table.append(row); }
           logBody.append(table);
-        } catch (e) { logBody.replaceChildren(element('p', e.message)); }
+        } catch (e) { if (!invalidated) logBody.replaceChildren(element('p', '조회 기록을 확인하지 못했습니다. 접었다 다시 열어 주세요.')); }
+        finally { hasLogs = false; }
       });
       load();
+    },
+    openAdmin(client, { coopId, current, opener }) {
+      const dialog = element('dialog', undefined, 'ai-panel ai-admin-dialog');
+      dialog.setAttribute('aria-labelledby', 'aiAdminHeading');
+      const header = element('div', undefined, 'ai-admin-header');
+      const title = element('h2', '직원 AI 연결'); title.id = 'aiAdminHeading';
+      const close = button('닫기'); close.autofocus = true;
+      header.append(title, close);
+      const body = element('div', undefined, 'ai-admin-body');
+      const actions = element('div', undefined, 'ai-actions');
+      const active = button('사용 중', 'primary'), history = button('종료·만료'), refresh = button('다시 확인');
+      actions.append(active, history, refresh);
+      const status = element('p', '', 'ai-muted'); status.setAttribute('role', 'status');
+      const confirmation = element('div', undefined, 'ai-box ai-admin-confirm'); confirmation.hidden = true;
+      const list = element('div');
+      const more = button('더 보기'); more.hidden = true;
+      body.append(actions, status, confirmation, list, more);
+      dialog.append(header, body);
+      document.body.append(dialog);
+      let past = false, busy = false, uncertain = null, selected = null, cursor = null, disposed = false, listReady = false;
+      let observer;
+      const buttons = new Set();
+      const alive = () => !disposed && dialog.open && current();
+      const sync = () => {
+        for (const control of [active, history, refresh, more, ...buttons]) {
+          control.setAttribute('aria-disabled', String(busy || !!selected || (!!uncertain && control !== refresh) ||
+            (buttons.has(control) && !listReady)));
+        }
+        active.setAttribute('aria-pressed', String(!past)); history.setAttribute('aria-pressed', String(past));
+        refresh.textContent = uncertain ? '종료 결과 확인' : '다시 확인';
+      };
+      const call = async (action, data = {}) => {
+        const response = await deadline(client.rpc('erp_ai_admin_connections', { p_action: action, p_data: data }));
+        if (response.error) throw response.error;
+        if (String(response.data?.coop_id) !== coopId) throw new Error('AI_MANAGEMENT_WRONG_COOP');
+        return response.data;
+      };
+      const load = async (append = false, message = '') => {
+        if (!alive() || busy || selected || uncertain || (append && !cursor)) return;
+        busy = true; sync();
+        status.textContent = '연결을 확인하고 있습니다.';
+        try {
+          const data = await call('list', { history: past, ...(append ? cursor : {}) });
+          if (!alive()) return;
+          if (!Array.isArray(data.items)) throw new Error('AI_MANAGEMENT_INVALID_LIST');
+          const items = data.items.slice(0, 50);
+          const end = items.at(-1);
+          cursor = data.items.length > 50 && end ? { after_at: end.created_at, after_id: end.id } : null;
+          const wasInList = list.contains(document.activeElement);
+          const wasOnMore = document.activeElement === more;
+          if (!append) { list.replaceChildren(); buttons.clear(); }
+          if (!items.length && !append) list.append(element('p', past ? '종료되거나 만료된 연결이 없습니다.' : '사용 중인 AI 연결이 없습니다.', 'ai-muted'));
+          let firstNew = null;
+          for (const c of items) {
+            const row = element('div', undefined, 'ai-connection'); row.tabIndex = -1;
+            if (!firstNew) firstNew = row;
+            const info = element('div');
+            info.append(element('strong', c.employee_name), element('p', c.name + ' · ' + stateLabel(c.state), 'ai-connection-state'));
+            const employeeState = { resigned: '퇴사', inactive: '비활성', unlinked: '직원 정보 없음' }[c.employee_state];
+            if (employeeState) info.append(element('p', employeeState, 'ai-muted'));
+            info.append(element('p', '최근 AI 요청: ' + date(c.last_used_at), 'ai-muted'));
+            info.append(element('p', (c.state === 'revoked' ? '종료: ' : '유효기간: ') + date(c.revoked_at || c.expires_at), 'ai-muted'));
+            row.append(info);
+            if (c.state === 'active') {
+              const revoke = button('연결 종료', 'danger'); buttons.add(revoke);
+              revoke.setAttribute('aria-label', c.employee_name + ' · ' + c.name + ' 연결 종료');
+              revoke.onclick = () => {
+                if (!alive() || !listReady || busy || selected || uncertain) return;
+                selected = c.id; sync();
+                confirmation.replaceChildren(element('p', c.employee_name + '님의 ' + c.name + ' ERP 접근을 종료할까요?'));
+                const confirm = button('종료하기', 'danger'), cancel = button('취소');
+                const confirmActions = element('div', undefined, 'ai-actions'); confirmActions.append(cancel, confirm);
+                confirmation.append(confirmActions); confirmation.hidden = false; cancel.focus();
+                const clear = () => { selected = null; confirmation.hidden = true; confirmation.replaceChildren(); sync(); };
+                cancel.onclick = () => { if (!alive() || selected !== c.id) return; clear(); revoke.focus(); };
+                confirm.onclick = async () => {
+                  if (!alive() || selected !== c.id || busy) return;
+                  clear(); busy = true; sync(); refresh.focus({ preventScroll: true });
+                  status.textContent = '연결을 종료하고 있습니다.';
+                  let result;
+                  try { result = await call('revoke', { id: c.id }); }
+                  catch (e) {
+                    if (!alive()) return;
+                    if (e?.code === '42501') { listReady = false; status.textContent = '연결 종료 권한을 확인해 주세요.'; }
+                    else { uncertain = c.id; status.textContent = '종료 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.'; }
+                  } finally { busy = false; if (alive()) sync(); }
+                  if (alive() && result) await load(false, resultMessage(result.state));
+                };
+              };
+              row.append(revoke);
+            }
+            list.append(row);
+          }
+          more.hidden = !cursor;
+          listReady = true;
+          status.textContent = message;
+          if (append && wasOnMore && !cursor) (firstNew || refresh).focus({ preventScroll: true });
+          else if (!append && wasInList) refresh.focus({ preventScroll: true });
+        } catch {
+          if (!alive()) return;
+          listReady = false;
+          status.textContent = '연결 목록을 확인하지 못했습니다. 다시 확인해 주세요.';
+        } finally { busy = false; if (alive()) sync(); }
+      };
+      const resultMessage = (state) => state === 'revoked' ? 'ERP 접근을 종료했습니다.'
+        : state === 'expired' ? '이미 유효기간이 만료된 연결입니다.'
+        : state === 'active' ? '아직 사용 중인 연결입니다. 필요한 경우 다시 종료해 주세요.'
+        : '현재 조합의 목록에서 연결을 찾지 못했습니다.';
+      const switchList = (next) => {
+        if (!alive() || busy || selected || uncertain || past === next) return;
+        past = next; cursor = null; more.hidden = true; list.replaceChildren(); buttons.clear(); load();
+      };
+      active.onclick = () => switchList(false); history.onclick = () => switchList(true);
+      refresh.onclick = async () => {
+        if (!alive() || busy || selected) return;
+        if (!uncertain) return load();
+        busy = true; sync(); status.textContent = '종료 결과를 확인하고 있습니다.';
+        let result;
+        try { result = await call('status', { id: uncertain }); if (alive()) uncertain = null; }
+        catch { if (alive()) status.textContent = '종료 결과를 확인하지 못했습니다. 다시 확인해 주세요.'; }
+        finally { busy = false; if (alive()) sync(); }
+        if (alive() && result) await load(false, resultMessage(result.state));
+      };
+      more.onclick = () => load(true);
+      const dispose = () => {
+        if (disposed) return;
+        disposed = true; observer?.disconnect(); window.removeEventListener('pagehide', dispose);
+        if (dialog.open) dialog.close();
+        dialog.remove();
+        if (current() && opener.isConnected && (!document.activeElement || document.activeElement === document.body || document.activeElement === opener)) opener.focus({ preventScroll: true });
+      };
+      close.onclick = dispose;
+      dialog.addEventListener('close', () => { if (!dialog.open) dispose(); });
+      dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        if (selected) confirmation.querySelector('button')?.click();
+        else dispose();
+      });
+      window.addEventListener('pagehide', dispose);
+      if (window.frameElement) {
+        observer = new MutationObserver(records => {
+          if (window.frameElement?.hidden || records.some(r => r.oldValue === null)) dispose();
+        });
+        observer.observe(window.frameElement, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
+      }
+      dialog.showModal(); load();
+      return dispose;
     },
     async authorize(client, root) {
       if (!root || root.dataset.aiAuthorizing) return;
