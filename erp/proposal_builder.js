@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.8';
+  const VERSION = '1.6.9';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -45,6 +45,8 @@
     editMode: false,
     manualDirty: false,
     formPending: false,
+    generalPhotoPending: false,
+    generalPhotoRemoved: false,
     renderTimer: 0,
     bootInFlight: false,
     bootAttempt: 0
@@ -1196,7 +1198,7 @@
 
   async function renderPreview({ force = false, applyPending = false } = {}) {
     if (!state.templateHtml) return false;
-    if (state.formPending && !applyPending) {
+    if ((state.formPending || state.generalPhotoPending) && !applyPending) {
       setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 제안서 전체에 한 번에 반영됩니다.', true);
       return false;
     }
@@ -1224,6 +1226,8 @@
       const html = buildPreviewDocument(model);
       state.previewFields = collectFields();
       state.formPending = false;
+      state.generalPhotoPending = false;
+      state.generalPhotoRemoved = false;
       saveDraft();
       state.manualDirty = state.loadedCopyEdits.length > 0;
       setStatus(state.coopId!==window.ProposalTenant.mainId&&state.documentIssuer?.legacy?'이전 서식의 저장본을 유지합니다. 현재 조합 정보로 새로 작성하려면 「새 공공시설 추가」 또는 「새 학교 추가」를 선택해 주세요.':'제안서 미리보기를 다시 만들고 있습니다.');
@@ -1234,6 +1238,7 @@
           const doc = el.previewFrame.contentDocument;
           await doc?.fonts?.ready;
           if (doc !== el.previewFrame.contentDocument) { resolve(); return; }
+          if (model.facilityType === 'general' && state.generalPhotoRemoved) doc?.querySelector('.general-photo')?.remove();
           if (model.facilityType !== 'general') lockPhotoGeometry(doc);
           const slideCount = doc?.querySelectorAll('.slide').length || 0;
           el.pageCount.textContent = model.facilityType === 'general' ? 'A4' : `${slideCount}쪽`;
@@ -1548,12 +1553,15 @@
     state.customOverlays = overlays; state.selectedOverlayId = ''; state.overlayDrawMode = false;
     state.loadedCopyEdits = copyEdits; state.manualDirty = false; state.editMode = false;
     state.formPending = false;
+    state.generalPhotoPending = false;
+    state.generalPhotoRemoved = false;
     state.copyRestoreMismatch = false;
     state.lastExistingKw = Number(ERPNumberInput.raw(snapshot.fields.existingKw)) || 0;
     setFields(snapshot.fields);
     el.siteImage.value = '';
     document.getElementById('generalPhoto').value = '';
     document.getElementById('generalPhotoName').textContent = photo && snapshot.fields.facilityType === 'general' ? state.photoName || '저장한 참고 사진' : '선택한 사진 없음';
+    updateGeneralPhotoButton();
     el.siteImageName.textContent = photo ? state.photoName || '저장한 대상지 사진' : state.useSamplePhoto ? '남사읍 예시 위성사진 사용 중' : '대상지 사진 미등록';
     (await renderPreview());
     await withTimeout(waitForPreview(), 'PREVIEW');
@@ -1714,7 +1722,7 @@
     validateModel(readModel());
     const changedFields = JSON.stringify(collectFields()) !== JSON.stringify(state.previewFields);
     const pendingOverlayLabel = state.customOverlays.some((overlay) => Object.prototype.hasOwnProperty.call(overlay, 'draftLabel'));
-    if (changedFields || state.formPending || pendingOverlayLabel) {
+    if (changedFields || state.formPending || state.generalPhotoPending || pendingOverlayLabel) {
       throw new Error('입력값이 미리보기와 다릅니다. 「문구 확인」을 누른 뒤 미리보기를 확인하고 저장해 주세요.');
     }
     await withTimeout(waitForPreview(), 'PREVIEW');
@@ -1777,7 +1785,8 @@
     state.library?.markDirty();
     if (input.id === 'generalPhoto') {
       document.getElementById('generalPhotoName').textContent = file.name;
-      state.formPending = true;
+      state.generalPhotoPending = true;
+      updateGeneralPhotoButton();
       setStatus('참고 사진을 선택했습니다. 「문구 확인」을 눌러 미리보기에 반영하세요.', true);
       return;
     }
@@ -1800,6 +1809,37 @@
     doc.querySelectorAll('.photo-caption').forEach((node) => node.remove());
     updateOverlayControls(doc);
     setStatus('대상지 사진을 반영했습니다. PDF와 HTML에도 이 사진이 들어갑니다.', state.manualDirty);
+  }
+
+  function updateGeneralPhotoButton() {
+    const input = document.getElementById('generalPhoto');
+    document.getElementById('removeGeneralPhotoButton').hidden = textValue('facilityType') !== 'general'
+      || !(state.siteImageDataUrl || input.files?.length || state.imageLoadError);
+  }
+
+  function removeGeneralPhoto() {
+    const button = document.getElementById('removeGeneralPhotoButton');
+    if (textValue('facilityType') !== 'general' || button.hidden || el.form.inert || state.exportInFlight) return;
+    const input = document.getElementById('generalPhoto');
+    const previewPhoto = el.previewFrame.contentDocument?.querySelector('.general-photo');
+    const hadPhoto = Boolean(state.siteImageDataUrl || previewPhoto);
+    ++state.imageSequence; // The last selected file must not reappear after its asynchronous read.
+    state.imageLoadPromise = Promise.resolve();
+    state.imageLoadError = null;
+    state.siteImageDataUrl = '';
+    state.photoName = '';
+    state.photoAspectRatio = 0;
+    state.useSamplePhoto = false;
+    state.generalPhotoPending = false;
+    state.generalPhotoRemoved ||= hadPhoto;
+    input.value = '';
+    document.getElementById('generalPhotoName').textContent = '선택한 사진 없음';
+    previewPhoto?.remove();
+    if (document.activeElement === button) input.focus({ preventScroll: true });
+    updateGeneralPhotoButton();
+    if (hadPhoto) state.library?.markDirty();
+    setStatus(hadPhoto ? '미리보기에서 사진만 뺐습니다. 「문구 확인」으로 이 브라우저에 임시 보관할 수 있습니다.'
+      : '사진 선택을 취소했습니다.', hadPhoto || state.formPending || state.manualDirty);
   }
 
   async function resetSample() {
@@ -1852,7 +1892,13 @@
     state.eventsBound = true;
     el.form.addEventListener('submit', (event) => {
       event.preventDefault();
-      void state.library?.applyLocally(async () => (await renderPreview({ force: true, applyPending: true })));
+      void state.library?.applyLocally(() => {
+        // With no new form text, keep any wording edited in the current preview.
+        if (state.generalPhotoRemoved && !state.generalPhotoPending && !state.formPending && !state.copyRestoreMismatch
+            && textValue('facilityType') === 'general' && state.previewFields?.facilityType === 'general'
+            && JSON.stringify(collectFields()) === JSON.stringify(state.previewFields)) return true;
+        return renderPreview({ force: true, applyPending: true });
+      });
     });
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage || event.target.id === 'generalPhoto') return;
@@ -1929,14 +1975,21 @@
     });
     [el.siteImage, document.getElementById('generalPhoto')].forEach(input => input.addEventListener('change', () => {
       state.imageLoadError = null;
+      const general = input.id === 'generalPhoto';
+      if (general) {
+        if (input.files?.length) state.generalPhotoRemoved = false;
+        updateGeneralPhotoButton();
+      }
       const sequence = state.imageSequence + 1;
       state.imageLoadPromise = handleSiteImageChange(input).catch((error) => {
         if (sequence !== state.imageSequence) return;
         state.imageLoadError = new Error(error?.message?.includes('사진') ? error.message : '사진을 읽지 못했습니다. 다른 파일을 선택해 주세요.');
+        if (general) updateGeneralPhotoButton();
         console.error(`[proposal-builder ${VERSION}] image load failed`, error);
         setStatus(state.imageLoadError.message, true);
       });
     }));
+    document.getElementById('removeGeneralPhotoButton').addEventListener('click', removeGeneralPhoto);
     el.addOverlayButton.addEventListener('click', toggleOverlayDrawMode);
     el.deleteOverlayButton.addEventListener('click', deleteSelectedOverlay);
     el.clearOverlayButton.addEventListener('click', clearOverlays);
