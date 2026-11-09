@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.10';
+  const VERSION = '1.6.11';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -1856,15 +1856,16 @@
       : '사진 선택을 취소했습니다.', hadPhoto || state.formPending || state.manualDirty);
   }
 
-  function canApplyGeneralPhotoOnly() {
-    return state.generalPhotoChanged && !state.formPending && !state.copyRestoreMismatch
+  function canKeepGeneralPreview() {
+    return !state.copyRestoreMismatch
       && textValue('facilityType') === 'general' && state.previewFields?.facilityType === 'general'
       && JSON.stringify(collectFields()) === JSON.stringify(state.previewFields);
   }
 
   async function applyGeneralPhotoOnly() {
     const epoch = state.documentEpoch, sequence = state.imageSequence;
-    const current = () => epoch === state.documentEpoch && sequence === state.imageSequence && canApplyGeneralPhotoOnly();
+    const current = () => epoch === state.documentEpoch && sequence === state.imageSequence
+      && state.generalPhotoChanged && canKeepGeneralPreview();
     try {
       await withTimeout(state.imageLoadPromise, 'GENERAL_PHOTO');
       if (!current()) return false;
@@ -1872,6 +1873,7 @@
       await withTimeout(waitForPreview(), 'PREVIEW');
       if (!current()) return false;
       if (!setGeneralPreviewPhoto(el.previewFrame.contentDocument, state.siteImageDataUrl)) throw new Error('미리보기가 아직 준비되지 않았습니다. 다시 확인해 주세요.');
+      state.formPending = false;
       state.generalPhotoPending = false;
       setStatus('미리보기의 사진만 반영했습니다. 직접 고친 문구는 그대로입니다.');
       return true;
@@ -1933,8 +1935,14 @@
     state.eventsBound = true;
     el.form.addEventListener('submit', (event) => {
       event.preventDefault();
-      void state.library?.applyLocally(() => canApplyGeneralPhotoOnly()
-        ? applyGeneralPhotoOnly() : renderPreview({ force: true, applyPending: true }));
+      void state.library?.applyLocally(() => {
+        if (!canKeepGeneralPreview()) return renderPreview({ force: true, applyPending: true });
+        if (state.generalPhotoChanged) return applyGeneralPhotoOnly();
+        // A restored direct edit (or a reverted form input) is not a request to rebuild the preview.
+        state.formPending = false;
+        setStatus('양식 입력값이 같아 현재 미리보기를 유지합니다.');
+        return true;
+      });
     });
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage || event.target.id === 'generalPhoto') return;
