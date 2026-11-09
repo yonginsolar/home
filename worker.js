@@ -304,6 +304,7 @@ async function routeRequest(request,env){
       '/shared/home_progressive.js?20261023-3':'/shared/home_progressive_20261023_legacy.js',
       '/shared/home_preview_editor.js?20261109-photo-intent-1':'/shared/home_preview_editor_20261109_intent_legacy.js',
       '/shared/public_power_monitor.js?20261007-4':'/shared/public_power_monitor_20261007_legacy.js',
+      '/shared/public_power_monitor.js?20261109-1':'/shared/public_power_monitor_20261109_legacy.js',
       '/erp/admin_member_assets.js?20261109-photo-return-1':'/erp/admin_member_assets_20261109_return_legacy.js',
       '/erp/admin_member_assets.js?20261109-photo-return-2':'/erp/admin_member_assets_20261109_return_legacy.js',
       '/erp/admin_member_site.js?20261109-editor-continuity-1':'/erp/admin_member_site_20261109_continuity_legacy.js',

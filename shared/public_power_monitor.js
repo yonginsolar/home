@@ -1,4 +1,4 @@
-/* v1.0.4 — Public-only homepage adapter. Never reads monitor administration tables. */
+/* v1.0.5 — Public-only homepage adapter with card details from the same snapshot. */
 (function (global) {
   'use strict';
 
@@ -145,6 +145,29 @@
         card.append(details);
         const fetched = timeLabel(plant.fetched_at);
         if (fetched) card.append(element('p', 'public-monitor-plant-time', `${fetched} 기준`));
+        if (plant.detail_enabled === true && typeof options.onPlantDetails === 'function') {
+          card.classList.add('public-plant-card');
+          const name = plant.full_name || plant.short_name || '태양광 발전소';
+          const button = element('button', 'btn btn-sm btn-outline-primary mt-2 public-plant-card-action', '상세 정보');
+          button.type = 'button';
+          button.setAttribute('aria-haspopup', 'dialog');
+          button.setAttribute('aria-label', `${name} 상세 정보`);
+          if (plant.display_order != null) button.dataset.publicPlantKey = `${plant.display_order}:${name}`;
+          const statusLabels = {generating:'발전 중',night:'야간',stopped:'정지',offline:'연결 끊김'};
+          const operating = ['live','stale'].includes(plant.data_state) && Object.hasOwn(statusLabels,plant.operational_state)
+            ? statusLabels[plant.operational_state] : '확인 중';
+          const measure = (value, unit) => value == null ? '—' : `${formatted(value)} ${unit}`;
+          const metrics = [
+            ['운전 상태', operating], ['설비 용량', measure(number(plant.capacity_kw),'kW')],
+            ['현재 출력', measure(metric(plant,'current_kw'),'kW')], ['오늘 발전량', measure(todayValue(plant,today),'kWh')],
+            ['이번 달 누적', measure(monthValue(plant,now),'kWh')], ['누적 발전량', measure(metric(plant,'lifetime_kwh'),'kWh')],
+            ['자료 기준', fetched ? `${fetched}${plant.data_state === 'stale' ? ' · 갱신 대기' : ''}` : '수집 대기 중']
+          ];
+          button.addEventListener('click', event => {
+            if (!event.defaultPrevented && button.isConnected) options.onPlantDetails({name,location,metrics}, button);
+          });
+          card.append(button);
+        }
         cell.append(card);
         fragment.append(cell);
       });

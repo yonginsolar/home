@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.195
-Change: 2026-11-09 - Preserve construction cards and open plant details instead of photo-only zoom.
+Version: v1.0.196
+Change: 2026-11-09 - Open detailed public plant information from the full card.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -13,7 +13,7 @@ Change: 2026-11-09 - Preserve construction cards and open plant details instead 
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.195 | index.html');</script>
+<script>console.log('[Version] v1.0.196 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1856,19 +1856,22 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 #progress[data-sunlit-public-progress]:not([hidden]) { display: block !important; }
 #progress[data-sunlit-public-progress]:not([data-progress-content]):not([data-home-load-state="ready"]):not([data-home-load-state="failed"]) [data-progress-loading],
 #progress[data-sunlit-public-progress][data-home-load-state="ready"]:not([data-progress-content="present"]) [data-progress-empty] { display: block; }
-#progress :is(.progress-plant-photo-button,.progress-plant-name-button) {
-  padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:start;
-}
-#progress .progress-plant-photo-button { display:block; width:100%; height:100%; border-radius:inherit; }
-#progress .progress-plant-name-button { max-width:100%; word-break:keep-all; overflow-wrap:anywhere; }
-#progress .progress-plant-name-button:is(:hover,:focus-visible) { text-decoration:underline; text-underline-offset:.16em; }
-#progress :is(.progress-plant-photo-button,.progress-plant-name-button):focus-visible { outline:2px solid currentColor; outline-offset:2px; }
-#progress .progress-plant-photo-button:focus-visible { outline-offset:-3px; }
-#progressPlantDetailModal { --bs-modal-width:34rem; }
-#progressPlantDetailModal .modal-content { height:32rem; max-height:calc(100vh - 1rem); max-height:calc(100dvh - 1rem); }
-#progressPlantDetailModal .modal-body { min-height:0; word-break:keep-all; overflow-wrap:anywhere; }
+.public-plant-card { position:relative; }
+.public-plant-card-action::after { content:""; position:absolute; inset:0; z-index:2; border-radius:inherit; }
+.public-plant-card:has(.public-plant-card-action:focus-visible) { outline:2px solid var(--theme-link,#2563eb); outline-offset:2px; }
+.public-plant-card .public-plant-card-action { position:static; white-space:normal; overflow-wrap:anywhere; }
+:is(#progressPlantDetailModal,#plantDetailModal) { --bs-modal-width:38rem; }
+:is(#progressPlantDetailModal,#plantDetailModal) .modal-content { height:36rem; max-height:calc(100vh - 1rem); max-height:calc(100dvh - 1rem); }
+:is(#progressPlantDetailModal,#plantDetailModal) .modal-body { min-height:0; word-break:keep-all; overflow-wrap:anywhere; }
+#plantDetailModal .modal-header .btn-close { flex:none; }
+#plantDetailModal .list-group-item { gap:.35rem 1rem; flex-wrap:wrap; }
 #progressPlantDetailModal .modal-header { gap:12px; }
 #progressPlantDetailModal .btn-close { flex:none; }
+#progressPlantDetailModal .plant-detail-group { border:1px solid var(--bs-border-color,#d5dfda); border-radius:12px; padding:.8rem; margin:0 0 .8rem; }
+#progressPlantDetailModal .plant-detail-group h4 { font-size:1em; margin:0 0 .3rem; }
+#progressPlantDetailModal .plant-detail-steps { display:grid; gap:.3rem; padding-inline-start:1.35em; margin:.5rem 0 0; }
+#progressPlantDetailModal [aria-current="step"] { font-weight:750; color:var(--theme-link,#245b91); }
+:is(#progress-plant-modal-map,#plant-modal-map)[hidden] { display:none!important; }
 #progressPlantDetailModal dl > div { padding:.5rem 0; border-bottom:1px solid var(--bs-border-color,#d5dfda); }
 #progressPlantDetailModal dt { color:var(--bs-secondary-color,#46545b); font-size:.9em; }
 #progressPlantDetailModal dd { margin:0; }
@@ -2568,8 +2571,8 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 
 
 
-<div class="modal fade" id="plantDetailModal" tabindex="-1" >
-  <div class="modal-dialog modal-dialog-centered">
+<div class="modal fade" id="plantDetailModal" tabindex="-1" aria-labelledby="plant-modal-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title fw-bold" id="plant-modal-title">발전소 이름</h5>
@@ -2581,14 +2584,16 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         </div>
 
         <div id="plant-modal-compare" class="mb-3" hidden></div>
+        <h6 class="fw-bold mb-2">운영·설비 정보</h6>
         <ul class="list-group list-group-flush" id="plant-modal-info-list">
            </ul>
+        <a id="plant-modal-map" class="btn btn-sm btn-outline-primary mt-2" target="_blank" rel="noopener noreferrer" hidden>공개 위치 지도에서 보기</a>
 
         <div id="plant-modal-status-box" class="alert mt-3 text-center" role="alert">
         </div>
       </div>
       <div class="modal-footer">
-        <a href="#" id="plant-modal-link" class="btn btn-success" target="_blank" style="display:none;">모니터링 보기</a>
+        <a href="#" id="plant-modal-link" class="btn btn-success" target="_blank" rel="noopener noreferrer" style="display:none;">모니터링 보기</a>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
       </div>
     </div>
@@ -2604,7 +2609,15 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
       </div>
       <div class="modal-body" tabindex="0" role="region" aria-labelledby="progress-plant-modal-name">
         <h3 class="h5 fw-bold" id="progress-plant-modal-name"></h3>
-        <dl class="mb-0" id="progress-plant-modal-details"></dl>
+        <section class="plant-detail-group" id="progress-plant-modal-stages" hidden>
+          <h4 class="fw-bold">건립 진행 단계</h4>
+          <ol class="plant-detail-steps"></ol>
+        </section>
+        <section class="plant-detail-group">
+          <h4 class="fw-bold" id="progress-plant-modal-group-title">사업 정보</h4>
+          <dl class="mb-0" id="progress-plant-modal-details"></dl>
+          <a id="progress-plant-modal-map" class="btn btn-sm btn-outline-primary mt-2" target="_blank" rel="noopener noreferrer" hidden>공개 위치 지도에서 보기</a>
+        </section>
         <figure id="progress-plant-modal-photo" hidden></figure>
       </div>
       <div class="modal-footer">
@@ -2644,7 +2657,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
   <script src="shared/route_guard.js?v=20260401-1"></script>
-  <script src="shared/public_power_monitor.js?v=20261109-1"></script>
+  <script src="shared/public_power_monitor.js?v=20261109-plant-details-1" integrity="sha384-A/RdPTDgjsAclli3ZkKN5JaF4itaKNc9XvFgEfdoFUquQGaTcKnq703kw5qCL1Nx" crossorigin="anonymous"></script>
  <script src="/shared/daily_patch_notes.js?v=20261019-1" integrity="sha384-M/werDU95RS3yyX4R8KvWSkengMa84XWJCZDXvvKGfYJdJ4jXKlMKXKvgi9lXPHf" crossorigin="anonymous"></script>
  <script src="home_patch_note.js?v=20261019-archive-1"></script>
   <script>
@@ -4752,7 +4765,8 @@ async function getPublicHomeMonitor() {
       g_public_home_monitor = window.CoopPublicPowerMonitor?.create({
         context, hostname: window.location.hostname, client: _client,
         onGenerationMonths: (plants, now, current) => getPublicGenerationTrend()?.renderMonitor(plants, now, current),
-        onGenerationMonthsIssue: retain => getPublicGenerationTrend()?.monitorIssue(retain)
+        onGenerationMonthsIssue: retain => getPublicGenerationTrend()?.monitorIssue(retain),
+        onPlantDetails: isHomePreviewMode ? null : (plant, trigger) => openProgressPlantDetail(plant, trigger, 'monitor')
       }) || null;
       return g_public_home_monitor;
     }
@@ -5000,10 +5014,13 @@ function buildOptimizedImageAttrs(url, options = {}) {
     const originalUrl = safeUrl(url);
     if (!originalUrl) return '';
     const src = getOptimizedSupabaseImageUrl(originalUrl, options);
-    const fallback = `this.onerror=null;this.removeAttribute('srcset');this.src=this.dataset.originalSrc;`;
+    const sourceAttr = options.detailCard ? 'data-plant-card-src' : 'data-original-src';
+    const fallback = options.detailCard
+        ? `this.onerror=null;this.removeAttribute('srcset');this.src=this.getAttribute('data-plant-card-src');`
+        : `this.onerror=null;this.removeAttribute('srcset');this.src=this.dataset.originalSrc;`;
     return [
         `src="${escapeHtml(src)}"`,
-        `data-original-src="${escapeHtml(originalUrl)}"`,
+        `${sourceAttr}="${escapeHtml(originalUrl)}"`,
         `loading="${options.loading || 'lazy'}"`,
         'decoding="async"',
         `onerror="${escapeHtml(fallback)}"`
@@ -6022,9 +6039,9 @@ function openNoticeDetail(id) {
 
 	                 pfHtml += `
 	                  <div class="col-lg-4 col-md-6 portfolio-item mb-4" data-aos="fade-up">
-                    <div class="portfolio-wrap shadow-sm rounded overflow-hidden">
+                    <div class="portfolio-wrap shadow-sm rounded overflow-hidden public-plant-card">
                       <div style="height:250px; overflow:hidden;">
-                        <img ${buildOptimizedImageAttrs(imgUrl,{width:640})} class="img-fluid w-100 h-100" style="object-fit:cover;" alt="${safePlantName}">
+                        <img ${buildOptimizedImageAttrs(imgUrl,{width:640,detailCard:true})} class="img-fluid w-100 h-100" style="object-fit:cover;" alt="${safePlantName}">
 	                      </div>
 	                      <div class="portfolio-info p-3 bg-white">
 	                        <div class="mb-2">${typeBadge}</div>
@@ -6033,7 +6050,7 @@ function openNoticeDetail(id) {
 
                         <div class="d-flex justify-content-between align-items-center mt-3">
                             <span class="badge bg-success">정상 가동 중</span>
-                            <button class="btn btn-sm btn-outline-primary rounded-pill" data-home-photo-preview-plant onclick="openPlantDetail(decodeURIComponent('${safePlantId}'))">
+                            <button type="button" class="btn btn-sm btn-outline-primary rounded-pill public-plant-card-action" aria-haspopup="dialog" aria-label="${safePlantName} 상세 정보" data-home-photo-preview-plant onclick="openPlantDetail(decodeURIComponent('${safePlantId}'),this)">
                                 <i class="bi bi-plus-lg"></i> 상세 정보
                             </button>
                         </div>
@@ -6054,9 +6071,13 @@ function openNoticeDetail(id) {
 }
 
 // 2. [상세 모달] 발전소 상세 정보 팝업
-function openPlantDetail(id) {
+function openPlantDetail(id, trigger = document.activeElement) {
     const p = g_plants_list.find(item => item.id === id);
-    if(!p) return;
+    const section = document.getElementById('portfolio');
+    const modal = document.getElementById('plantDetailModal');
+    const Modal = window.bootstrap?.Modal;
+    if (!p || !Modal || !modal || modal.dataset.plantDetailOpen || !section?.contains(trigger) || !trigger.getClientRects().length || section.hidden
+        || publicHiddenSectionIds.has('portfolio') || document.querySelector('.modal.show,dialog[open]')) return;
 
     // 1) 기본 정보 채우기
     document.getElementById('plant-modal-title').innerText = p.name;
@@ -6113,14 +6134,18 @@ function openPlantDetail(id) {
                 }
             }
 
+    if (String(p.area ?? '').trim()) {
+        listHtml += `<li class="list-group-item d-flex justify-content-between"><span>면적</span> <strong>${escapeHtml(String(p.area))}</strong></li>`;
+    }
     // 완공일이 있으면 추가
     if(p.completion_date) {
         listHtml += `
         <li class="list-group-item d-flex justify-content-between">
-          <span>준공일(예정)</span> <strong>${safeCompletion}</strong>
+          <span>${p.status === '운영중' ? '준공일' : '준공일(예정)'}</span> <strong>${safeCompletion}</strong>
         </li>`;
     }
     listContainer.innerHTML = listHtml;
+    setPublicPlantMapLink('plant-modal-map', isHomePreviewMode ? '' : p.location);
 
     // 3) 상태 메시지 박스 및 버튼 처리
     const statusBox = document.getElementById('plant-modal-status-box');
@@ -6150,7 +6175,16 @@ function openPlantDetail(id) {
     }
 
     // 모달 띄우기
-    new bootstrap.Modal(document.getElementById('plantDetailModal')).show();
+    if (!isHomePreviewMode) modal.classList.remove('fade');
+    const instance = Modal.getOrCreateInstance(modal);
+    modal.dataset.plantDetailOpen = 'true';
+    modal.addEventListener('hidden.bs.modal', () => {
+        delete modal.dataset.plantDetailOpen;
+        const active = document.activeElement;
+        if ((active === document.body || modal.contains(active)) && trigger.getClientRects().length
+            && !document.querySelector('.modal.show,dialog[open]')) trigger.focus({preventScroll:true});
+    }, {once:true});
+    instance.show(trigger);
 }
 
     function scrollProgressPlants(direction) {
@@ -6288,27 +6322,56 @@ function openPlantDetail(id) {
         return Number.isFinite(capacity) && capacity > 0 ? formatPublicPlantNumber(capacity, ' kW') : '미정';
     }
 
-    function openProgressPlantDetail(plant, trigger) {
-        const section = document.getElementById('progress');
+    function setPublicPlantMapLink(id, location) {
+        const link = document.getElementById(id);
+        const place = String(location || '').replace(/\s+/g,' ').trim();
+        // Do not invent a pin from a city name, an unpublished address, or a future site.
+        const specific = place.length <= 160 && !/(미정|미공개|비공개|후보지)/.test(place)
+            && /(?:대로|로|길)\s+\d{1,6}(?:-\d{1,6})?(?:\s|,|$)|(?:동|리|가)\s+(?:산\s*)?\d{1,6}(?:-\d{1,6})?(?:번지|\s|,|$)/.test(place);
+        link.hidden = !specific;
+        if (!specific) { link.removeAttribute('href'); return; }
+        const map = new URL('https://www.google.com/maps/search/');
+        map.searchParams.set('api','1');
+        map.searchParams.set('query',place);
+        link.href = map.href;
+    }
+
+    function openProgressPlantDetail(plant, trigger, source = 'construction') {
+        const construction = source === 'construction';
+        const sectionId = construction ? 'progress' : 'portfolio';
+        const section = document.getElementById(sectionId);
         const modal = document.getElementById('progressPlantDetailModal');
         const Modal = window.bootstrap?.Modal;
         if (isHomePreviewMode || !Modal || !modal || !section || !section.contains(trigger) || !trigger.getClientRects().length
-            || section.hidden || publicHiddenSectionIds.has('progress') || document.querySelector('.modal.show, dialog[open]')) return;
+            || section.hidden || publicHiddenSectionIds.has(sectionId) || document.querySelector('.modal.show, dialog[open]')) return;
 
         const name = String(plant.name || '발전소');
         const stage = getPublicPlantProgressStage(plant.progress_rate);
         const type = normalizePublicPlantProjectType(plant.project_type);
         const text = value => String(value ?? '').trim();
-        const rows = [
-            ['현재 단계', stage.currentTitle], ['다음 단계', stage.nextTitle],
+        const stages = document.getElementById('progress-plant-modal-stages');
+        const steps = stages.querySelector('ol');
+        stages.hidden = !construction;
+        steps.replaceChildren();
+        if (construction) for (const [index, step] of PUBLIC_PLANT_PROGRESS_STAGES.entries()) {
+            const li = document.createElement('li');
+            const current = index + 1 === stage.position;
+            if (current) li.setAttribute('aria-current','step');
+            li.textContent = `${step.title}${current ? ' · 현재' : ''}`;
+            steps.append(li);
+        }
+        const rows = construction ? [
+            ['진행 상태', text(plant.status)], ['현재 단계', stage.currentTitle], ['다음 단계', stage.nextTitle],
             [type === 'participation' ? '전체 사업 예정 용량' : '예정 용량', getProgressPlantCapacity(plant)],
             ['위치', text(plant.location) || '미정'], ['준공 예정일', text(plant.completion_date) || '미정'],
             ['면적', text(plant.area)], ['사업 유형', getPublicPlantTypeLabel(type)]
-        ];
-        if (type === 'participation') rows.push(
+        ] : [['위치', text(plant.location) || '—'], ...plant.metrics];
+        if (construction && type === 'participation') rows.push(
             ['사업 주체', text(plant.project_owner_name)], ['조합 참여분', getPublicParticipationSummary(plant)], ['공개 설명', text(plant.public_note)]
         );
         document.getElementById('progress-plant-modal-name').textContent = name;
+        document.getElementById('progress-plant-modal-group-title').textContent = construction ? '사업 정보' : '설비·발전 실적';
+        setPublicPlantMapLink('progress-plant-modal-map', plant.location);
         const details = document.getElementById('progress-plant-modal-details');
         details.replaceChildren();
         for (const [label, value] of rows) {
@@ -6345,8 +6408,10 @@ function openPlantDetail(id) {
             photo.hidden = true;
             photo.replaceChildren();
             const active = document.activeElement;
-            if ((active === document.body || modal.contains(active)) && trigger.getClientRects().length
-                && !document.querySelector('.modal.show, dialog[open]')) trigger.focus({preventScroll:true});
+            const currentTrigger = trigger.isConnected ? trigger : trigger.dataset.publicPlantKey
+                && Array.from(section.querySelectorAll('[data-public-plant-key]')).find(button => button.dataset.publicPlantKey === trigger.dataset.publicPlantKey);
+            if ((active === document.body || modal.contains(active)) && currentTrigger?.getClientRects().length
+                && !document.querySelector('.modal.show, dialog[open]')) currentTrigger.focus({preventScroll:true});
         }, {once:true});
 
         // The detail photo is independent of the card image and only shows on successful load.
@@ -6357,6 +6422,7 @@ function openPlantDetail(id) {
         if (url.username || url.password || url.hostname === 'via.placeholder.com') return;
         const image = document.createElement('img');
         image.alt = `${name} 사진`;
+        image.dataset.originalSrc = imageUrl;
         image.decoding = 'async';
         image.addEventListener('load', () => { if (photo.contains(image)) photo.hidden = false; }, {once:true});
         image.addEventListener('error', () => { if (photo.contains(image)) photo.replaceChildren(); }, {once:true});
@@ -6402,21 +6468,19 @@ function openPlantDetail(id) {
 
             cardHtml += `
             <article class="progress-plant-card">
-                <div class="count-box progress-plant-card-inner">
+                <div class="count-box progress-plant-card-inner public-plant-card">
 
                   <div class="row align-items-center">
                       <div class="col-md-5 mb-3 mb-md-0">
                           <div class="progress-plant-image">
-                            <button type="button" class="progress-plant-photo-button" data-progress-plant-detail aria-haspopup="dialog" aria-label="${safeName} 상세 보기">
-                              <img ${buildOptimizedImageAttrs(img,{width:640})} alt="">
-                            </button>
+                              <img ${buildOptimizedImageAttrs(img,{width:640,detailCard:true})} alt="${safeName}">
                           </div>
                       </div>
                       <div class="col-md-7">
 	                          <div class="d-flex align-items-center mb-2 progress-plant-title-row">
 	                              <span class="badge bg-warning text-dark me-2">${safeStatus}</span>
 	                                      <span class="me-2">${typeBadge}</span>
-	                              <h3><button type="button" class="progress-plant-name-button" data-progress-plant-detail aria-haspopup="dialog">${safeName}</button></h3>
+	                              <h3>${safeName}</h3>
 	                          </div>
 
 	                          <ul class="list-unstyled text-muted small mb-3">
@@ -6449,6 +6513,7 @@ function openPlantDetail(id) {
                                  ${stage.position} / ${stage.total}단계
                             </div>
                           </div>
+                          <button type="button" class="btn btn-sm btn-outline-primary mt-2 public-plant-card-action" data-progress-plant-detail aria-haspopup="dialog" aria-label="${safeName} 상세 정보">상세 정보 <i class="bi bi-chevron-right" aria-hidden="true"></i></button>
                       </div>
                   </div>
                 </div>
