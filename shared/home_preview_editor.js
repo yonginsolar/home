@@ -64,8 +64,23 @@
     // inside this preview so the task tabs and settings stay where the user left them.
     if(node)window.scrollTo({top:window.scrollY+node.getBoundingClientRect().top,behavior:'instant'});
   }
+  function closeFinishedPhotoExperience(event){
+    if(draft.photo_inspect!==true)window.bootstrap?.Modal?.getInstance(event.currentTarget)?.hide();
+  }
+  function exitPhotoExperience(){
+    if(typeof invalidateActivityDetailRequest==='function')invalidateActivityDetailRequest();
+    window.CoopHomeEnhancements?.closeZoom(false);
+    for(const id of ['plantDetailModal','activityDetailModal']){
+      const modal=document.getElementById(id),instance=modal&&window.bootstrap?.Modal?.getInstance(modal);
+      if(!instance)continue;
+      // Bootstrap ignores hide during the opening animation. Retry only on
+      // that modal's completion, and never close a newly enabled experience.
+      modal.addEventListener('shown.bs.modal',closeFinishedPhotoExperience,{once:true});
+      instance.hide();
+    }
+  }
   window.CoopSitePreview=Object.freeze({
-    get:key=>draft[key],apply(value){draft=value&&typeof value==='object'?value:{};return refresh(false);},refresh,finishActivities,invalidate(key){delete rendered[key];},
+    get:key=>draft[key],apply(value){const wasInspecting=draft.photo_inspect===true;draft=value&&typeof value==='object'?value:{};if(wasInspecting&&draft.photo_inspect!==true)exitPhotoExperience();return refresh(false);},refresh,finishActivities,invalidate(key){delete rendered[key];},
     activityRows(rows){
       if(!draft.activity)return rows;
       const filtered=(Array.isArray(rows)?rows:[]).filter(row=>String(row.id)!==draft.activity.id);

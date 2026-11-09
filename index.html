@@ -2,7 +2,7 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.184
+Version: v1.0.185
 Change: 2026-11-09 - Safe photo preview, slide selection and initial fit.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
@@ -13,7 +13,7 @@ Change: 2026-11-09 - Safe photo preview, slide selection and initial fit.
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.184 | index.html');</script>
+<script>console.log('[Version] v1.0.185 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1868,7 +1868,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 <script src="shared/site_text_styles.js?v=20261009-17" defer></script>
 <script src="shared/home_display_options.js?v=1.3.1" defer></script>
 <script src="shared/site_inline_editor.js?v=20261019-shortcuts-1" defer></script>
-<script src="shared/home_preview_editor.js?v=20261109-photo-inspect-1" defer></script>
+<script src="shared/home_preview_editor.js?v=20261109-editor-usability-1" defer></script>
 <script src="shared/hero_banner.js?v=1.5.1" defer></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
 <script src="shared/home_progressive.js?v=20261023-3" integrity="sha384-px6WJAuCM53uUaqxVd38tnhTQoEuGSl7o9+9m0SydxN2p6AZ2QMi52Mf9fpUuz3i" crossorigin="anonymous" defer></script>
@@ -2185,7 +2185,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
             </div>
 
             <div class="text-center mt-4">
-              <a href="signup.html" class="get-started-btn" style="background:var(--color-primary); color:#fff; border:none;">이 금액으로 가입하기</a>
+              <a href="signup.html" class="get-started-btn" style="background:var(--color-primary); color:#fff; border:none;">조합원 가입하기</a>
             </div>
           </div>
         </div>
@@ -6655,6 +6655,30 @@ function openPlantDetail(id) {
        const container = document.getElementById('faq-list-container');
        if(!container) return;
 
+       function bindPublicFaqQueue() {
+        let pending = null;
+        const transitioning = () => !!container.querySelector('.answer-block.collapsing');
+        const buttonFor = target => target?.closest?.('button.question-block[data-bs-toggle="collapse"]');
+        // Bootstrap delegates at document capture; intercept only this list before it does.
+        window.addEventListener('click', event => {
+            const button = buttonFor(event.target);
+            if (!button || !container.contains(button) || !window.bootstrap?.Collapse || !transitioning()) return;
+            pending = button;
+            event.preventDefault();
+            event.stopPropagation();
+        }, true);
+        const finish = () => queueMicrotask(() => {
+            if (transitioning() || !pending) return;
+            const next = pending;
+            pending = null;
+            if (next.isConnected && container.contains(next) && !next.disabled) next.click();
+        });
+        for (const event of ['shown.bs.collapse', 'hidden.bs.collapse']) container.addEventListener(event, finish);
+        container.addEventListener('show.bs.collapse', event => {
+            if (event.target.parentElement?.parentElement === container && transitioning()) event.preventDefault();
+        });
+       }
+
        // 1. DB에서 공개된(is_visible=true) FAQ만 가져오기
        const { data: faqs, error } = await readPublicHome(signal => readPublicHomeScoped(_client
            .from('site_faqs')
@@ -6668,10 +6692,7 @@ function openPlantDetail(id) {
        const collapse = window.bootstrap?.Collapse;
        if (!container.dataset.faqStateBound) {
            container.dataset.faqStateBound = 'true';
-           container.addEventListener('show.bs.collapse', event => {
-               if (event.target.parentElement?.parentElement !== container) return;
-               if (container.querySelector('.answer-block.collapsing')) event.preventDefault();
-           });
+           bindPublicFaqQueue();
        }
        container.querySelectorAll('.answer-block').forEach(answer => {
            const dispose = () => {

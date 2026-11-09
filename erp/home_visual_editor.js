@@ -2,6 +2,7 @@
 (function(root){
   'use strict';
   let mounted=false, selected='hero', lastHomeArea='hero', selectionRevision=0, sectionRows=[], previewOrder=[];
+  const narrowScreen=root.matchMedia?.('(max-width: 767px)');
   const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',documents:'문서 관리'};
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
   const homeAreas=new Set(['hero','impact','contact','design','fonts']);
@@ -70,7 +71,36 @@
     const label=document.querySelector('.home-visual-area-label');if(label)label.hidden=areaTask!=='materials';
     const extra=document.getElementById('site-home-extra-picker');if(extra){for(const option of extra.options)if(option.value)option.hidden=!available(option.value);extra.disabled=!allowed;extra.value=['fonts','impact','contact'].includes(selected)?selected:'';}
     const docs=document.getElementById('site-home-linked-documents');if(docs)docs.hidden=areaTask!=='materials';
+    document.querySelectorAll('[data-home-pane-select]').forEach(button=>button.disabled=!allowed);
+    const photoExit=document.getElementById('site-home-photo-preview-exit');if(photoExit)photoExit.disabled=!allowed;
     syncContext();
+  }
+  function setPane(pane){
+    const workspace=document.getElementById('site-home-visual-workspace');
+    if(!workspace)return;
+    workspace.dataset.homePane=pane;
+    for(const button of document.querySelectorAll('[data-home-pane-select]'))button.setAttribute('aria-pressed',String(button.dataset.homePaneSelect===pane));
+  }
+  function mountPaneControls(workspace){
+    const bar=document.createElement('div');bar.className='home-view-controls';
+    const views=document.createElement('div');views.className='home-pane-switch';views.setAttribute('role','group');views.setAttribute('aria-label','휴대전화 화면 보기');
+    for(const [pane,label,area] of [['settings','설정','site-home-settings-pane'],['preview','미리보기','site-home-preview-pane']]){
+      const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';
+      button.dataset.homePaneSelect=pane;button.textContent=label;button.setAttribute('aria-controls',area);
+      button.onclick=()=>setPane(pane);views.append(button);
+    }
+    const experience=document.createElement('div');experience.id='site-home-photo-preview-banner';experience.className='home-photo-preview-banner';experience.hidden=true;
+    const note=document.createElement('span');note.textContent='사진 체험 중';note.setAttribute('role','status');
+    const exit=document.createElement('button');exit.id='site-home-photo-preview-exit';exit.type='button';exit.className='btn btn-sm btn-outline-secondary';exit.textContent='체험 종료';
+    exit.onclick=()=>root.setHomePhotoPreview?.(false);
+    experience.append(note,exit);bar.append(views,experience);workspace.before(bar);
+    setPane('preview');
+    narrowScreen?.addEventListener?.('change',event=>{
+      if(!event.matches)return;
+      const active=document.activeElement;
+      if(workspace.querySelector('.home-visual-inspector')?.contains(active))setPane('settings');
+      else if(workspace.querySelector('.home-visual-stage')?.contains(active))setPane('preview');
+    });
   }
   function mountZoom(stage,shell){
     const controls=document.createElement('div');controls.className='home-preview-zoom';controls.setAttribute('role','group');controls.setAttribute('aria-label','미리보기 확대·축소');
@@ -108,6 +138,7 @@
     if(area==='portfolio') area='progress';
     if(!Object.hasOwn(labels,area)||!available(area)) return false;
     if(typeof canAccessAdminMemberTab==='function'&&!canAccessAdminMemberTab('site'))return false;
+    const changed=area!==selected;
     selected=area;lastAreas[taskFor(area)]=area;selectionRevision++;
     const bannerTools=document.querySelector('.mobile-banner-tools');if(bannerTools)bannerTools.hidden=area!=='hero';
     if(area!=='legal')lastHomeArea=area;
@@ -124,6 +155,7 @@
     const legalTabs=document.getElementById('site-legal-document-tabs');if(legalTabs)legalTabs.hidden=!legal;
     document.getElementById('site-home-preview-shell').hidden=legal;
     document.getElementById('site-home-legal-preview').hidden=!legal;
+    if(changed || (navigate && narrowScreen?.matches))setPane(area==='hero'?'preview':'settings');
     if(legal)window.CoopSiteLegalEditor?.refreshPreview();
     if(navigate && !legal) {
       const frame=document.getElementById('site-home-preview-frame');
@@ -144,7 +176,7 @@
       const area=card.querySelector('[id^="site-home-hero-"]')?'hero':card.querySelector('[id^="site-home-impact-"]')?'impact':card.querySelector('[id^="site-home-contact-"]')?'contact':card.id==='site-home-font-settings'||card.querySelector('#site-home-title-font')?'fonts':'design';
       areas[area].push(card);
     }
-    const toolbar=document.createElement('div'); toolbar.className='home-visual-toolbar';
+    const toolbar=document.createElement('div'); toolbar.className='home-visual-toolbar home-responsive-toolbar';
     const pickerLabel=document.createElement('label');pickerLabel.className='home-visual-area-label';pickerLabel.htmlFor='site-home-area-picker';pickerLabel.textContent='관리할 자료';
     const picker=document.createElement('select');picker.id='site-home-area-picker';picker.className='form-select home-visual-area-picker';picker.onchange=()=>select(picker.value);
     for(const [area,label] of Object.entries(labels)) {const option=document.createElement('option');option.value=area;option.textContent=label;picker.append(option);}
@@ -165,14 +197,14 @@
     const showSections=document.createElement('button');showSections.type='button';showSections.className='btn btn-sm btn-outline-secondary';showSections.id='site-home-show-sections';showSections.textContent='표시 영역·순서 확인';showSections.onclick=()=>select('sections');taskContext.append(showSections);
     const pending=document.createElement('button');pending.type='button';pending.className='btn btn-sm btn-primary';pending.id='site-home-pending-save';pending.hidden=true;pending.textContent='메인 화면 변경 저장';pending.onclick=async()=>{if(await (window.CoopSiteInlineHost?.flush()??Promise.resolve(true)))saveHomeSettings();else myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');};toolbar.append(pending);
     const workspace=document.createElement('div'); workspace.id='site-home-visual-workspace';workspace.className='home-visual-workspace';
-    const stage=document.createElement('div'); stage.className='home-visual-stage';
+    const stage=document.createElement('div'); stage.className='home-visual-stage';stage.id='site-home-preview-pane';
     const previewShell=document.getElementById('site-home-preview-shell');mountZoom(stage,previewShell);
     // Device choice is presentation only; it must not mark the home draft dirty.
     stage.querySelector('#site-home-preview-shell')?.classList.add('is-mobile');
     toolbar.querySelector('#site-home-preview-mobile')?.classList.add('active');
     toolbar.querySelector('#site-home-preview-desktop')?.classList.remove('active');
     const legalPreview=document.createElement('div');legalPreview.id='site-home-legal-preview';legalPreview.className='home-visual-legal-preview';legalPreview.hidden=true;stage.append(legalPreview);
-    const inspector=document.createElement('div'); inspector.className='home-visual-inspector';
+    const inspector=document.createElement('div'); inspector.className='home-visual-inspector';inspector.id='site-home-settings-pane';
     const homeFields=document.createElement('div');homeFields.className='home-visual-home-fields';
     for(const [area,cards] of Object.entries(areas)) {
       const group=document.createElement('div'); group.dataset.homeInspectorArea=area;
@@ -193,6 +225,7 @@
     for(const [value,label]of [['','다른 꾸미기'],['fonts','글꼴'],['impact','참여 안내'],['contact','홈페이지 연락처']]){const option=document.createElement('option');option.value=value;option.textContent=label;extra.append(option);}extra.onchange=()=>{if(extra.value)select(extra.value);};choices.append(extraLabel,extra);
     const linkedDocuments=document.createElement('div');linkedDocuments.id='site-home-linked-documents';const movedNote=document.getElementById('site-documents-moved-note');if(movedNote)linkedDocuments.append(movedNote);
     tabContent.before(modes,choices,taskContext,toolbar,linkedDocuments,workspace);inspector.append(tabContent);workspace.append(stage,inspector);
+    mountPaneControls(workspace);
     // Keep the original tab nodes and Bootstrap handlers as the single navigation path.
     tabs.classList.add('home-visual-original-tabs');
     const activityModal=document.getElementById('activityModal');
@@ -291,9 +324,10 @@
     if(event.data?.type==='coop-home-preview-order')syncOrder(null,event.data.ids);
     if(event.data?.type==='coop-home-preview-area') {
       if(!select(event.data.area,false))return;
+      if(narrowScreen?.matches)setPane('settings');
       if(event.data.area==='activities' && typeof event.data.itemId==='string' && typeof openActivityModal==='function')void openActivityModal(event.data.itemId);
       if(event.data.area==='legal')window.CoopSiteLegalEditor?.select(event.data.legalKind);
     }
   });
-  root.CoopHomeVisualEditor=Object.freeze({version:'20261019-controls-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
+  root.CoopHomeVisualEditor=Object.freeze({version:'20261109-editor-usability-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
 })(window);

@@ -300,6 +300,16 @@ async function routeRequest(request,env){
   }
   if(['GET','HEAD'].includes(request.method)){
     const version=url.searchParams.get('v');
+    const retainedEditor={
+      '/erp/admin_member_assets.js?20261109-photo-safety-1':'/erp/admin_member_assets_20261109_photo_safety_legacy.js',
+      '/erp/admin_member_site.js?20261109-photo-safety-1':'/erp/admin_member_site_20261109_photo_safety_legacy.js',
+      '/erp/home_visual_editor.js?20261022-help-1':'/erp/home_visual_editor_20261022_help_legacy.js',
+    }[url.pathname+'?'+version];
+    if(retainedEditor){
+      const target=new URL(request.url);target.pathname=retainedEditor;target.search='';
+      const response=await env.ASSETS.fetch(new Request(target,request));
+      return p.passThrough?response:withProfileHeaders(response,p,noIndex(p,hostname,url.pathname),request.method==='HEAD');
+    }
     const legacyPath=url.pathname==='/erp/admin_member_site.js'&&version==='20261109-enhancements-1'
       ? '/erp/admin_member_site_20261109_enhancements_legacy.js'
       : version==='1.0.0'&&['/shared/home_enhancements.js','/shared/home_enhancements.css'].includes(url.pathname)

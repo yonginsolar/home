@@ -1066,8 +1066,12 @@ const homeCompareUuid = value => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/
 const homeComparePhotoOwners = {before:new WeakMap(),after:new WeakMap()};
 const homeCompareCoop = () => typeof g_adminMemberRuntime === 'undefined' ? '' : String(g_adminMemberRuntime?.coop_id || '');
 let homeComparisonRead = null, homeComparisonConfirming = false;
+function canPickHomeComparisonPhotos() {
+const picker = homeCompareInput('plant'), option = picker?.selectedOptions?.[0];
+return !!option && homeCompareUuid(option.value) && !option.hasAttribute('data-compare-unavailable') && canAccessAdminMemberTab('site');
+}
 function markHomeComparisonPhoto(key) {
-if (!Object.hasOwn(homeComparePhotoOwners,key)) return;
+if (!Object.hasOwn(homeComparePhotoOwners,key) || !canPickHomeComparisonPhotos()) return;
 const file = homeCompareInput(key)?.files?.[0], plant = homeCompareInput('plant')?.value;
 if (file && homeCompareUuid(plant)) homeComparePhotoOwners[key].set(file,{plant,coop:homeCompareCoop()});
 updateHomeComparisonHint();
@@ -1076,33 +1080,48 @@ function updateHomeComparisonHint() {
 const hint = homeCompareInput('existing'); if (!hint) return;
 const draft = readHomeComparisonDraft(), saved = homeComparisonSaved();
 const pending = ['before','after'].some(key => homeCompareInput(key)?.files?.length);
+const canPick = canPickHomeComparisonPhotos();
+const fields = homeCompareInput('files');if(fields)fields.disabled = !canPick;
 const message = !draft && pending ? '선택한 사진은 남아 있지만 비교를 사용하지 않습니다.' :
+!draft ? '목록을 불러와 운영 중인 발전소를 고르면 사진을 선택할 수 있습니다.' :
+!canPick ? (pending ? '선택한 사진은 보관 중입니다. 사진을 바꾸려면 운영 중인 발전소 목록을 확인해 주세요.' : '사진을 바꾸려면 운영 중인 발전소 목록을 먼저 확인해 주세요.') :
 draft?.mismatched ? '이전 발전소의 선택 파일을 보관 중입니다. 이 발전소에 쓰려면 사진을 다시 고르거나 사용을 확인해 주세요.' :
 draft && saved?.plant_id === draft.plant_id ? '저장된 전·후 사진을 사용 중입니다. 같은 발전소에서는 바꿀 사진만 선택하면 됩니다.' : '';
 if (hint.textContent !== message) hint.textContent = message;
-const rebind = homeCompareInput('rebind');if(rebind)rebind.hidden = !draft?.mismatched;
+const rebind = homeCompareInput('rebind');if(rebind)rebind.hidden = !canPick || !draft?.mismatched;
 }
 async function confirmHomeComparisonTarget() {
-if (homeComparisonConfirming || g_homeSettingsSaving || !canAccessAdminMemberTab('site')) return;
+if (homeComparisonConfirming || g_homeSettingsSaving || !canPickHomeComparisonPhotos()) return;
 const draft = readHomeComparisonDraft();if (!draft?.mismatched) return;
 const runtime = g_adminMemberRuntime, name = homeCompareInput('plant')?.selectedOptions?.[0]?.textContent || '선택한 발전소';
 homeComparisonConfirming = true;
 try {
 if (!await CoopDialog.confirm(`선택해 둔 사진을 ‘${name}’의 사진으로 사용하시겠습니까? 공개 홈페이지에는 저장한 뒤 반영됩니다.`,{title:'사진을 연결할 발전소 확인',confirmText:'이 발전소에 사용',cancelText:'취소'})) return;
 const current = readHomeComparisonDraft();
-if (g_homeSettingsSaving || runtime !== g_adminMemberRuntime || !canAccessAdminMemberTab('site') || current?.plant_id !== draft.plant_id || !['before','after'].every(key => current[key].selected === draft[key].selected)) return;
+if (g_homeSettingsSaving || runtime !== g_adminMemberRuntime || !canPickHomeComparisonPhotos() || current?.plant_id !== draft.plant_id || !['before','after'].every(key => current[key].selected === draft[key].selected)) return;
 for (const key of ['before','after']) markHomeComparisonPhoto(key);
 queueHomePreviewUpdate();
 } finally { homeComparisonConfirming = false; }
 }
 function toggleHomePhotoPreview() {
 const button = document.getElementById('site-home-photo-preview-mode');
+if (button) setHomePhotoPreview(button.getAttribute('aria-pressed') !== 'true');
+}
+function setHomePhotoPreview(enabled) {
+const button = document.getElementById('site-home-photo-preview-mode');
 if (!button || !canAccessAdminMemberTab('site')) return;
-const enabled = button.getAttribute('aria-pressed') !== 'true';
+const banner = document.getElementById('site-home-photo-preview-banner'), exit = document.getElementById('site-home-photo-preview-exit');
+const returnFocus = !enabled && exit && document.activeElement === exit;
 button.setAttribute('aria-pressed',String(enabled));
+if (banner) banner.hidden = !enabled;
 document.getElementById('site-home-photo-preview-hint').textContent = enabled
-? '체험 중 · 미리보기에서 발전소의 상세 정보 또는 우리 소식을 눌러 보세요. 다시 누르면 편집으로 돌아갑니다.'
-: '켜면 미리보기에서 발전소 상세와 우리 소식을 직접 열 수 있습니다. 저장되지 않습니다.';
+? '미리보기에서 발전소 상세나 우리 소식을 눌러 보세요. 편집하려면 미리보기 위의 ‘체험 종료’를 눌러 주세요.'
+: '미리보기에서 발전소 상세와 우리 소식을 직접 열어 볼 수 있습니다. 사진을 확대하려면 위의 ‘우리 소식 사진 크게 보기 사용’도 켜 주세요. 체험 모드는 저장되지 않습니다.';
+if(returnFocus){
+const next = [button,document.querySelector('[data-home-pane-select][aria-pressed="true"]'),document.querySelector('#site-home-mode-tabs [aria-selected="true"]')]
+  .find(node=>node?.getClientRects().length&&!node.disabled);
+next?.focus({preventScroll:true});
+}
 queueHomePreviewUpdate();
 }
 function homeComparisonSaved() {
@@ -1115,7 +1134,9 @@ card.value = HOME_EFFECTS.includes(value?.card_effect) ? value.card_effect : 'of
 zoom.checked = value?.activity_zoom === true;
 const compare = value?.comparison?.[0], picker = homeCompareInput('plant');
 const id = homeCompareUuid(compare?.plant_id) ? compare.plant_id : '';
-if (id && !Array.from(picker.options).some(o => o.value === id)) picker.add(new Option('저장된 발전소',id));
+if (id && !Array.from(picker.options).some(o => o.value === id)) {
+const option=new Option('저장된 발전소',id);option.setAttribute('data-compare-unavailable','');picker.add(option);
+}
 picker.value = id;
 homeCompareInput('saved').value = id ? JSON.stringify(compare) : '';
 for (const key of ['before','after']) homeCompareInput(key).value = '';
@@ -1132,9 +1153,13 @@ const {data,error} = await scopeAdminTenant(_supabase.from('site_power_plants').
 if (homeComparisonRead !== read || runtime !== g_adminMemberRuntime || !canAccessAdminMemberTab('site')) return;
 if (error || !Array.isArray(data)) throw error || new Error('PLANT_LIST_UNAVAILABLE');
 const picker = homeCompareInput('plant'), previous = picker.value, options = data.filter(p => homeCompareUuid(p.id)).map(p => new Option(p.name,p.id));
-if (previous && !options.some(o => o.value === previous)) options.push(new Option('기존 선택 · 공개 운영 목록에 없음',previous));
+const availableCount = options.length;
+if (previous && !options.some(o => o.value === previous)) {
+const option=new Option('기존 선택 · 공개 운영 목록에 없음',previous);option.setAttribute('data-compare-unavailable','');options.push(option);
+}
 picker.replaceChildren(new Option('비교 사용 안 함',''),...options); picker.value = previous;
-status.textContent = data.length ? '공개 상세에서 비교할 운영 중 발전소를 골라 주세요.' : '선택할 수 있는 운영 중 발전소가 없습니다.';
+status.textContent = availableCount ? '공개 상세에서 비교할 운영 중 발전소를 골라 주세요.' : '선택할 수 있는 운영 중 발전소가 없습니다.';
+updateHomeComparisonHint();
 } catch (_) {
 if (homeComparisonRead === read && runtime === g_adminMemberRuntime && canAccessAdminMemberTab('site')) status.textContent = '목록을 불러오지 못했습니다. 버튼을 눌러 다시 확인해 주세요.';
 } finally {
@@ -1328,12 +1353,14 @@ if(!canAccessAdminMemberTab('site')||!homeSettingsBaseline)throw new Error('현�
 const coopId = String(g_adminMemberRuntime?.coop_id || '').trim();
 const comparison = readHomeComparisonDraft();
 const originalComparison = comparison && {...comparison,before:{...comparison.before},after:{...comparison.after}};
+const canUseNewCompareFiles = () => !originalComparison || !['before','after'].some(key => originalComparison[key].selected) || canPickHomeComparisonPhotos();
 const compareCurrent = () => {
 const current = readHomeComparisonDraft();
-return g_adminMemberRuntime===runtime && canAccessAdminMemberTab('site') &&
+return g_adminMemberRuntime===runtime && canAccessAdminMemberTab('site') && canUseNewCompareFiles() &&
 (!originalComparison ? !current : !current?.mismatched && current?.plant_id===originalComparison.plant_id && ['before','after'].every(key => current[key].selected===originalComparison[key].selected && current[key].file===originalComparison[key].file && current[key].url===originalComparison[key].url));
 };
 if (comparison?.mismatched) throw new Error('비교할 발전소가 바뀌었습니다. 이 발전소에 쓸 사진을 다시 고르거나 사용을 확인해 주세요.');
+if (!canUseNewCompareFiles()) throw new Error('비교할 운영 중인 발전소를 다시 확인해 주세요. 선택한 사진은 보관되어 있습니다.');
 if (comparison) for (const key of ['before','after']) {
 const {url,file} = comparison[key];
 if (!url && !file) throw new Error('발전소의 설치 전 사진과 설치 후 사진을 모두 지정해 주세요.');
@@ -4460,6 +4487,6 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
-    Object.assign(root,{loadHomeComparisonPlants,markHomeComparisonPhoto,confirmHomeComparisonTarget,toggleHomePhotoPreview});
-    root.AdminMemberSite = Object.freeze({ version: '20261109-photo-safety-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
+    Object.assign(root,{loadHomeComparisonPlants,markHomeComparisonPhoto,confirmHomeComparisonTarget,toggleHomePhotoPreview,setHomePhotoPreview});
+    root.AdminMemberSite = Object.freeze({ version: '20261109-editor-usability-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
 })(window);
