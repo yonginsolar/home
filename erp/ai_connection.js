@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v1.3.0 — personal and HR management of existing ERP AI connections. */
+/* v1.3.1 — keep HR termination attempts scoped across dialog reopens. */
 (function () {
   'use strict';
   const LABELS = { help: '사용 안내', accounting: '회계', approvals: '전자결재', documents: '문서함', inventory: '재고', events: '행사 매출', member_stats: '조합원 통계' };
@@ -69,8 +69,42 @@
     return Promise.race([work, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), 15000); })])
       .finally(() => clearTimeout(timeout));
   }
+  const adminScopes = new WeakMap();
+  function adminScope(client, coopId, actor) {
+    let scopes = adminScopes.get(client);
+    if (!scopes) { scopes = new Map(); adminScopes.set(client, scopes); }
+    const key = JSON.stringify([coopId, actor]);
+    if (!scopes.has(key)) scopes.set(key, { attempt: null, inFlight: new Set(), listeners: new Set() });
+    return scopes.get(key);
+  }
+  const notifyAdmin = scope => scope.listeners.forEach(fn => fn());
+  function startAdminRevoke(scope, id, request) {
+    if (scope.attempt || scope.inFlight.has(id)) return;
+    const attempt = { id, pending: true, phase: 'sending', state: null };
+    scope.attempt = attempt;
+    scope.inFlight.add(id);
+    const raw = request('revoke', { id });
+    notifyAdmin(scope);
+    const complete = (phase, state) => {
+      scope.inFlight.delete(id);
+      if (scope.attempt !== attempt) { notifyAdmin(scope); return; }
+      attempt.pending = false; attempt.phase = phase; attempt.state = state;
+      notifyAdmin(scope);
+    };
+    raw.then(result => {
+      const valid = ['active', 'revoked', 'expired', 'not_found'].includes(result?.state);
+      complete(valid ? 'done' : 'unknown', valid ? result.state : null);
+    }, error => complete(error?.code === '42501' ? 'denied' : 'unknown', null));
+    // A deadline only changes the display. It cannot establish that the server
+    // received no request, so do not release the lock on a still-pending write.
+    void deadline(raw).catch(() => {
+      if (scope.attempt === attempt && attempt.pending) {
+        attempt.phase = 'unknown'; notifyAdmin(scope);
+      }
+    });
+  }
   window.ErpAiConnections = {
-    version: '1.3.0',
+    version: '1.3.1',
     mount(client, root) {
       if (!root || root.dataset.aiMounted) return;
       root.dataset.aiMounted = '1'; root.classList.add('ai-panel');
@@ -241,7 +275,8 @@
       });
       load();
     },
-    openAdmin(client, { coopId, current, opener }) {
+    openAdmin(client, { coopId, actor, current, opener }) {
+      const scope = adminScope(client, coopId, actor);
       const dialog = element('dialog', undefined, 'ai-panel ai-admin-dialog');
       dialog.setAttribute('aria-labelledby', 'aiAdminHeading');
       const header = element('div', undefined, 'ai-admin-header');
@@ -259,26 +294,28 @@
       body.append(actions, status, confirmation, list, more);
       dialog.append(header, body);
       document.body.append(dialog);
-      let past = false, busy = false, uncertain = null, selected = null, cursor = null, disposed = false, listReady = false;
+      let past = false, busy = false, selected = null, cursor = null, disposed = false, listReady = false;
       let observer;
       const buttons = new Set();
       const alive = () => !disposed && dialog.open && current();
       const sync = () => {
+        const attempt = scope.attempt;
         for (const control of [active, history, refresh, more, ...buttons]) {
-          control.setAttribute('aria-disabled', String(busy || !!selected || (!!uncertain && control !== refresh) ||
-            (buttons.has(control) && !listReady)));
+          control.setAttribute('aria-disabled', String(busy || !!selected || (!!attempt && (control !== refresh || attempt.phase !== 'unknown')) ||
+            (buttons.has(control) && (!listReady || scope.inFlight.has(control.dataset.aiConnectionId)))));
         }
         active.setAttribute('aria-pressed', String(!past)); history.setAttribute('aria-pressed', String(past));
-        refresh.textContent = uncertain ? '종료 결과 확인' : '다시 확인';
+        refresh.textContent = attempt?.phase === 'unknown' ? '종료 결과 확인' : '다시 확인';
       };
-      const call = async (action, data = {}) => {
-        const response = await deadline(client.rpc('erp_ai_admin_connections', { p_action: action, p_data: data }));
+      const request = async (action, data = {}) => {
+        const response = await client.rpc('erp_ai_admin_connections', { p_action: action, p_data: data });
         if (response.error) throw response.error;
         if (String(response.data?.coop_id) !== coopId) throw new Error('AI_MANAGEMENT_WRONG_COOP');
         return response.data;
       };
+      const call = (action, data) => deadline(request(action, data));
       const load = async (append = false, message = '') => {
-        if (!alive() || busy || selected || uncertain || (append && !cursor)) return;
+        if (!alive() || busy || selected || scope.attempt || (append && !cursor)) return;
         busy = true; sync();
         status.textContent = '연결을 확인하고 있습니다.';
         try {
@@ -305,9 +342,10 @@
             row.append(info);
             if (c.state === 'active') {
               const revoke = button('연결 종료', 'danger'); buttons.add(revoke);
+              revoke.dataset.aiConnectionId = c.id;
               revoke.setAttribute('aria-label', c.employee_name + ' · ' + c.name + ' 연결 종료');
               revoke.onclick = () => {
-                if (!alive() || !listReady || busy || selected || uncertain) return;
+                if (!alive() || !listReady || busy || selected || scope.attempt || scope.inFlight.has(c.id)) return;
                 selected = c.id; sync();
                 confirmation.replaceChildren(element('p', c.employee_name + '님의 ' + c.name + ' ERP 접근을 종료할까요?'));
                 const confirm = button('종료하기', 'danger'), cancel = button('취소');
@@ -315,18 +353,10 @@
                 confirmation.append(confirmActions); confirmation.hidden = false; cancel.focus();
                 const clear = () => { selected = null; confirmation.hidden = true; confirmation.replaceChildren(); sync(); };
                 cancel.onclick = () => { if (!alive() || selected !== c.id) return; clear(); revoke.focus(); };
-                confirm.onclick = async () => {
-                  if (!alive() || selected !== c.id || busy) return;
-                  clear(); busy = true; sync(); refresh.focus({ preventScroll: true });
-                  status.textContent = '연결을 종료하고 있습니다.';
-                  let result;
-                  try { result = await call('revoke', { id: c.id }); }
-                  catch (e) {
-                    if (!alive()) return;
-                    if (e?.code === '42501') { listReady = false; status.textContent = '연결 종료 권한을 확인해 주세요.'; }
-                    else { uncertain = c.id; status.textContent = '종료 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.'; }
-                  } finally { busy = false; if (alive()) sync(); }
-                  if (alive() && result) await load(false, resultMessage(result.state));
+                confirm.onclick = () => {
+                  if (!alive() || selected !== c.id || busy || scope.attempt || scope.inFlight.has(c.id)) return;
+                  clear(); refresh.focus({ preventScroll: true });
+                  startAdminRevoke(scope, c.id, request);
                 };
               };
               row.append(revoke);
@@ -348,25 +378,58 @@
         : state === 'expired' ? '이미 유효기간이 만료된 연결입니다.'
         : state === 'active' ? '아직 사용 중인 연결입니다. 필요한 경우 다시 종료해 주세요.'
         : '현재 조합의 목록에서 연결을 찾지 못했습니다.';
+      const showAttempt = () => {
+        if (!alive()) return;
+        const attempt = scope.attempt;
+        sync();
+        if (!attempt || busy) return;
+        if (attempt.phase === 'done') {
+          scope.attempt = null; listReady = false;
+          void load(false, resultMessage(attempt.state));
+        } else if (attempt.phase === 'denied') {
+          scope.attempt = null; listReady = false; list.replaceChildren(); buttons.clear(); more.hidden = true; cursor = null;
+          status.textContent = '연결 종료 권한을 확인해 주세요.';
+          sync();
+        } else {
+          status.textContent = attempt.phase === 'sending' ? '연결을 종료하고 있습니다.'
+            : '종료 결과를 확인하지 못했습니다. 결과를 다시 확인해 주세요.';
+        }
+      };
       const switchList = (next) => {
-        if (!alive() || busy || selected || uncertain || past === next) return;
+        if (!alive() || busy || selected || scope.attempt || past === next) return;
         past = next; cursor = null; more.hidden = true; list.replaceChildren(); buttons.clear(); load();
       };
       active.onclick = () => switchList(false); history.onclick = () => switchList(true);
       refresh.onclick = async () => {
         if (!alive() || busy || selected) return;
-        if (!uncertain) return load();
+        const attempt = scope.attempt;
+        if (!attempt) return load();
+        if (attempt.phase !== 'unknown') return;
+        const beganWhilePending = attempt.pending;
         busy = true; sync(); status.textContent = '종료 결과를 확인하고 있습니다.';
-        let result;
-        try { result = await call('status', { id: uncertain }); if (alive()) uncertain = null; }
-        catch { if (alive()) status.textContent = '종료 결과를 확인하지 못했습니다. 다시 확인해 주세요.'; }
-        finally { busy = false; if (alive()) sync(); }
-        if (alive() && result) await load(false, resultMessage(result.state));
+        try {
+          const result = await call('status', { id: attempt.id });
+          if (!alive() || scope.attempt !== attempt || attempt.phase !== 'unknown') return;
+          if (['revoked', 'expired', 'not_found'].includes(result.state) || (result.state === 'active' && !beganWhilePending && !attempt.pending)) {
+            attempt.phase = 'done'; attempt.state = result.state;
+          } else if (result.state === 'active') {
+            status.textContent = '아직 종료를 확인하지 못했습니다. 같은 연결을 다시 종료하지 않고 결과만 확인할 수 있습니다.';
+          } else {
+            status.textContent = '종료 결과를 확인하지 못했습니다. 다시 확인해 주세요.';
+          }
+        } catch { if (alive() && attempt.phase === 'unknown') status.textContent = '종료 결과를 확인하지 못했습니다. 다시 확인해 주세요.'; }
+        finally {
+          busy = false;
+          if (alive()) {
+            if (scope.attempt?.phase === 'done' || scope.attempt?.phase === 'denied') showAttempt();
+            else sync();
+          }
+        }
       };
       more.onclick = () => load(true);
       const dispose = () => {
         if (disposed) return;
-        disposed = true; observer?.disconnect(); window.removeEventListener('pagehide', dispose);
+        disposed = true; scope.listeners.delete(showAttempt); observer?.disconnect(); window.removeEventListener('pagehide', dispose);
         if (dialog.open) dialog.close();
         dialog.remove();
         if (current() && opener.isConnected && (!document.activeElement || document.activeElement === document.body || document.activeElement === opener)) opener.focus({ preventScroll: true });
@@ -385,7 +448,9 @@
         });
         observer.observe(window.frameElement, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
       }
-      dialog.showModal(); load();
+      dialog.showModal(); scope.listeners.add(showAttempt);
+      if (scope.attempt) showAttempt();
+      else load();
       return dispose;
     },
     async authorize(client, root) {

@@ -100,7 +100,7 @@
     return map;
   }
 
-  async function fetchSupportRows(supabase, applyMonth) {
+  async function fetchSupportRows(supabase, applyMonth, options) {
     if (!supabase) throw new Error('supabase client is required');
     var ym = normalizeMonth(applyMonth);
     if (!ym) return [];
@@ -113,7 +113,9 @@
       .eq('entity_type', 'durunuri_support')
       .like('entity_id', likePattern);
     query = query.eq('coop_id', String(coopId || '').trim() || '00000000-0000-0000-0000-000000000000');
-    var response = await query.order('created_at', { ascending: false });
+    query = query.order('created_at', { ascending: false });
+    if (options?.signal && typeof query.abortSignal === 'function') query = query.abortSignal(options.signal);
+    var response = await query;
 
     if (response.error) throw response.error;
     return Array.isArray(response.data) ? response.data : [];
@@ -134,8 +136,8 @@
     return Array.isArray(response.data) ? response.data : [];
   }
 
-  async function getSupportMap(supabase, applyMonth) {
-    var rows = await fetchSupportRows(supabase, applyMonth);
+  async function getSupportMap(supabase, applyMonth, options) {
+    var rows = await fetchSupportRows(supabase, applyMonth, options);
     return buildSupportMap(rows);
   }
 

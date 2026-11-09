@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.92 | Change: 2026-11-09 - Personal AI connection controls and separate guides. -->
+<!-- Version: v1.0.93 | Change: 2026-11-09 - Recover stalled salary totals and monthly statements. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -40,11 +40,11 @@
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
 <script src="print_service.js?v=20261022-expo-cert-1"></script>
 <script src="expo_employee_certificate.js?v=20261022-1"></script>
-<script src="payroll_durunuri_module.js?v=20260901-1"></script>
+<script src="payroll_durunuri_module.js?v=20261109-mypage-1"></script>
 <script src="leave_time.js?v=20261012-2"></script>
 <script src="leave_ledger.js?v=20261012-2"></script>
 <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
-<script src="ai_connection.js?v=1.3.0"></script>
+<script src="ai_connection.js?v=1.3.1"></script>
   
 <style>
 body{background-color:#f0f2f5;padding:28px 20px 40px;font-family:'Malgun Gothic',sans-serif}
@@ -270,7 +270,7 @@ body{padding:18px 14px 28px}
 <div class="mypage-salary-tools mb-2">
 <div class="input-group" style="max-width: 250px;">
 <input type="month" class="form-control" id="salaryMonth" data-erp-query-control>
-<button class="btn btn-primary" onclick="searchSalary()">조회</button>
+<button type="button" class="btn btn-primary" id="btnMypageSalaryQuery" onclick="searchSalary()">조회</button>
 </div>
 <button class="btn btn-sm btn-dark hidden" id="btnPrintSalary" onclick="printSalaryPopup()">🖨️ 인쇄하기</button>
 </div>
@@ -279,8 +279,8 @@ body{padding:18px 14px 28px}
 <div class="salary-total-header">
 <div>
 <div class="salary-total-label">현재까지 받은 총 급여 보기</div>
-<div class="small text-muted" id="salaryTotalMeta">급여명세서 합계를 불러오고 있습니다.</div>
-<button type="button" class="btn btn-sm btn-outline-secondary hidden mt-2" id="salaryTotalRetry" onclick="ensureMypageSection('salary')">다시 불러오기</button>
+<div class="small text-muted" id="salaryTotalMeta" role="status" tabindex="-1">급여명세서 합계를 불러오고 있습니다.</div>
+<button type="button" class="btn btn-sm btn-outline-secondary hidden mt-2" id="salaryTotalRetry" onclick="loadMypageSalaryTab()">다시 확인</button>
 </div>
 <button type="button" class="salary-total-toggle" id="salaryTotalToggle" aria-controls="salaryTotalGross salaryTotalDed salaryTotalNet" aria-pressed="false" onclick="toggleMypageSalaryTotalReveal()" disabled>보기</button>
 </div>
@@ -421,7 +421,19 @@ if(subEl) subEl.textContent=meta.subtitle;
 }
 const getMypageKstDateParts=(value)=>{if(!value) return {date:'',time:'',hasTime:false}; if(typeof value==='string' && !value.includes('T')) return {date:value,time:'',hasTime:false}; const d=new Date(value); if(Number.isNaN(d.getTime())) return {date:'',time:'',hasTime:false}; const date=new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d); const time=new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,hour:'2-digit',minute:'2-digit',hour12:false}).format(d); return {date,time,hasTime:true}};
 function escapeHtml(value){return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}
-async function getAdjustedSalaryRowForMypage(row, ym){if(!row) return row; if(!window.PayrollDurunuriModule) return row; try{const supportMap=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym); return window.PayrollDurunuriModule.adjustSalaryRow(row,supportMap);}catch(e){CoopSafeLog.warn("Durunuri support load failed:", e?.message||e); return row;}}
+async function getAdjustedSalaryRowForMypage(row, ym, signal){
+if(!row||!window.PayrollDurunuriModule)return row;
+let supportMap;
+try{
+supportMap=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym,{signal});
+}catch(error){
+// Preserve the existing saved-statement fallback for accounts without
+// support-log access, but never pass an interrupted lookup off as complete.
+if(!signal?.aborted&&['42501','403'].includes(String(error?.code||error?.status)))return row;
+throw error;
+}
+return window.PayrollDurunuriModule.adjustSalaryRow(row,supportMap);
+}
 let myInfo={},companyInfo={},currentSalaryData=null,tempEmergencyList=[],noticesData=[],leaveSnapshotState=null;
 let permissionSet = new Set();
 let purposeModal,leaveDetailModal,noticeDetailModal,alertModal,eventModal,calendarSubscriptionModal;
@@ -439,7 +451,7 @@ let mypageDataAuthorized=false;
 let mypageRefreshing=false;
 let mypageProfileBaseline='',mypageProfileRestoring=false;
 let mypageInfoFieldsOwner='';
-let mypageSalaryLatest=null,mypageSalaryAutoOwner='',mypageSalaryMonthChosen=false,mypageSalaryRequest=null;
+let mypageSalaryLatest=null,mypageSalaryAutoOwner='',mypageSalaryMonthChosen=false,mypageSalaryRequest=null,mypageSalarySessionValid=true;
 function mypageProfileValues(){return JSON.stringify({fields:['myMemberId','myPhone','myEmail','myAddress','myBank','myAccount'].map(id=>document.getElementById(id)?.value||''),contacts:tempEmergencyList,contactDrafts:[...document.querySelectorAll('#emergencyListBody tr[data-emergency-draft]')].map(row=>[...row.querySelectorAll('input')].map(input=>input.value)).filter(values=>values.some(value=>value!==''))});}
 window.addEventListener('beforeunload',event=>{if(mypageProfileRestoring||(!document.getElementById('btnSaveInfo')?.classList.contains('hidden')&&mypageProfileBaseline&&mypageProfileValues()!==mypageProfileBaseline)){event.preventDefault();event.returnValue='';}});
 const mypageSectionLoads=new Map();
@@ -454,17 +466,20 @@ const owner=getMypageDataOwner();
 const previous=mypageSectionLoads.get(key);
 if(previous?.owner===owner){if(previous.pending)return previous.pending;if(previous.loaded)return Promise.resolve(true);}
 const state={owner,loaded:false,pending:null};
-const isCurrent=()=>mypageDataAuthorized&&owner===getMypageDataOwner()&&mypageSectionLoads.get(key)===state&&isMypageDataVisible()&&(key!=='contractHours'||!window.frameElement?.hidden);
+const isCurrent=()=>mypageDataAuthorized&&owner===getMypageDataOwner()&&mypageSectionLoads.get(key)===state&&isMypageDataVisible()&&(key!=='contractHours'||!window.frameElement?.hidden)&&(key!=='salary'||isMypageSalaryTabCurrent());
 mypageSectionLoads.set(key,state);
-state.pending=Promise.resolve().then(()=>isCurrent()?(key==='contractHours'?loader(isCurrent,cancel=>{state.cancel=cancel;}):loader(isCurrent)):false).then(result=>{
+state.pending=Promise.resolve().then(()=>isCurrent()?(key==='contractHours'||key==='salary'?loader(isCurrent,cancel=>{state.cancel=cancel;}):loader(isCurrent)):false).then(result=>{
 state.loaded=result!==false&&isCurrent();
 return state.loaded;
 }).catch(()=>false).finally(()=>{state.pending=null;});
 return state.pending;
 }
+function loadMypageSalaryTab(){
+return ensureMypageSection('salary').then(loaded=>{if(loaded)void openMypageLatestSalary();return loaded;});
+}
 function loadMypageVisibleSections(){
 const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
-if(pane==='tabSalary')return ensureMypageSection('salary').then(loaded=>{if(loaded)void openMypageLatestSalary();});
+if(pane==='tabSalary')return loadMypageSalaryTab();
 if(pane==='tabNotice')return ensureMypageSection('notices');
 if(pane==='tabWork')return Promise.all([ensureMypageSection('leave'),ensureMypageSection('overtime'),ensureMypageSection('contractHours')]);
 if(pane==='tabAi')return ensureMypageSection('telegram');
@@ -487,15 +502,17 @@ if(bindMypageContractHoursResume.bound)return;
 bindMypageContractHoursResume.bound=true;
 const frame=window.frameElement;
 const visible=()=>!frame?.hidden&&document.getElementById('tabWork')?.classList.contains('active');
-if(frame)new MutationObserver(()=>{
- if(frame.hidden){window.HrInsuranceStatus?.suspend(document.getElementById('myInsuranceStatus'));invalidateMypageSalaryRead();}
+if(frame)new MutationObserver(records=>{
+ if(frame.hidden || records.some(record=>record.oldValue===null)) invalidateMypageSalaryReads();
+ if(frame.hidden){window.HrInsuranceStatus?.suspend(document.getElementById('myInsuranceStatus'));}
  else if(document.getElementById('tabCert')?.classList.contains('active')
   &&!window.HrInsuranceStatus?.isMounted?.(document.getElementById('myInsuranceStatus')))void loadMypageInsuranceStatus();
  invalidateMypageContractHours();
  if(visible())void ensureMypageSection('contractHours');
-}).observe(frame,{attributes:true,attributeFilter:['hidden']});
+ if(isMypageSalaryTabCurrent())void loadMypageSalaryTab();
+}).observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
 window.addEventListener('pagehide',invalidateMypageContractHours);
-window.addEventListener('pagehide',invalidateMypageSalaryRead);
+window.addEventListener('pagehide',invalidateMypageSalaryReads);
 }
 async function refreshMypageDataForResume(){
 bindMypageContractHoursResume();
@@ -509,6 +526,14 @@ if(isMypageProfileEditing()){
 mypageRefreshing=true;
 try{
 const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
+if(pane==='tabSalary'){
+ // The host is holding the frame hidden while checking access. Reveal it
+ // without waiting on salary; the frame observer starts the visible read.
+ invalidateMypageSalaryReads();
+ mypageSectionLoads.delete('salary');
+ if(isMypageSalaryTabCurrent())void loadMypageSalaryTab();
+ return;
+}
 mypageSectionLoads.clear();
 if(pane==='tabCert')await loadMypageInsuranceStatus();
 else if(pane==='tabCalendar')await renderCalendar();
@@ -1494,7 +1519,10 @@ document.getElementById('salaryMonth').addEventListener('input',()=>{
     invalidateMypageSalaryRead();
     resetMypageSalaryDetail('선택한 월의 명세서를 조회해 주세요.');
 });
-document.getElementById('tab-salary-btn').addEventListener('hide.bs.tab',invalidateMypageSalaryRead);
+document.getElementById('tab-salary-btn').addEventListener('hide.bs.tab',invalidateMypageSalaryReads);
+for(const id of ['salaryTotalRetry','btnMypageSalaryQuery'])document.getElementById(id)?.addEventListener('keydown',event=>{
+    if(event.repeat&&!event.isComposing&&['Enter',' '].includes(event.key))event.preventDefault();
+});
 document.getElementById('tab-calendar-btn').addEventListener('shown.bs.tab',function(e){renderCalendar()});
 const myAiRoot = document.getElementById('aiConnectionsRoot');
 const myAiTab = document.getElementById('tab-ai-btn');
@@ -1504,10 +1532,16 @@ window.addEventListener('pagehide', () => myAiRoot.aiPause?.());
 if (window.frameElement) new MutationObserver(records => {
     if (window.frameElement?.hidden || records.some(record => record.oldValue === null)) myAiRoot.aiPause?.();
 }).observe(window.frameElement, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
-let myAiAuthUser = '';
+let myAiAuthUser = mypageUserGate.authUser?.id || '';
 _supabase.auth.onAuthStateChange((event, session) => {
     const next = session?.user?.id || '';
-    if (event === 'SIGNED_OUT' || (next && myAiAuthUser && next !== myAiAuthUser)) myAiRoot.aiInvalidate?.();
+    if (event === 'SIGNED_OUT' || (next && myAiAuthUser && next !== myAiAuthUser)) {
+        myAiRoot.aiInvalidate?.();
+        mypageSalarySessionValid=false;
+        invalidateMypageSalaryReads();
+        document.getElementById('tabSalary').classList.add('hidden');
+        resetMypageSalaryDetail('');
+    }
     if (next) myAiAuthUser = next;
 });
 document.getElementById('tab-cert-btn').addEventListener('shown.bs.tab',function(){void loadMypageInsuranceStatus();});
@@ -2373,7 +2407,24 @@ toggleBtn.textContent=nextState?'가리기':'보기';
 toggleBtn.setAttribute('aria-pressed',nextState?'true':'false');
 }
 } // End of toggleMypageSalaryTotalReveal
-async function buildMypageAdjustedSalaryRows(rows,isCurrent=()=>true){
+function readMypageSalary(signalController, work, timeoutMs=12000){
+const signal=signalController.signal;
+let timer, onAbort;
+const interrupted=new Promise((_,reject)=>{
+onAbort=()=>reject(new Error('SALARY_READ_INTERRUPTED'));
+if(signal.aborted){onAbort();return;}
+signal.addEventListener('abort',onAbort,{once:true});
+timer=setTimeout(()=>signalController.abort(),timeoutMs);
+});
+return Promise.race([interrupted,Promise.resolve().then(()=>signal.aborted?null:work(signal))]).finally(()=>{
+clearTimeout(timer);
+signal.removeEventListener('abort',onAbort);
+});
+}
+function withMypageSalarySignal(query,signal){
+return typeof query.abortSignal==='function'?query.abortSignal(signal):query;
+}
+async function buildMypageAdjustedSalaryRows(rows,isCurrent=()=>true,signal){
 if(!Array.isArray(rows)||rows.length===0) return [];
 if(!window.PayrollDurunuriModule) return rows;
 const months=Array.from(new Set(rows.map(function(row){return String(row?.year_month||'').trim()}).filter(Boolean)));
@@ -2383,7 +2434,7 @@ await Promise.all(Array.from({length:Math.min(4,months.length)},async()=>{
 while(nextMonth<months.length&&!loadError&&isCurrent()){
 const ym=months[nextMonth++];
 try{
-supportMapByMonth[ym]=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym);
+supportMapByMonth[ym]=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym,{signal});
 }catch(error){loadError=error;}
 }
 }));
@@ -2394,7 +2445,7 @@ const ym=String(row?.year_month||'').trim();
 return window.PayrollDurunuriModule.adjustSalaryRow({...row},supportMapByMonth[ym]||{});
 });
 } // End of buildMypageAdjustedSalaryRows
-async function loadMypageSalaryTotal(isCurrent=()=>true){
+async function loadMypageSalaryTotal(isCurrent=()=>true,registerCancel=()=>{}){
 const grossEl=document.getElementById('salaryTotalGross');
 const dedEl=document.getElementById('salaryTotalDed');
 const netEl=document.getElementById('salaryTotalNet');
@@ -2402,9 +2453,11 @@ const metaEl=document.getElementById('salaryTotalMeta');
 const toggleBtn=document.getElementById('salaryTotalToggle');
 const retryBtn=document.getElementById('salaryTotalRetry');
 const valueEls=[grossEl,dedEl,netEl].filter(Boolean);
-if(valueEls.length!==3||!metaEl) return;
+if(valueEls.length!==3||!metaEl) return false;
+const controller=new AbortController();
+registerCancel(()=>controller.abort());
 valueEls.forEach(function(valueEl){valueEl.textContent='—';valueEl.classList.remove('is-revealed')});
-retryBtn?.classList.add('hidden');
+retryBtn?.setAttribute('aria-disabled','true');
 metaEl.textContent='급여명세서 합계를 불러오고 있습니다.';
 if(toggleBtn){
 toggleBtn.textContent='보기';
@@ -2412,18 +2465,25 @@ toggleBtn.setAttribute('aria-pressed','false');
 toggleBtn.disabled=true;
 }
 try{
-const {data,error}=await scopeMypageEmployee(_supabase.from('hr_salary').select(MYPAGE_SALARY_TOTAL_SELECT_COLUMNS)).eq('emp_id',myInfo.emp_id).order('year_month',{ascending:true});
+const result=await readMypageSalary(controller,async signal=>{
+const query=scopeMypageEmployee(_supabase.from('hr_salary').select(MYPAGE_SALARY_TOTAL_SELECT_COLUMNS)).eq('emp_id',myInfo.emp_id).order('year_month',{ascending:true});
+const {data,error}=await withMypageSalarySignal(query,signal);
 if(error) throw error;
-if(!isCurrent())return false;
+if(!isCurrent()||signal.aborted)return null;
 const rows=Array.isArray(data)?data:[];
+const adjustedRows=await buildMypageAdjustedSalaryRows(rows,()=>isCurrent()&&!signal.aborted,signal);
+return {rows,adjustedRows};
+},15000);
+if(!result||!isCurrent())return false;
+const {rows,adjustedRows}=result;
+if(document.activeElement===retryBtn)metaEl.focus({preventScroll:true});
+retryBtn?.classList.add('hidden');
 mypageSalaryLatest={owner:getMypageDataOwner(),month:String(rows.at(-1)?.year_month||'')};
 if(rows.length===0){
 metaEl.textContent='아직 저장된 급여명세서가 없습니다.';
 valueEls.forEach(valueEl=>{valueEl.textContent='0';});
 return true;
 }
-const adjustedRows=await buildMypageAdjustedSalaryRows(rows,isCurrent);
-if(!isCurrent())return false;
 const totals=adjustedRows.reduce(function(acc,row){
 acc.gross+=Math.round(parseMypageAmount(row?.pay_total));
 acc.ded+=Math.round(parseMypageAmount(row?.ded_total));
@@ -2446,24 +2506,31 @@ CoopSafeLog.warn("loadMypageSalaryTotal failed:", error?.message||error);
 metaEl.textContent='총 급여 합계를 불러오지 못했습니다.';
 retryBtn?.classList.remove('hidden');
 return false;
-}
+}finally{if(isCurrent())retryBtn?.removeAttribute('aria-disabled');}
 } // End of loadMypageSalaryTotal
 function resetMypageSalaryDetail(message){
 currentSalaryData=null;
 document.getElementById('salaryResult').classList.add('hidden');
 document.getElementById('btnPrintSalary').classList.add('hidden');
 document.getElementById('mypageSalaryStatus').textContent=message;
+const query=document.getElementById('btnMypageSalaryQuery');
+if(query){query.textContent='조회';query.removeAttribute('aria-disabled');}
 }
 function invalidateMypageSalaryRead(){
 const previous=mypageSalaryRequest;
 mypageSalaryRequest=null;
 previous?.controller.abort();
 if(previous&&document.getElementById('mypageSalaryStatus')?.textContent==='급여명세서를 불러오는 중…'){
- document.getElementById('mypageSalaryStatus').textContent='선택한 월의 명세서를 조회해 주세요.';
+ resetMypageSalaryDetail('선택한 월의 명세서를 조회해 주세요.');
 }
+}
+function invalidateMypageSalaryReads(){
+const total=mypageSectionLoads.get('salary');
+if(total?.pending){mypageSectionLoads.delete('salary');total.cancel?.();}
+invalidateMypageSalaryRead();
 }
 function isMypageSalaryTabCurrent(){
-return mypageDataAuthorized&&isMypageDataVisible()&&document.getElementById('tabSalary').classList.contains('active');
+return mypageSalarySessionValid&&mypageDataAuthorized&&!window.frameElement?.hidden&&isMypageDataVisible()&&document.getElementById('tabSalary').classList.contains('active');
 }
 function openMypageLatestSalary(){
 const owner=getMypageDataOwner();
@@ -2485,26 +2552,29 @@ const read={owner,month:ym,controller:new AbortController(),pending:null};
 const current=()=>mypageSalaryRequest===read&&owner===getMypageDataOwner()&&isMypageSalaryTabCurrent()&&document.getElementById('salaryMonth').value===ym;
 mypageSalaryRequest=read;
 resetMypageSalaryDetail('급여명세서를 불러오는 중…');
+const button=document.getElementById('btnMypageSalaryQuery');
+button?.setAttribute('aria-disabled','true');
 read.pending=(async()=>{
-let timer;
 try{
+const adjusted=await readMypageSalary(read.controller,async signal=>{
 const query=scopeMypageEmployee(_supabase.from('hr_salary').select('*')).eq('emp_id',myInfo.emp_id).eq('year_month',ym).maybeSingle();
-const{data,error}=await Promise.race([
- typeof query.abortSignal==='function'?query.abortSignal(read.controller.signal):query,
- new Promise((_,reject)=>{timer=setTimeout(()=>{read.controller.abort();reject(new Error('SALARY_READ_TIMEOUT'));},12000);})
-]);
-if(!current())return false;
+const {data,error}=await withMypageSalarySignal(query,signal);
+if(!current()||signal.aborted)return null;
 if(error)throw error;
-if(!data){resetMypageSalaryDetail('선택한 월에 급여명세서가 없습니다.');mypageSalaryAutoOwner=owner;return true;}
-const adjusted=await getAdjustedSalaryRowForMypage({...data,year_month:ym},ym);
+return data?getAdjustedSalaryRowForMypage({...data,year_month:ym},ym,signal):null;
+});
 if(!current())return false;
-renderMypageSalaryDetail(adjusted,ym);
+if(adjusted)renderMypageSalaryDetail(adjusted,ym);
+else resetMypageSalaryDetail('선택한 월에 급여명세서가 없습니다.');
 mypageSalaryAutoOwner=owner;
 return true;
 }catch(_){
-if(current())resetMypageSalaryDetail('급여명세서를 확인하지 못했습니다. 조회 버튼으로 다시 시도해 주세요.');
+if(current()){
+resetMypageSalaryDetail('급여명세서를 확인하지 못했습니다. 선택한 월을 다시 확인할 수 있습니다.');
+if(button)button.textContent='다시 확인';
+}
 return false;
-}finally{clearTimeout(timer);if(mypageSalaryRequest===read)mypageSalaryRequest=null;}
+}finally{if(mypageSalaryRequest===read){mypageSalaryRequest=null;button?.removeAttribute('aria-disabled');}}
 })();
 return read.pending;
 }

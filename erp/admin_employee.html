@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.195
-Change: 2026-11-09 - Tenant-scoped employee AI connection controls.
+Version: v1.0.196
+Change: 2026-11-09 - Keep AI termination state and cancel stale dialog openings.
 -->
 <html>
 <head>
@@ -3683,22 +3683,31 @@ window.onload = async function() {
     hrSettingsAuthorized = true;
     if (!window.ERPEmployeeSettingsView.isPage && hrRuntimeProfile !== 'site_member' && permissionSet.has('hr.admin')) {
         const aiButton = document.getElementById('employeeAiConnections');
+        const frame = window.frameElement;
+        let openEpoch = 0;
+        const invalidateOpen = () => { openEpoch++; aiButton.removeAttribute('aria-busy'); };
+        window.addEventListener('pagehide', invalidateOpen);
+        if (frame) new MutationObserver(records => {
+            if (frame.hidden || records.some(record => record.oldValue === null)) invalidateOpen();
+        }).observe(frame, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
         aiButton.hidden = false;
         aiButton.onclick = async () => {
             if (aiButton.getAttribute('aria-busy') === 'true' || document.querySelector('.ai-admin-dialog[open]')) return;
             const owner = getHrSettingsOwner();
             const current = () => !aiButton.hidden && isHrSettingsContextCurrent(owner);
             if (!current()) return;
+            const epoch = ++openEpoch;
+            const canOpen = () => epoch === openEpoch && current();
             aiButton.setAttribute('aria-busy', 'true');
             try {
-                await import('./ai_connection.js?v=1.3.0');
-                if (!current()) return;
+                await import('./ai_connection.js?v=1.3.1');
+                if (!canOpen()) return;
                 closeEmployeeAiConnections = window.ErpAiConnections.openAdmin(_supabase, {
-                    coopId: String(myInfo.coop_id), current, opener: aiButton
+                    coopId: String(myInfo.coop_id), actor: hrAuthorizedUserId, current, opener: aiButton
                 });
             } catch {
-                if (current()) showAlert('AI 연결 창을 열지 못했습니다. 다시 눌러 주세요.');
-            } finally { aiButton.removeAttribute('aria-busy'); }
+                if (canOpen()) showAlert('AI 연결 창을 열지 못했습니다. 다시 눌러 주세요.');
+            } finally { if (epoch === openEpoch) aiButton.removeAttribute('aria-busy'); }
         };
     }
     if (!window.ERPEmployeeSettingsView.isPage) void window.ERPInitialSetupEmployee.attach(_supabase);
