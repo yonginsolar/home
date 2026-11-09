@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.199
+Version: v1.0.200
 Change: 2026-11-09 - Make the employee roster searchable and responsive.
 -->
 <html>
@@ -719,7 +719,14 @@ Change: 2026-11-09 - Make the employee roster searchable and responsive.
             <p id="employeeModuleAccessSaveNotice" class="employee-access-result small mt-2 mb-0" role="status" hidden></p>
             </div>
             <div id="employeeModuleAccessList" class="d-none"></div>
-            <section class="border-top mt-4 pt-3"><h3 class="h6 fw-bold">🔑 결재로 추가한 업무 권한</h3><div id="employeeApprovedRights" class="text-muted">직원을 선택하면 확인할 수 있습니다.</div></section>
+            <section id="employeeApprovedRightsSection" class="border-top mt-4 pt-3">
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <h3 class="h6 fw-bold mb-0">🔑 결재로 추가한 업무 권한</h3>
+                <button type="button" id="employeeApprovedRightsRetry" class="btn btn-sm btn-outline-secondary" style="min-height:44px" aria-controls="employeeApprovedRights" onclick="void resumeEmployeeApprovedRights(true)" onkeydown="if (event.key === 'Enter' &amp;&amp; event.repeat &amp;&amp; !event.isComposing) event.preventDefault()">목록 다시 확인</button>
+              </div>
+              <p id="employeeApprovedRightsNotice" class="small mb-2" role="status" hidden></p>
+              <div id="employeeApprovedRights" class="text-muted" aria-live="polite">직원을 선택하면 확인할 수 있습니다.</div>
+            </section>
           </section>
           <section id="tabSunVillageTotalManager" class="tab-pane employee-detail-section" role="tabpanel" aria-labelledby="sunVillageTotalManagerAccessTab" hidden>
             <h2 id="sunVillageTotalManagerHeading" class="h6 fw-bold" tabindex="-1">햇빛소득마을 관리자 지정</h2>
@@ -1469,6 +1476,8 @@ function runEmployeeAuxRead(modalId, options) {
 }
 let employeeNotificationSnapshot = null;
 let employeeNotificationSaveInFlight = false;
+let employeeApprovedRightsView = null;
+const employeeApprovedRightsWrites = new Set();
 const employeeDetailReadTokens = { modules: 0, approvedRights: 0, notifications: 0 };
 function beginEmployeeDetailRead(kind, {requireVisible = false} = {}) {
     const empId = String(currentEmpId || '').trim();
@@ -1857,6 +1866,7 @@ function ensureEmployeeLeaveTab({force = false, allowBusy = false} = {}) {
     return entry.pending;
 }
 function interruptEmployeeDetailTabReads(tabId) {
+    if (!tabId || tabId === 'tabModuleAccess') suspendEmployeeApprovedRights();
     for (const entry of employeeDetailTabLoads.values()) {
         const context = entry.context;
         if (!entry.pending || !context?.isOwned() || (tabId && context.tabId !== tabId)
@@ -1893,6 +1903,7 @@ function resumeEmployeeDetailTabReads() {
 function cancelEmployeeDetailReads() {
     window.EmployeeLeaveReport?.close();
     window.HrInsuranceStatus?.suspend(document.getElementById('employeeInsuranceStatus'));
+    suspendEmployeeApprovedRights(true);
     employeeDetailDraftBaseline.delete('sunVillageTotalManagerEnabled');
     window.SunVillageTotalManagerAdmin?.select('');
     window.ErpWorkspaceResume?.checkpoint(document.getElementById('sunVillageTotalManagerEnabled'));
@@ -6364,39 +6375,161 @@ async function loadEmployeeModuleAccess({readContext = null} = {}) {
     }
 } // End of loadEmployeeModuleAccess
 
-async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim(), {readContext = null} = {}) {
+function getEmployeeApprovedRightsView() {
+    if (employeeApprovedRightsView?.owns()) return employeeApprovedRightsView;
+    suspendEmployeeApprovedRights(true);
+    const owner = getHrSettingsOwner(), empId = String(currentEmpId || '').trim(), revision = employeeDetailRevision;
+    if (!owner || !empId) return null;
+    const view = {owner, empId, key:JSON.stringify([owner,empId]), epoch:0, read:null, confirm:null, needsRead:true};
+    view.owns = () => employeeApprovedRightsView === view && owner === getHrSettingsOwner()
+        && empId === String(currentEmpId || '').trim() && revision === employeeDetailRevision;
+    view.visible = () => view.owns() && isEmployeeDetailTabVisible('tabModuleAccess');
+    return employeeApprovedRightsView = view;
+}
+
+function setEmployeeApprovedRightsBusy(busy) {
+    document.getElementById('employeeApprovedRights').setAttribute('aria-busy', String(busy));
+    document.getElementById('employeeApprovedRightsRetry').setAttribute('aria-disabled', String(busy));
+}
+
+function suspendEmployeeApprovedRights(reset = false) {
+    const view = employeeApprovedRightsView;
+    if (view) {
+        view.epoch++;
+        view.confirm = null;
+        const read = view.read;
+        view.read = null;
+        read?.controller.abort();
+    }
+    if (reset) {
+        employeeApprovedRightsView = null;
+        setEmployeeApprovedRightsBusy(false);
+    }
+    setEmployeeAccessResult('employeeApprovedRightsNotice');
+}
+
+function resumeEmployeeApprovedRights(force = false) {
+    if (!isEmployeeDetailTabVisible('tabModuleAccess') || document.getElementById('employeeApprovedRightsSection').hidden) return;
+    const view = getEmployeeApprovedRightsView();
+    if (view && !view.confirm && !employeeApprovedRightsWrites.has(view.key) && (force || view.needsRead)) {
+        if (force && !view.read) setEmployeeAccessResult('employeeApprovedRightsNotice');
+        return loadEmployeeApprovedRights(view.empId);
+    }
+}
+
+function renderEmployeeApprovedRights(view, rights) {
     const list = document.getElementById('employeeApprovedRights');
-    if (!list || !empId || empId !== String(currentEmpId || '').trim()) return;
-    const { isCurrent } = beginEmployeeDetailRead('approvedRights', {requireVisible:true});
-    const isReadCurrent = () => isCurrent() && (!readContext || readContext.isCurrent());
-    list.textContent = '결재 권한을 확인하는 중입니다.';
-    let data, error;
-    try {
-        const query = _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId });
-        ({data, error} = await (readContext && typeof query.abortSignal === 'function' ? query.abortSignal(readContext.signal) : query));
-    } catch (_) { if (isReadCurrent()) list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return false; }
-    if (!isReadCurrent()) return false;
     list.replaceChildren();
-    if (error) { list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return false; }
-    if (!Array.isArray(data) || !data.length) { list.textContent = '결재로 추가한 권한이 없습니다.'; return true; }
-    data.forEach(right => {
+    if (!rights.length) { list.textContent = '결재로 추가한 권한이 없습니다.'; return; }
+    rights.forEach(right => {
         const row = document.createElement('div'); row.className = 'd-flex align-items-center justify-content-between border rounded p-2 mb-2 gap-2';
         const label = document.createElement('span'); label.textContent = right.label;
         const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-outline-danger btn-sm'; button.textContent = '권한 회수';
-        button.onclick = () => { if (!isCurrent()) return; showConfirm(`결재로 추가한 ${right.label} 권한을 회수할까요?`, async () => {
-            if (!isCurrent()) return;
-            button.disabled = true;
-            try {
-                const result = await _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId, p_revoke_key: right.key });
-                if (result.error) throw result.error;
-                if (!isCurrent()) return;
-                await loadEmployeeApprovedRights(empId);
-                showAlert('결재로 추가한 권한을 회수했습니다.');
-            } catch (_) { if (!isCurrent()) return; button.disabled = false; showAlert('권한을 회수하지 못했습니다. 현재 권한을 다시 확인해 주세요.'); }
-        }); };
+        button.onclick = () => void revokeEmployeeApprovedRight(view, right, button);
         row.append(label, button); list.append(row);
     });
-    return true;
+}
+
+function isEmployeeApprovedRightsResult(data) {
+    return Array.isArray(data) && data.every(right => typeof right?.key === 'string' && typeof right.label === 'string');
+}
+
+async function revokeEmployeeApprovedRight(view, right, button) {
+    const canStart = () => view.visible() && button.isConnected && !document.getElementById('employeeApprovedRightsSection').hidden
+        && !view.needsRead && !view.read
+        && !employeeApprovedRightsWrites.has(view.key);
+    if (!canStart() || view.confirm || !right.key) return;
+    const intent = {epoch:view.epoch};
+    view.confirm = intent;
+    let confirmed = false;
+    try {
+        confirmed = await window.CoopDialog.confirm(`결재로 추가한 ${right.label} 권한을 회수할까요?`, {
+            title:'업무 권한 회수', confirmText:'권한 회수'
+        });
+    } catch (_) { /* No confirmation means no write. */ }
+    if (view.confirm !== intent) return;
+    view.confirm = null;
+    if (!confirmed || intent.epoch !== view.epoch || !canStart()) return;
+
+    const list = document.getElementById('employeeApprovedRights');
+    const resultId = 'employeeApprovedRightsNotice';
+    const originalScreen = () => view.visible() && view.epoch === intent.epoch;
+    employeeApprovedRightsWrites.add(view.key);
+    view.needsRead = true;
+    setEmployeeAccessResult(resultId);
+    setEmployeeApprovedRightsBusy(true);
+    if (document.activeElement === button) document.getElementById('employeeApprovedRightsRetry').focus({preventScroll:true});
+    list.textContent = '권한 회수 결과를 확인하는 중입니다.';
+    try {
+        const {data,error} = await _supabase.rpc('erp_admin_approved_permissions', {p_emp_id:view.empId, p_revoke_key:right.key});
+        if (error || !isEmployeeApprovedRightsResult(data) || data.some(item => item.key === right.key)) throw new Error('EMPLOYEE_RIGHT_RESULT_UNVERIFIED');
+        if (originalScreen()) {
+            view.needsRead = false;
+            renderEmployeeApprovedRights(view, data);
+            setEmployeeAccessResult(resultId,'결재로 추가한 권한을 회수했습니다.');
+        }
+    } catch (_) {
+        if (originalScreen()) {
+            list.textContent = '권한 회수 결과를 확인하지 못했습니다.';
+            setEmployeeAccessResult(resultId,'목록을 다시 확인한 뒤 현재 권한을 확인해 주세요.',true);
+        }
+    } finally {
+        employeeApprovedRightsWrites.delete(view.key);
+        const currentView = employeeApprovedRightsView;
+        if (currentView?.key === view.key && currentView.visible() && !currentView.read) {
+            setEmployeeApprovedRightsBusy(false);
+            if (!originalScreen()) void resumeEmployeeApprovedRights();
+        }
+    }
+}
+
+function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim(), {readContext = null} = {}) {
+    const view = getEmployeeApprovedRightsView();
+    if (!view?.visible() || empId !== view.empId || (readContext && !readContext.isCurrent())) return Promise.resolve(false);
+    if (view.read) return view.read.pending;
+    if (employeeApprovedRightsWrites.has(view.key)) return Promise.resolve(true);
+    const list = document.getElementById('employeeApprovedRights');
+    const controller = new AbortController(), read = {controller, pending:null};
+    view.read = read;
+    view.needsRead = true;
+    list.textContent = '결재 권한을 확인하는 중입니다.';
+    setEmployeeApprovedRightsBusy(true);
+    const isViewCurrent = () => view.read === read && view.visible() && (!readContext || readContext.isCurrent());
+    const context = {signal:controller.signal, isCurrent:() => !controller.signal.aborted && isViewCurrent()};
+    const abort = () => controller.abort();
+    readContext?.signal?.addEventListener('abort', abort, {once:true});
+    read.pending = (async () => {
+        let timer;
+        try {
+            const work = async () => {
+                if (!readContext) await verifyEmployeeDetailTabAccess(view.owner, context);
+                if (!context.isCurrent()) return null;
+                const query = _supabase.rpc('erp_admin_approved_permissions', {p_emp_id:view.empId});
+                return typeof query.abortSignal === 'function' ? query.abortSignal(controller.signal) : query;
+            };
+            const stopped = new Promise((_, reject) => {
+                controller.signal.addEventListener('abort', () => reject(new Error('EMPLOYEE_RIGHT_READ_STOPPED')), {once:true});
+                if (!readContext) timer = setTimeout(abort, 15000);
+            });
+            const response = await Promise.race([work(), stopped]);
+            if (!context.isCurrent()) return false;
+            if (!response || response.error || !isEmployeeApprovedRightsResult(response.data)) throw new Error('EMPLOYEE_RIGHT_READ_FAILED');
+            view.needsRead = false;
+            renderEmployeeApprovedRights(view, response.data);
+            return true;
+        } catch (_) {
+            if (isViewCurrent()) list.textContent = '결재로 추가한 권한을 확인하지 못했습니다. 목록을 다시 확인해 주세요.';
+            return false;
+        } finally {
+            clearTimeout(timer);
+            readContext?.signal?.removeEventListener('abort', abort);
+            if (view.read === read) {
+                view.read = null;
+                if (view.visible()) setEmployeeApprovedRightsBusy(false);
+            }
+        }
+    })();
+    return read.pending;
 }
 
 function setEmployeeAccessResult(id, message = '', isError = false) {
@@ -6670,7 +6803,7 @@ function bindEmployeeInfoResume() {
             void loadEmployeeContractHours();
             void loadEmployeeInsuranceStatus();
             if (isEmployeeDetailTabVisible('tabAccessGroup')) void window.SunVillageTotalManagerAdmin?.ensure();
-            void resumeEmployeeDetailTabReads();
+            void resumeEmployeeDetailTabReads().then(() => resumeEmployeeApprovedRights());
         }
         if (frame.hidden === hidden) return;
         hidden = frame.hidden;
@@ -6916,6 +7049,7 @@ async function openDetail(u, rosterOpener = null) {
     employeeInfoActiveReads.clear();
     employeeInfoResumeReads.clear();
     ++employeeDetailRevision;
+    suspendEmployeeApprovedRights(true);
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
     document.getElementById('tabInsuranceStatus').open = false;
     window.HrInsuranceStatus?.suspend(document.getElementById('employeeInsuranceStatus'));
@@ -7071,7 +7205,10 @@ function activateEmployeeAccessSection(link) {
     const tabId = link?.getAttribute('data-bs-target')?.slice(1);
     if (!isEmployeeDetailTabVisible(tabId)) return;
     revealEmployeeDetailTab(link);
-    if (tabId !== 'tabSunVillageTotalManager') void ensureEmployeeAccessTab(tabId);
+    if (tabId === 'tabModuleAccess') void ensureEmployeeAccessTab(tabId).then(ready => {
+        if (ready) return resumeEmployeeApprovedRights();
+    });
+    else if (tabId !== 'tabSunVillageTotalManager') void ensureEmployeeAccessTab(tabId);
 }
 function activateEmployeeDetailTab(link) {
     const tabId = link?.getAttribute('href')?.slice(1);
