@@ -4,6 +4,7 @@
   let mounted=false, selected='hero', lastHomeArea='hero', selectionRevision=0, photoViewRevision=0, sectionRows=[], previewOrder=[];
   const photoClock=()=>performance.timeOrigin+performance.now();
   let photoViewChangedAt=photoClock(),photoViewActiveSince=null;
+  let photoModeRevision=0,photoModeChangedAt=photoClock(),photoModeEnabled=false;
   const narrowScreen=root.matchMedia?.('(max-width: 767px)');
   const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',documents:'문서 관리'};
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
@@ -79,6 +80,22 @@
   }
   function photoViewVisible(frame){
     return !!frame?.getClientRects().length&&!root.frameElement?.hidden;
+  }
+  function sendPhotoMode(frame=document.getElementById('site-home-preview-frame')){
+    if(!frame?.src||!frame.contentWindow)return;
+    const origin=new URL(frame.src).origin;
+    if(origin==='null')return;
+    frame.dataset.photoModeRevision=String(photoModeRevision);
+    frame.dataset.photoModeEnabled=String(photoModeEnabled);
+    frame.contentWindow.postMessage({type:'coop-home-preview-photo-mode',enabled:photoModeEnabled,photoModeRevision,modeChangedAt:photoModeChangedAt},origin);
+  }
+  function setPhotoMode(enabled){
+    if(photoModeEnabled!==enabled){
+      photoModeEnabled=enabled;
+      photoModeChangedAt=photoClock();
+      photoModeRevision++;
+    }
+    sendPhotoMode();
   }
   function sendPhotoView(active,frame=document.getElementById('site-home-preview-frame')){
     if(!frame?.src||!frame.contentWindow)return;
@@ -360,10 +377,10 @@
   window.addEventListener('message',event=>{
     const frame=document.getElementById('site-home-preview-frame');
     if(!frame?.src || event.source!==frame.contentWindow || event.origin!==new URL(frame.src).origin) return;
-    if(event.data?.type==='coop-home-preview-photo-view-ready'){sendPhotoView(undefined,frame);return;}
+    if(event.data?.type==='coop-home-preview-photo-view-ready'){sendPhotoMode(frame);sendPhotoView(undefined,frame);return;}
     if(event.data?.type==='coop-home-preview-order')syncOrder(null,event.data.ids);
     if(event.data?.type==='coop-home-preview-area') {
-      const {area,photoRequest,photoViewRevision:requestedView,photoClickedAt}=event.data;
+      const {area,photoRequest,photoViewRevision:requestedView,photoModeRevision:requestedMode,photoClickedAt}=event.data;
       if(Number.isSafeInteger(photoRequest)&&photoRequest>0&&['activities','portfolio'].includes(area)){
         if(typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site')||!photoViewVisible(frame))return;
         // A newly visible cross-origin frame may still have the previous view
@@ -375,10 +392,13 @@
         if(timed&&(since===null||(!exactLiveView&&photoClickedAt<since)||photoClickedAt>photoClock()+100))return;
         if(requestedView!=null&&requestedView!==photoViewRevision&&
            (!timed||since===null||photoClickedAt<=since||requestedView>photoViewRevision))return;
-        // The parent owns the mode. A click received immediately after Exit
-        // must route to the editor even if the iframe still paints photo mode.
-        if(document.getElementById('site-home-photo-preview-mode')?.getAttribute('aria-pressed')==='true'){
-          frame.contentWindow.postMessage({type:'coop-home-preview-photo-open',photoRequest,photoViewRevision},event.origin);
+        // Do not reinterpret an older photo click as editing after Exit. For a
+        // cross-origin preview, a new click may precede delivery of the new mode.
+        const exactMode=event.origin===location.origin&&requestedMode===photoModeRevision;
+        if(requestedMode>photoModeRevision||(!exactMode&&
+           (timed?photoClickedAt<=photoModeChangedAt:photoModeRevision!==0)))return;
+        if(photoModeEnabled){
+          frame.contentWindow.postMessage({type:'coop-home-preview-photo-open',photoRequest,photoViewRevision,photoModeRevision},event.origin);
           return;
         }
       }
@@ -388,5 +408,5 @@
       if(event.data.area==='legal')window.CoopSiteLegalEditor?.select(event.data.legalKind);
     }
   });
-  root.CoopHomeVisualEditor=Object.freeze({version:'20261109-photo-return-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
+  root.CoopHomeVisualEditor=Object.freeze({version:'20261109-photo-intent-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi,setPhotoMode});
 })(window);

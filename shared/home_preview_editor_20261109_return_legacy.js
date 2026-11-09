@@ -1,0 +1,209 @@
+/* Visual editing is confined to a same-cooperative parent iframe. No persistence. */
+(function(){
+  'use strict';
+  if(new URLSearchParams(location.search).get('home_preview')!=='1'||window.parent===window) return;
+  const areas=['hero','about','impact','progress','portfolio','status','activities','partners','history','faq','contact','documents','calculator','ops-system','game-hall'];
+  let parentOrigin='',draft={},photoController=false,explicitPhotoMode,pendingPhoto=null,photoSequence=0,replayingPhoto=null;
+  let photoViewRequested=false,photoViewRevision=null,photoViewActive=true,photoOpenRevision=0,photoReturnProtocol=false;
+  const photoMode=()=>explicitPhotoMode??(draft.photo_inspect===true);
+  const rendered = {};
+  function imageUrl(value){
+    const url=String(value||'');
+    if(!url.trim())return '';
+    if(/^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(url))return url;
+    try{const parsed=new URL(url,location.href);return ['https:','http:'].includes(parsed.protocol)?parsed.href:'';}catch(_){return '';}
+  }
+  function refresh(force=true){
+    if(window.CoopSiteInline?.isEditing('about')||window.CoopSiteInline?.isEditing('activities'))return false;
+    let updated=false;
+    const changed=(key,value)=>{const signature=JSON.stringify(value);if(!force&&rendered[key]===signature)return false;rendered[key]=signature;return true;};
+    const layout=[draft.sections,typeof g_public_home_settings==='undefined'?null:[g_public_home_settings?.home_layout_mode,g_public_home_settings?.home_template]];
+    if(Array.isArray(draft.sections)&&changed('sections',layout)){
+      updated=true;
+      applyPublicSectionOrder(draft.sections);
+      for(const row of draft.sections){
+        if(!areas.includes(row?.id)||typeof row.is_visible!=='boolean')continue;
+        const section=document.getElementById(row.id);
+        if(section){if(row.is_visible)section.style.removeProperty('display');else section.style.setProperty('display','none','important');}
+        if(typeof publicHiddenSectionIds!=='undefined'){
+          if(row.is_visible)publicHiddenSectionIds.delete(row.id);else publicHiddenSectionIds.add(row.id);
+        }
+      }
+      window.syncPublicSectionLinks?.();
+    }
+    if(draft.about && typeof renderPublicAbout==='function' && changed('about',draft.about)){renderPublicAbout({...draft.about,image_url:imageUrl(draft.about.image_url)});updated=true;}
+    if(Array.isArray(draft.certifications) && typeof renderPublicCertifications==='function' && changed('certifications',draft.certifications)){renderPublicCertifications(draft.certifications.map(row=>({...row,image_url:imageUrl(row.image_url)})));updated=true;}
+    const container=document.getElementById('activities-container');
+    if(container && (draft.activity || document.getElementById('home-preview-activity-article')) && typeof renderActivityCards==='function' && changed('activity',draft.activity)){renderActivityCards(g_activity_list);updated=true;}
+    // The rendered order also includes the selected template's layout overrides.
+    if(updated&&parentOrigin)window.parent.postMessage({type:'coop-home-preview-order',ids:[...document.querySelectorAll('main > section[id]')].map(node=>node.id)},parentOrigin);
+    return updated;
+  }
+  function finishActivities(container){
+    if(container){
+      const previousId=document.getElementById('home-preview-activity-article')?.dataset.activityId;
+      document.getElementById('home-preview-activity-article')?.remove();
+      if(draft.activity){
+        const article=document.createElement('article');article.id='home-preview-activity-article';article.className='activity-detail-content home-preview-article';
+        article.dataset.activityId=draft.activity.id;
+        const title=document.createElement('h3');CoopTextStyles.paint(title,String(draft.activity.title||''),draft.activity.text_styles?.activityTitle);
+        const date=document.createElement('p');date.textContent=[draft.activity.event_date,draft.activity.is_current?'':'비공개'].filter(Boolean).join(' · ');
+        const content=document.createElement('div');content.id='home-preview-activity-body';const body=sanitizeHtml(String(draft.activity.content||''));content.innerHTML=typeof optimizeActivityContentImages==='function'?optimizeActivityContentImages(body):body;
+        article.append(title,date);
+        const url=imageUrl(draft.activity.file_url);
+        if(url){const img=document.createElement('img');img.src=window.CoopDisplayImages?.display(url)||url;img.alt='';img.style.cssText='max-width:100%;max-height:320px;object-fit:contain;margin-bottom:20px';article.append(img);}
+        article.append(content);container.after(article);
+        CoopTextStyles.adapt(article);
+        if(previousId!==draft.activity.id)window.scrollTo({top:window.scrollY+article.getBoundingClientRect().top,behavior:'instant'});
+      }
+    }
+  }
+  function navigate(area){
+    const target=area==='certifications'?'public-site-certifications':area==='design'||area==='fonts'?'hero':area==='external-news'?'activities':area;
+    if(!areas.includes(target)&&target!=='public-site-certifications')return;
+    const node=document.getElementById(target);
+    // scrollIntoView also scrolls the editor's ancestor viewport. Navigate only
+    // inside this preview so the task tabs and settings stay where the user left them.
+    if(node)window.scrollTo({top:window.scrollY+node.getBoundingClientRect().top,behavior:'instant'});
+  }
+  function closeFinishedPhotoExperience(event){
+    if(!photoMode())window.bootstrap?.Modal?.getInstance(event.currentTarget)?.hide();
+  }
+  function cancelPendingPhotoOpen(){
+    pendingPhoto=null;
+    photoOpenRevision++;
+  }
+  function livePhotoView(){
+    // Same-origin previews can see the actual frame immediately. Cross-origin
+    // previews use the click's timestamp and the parent's current view.
+    const frame=window.frameElement, revision=frame?.dataset.photoViewRevision;
+    if(frame?.id!=='site-home-preview-frame'||!/^\d+$/.test(revision||''))return null;
+    return {revision:Number(revision),active:frame.dataset.photoViewActive==='true'};
+  }
+  function pendingBelongsToView({photoViewRevision:revision,active,changedAt,activeSince}){
+    if(!pendingPhoto||!Number.isFinite(changedAt))return false;
+    const {liveRevision,requestedView,clickedAt}=pendingPhoto;
+    if(liveRevision!=null)return liveRevision>revision||(liveRevision===revision&&active);
+    if(active&&requestedView===revision)return clickedAt>=activeSince;
+    return clickedAt>(active?activeSince:changedAt);
+  }
+  function openApprovedPhoto(){
+    const request=pendingPhoto,approval=request?.approval;
+    if(!approval||!photoViewActive||(photoViewRevision!==null&&approval.photoViewRevision!==photoViewRevision))return;
+    const live=livePhotoView();
+    if(live&&(!live.active||approval.photoViewRevision!==live.revision))return;
+    pendingPhoto=null;
+    if(!photoMode()||!request.trigger.isConnected)return;
+    replayingPhoto=request.trigger;
+    try{request.trigger.click();}finally{replayingPhoto=null;}
+  }
+  function capturePhotoOpen(){
+    if(!replayingPhoto)return null;
+    const revision=photoOpenRevision,viewRevision=photoViewRevision;
+    return ()=>{
+      const live=livePhotoView();
+      return revision===photoOpenRevision&&photoViewActive&&photoMode()&&(!live||(live.active&&live.revision===viewRevision));
+    };
+  }
+  function exitPhotoExperience(){
+    cancelPendingPhotoOpen();
+    if(typeof invalidateActivityDetailRequest==='function')invalidateActivityDetailRequest();
+    window.CoopHomeEnhancements?.closeZoom(false);
+    for(const id of ['plantDetailModal','activityDetailModal']){
+      const modal=document.getElementById(id),instance=modal&&window.bootstrap?.Modal?.getInstance(modal);
+      if(!instance)continue;
+      // Bootstrap ignores hide during the opening animation. Retry only on
+      // that modal's completion, and never close a newly enabled experience.
+      modal.addEventListener('shown.bs.modal',closeFinishedPhotoExperience,{once:true});
+      instance.hide();
+    }
+  }
+  window.CoopSitePreview=Object.freeze({
+    capturePhotoOpen,
+    get:key=>key==='photo_inspect'?photoMode():draft[key],apply(value){const wasInspecting=photoMode();draft=value&&typeof value==='object'?value:{};if(wasInspecting&&!photoMode())exitPhotoExperience();return refresh(false);},refresh,finishActivities,invalidate(key){delete rendered[key];},
+    activityRows(rows){
+      if(!draft.activity)return rows;
+      const filtered=(Array.isArray(rows)?rows:[]).filter(row=>String(row.id)!==draft.activity.id);
+      return draft.activity.is_current? [{...draft.activity,file_url:imageUrl(draft.activity.file_url)},...filtered]:filtered;
+    }
+  });
+  window.addEventListener('message',event=>{
+    if(event.source!==window.parent) return;
+    let url;try{url=new URL(event.origin);}catch(_){return;}
+    if(url.protocol!==location.protocol||url.port!==location.port||url.hostname.replace(/^(www|erp)\./,'')!==location.hostname.replace(/^(www|erp)\./,''))return;
+    if(event.data?.type==='coop-home-preview-settings'){
+      parentOrigin=event.origin;document.documentElement.dataset.homeVisualEdit='true';
+      if(event.data.settings?.site_preview?.photo_controller===true){
+        photoController=true;
+        if(!photoViewRequested){photoViewRequested=true;window.parent.postMessage({type:'coop-home-preview-photo-view-ready'},parentOrigin);}
+      }
+    }
+    if(parentOrigin!==event.origin)return;
+    if(event.data?.type==='coop-home-preview-photo-view'){
+      const {photoViewRevision:revision,active}=event.data;
+      if(!Number.isSafeInteger(revision)||revision<0||typeof active!=='boolean'||(photoViewRevision!==null&&revision<photoViewRevision))return;
+      if(Number.isFinite(event.data.changedAt))photoReturnProtocol=true;
+      if((photoViewRevision!==null&&revision!==photoViewRevision)||!active){
+        if(pendingBelongsToView(event.data))photoOpenRevision++;
+        else cancelPendingPhotoOpen();
+      }
+      photoViewRevision=revision;photoViewActive=active;
+      openApprovedPhoto();
+    }else if(event.data?.type==='coop-home-preview-photo-mode'&&typeof event.data.enabled==='boolean'){
+      const wasInspecting=photoMode();
+      photoController=true;explicitPhotoMode=event.data.enabled;
+      if(wasInspecting&&!photoMode())exitPhotoExperience();
+    }else if(event.data?.type==='coop-home-preview-photo-open'){
+      const request=pendingPhoto;
+      if(!photoController||!request||event.data.photoRequest!==request.id)return;
+      if(photoViewRevision!==null&&event.data.photoViewRevision<photoViewRevision)return;
+      request.approval=event.data;
+      openApprovedPhoto();
+    }else if(['coop-home-preview-select','coop-home-preview-navigate'].includes(event.data?.type))navigate(event.data.area);
+  });
+  const plantDetailSelector='#portfolio #power-plants-container button[data-home-photo-preview-plant]';
+  const activityDetailSelector='#activities #activities-container .activity-card[data-activity-id]';
+  function routeInteraction(event){
+    if(!parentOrigin||replayingPhoto===event.target)return;
+    if(event.target.closest('#plantDetailModal a[href],#activityDetailModal a[href]')){
+      event.preventDefault();event.stopImmediatePropagation();return;
+    }
+    const detail=event.target.closest(plantDetailSelector+','+activityDetailSelector);
+    const isPhotoTarget=!!detail&&!event.target.closest('a[href]');
+    if(isPhotoTarget&&!photoController&&photoMode())return;
+    const legal=event.target.closest('a[href*="privacy"],a[href*="terms"],a[href*="signup"]');
+    const certification=event.target.closest('#public-site-certifications,#public-hero-certifications');
+    const section=event.target.closest(areas.map(id=>`#${id}`).join(','));
+    const area=legal?'legal':certification?'certifications':section?.id;
+    if(!area)return;
+    event.preventDefault();event.stopImmediatePropagation();
+    const message={type:'coop-home-preview-area',area};
+    const card=event.target.closest('.activity-card[data-activity-id]');
+    if(card){try{message.itemId=decodeURIComponent(card.dataset.activityId);}catch(_){}}
+    if(isPhotoTarget&&photoController){
+      const live=livePhotoView();
+      if(live?!live.active:!photoViewActive&&!photoReturnProtocol)return;
+      const trigger=event.target.closest('button')||detail;
+      const requestedView=live?.revision??photoViewRevision;
+      const clickedAt=performance.timeOrigin+event.timeStamp;
+      pendingPhoto={id:++photoSequence,trigger,liveRevision:live?.revision,requestedView,clickedAt};
+      message.photoRequest=pendingPhoto.id;
+      if(requestedView!==null)message.photoViewRevision=requestedView;
+      if(photoReturnProtocol||live)message.photoClickedAt=clickedAt;
+    }
+    if(legal)message.legalKind=legal.getAttribute('href').includes('privacy')?'privacy':legal.getAttribute('href').includes('terms')?'terms':'signup_purpose';
+    window.parent.postMessage(message,parentOrigin);
+  }
+  document.addEventListener('click',routeInteraction,true);
+  document.addEventListener('keydown',event=>{
+    // Public news cards are role=button articles with their own key handler,
+    // unlike nested native buttons which already dispatch a click.
+    if(!parentOrigin||event.isComposing||event.keyCode===229||!['Enter',' '].includes(event.key)||
+       !event.target.matches?.(activityDetailSelector+'[role="button"]'))return;
+    if(event.repeat){event.preventDefault();event.stopImmediatePropagation();return;}
+    routeInteraction(event);
+  },true);
+  const style=document.createElement('style');
+  style.textContent=`html[data-home-visual-edit] :is(${areas.map(id=>'#'+id).join(',')}){cursor:pointer} html[data-home-visual-edit] :is(${areas.map(id=>'#'+id).join(',')}):hover{outline:3px solid #2baf84;outline-offset:-3px} html[data-home-preview] [data-aos]{opacity:1!important;transform:none!important} .home-preview-article{flex:0 0 100%;padding:24px;border:1px solid #dbe3e9;border-radius:12px;background:var(--surface-color,#fff);word-break:keep-all;overflow-wrap:break-word}`;
+  document.head.append(style);
+})();

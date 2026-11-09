@@ -5,6 +5,7 @@
   const areas=['hero','about','impact','progress','portfolio','status','activities','partners','history','faq','contact','documents','calculator','ops-system','game-hall'];
   let parentOrigin='',draft={},photoController=false,explicitPhotoMode,pendingPhoto=null,photoSequence=0,replayingPhoto=null;
   let photoViewRequested=false,photoViewRevision=null,photoViewActive=true,photoOpenRevision=0,photoReturnProtocol=false;
+  let photoModeRevision=null;
   const photoMode=()=>explicitPhotoMode??(draft.photo_inspect===true);
   const rendered = {};
   function imageUrl(value){
@@ -80,6 +81,11 @@
     if(frame?.id!=='site-home-preview-frame'||!/^\d+$/.test(revision||''))return null;
     return {revision:Number(revision),active:frame.dataset.photoViewActive==='true'};
   }
+  function livePhotoMode(){
+    const frame=window.frameElement,revision=frame?.dataset.photoModeRevision;
+    if(frame?.id!=='site-home-preview-frame'||!/^\d+$/.test(revision||''))return null;
+    return {revision:Number(revision),enabled:frame.dataset.photoModeEnabled==='true'};
+  }
   function pendingBelongsToView({photoViewRevision:revision,active,changedAt,activeSince}){
     if(!pendingPhoto||!Number.isFinite(changedAt))return false;
     const {liveRevision,requestedView,clickedAt}=pendingPhoto;
@@ -90,8 +96,11 @@
   function openApprovedPhoto(){
     const request=pendingPhoto,approval=request?.approval;
     if(!approval||!photoViewActive||(photoViewRevision!==null&&approval.photoViewRevision!==photoViewRevision))return;
+    if(photoModeRevision!==null&&approval.photoModeRevision!==photoModeRevision)return;
     const live=livePhotoView();
     if(live&&(!live.active||approval.photoViewRevision!==live.revision))return;
+    const mode=livePhotoMode();
+    if(mode&&(!mode.enabled||approval.photoModeRevision!==mode.revision))return;
     pendingPhoto=null;
     if(!photoMode()||!request.trigger.isConnected)return;
     replayingPhoto=request.trigger;
@@ -99,10 +108,11 @@
   }
   function capturePhotoOpen(){
     if(!replayingPhoto)return null;
-    const revision=photoOpenRevision,viewRevision=photoViewRevision;
+    const revision=photoOpenRevision,viewRevision=photoViewRevision,modeRevision=photoModeRevision;
     return ()=>{
-      const live=livePhotoView();
-      return revision===photoOpenRevision&&photoViewActive&&photoMode()&&(!live||(live.active&&live.revision===viewRevision));
+      const live=livePhotoView(),mode=livePhotoMode();
+      return revision===photoOpenRevision&&photoViewActive&&photoMode()&&
+        (!live||(live.active&&live.revision===viewRevision))&&(!mode||(mode.enabled&&mode.revision===modeRevision));
     };
   }
   function exitPhotoExperience(){
@@ -151,8 +161,19 @@
       openApprovedPhoto();
     }else if(event.data?.type==='coop-home-preview-photo-mode'&&typeof event.data.enabled==='boolean'){
       const wasInspecting=photoMode();
+      const {photoModeRevision:revision,modeChangedAt}=event.data;
+      const versioned=Number.isSafeInteger(revision)&&revision>=0&&Number.isFinite(modeChangedAt);
+      if(photoModeRevision!==null&&(!versioned||revision<photoModeRevision))return;
+      if(versioned&&revision!==photoModeRevision){
+        const request=pendingPhoto;
+        // Keep an early new-mode click if its context is newer than this message.
+        if(request&&(request.liveModeRevision!=null?request.liveModeRevision>=revision:request.clickedAt>modeChangedAt))photoOpenRevision++;
+        else cancelPendingPhotoOpen();
+        photoModeRevision=revision;
+      }
       photoController=true;explicitPhotoMode=event.data.enabled;
       if(wasInspecting&&!photoMode())exitPhotoExperience();
+      else openApprovedPhoto();
     }else if(event.data?.type==='coop-home-preview-photo-open'){
       const request=pendingPhoto;
       if(!photoController||!request||event.data.photoRequest!==request.id)return;
@@ -183,12 +204,16 @@
     if(isPhotoTarget&&photoController){
       const live=livePhotoView();
       if(live?!live.active:!photoViewActive&&!photoReturnProtocol)return;
+      // Cancel only a pending result. An already open photo is not closed.
+      photoOpenRevision++;
       const trigger=event.target.closest('button')||detail;
       const requestedView=live?.revision??photoViewRevision;
+      const mode=livePhotoMode(),requestedMode=mode?.revision??photoModeRevision;
       const clickedAt=performance.timeOrigin+event.timeStamp;
-      pendingPhoto={id:++photoSequence,trigger,liveRevision:live?.revision,requestedView,clickedAt};
+      pendingPhoto={id:++photoSequence,trigger,liveRevision:live?.revision,liveModeRevision:mode?.revision,requestedView,clickedAt};
       message.photoRequest=pendingPhoto.id;
       if(requestedView!==null)message.photoViewRevision=requestedView;
+      if(requestedMode!==null)message.photoModeRevision=requestedMode;
       if(photoReturnProtocol||live)message.photoClickedAt=clickedAt;
     }
     if(legal)message.legalKind=legal.getAttribute('href').includes('privacy')?'privacy':legal.getAttribute('href').includes('terms')?'terms':'signup_purpose';
