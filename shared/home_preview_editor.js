@@ -81,8 +81,15 @@
     }
     if(parentOrigin===event.origin&&['coop-home-preview-select','coop-home-preview-navigate'].includes(event.data?.type))navigate(event.data.area);
   });
+  const plantDetailSelector='#portfolio #power-plants-container button[data-home-photo-preview-plant]';
+  const activityDetailSelector='#activities #activities-container .activity-card[data-activity-id]';
   document.addEventListener('click',event=>{
     if(!parentOrigin)return;
+    if(event.target.closest('#plantDetailModal a[href],#activityDetailModal a[href]')){
+      event.preventDefault();event.stopImmediatePropagation();return;
+    }
+    const detail=event.target.closest(plantDetailSelector+','+activityDetailSelector);
+    if(draft.photo_inspect===true&&detail&&!event.target.closest('a[href]'))return;
     const legal=event.target.closest('a[href*="privacy"],a[href*="terms"],a[href*="signup"]');
     const certification=event.target.closest('#public-site-certifications,#public-hero-certifications');
     const section=event.target.closest(areas.map(id=>`#${id}`).join(','));

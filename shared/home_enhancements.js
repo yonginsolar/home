@@ -20,6 +20,8 @@
  function closeZoom(restore=true){
    if(!activeZoom)return;const state=activeZoom;activeZoom=null;
    clearTimeout(state.timer);
+   state.observer?.disconnect();
+   root.removeEventListener('resize',state.resize);
    state.image.removeAttribute('src');state.dialog.close();state.dialog.remove();
    if(restore&&state.trigger.isConnected&&!state.trigger.hidden)state.trigger.focus({preventScroll:true});
  }
@@ -31,7 +33,15 @@
    bar.className='home-photo-controls';viewport.className='home-photo-viewport';status.setAttribute('role','status');
    image.alt=alt||'활동 사진';image.hidden=true;
    const minus=button('축소'), plus=button('확대'), exit=button('닫기');let scale=1;
-   function zoom(next){scale=Math.max(1,Math.min(3,next));image.style.setProperty('--photo-scale',scale);minus.disabled=image.hidden||scale<=1;plus.disabled=image.hidden||scale>=3;}
+   function fitImage(){
+     if(image.hidden||!image.naturalWidth||!image.naturalHeight)return;
+     const {width,height}=viewport.getBoundingClientRect();if(!width||!height)return;
+     const fit=Math.min(width/image.naturalWidth,height/image.naturalHeight,1),
+       w=Math.floor(image.naturalWidth*fit*scale),h=Math.floor(image.naturalHeight*fit*scale);
+     image.style.width=Math.max(1,w)+'px';image.style.height=Math.max(1,h)+'px';
+     image.style.marginBlockStart=Math.max(0,Math.floor((height-h)/2))+'px';
+   }
+   function zoom(next){scale=Math.max(1,Math.min(3,next));image.style.setProperty('--photo-scale',scale);fitImage();minus.disabled=image.hidden||scale<=1;plus.disabled=image.hidden||scale>=3;}
    minus.onclick=()=>zoom(scale-.5);plus.onclick=()=>zoom(scale+.5);exit.onclick=()=>closeZoom();
    const failed=()=>{if(activeZoom?.dialog!==dialog)return;clearTimeout(activeZoom.timer);image.removeAttribute('src');status.textContent='사진을 불러오지 못했습니다. 닫고 다시 열어 주세요.';};
    image.onload=()=>{if(activeZoom?.dialog!==dialog)return;clearTimeout(activeZoom.timer);image.hidden=false;status.hidden=true;zoom(1);};
@@ -39,7 +49,10 @@
    dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeZoom();}});
    dialog.addEventListener('cancel',event=>{event.preventDefault();closeZoom();});
    bar.append(minus,plus,exit);viewport.append(image,status);dialog.append(bar,viewport);modal.append(dialog);
-   activeZoom={dialog,image,trigger,timer:setTimeout(failed,12000)};dialog.showModal();exit.focus();zoom(1);image.src=src;
+   const resize=()=>{if(activeZoom?.dialog===dialog)fitImage();};
+   const observer=root.ResizeObserver?new root.ResizeObserver(resize):null;
+   activeZoom={dialog,image,trigger,resize,observer,timer:setTimeout(failed,12000)};dialog.showModal();exit.focus();zoom(1);
+   observer?.observe(viewport);root.addEventListener('resize',resize);image.src=src;
  }
  function bindActivity(modal,urls,toDisplay){
    closeZoom(false);
@@ -47,7 +60,9 @@
    if(!modal.dataset.photoZoomBound){modal.addEventListener('hide.bs.modal',()=>closeZoom(false));modal.dataset.photoZoomBound='1';}
    trigger.onclick=urls.length?()=>{
      if(preferences.activity_zoom!==true)return;
-     const slides=[...modal.querySelectorAll('#activityDetailCarousel .carousel-item')],i=Math.max(0,slides.findIndex(n=>n.classList.contains('active')));
+     const slides=[...modal.querySelectorAll('#activityDetailCarousel .carousel-item')];
+     const incoming=slides.findIndex(n=>n.matches('.carousel-item-next,.carousel-item-prev'));
+     const i=incoming>=0?incoming:Math.max(0,slides.findIndex(n=>n.classList.contains('active')));
      const alt=(slides[i]?.querySelector('img')||modal.querySelector('#activityDetailCover'))?.alt;
      openZoom(modal,trigger,toDisplay(urls[i]),alt);
    }:null;

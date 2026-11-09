@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /* Homepage-only functions; shared state and server gates stay in admin_member_core.js. */
 (function (root) {
-    if (root.AdminMemberSite?.version === '20261109-enhancements-1') return;
+    if (root.AdminMemberSite?.version === '20261109-photo-safety-1') return;
 const activityDrafts=new Map();
 let activityActiveDraft=null,activityDraftTemplate=null,activityDraftEpoch=0,activityEditRevision=0,activitySaveIntentEpoch=0;
 function captureActivitySaveIntent() {
@@ -1063,7 +1063,48 @@ queueHomePreviewUpdate();
 const HOME_EFFECTS = ['off','highlight','sun-glint'];
 const homeCompareInput = key => document.getElementById('site-home-compare-'+key);
 const homeCompareUuid = value => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value || '');
-let homeComparisonRead = null;
+const homeComparePhotoOwners = {before:new WeakMap(),after:new WeakMap()};
+const homeCompareCoop = () => typeof g_adminMemberRuntime === 'undefined' ? '' : String(g_adminMemberRuntime?.coop_id || '');
+let homeComparisonRead = null, homeComparisonConfirming = false;
+function markHomeComparisonPhoto(key) {
+if (!Object.hasOwn(homeComparePhotoOwners,key)) return;
+const file = homeCompareInput(key)?.files?.[0], plant = homeCompareInput('plant')?.value;
+if (file && homeCompareUuid(plant)) homeComparePhotoOwners[key].set(file,{plant,coop:homeCompareCoop()});
+updateHomeComparisonHint();
+}
+function updateHomeComparisonHint() {
+const hint = homeCompareInput('existing'); if (!hint) return;
+const draft = readHomeComparisonDraft(), saved = homeComparisonSaved();
+const pending = ['before','after'].some(key => homeCompareInput(key)?.files?.length);
+const message = !draft && pending ? '선택한 사진은 남아 있지만 비교를 사용하지 않습니다.' :
+draft?.mismatched ? '이전 발전소의 선택 파일을 보관 중입니다. 이 발전소에 쓰려면 사진을 다시 고르거나 사용을 확인해 주세요.' :
+draft && saved?.plant_id === draft.plant_id ? '저장된 전·후 사진을 사용 중입니다. 같은 발전소에서는 바꿀 사진만 선택하면 됩니다.' : '';
+if (hint.textContent !== message) hint.textContent = message;
+const rebind = homeCompareInput('rebind');if(rebind)rebind.hidden = !draft?.mismatched;
+}
+async function confirmHomeComparisonTarget() {
+if (homeComparisonConfirming || g_homeSettingsSaving || !canAccessAdminMemberTab('site')) return;
+const draft = readHomeComparisonDraft();if (!draft?.mismatched) return;
+const runtime = g_adminMemberRuntime, name = homeCompareInput('plant')?.selectedOptions?.[0]?.textContent || '선택한 발전소';
+homeComparisonConfirming = true;
+try {
+if (!await CoopDialog.confirm(`선택해 둔 사진을 ‘${name}’의 사진으로 사용하시겠습니까? 공개 홈페이지에는 저장한 뒤 반영됩니다.`,{title:'사진을 연결할 발전소 확인',confirmText:'이 발전소에 사용',cancelText:'취소'})) return;
+const current = readHomeComparisonDraft();
+if (g_homeSettingsSaving || runtime !== g_adminMemberRuntime || !canAccessAdminMemberTab('site') || current?.plant_id !== draft.plant_id || !['before','after'].every(key => current[key].selected === draft[key].selected)) return;
+for (const key of ['before','after']) markHomeComparisonPhoto(key);
+queueHomePreviewUpdate();
+} finally { homeComparisonConfirming = false; }
+}
+function toggleHomePhotoPreview() {
+const button = document.getElementById('site-home-photo-preview-mode');
+if (!button || !canAccessAdminMemberTab('site')) return;
+const enabled = button.getAttribute('aria-pressed') !== 'true';
+button.setAttribute('aria-pressed',String(enabled));
+document.getElementById('site-home-photo-preview-hint').textContent = enabled
+? '체험 중 · 미리보기에서 발전소의 상세 정보 또는 우리 소식을 눌러 보세요. 다시 누르면 편집으로 돌아갑니다.'
+: '켜면 미리보기에서 발전소 상세와 우리 소식을 직접 열 수 있습니다. 저장되지 않습니다.';
+queueHomePreviewUpdate();
+}
 function homeComparisonSaved() {
 try { return JSON.parse(homeCompareInput('saved')?.value || 'null'); } catch (_) { return null; }
 }
@@ -1078,7 +1119,7 @@ if (id && !Array.from(picker.options).some(o => o.value === id)) picker.add(new 
 picker.value = id;
 homeCompareInput('saved').value = id ? JSON.stringify(compare) : '';
 for (const key of ['before','after']) homeCompareInput(key).value = '';
-homeCompareInput('existing').textContent = id ? '저장된 전·후 사진을 사용 중입니다. 같은 발전소에서는 바꿀 사진만 선택하면 됩니다.' : '';
+updateHomeComparisonHint();
 }
 async function loadHomeComparisonPlants() {
 const runtime = g_adminMemberRuntime, button = homeCompareInput('load'), status = homeCompareInput('status');
@@ -1104,9 +1145,14 @@ function readHomeComparisonDraft() {
 const plantId = homeCompareInput('plant')?.value || '';
 if (!homeCompareUuid(plantId)) return null;
 const saved = homeComparisonSaved();
-return {plant_id:plantId,...Object.fromEntries(['before','after'].map(key => [key,{
-url: saved?.plant_id === plantId ? String(saved[key+'_url'] || '') : '', file: homeCompareInput(key)?.files?.[0] || null
-}]))};
+const draft = {plant_id:plantId,mismatched:false};
+for (const key of ['before','after']) {
+const selected = homeCompareInput(key)?.files?.[0] || null, owner = selected && homeComparePhotoOwners[key].get(selected);
+const usable = owner?.plant === plantId && owner?.coop === homeCompareCoop();
+if (selected && !usable) draft.mismatched = true;
+draft[key] = {url:saved?.plant_id === plantId ? String(saved[key+'_url'] || '') : '',file:usable ? selected : null,selected};
+}
+return draft;
 }
 function collectHomeEnhancements(display, comparison) {
 const card = document.getElementById('site-home-card-effect'), zoom = document.getElementById('site-home-activity-zoom');
@@ -1117,7 +1163,7 @@ else delete next.enhancements;
 return next;
 }
 function comparisonPayload(draft) {
-return draft?.before.url && draft?.after.url && draft.before.url !== draft.after.url
+return !draft?.mismatched && draft?.before.url && draft?.after.url && draft.before.url !== draft.after.url
 ? {plant_id:draft.plant_id,before_url:draft.before.url,after_url:draft.after.url} : null;
 }
 
@@ -1285,8 +1331,9 @@ const originalComparison = comparison && {...comparison,before:{...comparison.be
 const compareCurrent = () => {
 const current = readHomeComparisonDraft();
 return g_adminMemberRuntime===runtime && canAccessAdminMemberTab('site') &&
-(!originalComparison ? !current : current?.plant_id===originalComparison.plant_id && ['before','after'].every(key => current[key].file===originalComparison[key].file && current[key].url===originalComparison[key].url));
+(!originalComparison ? !current : !current?.mismatched && current?.plant_id===originalComparison.plant_id && ['before','after'].every(key => current[key].selected===originalComparison[key].selected && current[key].file===originalComparison[key].file && current[key].url===originalComparison[key].url));
 };
+if (comparison?.mismatched) throw new Error('비교할 발전소가 바뀌었습니다. 이 발전소에 쓸 사진을 다시 고르거나 사용을 확인해 주세요.');
 if (comparison) for (const key of ['before','after']) {
 const {url,file} = comparison[key];
 if (!url && !file) throw new Error('발전소의 설치 전 사진과 설치 후 사진을 모두 지정해 주세요.');
@@ -1334,7 +1381,7 @@ if(response.error?.message==='HOME_SETTINGS_STALE'){
  const review=CoopHomeConflict.plan(homeSettingsBaseline,mine,CoopHomeConflict.fromSettings(latest,homeSettingsBaseline));
  showLoading(false);
  if(!await CoopDialog.confirm(CoopHomeConflict.message(review),{title:'최신 설정과 내 변경 확인',confirmText:'검토한 내용 저장',cancelText:'취소'}))return;
- if(g_adminMemberRuntime!==runtime||!canAccessAdminMemberTab('site')||siteEditorFormSnapshot('sub-home-settings')!==form)throw Error('확인하는 동안 화면이나 입력이 바뀌었습니다. 작성 내용은 유지됩니다. 다시 저장해 주세요.');
+ if(!compareCurrent()||siteEditorFormSnapshot('sub-home-settings')!==form)throw Error('확인하는 동안 화면이나 입력이 바뀌었습니다. 작성 내용은 유지됩니다. 다시 저장해 주세요.');
  payload=review.payload;styles=review.styles;
  if(Object.keys(payload.p_home_external_fonts).length&&!payload.p_external_font_rights_confirmed)throw Error('최신 설정의 외부 글꼴 사용 권한을 확인한 뒤 다시 저장해 주세요. 작성 내용은 유지됩니다.');
  showLoading(true);
@@ -1425,7 +1472,7 @@ const comparison = includeLocalFiles ? readHomeComparisonDraft() : null;
 if (comparison) {
 for (const key of ['before','after']) {
 const entry = comparison[key];
-if (entry.file && entry.file.size<=10*1024*1024 && /^image\/(png|jpeg|webp|gif|avif)$/.test(entry.file.type)) entry.url = await readHomePreviewFile(entry.file);
+if (!comparison.mismatched && entry.file && entry.file.size<=10*1024*1024 && /^image\/(png|jpeg|webp|gif|avif)$/.test(entry.file.type)) entry.url = await readHomePreviewFile(entry.file);
 }
 payload.p_home_display_options = collectHomeEnhancements(payload.p_home_display_options,comparisonPayload(comparison));
 }
@@ -1476,6 +1523,7 @@ const file = document.getElementById(`site-home-${kind}-image-file`)?.files?.[0]
 if (file) settings[kind === 'hero-mobile' ? 'hero_mobile_image_url' : `${kind}_image_url`] = await readHomePreviewFile(file);
 }
 settings.site_preview = await collectSitePreviewDraft(includeLocalFiles);
+settings.site_preview.photo_inspect = document.getElementById('site-home-photo-preview-mode')?.getAttribute('aria-pressed') === 'true';
 Object.assign(settings,await CoopHeroSlides.preview(includeLocalFiles?readHomePreviewFile:async()=>'',{slideId:editor?.slideId||'',device:isPhone?'mobile':'desktop'}));
 settings.inline_fields = window.CoopSiteInlineHost?.collect() || {};
 settings.mobile_editor = editor;
@@ -1513,6 +1561,7 @@ CoopSafeLog.warn("[sendHomePreviewSettings] failed:", error);
 }
 
 function queueHomePreviewUpdate() {
+updateHomeComparisonHint();
 g_homePreviewRevision++;
 window.clearTimeout(g_homePreviewTimer);
 g_homePreviewTimer = window.setTimeout(sendHomePreviewSettings, 180);
@@ -4411,6 +4460,6 @@ window.setTimeout(sendHomePreviewSettings, 0);
     }
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
-    root.loadHomeComparisonPlants = loadHomeComparisonPlants;
-    root.AdminMemberSite = Object.freeze({ version: '20261109-enhancements-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
+    Object.assign(root,{loadHomeComparisonPlants,markHomeComparisonPhoto,confirmHomeComparisonTarget,toggleHomePhotoPreview});
+    root.AdminMemberSite = Object.freeze({ version: '20261109-photo-safety-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
 })(window);

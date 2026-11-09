@@ -298,6 +298,18 @@ async function routeRequest(request,env){
     const response=await env.ASSETS.fetch(new Request(target,request));
     return p.passThrough?response:withProfileHeaders(response,p,noIndex(p,hostname,url.pathname),request.method==='HEAD');
   }
+  if(['GET','HEAD'].includes(request.method)){
+    const version=url.searchParams.get('v');
+    const legacyPath=url.pathname==='/erp/admin_member_site.js'&&version==='20261109-enhancements-1'
+      ? '/erp/admin_member_site_20261109_enhancements_legacy.js'
+      : version==='1.0.0'&&['/shared/home_enhancements.js','/shared/home_enhancements.css'].includes(url.pathname)
+        ? url.pathname.replace(/\.(js|css)$/,'_1_0_0_legacy.$1') : '';
+    if(legacyPath){
+      const target=new URL(request.url);target.pathname=legacyPath;target.search='';
+      const response=await env.ASSETS.fetch(new Request(target,request));
+      return p.passThrough?response:withProfileHeaders(response,p,noIndex(p,hostname,url.pathname),request.method==='HEAD');
+    }
+  }
   if(p.passThrough){
     const response=await env.ASSETS.fetch(request);
     if(request.method!=='GET'||!(response.headers.get('content-type')||'').includes('text/html'))return response;
