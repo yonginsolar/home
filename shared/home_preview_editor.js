@@ -4,7 +4,7 @@
   if(new URLSearchParams(location.search).get('home_preview')!=='1'||window.parent===window) return;
   const areas=['hero','about','impact','progress','portfolio','status','activities','partners','history','faq','contact','documents','calculator','ops-system','game-hall'];
   let parentOrigin='',draft={},photoController=false,explicitPhotoMode,pendingPhoto=null,photoSequence=0,replayingPhoto=null;
-  let photoViewRequested=false,photoViewRevision=null,photoViewActive=true,photoOpenRevision=0;
+  let photoViewRequested=false,photoViewRevision=null,photoViewActive=true,photoOpenRevision=0,photoReturnProtocol=false;
   const photoMode=()=>explicitPhotoMode??(draft.photo_inspect===true);
   const rendered = {};
   function imageUrl(value){
@@ -73,10 +73,37 @@
     pendingPhoto=null;
     photoOpenRevision++;
   }
+  function livePhotoView(){
+    // Same-origin previews can see the actual frame immediately. Cross-origin
+    // previews use the click's timestamp and the parent's current view.
+    const frame=window.frameElement, revision=frame?.dataset.photoViewRevision;
+    if(frame?.id!=='site-home-preview-frame'||!/^\d+$/.test(revision||''))return null;
+    return {revision:Number(revision),active:frame.dataset.photoViewActive==='true'};
+  }
+  function pendingBelongsToView({photoViewRevision:revision,active,changedAt,activeSince}){
+    if(!pendingPhoto||!Number.isFinite(changedAt))return false;
+    const {liveRevision,requestedView,clickedAt}=pendingPhoto;
+    if(liveRevision!=null)return liveRevision>revision||(liveRevision===revision&&active);
+    if(active&&requestedView===revision)return clickedAt>=activeSince;
+    return clickedAt>(active?activeSince:changedAt);
+  }
+  function openApprovedPhoto(){
+    const request=pendingPhoto,approval=request?.approval;
+    if(!approval||!photoViewActive||(photoViewRevision!==null&&approval.photoViewRevision!==photoViewRevision))return;
+    const live=livePhotoView();
+    if(live&&(!live.active||approval.photoViewRevision!==live.revision))return;
+    pendingPhoto=null;
+    if(!photoMode()||!request.trigger.isConnected)return;
+    replayingPhoto=request.trigger;
+    try{request.trigger.click();}finally{replayingPhoto=null;}
+  }
   function capturePhotoOpen(){
     if(!replayingPhoto)return null;
-    const revision=photoOpenRevision;
-    return ()=>revision===photoOpenRevision&&photoViewActive&&photoMode();
+    const revision=photoOpenRevision,viewRevision=photoViewRevision;
+    return ()=>{
+      const live=livePhotoView();
+      return revision===photoOpenRevision&&photoViewActive&&photoMode()&&(!live||(live.active&&live.revision===viewRevision));
+    };
   }
   function exitPhotoExperience(){
     cancelPendingPhotoOpen();
@@ -115,8 +142,13 @@
     if(event.data?.type==='coop-home-preview-photo-view'){
       const {photoViewRevision:revision,active}=event.data;
       if(!Number.isSafeInteger(revision)||revision<0||typeof active!=='boolean'||(photoViewRevision!==null&&revision<photoViewRevision))return;
-      if((photoViewRevision!==null&&revision!==photoViewRevision)||!active)cancelPendingPhotoOpen();
+      if(Number.isFinite(event.data.changedAt))photoReturnProtocol=true;
+      if((photoViewRevision!==null&&revision!==photoViewRevision)||!active){
+        if(pendingBelongsToView(event.data))photoOpenRevision++;
+        else cancelPendingPhotoOpen();
+      }
       photoViewRevision=revision;photoViewActive=active;
+      openApprovedPhoto();
     }else if(event.data?.type==='coop-home-preview-photo-mode'&&typeof event.data.enabled==='boolean'){
       const wasInspecting=photoMode();
       photoController=true;explicitPhotoMode=event.data.enabled;
@@ -124,11 +156,9 @@
     }else if(event.data?.type==='coop-home-preview-photo-open'){
       const request=pendingPhoto;
       if(!photoController||!request||event.data.photoRequest!==request.id)return;
-      pendingPhoto=null;
-      if(!photoViewActive||!photoMode()||!request.trigger.isConnected||
-         (photoViewRevision!==null&&event.data.photoViewRevision!==photoViewRevision))return;
-      replayingPhoto=request.trigger;
-      try{request.trigger.click();}finally{replayingPhoto=null;}
+      if(photoViewRevision!==null&&event.data.photoViewRevision<photoViewRevision)return;
+      request.approval=event.data;
+      openApprovedPhoto();
     }else if(['coop-home-preview-select','coop-home-preview-navigate'].includes(event.data?.type))navigate(event.data.area);
   });
   const plantDetailSelector='#portfolio #power-plants-container button[data-home-photo-preview-plant]';
@@ -151,11 +181,15 @@
     const card=event.target.closest('.activity-card[data-activity-id]');
     if(card){try{message.itemId=decodeURIComponent(card.dataset.activityId);}catch(_){}}
     if(isPhotoTarget&&photoController){
-      if(!photoViewActive)return;
+      const live=livePhotoView();
+      if(live?!live.active:!photoViewActive&&!photoReturnProtocol)return;
       const trigger=event.target.closest('button')||detail;
-      pendingPhoto={id:++photoSequence,trigger};
+      const requestedView=live?.revision??photoViewRevision;
+      const clickedAt=performance.timeOrigin+event.timeStamp;
+      pendingPhoto={id:++photoSequence,trigger,liveRevision:live?.revision,requestedView,clickedAt};
       message.photoRequest=pendingPhoto.id;
-      if(photoViewRevision!==null)message.photoViewRevision=photoViewRevision;
+      if(requestedView!==null)message.photoViewRevision=requestedView;
+      if(photoReturnProtocol||live)message.photoClickedAt=clickedAt;
     }
     if(legal)message.legalKind=legal.getAttribute('href').includes('privacy')?'privacy':legal.getAttribute('href').includes('terms')?'terms':'signup_purpose';
     window.parent.postMessage(message,parentOrigin);

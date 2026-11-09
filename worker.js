@@ -301,6 +301,9 @@ async function routeRequest(request,env){
   if(['GET','HEAD'].includes(request.method)){
     const version=url.searchParams.get('v');
     const retainedEditor={
+      '/erp/admin_member_assets.js?20261109-photo-navigation-1':'/erp/admin_member_assets_20261109_navigation_legacy.js',
+      '/erp/home_visual_editor.js?20261109-photo-navigation-1':'/erp/home_visual_editor_20261109_navigation_legacy.js',
+      '/shared/home_preview_editor.js?20261109-photo-navigation-1':'/shared/home_preview_editor_20261109_navigation_legacy.js',
       '/erp/admin_member_assets.js?20261109-editor-continuity-1':'/erp/admin_member_assets_20261109_continuity_legacy.js',
       '/erp/home_visual_editor.js?20261109-editor-continuity-1':'/erp/home_visual_editor_20261109_continuity_legacy.js',
       '/shared/home_preview_editor.js?20261109-editor-continuity-1':'/shared/home_preview_editor_20261109_continuity_legacy.js',
