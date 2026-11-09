@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.201
+Version: v1.0.202
 Change: 2026-11-09 - Make the employee roster searchable and responsive.
 -->
 <html>
@@ -1477,7 +1477,7 @@ function runEmployeeAuxRead(modalId, options) {
 let employeeNotificationSnapshot = null;
 let employeeNotificationSaveInFlight = false;
 let employeeApprovedRightsView = null;
-// Scoped to the retained workspace, by actor/cooperative/employee and permission key.
+// Per-document waiting state; unresolved operation markers also survive document replacement.
 const employeeApprovedRightsWrites = new Map();
 const employeeDetailReadTokens = { modules: 0, approvedRights: 0, notifications: 0 };
 function beginEmployeeDetailRead(kind, {requireVisible = false} = {}) {
@@ -6410,12 +6410,50 @@ function suspendEmployeeApprovedRights(reset = false) {
     setEmployeeAccessResult('employeeApprovedRightsNotice');
 }
 
+function employeeApprovedRightsMarkerKey(scope, right = '') {
+    return `erp.approved-right-revoke.v1:${scope}:` + (right ? encodeURIComponent(right) : '');
+}
+
+function employeeApprovedRightsOperations(scope) {
+    const operations = employeeApprovedRightsWrites.get(scope) || new Map();
+    const prefix = employeeApprovedRightsMarkerKey(scope);
+    try {
+        const live = new Set();
+        for (let i = 0; i < localStorage.length; i++) {
+            const storageKey = localStorage.key(i);
+            if (!storageKey?.startsWith(prefix)) continue;
+            const right = decodeURIComponent(storageKey.slice(prefix.length));
+            const marker = JSON.parse(localStorage.getItem(storageKey));
+            if (!right || typeof marker?.id !== 'string') continue;
+            live.add(right);
+            const known = operations.get(right);
+            if (known?.id === marker.id) known.confirmed ||= marker.confirmed === true;
+            else operations.set(right, {id:marker.id, waiting:false, confirmed:marker.confirmed === true, absent:false});
+        }
+        for (const [right, operation] of operations) if (!live.has(right) && !operation.waiting) operations.delete(right);
+    } catch (_) { /* The in-memory guard still protects any already-sent operation. */ }
+    employeeApprovedRightsWrites.set(scope, operations);
+    return operations;
+}
+
+function updateEmployeeApprovedRightsMarker(scope, right, operation, action) {
+    const key = employeeApprovedRightsMarkerKey(scope, right);
+    try {
+        const current = localStorage.getItem(key);
+        if (action === 'reserve' ? current !== null : JSON.parse(current)?.id !== operation.id) return false;
+        if (action === 'clear') localStorage.removeItem(key);
+        else localStorage.setItem(key, JSON.stringify({id:operation.id, confirmed:action === 'confirm'}));
+        return action !== 'reserve' || JSON.parse(localStorage.getItem(key))?.id === operation.id;
+    } catch (_) { return false; }
+}
+
 function syncEmployeeApprovedRightsWriteState(view) {
-    const operations = [...(employeeApprovedRightsWrites.get(view.key)?.values() || [])];
+    const operations = [...employeeApprovedRightsOperations(view.key).values()];
     if (!view.visible()) return false;
     const waiting = operations.some(operation => operation.waiting);
-    const unknown = operations.some(operation => !operation.waiting && !operation.absent);
-    document.getElementById('employeeApprovedRightsRetry').textContent = unknown ? '결과 확인' : '목록 다시 확인';
+    const unresolved = operations.filter(operation => !operation.waiting && !operation.absent);
+    const unknown = unresolved.some(operation => !operation.confirmed);
+    document.getElementById('employeeApprovedRightsRetry').textContent = unresolved.length ? '결과 확인' : '목록 다시 확인';
     if (unknown) setEmployeeAccessResult('employeeApprovedRightsNotice', '권한 회수 결과 미확인. 결과 확인은 현재 권한 목록만 불러옵니다.', true);
     if (waiting) {
         document.getElementById('employeeApprovedRights').textContent = '권한 회수 결과를 확인하는 중입니다.';
@@ -6436,13 +6474,14 @@ function resumeEmployeeApprovedRights(force = false) {
 
 function renderEmployeeApprovedRights(view, rights) {
     const list = document.getElementById('employeeApprovedRights');
+    const operations = employeeApprovedRightsOperations(view.key);
     list.replaceChildren();
     if (!rights.length) { list.textContent = '결재로 추가한 권한이 없습니다.'; return; }
     rights.forEach(right => {
         const row = document.createElement('div'); row.className = 'd-flex align-items-center justify-content-between border rounded p-2 mb-2 gap-2';
         const label = document.createElement('span'); label.textContent = right.label;
         const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-outline-danger btn-sm'; button.textContent = '권한 회수';
-        if (employeeApprovedRightsWrites.get(view.key)?.has(right.key)) {
+        if (operations.has(right.key)) {
             button.disabled = true;
             button.textContent = '결과 미확인';
         } else button.onclick = () => void revokeEmployeeApprovedRight(view, right, button);
@@ -6455,11 +6494,15 @@ function isEmployeeApprovedRightsResult(data) {
 }
 
 async function revokeEmployeeApprovedRight(view, right, button) {
-    const operationsForView = () => employeeApprovedRightsWrites.get(view.key);
+    const operationsForView = () => employeeApprovedRightsOperations(view.key);
     const canStart = () => view.visible() && button.isConnected && !document.getElementById('employeeApprovedRightsSection').hidden
         && !view.needsRead && !view.read
         && !operationsForView()?.has(right.key) && ![...(operationsForView()?.values() || [])].some(operation => operation.waiting);
-    if (!canStart() || view.confirm || !right.key) return;
+    if (view.confirm || !right.key) return;
+    if (!canStart()) {
+        if (view.visible() && button.isConnected && operationsForView().has(right.key)) void resumeEmployeeApprovedRights(true);
+        return;
+    }
     const intent = {epoch:view.epoch};
     view.confirm = intent;
     let confirmed = false;
@@ -6469,19 +6512,39 @@ async function revokeEmployeeApprovedRight(view, right, button) {
         });
     } catch (_) { /* No confirmation means no write. */ }
     if (view.confirm !== intent) return;
-    view.confirm = null;
-    if (!confirmed || intent.epoch !== view.epoch || !canStart()) return;
+    if (!confirmed) { view.confirm = null; return; }
+    const send = () => {
+        if (view.confirm !== intent) return;
+        view.confirm = null;
+        if (intent.epoch !== view.epoch || !canStart()) {
+            if (view.visible() && operationsForView().has(right.key)) void resumeEmployeeApprovedRights(true);
+            return;
+        }
+        return submitEmployeeApprovedRight(view, right, button, intent);
+    };
+    // Serialize the check-and-reserve across updated same-origin tabs, without holding a browser lock while the network waits.
+    if (navigator.locks?.request) {
+        try {
+            await navigator.locks.request(employeeApprovedRightsMarkerKey(view.key, right.key), () => { void send(); });
+        } catch (_) { if (view.confirm === intent) view.confirm = null; }
+    } else await send();
+}
 
+async function submitEmployeeApprovedRight(view, right, button, intent) {
     const list = document.getElementById('employeeApprovedRights');
     const resultId = 'employeeApprovedRightsNotice';
     const originalScreen = () => view.visible() && view.epoch === intent.epoch;
-    const operations = operationsForView() || new Map();
-    const operation = {waiting:true, confirmed:false, absent:false};
+    const operations = employeeApprovedRightsOperations(view.key);
+    const operation = {id:crypto.randomUUID(), waiting:true, confirmed:false, absent:false};
+    if (!updateEmployeeApprovedRightsMarker(view.key, right.key, operation, 'reserve')) {
+        if (employeeApprovedRightsOperations(view.key).has(right.key)) void resumeEmployeeApprovedRights(true);
+        else setEmployeeAccessResult(resultId, '이 브라우저에 결과 확인 상태를 보관할 수 없어 회수를 시작하지 않았습니다.', true);
+        return;
+    }
     operations.set(right.key, operation);
-    employeeApprovedRightsWrites.set(view.key, operations);
     const forget = () => {
-        operations.delete(right.key);
-        if (!operations.size) employeeApprovedRightsWrites.delete(view.key);
+        updateEmployeeApprovedRightsMarker(view.key, right.key, operation, 'clear');
+        if (operations.get(right.key) === operation) operations.delete(right.key);
     };
     const showUnknown = () => {
         if (!operation.waiting) return;
@@ -6509,16 +6572,14 @@ async function revokeEmployeeApprovedRight(view, right, button) {
             return;
         }
         if (error || !isEmployeeApprovedRightsResult(data) || data.some(item => item.key === right.key)) throw new Error('EMPLOYEE_RIGHT_RESULT_UNVERIFIED');
-        if (!operation.waiting) {
-            operation.confirmed = true;
-            return; // A fresh list, not this late response, owns the screen and focus.
-        }
-        forget();
+        operation.confirmed = true;
+        updateEmployeeApprovedRightsMarker(view.key, right.key, operation, 'confirm');
+        if (!operation.waiting) return; // A fresh list, not this late response, owns the screen and focus.
         if (originalScreen()) {
+            operation.absent = true;
             view.needsRead = false;
             renderEmployeeApprovedRights(view, data);
             setEmployeeAccessResult(resultId,'결재로 추가한 권한을 회수했습니다.');
-            syncEmployeeApprovedRightsWriteState(view);
         }
     } catch (_) {
         showUnknown();
@@ -6526,9 +6587,12 @@ async function revokeEmployeeApprovedRight(view, right, button) {
         clearTimeout(timer);
         const current = employeeApprovedRightsView;
         if (operation.waiting && current?.key === view.key && current.visible() && !current.read) {
+            operation.waiting = false;
             setEmployeeApprovedRightsBusy(false);
+            syncEmployeeApprovedRightsWriteState(current);
             if (!originalScreen()) void resumeEmployeeApprovedRights();
         }
+        operation.waiting = false;
     }
 }
 
@@ -6554,7 +6618,7 @@ function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim(), {
             const work = async () => {
                 if (!readContext) await verifyEmployeeDetailTabAccess(view.owner, context);
                 if (!context.isCurrent()) return null;
-                employeeApprovedRightsWrites.get(view.key)?.forEach(operation => {
+                employeeApprovedRightsOperations(view.key).forEach(operation => {
                     if (operation.confirmed) confirmedBeforeRead.add(operation);
                 });
                 const query = _supabase.rpc('erp_admin_approved_permissions', {p_emp_id:view.empId});
@@ -6568,13 +6632,15 @@ function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim(), {
             if (!context.isCurrent()) return false;
             if (!response || response.error || !isEmployeeApprovedRightsResult(response.data)) throw new Error('EMPLOYEE_RIGHT_READ_FAILED');
             view.needsRead = false;
-            const operations = employeeApprovedRightsWrites.get(view.key);
+            const operations = employeeApprovedRightsOperations(view.key);
             if (operations?.size) {
                 for (const [key, operation] of operations) {
                     operation.absent = !response.data.some(right => right.key === key);
-                    if (confirmedBeforeRead.has(operation) || (operation.absent && operation.confirmed)) operations.delete(key);
+                    if (confirmedBeforeRead.has(operation) || (operation.absent && operation.confirmed)) {
+                        updateEmployeeApprovedRightsMarker(view.key, key, operation, 'clear');
+                        operations.delete(key);
+                    }
                 }
-                if (!operations.size) employeeApprovedRightsWrites.delete(view.key);
                 setEmployeeAccessResult('employeeApprovedRightsNotice');
             }
             renderEmployeeApprovedRights(view, response.data);

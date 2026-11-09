@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: v1.5.3 | Incompatible legacy copy can be explicitly migrated to the latest template. */
+/* Version: v1.5.5 | Independent general proposal creation and restored document kinds. */
 (() => {
   'use strict';
   const TABLE = 'erp_proposals';
@@ -13,7 +13,8 @@
     const save = byId('saveSiteButton'), copy = byId('copySiteButton');
     const form = byId('proposalForm');
     let current = null, rows = [], busy = false, dirty = false, pending = null, available = false;
-    let presetFilter = hooks.getFacilityType?.() === 'school' ? 'school' : 'public';
+    const kind = value => ['school','general'].includes(value) ? value : 'public';
+    let presetFilter = kind(hooks.getFacilityType?.());
     // localStorage holds only the server ID. Explicit apply drafts use account-scoped IndexedDB.
     const resumeKey = hooks.userId ? `yonginsolar.erp.proposal-current.v1.${hooks.coopId}.${hooks.userId}` : '';
     let resumeId = '', rememberFailed = false;
@@ -54,27 +55,29 @@
     }
     function options() {
       const selected = select.value;
-      select.replaceChildren(new Option('대상지를 선택해 주세요', ''));
+      select.replaceChildren(new Option(presetFilter === 'general' ? '제안서를 선택해 주세요' : '대상지를 선택해 주세요', ''));
       const isSchool = presetFilter === 'school';
       const presets = document.createElement('optgroup');
       presets.label = isSchool ? '학교 기본 대상지 · 새 제안서 시작' : '공공기관 기본 대상지 · 새 제안서 시작';
       window.ProposalPresets.items
         .filter((site) => site.fields.facilityType === presetFilter)
         .forEach((site) => presets.append(new Option(site.name, `preset:${site.id}`)));
-      select.append(presets);
+      if (presets.children.length) select.append(presets);
       const saved = document.createElement('optgroup'); saved.label = 'ERP에 저장한 제안서 · 최근 200개';
       rows.forEach((row) => saved.append(new Option(row.name, `saved:${row.id}`)));
       if (current && !rows.some((row) => row.id === current.id)) saved.append(new Option(current.name, `saved:${current.id}`));
       select.append(saved); select.value = selected;
     }
     function setPresetFilter(next, { syncDocument = true, resetSelection = true } = {}) {
-      presetFilter = next === 'school' ? 'school' : 'public';
-      byId('publicProposalKindButton').classList.toggle('active', presetFilter === 'public');
-      byId('schoolProposalKindButton').classList.toggle('active', presetFilter === 'school');
-      byId('proposalSiteSelectLabel').textContent = presetFilter === 'school'
-        ? '학교 기본 대상지 또는 저장한 제안서'
-        : '공공기관 기본 대상지 또는 저장한 제안서';
-      byId('newSiteButton').textContent = presetFilter === 'school' ? '+ 새 학교 추가' : '+ 새 공공시설 추가';
+      presetFilter = kind(next);
+      for (const name of ['public','school','general']) {
+        const button = byId(`${name}ProposalKindButton`);
+        button.classList.toggle('active', presetFilter === name);
+        button.setAttribute('aria-pressed', String(presetFilter === name));
+      }
+      byId('proposalSiteSelectLabel').textContent = presetFilter === 'general' ? '저장한 제안서'
+        : presetFilter === 'school' ? '학교 기본 대상지 또는 저장한 제안서' : '공공기관 기본 대상지 또는 저장한 제안서';
+      byId('newSiteButton').textContent = presetFilter === 'general' ? '+ 새 범용 제안서' : presetFilter === 'school' ? '+ 새 학교 추가' : '+ 새 공공시설 추가';
       if (resetSelection) select.value = '';
       options();
       if (syncDocument && hooks.setFacilityType?.(presetFilter)) markDirty();
@@ -103,7 +106,7 @@
       }
     }
     async function mayReplace() {
-      return !(dirty || hooks.isDirty()) || (await window.CoopDialog.confirm('현재 화면의 저장하지 않은 변경을 버리고 다른 대상지를 불러올까요? 보관하려면 취소 후 먼저 저장해 주세요.'));
+      return !(dirty || hooks.isDirty()) || (await window.CoopDialog.confirm('현재 화면의 저장하지 않은 변경을 버리고 다른 제안서를 열까요? 보관하려면 취소 후 먼저 저장해 주세요.'));
     }
     async function readSnapshot(row) {
       const { data, error } = await request(hooks.client.storage.from(BUCKET).download(row.object_path));
@@ -190,17 +193,23 @@
       options(); select.value = `saved:${row.id}`;
       say(`「${title}」 저장 완료. 새로고침해도 사진과 수정 내용이 함께 열립니다.${rememberNotice()}`);
     }
-    setPresetFilter(presetFilter, { syncDocument: false, resetSelection: false });
-    byId('publicProposalKindButton').addEventListener('click', () => setPresetFilter('public'));
-    byId('schoolProposalKindButton').addEventListener('click', () => setPresetFilter('school'));
-    byId('loadSiteButton').addEventListener('click', () => run(load));
-    byId('newSiteButton').addEventListener('click', () => run(async () => {
+    async function startNew(next) {
       if (!(await mayReplace())) return;
-      await hooks.newSite({ fields: window.ProposalPresets.blank(presetFilter) }); await detach(); name.value = ''; dirty = true;
-      say(presetFilter === 'school'
+      await hooks.newSite({ fields:next === 'general' ? {facilityType:'general'} : window.ProposalPresets.blank(next) });
+      await detach();
+      setPresetFilter(next, {syncDocument:false}); dirty = true;
+      say(next === 'general' ? '새 범용 제안서입니다. 제목과 필요한 항목만 입력하세요.' : next === 'school'
         ? '새 학교 제안서를 시작합니다. 학교 정보와 설치 계획을 입력해 저장해 주세요.'
         : '새 공공시설 제안서를 시작합니다. 대상지 정보를 입력해 저장해 주세요.');
-    }));
+    }
+    setPresetFilter(presetFilter, { syncDocument: false, resetSelection: false });
+    for (const next of ['public','school','general']) byId(`${next}ProposalKindButton`).addEventListener('click', () => {
+      if (next === presetFilter) return;
+      if (next === 'general' || presetFilter === 'general') return run(() => startNew(next));
+      setPresetFilter(next);
+    });
+    byId('loadSiteButton').addEventListener('click', () => run(load));
+    byId('newSiteButton').addEventListener('click', () => run(() => startNew(presetFilter)));
     save.addEventListener('click', () => run(() => persist(false)));
     copy.addEventListener('click', () => run(() => persist(true)));
     async function restoreLocalDraft() {

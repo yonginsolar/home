@@ -109,6 +109,8 @@
     .proposal-kind-button { min-height:64px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--surface-soft); color:var(--ink); font-weight:850; line-height:1.35; cursor:pointer; }
     .proposal-kind-button span { display:block; margin-top:3px; color:var(--muted); font-size:11px; font-weight:650; }
     .proposal-kind-button.active { border-color:var(--green); background:var(--green-soft); box-shadow:0 0 0 2px color-mix(in srgb, var(--green) 14%, transparent); }
+    #generalProposalKindButton { grid-column:1 / -1; }
+    .editor[data-proposal-kind="general"] > [data-solar-only] { display:none !important; }
     .companion-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; color:var(--muted); font-size:12px; font-weight:800; }
     .companion-count { color:var(--green); white-space:nowrap; }
     .companion-directors { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin-bottom:11px; }
@@ -178,7 +180,7 @@
     <header class="topbar">
       <div class="title-wrap">
         <strong>📑 제안서 만들기 <span id="appVersion" style="display:inline;color:var(--muted);font-size:11px">v1.6.7</span></strong>
-        <span>공공기관·주차장용과 학교용을 구분해 제안서를 만듭니다.</span>
+        <span>공공기관·주차장용, 학교용 또는 범용 제안서를 만듭니다.</span>
       </div>
       <div class="top-actions">
         <button class="btn" id="printTopButton" type="button">🖨️ PDF 저장</button>
@@ -191,14 +193,15 @@
         <p class="help" id="proposalIssuerStatus" role="status"></p>
         <div class="intro">
           <strong>사용 순서</strong><br>
-          먼저 공공기관용 또는 학교용을 고른 뒤 대상지·용량·사진을 입력하세요. 입력 중에는 미리보기가 새로 만들어지지 않으며, <b>문구 확인</b>을 누르면 제안서 전체에 한 번에 반영됩니다. 필요하면 <b>최종 문구 수정</b>을 켜서 미리보기 문장을 직접 고친 뒤 PDF나 HTML로 저장하세요.
+          제안서 유형을 고르고 내용을 입력한 뒤 <b>문구 확인</b>을 누르세요. 필요하면 <b>최종 문구 수정</b>으로 미리보기 문장을 고친 뒤 PDF나 HTML로 저장할 수 있습니다.
         </div>
 
         <section class="section" data-library-controls>
-          <h2>📂 대상지 선택·저장</h2>
+          <h2>📂 제안서 선택·저장</h2>
           <div class="proposal-kind-picker" aria-label="새 제안서 유형 선택">
             <button class="proposal-kind-button active" id="publicProposalKindButton" type="button">🏛️ 공공기관·주차장용<span>의무용량·차양·주민편익 중심</span></button>
             <button class="proposal-kind-button" id="schoolProposalKindButton" type="button">🏫 학교용<span>학교 환원·교육·설치비 부담 없음</span></button>
+            <button class="proposal-kind-button" id="generalProposalKindButton" type="button" aria-pressed="false">📝 범용 제안서<span>사업·협력·행사 등 자유 제안</span></button>
           </div>
           <div class="field">
             <label for="proposalSiteSelect" id="proposalSiteSelectLabel">공공기관 기본 대상지 또는 저장한 제안서</label>
@@ -221,7 +224,20 @@
           <span class="help">ERP에 저장한 제안서는 다른 컴퓨터에서도 불러올 수 있습니다. 사진·표시 영역·최종 수정 문구를 함께 보관합니다. 저장 버튼을 눌러야 서버에 반영됩니다.</span>
         </section>
 
-        <section class="section">
+        <section class="section" id="generalProposalSection" hidden>
+          <h2>제안 내용</h2>
+          <div class="field"><label for="generalTitle">제안서 제목</label><input id="generalTitle" maxlength="100" required placeholder="예: 지역 공동사업 협력 제안"></div>
+          <div class="field"><label for="generalRecipient">받는 곳</label><input id="generalRecipient" maxlength="100"></div>
+          <div class="field"><label for="generalPurpose">배경·목적</label><textarea id="generalPurpose" maxlength="2000" rows="4"></textarea></div>
+          <div class="field"><label for="generalDetails">제안 내용</label><textarea id="generalDetails" maxlength="4000" rows="6"></textarea></div>
+          <div class="field"><label for="generalSchedule">추진 일정</label><textarea id="generalSchedule" maxlength="1200" rows="3"></textarea></div>
+          <div class="field"><label for="generalBudget">예산·필요 자원</label><textarea id="generalBudget" maxlength="1200" rows="3"></textarea></div>
+          <div class="field"><label for="generalImpact">기대 효과</label><textarea id="generalImpact" maxlength="1200" rows="3"></textarea></div>
+          <div class="field"><label for="generalContact">담당자·연락처</label><input id="generalContact" maxlength="150"></div>
+          <div class="field"><label for="generalPhoto">참고 사진 (선택)</label><input id="generalPhoto" type="file" accept="image/png,image/jpeg,image/webp"><span class="help" id="generalPhotoName">선택한 사진 없음</span></div>
+        </section>
+
+        <section class="section" data-solar-only>
           <h2>1. 제안서 기본 정보</h2>
           <div class="grid-2">
             <div class="field">
@@ -239,7 +255,7 @@
           </div>
           <div class="field">
             <label for="facilityType">대상지 구분</label>
-            <select id="facilityType" disabled aria-describedby="facilityTypeHelp"><option value="public">공공시설·공영주차장</option><option value="school">학교</option></select>
+            <select id="facilityType" disabled aria-describedby="facilityTypeHelp"><option value="public">공공시설·공영주차장</option><option value="school">학교</option><option value="general">범용 제안서</option></select>
             <span class="help" id="facilityTypeHelp">위에서 선택한 제안서 유형이 자동으로 반영됩니다.</span>
           </div>
           <div class="grid-2">
@@ -306,7 +322,7 @@
           </div>
         </section>
 
-        <section class="section" id="schoolPlanningSection" hidden>
+        <section class="section" id="schoolPlanningSection" data-solar-only hidden>
           <h2>2. 학교 태양광 계획</h2>
           <div class="field">
             <label for="schoolPublicProgramStatus">햇빛이음학교 반영 여부 · 제안서 앞부분에는 표시하지 않음</label>
@@ -344,7 +360,7 @@
           <span class="help">선택한 공간은 제안 문구에 함께 반영됩니다. 각 구역은 3쪽 사진에 이름을 붙여 표시할 수 있으며, 설치 가능 여부와 용량은 구조·안전 검토 후 확정합니다.</span>
         </section>
 
-        <section class="section">
+        <section class="section" data-solar-only>
           <h2><span id="capacitySectionNumber">2.</span> 설치 용량</h2>
           <label class="switch-row existing-toggle"><input id="noMandatory" type="checkbox"><span><b>의무 설치 없는 사업</b><br>학교 등 자발적 설치 제안은 의무 대응 문구 대신 설치·운영·교육 목적을 반영합니다.</span></label>
           <div class="field" id="voluntaryCapacityField" hidden><label for="voluntaryBaseKw">기준 설치안 용량(kW) · 자발적 설치</label><input data-number-group id="voluntaryBaseKw" type="number" min="0.1" step="0.1" placeholder="현장조사 후 입력"></div>
@@ -382,7 +398,7 @@
           </div>
         </section>
 
-        <details class="section">
+        <details class="section" data-solar-only>
           <summary><span id="financeSectionNumber">3.</span> 수지 계산 가정</summary>
           <div class="details-body">
             <div class="grid-2">
@@ -411,7 +427,7 @@
           </div>
         </details>
 
-        <details class="section">
+        <details class="section" data-solar-only>
           <summary><span id="operationsSectionNumber">4.</span> 일정·조합 현황·연락처</summary>
           <div class="details-body">
             <button class="btn" type="button" id="refreshCoopStatsButton">🔄 최신 조합 현황 불러오기</button>
@@ -490,7 +506,7 @@
           </div>
         </details>
 
-        <label class="switch-row">
+        <label class="switch-row" data-solar-only>
           <input id="keepNamsaOverlay" name="keepNamsaOverlay" type="checkbox" checked>
           <span><b>남사읍 예시 사진의 주차열 표시선 유지</b><br>다른 대상지 사진을 올리면 자동으로 꺼집니다.</span>
         </label>
@@ -517,9 +533,9 @@
 
   <script src="proposal_presets.js?v=1.6.0"></script>
   <script src="proposal_drafts.js?v=1.4.5"></script>
-  <script src="proposal_library.js?v=1.5.4" integrity="sha384-mbawS7q/7mwLsbHifaUO2/qlov8mhUTSQOivboCqYv8hrPidhWKw7q6fWKM9OXOf" crossorigin="anonymous"></script>
+  <script src="proposal_library.js?v=1.5.5" integrity="sha384-GBfrTvtQKL/7GoZj54pDyqqHaB+HadzeoOguSgncOcxSAn//CDkYfw9C2LG82++c" crossorigin="anonymous"></script>
   <script src="proposal_tenant.js?v=1.0.0" integrity="sha384-ADHZOO5PinKUO7MhzqKpMd3lceCAnXqlCRD9mD4z/fTyaIUg3OjbNwO91ZGCs1hn" crossorigin="anonymous"></script>
   <script src="proposal_sections.js?v=1.6.2" integrity="sha384-tHF85SmxDf/029IX3GJ7S2x8P4H943dgofn2mNnGYyh8kL5pfZ3NjJRfhA0vP2km" crossorigin="anonymous"></script>
-  <script src="proposal_builder.js?v=1.6.7" integrity="sha384-M4cHMwoCwBsR1w2mvZhtvFBeJzyfBxcCekbLZI8zpXAQuIannxnP26wjOW1KBOQo" crossorigin="anonymous"></script>
+  <script src="proposal_builder.js?v=1.6.8" integrity="sha384-Xp9VJPKtAT4mCKsV5Eb+A2zLDbYBhADplE1LvG7S7jput+j8fWvovg5Dc0we//qj" crossorigin="anonymous"></script>
 </body>
 </html>

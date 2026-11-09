@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.7';
+  const VERSION = '1.6.8';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -20,6 +20,8 @@
     'visitCompanionsJson', 'visitDirector', 'visitDirectorPhone', 'statsAsOf',
     'schoolPublicProgramStatus', 'schoolPublicProgramKw', 'schoolInstallArea', 'schoolOtherArea', 'schoolOwnership'
   ];
+  const GENERAL_FIELDS = ['generalTitle', 'generalRecipient', 'generalPurpose', 'generalDetails',
+    'generalSchedule', 'generalBudget', 'generalImpact', 'generalContact'];
 
   const state = {
     client: null,
@@ -333,6 +335,10 @@
   }
 
   function readModel() {
+    if (textValue('facilityType') === 'general') {
+      return { facilityType:'general', proposalDate:textValue('proposalDate'), proposalVersion:textValue('proposalVersion'),
+        issuer:state.documentIssuer, ...Object.fromEntries(GENERAL_FIELDS.map(id => [id,textValue(id)])) };
+    }
     normalizeExistingZero();
     const noMandatory = document.getElementById('noMandatory').checked;
     const mandatoryKw = !noMandatory && document.getElementById('mandatoryKnown').checked && textValue('mandatoryKw') !== '' ? numberValue('mandatoryKw') : null;
@@ -393,6 +399,10 @@
   }
 
   function validateModel(model) {
+    if (model.facilityType === 'general') {
+      if (!model.generalTitle || !model.proposalDate) throw new Error('제안서 제목을 입력해 주세요.');
+      return;
+    }
     if (!model.proposalDate || !model.facilityName || !model.regionFull || !model.regionShort) {
       throw new Error('제안일, 대상 시설과 지역명을 입력해 주세요.');
     }
@@ -674,6 +684,7 @@
   }
 
   function buildPreviewDocument(model) {
+    if (model.facilityType === 'general') return buildGeneralPreviewDocument(model);
     const doc = new DOMParser().parseFromString(state.templateHtml, 'text/html');
     doc.querySelectorAll('script').forEach((node) => node.remove());
     const replaceText = createReplacer(buildReplacementEntries(model));
@@ -697,6 +708,43 @@
     appendBuilderStyles(doc);
     applyPhotoAspectRatio(doc, state.photoAspectRatio);
     window.ProposalTenant.apply(doc, model);
+    applyPreviewCopyEdits(doc);
+    doc.title = pdfDocumentTitle(model.facilityName);
+    return '<!doctype html>\n' + doc.documentElement.outerHTML;
+  }
+
+  function buildGeneralPreviewDocument(model) {
+    const doc = new DOMParser().parseFromString(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+      *{box-sizing:border-box}body{margin:0;padding:clamp(8px,3vw,28px);background:#eef4ef;color:#1b3229;font:1rem/1.7 system-ui,sans-serif}
+      .slide{max-width:850px;margin:auto;background:#fff;padding:clamp(18px,5vw,46px);border-radius:14px;overflow-wrap:anywhere}
+      header{border-top:5px solid #207154;border-bottom:1px solid #cbd9d0;padding:18px 0}h1{font-size:clamp(1.6rem,5vw,2.6rem);line-height:1.25;margin:.25em 0 .45em}
+      .issuer,.version{color:#395d4e;font-size:.9rem}h2{margin:1.3em 0 .25em;font-size:1.15em;color:#14593f}p{white-space:pre-wrap;margin:0}
+      figure{margin:1.5em 0 0}img{display:block;width:auto;max-width:100%;max-height:110mm;object-fit:contain}footer{margin-top:1.7em;border-top:1px solid #cbd9d0;padding-top:.7em}
+      @page{size:A4;margin:16mm}@media print{body,.slide{margin:0;padding:0;background:#fff;border-radius:0}h2{break-after:avoid}header,figure{break-inside:avoid}}
+    </style></head><body><main class="slide"><header><div class="issuer"></div><h1></h1><p class="recipient" hidden></p></header><div class="general-content"></div><figure class="general-photo" hidden><img alt="제안 참고 사진"></figure><footer class="version"></footer></main></body></html>`, 'text/html');
+    doc.title = pdfDocumentTitle(model.generalTitle, 'general');
+    doc.querySelector('.issuer').textContent = model.issuer?.name || '제안 조합';
+    doc.querySelector('h1').textContent = model.generalTitle;
+    const recipient = doc.querySelector('.recipient');
+    recipient.hidden = !model.generalRecipient;
+    if (model.generalRecipient) recipient.textContent = `수신: ${model.generalRecipient}`;
+    const content = doc.querySelector('.general-content');
+    for (const [id, label] of [['generalPurpose','배경·목적'],['generalDetails','제안 내용'],['generalSchedule','추진 일정'],['generalBudget','예산·필요 자원'],['generalImpact','기대 효과'],['generalContact','담당자·연락처']]) {
+      if (!model[id]) continue;
+      const section = doc.createElement('section'), heading = doc.createElement('h2'), paragraph = doc.createElement('p');
+      heading.textContent = label; paragraph.textContent = model[id]; section.append(heading, paragraph); content.append(section);
+    }
+    if (state.siteImageDataUrl) {
+      doc.querySelector('.general-photo').hidden = false;
+      doc.querySelector('.general-photo img').src = state.siteImageDataUrl;
+    } else doc.querySelector('.general-photo').remove();
+    doc.querySelector('.version').textContent = `제안서 ${model.proposalVersion} · ${formatDate(model.proposalDate)}`;
+    appendBuilderStyles(doc);
+    applyPreviewCopyEdits(doc);
+    return '<!doctype html>\n' + doc.documentElement.outerHTML;
+  }
+
+  function applyPreviewCopyEdits(doc) {
     editableCandidates(doc).forEach((node, index) => {
       node.dataset.copyId = String(index);
       node.dataset.copyBase = node.textContent;
@@ -711,8 +759,6 @@
       node.textContent = edit.text;
       node.style.whiteSpace = 'pre-line';
     });
-    doc.title = pdfDocumentTitle(model.facilityName);
-    return '<!doctype html>\n' + doc.documentElement.outerHTML;
   }
 
   function normalizeCopyMeaning(value) {
@@ -769,7 +815,7 @@
   function editableCandidates(doc) {
     const selector = 'h1, h2, h3, h4, p, li, td, th, .cover-kicker, .subtitle, .date, .banner, .note';
     return [...doc.querySelectorAll(selector)]
-      .filter((node) => !node.closest('.control-bar') && !node.closest('.page') && !node.closest('.version'))
+      .filter((node) => !node.closest('.control-bar') && !node.closest('.page') && !node.closest('.version') && !node.hidden)
       .filter((node) => !node.parentElement?.closest(selector));
   }
 
@@ -791,7 +837,7 @@
       setStatus('수정할 문장을 미리보기에서 눌러 직접 고치세요. 수정 내용은 PDF와 HTML에 그대로 반영됩니다.', true);
     } else {
       el.editButton.textContent = '✍️ 최종 문구 수정';
-      setStatus(state.manualDirty ? '직접 고친 문구가 미리보기에 남아 있습니다. PDF 또는 HTML로 저장할 수 있습니다.' : '입력값과 자동 계산을 반영했습니다.');
+      setStatus(state.manualDirty ? '직접 고친 문구가 미리보기에 남아 있습니다. PDF 또는 HTML로 저장할 수 있습니다.' : textValue('facilityType') === 'general' ? '입력한 내용을 미리보기에 반영했습니다.' : '입력값과 자동 계산을 반영했습니다.');
     }
   }
 
@@ -1110,6 +1156,14 @@
   }
 
   function syncSchoolPlanningUi() {
+    const general = textValue('facilityType') === 'general';
+    el.form.dataset.proposalKind = general ? 'general' : 'solar';
+    el.form.noValidate = general;
+    const generalSection = document.getElementById('generalProposalSection');
+    generalSection.hidden = !general;
+    generalSection.querySelectorAll('input,textarea').forEach(input => { input.disabled = !general; });
+    if (general) el.resetButton.textContent = '↩️ 범용 제안서 초기화';
+    else el.resetButton.textContent = state.coopId !== window.ProposalTenant.mainId ? '↩️ 새 제안서로 초기화' : '↩️ 남사 예시로 초기화';
     const isSchool = textValue('facilityType') === 'school';
     document.getElementById('schoolPlanningSection').hidden = !isSchool;
     syncSchoolAreaUi();
@@ -1123,6 +1177,10 @@
     document.querySelector('label[for="voluntaryBaseKw"]').textContent = isSchool ? '전체 활용 기준용량(kW) · 선택' : '기준 설치안 용량(kW) · 자발적 설치';
     document.querySelector('label[for="expandedMinKw"]').textContent = isSchool ? '전체 활용 가능 범위 시작(kW) · 선택' : '제안 설치 범위 시작(kW) · 선택';
     document.querySelector('label[for="expandedKw"]').textContent = isSchool ? '학교 전체 활용 가능용량(kW) · 수지 계산 기준' : '제안 신규 설치용량(kW) · 수지 계산 기준';
+  }
+
+  function reportProposalValidity() {
+    return textValue('facilityType') === 'general' ? document.getElementById('generalTitle').reportValidity() : el.form.reportValidity();
   }
 
   function setFacilityTypeFromPicker(value) {
@@ -1150,8 +1208,12 @@
       state.loadedCopyEdits = [];
       state.copyRestoreMismatch = false;
     }
-    if (!el.form.reportValidity()) return false;
+    if (!reportProposalValidity()) return false;
     try {
+      if (applyPending && textValue('facilityType') === 'general') {
+        await state.imageLoadPromise;
+        if (state.imageLoadError) throw state.imageLoadError;
+      }
       refreshDocumentMetadata();
       const model = readModel();
       validateModel(model);
@@ -1172,9 +1234,9 @@
           const doc = el.previewFrame.contentDocument;
           await doc?.fonts?.ready;
           if (doc !== el.previewFrame.contentDocument) { resolve(); return; }
-          lockPhotoGeometry(doc);
+          if (model.facilityType !== 'general') lockPhotoGeometry(doc);
           const slideCount = doc?.querySelectorAll('.slide').length || 0;
-          el.pageCount.textContent = `${slideCount}쪽`;
+          el.pageCount.textContent = model.facilityType === 'general' ? 'A4' : `${slideCount}쪽`;
           doc?.addEventListener('input', (event) => {
             if (!event.target?.closest?.('[data-proposal-editable="true"]')) return;
             state.manualDirty = true;
@@ -1195,7 +1257,7 @@
             target.style.whiteSpace = 'pre-line';
             state.manualDirty = true; state.library?.markDirty();
           });
-          bindOverlayEditor(doc);
+          if (model.facilityType !== 'general') bindOverlayEditor(doc);
           applyEditMode();
           resolve();
         };
@@ -1227,12 +1289,10 @@
   }
 
   function saveDraft() {
-    const draft = {};
-    DRAFT_FIELDS.forEach((id) => {
-      const input = document.getElementById(id);
-      if (!input) return;
-      draft[id] = input.type === 'checkbox' ? input.checked : input.hasAttribute('data-number-group') ? ERPNumberInput.raw(input.value) : input.value;
-    });
+    // The account-scoped library already saves applied general drafts, including photos.
+    // Never hand the older lightweight solar restore path a different document format.
+    if (textValue('facilityType') === 'general') return;
+    const draft = collectFields();
     try {
       localStorage.setItem(state.draftKey, JSON.stringify({ ...draft, useSamplePhoto: state.useSamplePhoto, proposalIssuer: state.documentIssuer }));
     } catch (error) {
@@ -1257,13 +1317,15 @@
   }
 
   function collectFields() {
-    return Object.fromEntries(DRAFT_FIELDS.map((id) => {
+    const keys = textValue('facilityType') === 'general' ? ['facilityType','proposalDate','proposalVersion',...GENERAL_FIELDS] : DRAFT_FIELDS;
+    return Object.fromEntries(keys.map((id) => {
       const input = document.getElementById(id);
       return [id, input.type === 'checkbox' ? input.checked : input.hasAttribute('data-number-group') ? ERPNumberInput.raw(input.value) : input.value];
     }));
   }
 
   async function refreshCoopStats() {
+    if (textValue('facilityType') === 'general') return;
     const button = document.getElementById('refreshCoopStatsButton');
     const status = document.getElementById('coopStatsStatus');
     if (state.statsLoading) return;
@@ -1327,6 +1389,10 @@
       }
       if (input.type === 'checkbox') input.checked = fields[id] === true;
       else input.value = String(fields[id] ?? '').slice(0, input.maxLength > 0 ? input.maxLength : 1000);
+    });
+    GENERAL_FIELDS.forEach(id => {
+      const input = document.getElementById(id);
+      input.value = fields.facilityType === 'general' ? String(fields[id] ?? '').slice(0, input.maxLength) : '';
     });
     refreshDocumentMetadata();
     restoreVisitCompanions(fields);
@@ -1448,14 +1514,16 @@
       .map((node) => ({ index: Number(node.dataset.copyId), baseText: node.dataset.copyBase, text: node.innerText }))
       .filter(isSubstantiveCopyEdit);
     if (copyEdits.length > 400 || copyEdits.some((edit) => edit.text.length > 20000)) throw new Error('직접 수정한 문구가 저장 가능한 길이를 넘었습니다. 문장을 나누거나 길이를 줄여 주세요.');
-    return { format: 1, builderVersion: VERSION, issuer: state.documentIssuer, fields: collectFields(),
+    return { format: textValue('facilityType') === 'general' ? 2 : 1, builderVersion: VERSION, issuer: state.documentIssuer, fields: collectFields(),
       photo: state.siteImageDataUrl, photoName: state.photoName,
       useSamplePhoto: state.useSamplePhoto, photoAspectRatio: state.photoAspectRatio,
       overlays: structuredClone(state.customOverlays), copyEdits };
   }
 
   async function restoreSnapshot(snapshot) {
-    if (snapshot?.format !== 1 || !snapshot.fields || typeof snapshot.fields !== 'object') throw new Error('지원하지 않는 제안서 저장 형식입니다.');
+    const general = snapshot?.fields?.facilityType === 'general';
+    if (snapshot?.format !== (general ? 2 : 1) || !snapshot.fields || typeof snapshot.fields !== 'object') throw new Error('지원하지 않는 제안서 저장 형식입니다.');
+    if (general && !String(snapshot.fields.generalTitle || '').trim()) throw new Error('저장된 범용 제안서 제목을 확인할 수 없습니다.');
     const issuer = window.ProposalTenant.restored(snapshot.issuer,state.coopId,state.issuer);
     const photo = typeof snapshot.photo === 'string' ? snapshot.photo : '';
     if (photo && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(photo) || photo.length > 17 * 1024 * 1024)) throw new Error('저장된 사진 형식을 확인할 수 없습니다.');
@@ -1484,6 +1552,8 @@
     state.lastExistingKw = Number(ERPNumberInput.raw(snapshot.fields.existingKw)) || 0;
     setFields(snapshot.fields);
     el.siteImage.value = '';
+    document.getElementById('generalPhoto').value = '';
+    document.getElementById('generalPhotoName').textContent = photo && snapshot.fields.facilityType === 'general' ? state.photoName || '저장한 참고 사진' : '선택한 사진 없음';
     el.siteImageName.textContent = photo ? state.photoName || '저장한 대상지 사진' : state.useSamplePhoto ? '남사읍 예시 위성사진 사용 중' : '대상지 사진 미등록';
     (await renderPreview());
     await withTimeout(waitForPreview(), 'PREVIEW');
@@ -1496,10 +1566,13 @@
 
   async function startSite(preset) {
     const fields = { ...collectFields(), ...(preset?.fields || window.ProposalPresets.blank()), visitCompanionsJson: '[]', visitDirector: '', visitDirectorPhone: '' };
+    if (fields.facilityType === 'general') {
+      Object.assign(fields, Object.fromEntries(GENERAL_FIELDS.map(id => [id,''])), {generalTitle:'범용 제안서'});
+    }
     if (!fields.facilityName) fields.facilityName = '새 대상지';
-    await restoreSnapshot({ format: 1, issuer: state.issuer, fields, photo: '', overlays: [], copyEdits: [], useSamplePhoto: false });
-    await refreshCoopStats();
-    document.getElementById('facilityName').focus();
+    await restoreSnapshot({ format: fields.facilityType === 'general' ? 2 : 1, issuer: state.issuer, fields, photo: '', overlays: [], copyEdits: [], useSamplePhoto: false });
+    if (fields.facilityType !== 'general') await refreshCoopStats();
+    document.getElementById(fields.facilityType === 'general' ? 'generalTitle' : 'facilityName').focus();
   }
 
   function restoreDraft() {
@@ -1525,12 +1598,12 @@
       .slice(0, 120) || 'proposal';
   }
 
-  function pdfDocumentTitle(facilityName) {
+  function pdfDocumentTitle(facilityName, kind = 'public') {
     const facility = String(facilityName || '').normalize('NFC')
       .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').trim() || '대상 시설';
     // Keep the requested spaces; the PDF printer adds the .pdf extension.
     const issuer = String(state.documentIssuer?.name || '').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g,'_');
-    return `태양광 발전사업제안서_${facility}_${issuer || '조합명 확인 필요'}`;
+    return kind === 'general' ? `${facility}_${issuer || '제안서'}` : `태양광 발전사업제안서_${facility}_${issuer || '조합명 확인 필요'}`;
   }
 
   function dataUrlFromBlob(blob) {
@@ -1604,7 +1677,8 @@
       const html = await buildDownloadHtml(await prepareOutput());
       const model = readModel();
       const datePart = model.proposalDate.replaceAll('-', '');
-      const filename = `${sanitizeFilename(`${datePart}_${model.facilityName}_주차장_햇빛발전소_제안서_${model.proposalVersion}`)}.html`;
+      const name = model.facilityType === 'general' ? model.generalTitle : `${model.facilityName}_주차장_햇빛발전소_제안서`;
+      const filename = `${sanitizeFilename(`${datePart}_${name}_${model.proposalVersion}`)}.html`;
       downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), filename);
       setStatus('HTML 파일을 저장했습니다. 파일만 옮겨도 사진을 포함한 제안서가 열립니다.');
     } catch (error) {
@@ -1636,7 +1710,7 @@
     if (contactRequest) await contactRequest.promise;
     if (state.directorContactRequest) throw new Error('동행 이사 연락처를 불러오는 중입니다. 입력이 끝난 뒤 다시 저장해 주세요.');
     if (state.imageLoadError) throw state.imageLoadError;
-    if (!el.form.reportValidity()) throw new Error('입력값을 확인한 뒤 다시 저장해 주세요.');
+    if (!reportProposalValidity()) throw new Error('입력값을 확인한 뒤 다시 저장해 주세요.');
     validateModel(readModel());
     const changedFields = JSON.stringify(collectFields()) !== JSON.stringify(state.previewFields);
     const pendingOverlayLabel = state.customOverlays.some((overlay) => Object.prototype.hasOwnProperty.call(overlay, 'draftLabel'));
@@ -1654,7 +1728,7 @@
       }
     })), 'IMAGES');
     await withTimeout(doc.fonts.ready, 'FONTS');
-    if (!lockPhotoGeometry(doc)) throw new Error('대상지 사진의 배치를 확인하지 못했습니다. 미리보기를 다시 연 뒤 출력해 주세요.');
+    if (textValue('facilityType') !== 'general' && !lockPhotoGeometry(doc)) throw new Error('대상지 사진의 배치를 확인하지 못했습니다. 미리보기를 다시 연 뒤 출력해 주세요.');
     refreshDocumentMetadata(doc);
     return doc;
   }
@@ -1665,7 +1739,7 @@
     setStatus('사진과 제안서 준비가 끝나면 인쇄 창을 엽니다.');
     try {
       const doc = await prepareOutput();
-      const title = pdfDocumentTitle(state.previewFields.facilityName);
+      const title = pdfDocumentTitle(state.previewFields.generalTitle || state.previewFields.facilityName, state.previewFields.facilityType);
       // PDF printers may use either the top-level page title or the printed frame title.
       document.title = title;
       doc.title = title;
@@ -1680,16 +1754,16 @@
     }
   }
 
-  async function handleSiteImageChange() {
+  async function handleSiteImageChange(input = el.siteImage) {
     const sequence = ++state.imageSequence;
-    const file = el.siteImage.files?.[0];
+    const file = input.files?.[0];
     if (!file) return;
     if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
-      el.siteImage.value = '';
+      input.value = '';
       throw new Error('PNG, JPG 또는 WebP 사진만 사용할 수 있습니다.');
     }
     if (file.size > 12 * 1024 * 1024) {
-      el.siteImage.value = '';
+      input.value = '';
       throw new Error('사진은 12MB 이하로 선택해 주세요.');
     }
     const dataUrl = await dataUrlFromBlob(file);
@@ -1701,6 +1775,12 @@
     state.photoName = file.name;
     state.useSamplePhoto = false;
     state.library?.markDirty();
+    if (input.id === 'generalPhoto') {
+      document.getElementById('generalPhotoName').textContent = file.name;
+      state.formPending = true;
+      setStatus('참고 사진을 선택했습니다. 「문구 확인」을 눌러 미리보기에 반영하세요.', true);
+      return;
+    }
     state.customOverlays = [];
     state.selectedOverlayId = '';
     state.overlayDrawMode = false;
@@ -1723,6 +1803,12 @@
   }
 
   async function resetSample() {
+    if (textValue('facilityType') === 'general') {
+      if (await window.CoopDialog.confirm('현재 범용 제안서의 입력값과 사진을 지우고 새로 시작할까요?')) {
+        await state.library.resetLocally(() => startSite({fields:{facilityType:'general'}}));
+      }
+      return;
+    }
     const own = state.coopId !== window.ProposalTenant.mainId;
     if (!(await window.CoopDialog.confirm(own?'입력값과 직접 수정한 문구를 지우고 새 제안서로 돌아갈까요?':'입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?'))) return;
     await state.library.resetLocally(async () => {
@@ -1769,7 +1855,7 @@
       void state.library?.applyLocally(async () => (await renderPreview({ force: true, applyPending: true })));
     });
     el.form.addEventListener('input', (event) => {
-      if (event.target === el.siteImage) return;
+      if (event.target === el.siteImage || event.target.id === 'generalPhoto') return;
       if (event.target === el.overlayAngle) return;
       if (event.target === el.selectedOverlayLabel) return;
       if (event.target.closest('[data-library-controls]')) return;
@@ -1841,16 +1927,16 @@
       setVisitCompanions(rows);
       state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
     });
-    el.siteImage.addEventListener('change', () => {
+    [el.siteImage, document.getElementById('generalPhoto')].forEach(input => input.addEventListener('change', () => {
       state.imageLoadError = null;
       const sequence = state.imageSequence + 1;
-      state.imageLoadPromise = handleSiteImageChange().catch((error) => {
+      state.imageLoadPromise = handleSiteImageChange(input).catch((error) => {
         if (sequence !== state.imageSequence) return;
         state.imageLoadError = new Error(error?.message?.includes('사진') ? error.message : '사진을 읽지 못했습니다. 다른 파일을 선택해 주세요.');
         console.error(`[proposal-builder ${VERSION}] image load failed`, error);
         setStatus(state.imageLoadError.message, true);
       });
-    });
+    }));
     el.addOverlayButton.addEventListener('click', toggleOverlayDrawMode);
     el.deleteOverlayButton.addEventListener('click', deleteSelectedOverlay);
     el.clearOverlayButton.addEventListener('click', clearOverlays);

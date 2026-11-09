@@ -8,7 +8,7 @@
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
     ['btnAccounting', '회계 관리', 'accounting.html', 'accounting', ['accounting.view'], '▤'],
-    ['btnAdmin', '직원 관리', 'admin_employee.html', 'hr', ['hr.admin'], '♙'],
+    ['btnAdmin', '직원 관리', 'admin_employee.html', 'hr', ['hr.admin'], '♙', true],
     ['btnCoopSettings', '조합 설정', 'admin_employee.html?section=settings', 'hr', ['hr.admin'], '⚙'],
     ['btnMemberAdmin', '조합원 관리', 'admin_member.html?scope=member_admin&tab=dashboard', 'member_admin', ['member.admin'], '♧', true],
     ['btnParticipationAnalytics', '조합원 참여 현황', 'participation_analytics.html', 'member_admin', ['member.admin'], '▥'],
