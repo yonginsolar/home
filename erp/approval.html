@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.148 | Change: 2026-11-09 - Align approval list cards, actions and status. -->
+<!-- Version: v1.2.149 | Change: 2026-11-09 - Add approval inbox, archive and composer layouts. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.148 | approval.html');</script>
+  <script>console.log('[Version] v1.2.149 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -773,6 +773,8 @@
   <meta name="erp-workflow-revision" content="20261010.1">
   <link rel="stylesheet" href="workflow_ease.css?v=20261010-1">
   <script src="workflow_ease.js?v=20261010-1" defer></script>
+  <link rel="stylesheet" href="approval_workspace_ui.css?v=1.0.0" integrity="sha384-G/XCIvqCzILl+mDKxA4qE4B19I9zOBLjWk+SMRHaS2AK6AbQcpDXEQzbhyRICocL" crossorigin="anonymous">
+  <script src="approval_workspace_ui.js?v=1.0.0" integrity="sha384-VC0lMOHO2oqlniKFKmC77xuD5wOmIvtAkkGyLvv8oc2qs9bpZAEGgvGYmILTcxge" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 <body class="erp-unified erp-hybrid-workspace erp-page-approval" data-erp-mobile-task="approval">
@@ -805,6 +807,7 @@
   <div id="delegateBanner" class="delegate-banner hidden"></div>
 
   <div id="view-draft">
+    <div class="approval-composer-layout">
     <form id="draftForm" onsubmit="handleDraftSubmit(event)">
 
       <div class="approval-draft-status">
@@ -1590,9 +1593,36 @@
         <button type="submit" class="btn btn-primary w-100 py-3 fw-bold btn-lg" id="btnSubmit">상신하기</button>
       </div>
     </form>
+      <aside id="approvalComposerSummary" class="approval-composer-summary" aria-labelledby="approvalComposerSummaryTitle" hidden>
+        <h2 id="approvalComposerSummaryTitle" class="h6 fw-bold">기안 요약</h2>
+        <dl>
+          <div><dt>결재 구분</dt><dd data-composer-type>—</dd></div>
+          <div><dt>제목</dt><dd data-composer-title>—</dd></div>
+          <div><dt>결재선</dt><dd data-composer-line>—</dd></div>
+          <div><dt>첨부</dt><dd data-composer-files>—</dd></div>
+        </dl>
+        <button type="button" class="btn btn-sm btn-outline-primary mt-2" data-composer-preview disabled>상신 미리보기</button>
+      </aside>
+    </div>
   </div>
 
-  <div id="view-todo" class="hidden"><div id="todoList" class="list-group approval-doc-grid"></div></div>
+  <div id="view-todo" class="hidden">
+    <div id="approvalInbox" class="approval-inbox" hidden>
+      <section class="approval-inbox-pane approval-inbox-list" aria-labelledby="approvalInboxListTitle">
+        <div class="approval-inbox-header"><h2 id="approvalInboxListTitle" class="h6 fw-bold">결재할 문서</h2><span class="small text-muted" data-inbox-count role="status"></span></div>
+        <div class="approval-inbox-items" data-inbox-items></div>
+      </section>
+      <section class="approval-inbox-pane approval-inbox-detail" aria-labelledby="approvalInboxDetailTitle">
+        <div class="approval-inbox-header">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-inbox-back>목록으로</button>
+          <h2 id="approvalInboxDetailTitle" class="h6 fw-bold" data-inbox-heading tabindex="-1">문서 검토</h2>
+        </div>
+        <div id="approvalInboxDocument" class="approval-inbox-body" data-inbox-document aria-live="polite"><p class="text-muted mb-0">목록에서 문서를 선택해 주세요.</p></div>
+        <div class="approval-inbox-actions" data-inbox-actions hidden></div>
+      </section>
+    </div>
+    <div id="todoList" class="list-group approval-doc-grid"></div>
+  </div>
   <div id="view-pending" class="hidden"><div id="pendingList" class="list-group approval-doc-grid"></div></div>
   <div id="view-history" class="hidden">
     <div class="input-group mb-3">
@@ -1811,6 +1841,8 @@ let approvalSubmitAttempt = null;
 let approvalSubmitPreviewState = null;
 let approvalComposerInputRevision = 0;
 let approvalRelViewRevision = 0;
+let approvalInboxUi = null;
+let scheduleApprovalComposerSummary = null;
 let approvalLeaveCancelCandidates = [];
 let approvalBusinessTripCancelCandidates = [];
 let approvalExpenseAdjustmentSelectedDoc = null;
@@ -9839,6 +9871,7 @@ function applySelectedApprovalTemplate() {
         }
     }
 
+    if (typeof scheduleApprovalComposerSummary === 'function') scheduleApprovalComposerSummary();
     hideApprovalLegacyModal(approvalTemplateModalInstance, 'approvalTemplateModal');
     showAlert(`양식을 불러왔습니다.\n제목: ${selected.title || '제목 없음'}`);
 }
@@ -10840,6 +10873,7 @@ window.onload = async function() {
     normalizeApprovalInitialComposerTitle();
     syncApprovalDraftStatusText();
     updateFileList();
+    initializeApprovalComposerSummary();
     await openApprovalDocFromLocationIfNeeded();
     await window.ServiceContractApproval.load(_supabase);
     // Hold the existing composer in memory; resume refreshes reads, never rebuilds the form.
@@ -11105,7 +11139,7 @@ async function ensureTodoListLoaded(options = {}) {
         syncTodoTabVisibility();
         if (shouldRender) {
             const el = document.getElementById('todoList');
-            if (el) renderDocs(el, todoCache, true);
+            if (el) renderApprovalTodo(el, todoCache);
         }
         return todoCache;
     }
@@ -12390,6 +12424,7 @@ function decorateTodoDelegation(doc) {
 
 function switchTab(tab, options = {}) {
     if(activeApprovalTab !== String(tab || 'draft').trim()){
+        if (activeApprovalTab === 'todo') approvalInboxUi?.leave();
         closeApprovalLegacyDialogs();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
         leaveApprovalSubmitPreview();
@@ -12399,7 +12434,7 @@ function switchTab(tab, options = {}) {
     document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
     const shouldLoad = options?.skipLoad !== true;
     const shouldWriteCache = options?.skipCacheWrite !== true;
-    if(tab==='draft') { document.getElementById('view-draft').classList.remove('hidden'); document.getElementById('tab1').classList.add('active'); }
+    if(tab==='draft') { document.getElementById('view-draft').classList.remove('hidden'); document.getElementById('tab1').classList.add('active'); scheduleApprovalComposerSummary?.(); }
     else if(tab==='todo') {
         if (!canProcessApprovals()) { showAlert("접근 권한이 없습니다."); switchTab('draft'); return; }
         document.getElementById('view-todo').classList.remove('hidden');
@@ -12428,6 +12463,7 @@ function getApprovalTitleInputElement(mainType) {
 } // End of getApprovalTitleInputElement
 
 function markApprovalTitleInputDirty(inputKind) {
+    if (typeof scheduleApprovalComposerSummary === 'function') scheduleApprovalComposerSummary();
     const safeInputKind = String(inputKind || '').trim();
     const inputEl = safeInputKind === 'notice'
         ? document.getElementById('noticeSubject')
@@ -12545,6 +12581,7 @@ function normalizeApprovalInitialComposerTitle() {
 } // End of normalizeApprovalInitialComposerTitle
 
 function syncApprovalTitleInput(mainType, options = {}) {
+    if (typeof scheduleApprovalComposerSummary === 'function') scheduleApprovalComposerSummary();
     const safeType = String(mainType || '').trim();
     const force = options && options.force === true;
     const titleInput = getApprovalTitleInputElement(safeType);
@@ -15935,7 +15972,7 @@ async function loadTodoList(options = {}) {
     if (!isCurrent()) return null;
     const el = document.getElementById("todoList");
     const shouldRender = options?.render !== false;
-    if (el && shouldRender) el.innerHTML = 'loading...';
+    if (el && shouldRender) renderApprovalTodo(el, [], 'loading');
     if (!canPerform('approval.process') && delegatedApproverEmpIds.length === 0) {
         await loadDelegationContext({ refreshTodo: false });
     }
@@ -15950,7 +15987,7 @@ async function loadTodoList(options = {}) {
         markApprovalDataLoaded('todo');
         syncTodoTabVisibility();
         writeApprovalSummaryCache({ todo_count: 0 });
-        if (el && shouldRender) renderDocs(el, [], true);
+        if (el && shouldRender) renderApprovalTodo(el, []);
         return todoCache;
     }
     const coopId = String(myInfo?.coop_id || '').trim();
@@ -15968,7 +16005,7 @@ async function loadTodoList(options = {}) {
     if (!isCurrent()) return null;
     if (approvalRes.error || physicalRes.error) {
         approvalDataLoadedAt.todo = 0;
-        if (el && shouldRender) el.textContent = '불러오지 못했습니다. 결재 대기함을 다시 눌러 주세요.';
+        if (el && shouldRender) renderApprovalTodo(el, [], 'error');
         return null;
     }
     const todoMap = new Map();
@@ -15991,8 +16028,100 @@ async function loadTodoList(options = {}) {
     markApprovalDataLoaded('todo');
     syncTodoTabVisibility();
     writeApprovalSummaryCache({ todo_count: list.length });
-    if (el && shouldRender) renderDocs(el, list, true);
+    if (el && shouldRender) renderApprovalTodo(el, list);
     return todoCache;
+}
+
+function initializeApprovalComposerSummary() {
+    if (scheduleApprovalComposerSummary || !window.ApprovalWorkspaceUi || window.ExpoRuntimeBridge) return;
+    const aside = document.getElementById('approvalComposerSummary');
+    const form = document.getElementById('draftForm');
+    if (!aside || !form) return;
+    scheduleApprovalComposerSummary = window.ApprovalWorkspaceUi.composer(aside,form,() => {
+        const type = getCurrentDraftMainType();
+        const selected = form.querySelector('#appCategory')?.selectedOptions[0]?.textContent?.trim();
+        const line = Array.from(form.querySelectorAll('#linePreview .line-step'), step => step.textContent.trim());
+        const count = form.querySelectorAll('#fileListArea [data-attachment-order-index]').length;
+        return {
+            type: selected || type || '선택 전',
+            title: getApprovalTitleInputElement(type)?.value?.trim() || '제목 미입력',
+            line: line.join(' → ') || '선택 전',
+            files: count.toLocaleString('ko-KR') + '건'
+        };
+    });
+}
+
+function renderApprovalTodo(target, list, state = 'ready') {
+    const root = document.getElementById('approvalInbox');
+    if (!window.ApprovalWorkspaceUi || !root || window.ExpoRuntimeBridge) {
+        if (root && !root.hidden) {
+            approvalInboxUi?.leave();
+            root.hidden = true;
+            target.hidden = false;
+            target.classList.remove('hidden');
+        }
+        if (state === 'ready') renderDocs(target,list,true);
+        else target.textContent = state === 'loading' ? '불러오는 중…' : '불러오지 못했습니다. 결재 대기함을 다시 눌러 주세요.';
+        return;
+    }
+    if (!approvalInboxUi) {
+        let ownerInvalidated = false;
+        approvalInboxUi = window.ApprovalWorkspaceUi.inbox(root,{
+            context: allowHidden => !ownerInvalidated && approvalBootstrapReady && activeApprovalTab === 'todo'
+                && (allowHidden || !window.frameElement?.hidden) && canProcessApprovals()
+                && myAuthUserId && getApprovalCoopId() ? getApprovalActionOwner() : '',
+            id: toPositiveDocId,
+            describe: doc => ({
+                title: String(doc.title || '').trim() || '제목 없는 문서',
+                meta: [formatApprovalDocTypeLabel(doc), formatApprovalKstDateISO(doc.created_at,''),
+                    doc._physical_pending ? '실물결재 대기' : doc.status, doc._delegated_from ? '대결재' : ''].filter(Boolean).join(' · ')
+            }),
+            read: async (docId, signal) => {
+                const coop = getApprovalCoopId();
+                const {data,error} = await scopeApprovalTenant(_supabase.from('ref_approval').select('*'))
+                    .eq('id',docId).abortSignal(signal).maybeSingle();
+                if (error || !data || toPositiveDocId(data.id) !== docId || String(data.coop_id || '').trim() !== coop) throw new Error('INBOX_READ_DENIED');
+                return data;
+            },
+            paint: async (content, doc, current, objectUrls) => {
+                renderApprovalReadOnlyDetail(content,doc);
+                await appendApprovalRelatedDocSection(content,doc,current);
+                if (!current()) return;
+                const viewer = await buildRelAttachmentViewer(getApprovalReadOnlyAttachmentRefs(doc),{current,objectUrls});
+                if (current()) content.append(viewer);
+            },
+            actions: doc => {
+                const id = toPositiveDocId(doc.id);
+                const actions = [{label:'문서 창으로 보기',css:'btn-outline-secondary',modal:'relViewModal',run:() => openRelView(id)}];
+                const related = toPositiveDocId(doc.related_doc_id);
+                if (related) actions.unshift({label:getApprovalExpenseAdjustmentType(doc) !== 'new' ? '원결재 보기' : '근거문서 보기',
+                    css:'btn-outline-info',modal:'relViewModal',run:() => openRelView(related)});
+                const context = getApprovalDocProcessContext(doc);
+                const physical = doc.status === '실물결재대기';
+                const pending = ['진행중','증빙확인중','실물결재대기'].includes(doc.status);
+                const canAct = () => pending && getApprovalDocProcessContext(doc).canProcess;
+                if (pending && context.canProcess) actions.push(
+                    {label:physical ? '전자 승인' : getApprovalPositiveActionLabel(),css:'btn-success',modal:'approvalActionModal',run:() => { if(canAct()) void procDoc(id,'승인'); }},
+                    {label:physical ? '전자 반려' : '반려',css:'btn-outline-danger',modal:'approvalActionModal',run:() => { if(canAct()) void procDoc(id,'반려'); }}
+                );
+                const hint = !pending ? '더 이상 결재 대기 상태가 아닙니다.'
+                    : !context.canProcess ? context.reason
+                    : context.delegatedFrom ? '위임받은 문서입니다.' : '';
+                return {hint,actions};
+            },
+            retryList: () => ensureTodoListLoaded({force:true})
+        });
+        _supabase.auth?.onAuthStateChange?.((event,session) => {
+            if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== myAuthUserId)) {
+                ownerInvalidated = true;
+                approvalInboxUi?.leave();
+            }
+        });
+    }
+    root.hidden = false;
+    target.hidden = true;
+    target.classList.add('hidden');
+    approvalInboxUi.render(list,state);
 }
 
 function extractAuditReason(detail) {
@@ -16444,7 +16573,10 @@ function exportHistoryCsv() {
 // [수정] 문서 렌더링 (가승인 버튼 포함)
 // [수정] 문서 렌더링 (관련 문서 링크 버튼 추가)
 function renderDocs(target, list, isTodo) {
-    if(!list || list.length===0) { target.innerHTML = '<div class="p-3 text-center text-muted">없음</div>'; return; }
+    const archive = target.id === 'historyList' && !!window.ApprovalWorkspaceUi && !window.ExpoRuntimeBridge;
+    if(!list || list.length===0) { target.innerHTML = archive
+        ? '<div class="approval-archive-empty p-3 text-center text-muted">조건에 맞는 문서가 없습니다.</div>'
+        : '<div class="p-3 text-center text-muted">없음</div>'; return; }
     const cards = list.map(doc => {
         const approvalLine = Array.isArray(doc.approval_line) ? doc.approval_line : [];
         const safeDocType = escapeHtml(formatApprovalDocTypeLabel(doc || doc.doc_type));
@@ -16549,7 +16681,7 @@ function renderDocs(target, list, isTodo) {
             const canDeleteCanceled = canDeleteCanceledDoc(doc);
             const isCompletedDoc = ['완료', '실물결재완료'].includes(String(doc.status || ''));
             if (titleDocId) {
-                actions.push(`<button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="openRelView(${titleDocId})">👁️ 바로보기</button>`);
+                if (!archive) actions.push(`<button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="openRelView(${titleDocId})">👁️ 바로보기</button>`);
                 if (canViewApprovalArchiveDoc(doc)) {
                     actions.push(`<button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="printApprovalArchiveDoc(${titleDocId})">🖨️ 문서 출력</button>`);
                 }
@@ -16590,9 +16722,16 @@ function renderDocs(target, list, isTodo) {
             btnHtml = actions.join(' ');
         }
 
+        if (archive) {
+            const label = safeTitle || '제목 없는 문서';
+            const name = titleDocId
+                ? `<button type="button" class="btn btn-link approval-archive-title" onclick="openRelView(${titleDocId})">${label}</button>`
+                : `<strong>${label}</strong>`;
+            return `<tr role="row"><td role="cell">${name}${reasonHtml}</td><td role="cell">${safeDocType}</td><td role="cell">${statusHtml}${ageBadge}${jeongyeolBadge}${evidencePendingBadge}${attachmentBadge}${signedDocBadge}</td><td role="cell" class="approval-doc-date">${safeDate}</td><td role="cell"><div class="approval-archive-actions">${relBtn}${btnHtml}</div></td></tr>`;
+        }
         return `<div class="list-group-item approval-doc-card"><div class="approval-doc-meta"><div class="approval-doc-meta-group"><span class="badge bg-primary">${safeDocType}</span>${statusHtml}${jeongyeolBadge}${evidencePendingBadge}${attachmentBadge}${signedDocBadge}</div><div class="approval-doc-meta-group"><small class="approval-doc-date">${safeDate}</small>${ageBadge}</div></div>${titleHtml}<div class="small">${lineHtml}</div>${reasonHtml}${noticeHtml}<div class="approval-doc-actions">${relBtn}${btnHtml}</div></div>`;
     });
-    target.innerHTML = cards.join('');
+    target.innerHTML = archive ? `<table class="approval-archive" role="table" aria-label="결재 이력"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">문서 제목</th><th scope="col" role="columnheader">종류</th><th scope="col" role="columnheader">상태</th><th scope="col" role="columnheader">기안일</th><th scope="col" role="columnheader">문서 작업</th></tr></thead><tbody role="rowgroup">${cards.join('')}</tbody></table>` : cards.join('');
 }
 function chooseExpoApprovalExample() {
     const bridge = window.ExpoRuntimeBridge;
@@ -16680,9 +16819,9 @@ function openSignedDoc(encodedUrl) {
     return openAttachment(encodedUrl);
 }
 
-async function openAttachment(encodedUrl) {
+async function openAttachment(encodedUrl, isCurrent = approvalAttachmentReadContext()) {
     if (!encodedUrl) return;
-    const current = approvalAttachmentReadContext();
+    const current = isCurrent;
     try {
         const rawUrl = decodeURIComponent(encodedUrl);
         const url = await boundedApprovalAttachmentRead(() => resolveStorageUrl(rawUrl, 60 * 60 * 6, {strict:true}));
@@ -17246,9 +17385,11 @@ async function selectRelDoc(doc) {
     relSearchModal.hide();
 }
 
-async function buildRelAttachmentViewer(attachments) {
-    const viewerRevision = ++relAttachmentViewerRevision;
-    const ownerCurrent = approvalAttachmentReadContext();
+async function buildRelAttachmentViewer(attachments, options = null) {
+    const inline = typeof options?.current === 'function';
+    const viewerRevision = inline ? null : ++relAttachmentViewerRevision;
+    const ownerCurrent = inline ? options.current : approvalAttachmentReadContext();
+    const viewerCurrent = () => ownerCurrent() && (inline || viewerRevision === relAttachmentViewerRevision);
     const wrapper = document.createElement('div');
     wrapper.className = 'mt-4';
 
@@ -17277,6 +17418,7 @@ async function buildRelAttachmentViewer(attachments) {
 
     const navBox = document.createElement('div');
     navBox.className = 'd-flex gap-2';
+    navBox.hidden = inline;
     const prevBtn = document.createElement('button');
     prevBtn.type = 'button';
     prevBtn.className = 'btn btn-sm btn-outline-secondary';
@@ -17293,6 +17435,7 @@ async function buildRelAttachmentViewer(attachments) {
 
     const stage = document.createElement('div');
     stage.className = 'rel-attachment-stage';
+    stage.hidden = inline;
     stage.innerHTML = '<div class="text-muted">첨부파일을 선택하면 미리보기가 표시됩니다.</div>';
 
     const list = document.createElement('div');
@@ -17323,14 +17466,17 @@ async function buildRelAttachmentViewer(attachments) {
         try {
             URL.revokeObjectURL(stageObjectUrl);
         } catch (_) {}
-        relViewObjectUrls = relViewObjectUrls.filter((url) => url !== stageObjectUrl);
+        if (inline) options.objectUrls.delete(stageObjectUrl);
+        else relViewObjectUrls = relViewObjectUrls.filter((url) => url !== stageObjectUrl);
         stageObjectUrl = null;
     };
 
     const renderCurrent = async (previewIndex) => {
         const revision = ++state.revision;
-        const currentRead = () => revision === state.revision && viewerRevision === relAttachmentViewerRevision && ownerCurrent();
+        const currentRead = () => revision === state.revision && viewerCurrent();
         if (!currentRead()) return;
+        navBox.hidden = false;
+        stage.hidden = false;
         if (!state.previewable.length) {
             metaBox.textContent = '첨부파일은 있지만 웹 바로보기를 지원하는 형식은 없습니다.';
             stage.innerHTML = '<div class="text-center text-muted">PDF와 이미지 파일만 여기에서 바로 볼 수 있습니다.</div>';
@@ -17359,10 +17505,12 @@ async function buildRelAttachmentViewer(attachments) {
             if (!currentRead()) { URL.revokeObjectURL(payload.url); return; }
             const previewType = getAttachmentPreviewType(currentName, payload.blob?.type || current.mimeType || '');
             if (!previewType) {
+                URL.revokeObjectURL(payload.url);
                 throw new Error('unsupported-preview-type');
             }
             stageObjectUrl = payload.url;
-            relViewObjectUrls.push(stageObjectUrl);
+            if (inline) options.objectUrls.add(stageObjectUrl);
+            else relViewObjectUrls.push(stageObjectUrl);
             metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${currentName} · ${payload.typeLabel}${payload.sizeLabel ? ` · ${payload.sizeLabel}` : ''}`;
             if (previewType === 'pdf') {
                 stage.innerHTML = `<iframe src="${escapeHtml(stageObjectUrl)}#toolbar=1"></iframe>`;
@@ -17397,6 +17545,7 @@ async function buildRelAttachmentViewer(attachments) {
     });
 
     list.addEventListener('click', (event) => {
+        if (inline && !viewerCurrent()) return;
         const previewBtn = event.target.closest('[data-preview-index]');
         if (previewBtn) {
             const previewIndex = Number(previewBtn.getAttribute('data-preview-index'));
@@ -17405,7 +17554,8 @@ async function buildRelAttachmentViewer(attachments) {
         }
         const openBtn = event.target.closest('[data-open-url]');
         if (openBtn) {
-            openAttachment(openBtn.getAttribute('data-open-url'));
+            if (inline) openAttachment(openBtn.getAttribute('data-open-url'),viewerCurrent);
+            else openAttachment(openBtn.getAttribute('data-open-url'));
         }
     });
 
@@ -17421,7 +17571,7 @@ async function buildRelAttachmentViewer(attachments) {
     viewer.appendChild(list);
     wrapper.appendChild(viewer);
 
-    await renderCurrent(0);
+    if (!inline) await renderCurrent(0);
     return wrapper;
 }
 
@@ -17456,6 +17606,17 @@ async function openRelView(docId) {
     const [data] = await annotateApprovalBusinessTripCancelRequestState([rawDoc]);
     if(!isCurrentView())return;
 
+    renderApprovalReadOnlyDetail(contentEl,data);
+    await appendApprovalRelatedDocSection(contentEl, data,isCurrentView);
+    if(!isCurrentView())return;
+    const attachmentViewerEl = await buildRelAttachmentViewer(getApprovalReadOnlyAttachmentRefs(data));
+    if(!isCurrentView())return;
+    contentEl.appendChild(attachmentViewerEl);
+    syncRelViewActionArea(data);
+    void mountApprovalTaxTaskLinks(contentEl, data);
+}
+
+function renderApprovalReadOnlyDetail(contentEl, data) {
     // 보기 전용 템플릿 렌더링 (안전한 DOM 구성)
     const lines = (Array.isArray(data.approval_line) ? data.approval_line : [])
         .map(l => `${l.name || ''}(${l.status || ''})`).join(" → ");
@@ -17507,9 +17668,9 @@ async function openRelView(docId) {
     appendApprovalWithholdingSnapshotSection(contentEl, data);
     contentEl.appendChild(amountEl);
     appendApprovalSalaryLedgerSnapshotSection(contentEl, data);
-    await appendApprovalRelatedDocSection(contentEl, data,isCurrentView);
-    if(!isCurrentView())return;
+}
 
+function getApprovalReadOnlyAttachmentRefs(data) {
     const attachmentRefs = Array.isArray(data.file_links)
         ? data.file_links.filter(link => typeof link === 'string' && link.trim()).map(rawRef => ({ rawRef }))
         : [];
@@ -17519,11 +17680,7 @@ async function openRelView(docId) {
             displayName: `서명문서 · ${extractDisplayFileName(data.signed_doc_url, 'signed_document.pdf')}`
         });
     }
-    const attachmentViewerEl = await buildRelAttachmentViewer(attachmentRefs);
-    if(!isCurrentView())return;
-    contentEl.appendChild(attachmentViewerEl);
-    syncRelViewActionArea(data);
-    void mountApprovalTaxTaskLinks(contentEl, data);
+    return attachmentRefs;
 }
 
 async function mountApprovalTaxTaskLinks(contentEl, doc) {
