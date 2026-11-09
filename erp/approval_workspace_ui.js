@@ -1,4 +1,4 @@
-/* v1.0.0 — Approval inbox presentation and a read-only composer summary. */
+/* v1.0.1 — Approval inbox presentation. */
 (() => {
     'use strict';
     const node = (name, className, text) => {
@@ -171,34 +171,5 @@
         return {render, clear, leave};
     }
 
-    function composer(aside, form, read) {
-        let scheduled = false;
-        const sync = () => {
-            scheduled = false;
-            if (aside.hidden) return;
-            const values = read();
-            for (const [key,value] of Object.entries(values)) {
-                const target = aside.querySelector('[data-composer-' + key + ']');
-                if (target && target.textContent !== value) target.textContent = value;
-            }
-            const source = form.querySelector('#btnSubmitPreview');
-            aside.querySelector('[data-composer-preview]').disabled = !source || source.disabled || source.hidden;
-        };
-        const schedule = () => { if (!scheduled) { scheduled=true; queueMicrotask(sync); } };
-        for (const event of ['input','change','reset']) form.addEventListener(event,schedule);
-        const observer = new MutationObserver(schedule);
-        for (const id of ['linePreview','fileListArea','approvalDraftStatusText','appCategory']) {
-            const target = form.querySelector('#' + id);
-            if (target) observer.observe(target,{childList:true,subtree:true,characterData:true,attributes:id==='appCategory'});
-        }
-        const source = form.querySelector('#btnSubmitPreview');
-        if (source) observer.observe(source,{attributes:true,attributeFilter:['disabled','hidden','class']});
-        aside.querySelector('[data-composer-preview]').addEventListener('click', () => {
-            if (source?.getClientRects().length && !source.disabled && !source.hidden) source.click();
-        });
-        aside.hidden = false;
-        schedule();
-        return schedule;
-    }
-    window.ApprovalWorkspaceUi = Object.freeze({inbox,composer});
+    window.ApprovalWorkspaceUi = Object.freeze({inbox});
 })();
