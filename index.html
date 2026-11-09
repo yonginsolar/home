@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.180
-Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scrollable menus.
+Version: v1.0.181
+Change: 2026-11-09 - Add the opt-in sunlit homepage composition.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -13,7 +13,7 @@ Change: 2026-10-26 - Match mobile cover previews, compact mode controls and scro
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.180 | index.html');</script>
+<script>console.log('[Version] v1.0.181 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1874,6 +1874,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 <script src="shared/home_progressive.js?v=20261023-3" integrity="sha384-px6WJAuCM53uUaqxVd38tnhTQoEuGSl7o9+9m0SydxN2p6AZ2QMi52Mf9fpUuz3i" crossorigin="anonymous" defer></script>
 <link rel="stylesheet" href="shared/hero_banner.css?v=1.9.0">
   <link rel="stylesheet" href="shared/home_design.css?v=20261015-2">
+  <link rel="stylesheet" href="shared/home_sunlit.css?v=1.0.0" integrity="sha384-DLU1uCWeCDeFCHjkCPd4MxOsD07CtGSxMXkyZa3xHYeDCpiMCXK4XOAyB5olTrlN" crossorigin="anonymous">
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 
@@ -1931,6 +1932,30 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         </div>
       </div>
 
+    </div>
+  </section>
+
+  <section id="sunlit-projects" hidden aria-labelledby="sunlit-projects-heading">
+    <div class="container">
+      <h2 id="sunlit-projects-heading">우리가 하는 일</h2>
+      <p class="sunlit-intro">발전소에서 마을까지, 시민의 힘으로</p>
+      <div class="sunlit-grid">
+        <a href="#progress" class="sunlit-card sunlit-plant scrollto" data-sunlit-targets="progress portfolio status" hidden>
+          <span class="sunlit-tag"><i class="bi bi-lightning-charge" aria-hidden="true"></i> 발전소</span>
+          <span><strong>시민이 만드는 태양광 발전소</strong><small>건립·운영 현황을 살펴봐요.</small></span>
+          <i class="bi bi-arrow-up-right sunlit-arrow" aria-hidden="true"></i>
+        </a>
+        <a href="#impact" class="sunlit-card sunlit-village scrollto" data-sunlit-targets="impact" hidden>
+          <span class="sunlit-tag"><i class="bi bi-house" aria-hidden="true"></i> 마을</span>
+          <span><strong>에너지 자립마을</strong><small>시민이 함께 모은 참여와 출자의 현황</small></span>
+          <i class="bi bi-arrow-up-right sunlit-arrow" aria-hidden="true"></i>
+        </a>
+        <a href="#activities" class="sunlit-card sunlit-people scrollto" data-sunlit-targets="activities" hidden>
+          <span class="sunlit-tag"><i class="bi bi-people" aria-hidden="true"></i> 참여</span>
+          <span><strong>시민과 함께하는 활동</strong><small>우리 조합의 교육·행사와 활동 소식</small></span>
+          <i class="bi bi-arrow-up-right sunlit-arrow" aria-hidden="true"></i>
+        </a>
+      </div>
     </div>
   </section>
 
@@ -2863,15 +2888,16 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         if (!(settings.hero_slides_enabled === true && settings.hero_slides?.length)) window.CoopHomeDisplay?.apply(settings);
 
         const isSiteMemberProfile = String(settings.runtime_profile || '') === 'site_member';
-        const homeTemplate = ['community', 'simple', 'brand', 'editorial', 'campaign'].includes(String(settings.home_template || ''))
+        const homeTemplate = ['community', 'simple', 'brand', 'editorial', 'campaign', 'sunlit'].includes(String(settings.home_template || ''))
             ? String(settings.home_template)
             : (isSiteMemberProfile ? 'simple' : 'community');
-        document.body.classList.remove('home-template-community', 'home-template-simple', 'home-template-brand', 'home-template-editorial', 'home-template-campaign');
+        document.body.classList.remove('home-template-community', 'home-template-simple', 'home-template-brand', 'home-template-editorial', 'home-template-campaign', 'home-template-sunlit');
         document.body.classList.add(`home-template-${homeTemplate}`);
         window.__PUBLIC_HOME_TEMPLATE__ = homeTemplate;
         window.__PUBLIC_SITE_MEMBER_PROFILE__ = isSiteMemberProfile;
         document.body.classList.toggle('home-layout-designed', CoopHomeDesign.normalizeLayout(settings.home_layout_mode) === 'designed');
         CoopHomeDesign.applyFonts(document.body, settings.home_title_font, settings.home_body_font, settings.home_external_fonts || {});
+        syncSunlitProjectLinks();
         if (reorder && Array.isArray(g_publicSectionsForLayout)) applyPublicSectionOrder(g_publicSectionsForLayout);
 
         const impact = document.getElementById('impact');
@@ -3848,6 +3874,29 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
     // [신규 기능] DB 설정에 따라 섹션과 메뉴를 끄고 켜는 함수
     const publicHiddenSectionIds = new Set();
 
+    function syncSunlitProjectLinks() {
+        const projects = document.getElementById('sunlit-projects');
+        if (!projects) return;
+        const active = document.body.classList.contains('home-template-sunlit')
+            && document.documentElement.dataset.homeNavState === 'ready'
+            && !document.documentElement.hasAttribute('data-public-tenant-pending');
+        let count = 0;
+        for (const link of projects.querySelectorAll('[data-sunlit-targets]')) {
+            const target = active && link.dataset.sunlitTargets.split(' ').find(id => {
+                const section = document.getElementById(id);
+                return section && !section.hidden && !publicHiddenSectionIds.has(id)
+                    && window.getComputedStyle(section).display !== 'none';
+            });
+            link.hidden = !target;
+            if (target) {
+                link.setAttribute('href', '#' + target);
+                count++;
+            }
+        }
+        projects.querySelector('.sunlit-grid').dataset.count = String(count);
+        projects.hidden = count === 0;
+    }
+
     // Navigation follows the actual section, including empty-data sections.
     // AOS opacity does not change link availability.
     function syncPublicSectionLinks() {
@@ -3862,6 +3911,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
             item.hidden = hidden;
             item.style.display = hidden ? 'none' : '';
         });
+        syncSunlitProjectLinks();
     }
     window.syncPublicSectionLinks = syncPublicSectionLinks;
 
@@ -3873,7 +3923,10 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         if (toggle) toggle.disabled = !ready;
         const retry = document.getElementById('homeNavRetry');
         if (retry) { retry.hidden = Boolean(ready); retry.textContent = '다시 확인'; }
-        if (!document.documentElement.hasAttribute('data-public-tenant-pending')) return;
+        if (!document.documentElement.hasAttribute('data-public-tenant-pending')) {
+            syncSunlitProjectLinks();
+            return;
+        }
         // A failed read must not expose another cooperative's default sections.
         if (!settingsReady || !sectionsReady) {
             // The pending root rule keeps every section hidden, without overwriting
