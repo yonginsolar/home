@@ -1,4 +1,4 @@
-/* Homepage demand loader v1.0.2. Public reads only; no persistence or Auth cache. */
+/* Homepage demand loader v1.0.3. Public reads only; no persistence or Auth cache. */
 (function (host) {
   'use strict';
   function create(options) {
@@ -39,7 +39,12 @@
             retry.setAttribute('aria-busy', 'true');
             retry.classList.add('disabled');
             retry.textContent = '확인 중…';
-          } else row?.remove();
+          } else if (row) {
+            const heading = state === 'ready' && document.activeElement === row.querySelector('button')
+              ? node.querySelector('[data-home-read-success-focus]') : null;
+            if (heading?.getClientRects().length) heading.focus({preventScroll:true});
+            row.remove();
+          }
           continue;
         }
         if (row) {

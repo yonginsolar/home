@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.191
-Change: 2026-11-09 - Show the public plant shortcut before loading construction details.
+Version: v1.0.192
+Change: 2026-11-09 - Keep the plant shortcut destination in view and restore retry focus.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -13,7 +13,7 @@ Change: 2026-11-09 - Show the public plant shortcut before loading construction 
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.191 | index.html');</script>
+<script>console.log('[Version] v1.0.192 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1878,7 +1878,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 <script src="shared/home_preview_editor.js?v=20261109-photo-restart-1" defer></script>
 <script src="shared/hero_banner.js?v=1.5.1" defer></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
-<script src="shared/home_progressive.js?v=20261023-3" integrity="sha384-px6WJAuCM53uUaqxVd38tnhTQoEuGSl7o9+9m0SydxN2p6AZ2QMi52Mf9fpUuz3i" crossorigin="anonymous" defer></script>
+<script src="shared/home_progressive.js?v=20261109-plant-focus-1" integrity="sha384-9Dlkt6OyyiAA6Bwc4dORwzgnVXL0eyySkmm1tlC+k9yYpm1L6Rp3jc8yeEdAMrJk" crossorigin="anonymous" defer></script>
 <link rel="stylesheet" href="shared/hero_banner.css?v=1.9.0">
   <link rel="stylesheet" href="shared/home_design.css?v=20261015-2">
   <link rel="stylesheet" href="shared/home_sunlit.css?v=1.0.0" integrity="sha384-DLU1uCWeCDeFCHjkCPd4MxOsD07CtGSxMXkyZa3xHYeDCpiMCXK4XOAyB5olTrlN" crossorigin="anonymous">
@@ -2088,7 +2088,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
       <div class="container">
         <div class="section-title">
           <h2>Progress</h2>
-          <p>발전소 <span>건립 현황</span></p>
+          <p id="progress-heading" tabindex="-1" data-home-read-success-focus>발전소 <span>건립 현황</span></p>
         </div>
         <p class="text-center text-muted mb-0" data-progress-loading role="status">발전소 건립 현황을 불러오는 중입니다.</p>
         <p class="text-center text-muted mb-0" data-progress-empty role="status">현재 공개된 발전소 건립 현황이 없습니다.</p>
@@ -3798,12 +3798,73 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
     let publicHomeBootRequest = null;
     let publicHomeLoader = null;
     let publicHomeToolRequest = null;
+    let stopPlantShortcutFollow = null;
+
+    function followPublicPlantShortcut(section) {
+        stopPlantShortcutFollow?.();
+        const events = new AbortController();
+        const isCurrent = () => window.location.hash === '#progress'
+            && section.hasAttribute('data-sunlit-public-progress') && section.getClientRects().length;
+        const align = () => {
+            const offset = Math.max(parseFloat(getComputedStyle(section).scrollMarginTop) || 0,
+                Math.ceil(document.getElementById('header')?.getBoundingClientRect().bottom || 0) + 8);
+            const delta = section.getBoundingClientRect().top - offset;
+            if (Math.abs(delta) > 2) window.scrollTo({top:window.scrollY + delta,behavior:'instant'});
+            return window.scrollY;
+        };
+        let expectedY = align(), frame = 0;
+        const stop = () => {
+            observer?.disconnect();
+            window.cancelAnimationFrame(frame);
+            window.clearTimeout(deadline);
+            events.abort();
+            if (stopPlantShortcutFollow === stop) stopPlantShortcutFollow = null;
+        };
+        const moved = () => !isCurrent() || Math.abs(window.scrollY - expectedY) > 2;
+        const queueAlign = () => {
+            if (frame) return;
+            frame = window.requestAnimationFrame(() => {
+                frame = 0;
+                if (moved()) { stop(); return; }
+                expectedY = align();
+            });
+        };
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(queueAlign) : null;
+        const deadline = window.setTimeout(stop,15000);
+        stopPlantShortcutFollow = stop;
+        const watched = [document.getElementById('header'),document.getElementById('hero'),
+            document.getElementById('sunlit-projects'),section.parentElement,section];
+        for (let node = section.previousElementSibling; node; node = node.previousElementSibling) watched.push(node);
+        for (const node of watched) if (node) observer?.observe(node);
+        const options = {capture:true,passive:true,signal:events.signal};
+        for (const event of ['pointerdown','touchstart','wheel','keydown','popstate','hashchange','pagehide']) {
+            window.addEventListener(event,stop,options);
+        }
+        window.addEventListener('scroll',() => { if (moved()) stop(); },options);
+        window.addEventListener('resize',queueAlign,options);
+    }
+
+    function handlePublicPlantShortcut(event) {
+        if (isHomePreviewMode || event.defaultPrevented || event.button !== 0
+            || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const link = event.target.closest?.('#sunlit-projects a.sunlit-plant[href="#progress"]:not([hidden])');
+        const section = document.getElementById('progress');
+        if (!link || !section?.hasAttribute('data-sunlit-public-progress') || !section.getClientRects().length) return;
+        event.preventDefault();
+        if (window.location.hash !== '#progress') window.history.pushState(window.history.state,'','#progress');
+        section.querySelector('#progress-heading')?.focus({preventScroll:true});
+        followPublicPlantShortcut(section);
+        // If the progressive tool is still starting, it reads the same hash on start.
+        publicHomeLoader?.area('progress');
+    }
+    document.addEventListener('click',handlePublicPlantShortcut);
+
     async function ensurePublicHomeLoader() {
         if (window.CoopHomeProgressive) return;
         if (!publicHomeToolRequest) publicHomeToolRequest = new Promise((resolve,reject) => {
             const script = document.createElement('script');
-            script.src = 'shared/home_progressive.js?v=20261023-3';
-            script.integrity = 'sha384-px6WJAuCM53uUaqxVd38tnhTQoEuGSl7o9+9m0SydxN2p6AZ2QMi52Mf9fpUuz3i';
+            script.src = 'shared/home_progressive.js?v=20261109-plant-focus-1';
+            script.integrity = 'sha384-9Dlkt6OyyiAA6Bwc4dORwzgnVXL0eyySkmm1tlC+k9yYpm1L6Rp3jc8yeEdAMrJk';
             script.crossOrigin = 'anonymous';
             const timer = setTimeout(() => { script.remove(); reject(Error('TOOL_UNAVAILABLE')); },15000);
             script.onload = () => { clearTimeout(timer); window.CoopHomeProgressive ? resolve() : reject(Error('TOOL_UNAVAILABLE')); };

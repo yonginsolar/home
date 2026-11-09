@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.270
-Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without changing issuance.
+Version: v1.0.271
+Change: 2026-11-09 - Match member portal header and footer to the public homepage palette.
 -->
 <html lang="ko">
 <head>
@@ -17,7 +17,7 @@ Change: 2026-11-01 - Unify certificate preview and PDF drawing geometry without 
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.5" integrity="sha384-IcwaTuuPaMoh8p4EaYxvDbn0Ye+NrQUGy3diLEArvhVNaLjODZgpVZI/c3lJmmeh" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.270 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.271 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -107,9 +107,8 @@ flex-direction: column;
 min-height: 100vh;
 }
 
-/* [헤더] 규정집 스타일 오버라이드 (검은색 배경 강제) */
+/* [헤더] 공개 홈페이지 팔레트를 그대로 사용한다. */
 #header {
-background-color: #000 !important; /* style.css보다 우선순위 높임 */
 padding: 15px 0;
 box-shadow: 0 2px 10px rgba(0,0,0,0.1);
 }
@@ -118,23 +117,20 @@ font-family: 'GmarketSans', sans-serif;
 font-weight: 700;
 font-size: 20px;
 text-decoration: none;
-color: #fff !important;
 }
 .header-link {
-color: #fff;
 text-decoration: none;
 margin-left: 20px;
 font-size: 1.2rem;
 cursor: pointer;
 transition: 0.3s;
 }
-.header-link:hover { color: #ff9800; }
+html body #header :is(.logo h1 a, .header-link) { color: var(--home-header-ink) !important; }
+html body #header :is(.logo h1 a, .header-link):is(:hover,:focus-visible) { color: var(--home-header-accent) !important; }
 
 /* [푸터] 하단 고정 */
 #footer {
 margin-top: auto;
-background: #111; 
-color: #fff;
 }
 
 /* [로그인 섹션] 전용 스타일 */
@@ -1533,6 +1529,7 @@ gtag('config', 'G-TR217L7JN9');
 </script>
 <script src="shared/theme.js?v=20261026-focus-2"></script>
 <link href="shared/theme.css?v=20261026-mobile-ui-1" rel="stylesheet">
+<link rel="stylesheet" href="shared/home_chrome.css?v=1.0.0" integrity="sha384-n+fNndz4uEFiuAmxlqPz+RMfDjU10RqNIMJuAo50q/6p1QYZudXUFJA5SU+GpQjv" crossorigin="anonymous">
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 
@@ -6041,6 +6038,15 @@ return currentMemberCoopName;
 }
 }
 
+function applyMembermanageHomepagePalette(settings, coopName) {
+const normalize = value => String(value || '').replace(/\s+/g, '');
+if (!settings || !normalize(coopName) || normalize(settings.coop_name) !== normalize(coopName)) return;
+const templates = ['community', 'simple', 'brand', 'editorial', 'campaign', 'sunlit'];
+const fallback = settings.runtime_profile === 'site_member' ? 'simple' : 'community';
+const template = templates.includes(settings.home_template) ? settings.home_template : fallback;
+for (const name of templates) document.body.classList.toggle('home-template-' + name, name === template);
+}
+
 async function hydrateMembermanagePublicBranding() {
 if (!_supabase) return currentMemberCoopName;
 try {
@@ -6054,6 +6060,7 @@ writeMembermanageBrandingCache(coopName, context?.coop_id || '');
 applyMembermanageBranding();
 const { data: footerSettings, error: footerSettingsError } = await _supabase.rpc('get_public_home_settings');
 if (footerSettingsError) throw footerSettingsError;
+applyMembermanageHomepagePalette(footerSettings, coopName);
 if (typeof window.applyFooterSiteProfile === 'function') {
 window.applyFooterSiteProfile({ ...(footerSettings || {}), coop_name: coopName });
 }
