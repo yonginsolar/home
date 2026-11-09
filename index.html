@@ -2,7 +2,7 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.192
+Version: v1.0.193
 Change: 2026-11-09 - Keep the plant shortcut destination in view and restore retry focus.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
@@ -13,7 +13,7 @@ Change: 2026-11-09 - Keep the plant shortcut destination in view and restore ret
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.192 | index.html');</script>
+<script>console.log('[Version] v1.0.193 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1851,6 +1851,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   }
 }
 /* The Sunlit shortcut needs a real anchor even while its public read is pending. */
+:root[data-plant-shortcut-follow] { overflow-anchor: none; }
 #progress [data-progress-loading], #progress [data-progress-empty] { display: none; }
 #progress[data-sunlit-public-progress]:not([hidden]) { display: block !important; }
 #progress[data-sunlit-public-progress]:not([data-progress-content]):not([data-home-load-state="ready"]):not([data-home-load-state="failed"]) [data-progress-loading],
@@ -3802,6 +3803,9 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 
     function followPublicPlantShortcut(section) {
         stopPlantShortcutFollow?.();
+        const root = document.documentElement;
+        // While we own this jump, layout shifts must not also move the browser's scroll anchor.
+        root.setAttribute('data-plant-shortcut-follow','');
         const events = new AbortController();
         const isCurrent = () => window.location.hash === '#progress'
             && section.hasAttribute('data-sunlit-public-progress') && section.getClientRects().length;
@@ -3818,7 +3822,10 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
             window.cancelAnimationFrame(frame);
             window.clearTimeout(deadline);
             events.abort();
-            if (stopPlantShortcutFollow === stop) stopPlantShortcutFollow = null;
+            if (stopPlantShortcutFollow === stop) {
+                root.removeAttribute('data-plant-shortcut-follow');
+                stopPlantShortcutFollow = null;
+            }
         };
         const moved = () => !isCurrent() || Math.abs(window.scrollY - expectedY) > 2;
         const queueAlign = () => {
