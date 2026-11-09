@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.190
-Change: 2026-11-09 - Safe photo preview, slide selection and initial fit.
+Version: v1.0.191
+Change: 2026-11-09 - Show the public plant shortcut before loading construction details.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -13,7 +13,7 @@ Change: 2026-11-09 - Safe photo preview, slide selection and initial fit.
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.190 | index.html');</script>
+<script>console.log('[Version] v1.0.191 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1850,6 +1850,11 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
     font-size: 1.2rem;
   }
 }
+/* The Sunlit shortcut needs a real anchor even while its public read is pending. */
+#progress [data-progress-loading], #progress [data-progress-empty] { display: none; }
+#progress[data-sunlit-public-progress]:not([hidden]) { display: block !important; }
+#progress[data-sunlit-public-progress]:not([data-progress-content]):not([data-home-load-state="ready"]):not([data-home-load-state="failed"]) [data-progress-loading],
+#progress[data-sunlit-public-progress][data-home-load-state="ready"]:not([data-progress-content="present"]) [data-progress-empty] { display: block; }
   </style>
   <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-TR217L7JN9"></script>
@@ -2085,6 +2090,8 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
           <h2>Progress</h2>
           <p>발전소 <span>건립 현황</span></p>
         </div>
+        <p class="text-center text-muted mb-0" data-progress-loading role="status">발전소 건립 현황을 불러오는 중입니다.</p>
+        <p class="text-center text-muted mb-0" data-progress-empty role="status">현재 공개된 발전소 건립 현황이 없습니다.</p>
         <div class="progress-scroll-shell" id="progress-container" aria-live="polite"></div>
       </div>
     </section>
@@ -3911,6 +3918,18 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         const active = document.body.classList.contains('home-template-sunlit')
             && document.documentElement.dataset.homeNavState === 'ready'
             && !document.documentElement.hasAttribute('data-public-tenant-pending');
+        const progress = document.getElementById('progress');
+        const publicProgress = active && !!progress && !progress.hidden && !publicHiddenSectionIds.has('progress');
+        const revealProgress = publicProgress && !progress.hasAttribute('data-sunlit-public-progress');
+        progress?.toggleAttribute('data-sunlit-public-progress', publicProgress);
+        if (revealProgress && window.location.hash === '#progress') {
+            // Direct links may have arrived before the public configuration was ready.
+            window.requestAnimationFrame(() => {
+                if (window.location.hash === '#progress' && progress.hasAttribute('data-sunlit-public-progress') && progress.getClientRects().length) {
+                    progress.scrollIntoView({ block: 'start' });
+                }
+            });
+        }
         let count = 0;
         for (const link of projects.querySelectorAll('[data-sunlit-targets]')) {
             const target = active && link.dataset.sunlitTargets.split(' ').find(id => {
@@ -6168,8 +6187,10 @@ function openPlantDetail(id) {
 
         if (!section || !container) return;
 
+        section.dataset.progressContent = inProgressPlants.length ? 'present' : 'empty';
         if (inProgressPlants.length === 0) {
             clearProgressRevealObserver();
+            container.replaceChildren();
             section.style.display = 'none';
             syncPublicSectionLinks();
             return;
@@ -6266,7 +6287,7 @@ function openPlantDetail(id) {
                 ${cardHtml}
             </div>`;
         setupProgressReveal(section);
-        if (window.location.hash === '#progress') {
+        if (window.location.hash === '#progress' && !section.hasAttribute('data-sunlit-public-progress')) {
             window.requestAnimationFrame(function revealLinkedProgressSection() {
                 section.scrollIntoView({ block: 'start' });
             });
