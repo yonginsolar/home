@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.150 | Change: 2026-11-09 - Simplify pending card colors and restore full-width drafting. -->
+<!-- Version: v1.2.151 | Change: 2026-11-09 - Full-width paper layout and section shortcuts for long drafts. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.150 | approval.html');</script>
+  <script>console.log('[Version] v1.2.151 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -434,6 +434,65 @@
       flex-wrap: wrap;
       gap: 8px;
     }
+    #draftForm {
+      --draft-divider: var(--bs-border-color, #d9e2ee);
+      --draft-quiet: var(--bs-secondary-bg-subtle, #f6f8fb);
+      --draft-accent: var(--bs-primary-text-emphasis, #214e8b);
+      min-inline-size: 0;
+      padding: clamp(.75rem, 2vw, 1.5rem);
+      background: var(--bs-body-bg, #fff);
+      border: 1px solid var(--draft-divider);
+      border-radius: .85rem;
+    }
+    #draftForm .approval-draft-status {
+      background: var(--draft-quiet);
+      border-color: var(--draft-divider);
+      margin-bottom: 1.15rem;
+    }
+    #draftForm .approval-draft-status .actions .btn { min-block-size: 2.25rem; }
+    #draftForm .approval-draft-actions .btn { min-block-size: 2.75rem; }
+    #draftForm .approval-draft-section-links {
+      display: none;
+      flex-wrap: wrap;
+      gap: .35rem;
+      margin-top: .65rem;
+    }
+    #draftForm:has(#appCategory option:checked:is([value="공문"],[value="지출결의"])) .approval-draft-section-links {
+      display: flex;
+    }
+    #draftForm .approval-draft-section-links .btn {
+      color: var(--draft-accent);
+      border: 1px solid var(--draft-divider);
+      background: var(--draft-quiet);
+      min-block-size: 2.25rem;
+    }
+    #draftForm .approval-draft-section-links .btn:hover {
+      background: var(--bs-primary-bg-subtle, #e9f0fa);
+    }
+    #draftForm [data-approval-draft-section] { scroll-margin-block-start: 1rem; }
+    #draftForm [data-approval-draft-section]:focus-visible,
+    #draftForm .approval-draft-section-links .btn:focus-visible {
+      outline: 2px solid var(--draft-accent);
+      outline-offset: 2px;
+    }
+    #draftForm .approval-draft-part,
+    #draftForm .approval-draft-actions {
+      border-top: 1px solid var(--draft-divider);
+      padding-top: .85rem;
+    }
+    #draftForm .approval-draft-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .55rem; }
+    @media (max-width: 575.98px) {
+      #draftForm .approval-draft-status { padding: .65rem; }
+      #draftForm :is(.approval-draft-status,.approval-draft-actions,.approval-draft-section-links) .btn {
+        min-block-size: 2.75rem;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      #draftForm .approval-draft-actions > .btn { flex: 1 1 9rem; }
+    }
+    @media print {
+      #draftForm .approval-draft-section-links { display: none !important; }
+    }
     .approval-draft-empty {
       padding: 18px 12px;
       text-align: center;
@@ -853,8 +912,8 @@
       </div>
 
       <div class="row mb-3">
-        <div class="col-12 mb-3">
-          <label class="small text-muted fw-bold">결재 구분</label>
+        <div class="col-12 mb-3" id="approvalDraftBasics" data-approval-draft-section tabindex="-1" role="group" aria-label="기본 정보">
+          <label for="appCategory" class="small text-muted fw-bold">결재 구분</label>
           <div id="approvalQuickTypes" class="workflow-quick-types" role="group" aria-label="자주 쓰는 양식"></div>
           <select class="form-select" id="appCategory" onchange="handleCategoryChange()">
             <optgroup label="회계/지출">
@@ -869,6 +928,11 @@
                 <option value="공문">📢 공문</option>
             </optgroup>
           </select>
+          <nav class="approval-draft-section-links" aria-label="기안 구역 바로가기">
+            <button type="button" class="btn btn-sm" aria-controls="approvalDraftBasics" onclick="jumpToApprovalDraftSection(this)">기본 정보</button>
+            <button type="button" class="btn btn-sm" aria-controls="permissionRequestBody" onclick="jumpToApprovalDraftSection(this)">본문</button>
+            <button type="button" class="btn btn-sm" aria-controls="permissionRequestLine" onclick="jumpToApprovalDraftSection(this)">결재선·첨부</button>
+          </nav>
         </div>
 
         <div class="col-12 hidden mb-3" id="divLeaveType">
@@ -1484,31 +1548,9 @@
         </div>
       </details>
 
-      <div class="mb-3" id="permissionRequestLine">
-        <label class="small text-muted fw-bold">결재선 (필수)</label>
-        <div class="card p-3 border-0 bg-light mb-2">
-          <div id="linePreview" class="mb-2 text-muted small">결재자를 추가해주세요.</div>
-          <div>
-            <button type="button" class="btn btn-sm btn-outline-primary" id="btnSelectApprover" onclick="openUserModal('approver')">➕ 결재자 선택</button>
-            <button type="button" class="btn btn-sm btn-outline-danger ms-1" id="btnResetApprover" onclick="resetLine('approver')">↺ 초기화</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="mb-3" id="permissionRequestRef">
-        <label class="small text-muted">참조자 (선택)</label>
-        <div class="card p-3 border-0 bg-light">
-          <div id="refPreview" class="mb-2 text-muted small">참조자가 없습니다.</div>
-          <div>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openUserModal('referrer')">➕ 참조자 선택</button>
-            <button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="resetLine('referrer')">↺ 초기화</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="mb-3" id="permissionRequestBody">
+      <div class="mb-3 approval-draft-part" id="permissionRequestBody" data-approval-draft-section tabindex="-1" role="group" aria-labelledby="approvalDraftBodyLabel">
         <div class="d-flex justify-content-between align-items-center mb-1">
-          <label class="small text-muted fw-bold m-0">내용</label>
+          <span id="approvalDraftBodyLabel" class="small text-muted fw-bold m-0">본문</span>
           <div class="d-flex gap-2">
             <button type="button" class="btn btn-sm btn-outline-primary" id="btnApprovalMobileFormatting" aria-expanded="false" aria-controls="appDescEditorControls" onclick="toggleApprovalMobileFormatting()">서식 도구</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openApprovalTemplatePicker()">📂 지난 양식 불러오기</button>
@@ -1575,6 +1617,28 @@
         <div class="small text-muted mt-2 hidden" id="appDescHtmlHelp">전자결재 문서는 서식 있는 본문을 작성할 수 있습니다. 미리보기 편집 또는 HTML 편집 탭으로 작성하고 제출 전 미리보기로 확인하세요.</div>
       </div>
 
+      <div class="mb-3 approval-draft-part" id="permissionRequestLine" data-approval-draft-section tabindex="-1" role="group" aria-labelledby="approvalDraftLineLabel">
+        <span id="approvalDraftLineLabel" class="small text-muted fw-bold">결재선 (필수)</span>
+        <div class="card p-3 border-0 bg-light mb-2">
+          <div id="linePreview" class="mb-2 text-muted small">결재자를 추가해주세요.</div>
+          <div>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="btnSelectApprover" onclick="openUserModal('approver')">➕ 결재자 선택</button>
+            <button type="button" class="btn btn-sm btn-outline-danger ms-1" id="btnResetApprover" onclick="resetLine('approver')">↺ 초기화</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-3" id="permissionRequestRef">
+        <label class="small text-muted">참조자 (선택)</label>
+        <div class="card p-3 border-0 bg-light">
+          <div id="refPreview" class="mb-2 text-muted small">참조자가 없습니다.</div>
+          <div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openUserModal('referrer')">➕ 참조자 선택</button>
+            <button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="resetLine('referrer')">↺ 초기화</button>
+          </div>
+        </div>
+      </div>
+
       <div class="mb-4" id="permissionRequestFiles">
         <label class="small text-muted">증빙 첨부 <span id="fileHelp" class="text-danger small hidden">(가족관계증명서 필수)</span></label>
         <div id="attachmentDropZone" class="attachment-dropzone">
@@ -1587,9 +1651,9 @@
         <div class="small text-muted mt-2 hidden" id="attachmentOrderHint">첨부가 2개 이상이면 위·아래 버튼으로 순서를 바꿀 수 있습니다. 정렬 순서는 미리보기, 임시저장, 최종 상신 문서에 동일하게 적용됩니다.</div>
       </div>
 
-      <div class="d-grid gap-2">
-        <button type="button" class="btn btn-outline-secondary py-2 fw-bold" id="btnSubmitPreview" onclick="openApprovalSubmitPreview()">상신 미리보기</button>
-        <button type="submit" class="btn btn-primary w-100 py-3 fw-bold btn-lg" id="btnSubmit">상신하기</button>
+      <div class="approval-draft-actions">
+        <button type="button" class="btn btn-outline-secondary px-3 fw-bold" id="btnSubmitPreview" onclick="openApprovalSubmitPreview()">상신 미리보기</button>
+        <button type="submit" class="btn btn-primary px-4 fw-bold" id="btnSubmit">상신하기</button>
       </div>
     </form>
   </div>
@@ -12439,6 +12503,15 @@ function switchTab(tab, options = {}) {
     if (shouldWriteCache) {
         writeApprovalSummaryCache({ active_tab: activeApprovalTab });
     }
+}
+
+function jumpToApprovalDraftSection(button) {
+    const form = document.getElementById('draftForm');
+    if (!form || !button?.closest('.approval-draft-section-links') || !form.contains(button) || !button.getClientRects().length) return;
+    const target = document.getElementById(button.getAttribute('aria-controls'));
+    if (!target || !form.contains(target) || !target.hasAttribute('data-approval-draft-section') || !target.getClientRects().length) return;
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'instant' });
 }
 
 function getApprovalTitleInputElement(mainType) {
