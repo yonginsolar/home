@@ -1,7 +1,7 @@
 /* Actual homepage preview + the existing inputs, draft controller and secure save path. */
 (function(root){
   'use strict';
-  let mounted=false, selected='hero', lastHomeArea='hero', selectionRevision=0, sectionRows=[], previewOrder=[];
+  let mounted=false, selected='hero', lastHomeArea='hero', selectionRevision=0, photoViewRevision=0, sectionRows=[], previewOrder=[];
   const narrowScreen=root.matchMedia?.('(max-width: 767px)');
   const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',documents:'문서 관리'};
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
@@ -75,9 +75,22 @@
     const photoExit=document.getElementById('site-home-photo-preview-exit');if(photoExit)photoExit.disabled=!allowed;
     syncContext();
   }
-  function setPane(pane,keepSettingsOnWide=false){
+  function photoViewVisible(frame){
+    return !!frame?.getClientRects().length&&!root.frameElement?.hidden;
+  }
+  function sendPhotoView(active,frame=document.getElementById('site-home-preview-frame')){
+    if(!frame?.src||!frame.contentWindow)return;
+    const origin=new URL(frame.src).origin;
+    if(origin!=='null')frame.contentWindow.postMessage({type:'coop-home-preview-photo-view',photoViewRevision,active:active??photoViewVisible(frame)},origin);
+  }
+  function advancePhotoView(active){
+    photoViewRevision++;
+    sendPhotoView(active);
+  }
+  function setPane(pane,keepSettingsOnWide=false,notify=true){
     const workspace=document.getElementById('site-home-visual-workspace');
     if(!workspace)return;
+    const changed=workspace.dataset.homePane!==pane;
     // Use the original desktop toggle's explicit state before the layout changes.
     // No new pane or editor instance, and no focus move during rotation.
     if(keepSettingsOnWide&&pane==='settings'&&narrowScreen?.matches&&!workspace.classList.contains('is-legal-edit')){
@@ -85,6 +98,7 @@
     }
     workspace.dataset.homePane=pane;
     for(const button of document.querySelectorAll('[data-home-pane-select]'))button.setAttribute('aria-pressed',String(button.dataset.homePaneSelect===pane));
+    if(notify&&changed&&narrowScreen?.matches)advancePhotoView();
   }
   function mountPaneControls(workspace){
     const bar=document.createElement('div');bar.className='home-view-controls';
@@ -101,12 +115,20 @@
     experience.append(note,exit);bar.append(views,experience);workspace.before(bar);
     setPane('preview');
     narrowScreen?.addEventListener?.('change',event=>{
-      if(!event.matches)return;
+      if(!event.matches){sendPhotoView();return;}
       const active=document.activeElement;
-      if(workspace.querySelector('.home-visual-inspector')?.contains(active))setPane('settings');
-      else if(workspace.querySelector('.home-visual-stage')?.contains(active))setPane('preview');
-      else if(workspace.classList.contains('show-settings')&&!workspace.classList.contains('is-legal-edit'))setPane('settings');
+      if(workspace.querySelector('.home-visual-inspector')?.contains(active))setPane('settings',false,false);
+      else if(workspace.querySelector('.home-visual-stage')?.contains(active))setPane('preview',false,false);
+      else if(workspace.classList.contains('show-settings')&&!workspace.classList.contains('is-legal-edit'))setPane('settings',false,false);
+      const frame=document.getElementById('site-home-preview-frame');
+      if(frame&&!photoViewVisible(frame))advancePhotoView(false);else sendPhotoView();
     });
+    const isSiteTab=event=>event.target.matches?.('a[href="#tab-site"],[data-bs-target="#tab-site"]');
+    document.addEventListener('hide.bs.tab',event=>{if(isSiteTab(event))advancePhotoView(false);});
+    document.addEventListener('shown.bs.tab',event=>{if(isSiteTab(event))sendPhotoView();});
+    if(root.frameElement)new MutationObserver(()=>advancePhotoView()).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
+    root.addEventListener('pagehide',()=>advancePhotoView(false));
+    root.addEventListener('pageshow',()=>sendPhotoView());
   }
   function mountZoom(stage,shell){
     const controls=document.createElement('div');controls.className='home-preview-zoom';controls.setAttribute('role','group');controls.setAttribute('aria-label','미리보기 확대·축소');
@@ -161,7 +183,8 @@
     const legalTabs=document.getElementById('site-legal-document-tabs');if(legalTabs)legalTabs.hidden=!legal;
     document.getElementById('site-home-preview-shell').hidden=legal;
     document.getElementById('site-home-legal-preview').hidden=!legal;
-    if(changed || (navigate && narrowScreen?.matches))setPane(area==='hero'?'preview':'settings',true);
+    if(changed || (navigate && narrowScreen?.matches))setPane(area==='hero'?'preview':'settings',true,!changed);
+    if(changed)advancePhotoView();
     if(legal)window.CoopSiteLegalEditor?.refreshPreview();
     if(navigate && !legal) {
       const frame=document.getElementById('site-home-preview-frame');
@@ -327,15 +350,17 @@
   window.addEventListener('message',event=>{
     const frame=document.getElementById('site-home-preview-frame');
     if(!frame?.src || event.source!==frame.contentWindow || event.origin!==new URL(frame.src).origin) return;
+    if(event.data?.type==='coop-home-preview-photo-view-ready'){sendPhotoView(undefined,frame);return;}
     if(event.data?.type==='coop-home-preview-order')syncOrder(null,event.data.ids);
     if(event.data?.type==='coop-home-preview-area') {
-      const {area,photoRequest}=event.data;
+      const {area,photoRequest,photoViewRevision:requestedView}=event.data;
       if(Number.isSafeInteger(photoRequest)&&photoRequest>0&&['activities','portfolio'].includes(area)){
-        if(typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site'))return;
+        if(typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site')||!photoViewVisible(frame)||
+           (requestedView!=null&&requestedView!==photoViewRevision))return;
         // The parent owns the mode. A click received immediately after Exit
         // must route to the editor even if the iframe still paints photo mode.
         if(document.getElementById('site-home-photo-preview-mode')?.getAttribute('aria-pressed')==='true'){
-          frame.contentWindow.postMessage({type:'coop-home-preview-photo-open',photoRequest},event.origin);
+          frame.contentWindow.postMessage({type:'coop-home-preview-photo-open',photoRequest,photoViewRevision},event.origin);
           return;
         }
       }
@@ -345,5 +370,5 @@
       if(event.data.area==='legal')window.CoopSiteLegalEditor?.select(event.data.legalKind);
     }
   });
-  root.CoopHomeVisualEditor=Object.freeze({version:'20261109-editor-continuity-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
+  root.CoopHomeVisualEditor=Object.freeze({version:'20261109-photo-navigation-1',mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
 })(window);

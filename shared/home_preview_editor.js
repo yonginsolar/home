@@ -4,6 +4,7 @@
   if(new URLSearchParams(location.search).get('home_preview')!=='1'||window.parent===window) return;
   const areas=['hero','about','impact','progress','portfolio','status','activities','partners','history','faq','contact','documents','calculator','ops-system','game-hall'];
   let parentOrigin='',draft={},photoController=false,explicitPhotoMode,pendingPhoto=null,photoSequence=0,replayingPhoto=null;
+  let photoViewRequested=false,photoViewRevision=null,photoViewActive=true,photoOpenRevision=0;
   const photoMode=()=>explicitPhotoMode??(draft.photo_inspect===true);
   const rendered = {};
   function imageUrl(value){
@@ -68,8 +69,17 @@
   function closeFinishedPhotoExperience(event){
     if(!photoMode())window.bootstrap?.Modal?.getInstance(event.currentTarget)?.hide();
   }
-  function exitPhotoExperience(){
+  function cancelPendingPhotoOpen(){
     pendingPhoto=null;
+    photoOpenRevision++;
+  }
+  function capturePhotoOpen(){
+    if(!replayingPhoto)return null;
+    const revision=photoOpenRevision;
+    return ()=>revision===photoOpenRevision&&photoViewActive&&photoMode();
+  }
+  function exitPhotoExperience(){
+    cancelPendingPhotoOpen();
     if(typeof invalidateActivityDetailRequest==='function')invalidateActivityDetailRequest();
     window.CoopHomeEnhancements?.closeZoom(false);
     for(const id of ['plantDetailModal','activityDetailModal']){
@@ -82,6 +92,7 @@
     }
   }
   window.CoopSitePreview=Object.freeze({
+    capturePhotoOpen,
     get:key=>key==='photo_inspect'?photoMode():draft[key],apply(value){const wasInspecting=photoMode();draft=value&&typeof value==='object'?value:{};if(wasInspecting&&!photoMode())exitPhotoExperience();return refresh(false);},refresh,finishActivities,invalidate(key){delete rendered[key];},
     activityRows(rows){
       if(!draft.activity)return rows;
@@ -95,10 +106,18 @@
     if(url.protocol!==location.protocol||url.port!==location.port||url.hostname.replace(/^(www|erp)\./,'')!==location.hostname.replace(/^(www|erp)\./,''))return;
     if(event.data?.type==='coop-home-preview-settings'){
       parentOrigin=event.origin;document.documentElement.dataset.homeVisualEdit='true';
-      if(event.data.settings?.site_preview?.photo_controller===true)photoController=true;
+      if(event.data.settings?.site_preview?.photo_controller===true){
+        photoController=true;
+        if(!photoViewRequested){photoViewRequested=true;window.parent.postMessage({type:'coop-home-preview-photo-view-ready'},parentOrigin);}
+      }
     }
     if(parentOrigin!==event.origin)return;
-    if(event.data?.type==='coop-home-preview-photo-mode'&&typeof event.data.enabled==='boolean'){
+    if(event.data?.type==='coop-home-preview-photo-view'){
+      const {photoViewRevision:revision,active}=event.data;
+      if(!Number.isSafeInteger(revision)||revision<0||typeof active!=='boolean'||(photoViewRevision!==null&&revision<photoViewRevision))return;
+      if((photoViewRevision!==null&&revision!==photoViewRevision)||!active)cancelPendingPhotoOpen();
+      photoViewRevision=revision;photoViewActive=active;
+    }else if(event.data?.type==='coop-home-preview-photo-mode'&&typeof event.data.enabled==='boolean'){
       const wasInspecting=photoMode();
       photoController=true;explicitPhotoMode=event.data.enabled;
       if(wasInspecting&&!photoMode())exitPhotoExperience();
@@ -106,7 +125,8 @@
       const request=pendingPhoto;
       if(!photoController||!request||event.data.photoRequest!==request.id)return;
       pendingPhoto=null;
-      if(!photoMode()||!request.trigger.isConnected)return;
+      if(!photoViewActive||!photoMode()||!request.trigger.isConnected||
+         (photoViewRevision!==null&&event.data.photoViewRevision!==photoViewRevision))return;
       replayingPhoto=request.trigger;
       try{request.trigger.click();}finally{replayingPhoto=null;}
     }else if(['coop-home-preview-select','coop-home-preview-navigate'].includes(event.data?.type))navigate(event.data.area);
@@ -131,9 +151,11 @@
     const card=event.target.closest('.activity-card[data-activity-id]');
     if(card){try{message.itemId=decodeURIComponent(card.dataset.activityId);}catch(_){}}
     if(isPhotoTarget&&photoController){
+      if(!photoViewActive)return;
       const trigger=event.target.closest('button')||detail;
       pendingPhoto={id:++photoSequence,trigger};
       message.photoRequest=pendingPhoto.id;
+      if(photoViewRevision!==null)message.photoViewRevision=photoViewRevision;
     }
     if(legal)message.legalKind=legal.getAttribute('href').includes('privacy')?'privacy':legal.getAttribute('href').includes('terms')?'terms':'signup_purpose';
     window.parent.postMessage(message,parentOrigin);
