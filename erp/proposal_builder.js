@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6.9';
+  const VERSION = '1.6.10';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -46,7 +46,7 @@
     manualDirty: false,
     formPending: false,
     generalPhotoPending: false,
-    generalPhotoRemoved: false,
+    generalPhotoChanged: false,
     renderTimer: 0,
     bootInFlight: false,
     bootAttempt: 0
@@ -723,7 +723,7 @@
       .issuer,.version{color:#395d4e;font-size:.9rem}h2{margin:1.3em 0 .25em;font-size:1.15em;color:#14593f}p{white-space:pre-wrap;margin:0}
       figure{margin:1.5em 0 0}img{display:block;width:auto;max-width:100%;max-height:110mm;object-fit:contain}footer{margin-top:1.7em;border-top:1px solid #cbd9d0;padding-top:.7em}
       @page{size:A4;margin:16mm}@media print{body,.slide{margin:0;padding:0;background:#fff;border-radius:0}h2{break-after:avoid}header,figure{break-inside:avoid}}
-    </style></head><body><main class="slide"><header><div class="issuer"></div><h1></h1><p class="recipient" hidden></p></header><div class="general-content"></div><figure class="general-photo" hidden><img alt="제안 참고 사진"></figure><footer class="version"></footer></main></body></html>`, 'text/html');
+    </style></head><body><main class="slide"><header><div class="issuer"></div><h1></h1><p class="recipient" hidden></p></header><div class="general-content"></div><footer class="version"></footer></main></body></html>`, 'text/html');
     doc.title = pdfDocumentTitle(model.generalTitle, 'general');
     doc.querySelector('.issuer').textContent = model.issuer?.name || '제안 조합';
     doc.querySelector('h1').textContent = model.generalTitle;
@@ -736,14 +736,28 @@
       const section = doc.createElement('section'), heading = doc.createElement('h2'), paragraph = doc.createElement('p');
       heading.textContent = label; paragraph.textContent = model[id]; section.append(heading, paragraph); content.append(section);
     }
-    if (state.siteImageDataUrl) {
-      doc.querySelector('.general-photo').hidden = false;
-      doc.querySelector('.general-photo img').src = state.siteImageDataUrl;
-    } else doc.querySelector('.general-photo').remove();
+    setGeneralPreviewPhoto(doc, state.siteImageDataUrl);
     doc.querySelector('.version').textContent = `제안서 ${model.proposalVersion} · ${formatDate(model.proposalDate)}`;
     appendBuilderStyles(doc);
     applyPreviewCopyEdits(doc);
     return '<!doctype html>\n' + doc.documentElement.outerHTML;
+  }
+
+  function setGeneralPreviewPhoto(doc, dataUrl) {
+    const content = doc?.querySelector('main.slide > .general-content');
+    if (!content) return false;
+    let figure = content.parentElement.querySelector('.general-photo');
+    if (!dataUrl) { figure?.remove(); return true; }
+    if (!figure) {
+      figure = doc.createElement('figure');
+      figure.className = 'general-photo';
+      const img = doc.createElement('img');
+      img.alt = '제안 참고 사진';
+      figure.append(img);
+      content.after(figure);
+    }
+    figure.querySelector('img').src = dataUrl;
+    return true;
   }
 
   function applyPreviewCopyEdits(doc) {
@@ -1227,7 +1241,7 @@
       state.previewFields = collectFields();
       state.formPending = false;
       state.generalPhotoPending = false;
-      state.generalPhotoRemoved = false;
+      state.generalPhotoChanged = false;
       saveDraft();
       state.manualDirty = state.loadedCopyEdits.length > 0;
       setStatus(state.coopId!==window.ProposalTenant.mainId&&state.documentIssuer?.legacy?'이전 서식의 저장본을 유지합니다. 현재 조합 정보로 새로 작성하려면 「새 공공시설 추가」 또는 「새 학교 추가」를 선택해 주세요.':'제안서 미리보기를 다시 만들고 있습니다.');
@@ -1238,7 +1252,7 @@
           const doc = el.previewFrame.contentDocument;
           await doc?.fonts?.ready;
           if (doc !== el.previewFrame.contentDocument) { resolve(); return; }
-          if (model.facilityType === 'general' && state.generalPhotoRemoved) doc?.querySelector('.general-photo')?.remove();
+          if (model.facilityType === 'general' && state.generalPhotoChanged && !state.siteImageDataUrl) setGeneralPreviewPhoto(doc, '');
           if (model.facilityType !== 'general') lockPhotoGeometry(doc);
           const slideCount = doc?.querySelectorAll('.slide').length || 0;
           el.pageCount.textContent = model.facilityType === 'general' ? 'A4' : `${slideCount}쪽`;
@@ -1554,7 +1568,7 @@
     state.loadedCopyEdits = copyEdits; state.manualDirty = false; state.editMode = false;
     state.formPending = false;
     state.generalPhotoPending = false;
-    state.generalPhotoRemoved = false;
+    state.generalPhotoChanged = false;
     state.copyRestoreMismatch = false;
     state.lastExistingKw = Number(ERPNumberInput.raw(snapshot.fields.existingKw)) || 0;
     setFields(snapshot.fields);
@@ -1831,7 +1845,7 @@
     state.photoAspectRatio = 0;
     state.useSamplePhoto = false;
     state.generalPhotoPending = false;
-    state.generalPhotoRemoved ||= hadPhoto;
+    state.generalPhotoChanged ||= hadPhoto;
     input.value = '';
     document.getElementById('generalPhotoName').textContent = '선택한 사진 없음';
     previewPhoto?.remove();
@@ -1840,6 +1854,33 @@
     if (hadPhoto) state.library?.markDirty();
     setStatus(hadPhoto ? '미리보기에서 사진만 뺐습니다. 「문구 확인」으로 이 브라우저에 임시 보관할 수 있습니다.'
       : '사진 선택을 취소했습니다.', hadPhoto || state.formPending || state.manualDirty);
+  }
+
+  function canApplyGeneralPhotoOnly() {
+    return state.generalPhotoChanged && !state.formPending && !state.copyRestoreMismatch
+      && textValue('facilityType') === 'general' && state.previewFields?.facilityType === 'general'
+      && JSON.stringify(collectFields()) === JSON.stringify(state.previewFields);
+  }
+
+  async function applyGeneralPhotoOnly() {
+    const epoch = state.documentEpoch, sequence = state.imageSequence;
+    const current = () => epoch === state.documentEpoch && sequence === state.imageSequence && canApplyGeneralPhotoOnly();
+    try {
+      await withTimeout(state.imageLoadPromise, 'GENERAL_PHOTO');
+      if (!current()) return false;
+      if (state.imageLoadError) throw state.imageLoadError;
+      await withTimeout(waitForPreview(), 'PREVIEW');
+      if (!current()) return false;
+      if (!setGeneralPreviewPhoto(el.previewFrame.contentDocument, state.siteImageDataUrl)) throw new Error('미리보기가 아직 준비되지 않았습니다. 다시 확인해 주세요.');
+      state.generalPhotoPending = false;
+      setStatus('미리보기의 사진만 반영했습니다. 직접 고친 문구는 그대로입니다.');
+      return true;
+    } catch (error) {
+      if (current()) setStatus(error?.code === 'PROPOSAL_BUILDER_REQUEST_TIMEOUT'
+        ? '사진 또는 미리보기 준비가 늦어지고 있습니다. 잠시 뒤 문구 확인을 다시 눌러 주세요.'
+        : error.message || '사진을 반영하지 못했습니다. 다시 확인해 주세요.', true);
+      return false;
+    }
   }
 
   async function resetSample() {
@@ -1892,13 +1933,8 @@
     state.eventsBound = true;
     el.form.addEventListener('submit', (event) => {
       event.preventDefault();
-      void state.library?.applyLocally(() => {
-        // With no new form text, keep any wording edited in the current preview.
-        if (state.generalPhotoRemoved && !state.generalPhotoPending && !state.formPending && !state.copyRestoreMismatch
-            && textValue('facilityType') === 'general' && state.previewFields?.facilityType === 'general'
-            && JSON.stringify(collectFields()) === JSON.stringify(state.previewFields)) return true;
-        return renderPreview({ force: true, applyPending: true });
-      });
+      void state.library?.applyLocally(() => canApplyGeneralPhotoOnly()
+        ? applyGeneralPhotoOnly() : renderPreview({ force: true, applyPending: true }));
     });
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage || event.target.id === 'generalPhoto') return;
@@ -1974,10 +2010,13 @@
       state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
     });
     [el.siteImage, document.getElementById('generalPhoto')].forEach(input => input.addEventListener('change', () => {
-      state.imageLoadError = null;
       const general = input.id === 'generalPhoto';
+      if (general && (textValue('facilityType') !== 'general' || !input.files?.length)) return;
+      state.imageLoadError = null;
       if (general) {
-        if (input.files?.length) state.generalPhotoRemoved = false;
+        // Record the selection before reading: an immediate submit must take the photo-only path too.
+        state.generalPhotoChanged = true;
+        state.generalPhotoPending = true;
         updateGeneralPhotoButton();
       }
       const sequence = state.imageSequence + 1;
