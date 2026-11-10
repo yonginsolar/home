@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.200 | Change: 2026-11-10 - Confirm actual salary payment before posting its payment journal. -->
+<!-- Version: v1.0.201 | Change: 2026-11-10 - Check uncertain payroll journal results without resending. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,12 +10,13 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.200 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.201 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.0"></script>
   <script src="accounting_report_save.js?v=1.0.0" integrity="sha384-AzLhwgwH2GCLUoGPmH84klNCeErIK1TS80qvB89ZFoXhSOEMec79STufobsxF1kw" crossorigin="anonymous"></script>
   <script src="accounting_bank_compare.js?v=1.1.4"></script>
+  <script src="accounting_payroll_recovery.js?v=1.0.0" integrity="sha384-3XUWSWA6y0pYgktOQ8qYYFSDsKYf+u/smrs3/O5PNm76rhoMAxovSnHzCDFsE54/" crossorigin="anonymous"></script>
   <script src="accounting_journal_typo.js?v=1.1.0" integrity="sha384-m85gYkNm21TI8RCNtqcn9S4eqxMRG2/JuHPpDL694JYsXE4AKCCnqWV/ZQYzBr1X" crossorigin="anonymous" defer></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261105-tax-label-1"></script>
@@ -671,6 +672,10 @@
 	               <div><h6 class="fw-bold mb-1">📝 전자결재 연동</h6><small class="text-muted">승인된 지출결의를 회계에 반영합니다. 급여는 귀속월 말 비용과 실제 지급일 출금을 나누어 기록합니다.</small></div>
                <button class="btn btn-warning btn-sm text-white" onclick="confirmSync('approval')">결제수단·연동 내용 확인</button>
 	             </div>
+               <div id="accountingPayrollResult" class="mt-2" hidden>
+                 <div id="accountingPayrollResultText" class="small mb-2" role="status"></div>
+                 <button id="accountingPayrollResultButton" type="button" class="btn btn-outline-primary btn-sm" onclick="checkAccountingPayrollResult()">급여 저장 결과 확인</button>
+               </div>
 	          </div>
           <div class="card p-3 border-start border-5 border-success-subtle bg-white">
              <div class="d-flex justify-content-between align-items-center">
@@ -2325,6 +2330,10 @@ window.onload = async function() {
     onReceivableIncomeTypeChange();
     toggleAdvancedMode();
     renderAutoSyncUndoInfo();
+    renderAccountingPayrollResult();
+    window.addEventListener('storage', event => {
+        if (event.key === null || event.key.startsWith('coop.accounting.payroll.result.v1:')) renderAccountingPayrollResult();
+    });
     if (document.getElementById('tabSync')?.classList.contains('active')) await loadApprovalUnclassifiedQueue();
     if (document.getElementById('tabGuide')?.classList.contains('active')) await mountAccountingGuide();
     if (new URLSearchParams(location.search).get('work') === 'taxes') {
@@ -2713,6 +2722,72 @@ function renderAutoSyncUndoInfo() {
     const label = String(state.label || state.type || '자동연동');
     const transCount = Array.isArray(state.trans_ids) ? state.trans_ids.length : 0;
     infoEl.textContent = `${label} · ${timeLabel} · 전표 ${transCount}건 되돌리기 가능`;
+}
+
+function accountingPayrollRecovery() {
+    if (!window.CoopPayrollRecovery || window.ExpoRuntimeBridge || !accountingDataAuthorized
+        || !canPerform('accounting.edit') || !myInfo?.coop_id) return null;
+    try {
+        return window.CoopPayrollRecovery.create(window.localStorage, accountingReadIdentity(), () => window.crypto.randomUUID());
+    } catch (_) { return null; }
+}
+
+function accountingPendingPayrollMonths() {
+    try {
+        return new Set((accountingPayrollRecovery()?.list() || []).flatMap(entry => entry.months));
+    } catch (_) { return new Set(); }
+}
+
+function accountingApprovalTargetsWithoutPendingPayroll(targetDocs) {
+    const pending = accountingPendingPayrollMonths();
+    return targetDocs.filter(doc => !isSalaryExpenseApproval(doc) || !pending.has(getApprovalSalaryMonth(doc)));
+}
+
+function renderAccountingPayrollResult(message = '') {
+    const section = document.getElementById('accountingPayrollResult');
+    if (!section) return;
+    let entries = [];
+    const store = accountingPayrollRecovery();
+    try { entries = store?.list() || []; } catch (_) {
+        message ||= '이전 급여 저장 요청을 읽지 못했습니다. 장부에서 결과를 확인해 주세요.';
+    }
+    const button = document.getElementById('accountingPayrollResultButton');
+    document.getElementById('accountingPayrollResultText').textContent = message ||
+        (entries.length ? '저장 응답을 확인하지 못한 급여가 있습니다. 다시 저장하지 않고 결과만 확인할 수 있어요.' : '');
+    section.hidden = !store || (!entries.length && !message);
+    button.hidden = !entries.length;
+    button.disabled = approvalSyncBusy || accountingReadTasks.has('payrollBatchResult');
+}
+
+function checkAccountingPayrollResult() {
+    const store = accountingPayrollRecovery();
+    const scope = accountingReadScope('tabSync', {valid:()=>canPerform('accounting.edit')});
+    if (!store || approvalSyncBusy || !accountingReadScopeCurrent(scope)) return;
+    let entries;
+    try { entries = store.list(); } catch (_) { return renderAccountingPayrollResult('저장 요청을 읽지 못했습니다. 장부에서 확인해 주세요.'); }
+    if (!entries.length) return renderAccountingPayrollResult();
+    let message = '';
+    return runAccountingRead('payrollBatchResult', entries.map(entry => entry.id).sort().join(','), scope,
+        read => window.CoopPayrollRecovery.read(_supabase, scope.owner.coop_id, entries, read.controller.signal),
+        results => {
+            const labels = {
+                posted: '전표 저장을 확인했습니다. 급여대장 등 후속 처리 상태는 별도로 확인해 주세요.',
+                changed: '저장은 완료됐으나 이후 전표가 바뀌었습니다. 현재 장부를 확인해 주세요.',
+                reverted: '저장됐던 전표가 현재 장부에는 없습니다.',
+                unknown: '아직 결과를 확인하지 못했습니다. 다시 저장하지 말고 결과를 확인해 주세요.'
+            };
+            message = results.map(({ entry, state }) => {
+                if (state !== 'unknown') {
+                    try { store.clear(entry); } catch (_) { /* Keep the pending marker for another read. */ }
+                }
+                return `${entry.months.join(', ')}: ${labels[state]}`;
+            }).join(' ');
+        },
+        hint => { message = hint; },
+        {start:()=>renderAccountingPayrollResult('급여 저장 결과를 확인하는 중…'),
+         finish:()=>renderAccountingPayrollResult(message),
+         cancel:()=>renderAccountingPayrollResult()}
+    );
 }
 
 function parseSourceIdFromTransId(transId, prefix) {
@@ -9003,8 +9078,11 @@ function confirmSync(type) {
     // (2) 전자결재 연동
     else if (type === 'approval') {
         if (approvalSyncBusy) return;
+        const paymentScope = accountingReadScope('tabSync', {valid:()=>canPerform('accounting.edit')});
+        if (!accountingReadScopeCurrent(paymentScope)) return;
         document.getElementById('accountingSyncReview').hidden = true;
         approvalSyncBusy = true;
+        renderAccountingPayrollResult();
         (async () => {
           try {
             const coopId = String(myInfo?.coop_id || '').trim();
@@ -9026,8 +9104,9 @@ function confirmSync(type) {
             if (existingError) return showAlert("오류", "미리보기 전표 조회 실패: " + existingError.message);
             const existingSet = new Set(existing ? existing.map((entry) => entry.Trans_ID) : []);
             const previewTargetState = getApprovalSyncTargetState(approvals, existingSet);
-            const targetDocs = previewTargetState.targetDocs;
-            if (targetDocs.length === 0) return showAlert("알림", "이미 모두 연동되었습니다.");
+            const targetDocs = accountingApprovalTargetsWithoutPendingPayroll(previewTargetState.targetDocs);
+            if (targetDocs.length === 0) return showAlert("알림", previewTargetState.targetDocs.length
+                ? '급여 저장 결과 확인을 먼저 이용해 주세요.' : '이미 모두 연동되었습니다.');
 
             const withholdingCandidates = [];
             for (const doc of targetDocs.filter(isWithholdingTaxApproval)) {
@@ -9042,7 +9121,7 @@ function confirmSync(type) {
             await loadCards();
             const expensePayments = await window.CoopPaymentDates.collect(expenseCandidates, today, {cards:cardData,owner:myInfo.coop_id+':'+myInfo.emp_id});
             if (expensePayments === null) return;
-            const salaryPayments = await window.CoopPaymentDates.collectSalary(getApprovalSalaryPaymentCandidates(previewTargetState, today), today);
+            const salaryPayments = await window.CoopPaymentDates.collectSalary(getApprovalSalaryPaymentCandidates({...previewTargetState,targetDocs}, today), today);
             if (salaryPayments === null) return;
 
             const previewPlanResult = await buildApprovalSyncPlans(targetDocs, today, writer, {
@@ -9087,6 +9166,7 @@ function confirmSync(type) {
             ].filter(Boolean).join('\n');
 
             await window.CoopWithholdingPayment.review(previewMsg, async () => {
+                if (!accountingReadScopeCurrent(paymentScope)) return;
                 await loadCards();
                 const { data: runApprovals, error: runFetchError } = await _supabase
                     .from('ref_approval')
@@ -9106,9 +9186,10 @@ function confirmSync(type) {
                 if (runExistingError) return showAlert("오류", "기존 전표 확인 실패: " + runExistingError.message);
                 const runExistingSet = new Set(runExisting ? runExisting.map((entry) => entry.Trans_ID) : []);
                 const runTargetState = getApprovalSyncTargetState(runApprovals, runExistingSet);
-                const runTargetDocs = runTargetState.targetDocs;
-                if (runTargetDocs.length === 0) return showAlert("알림", "이미 모두 연동되었습니다.");
-                const currentSalaryTargets = new Map(getApprovalSalaryPaymentCandidates(runTargetState, today)
+                const runTargetDocs = accountingApprovalTargetsWithoutPendingPayroll(runTargetState.targetDocs);
+                if (runTargetDocs.length === 0) return showAlert("알림", runTargetState.targetDocs.length
+                    ? '급여 저장 결과 확인을 먼저 이용해 주세요.' : '이미 모두 연동되었습니다.');
+                const currentSalaryTargets = new Map(getApprovalSalaryPaymentCandidates({...runTargetState,targetDocs:runTargetDocs}, today)
                     .map(target => [`APR-${target.doc.id}`, target]));
                 const confirmedSalaryPlans = previewPlanResult.plans.filter(plan => plan.kind === 'payment' && plan.salaryMonth);
                 if (confirmedSalaryPlans.some(plan => {
@@ -9168,10 +9249,39 @@ function confirmSync(type) {
 
                 let insertedJournalRows = [];
                 if (entries.length > 0) {
-                    const insertResult = await _supabase
+                    const insert = _supabase
                         .from('ac_journal')
                         .insert(entries)
                         .select('Trans_ID');
+                    let insertResult;
+                    const recoveryMonths = runPlanResult.plans.filter(plan => plan.kind === 'payment' && plan.salaryMonth)
+                        .map(plan => plan.salaryMonth);
+                    if (recoveryMonths.length && !window.ExpoRuntimeBridge) {
+                        const recovery = accountingPayrollRecovery();
+                        let attempt, taggedInsert;
+                        try {
+                            if (!accountingReadScopeCurrent(paymentScope) || !recovery
+                                || typeof insert.setHeader !== 'function' || typeof insert.retry !== 'function') {
+                                throw Error('현재 회계 화면에서 급여 저장 결과를 확인할 수 없습니다.');
+                            }
+                            attempt = recovery.begin(recoveryMonths);
+                            taggedInsert = insert.setHeader('x-coop-payroll-request', attempt.id).retry(false);
+                        } catch (error) {
+                            if (attempt) { try { recovery.clear(attempt); } catch (_) {} }
+                            await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);
+                            if (accountingReadScopeCurrent(paymentScope)) showAlert('급여 지급을 저장하지 않았습니다', error.message);
+                            return;
+                        }
+                        const outcome = await window.CoopPayrollRecovery.submit(taggedInsert);
+                        if (outcome.state === 'unknown') {
+                            if (accountingReadScopeCurrent(paymentScope)) {
+                                showAlert('급여 저장 결과 미확인', '다시 저장하지 말고 이 화면의 ‘급여 저장 결과 확인’을 이용해 주세요.');
+                            }
+                            return;
+                        }
+                        try { recovery.clear(attempt); } catch (_) { /* Server result remains available. */ }
+                        insertResult = outcome.response;
+                    } else insertResult = await insert;
                     if (insertResult.error) {
                         await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);
                         return showAlert("오류", "전표 저장 실패: " + insertResult.error.message);
@@ -9250,6 +9360,7 @@ function confirmSync(type) {
             showAlert('연동 확인 실패', error?.message || '전자결재 연동 내용을 확인하지 못했습니다. 다시 시도해 주세요.');
           } finally {
             approvalSyncBusy = false;
+            renderAccountingPayrollResult();
           }
         })();
     }
