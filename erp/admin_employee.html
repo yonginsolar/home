@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.202
+Version: v1.0.203
 Change: 2026-11-09 - Make the employee roster searchable and responsive.
 -->
 <html>
@@ -30,7 +30,7 @@ Change: 2026-11-09 - Make the employee roster searchable and responsive.
 <script src="../shared/coop_logo_upload.js?v=1.1.0"></script>
 <script src="../shared/coop_favicon_field.js?v=1.0.1"></script>
 <script src="coop_logo_settings.js?v=1.1.3"></script>
-<script src="coop_certificate_setup.js?v=20261017-notice-1"></script>
+<script src="coop_certificate_setup.js?v=20261110-write-lock"></script>
 <script src="../shared/member_capital.js?v=20261008-3"></script>
 <script src="member_capital_settings.js?v=20261016-1"></script>
 <script src="member_admission_policy.js?v=1.1.0"></script>
@@ -69,7 +69,7 @@ Change: 2026-11-09 - Make the employee roster searchable and responsive.
 <script src="payroll_import_guard.js?v=1.0.0"></script>
 <script src="coop_settings_view.js?v=20261016-1"></script>
 <script src="coop_settings_groups.js?v=1.0.0"></script>
-<script src="initial_setup_access.js?v=1.1.6"></script>
+<script src="initial_setup_access.js?v=1.1.7"></script>
 <script src="initial_setup_employee.js?v=1.0.1"></script>
 <script src="permission_help.js?v=1.0.0" integrity="sha384-2zqfj9JqbMoT6UJdiQ/DQ7D6WgQ4GmQavGcD8ZHX89634bbQCdHCsMllginiF8l/" crossorigin="anonymous"></script>
 <script src="permission_settings.js?v=1.2.0" integrity="sha384-ILXawNulxqIDZByjT/xkD8gGcN/KZuW6UXqA9x07V1WOnFWguifGiTDtfog7Xb2I" crossorigin="anonymous"></script>
@@ -1108,6 +1108,8 @@ function getRoleBadge(roleKey) {
 
 let settings = {}; let companyInfo = {}; let advancedSettingsRaw = [];
 let companyProfileState = null;
+let coopProfileOperation = false;
+let coopProfileAuthInvalidated = false;
 let companySettingsSaveInFlight = false;
 let hrSettingsAuthorized = false, hrSettingsReadyOwner = '', hrSettingsOpenPromise = null, hrSettingsResumeReadOwner = '';
 const hrSettingsAuxLoaded = new Set();
@@ -3734,7 +3736,7 @@ window.onload = async function() {
     if (!hrUserGate.ok) return;
     myInfo = hrUserGate.user;
     hrAuthorizedUserId = String(hrUserGate.authUser?.id || '');
-    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){document.getElementById('employeeAiConnections').hidden=true;closeEmployeeAiConnections?.();interruptEmployeeAuxReads('',true);window.HrContractFollowup?.invalidateOwner(getHrSettingsOwner());window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
+    _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){coopProfileAuthInvalidated=true;document.getElementById('employeeAiConnections').hidden=true;closeEmployeeAiConnections?.();interruptEmployeeAuxReads('',true);window.HrContractFollowup?.invalidateOwner(getHrSettingsOwner());window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
     const villageWorkspace = await _supabase.rpc('sun_village_workspace_context');
     if (!villageWorkspace.error && villageWorkspace.data?.workspaces?.some(item => item?.is_current === true && item?.is_management_coop === false)) {
         location.replace('village_company_info.html');
@@ -3808,7 +3810,7 @@ window.onload = async function() {
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:refreshEmployeeSettingsWorkspace,
         authorize:async runtime => { if (!window.ERPEmployeeSettingsView.isPage) await window.ERPInitialSetupEmployee.refresh(_supabase,runtime); return true; },
         busy:() => window.ERPPermissionSettings?.busy() || document.getElementById('coopDepositSetup')?.certificateSetupController?.busy() || document.getElementById('coopDepositSetup')?.certificateSetupController?.dirty() || window.ERPInitialSetupEmployee.busy() || runInvite._inFlight || inviteDiscardPending || hasUnsavedEmployeeInvite()
-            || companySettingsSaveInFlight || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
+            || companySettingsSaveInFlight || coopProfileOperation || employeeResignationSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
             || payrollImportBatchController?.busy()
             || window.ERPAnnualSettings?.isBusy()
             || window.ERPEmployeeSettingsView?.isDirty() || window.MemberAdmissionPolicy?.isDirty()
@@ -5762,12 +5764,13 @@ function showHrSettingsReadRetry(message) {
 }
 async function retryHrSettingsRead() {
     const owner = getHrSettingsOwner();
-    if (!isHrSettingsContextCurrent(owner) || companySettingsSaveInFlight) return;
+    if (!isHrSettingsContextCurrent(owner) || companySettingsSaveInFlight || coopProfileOperation) return;
     if (hrSettingsReadRetryPromise) return hrSettingsReadRetryPromise;
     if (hrSettingsAuxPending.size) return;
     const view = window.ERPEmployeeSettingsView;
     const draft = view.capture();
     const dirty = view.isDirty();
+    const heldProfile = coopProfileDraftDirty();
     const controls = [...document.querySelectorAll('#settingsModal input,#settingsModal select,#settingsModal textarea,#settingsModal button')].map(element=>({element,disabled:element.disabled}));
     controls.forEach(({element})=>{element.disabled=true;});
     const pending = (async () => {
@@ -5782,7 +5785,8 @@ async function retryHrSettingsRead() {
             if (!isHrSettingsContextCurrent(owner)) return;
             hrSettingsReadyOwner = owner;
             hrSettingsReadRetryRequired = false;
-            view.checkpoint();
+            if (heldProfile) view.checkpointSection('#coopBusinessSettingsFields,#setCalendar,#companyBrandingFields');
+            else view.checkpoint();
             if (dirty) view.restore(draft);
             document.getElementById('hrSettingsReadRetry').hidden = true;
         } catch (error) {
@@ -5944,7 +5948,7 @@ function ensureCoopDepositSettings() {
             return isHrSettingsContextCurrent(owner)&&runtime?.coop_id===myInfo?.coop_id&&runtime.is_active!==false&&runtime.effective_permissions?.includes('hr.admin');
         },checkpoint:node=>window.ERPEmployeeSettingsView.checkpointSection('#'+node.closest('#coopDepositSetup').id)});
 }
-async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null } = {}) {
+async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null, preserveProfile = false } = {}) {
     ensureCoopProfileFields();
     ensureCoopPermissionLaunchers();
     ensureCoopDepositSettings();
@@ -5956,20 +5960,13 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCur
         await loadCalendarIcsSettings({ throwOnError, isCurrent });
     }
     if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
-    const profileOwner = getHrSettingsOwner();
-    const profileRequest = _supabase.rpc('erp_coop_profile');
-    const profileResult = await (profileRequest.abortSignal ? profileRequest.abortSignal(AbortSignal.timeout(15000)) : profileRequest);
-    if (profileResult.error) throw profileResult.error;
-    if (!isCurrent() || !isHrSettingsContextCurrent(profileOwner)) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
-    Object.assign(companyInfo, profileResult.data.data);
-    companyProfileState = {owner:profileOwner,revision:profileResult.data.revision};
-    // 회사 정보는 연도와 무관하게 공통 관리 (원본 그대로 로드)
-    // *회사 정보는 보통 매년 바뀌지 않으므로 ref_company_info 하나만 씁니다.
-    document.getElementById("set_orgName").value = resolveAdminEmployeeCompanyName(companyInfo);
-    document.getElementById("set_ceoName").value = resolveAdminEmployeeChairmanName(companyInfo);
-    document.getElementById("set_bizNum").value = companyInfo['bizNum'] || "";
-    document.getElementById("set_address").value = companyInfo['company_address'] || "";
-    for (const [id,key] of COOP_PROFILE_DETAIL_FIELDS) document.getElementById(id).value = companyInfo[key] || '';
+    if (!preserveProfile && !coopProfileDraftDirty()) {
+        const profileOwner = getHrSettingsOwner();
+        const result = await window.ERPInitialSetupAccess.read(_supabase,'erp_coop_profile',{p_action:'get'});
+        if (!isCurrent() || !isHrSettingsReadContextCurrent(profileOwner)) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+        const latest = coopProfileValues(result.data);
+        commitCoopProfileRead(profileOwner,result,latest);
+    }
     document.getElementById("set_workLunchStartTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_START_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.start);
     document.getElementById("set_workLunchEndTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_END_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.end);
     await refreshMemberCapitalDisplays();
@@ -5981,8 +5978,81 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCur
     syncHrStructureSettingsUi();
 }
 
-// 회사 정보·캘린더·알림·결재 설정 저장 (연도별 기준은 별도 저장)
+// 조합 기본정보 is independent of other settings and their reads.
 const COOP_PROFILE_DETAIL_FIELDS = [['set_contactName','company_contact_name'],['set_contactPhone','company_contact_phone'],['set_contactEmail','company_contact_email'],['set_estDate','estDate']];
+const COOP_PROFILE_FIELDS = [['set_orgName','company_name'],['set_ceoName','chairman_name'],['set_bizNum','bizNum'],['set_address','company_address'],...COOP_PROFILE_DETAIL_FIELDS];
+function coopProfileValues(data) {
+    return Object.fromEntries(COOP_PROFILE_FIELDS.map(([id,key])=>[key,String(data ? data[key] ?? '' : document.getElementById(id)?.value ?? '').trim()]));
+}
+function coopProfileDraftDirty() {
+    return companyProfileState?.owner === getHrSettingsOwner() &&
+        Object.entries(coopProfileValues()).some(([key,value])=>companyProfileState.baseline[key] !== value);
+}
+function coopProfileNotice(message,retry=false) {
+    const notice=document.getElementById('coopProfileStatus');
+    if (notice) notice.textContent=message;
+    const button=document.getElementById('coopProfileRetry');
+    if (button) button.hidden=!retry;
+}
+function commitCoopProfileRead(owner,result,values,{checkpoint=false}={}) {
+    if (typeof result?.revision!=='string' || !result.data) throw Error('COOP_PROFILE_READ_INVALID');
+    const baseline=coopProfileValues(result.data);
+    Object.assign(companyInfo,result.data);
+    companyProfileState={owner,revision:result.revision,baseline,review:false};
+    for (const [id,key] of COOP_PROFILE_FIELDS) {
+        const field=document.getElementById(id);
+        field.value=values[key];
+        if (checkpoint && values[key]===baseline[key]) {
+            window.ERPEmployeeSettingsView?.checkpointSection('#'+id);
+            window.ErpWorkspaceResume?.checkpoint(field);
+        }
+    }
+}
+async function operateCoopBasicProfile(action) {
+    const owner=getHrSettingsOwner(), state=companyProfileState;
+    if (coopProfileAuthInvalidated || !isHrSettingsContextCurrent(owner) || coopProfileOperation || companySettingsSaveInFlight || hrSettingsReadRetryPromise) return;
+    const current=()=>!coopProfileAuthInvalidated&&isHrSettingsContextCurrent(owner)&&companyProfileState===state;
+    if (action==='save' && (state?.owner!==owner || state.review)) {
+        return coopProfileNotice('저장하기 전에 기본정보를 다시 확인해 주세요.',true);
+    }
+    const draft=coopProfileValues();
+    const payload=action==='save'?Object.fromEntries(Object.entries(draft).filter(([key,value])=>value!==state.baseline[key])):{};
+    if (action==='save' && !Object.keys(payload).length) return coopProfileNotice('변경된 기본정보가 없습니다.');
+    coopProfileOperation=true;
+    const controls=[...COOP_PROFILE_FIELDS.map(([id])=>document.getElementById(id)),document.getElementById('coopProfileSave'),document.getElementById('coopProfileRetry')]
+        .filter(Boolean).map(node=>[node,node.disabled]);
+    controls.forEach(([node])=>{node.disabled=true;});
+    try {
+        if (action==='check') {
+            const result=await window.ERPInitialSetupAccess.read(_supabase,'erp_coop_profile',{p_action:'get'});
+            if (!current()) return;
+            const latest=coopProfileValues(result.data);
+            const merge=state?.owner===owner?window.ERPInitialSetupAccess.reconcile(state.baseline,draft,latest):{values:latest,conflicts:[]};
+            if (merge.conflicts.length && !await window.CoopDialog.confirm('같은 항목이 다른 곳에서도 바뀌었습니다. 내 입력을 유지하고 최신 설정 기준으로 다시 검토할까요? 아직 저장하지 않습니다.')) return;
+            if (!current()) return;
+            commitCoopProfileRead(owner,result,merge.values,{checkpoint:true});
+            coopProfileNotice('최신 기본정보를 확인했습니다. 수정한 내용은 저장을 눌러 반영해 주세요.');
+            return;
+        }
+        const request=_supabase.rpc('erp_coop_profile',{p_action:'save',p_data:payload,p_expected_revision:state.revision});
+        const {data,error,status}=await (typeof request.retry==='function'?request.retry(false):request);
+        if (error) throw Object.assign(error,{responseStatus:status});
+        if (!current()) return;
+        commitCoopProfileRead(owner,data,coopProfileValues(data.data),{checkpoint:true});
+        coopProfileNotice('조합 기본정보를 저장했습니다.');
+    } catch(error) {
+        if (current()) {
+            if (state?.owner===owner && (error?.code==='PT409' || !error?.code || error?.responseStatus===0 ||
+                error?.responseStatus===408 || error?.responseStatus>=500)) state.review=true;
+            coopProfileNotice(error?.code==='22023'?'기본정보 입력 형식을 확인해 주세요. 입력은 유지됩니다.':
+                error?.code==='42501'?'기본정보를 변경할 권한을 확인해 주세요. 입력은 유지됩니다.':
+                '기본정보를 확인하지 못했습니다. 입력은 유지됩니다. 다시 확인해 주세요.',true);
+        }
+    } finally {
+        coopProfileOperation=false;
+        controls.forEach(([node,disabled])=>{node.disabled=disabled;});
+    }
+}
 function ensureCoopPermissionLaunchers() {
     const policyOwner=getHrSettingsOwner();
     window.MemberAdmissionPolicy?.bind({client:_supabase, context:()=>({coop_id:myInfo?.coop_id,actor:hrAuthorizedUserId}), current:()=>isHrSettingsContextCurrent(policyOwner)&&permissionSet.has('member.admin')});
@@ -6022,9 +6092,17 @@ function ensureCoopProfileFields() {
     const panel = document.createElement('section'); panel.id = 'companyProfileDetails'; panel.className = 'coop-setting-panel';
     panel.innerHTML = '<h3 class="coop-setting-heading" id="companyProfileDetailsHeading">📅 설립일 · 공식 연락처</h3><div class="coop-setting-body"><div class="row g-3"><div class="col-md-6"><label for="set_estDate" class="form-label">설립일</label><input id="set_estDate" type="date" class="form-control"></div><div class="col-md-6"><label for="set_contactName" class="form-label">공식 담당자</label><input id="set_contactName" class="form-control" maxlength="100"></div><div class="col-md-6"><label for="set_contactPhone" class="form-label">공식 전화번호</label><input id="set_contactPhone" type="tel" class="form-control" maxlength="40"></div><div class="col-md-6"><label for="set_contactEmail" class="form-label">공식 이메일</label><input id="set_contactEmail" type="email" class="form-control" maxlength="254"></div></div></div>';
     panel.setAttribute('aria-labelledby','companyProfileDetailsHeading'); identity.after(panel);
+    const actions=document.createElement('div');actions.className='d-flex gap-2 flex-wrap mt-3';
+    const save=document.createElement('button');save.type='button';save.id='coopProfileSave';save.className='btn btn-primary';save.textContent='기본정보 저장';
+    save.onclick=()=>void operateCoopBasicProfile('save');
+    const retry=document.createElement('button');retry.type='button';retry.id='coopProfileRetry';retry.className='btn btn-outline-secondary';retry.textContent='기본정보 다시 확인';retry.hidden=true;
+    retry.onclick=()=>void operateCoopBasicProfile('check');
+    const status=document.createElement('div');status.id='coopProfileStatus';status.className='small mt-2';status.setAttribute('role','status');
+    actions.append(save,retry);panel.querySelector('.coop-setting-body').append(actions,status);
+    const footer=document.querySelector('#companySettingsFooter button');if(footer)footer.textContent='그 외 조합 설정 저장';
 }
 async function saveSettings() {
-    if (companySettingsSaveInFlight) return;
+    if (companySettingsSaveInFlight || coopProfileOperation) return;
     const depositSetup=document.getElementById('coopDepositSetup')?.certificateSetupController;
     if (depositSetup?.busy() || depositSetup?.dirty()) return showAlert('출자금 납입 안내를 먼저 저장하거나 입력 취소해 주세요.');
     if (hrSettingsAuxPending.size || hrSettingsReadRetryPromise) return showAlert('설정을 불러오는 중입니다. 완료 후 저장해 주세요.');
@@ -6046,9 +6124,6 @@ async function saveSettings() {
 
         if (!coopId) throw new Error("조합 정보가 없어 저장할 수 없습니다. 다시 로그인해 주세요.");
 
-        // 3. 회사 정보 저장 (공통)
-        const org = document.getElementById("set_orgName").value;
-        const ceo = document.getElementById("set_ceoName").value;
         const departmentCatalog = collectHrDepartmentCatalogFromUi();
         const positionCatalog = collectHrPositionCatalogFromUi();
         const overtimePolicy = collectHrOvertimePolicyFromUi();
@@ -6062,9 +6137,6 @@ async function saveSettings() {
         ) {
             throw new Error('중간결재와 최종결재는 서로 다른 직원으로 지정해주세요.');
         }
-        const profileData = {company_name:org.trim(),chairman_name:ceo.trim(),bizNum:document.getElementById('set_bizNum').value.trim(),company_address:document.getElementById('set_address').value.trim()};
-        for (const [id,key] of COOP_PROFILE_DETAIL_FIELDS) profileData[key] = document.getElementById(id).value.trim();
-        if (!companyProfileState || companyProfileState.owner !== getHrSettingsOwner()) throw new Error('기본정보를 다시 불러와 확인해 주세요.');
         const cUpdates = [
             { coop_id: coopId, key: HR_WORK_LUNCH_START_TIME_KEY, value: lunchTimeSettings.start },
             { coop_id: coopId, key: HR_WORK_LUNCH_END_TIME_KEY, value: lunchTimeSettings.end },
@@ -6117,13 +6189,6 @@ async function saveSettings() {
         }
         // Validate all settings before staging the file. Upload does not change
         // the registered path or clear the user's selection until commit.
-        const profileSaved = await _supabase.rpc('erp_coop_profile',{p_action:'save',p_data:profileData,p_expected_revision:companyProfileState.revision});
-        if (profileSaved.error) throw profileSaved.error;
-        companyProfileState = {owner:getHrSettingsOwner(),revision:profileSaved.data.revision};
-        Object.assign(companyInfo,profileSaved.data.data);
-        confirmedSteps += 1;
-        window.ERPEmployeeSettingsView?.checkpointSection('#companyIdentityPanel');
-        window.ERPEmployeeSettingsView?.checkpointSection('#companyProfileDetails');
         const sealStoragePath = await uploadCompanySealIfNeeded(coopId);
         if (sealStoragePath || companyInfo._seal_row_present) cUpdates.push({ coop_id: coopId, key: 'seal_url', value: sealStoragePath });
         const { error: companySaveError } = await _supabase.from('ref_company_info').upsert(cUpdates, { onConflict: 'coop_id,key' });
@@ -6163,9 +6228,15 @@ async function saveSettings() {
 
         // 마무리
         await loadCompanyInfo({ throwOnError: true, refreshUi: false });
-        await loadSettings({ throwOnError: true }); // 저장 실패와 후속 조회 실패를 구분
-        window.ERPEmployeeSettingsView?.checkpoint();
-        window.ErpWorkspaceResume?.checkpoint(document.getElementById('settingsModal'));
+        await loadSettings({ throwOnError: true, preserveProfile: true }); // 저장 실패와 후속 조회 실패를 구분
+        if (coopProfileDraftDirty()) {
+            const scopes='#coopBusinessSettingsFields,#setCalendar,#companyBrandingFields';
+            window.ERPEmployeeSettingsView?.checkpointSection(scopes);
+            for(const node of document.querySelectorAll(scopes))window.ErpWorkspaceResume?.checkpoint(node);
+        } else {
+            window.ERPEmployeeSettingsView?.checkpoint();
+            window.ErpWorkspaceResume?.checkpoint(document.getElementById('settingsModal'));
+        }
         companySettingsSaveInFlight = false;
         settingsModal.hide();
         showAlert("저장되었습니다.");

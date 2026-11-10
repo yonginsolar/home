@@ -1,4 +1,4 @@
-/* v1.1.6 — Website completion scope includes deposit guide and seal preparation. */
+/* v1.1.7 — Bounded configuration reads and explicit draft reconciliation. */
 (function(root){
  'use strict';
  const date=v=>v?new Date(v).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false}):'—';
@@ -6,13 +6,24 @@
  async function rpc(client,name,args){const {data,error}=await client.rpc(name,args);if(error)throw error;return data;}
  async function read(client,name,args){
   const keys=Object.keys(args||{});
-  if(!((name==='erp_initial_setup_manage'&&keys.length===1&&args.p_action==='list')||(name==='erp_coop_branding'&&keys.length===1&&args.p_action==='get')||(name==='erp_initial_setup_status'&&keys.length===0)))throw Error('INITIAL_SETUP_READ_ONLY');
+  if(!((name==='erp_initial_setup_manage'&&keys.length===1&&args.p_action==='list')||(name==='erp_coop_branding'&&keys.length===1&&args.p_action==='get')||(name==='erp_initial_setup_status'&&keys.length===0)
+    ||(name==='erp_initial_setup_config'&&keys.length===2&&args.p_action==='get'&&['basic','capital'].includes(args.p_area))
+    ||(name==='erp_coop_profile'&&keys.length===1&&args.p_action==='get')))throw Error('INITIAL_SETUP_READ_ONLY');
   const abort=new AbortController();let timer;
   try{
    const request=client.rpc(name,args),query=typeof request.abortSignal==='function'?request.abortSignal(abort.signal):request;
    const {data,error}=await Promise.race([Promise.resolve(query),new Promise((_,reject)=>{timer=root.setTimeout(()=>{reject(Object.assign(new Error('INITIAL_SETUP_READ_TIMEOUT'),{code:'INITIAL_SETUP_READ_TIMEOUT'}));abort.abort();},15000);})]);
    if(error)throw error;return data;
   }finally{root.clearTimeout(timer);}
+ }
+ function reconcile(baseline,current,latest){
+  const values={},conflicts=[];
+  for(const key of Object.keys(current)){
+   const old=String(baseline?.[key]??''), draft=String(current[key]??''), server=String(latest[key]??'');
+   values[key]=draft===old?server:draft;
+   if(draft!==old&&server!==old&&draft!==server)conflicts.push(key);
+  }
+  return {values,conflicts};
  }
  function mount(client,container){
   if(!container)return;if(container.setupController)return container.setupController;
@@ -69,5 +80,5 @@
   $('initialSetupComplete').addEventListener('click',()=>void mutate('complete'));$('initialSetupRefresh').addEventListener('click',()=>void refresh());paint();
   const controller={refresh,busy:()=>busy,invalidate(){generation++;known=false;pending=null;readIssue='';paint();}};container.setupController=controller;return controller;
  }
- root.ERPInitialSetupAccess=Object.freeze({mount,message,read});
+ root.ERPInitialSetupAccess=Object.freeze({mount,message,read,reconcile});
 })(window);
