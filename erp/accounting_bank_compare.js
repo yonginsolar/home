@@ -1,4 +1,4 @@
-/* v1.1.2 — Preserve file settings during bounded multi-file reading; no automatic writes. */
+/* v1.1.3 — Reconcile verified overlapping bank records; no automatic writes. */
 (function(host){
  'use strict';
  const MAX_ROWS=20000, MAX_FILE=5*1024*1024, MAX_FILES=50, MAX_BYTES=20*1024*1024, MAX_EXPANDED=50*1024*1024;
@@ -11,16 +11,54 @@
  function amount(value){if(value===undefined||value===null||String(value).trim()===''||String(value).trim()==='-')return 0;
   const v=String(value).trim();if(!/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(v))throw new Error('금액 형식을 확인해 주세요.');
   const n=Number(v.replaceAll(',',''));if(!Number.isSafeInteger(n))throw new Error('금액 범위를 확인해 주세요.');return n;}
+ function transactionTime(value,d,date1904){
+  if(typeof value==='number'&&Number.isFinite(value)){
+   const fraction=value-Math.floor(value),seconds=Math.round(fraction*86400);
+   if(fraction<=0||seconds>=86400||date(value,date1904)!==d)return '';
+   return d+' '+[Math.floor(seconds/3600),Math.floor(seconds%3600/60),seconds%60].map(n=>String(n).padStart(2,'0')).join(':');
+  }
+  const m=String(value??'').trim().match(/\s+(\d{2}):(\d{2}):(\d{2})$/);
+  return m&&Number(m[1])<24&&Number(m[2])<60&&Number(m[3])<60?d+' '+m.slice(1).join(':'):'';
+ }
+ function accountIdentity(value){
+  if(typeof value!=='string')return '';
+  const s=value.trim();if(!/^[0-9 -]{8,24}$/.test(s))return '';
+  const n=s.replace(/\D/g,'');return n.length>=8&&n.length<=18?n:'';
+ }
+ function sheetAccount(rows,header){
+  const ids=new Set();
+  for(const row of rows.slice(0,Math.min(header,50)))for(let i=0;i<row.length-1;i++){
+   if(/^(?:계좌번호|입출금계좌번호)$/.test(String(row[i]??'').replace(/\s/g,''))){
+    const id=accountIdentity(row[i+1]);if(id)ids.add(id);
+   }
+  }
+  return ids.size===1?[...ids][0]:'';
+ }
+ function endingBalance(value){
+  const s=String(value??'').trim();if(!/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(s))return null;
+  const n=Number(s.replaceAll(',',''));return Number.isSafeInteger(n)?n:null;
+ }
  function bankRows(rows,map,header,date1904=false){
   if(!Array.isArray(rows)||rows.length>MAX_ROWS+51)throw new Error('2만 행 이하의 파일을 선택해 주세요.');
   if(!Number.isInteger(header)||header<0||header>=rows.length)throw new Error('제목 행을 확인해 주세요.');
   if(![map.date,map.deposit,map.withdrawal].every(n=>Number.isInteger(n)&&n>=0&&n<rows[header].length)||new Set([map.date,map.deposit,map.withdrawal]).size!==3)throw new Error('거래일·입금·출금 열을 각각 선택해 주세요.');
-  const valid=[],invalid=[];
+  const valid=[],invalid=[],account=sheetAccount(rows,header);
+  const headings=rows[header].map(x=>String(x??'').replace(/\s/g,''));
+  const balanceCol=headings.findIndex(x=>/^(?:잔액|거래후잔액|거래후금액)$/.test(x));
+  const accountCol=headings.findIndex(x=>/^(?:계좌번호|입출금계좌번호)$/.test(x));
+  const referenceCol=headings.findIndex(x=>/^(?:거래고유번호|거래번호|거래참조번호)$/.test(x));
   for(let i=header+1;i<rows.length;i++){
    const row=rows[i];if(!row?.some(v=>String(v??'').trim()))continue;
    try{const d=date(row[map.date],date1904),deposit=amount(row[map.deposit]),withdrawal=amount(row[map.withdrawal]);
     if(!d||!(deposit>0||withdrawal>0)||deposit>0&&withdrawal>0)throw new Error('거래일 또는 입출금 구분 확인');
-    valid.push({line:i+1,date:d,deposit,withdrawal,description:map.description>=0?String(row[map.description]??'').slice(0,1000):''});
+    const rowAccount=accountCol>=0?accountIdentity(row[accountCol]):account;
+    const time=transactionTime(row[map.date],d,date1904),balance=balanceCol>=0?endingBalance(row[balanceCol]):null;
+    const description=map.description>=0?String(row[map.description]??'').slice(0,1000):'';
+    // Date/amount alone are not identifiers. A masked account, an incomplete
+    // timestamp or a missing balance leaves the original row independent.
+    const reference=referenceCol>=0?String(row[referenceCol]??'').trim():'';
+    const overlapKey=rowAccount&&time&&balance!==null?JSON.stringify([rowAccount,time,deposit,withdrawal,balance,description.trim(),reference]):'';
+    valid.push({line:i+1,date:d,deposit,withdrawal,description,overlapKey});
    }catch(_){invalid.push(i+1);}
   }
   if(!valid.length)throw new Error('비교할 거래가 없습니다. 제목 행과 열 선택을 확인해 주세요.');return {valid,invalid};
@@ -82,13 +120,22 @@
  }
  function collectFiles(files){
   if(!files.length)throw new Error('통장 거래 파일을 선택해 주세요.');
-  const banks=[],invalid=[];
+  const banks=[],invalid=[],observed=new Map();let overlaps=0,inputCount=0;
   for(const f of files){let parsed;try{parsed=bankRows(f.rows,f.map,f.header,f.workbook?.Workbook?.WBProps?.date1904===true);}catch(e){throw new Error(`${f.name}: ${e.message}`);}
-   banks.push(...parsed.valid.map(row=>({...row,source:f.name,sourceId:f.id,sheet:f.sheet})));
-   if(banks.length>MAX_ROWS)throw new Error('전체 통장 거래는 2만 건 이하로 나누어 대조해 주세요.');
+   inputCount+=parsed.valid.length;if(inputCount>MAX_ROWS)throw new Error('전체 통장 거래는 2만 건 이하로 나누어 대조해 주세요.');
+   const occurrences=new Map();
+   for(const {overlapKey,...row} of parsed.valid){
+    const occurrence=overlapKey?(occurrences.get(overlapKey)||0)+1:0;
+    if(overlapKey)occurrences.set(overlapKey,occurrence);
+    if(overlapKey&&occurrence<=(observed.get(overlapKey)||0)){overlaps++;continue;}
+    banks.push({...row,source:f.name,sourceId:f.id,sheet:f.sheet});
+   }
+   // Keep multiplicity within an export: two source rows must never collapse
+   // to one merely because the other export only contains one occurrence.
+   for(const [key,n] of occurrences)observed.set(key,Math.max(n,observed.get(key)||0));
    if(parsed.invalid.length)invalid.push({source:f.name,lines:parsed.invalid});
   }
-  const dates=banks.map(row=>row.date).sort();return {banks,invalid,start:dates[0],end:dates[dates.length-1]};
+  const dates=banks.map(row=>row.date).sort();return {banks,invalid,overlaps,start:dates[0],end:dates[dates.length-1]};
  }
  const shiftDate=(value,days)=>new Date(new Date(value+'T00:00:00Z').getTime()+days*86400000).toISOString().slice(0,10);
  function candidatePeriods(banks,days){
@@ -140,7 +187,7 @@
   const run=el('button','btn btn-primary','대조하기'),clearFile=el('button','btn btn-outline-secondary','파일 비우기');run.type=clearFile.type='button';const foot=el('div','modal-footer');foot.append(clearFile,run);body.append(preview,status,result);content.append(head,body,foot);box.append(content);s.root.append(box);document.body.append(s.root);s.modal=new bootstrap.Modal(s.root,{backdrop:'static'});
   const current=serial=>state===s&&s.seq===serial&&owner(options.context())===s.owner&&!document.hidden&&!window.frameElement?.hidden;
   function invalidate(){++s.seq;s.result=null;result.replaceChildren();status.textContent='';}
-  function refreshPreview(){try{const parsed=collectFiles(s.files);preview.textContent=`파일 ${s.files.length}개 · 거래 ${parsed.banks.length.toLocaleString('ko-KR')}건 · ${parsed.start} ~ ${parsed.end} 전체 대조`;}catch(e){preview.textContent=s.files.length?e.message:'';}}
+  function refreshPreview(){try{const parsed=collectFiles(s.files);preview.textContent=`파일 ${s.files.length}개 · 거래 ${parsed.banks.length.toLocaleString('ko-KR')}건 · ${parsed.start} ~ ${parsed.end} 전체 대조${parsed.overlaps?' · 겹친 거래 '+parsed.overlaps.toLocaleString('ko-KR')+'행 제외':''}`;}catch(e){preview.textContent=s.files.length?e.message:'';}}
   function readSheet(f){f.rows=host.XLSX.utils.sheet_to_json(f.workbook.Sheets[f.sheet],{header:1,defval:'',raw:true,blankrows:true});Object.assign(f,detectHeader(f.rows));}
   function renderFile(f){
    const card=el('div','border rounded p-3 mb-2'),bar=el('div','d-flex align-items-start justify-content-between gap-2'),label=el('strong','text-break',f.name),remove=el('button','btn btn-sm btn-outline-secondary flex-shrink-0','제외');remove.type='button';label.style.minWidth='0';bar.append(label,remove);card.append(bar);
@@ -173,7 +220,7 @@
    try{const parsed=collectFiles(s.files),banks=parsed.banks,periods=candidatePeriods(banks,Number(days.value));
     status.textContent='통장 거래 날짜에 해당하는 장부를 불러오는 중…';const ledger=await loadPeriods(options.client,context.coop_id,periods,()=>current(serial));if(!current(serial))return;
     const compared=compare(banks,ledger.rows,Number(days.value));s.result=compared;
-    status.textContent=`파일 ${s.files.length}개 · 통장 ${banks.length.toLocaleString('ko-KR')}건 · 장부 ${ledger.rows.length.toLocaleString('ko-KR')}건${compared.excludedLedger?' · 복합·조정 분개 '+compared.excludedLedger+'건은 별도 확인':''}${parsed.invalid.length?' · 제외된 행: '+parsed.invalid.map(f=>f.source+' '+f.lines.slice(0,20).join(', ')+'행'+(f.lines.length>20?' 외 '+(f.lines.length-20)+'행':'')).join(' / '):''}`;
+    status.textContent=`파일 ${s.files.length}개 · 통장 ${banks.length.toLocaleString('ko-KR')}건 · 장부 ${ledger.rows.length.toLocaleString('ko-KR')}건${parsed.overlaps?' · 겹친 거래 '+parsed.overlaps.toLocaleString('ko-KR')+'행 제외':''}${compared.excludedLedger?' · 복합·조정 분개 '+compared.excludedLedger+'건은 별도 확인':''}${parsed.invalid.length?' · 제외된 행: '+parsed.invalid.map(f=>f.source+' '+f.lines.slice(0,20).join(', ')+'행'+(f.lines.length>20?' 외 '+(f.lines.length-20)+'행':'')).join(' / '):''}`;
     const table=el('table','table align-middle'),thead=el('thead'),tr=el('tr');['통장 거래','확인 결과','장부 후보'].forEach(t=>tr.append(el('th','',t)));thead.append(tr);table.append(thead);const tbody=el('tbody');
     function renderPage(page){tbody.replaceChildren();const pageRows=compared.slice(page*100,(page+1)*100);for(const row of pageRows){const tr=el('tr'),b=el('td','',`${row.bank.date} · ${row.bank.deposit?'입금':'출금'} ${(row.bank.deposit||row.bank.withdrawal).toLocaleString('ko-KR')}원`);b.append(el('div','small text-muted',`${row.bank.source} · ${row.bank.sheet} · ${row.bank.line}행 · ${row.bank.description}`));tr.append(b,el('td','',row.status));const cell=el('td');
      for(const candidate of row.candidates.slice(0,20)){const d=el('div','mb-2',`${candidate.date} · ${candidate.account} · ${candidate.description||'적요 없음'}`);

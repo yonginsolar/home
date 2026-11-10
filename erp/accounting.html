@@ -15,7 +15,7 @@
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.0"></script>
   <script src="accounting_report_save.js?v=1.0.0" integrity="sha384-AzLhwgwH2GCLUoGPmH84klNCeErIK1TS80qvB89ZFoXhSOEMec79STufobsxF1kw" crossorigin="anonymous"></script>
-  <script src="accounting_bank_compare.js?v=1.1.2"></script>
+  <script src="accounting_bank_compare.js?v=1.1.3"></script>
   <script src="accounting_journal_typo.js?v=1.1.0" integrity="sha384-m85gYkNm21TI8RCNtqcn9S4eqxMRG2/JuHPpDL694JYsXE4AKCCnqWV/ZQYzBr1X" crossorigin="anonymous" defer></script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261105-tax-label-1"></script>
@@ -5505,8 +5505,25 @@ async function syncApprovedSalarySupportForDocs(docs) {
     }
 } // End of syncApprovedSalarySupportForDocs
 
+async function deleteAutoSyncJournals(transIds) {
+    const ids = Array.from(new Set((Array.isArray(transIds) ? transIds : []).map(value => String(value || '').trim()).filter(Boolean)));
+    if (!ids.length) return { error: null };
+    const owner = myInfo;
+    if (!owner?.coop_id || !accountingDataAuthorized || !canPerform('accounting.edit')) return { error: new Error('전표를 되돌릴 권한이 없습니다.') };
+    const check = await _supabase.rpc('accounting_journal_workflow_delete', { p_action: 'payroll_undo', p_coop: owner.coop_id, p_ids: ids });
+    if (check.error) return check;
+    if (check.data?.ordinary === true) {
+        if (myInfo !== owner || !accountingDataAuthorized || !canPerform('accounting.edit')) return { error: new Error('현재 회계 화면을 다시 확인해 주세요.') };
+        return _supabase.from('ac_journal').delete().eq('coop_id', owner.coop_id).in('Trans_ID', ids);
+    }
+    return Number.isInteger(check.data?.deleted) ? { error: null } : { error: new Error('되돌린 전표의 결과를 확인하지 못했습니다.') };
+}
+
 async function rollbackApprovalSyncWrites(transIds, durunuriAuditIds, salaryRestores = []) {
     const failures = [];
+    const { error: journalError } = await deleteAutoSyncJournals(transIds);
+    if (journalError) return ['회계 전표: ' + (String(journalError.message || '').includes('ACCOUNTING_JOURNAL_PAYROLL_UNDO_CHANGED')
+        ? '이번 연동에서 만든 상태와 일치하지 않습니다. 급여 연동 내역을 확인해 주세요.' : journalError.message)];
     const module = getDurunuriModuleOrNull();
     const auditIds = Array.isArray(durunuriAuditIds) ? durunuriAuditIds.filter((id) => id != null) : [];
     if (auditIds.length > 0) {
@@ -5516,11 +5533,6 @@ async function rollbackApprovalSyncWrites(transIds, durunuriAuditIds, salaryRest
         } catch (e) {
             failures.push('두루누리 기록: ' + (e?.message || e));
         }
-    }
-    const safeTransIds = Array.from(new Set((Array.isArray(transIds) ? transIds : []).map((value) => String(value || '').trim()).filter(Boolean)));
-    if (safeTransIds.length > 0) {
-        const { error } = await _supabase.from('ac_journal').delete().in('Trans_ID', safeTransIds);
-        if (error) failures.push('회계 전표: ' + error.message);
     }
     failures.push(...(await restoreApprovalSalaryRows(salaryRestores)));
     return failures;
@@ -8952,7 +8964,7 @@ function confirmSync(type) {
                     ? Array.from(new Set(insertedRows.map(row => String(row?.Trans_ID || '').trim()).filter(Boolean)))
                     : [];
                 if (insertedTransIds.length > 0) {
-                    const { error: rollbackError } = await _supabase.from('ac_journal').delete().in('Trans_ID', insertedTransIds);
+                    const { error: rollbackError } = await deleteAutoSyncJournals(insertedTransIds);
                     if (rollbackError) {
                         return showAlert("부분 완료", "처리상태 갱신과 전표 롤백이 모두 실패했습니다: " + rollbackError.message);
                     }
@@ -9931,11 +9943,9 @@ function confirmSync(type) {
                     return showAlert("부분 완료", `자동연동 취소 일부가 실패했습니다.\n${rollbackFailures.join('\n')}\n기록은 재확인을 위해 유지합니다.`);
                 }
             } else if (transIds.length > 0) {
-                const { error: deleteError } = await _supabase
-                    .from('ac_journal')
-                    .delete()
-                    .in('Trans_ID', transIds);
-                if (deleteError) return showAlert("오류", "전표 되돌리기 실패: " + deleteError.message);
+                const { error: deleteError } = await deleteAutoSyncJournals(transIds);
+                if (deleteError) return showAlert("오류", "전표 되돌리기 실패: " + (String(deleteError.message || '').includes('ACCOUNTING_JOURNAL_PAYROLL_UNDO_CHANGED')
+                    ? '이번 연동에서 만든 상태와 일치하지 않습니다. 급여 연동 내역을 확인해 주세요.' : deleteError.message));
             }
 
             let restoreFail = 0;
@@ -9974,24 +9984,29 @@ function confirmSync(type) {
     // (9) 연말결산 취소 (되돌리기) - 연도 입력 모달
     else if (type === 'undo_closing') {
         const defaultYear = new Date().getFullYear() - 1;
+        const owner = myInfo;
+        const current = () => myInfo === owner && owner?.coop_id && accountingDataAuthorized && canPerform('accounting.edit')
+            && !window.frameElement?.hidden && document.visibilityState !== 'hidden';
         openYearModal("결산 취소", "취소할 결산 연도를 입력하세요.", defaultYear, async (targetYear) => {
-            const relatedKey = `CLOSE-${targetYear}`;
-
+            if (!current()) return;
+            const year = Number(targetYear);
+            const preview = await _supabase.rpc('accounting_journal_workflow_delete', { p_action: 'closing_inspect', p_coop: owner.coop_id, p_year: year });
+            if (!current()) return;
+            if (preview.error || !Number.isInteger(preview.data?.row_count)) return showAlert('오류', '마감 내역을 확인하지 못했습니다. 다시 시도해 주세요.');
+            if (!preview.data.row_count) return showAlert('알림', `${targetYear}년도 결산 내역이 없습니다.`);
             showConfirm("결산 취소", `⚠️ ${targetYear}년도 결산 내역을 삭제하시겠습니까?\n마감 분개가 모두 삭제되고 손익이 초기화됩니다.`, async () => {
-                const { count } = await _supabase
-                    .from('ac_journal')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('Trans_ID', relatedKey);
+                if (!current()) return;
+                const { data, error } = await _supabase.rpc('accounting_journal_workflow_delete', {
+                    p_action: 'closing', p_coop: owner.coop_id, p_year: year, p_fingerprint: preview.data.fingerprint
+                });
+                if (!current()) return;
 
-                if (!count || count === 0) return showAlert("알림", `${targetYear}년도 결산 내역이 없습니다.`);
-
-                const { error } = await _supabase
-                    .from('ac_journal')
-                    .delete()
-                    .eq('Trans_ID', relatedKey);
-
-                if (error) {
-                    showAlert("오류", "취소 실패: " + error.message);
+                if (String(error?.message || '').includes('ACCOUNTING_JOURNAL_DELETE_CHANGED')) {
+                    showAlert("다시 확인", "마감 내역이 바뀌었습니다. 결산 취소를 다시 열어 확인해 주세요.");
+                } else if (error || !Number.isInteger(data?.deleted)) {
+                    showAlert("오류", "결산 취소 결과를 확인하지 못했습니다. 해당 연도의 결산 상태를 다시 확인해 주세요.");
+                } else if (!data.deleted) {
+                    showAlert("알림", `${targetYear}년도 결산 내역이 없습니다.`);
                 } else {
                     showAlert("완료", `${targetYear}년도 결산이 취소되었습니다.\n수정 후 다시 결산을 진행하세요.`);
                     refreshDashboard();
@@ -10185,7 +10200,8 @@ function buildDoubleEntryHistory(rows) {
         return {
             id: group.id,
             transId: group.transId,
-            date: String(representative.Date || ''),
+            date: String(representative.History_Display_Date ?? representative.Date ?? ''),
+            deleteLocked: group.rows.some(row => row.History_Delete_Locked === true) || /^(CLOSE-|OPEN-|SAL-)/.test(group.transId),
             description: cleanHistoryDescription(representative.Description || ''),
             rawDescription: accountingHistoryToPlainText(representative.Description || ''),
             operator: String(representative.Operator || '작성자 미상'),
@@ -10270,7 +10286,7 @@ function renderHistoryDouble(rows, completePage = false) {
             classificationBadge = '<span class="badge text-bg-secondary">재분류 전표</span>';
         }
         const idAttr = escapeHtml(item.id || '');
-        const deleteButton = item.actualTransactionCount === 1 && (item.transId || item.id)
+        const deleteButton = canPerform('accounting.edit') && !item.deleteLocked && item.actualTransactionCount === 1 && (item.transId || item.id)
             ? `<button class="btn btn-sm btn-outline-danger" data-history-process data-id="${idAttr}" data-trans-id="${safeTransId}" onclick="deleteTxByButton(this)">전표 삭제</button>`
             : '';
         const transMeta = safeRelatedTransIds || safeTransId;
@@ -10345,6 +10361,7 @@ async function editJournalDateByButton(button) {
 
 async function deleteTx(id, transId) {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
+    if (/^(CLOSE-|OPEN-|SAL-)/.test(String(transId || '').trim())) return showAlert('보호된 전표입니다. 결산 또는 급여 업무에서 확인해 주세요.');
     const current = window.CoopAccountingHistory.guard();
     if (!current()) return showAlert('전표를 다시 조회한 뒤 진행해 주세요.');
     if (!transId) {
@@ -10361,7 +10378,8 @@ async function deleteTx(id, transId) {
         if (!current() || !canPerform('accounting.edit')) return showAlert('전표를 다시 조회한 뒤 진행해 주세요.');
         // Trans_ID가 같은 모든 행을 삭제
         const { error } = await _supabase.from('ac_journal').delete().eq('Trans_ID', transId);
-        if(error) showAlert("오류", /LINKED_MONEY_JOURNAL_LOCKED|CARD_SOURCE_HAS_CANCELLATION/.test(error.message || '') ? '취소·환급과 연결된 전표는 삭제할 수 없습니다. 업무별 입력·카드 환급에서 처리 내역을 확인해 주세요.' : "삭제 실패");
+        if(error) showAlert("오류", /LINKED_MONEY_JOURNAL_LOCKED|CARD_SOURCE_HAS_CANCELLATION/.test(error.message || '') ? '취소·환급과 연결된 전표는 삭제할 수 없습니다. 업무별 입력·카드 환급에서 처리 내역을 확인해 주세요.' :
+            /ACCOUNTING_JOURNAL_.*DELETE_PROTECTED|결산에 포함/.test(error.message || '') ? '마감되었거나 급여에 연결된 전표는 일반 삭제할 수 없습니다. 해당 업무에서 확인해 주세요.' : "삭제 실패");
         else {
             await logAudit('accounting.delete', transId, '전표 삭제(전체)', null);
             loadHistory();
