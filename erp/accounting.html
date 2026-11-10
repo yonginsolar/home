@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.202 | Change: 2026-11-10 - Restore confirmed payroll undo and safely finish its payroll status. -->
+<!-- Version: v1.0.203 | Change: 2026-11-10 - Verify the original payroll bundle before offering undo. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.202 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.203 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.0"></script>
@@ -661,9 +661,9 @@
              <div class="d-flex justify-content-between align-items-center">
                <div>
                  <h6 class="fw-bold mb-1">↩️ 자동연동 직전 취소</h6>
-                 <small class="text-muted" id="autoSyncUndoInfo">되돌릴 자동연동 기록이 없습니다.</small>
+                 <small class="text-muted" id="autoSyncUndoInfo" role="status">되돌릴 자동연동 기록이 없습니다.</small>
                </div>
-               <button class="btn btn-outline-dark btn-sm" onclick="confirmSync('undo_sync_last')">직전 취소</button>
+               <button type="button" id="autoSyncUndoButton" class="btn btn-outline-dark btn-sm" onclick="confirmSync('undo_sync_last')">직전 취소</button>
              </div>
           </div>
           </details>
@@ -1257,6 +1257,7 @@ let selectModal, reportModal, addModal, infoModal, alertModal, confirmModal, clo
 let myInfo = null, confirmCallback = null;
 let approvalSyncBusy = false;
 let payrollRecoveryBusy = false;
+let payrollUndoNotice = null;
 let confirmReturnModalId = null, confirmAccepted = false;
 let closingTaxExpenseManual = false;
 let bankInterestTaxManual = false;
@@ -2713,8 +2714,21 @@ function renderAutoSyncUndoInfo() {
     if (!infoEl) return;
 
     const state = getLastAutoSyncUndo();
+    const button = document.getElementById('autoSyncUndoButton');
+    const checking = !!state?.recovery_request && accountingReadTasks.has('payrollUndoAvailability');
+    if (button) {
+        button.textContent = state?.recovery_request ? (checking ? '확인 중…' : '취소 가능 여부 확인') : '직전 취소';
+        button.disabled = checking;
+    }
     if (!state) {
         infoEl.textContent = '되돌릴 자동연동 기록이 없습니다.';
+        return;
+    }
+    if (state.recovery_request) {
+        const current = payrollUndoNotice?.request === state.recovery_request &&
+            payrollUndoNotice.owner === accountingReadIdentity();
+        infoEl.textContent = checking ? '원래 급여 연동 묶음을 확인하는 중입니다.' :
+            current ? payrollUndoNotice.message : '급여 전표를 되돌리기 전에 원래 묶음을 확인합니다.';
         return;
     }
 
@@ -2725,6 +2739,29 @@ function renderAutoSyncUndoInfo() {
     const label = String(state.label || state.type || '자동연동');
     const transCount = Array.isArray(state.trans_ids) ? state.trans_ids.length : 0;
     infoEl.textContent = `${label} · ${timeLabel} · 전표 ${transCount}건 되돌리기 가능`;
+}
+
+function accountingPayrollUndoReason(reason) {
+    return ({
+        payroll_changed: '원래 급여 행이 바뀌었거나 없어져 직전 취소할 수 없습니다.',
+        separate_payout: '같은 귀속월의 지급 전표가 별도로 기록되어 이 묶음만 취소할 수 없습니다.',
+        expired: '연동 후 24시간이 지나 직전 취소할 수 없습니다.',
+        original_unverified: '본인이 연동한 원래 전표 묶음을 확인할 수 없어 직전 취소할 수 없습니다.',
+        journal_changed: '원래 전표 묶음이 바뀌어 직전 취소할 수 없습니다.',
+        already_reverted: '원래 전표 묶음이 이미 취소됐거나 현재 장부에 없습니다.'
+    })[reason] || '';
+}
+
+function accountingPayrollUndoReadMessage(result) {
+    const reason = result?.state === 'changed' ? 'journal_changed' :
+        result?.state === 'reverted' ? 'already_reverted' : result?.undo_reason;
+    return accountingPayrollUndoReason(reason);
+}
+
+function setAccountingPayrollUndoNotice(request, message) {
+    if (getLastAutoSyncUndo()?.recovery_request !== request) return;
+    payrollUndoNotice = message ? {request, owner:accountingReadIdentity(), message} : null;
+    renderAutoSyncUndoInfo();
 }
 
 function accountingPayrollRecovery() {
@@ -2809,6 +2846,13 @@ function checkAccountingPayrollResult() {
                         text += ' 급여대장 반영은 별도로 마무리할 수 있습니다.';
                     } else if (result.followup === 'review') text += ' 급여대장 상태는 별도로 확인해 주세요.';
                     else if (result.followup === 'complete') text += ' 급여대장 반영도 확인했습니다.';
+                }
+                const undoMessage = accountingPayrollUndoReadMessage(result);
+                if (undoMessage) {
+                    setAccountingPayrollUndoNotice(entry.id, undoMessage);
+                    if (state === 'posted') text += ' ' + undoMessage;
+                } else if (state === 'posted' && result.undo_reason === 'available') {
+                    setAccountingPayrollUndoNotice(entry.id, '');
                 }
                 if (state !== 'unknown' && !(state === 'posted' && result.followup === 'ready')) {
                     try { store.clear(entry); } catch (_) {}
@@ -10123,7 +10167,8 @@ function confirmSync(type) {
     else if (type === 'undo_sync_last') {
         const undoState = getLastAutoSyncUndo();
         if (!undoState) return showAlert("알림", "되돌릴 자동연동 기록이 없습니다.");
-        const undoScope = accountingReadScope('tabSync', {valid:()=>canPerform('accounting.edit')});
+        const undoScope = accountingReadScope('tabSync', {valid:()=>canPerform('accounting.edit') &&
+            (!undoState.recovery_request || getLastAutoSyncUndo()?.recovery_request === undoState.recovery_request)});
         if (undoState.recovery_request && (undoState.recovery_owner !== accountingReadIdentity() ||
             payrollRecoveryBusy || approvalSyncBusy || !accountingReadScopeCurrent(undoScope))) return;
 
@@ -10136,19 +10181,32 @@ function confirmSync(type) {
         const restores = Array.isArray(undoState.restores) ? undoState.restores : [];
         const label = String(undoState.label || undoState.type || '자동연동');
 
-        showConfirm("자동연동 직전 취소", `${label} 내역을 되돌리시겠습니까?\n전표 ${transIds.length}건 + 두루누리 기록 ${durunuriAuditIds.length}건 + 상태복원 ${restores.length}건`, async () => {
+        const promptUndo = () => showConfirm("자동연동 직전 취소", undoState.recovery_request
+            ? `${label}의 원래 묶음을 되돌리시겠습니까?\n나중에 추가한 급여 행은 그대로 유지합니다.`
+            : `${label} 내역을 되돌리시겠습니까?\n전표 ${transIds.length}건 + 두루누리 기록 ${durunuriAuditIds.length}건 + 상태복원 ${restores.length}건`, async () => {
             let recoveredFailures = [];
             if (undoState.recovery_request) {
                 if (payrollRecoveryBusy || approvalSyncBusy || !accountingReadScopeCurrent(undoScope) ||
                     getLastAutoSyncUndo()?.recovery_request !== undoState.recovery_request) return;
                 payrollRecoveryBusy = true;
+                renderAutoSyncUndoInfo();
                 try {
                     const {error,data} = await _supabase.rpc('accounting_payroll_recovery_action', {
                         p_request_id:undoState.recovery_request, p_coop_id:undoScope.owner.coop_id, p_action:'undo'
                     });
-                    if (error || data?.state !== 'reverted') return showAlert('전표를 되돌리지 못했습니다', autoSyncJournalUndoError(error));
+                    if (error || data?.state !== 'reverted') {
+                        const reason = accountingPayrollUndoReason(error?.details) || autoSyncJournalUndoError(error);
+                        if (accountingReadScopeCurrent(undoScope)) {
+                            setAccountingPayrollUndoNotice(undoState.recovery_request, reason);
+                            return showAlert('전표를 되돌리지 못했습니다', reason);
+                        }
+                        return;
+                    }
                     recoveredFailures = await rollbackApprovalSyncWrites([], durunuriAuditIds);
-                } finally { payrollRecoveryBusy = false; }
+                } catch (_) {
+                    if (accountingReadScopeCurrent(undoScope)) setAccountingPayrollUndoNotice(undoState.recovery_request, '직전 취소 결과를 확인하지 못했습니다. 장부와 현재 상태를 다시 확인해 주세요.');
+                    return;
+                } finally { payrollRecoveryBusy = false; renderAutoSyncUndoInfo(); }
             } else if (durunuriAuditIds.length > 0) {
                 const rollbackFailures = await rollbackApprovalSyncWrites(transIds, durunuriAuditIds);
                 if (rollbackFailures.length > 0) {
@@ -10185,6 +10243,26 @@ function confirmSync(type) {
             refreshDashboard();
             loadHistory();
         });
+        if (!undoState.recovery_request) return promptUndo();
+        return runAccountingRead('payrollUndoAvailability', undoState.recovery_request, undoScope, async read => {
+            let query = _supabase.rpc('accounting_payroll_recovery_status', {
+                p_request_id:undoState.recovery_request, p_coop_id:undoScope.owner.coop_id, p_months:null
+            }, {get:true});
+            if (typeof query.abortSignal === 'function') query = query.abortSignal(read.controller.signal);
+            const {error,data} = await query;
+            if (error) throw Error('급여 직전 취소 상태를 확인하지 못했습니다.');
+            return data;
+        }, result => {
+            if (payrollRecoveryBusy || approvalSyncBusy) return;
+            if (result?.state !== 'posted' || result.undo_reason !== 'available' ||
+                !Array.isArray(result.undo_ids) || !result.undo_ids.length) {
+                return setAccountingPayrollUndoNotice(undoState.recovery_request,
+                    accountingPayrollUndoReadMessage(result) || '원래 묶음의 직전 취소 가능 여부를 확인하지 못했습니다.');
+            }
+            setAccountingPayrollUndoNotice(undoState.recovery_request, '');
+            promptUndo();
+        }, hint => setAccountingPayrollUndoNotice(undoState.recovery_request, hint),
+        {start:renderAutoSyncUndoInfo, finish:renderAutoSyncUndoInfo, cancel:renderAutoSyncUndoInfo});
     }
 
     // (8) 연말결산 (손익마감) - 모달 입력 방식
