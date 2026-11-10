@@ -11797,6 +11797,19 @@ async function saveChildMember() {
 // ================================================================
 // [초기화] DOM과 필수 스크립트가 준비되면 시작한다. 이미지 등의 load는 기다리지 않는다.
 // ================================================================
+function openAdminMemberAdmissionPolicyDeepLink(entry) {
+    const actor = adminCertificateAuthId, coop = g_adminMemberRuntime?.coop_id;
+    const current = () => !!actor && !!coop && adminCertificateAuthId === actor
+        && g_adminMemberRuntime?.coop_id === coop && g_adminMemberRuntime?.is_active !== false
+        && ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && hasAdminMemberScopePermission('member_admin')
+        && isAdminMemberRuntimeModuleEnabled('member_admin') && !window.frameElement?.hidden;
+    if (entry.get('sub') !== 'payment-policy' || !current()) return;
+    const policy = window.MemberAdmissionPolicy;
+    if (!policy) return;
+    policy.bind({client:_supabase,context:()=>({coop_id:coop,actor}),current});
+    return policy.open();
+}
+
 async function initializeAdminMember() {
 
     if(ADMIN_MEMBER_PAGE_SCOPE!=='member_admin')await window.AdminMemberAssets?.ensureMedia?.();
@@ -11894,6 +11907,8 @@ async function initializeAdminMember() {
     // 3. 초기 탭 로드
     const initialTab = getInitialAdminMemberTab();
     switchTab(initialTab);
+    // This settings read does not depend on the roster or other deep-link loaders.
+    void openAdminMemberAdmissionPolicyDeepLink(new URLSearchParams(window.location.search));
     if (initialTab !== 'dashboard' && canAccessAdminMemberTab('applications')) {
         fetchMemberReturnSummary();
     }
@@ -11911,9 +11926,6 @@ async function initializeAdminMember() {
     }
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && hasAdminMemberScopePermission('member_admin') && isAdminMemberRuntimeModuleEnabled('member_admin') && workEntry.get('sub') === 'capital') {
         await openMemberCapitalSettings();
-    }
-    if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && hasAdminMemberScopePermission('member_admin') && isAdminMemberRuntimeModuleEnabled('member_admin') && workEntry.get('sub') === 'payment-policy') {
-        await window.MemberAdmissionPolicy?.open();
     }
     if (workEntry.get('sub')==='certificate-settings' && isAdminMemberSiteProfile() &&
         ((ADMIN_MEMBER_PAGE_SCOPE==='member_admin'&&hasAdminMemberScopePermission('member_admin')&&isAdminMemberRuntimeModuleEnabled('member_admin'))||

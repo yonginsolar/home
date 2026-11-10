@@ -1,4 +1,4 @@
-/* v1.2.3 — Show existing account, deadline and seal readiness without widening access. */
+/* v1.2.4 — Render setup checks independently and retry failed reads only. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -37,7 +37,7 @@
   let dialog=null,dialogReturnFocus=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0,contractListGeneration=0,contractListController=null;
   const current=()=>!disposed&&key()===owner&&!!owner&&container.isConnected&&!container.closest('.hidden');
   const extras=()=>setupRoutes(options.runtime?.(),options.context()?.coop_id);
-  async function setupExtraItems(paths){
+  async function readSetupExtra(group,paths){
    const coop=options.context()?.coop_id,controller=new AbortController();let timer;
    controllers.set(controller,'setup-extra');
    const unavailable=key=>({key,state:'unavailable'});
@@ -47,11 +47,11 @@
      if(controller.signal.aborted)reject(Error('SETUP_EXTRA_TIMEOUT'));
      else controller.signal.addEventListener('abort',()=>reject(Error('SETUP_EXTRA_TIMEOUT')),{once:true});
     })]);
-    if(res.error)throw res.error;return res.data;
+    if(res.error)throw Object.assign(Error('SETUP_READ_FAILED'),{code:res.error.code,status:res.status??res.error.status});return res.data;
    }
-   const work=[];
    timer=setTimeout(()=>controller.abort(),15000);
-   if(paths.certificate)work.push((async()=>{try{
+   try{
+   if(group==='certificate'){
     let data;
     if(paths.civic){
      // This is the same existing read as the civic settings dialog.
@@ -60,14 +60,16 @@
     }else{data=await get('erp_coop_certificate_setup',{p_action:'get'});if(data?.coop_id!==coop)throw Error('SETUP_SCOPE');}
     const filled=v=>typeof v==='string'&&!!v.trim();
     return [{key:'deposit',state:[data.bank,data.account,data.holder].every(filled)?'ready':'missing'}, {key:'seal',state:filled(data.seal_path)?'ready':'missing'}];
-   }catch(e){return e?.code==='42501'||e?.status===403?[]:['deposit','seal'].map(unavailable);}})());
-   if(paths.deadline)work.push((async()=>{try{
+   }
     const d=await get('erp_member_admission_policy',{p_action:'get'});
     if(d?.coop_id!==coop||!(d.payment_days===null||Number.isInteger(d.payment_days)&&d.payment_days>=0&&d.payment_days<=365))throw Error('SETUP_SCOPE');
     return [{key:'payment_policy',state:d.payment_days===null?'missing':'ready',days:d.payment_days}];
-   }catch(e){return e?.code==='42501'||e?.status===403?[]:[unavailable('payment_policy')];}})());
-   try{return (await Promise.all(work)).flat();}finally{clearTimeout(timer);controllers.delete(controller);}
+   }catch(e){
+    if(readDenied(e))return [];
+    return (group==='certificate'?['deposit','seal']:['payment_policy']).map(unavailable);
+   }finally{clearTimeout(timer);controllers.delete(controller);}
   }
+  const readDenied=e=>[401,403].includes(Number(e?.status))||['42501','PGRST301','PGRST302'].includes(String(e?.code));
   async function read(section){
    const ticket=++readSequence,controller=new AbortController();controllers.set(controller,section);let timer;
    // Reserve the boundary when a read starts, including reads that later fail.
@@ -78,7 +80,7 @@
     const request=Promise.resolve().then(()=>{const q=options.client.rpc('erp_get_work_overview_contracts',{p_section:requested});return q.abortSignal?q.abortSignal(controller.signal):q;});
     const response=await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('READ_TIMEOUT'));},15000);})]);
     if(!current())throw Error('SCOPE_CHANGED');
-    if(response.error)throw Error('READ_FAILED');
+    if(response.error)throw Object.assign(Error('READ_FAILED'),{code:response.error.code,status:response.status??response.error.status});
     const data=response.data;
     if(data?.coop_id!==options.context().coop_id||data?.section!==requested||!Array.isArray(data.items))throw Error('SCOPE_CHANGED');
     return {data,ticket};
@@ -107,7 +109,8 @@
     ||value.complete!==(value.required_count>0&&value.pending_count===0))throw Error('STATE_UNAVAILABLE');
    lastSetupTicket=ticket;
    const panel=panels.get('setup'),paths=extras();panel.root.hidden=(!value.can_view||value.complete)&&!paths.certificate&&!paths.deadline;
-   if(panel.root.hidden){panel.root.open=false;panel.list.replaceChildren();panel.reset();}
+   if(panel.root.hidden){panel.root.open=false;panel.reset();}
+   else panel.syncScope?.();
    return true;
   }
   function failTasks(ticket,message){
@@ -129,9 +132,10 @@
      panel.status.textContent=data.items.some(item=>item.count>0)?'대기 건수를 확인했습니다. 펼치면 최신 목록을 볼 수 있습니다.':'현재 확인할 대기 업무가 없습니다.';
      if(current()&&panel.root.open&&ticket===lastTaskTicket)await panel.load();
     }
-   }catch(_){if(current()){
+   }catch(error){if(current()){
     failTasks(attemptTicket,'대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
-    if(attemptTicket>=lastSetupTicket)panels.get('setup').root.hidden=true;
+    const setup=panels.get('setup');
+    if(attemptTicket>=lastSetupTicket&&readDenied(error)){setup.root.hidden=true;setup.root.open=false;setup.reset();}
    }}})().finally(()=>{summaryPending=null;panel.syncRetry();});
    panel.syncRetry();
    return summaryPending;
@@ -188,6 +192,90 @@
    const close=el('button','btn btn-secondary','닫기');close.type='button';close.onclick=()=>opened.close();dialog.append(close);
    dialog.addEventListener('close',()=>{if(dialog===opened)closeDialog(true);},{once:true});document.body.append(dialog);dialog.showModal();
   }
+  function mountSetupPanel(root,status,list,retry){
+   const names=['base','certificate','deadline'];
+   const groups=new Map(names.map(name=>[name,{phase:'idle',scope:'',serial:0,rows:null}]));
+   const timestamp=()=>new Date().toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'});
+   function scopeFor(name,paths){
+    if(name==='certificate')return paths.certificate;
+    if(name==='deadline')return paths.deadline?'member':'';
+    const runtime=options.runtime?.();
+    return JSON.stringify([owner,runtime?.coop_id,runtime?.is_active,runtime?.runtime_profile,
+     [...(runtime?.effective_permissions||[])].sort(),runtime?.modules]);
+   }
+   function clearGroup(group){++group.serial;group.phase='idle';group.rows?.remove();group.rows=null;}
+   function syncScope(){
+    const paths=extras();
+    for(const [name,group] of groups){const next=scopeFor(name,paths);if(group.scope!==next){clearGroup(group);group.scope=next;}}
+   }
+   function renderStatus(){
+    const available=[...groups.values()].filter(group=>group.scope), loading=available.some(group=>group.phase==='loading');
+    const failed=available.some(group=>group.phase==='failed');
+    status.textContent=loading?(list.childElementCount?'나머지 항목 확인 중…':'불러오는 중…')
+     :failed?'일부 항목을 확인하지 못했습니다.':list.childElementCount?'확인 시각 '+timestamp():'현재 권한으로 확인할 항목이 없습니다.';
+    const focused=document.activeElement===retry;
+    retry.hidden=!failed&&!focused;
+    retry.disabled=!failed&&!focused;
+    retry.setAttribute('aria-disabled',String(!failed));
+    retry.textContent=failed?'실패한 항목 다시 확인':loading?'확인 중…':'확인 완료';
+   }
+   function paint(name,items,paths){
+    const group=groups.get(name),rows=el('div','d-grid gap-2');
+    for(const item of items){
+     const entry=links[item.key];if(!entry||!labels[item.state])throw Error('STATE_UNAVAILABLE');
+     const row=el('div','d-flex flex-wrap align-items-center justify-content-between gap-3 border rounded p-2');
+     let href=entry[1];
+     if(item.key==='deposit'||item.key==='seal')href=paths.certificate+item.key;
+     if(item.key==='capital'&&items.some(x=>x.key==='company'))href='admin_employee.html?section=settings&focus=capital';
+     const link=el(item.key==='domain'?'button':'a',item.key==='domain'?'btn btn-link text-start p-0 text-decoration-none':'text-decoration-none',entry[0]);
+     if(item.key==='domain'){link.type='button';link.onclick=()=>{
+      if(!current()||root.hidden||!root.open||!rows.isConnected||group.rows!==rows||group.scope!==scopeFor(name,extras()))return;
+      const addresses=(item.domains||[]).filter(x=>/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(x));
+      showList('등록된 홈페이지·ERP 주소',addresses.map(x=>({label:'https://'+x})),'setup');
+     };}else link.href=href;
+     const label=['signup_purpose','signup_privacy'].includes(item.key)&&item.state==='missing'?'미적용 · 문서 확인 필요':labels[item.state];
+     const right=el('span','small text-end',label);
+     if(item.key==='payment_policy'&&item.state==='ready')right.textContent=item.days===0?'기한 없음으로 설정됨':`${item.days}일로 설정됨`;
+     if(item.key==='capital')right.append(el('span','d-block text-muted',`최소 ${Number(item.minimum).toLocaleString('ko-KR')}원 · 1좌 ${Number(item.unit).toLocaleString('ko-KR')}원`));
+     row.append(link,right);rows.append(row);
+    }
+    group.rows?.remove();group.rows=null;
+    if(items.length){group.rows=rows;list.insertBefore(rows,names.slice(names.indexOf(name)+1).map(n=>groups.get(n).rows).find(Boolean)||null);}
+   }
+   async function loadGroup(name,paths){
+    const group=groups.get(name),scope=group.scope,serial=++group.serial;group.phase='loading';
+    const valid=()=>current()&&!root.hidden&&serial===group.serial&&scope===scopeFor(name,extras());
+    try{
+     let items;
+     if(name==='base'){
+      const {data,ticket}=await read('setup');if(!valid())return;
+      const required=data.items.filter(item=>item.key!=='notifications'),pending=required.filter(item=>!['ready','legacy'].includes(item.state)).length;
+      if(data.items.some(item=>!links[item.key]||!labels[item.state]))throw Error('STATE_UNAVAILABLE');
+      setupVisibility({can_view:required.length>0,complete:required.length>0&&pending===0,required_count:required.length,pending_count:pending},ticket);
+      if(!valid())return;items=data.items;
+     }else{items=await readSetupExtra(name,paths);if(!valid())return;}
+     paint(name,items,paths);
+     group.phase=items.some(item=>item.state==='unavailable')?'failed':'ready';
+    }catch(error){if(valid()){if(readDenied(error)){paint(name,[],paths);group.phase='ready';}else group.phase='failed';}}
+    finally{
+     if(valid())renderStatus();
+     else if(current()&&!root.hidden&&serial===group.serial){syncScope();renderStatus();}
+    }
+   }
+   function load(failedOnly=false){
+    if(!current()||!root.open||root.hidden)return;
+    syncScope();const paths=extras();
+    for(const name of names){const group=groups.get(name);if(group.scope&&group.phase!=='loading'&&(!failedOnly||group.phase==='failed'))void loadGroup(name,paths);}
+    renderStatus();
+   }
+   const reset=()=>{for(const group of groups.values())clearGroup(group);retry.hidden=true;status.textContent='';};
+   panels.set('setup',{root,status,list,reset,syncScope});
+   root.addEventListener('toggle',()=>{if(root.open)load();});
+   retry.hidden=true;
+   retry.onclick=()=>{if(retry.getAttribute('aria-disabled')!=='true')load(true);};
+   retry.addEventListener('blur',()=>{if(!root.hidden&&current())renderStatus();});
+   sections.push(()=>{root.open=false;reset();});
+  }
   for(const [section,title] of [['tasks','📌 내 업무 모아보기'],['setup','✅ 조합 설정 점검표']]) {
    const root=el('details','border rounded p-3 mb-2 bg-white'),heading=el('summary','fw-bold',title);
    root.dataset.overviewSection=section;root.hidden=section==='setup';
@@ -196,6 +284,7 @@
    status.setAttribute('role','status');const retry=el('button','btn btn-sm btn-outline-secondary mt-2','다시 확인');retry.type='button';
    if(section==='setup')body.append(el('p','small mb-2','가입을 열기 전 설립목적·가입 개인정보 동의와 출자 기준을 확인해 주세요. 납입 계좌는 입금 안내에, 조합 직인은 출자증서에 사용됩니다. 이 점검표와 임시 권한 부여 종료는 별도입니다.'));
    body.append(status,list,retry);root.append(heading,body);container.append(root);
+   if(section==='setup'){mountSetupPanel(root,status,list,retry);continue;}
    let sequence=0,busy=false,retrying=false;
    const isCurrent=serial=>serial===sequence&&current();
    const syncRetry=()=>{const locked=busy||retrying||(section==='tasks'&&!!summaryPending);retry.disabled=locked;list.querySelectorAll('button').forEach(button=>{button.disabled=locked;});};
@@ -205,52 +294,25 @@
     if(busy||!root.open)return;const serial=++sequence,attemptTicket=readSequence+1;busy=true;syncRetry();list.replaceChildren();if(section==='tasks')panels.get(section).snapshot=null;status.textContent='불러오는 중…';
     try {
      const {data,ticket}=await read(section);if(!isCurrent(serial))return;
-     if(section==='tasks'){
-      if(!counts(data,ticket))return;
-     }
-     else{
-      const required=data.items.filter(item=>item.key!=='notifications');
-      if(data.items.some(item=>!labels[item.state]))throw Error('STATE_UNAVAILABLE');
-      if(!setupVisibility({can_view:required.length>0,complete:required.length>0&&required.every(item=>['ready','legacy'].includes(item.state)),required_count:required.length,pending_count:required.filter(item=>!['ready','legacy'].includes(item.state)).length},ticket))return;
-      if(root.hidden)return;
-     }
-     const paths=section==='setup'?extras():{},extraItems=section==='setup'?await setupExtraItems(paths):[];
-     if(!isCurrent(serial)||section==='setup'&&(ticket!==lastSetupTicket||JSON.stringify(paths)!==JSON.stringify(extras())))return;
-     for(const item of [...data.items,...extraItems]) {
+     if(!counts(data,ticket))return;
+     for(const item of data.items) {
       const entry=links[item.key];if(!entry)throw new Error('UNKNOWN_ITEM');
       const row=el('div','d-flex align-items-center justify-content-between gap-3 border rounded p-2');
-      let href=entry[1];
-      if(item.key==='deposit'||item.key==='seal')href=paths.certificate+item.key;
-      if(item.key==='capital'&&data.items.some(x=>x.key==='company'))href='admin_employee.html?section=settings&focus=capital';
-      const choose=['receipts','material','domain'].includes(item.key)||item.key.startsWith('contract_');
+      const href=entry[1];
+      const choose=['receipts','material'].includes(item.key)||item.key.startsWith('contract_');
       const link=el(choose?'button':'a',choose?'btn btn-link text-start p-0 text-decoration-none':'text-decoration-none',entry[0]);
       if(choose){link.type='button';link.onclick=()=>{
        if(!isCurrent(serial)||busy||retrying||(section==='tasks'&&summaryPending))return;
        if(item.key.startsWith('contract_')){showContractList(item.key,section);return;}
-       if(item.key==='domain'){
-        const addresses=(item.domains||[]).filter(x=>/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(x));
-        showList('등록된 홈페이지·ERP 주소',addresses.map(x=>({label:'https://'+x})),section);
-       }else{
         const targets=(item.targets||[]).filter(x=>x.event_id==='unassigned'||/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(x.event_id));
         showList(entry[0],targets.map(x=>({label:String(x.label)+' · '+Number(x.count).toLocaleString('ko-KR')+'건',href:'festival_receipts.html?work='+item.key+'&event='+encodeURIComponent(x.event_id)})),section);
-       }
       };}else link.href=href;
       row.append(link);
-      if(section==='tasks') {
        if(!Number.isSafeInteger(item.count)||item.count<0)throw new Error('COUNT_UNAVAILABLE');
        row.append(el('span',item.count?'badge text-bg-primary':'text-muted small',item.key==='tax'&&item.configured===false?(item.count?`${item.count.toLocaleString('ko-KR')}건 · 주기 확인`:'주기 미설정'):`${item.count.toLocaleString('ko-KR')}${item.key.startsWith('contract_')?'명':'건'}`));
-      }else{
-       if(!labels[item.state])throw new Error('STATE_UNAVAILABLE');
-      row.classList.add('flex-wrap');
-      const stateLabel=['signup_purpose','signup_privacy'].includes(item.key)&&item.state==='missing'?'미적용 · 문서 확인 필요':labels[item.state];
-      const right=el('span','small text-end',stateLabel);
-       if(item.key==='payment_policy'&&item.state==='ready')right.textContent=item.days===0?'기한 없음으로 설정됨':`${item.days}일로 설정됨`;
-       if(item.key==='capital')right.append(el('span','d-block text-muted',`최소 ${Number(item.minimum).toLocaleString('ko-KR')}원 · 1좌 ${Number(item.unit).toLocaleString('ko-KR')}원`));
-       row.append(right);
-      }
       list.append(row);
      }
-     status.textContent=data.items.length||extraItems.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';
+     status.textContent=data.items.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';
      if(section==='tasks')panels.get(section).snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
     }catch(_){if(isCurrent(serial)&&attemptTicket>=(section==='tasks'?lastTaskTicket:lastSetupTicket)){
      list.replaceChildren();status.textContent='불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.';

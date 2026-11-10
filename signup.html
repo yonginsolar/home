@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.87
-Change: 2026-10-31 - Preserve unresolved existing-member connection requests.
+Version: v1.0.88
+Change: 2026-11-10 - Confirm signup readiness before preparing the form.
 -->
-<html lang="ko"> 
+<html lang="ko" data-signup-admission="checking">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
 <meta name="erp-security-revision" content="20261004.2">
@@ -14,7 +14,7 @@ Change: 2026-10-31 - Preserve unresolved existing-member connection requests.
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.86">
+  <meta name="signup-screen-version" content="1.0.88">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -178,7 +178,7 @@ html[data-signup-social="disabled"] #signup-naver-option {
 display: none !important;
 }
 html[data-signup-auth="checking"] #step-gate { display: none !important; }
-html[data-signup-admission="blocked"] [data-new-signup-choice] { display:none !important; }
+html:not([data-signup-admission="ready"]) [data-new-signup-choice] { display:none !important; }
 #signup-entry-readiness { overflow-wrap:anywhere; }
 #signupAuthStatus { padding: 3rem 1rem; text-align: center; }
 
@@ -208,7 +208,7 @@ gtag('config', 'G-TR217L7JN9');
 </div>
 <div id="signup-entry-readiness" class="alert alert-light border mt-3" hidden>
 <p id="signup-entry-readiness-message" class="mb-2" role="status"></p>
-<div class="d-flex flex-wrap gap-2"><button id="signup-entry-readiness-retry" type="button" class="btn btn-sm btn-outline-primary" onclick="checkNewSignupReadiness()">가입 가능 여부 다시 확인</button>
+<div class="d-flex flex-wrap gap-2"><button id="signup-entry-readiness-retry" type="button" class="btn btn-sm btn-outline-primary" onclick="retrySignupEntryReadiness()">가입 가능 여부 다시 확인</button>
 <a href="/membermanage" class="btn btn-sm btn-outline-secondary">기존 조합원 로그인·계정 연결</a></div>
 </div>
 
@@ -653,6 +653,8 @@ if(isCurrentSignupIdentity(scope)){
 }return false;
 }
 if(!isCurrentSignupIdentity(scope))return false;
+if(signupLegalRecovery&&!await checkNewSignupReadiness()){if(isCurrentSignupIdentity(scope))setSignupAuthBusy(false);return false;}
+if(!isCurrentSignupIdentity(scope))return false;
 await checkCurrentSignupSessionOnLoad({ reason: 'manual-retry', showFailure: true });
 }
 let resolveSignupAuthInitialStateReady = null;
@@ -719,18 +721,33 @@ function paintSignupEntryReadiness(message='') {
 }
 function checkNewSignupReadiness(){
  const scope=signupIdentityScope(), coop=signupTenant?.coop_code;
- if(signupEntryReadinessFlight&&isCurrentSignupIdentity(signupEntryReadinessFlight.scope)&&signupEntryReadinessFlight.coop===coop)return signupEntryReadinessFlight.promise;
+ if(signupEntryReadinessFlight&&isCurrentSignupIdentity(signupEntryReadinessFlight.scope)
+    &&(!signupEntryReadinessFlight.coop||signupEntryReadinessFlight.coop===coop))return signupEntryReadinessFlight.promise;
  const task={scope,coop};signupEntryReadinessFlight=task;
  const button=document.getElementById('signup-entry-readiness-retry');if(button)button.disabled=true;
  const owns=()=>signupEntryReadinessFlight===task&&isCurrentSignupIdentity(scope)&&(!coop||signupTenant?.coop_code===coop);
  task.promise=(async()=>{
   try{
-   await ensureSignupTenant();if(!owns())return false;
-   await loadSignupLegalDocuments(scope,owns);if(!owns())return false;
+   await ensureSignupTenant({contextOnly:true});if(!owns())return false;
+   task.coop=signupTenant?.coop_code;
+   await signupPreparationStep('legal_documents',()=>loadSignupLegalDocuments(scope,owns));if(!owns())return false;
    return signupLegalDocuments?.ready===true;
   }catch(error){if(owns()){setSignupLegalRecovery(error);paintSignupEntryReadiness('가입 가능 여부를 확인하지 못했습니다. 다시 확인해 주세요.');}return false;}
   finally{if(signupEntryReadinessFlight===task){signupEntryReadinessFlight=null;if(button)button.disabled=false;}}
  })();return task.promise;
+}
+async function retrySignupEntryReadiness(){
+ const scope=signupIdentityScope();
+ if(typeof window.CoopSignupPublicReads?.create!=='function'){
+  try{await recoverSignupPreparationScripts();}catch(error){
+   if(isCurrentSignupIdentity(scope)){setSignupLegalRecovery(error);paintSignupEntryReadiness('가입 가능 여부를 확인하지 못했습니다. 다시 확인해 주세요.');}
+   return false;
+  }
+ }
+ if(!isCurrentSignupIdentity(scope))return false;
+ if(!await checkNewSignupReadiness()||!isCurrentSignupIdentity(scope))return false;
+ await resumeSignupFromCurrentSession('readiness-confirmed');
+ return true;
 }
 
 function renderSignupLegalStatus() {
@@ -809,14 +826,6 @@ signupPublicSettingsPromise = (async () => {
 const { data, error } = await signupPublicReads.rpc('get_public_home_settings');
 if (error) throw error;
 signupPublicSettings = Array.isArray(data) ? (data[0] || null) : (data || null);
-try {
- const {data:guide,error:guideError}=await signupPublicReads.rpc('get_public_capital_deposit_guide');
- if(guideError||!guide?.coop_name)throw guideError||Error('DEPOSIT_GUIDE_UNAVAILABLE');
- if (guide.coop_name === signupPublicSettings?.coop_name) Object.assign(signupPublicSettings, {member_capital_deposit_bank:guide.bank,member_capital_deposit_account:guide.account,member_capital_deposit_holder:guide.holder});
- else if(signupPublicSettings)Object.assign(signupPublicSettings,{member_capital_deposit_bank:'',member_capital_deposit_account:'',member_capital_deposit_holder:''});
-} catch (_) {
- if (signupPublicSettings) Object.assign(signupPublicSettings,{member_capital_deposit_bank:'',member_capital_deposit_account:'',member_capital_deposit_holder:''});
-}
 return signupPublicSettings;
 })().catch((error) => {
 signupPublicSettingsPromise = null;
@@ -827,23 +836,44 @@ throw error;
 return signupPublicSettingsPromise;
 }
 
+async function loadSignupPublicDepositSettings(settings) {
+ if(!settings)return;
+ try {
+  const {data:guide,error}=await signupPublicReads.rpc('get_public_capital_deposit_guide');
+  if(!error&&guide?.coop_name&&guide.coop_name===settings.coop_name){
+   Object.assign(settings,{member_capital_deposit_bank:guide.bank,member_capital_deposit_account:guide.account,member_capital_deposit_holder:guide.holder});return;
+  }
+ } catch (_) {}
+ Object.assign(settings,{member_capital_deposit_bank:'',member_capital_deposit_account:'',member_capital_deposit_holder:''});
+}
+
 async function signupPreparationStep(operation, action) {
 if(window.CoopSignupFailure?.preparationStep)return window.CoopSignupFailure.preparationStep(operation,action);
 return action();
 }
-async function loadSignupPreparationDocuments(){
-await signupPreparationStep('admission_policy',()=>{if(typeof window.CoopApplicationNotice?.load!=='function')throw Error('SIGNUP_DEPENDENCY_MISSING');return CoopApplicationNotice.load(signupPublicReads,signupTenant.coop_id);});
-await signupPreparationStep('capital_rules',loadSignupCapitalRules);
-await signupPreparationStep('home_settings',loadSignupPublicSettings);
-await signupPreparationStep('legal_documents',loadSignupLegalDocuments);
-await signupPreparationStep('page_setup',applySignupTenantBranding);
+let signupEntryProfileApplied=false;
+async function ensureSignupEntryProfile(){
+ const settings=await signupPreparationStep('home_settings',loadSignupPublicSettings);
+ if(!signupEntryProfileApplied){applySignupProfileOptions();signupEntryProfileApplied=true;}
+ return settings;
 }
+async function loadSignupPreparationDocuments(){
+ const results=await Promise.allSettled([
+  signupPreparationStep('admission_policy',()=>{if(typeof window.CoopApplicationNotice?.load!=='function')throw Error('SIGNUP_DEPENDENCY_MISSING');return CoopApplicationNotice.load(signupPublicReads,signupTenant.coop_id);}),
+  signupPreparationStep('capital_rules',loadSignupCapitalRules),
+  ensureSignupEntryProfile().then(loadSignupPublicDepositSettings)
+ ]);
+ const failed=results.find(result=>result.status==='rejected');
+ if(failed)throw failed.reason;
+ await signupPreparationStep('page_setup',applySignupTenantBranding);
+}
+const signupFormPreparationLoader=BootGuard.createSuccessCachedTask(loadSignupPreparationDocuments);
 const signupTenantLoader = BootGuard.createSuccessCachedTask(async () => {
 const { data: contextData, error: contextError } = await signupPreparationStep('signup_context',()=>signupPublicReads.rpc('get_public_signup_context'));
 const contextResolved = Array.isArray(contextData) ? contextData[0] : contextData;
 if (!contextError && contextResolved?.coop_id && contextResolved?.coop_name) {
 signupTenant = contextResolved;
-await loadSignupPreparationDocuments();
+applySignupEntryBranding();
 return contextResolved;
 }
 
@@ -861,7 +891,7 @@ return signupPreparationStep('resolve_coop',()=>{throw error || contextError || 
 }
 
 signupTenant = resolved;
-await loadSignupPreparationDocuments();
+applySignupEntryBranding();
 return resolved;
 });
 let pendingSignupOtpEmail = '';
@@ -1134,8 +1164,7 @@ if (successHolder) successHolder.textContent = deposit.holder ? `(예금주: ${d
 return true;
 }
 
-function applySignupTenantBranding() {
-CoopApplicationNotice.show(document.getElementById('signupApplicationNotice'),!!signupTenant?.coop_name);
+function applySignupEntryBranding() {
 if (!signupTenant?.coop_name) return;
 
 const coopName = signupTenant.coop_name;
@@ -1151,7 +1180,11 @@ signupTitle.appendChild(document.createTextNode(coopName));
 signupTitle.appendChild(document.createElement('br'));
 signupTitle.appendChild(document.createTextNode('조합원 가입 신청서'));
 }
+}
 
+function applySignupTenantBranding() {
+CoopApplicationNotice.show(document.getElementById('signupApplicationNotice'),!!signupTenant?.coop_name);
+if (!signupTenant?.coop_name) return;
 const successModalCopy = document.getElementById('successModalCopy');
 const successAccountBox = document.getElementById('successAccountBox');
 const successKakaoBox = document.getElementById('successKakaoBox');
@@ -1173,7 +1206,6 @@ if (successAccountBox) successAccountBox.style.display = hasPublicDepositAccount
 if (successKakaoBox) successKakaoBox.style.display = 'none';
 }
 
-applySignupProfileOptions();
 applyTenantTerms();
 }
 
@@ -1235,17 +1267,19 @@ mailStatus.className = 'small mt-2';
 hideSignupRetryActions();
 }
 
-async function ensureSignupTenant() {
+async function ensureSignupTenant({contextOnly=false,entryOnly=false}={}) {
+let resolved;
 try {
-const resolved = await signupTenantLoader.run();
+resolved = await signupTenantLoader.run();
 clearSignupTenantRetryState();
-return resolved;
 } catch (error) {
 signupTenant = null;
 window.CoopSignupFailure?.report('tenant',error);
 signupPublicSettings = null;
 signupPublicSettingsPromise = null;
 signupTenantLoader.reset();
+signupFormPreparationLoader.reset();
+signupEntryProfileApplied=false;
 const kind = BootGuard.classifyError(error, {
 fatalMessages: ['SIGNUP_COOP_CONTEXT_MISSING', 'SIGNUP_COOP_NOT_FOUND']
 });
@@ -1256,6 +1290,10 @@ showSignupTenantRetryState(window.CoopSignupFailure?.retryMessage?.(error)||'가
 }
 throw error;
 }
+if(contextOnly)return resolved;
+if(!signupLegalDocuments&&!signupLegalRecovery)await checkNewSignupReadiness();
+if(!entryOnly&&signupLegalDocuments?.ready===true)await signupFormPreparationLoader.run();
+return resolved;
 }
 
 // Only fixed, same-origin preparation helpers; never reload Auth or the page.
@@ -1704,13 +1742,19 @@ hint.style.color = "red";
 async function showEmailInput() {
 const scope=signupIdentityScope();
 if(!await checkNewSignupReadiness()||!isCurrentSignupIdentity(scope))return;
+try{await ensureSignupEntryProfile();}catch(error){
+ if(isCurrentSignupIdentity(scope))showSignupAuthRetry('가입 방법을 불러오지 못했습니다. 다시 확인해 주세요.');
+ return;
+}
+if(!isCurrentSignupIdentity(scope))return;
+if(isDeferredSignupProfile())return openSignupFormWhenReady(null,scope);
 window.CoopSignupFailure?.setProvider('email');
 yonginInlineEmailSelected = signupTenant?.coop_code === DEFAULT_SIGNUP_COOP_CODE;
 if (!yonginInlineEmailSelected) {
 document.getElementById('email-gate-input').style.display = 'block';
 return;
 }
-showApplicationForm(null);
+await openSignupFormWhenReady(null,scope);
 }
 
 // [수정] 성공/실패 모달 제어 함수 (전역 사용을 위해 함수로 분리)
@@ -1747,7 +1791,9 @@ const task=beginSignupEmailWork('send','gate',email);
 if(!task)return;
 try {
 if(!await checkNewSignupReadiness()){if(isCurrentSignupEmailWork(task))finishSignupEmailWork(task);return;}
+await ensureSignupEntryProfile();
 if(!isCurrentSignupEmailWork(task))return;
+if(isDeferredSignupProfile()){finishSignupEmailWork(task);return;}
 } catch (tenantError) {
 if(!isCurrentSignupEmailWork(task))return;
 finishSignupEmailWork(task);
@@ -1986,7 +2032,7 @@ if (!session) {
 openResultModal('인증은 완료되었지만 로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.', true);
 return;
 }
-await ensureSignupTenant();
+await ensureSignupTenant({contextOnly:true});
 if(!isCurrentSignupEmailWork(task))return;
 checkExistingMember(session);
 } catch (error) {
@@ -2087,7 +2133,7 @@ signupHasSession = true;
 setSignupAuthBusy(true, '인증을 마쳤어요. 가입 정보를 확인하고 있어요.');
 window.setTimeout(async () => {
 try {
-await ensureSignupTenant();
+await ensureSignupTenant({contextOnly:true});
 if(!isCurrentSignupIdentity(scope))return;
 if (reason) console.debug('[signup] auth session check queued:', reason);
 if (deferredSignupFormInitialized) {
@@ -2129,19 +2175,22 @@ if (signupSessionResumeInFlight) return signupSessionResumeInFlight;
 let scope=signupIdentityScope();
 const task = (async () => {
 try {
-await ensureSignupTenant();
+await ensureSignupTenant({entryOnly:true});
 if(!isCurrentSignupIdentity(scope))return false;
+if(signupLegalDocuments?.ready===true){
+ await ensureSignupEntryProfile();if(!isCurrentSignupIdentity(scope))return false;
+}
 // Contact-only sites must not wait for an unrelated SDK Auth queue to show
 // their guest application. Later Auth events still pass through owner guards.
-if(isDeferredSignupProfile()&&!signupHasSession&&(signupIdentityKey===null||signupIdentityKey==='contact-only')){
- showApplicationForm(null);return true;
+if(signupLegalDocuments?.ready===true&&isDeferredSignupProfile()&&!signupHasSession&&(signupIdentityKey===null||signupIdentityKey==='contact-only')){
+ return openSignupFormWhenReady(null,scope);
 }
 const { data, error } = await _supabase.auth.getSession();
 if(!isCurrentSignupIdentity(scope))return false;
 if (error) throw error;
 scope=adoptSignupIdentity(data?.session);
 if (!data?.session) {
- if(isDeferredSignupProfile() || signupIdentityDrafts.has('contact-only')){showApplicationForm(null);return true;}
+ if(signupLegalDocuments?.ready===true&&(isDeferredSignupProfile()||signupIdentityDrafts.has('contact-only')))return openSignupFormWhenReady(null,scope);
  if(!signupSocialStartInFlight)setSignupAuthBusy(false);
  return false;
 }
@@ -2214,7 +2263,7 @@ if (signupApplicationSessionKey === null) toggleType('개인');
 applySignupEducationQrContext();
   // [추가] 페이지가 열리자마자 "배달 온 토큰 있나요?" 하고 확인
 try {
-await ensureSignupTenant();
+await ensureSignupTenant({entryOnly:true});
 } catch (tenantError) {
 showSignupAuthRetry('가입 대상을 확인하지 못했습니다. 다시 확인해 주세요.');
 return;
@@ -2225,7 +2274,7 @@ await checkCurrentSignupSessionOnLoad({ reason: 'load', showFailure: true });
 };
 
 window.addEventListener('pageshow', (event) => {
-if(event.persisted&&signupLegalDocuments?.ready===false)void checkNewSignupReadiness();
+if(event.persisted&&signupLegalDocuments?.ready===false)void retrySignupEntryReadiness();
 if (event.persisted && signupSocialStartInFlight && !isSignupSocialReturnUrl()) {
 signupSocialStartInFlight = false;
 checkCurrentSignupSessionOnLoad({ reason: 'back-from-auth', showFailure: false });
@@ -2237,8 +2286,8 @@ return;
 }
 resumeSignupFromCurrentSession('pageshow');
 });
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&signupLegalDocuments?.ready===false)void checkNewSignupReadiness();});
-window.setInterval(()=>{if(!document.hidden&&signupLegalDocuments?.ready===false&&!signupLegalRecovery)void checkNewSignupReadiness();},15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&signupLegalDocuments?.ready===false)void retrySignupEntryReadiness();});
+window.setInterval(()=>{if(!document.hidden&&signupLegalDocuments?.ready===false&&!signupLegalRecovery)void retrySignupEntryReadiness();},15000);
 
 window.addEventListener('focus', () => {
 if (isSignupSocialReturnUrl()) {
@@ -2407,6 +2456,20 @@ matched.provider_id
 ).trim();
 }
 
+async function openSignupFormWhenReady(session,scope){
+ try{
+  await ensureSignupTenant();
+  if(!isCurrentSignupIdentity(scope))return false;
+  if(signupLegalRecovery||signupLegalDocuments?.ready!==true){setSignupAuthBusy(false);return false;}
+  showApplicationForm(session);return true;
+ }catch(error){
+  if(isCurrentSignupIdentity(scope)){
+   window.CoopSignupFailure?.report('tenant',error);
+   showSignupAuthRetry('가입 신청서에 필요한 기준을 불러오지 못했습니다. 다시 확인해 주세요.');
+  }
+  return false;
+ }
+}
 // [코드 2] 가입 신청서 화면 렌더링 및 UI 제어
 function showApplicationForm(session) {
 if(signupIdentityKey!==null&&signupIdentityKey!=='contact-only'&&signupIdentityKey!==String(session?.user?.id||'contact-only'))return;
@@ -2504,6 +2567,8 @@ async function startKakaoSignup() {
     setSignupAuthBusy(true, '카카오 인증을 준비하고 있어요.');
     try {
         if(!await checkNewSignupReadiness())return;
+        const scope=signupIdentityScope();
+        await ensureSignupEntryProfile();if(!isCurrentSignupIdentity(scope))return;
         if (isDeferredSignupProfile()) {
             openResultModal('시민조합 가입은 간편로그인 없이 신청서에 이메일을 직접 입력합니다.', true);
             return;
@@ -2574,6 +2639,8 @@ async function startNaverSignup() {
     setSignupAuthBusy(true, '네이버 인증을 준비하고 있어요.');
     try {
         if(!await checkNewSignupReadiness())return;
+        const scope=signupIdentityScope();
+        await ensureSignupEntryProfile();if(!isCurrentSignupIdentity(scope))return;
         if (isDeferredSignupProfile()) {
             openResultModal('시민조합 가입은 간편로그인 없이 신청서에 이메일을 직접 입력합니다.', true);
             return;
@@ -3478,7 +3545,7 @@ const scope=adoptSignupIdentity(session);
 if(signupMemberCheckInFlight?.epoch===scope.epoch)return signupMemberCheckInFlight.task;
 const task=(async()=>{
 try {
-await ensureSignupTenant();
+await ensureSignupTenant({contextOnly:true});
 if(!isCurrentSignupIdentity(scope))return false;
 const linkedMember = await findSignupMemberByAuthUser(session,scope);
 if(!isCurrentSignupIdentity(scope))return false;
@@ -3528,7 +3595,7 @@ if (modal) modal.style.display = 'flex';
 } 
 // [Case B] DB에 없음 (신규 or 이메일 불일치 기존회원)
 else {
-showApplicationForm(session);
+return openSignupFormWhenReady(session,scope);
 }
 return true;
 
@@ -3568,6 +3635,8 @@ await _supabase.auth.signOut();
 //    이 페이지의 초기 상태(로그인 전)로 돌아갑니다.
 window.location.reload(); 
 }
+// The signup entry is ready to read without waiting for images or other page assets.
+void ensureSignupTenant({entryOnly:true}).catch(()=>{});
 </script>
 <script src="shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
