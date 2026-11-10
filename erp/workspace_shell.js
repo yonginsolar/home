@@ -14,6 +14,10 @@
   let printableEntry = null, navigationPending = false;
   document.documentElement.setAttribute('data-erp-print-locked', '');
   const view = () => routes.route(new URLSearchParams(location.search).get('view') || '');
+  const legalSetupLink = target => {
+    const url=new URL(target,location.origin);
+    return /\/admin_member(?:\.html)?\/?$/.test(url.pathname)&&url.searchParams.get('scope')==='site_admin'&&url.searchParams.get('sub')==='legal';
+  };
   const home = target => {
     const next = new URL('/erp/', location.origin);
     if (target) next.searchParams.set('next', new URL(target, location.origin).href);
@@ -177,6 +181,7 @@
       const request = source.rpc('get_my_erp_runtime');
       const [identity, access] = await Promise.all([source.auth.getUser(),
         request.abortSignal ? request.abortSignal(controller.signal) : request]);
+      if (identity.error?.name==='AuthSessionMissingError'||identity.error?.code==='session_not_found') throw new Error('ERP_LOGIN_REQUIRED');
       if (identity.error || access.error) throw new Error('ERP_ACCESS_UNAVAILABLE');
       const id = identity.data?.user?.id, runtime = access.data;
       if (!id || !runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return null;
@@ -550,6 +555,9 @@
     const target = view();
     if (!target) return home();
     const retry = document.getElementById('erpWorkspaceRetry');
+    const login=document.getElementById('erpWorkspaceLegalLogin');
+    if(login)login.hidden=true;
+    retry.hidden=false;
     error.hidden = true; status.textContent = '권한을 확인하고 있습니다…'; status.hidden = false;
     retry.disabled = true;
     const pending = (async () => { try {
@@ -564,14 +572,19 @@
         }
       });
       load(target);
-    } catch (_) {
+    } catch (cause) {
       const text = error.querySelector('p');
-      if (text) text.textContent = '접근 권한을 확인하지 못했습니다. 다시 시도해 주세요.';
+      const legal=legalSetupLink(target),needsLogin=cause?.message==='ERP_LOGIN_REQUIRED';
+      if (text) text.textContent = legal?(needsLogin?'가입 문서를 준비하려면 이 조합의 ERP에서 먼저 로그인해 주세요.':'가입 문서 접근 권한을 확인하지 못했습니다. 아직 로그인하지 않았다면 이 조합의 ERP에서 먼저 로그인해 주세요.'):'접근 권한을 확인하지 못했습니다. 다시 시도해 주세요.';
+      if(legal&&login){
+        const next=new URL('/erp/',location.origin);next.searchParams.set('next',new URL(target,location.origin).href);
+        login.href=next.href;login.hidden=false;retry.hidden=needsLogin;
+      }
       status.hidden = true; error.hidden = false;
     } })();
     startupPending = pending;
     try { await pending; }
     finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, version:'20261107.1'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, version:'20261110.1'};
 })();

@@ -1,4 +1,4 @@
-/* v1.2.1 — Contract tasks link directly to the employee's required action. */
+/* v1.2.2 — Distinguish admission readiness from delegated setup access. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -152,6 +152,7 @@
    const badge=el('span','small text-muted ms-2',section==='tasks'?'확인 중…':'');badge.setAttribute('role','status');heading.append(badge);
    const body=el('div','pt-3'),status=el('p','small text-muted mb-2',''),list=el('div','d-grid gap-2');
    status.setAttribute('role','status');const retry=el('button','btn btn-sm btn-outline-secondary mt-2','다시 확인');retry.type='button';
+   if(section==='setup')body.append(el('p','small mb-2','가입을 열기 전 설립목적·가입 개인정보 동의와 출자 기준을 확인해 주세요. 납입 계좌는 입금 안내에, 조합 직인은 출자증서에 사용됩니다. 이 점검표와 임시 권한 부여 종료는 별도입니다.'));
    body.append(status,list,retry);root.append(heading,body);container.append(root);
    let sequence=0,busy=false,retrying=false;
    const isCurrent=serial=>serial===sequence&&current();
@@ -195,7 +196,9 @@
        row.append(el('span',item.count?'badge text-bg-primary':'text-muted small',item.key==='tax'&&item.configured===false?(item.count?`${item.count.toLocaleString('ko-KR')}건 · 주기 확인`:'주기 미설정'):`${item.count.toLocaleString('ko-KR')}${item.key.startsWith('contract_')?'명':'건'}`));
       }else{
        if(!labels[item.state])throw new Error('STATE_UNAVAILABLE');
-       const right=el('span','small text-end',labels[item.state]);
+      row.classList.add('flex-wrap');
+      const stateLabel=['signup_purpose','signup_privacy'].includes(item.key)&&item.state==='missing'?'미적용 · 문서 확인 필요':labels[item.state];
+      const right=el('span','small text-end',stateLabel);
        if(item.key==='capital')right.append(el('span','d-block text-muted',`최소 ${Number(item.minimum).toLocaleString('ko-KR')}원 · 1좌 ${Number(item.unit).toLocaleString('ko-KR')}원`));
        row.append(right);
       }
