@@ -381,7 +381,7 @@ function clearMemberOrgLogo() {
     renderMemberOrgLogoPreview('', '');
 } // End of clearMemberOrgLogo
 
-async function openMemberCertificateSettingsModal() {
+async function openMemberCertificateSettingsModal(focus) {
     if (!isAdminMemberSiteProfile()) {
         if (!canOpenFullCoopSettings()) return;
         ErpWorkspaceResume.navigate(g_adminMemberRuntime?.initial_setup?.active && !g_adminMemberRuntime?.effective_permissions?.includes('hr.admin')
@@ -390,6 +390,15 @@ async function openMemberCertificateSettingsModal() {
     }
     if(memberOrgMediaLoading)return;
     const mediaRuntime=g_adminMemberRuntime,mediaAuth=adminCertificateAuthId;
+    const show=modal=>{
+        if(focus&&(mediaRuntime!==g_adminMemberRuntime||mediaAuth!==adminCertificateAuthId||window.frameElement?.hidden))return;
+        const target=focus==='deposit'?'member-org-deposit-bank':focus==='seal'?'member-certificate-seal-file':'';
+        if(target)modal.addEventListener('shown.bs.modal',()=>{
+            if(window.frameElement?.hidden||mediaRuntime!==g_adminMemberRuntime||mediaAuth!==adminCertificateAuthId)return;
+            const field=document.getElementById(target);field?.scrollIntoView?.({block:'nearest'});
+        },{once:true});
+        bootstrap.Modal.getOrCreateInstance(modal).show();
+    };
     memberOrgMediaLoading=true;
     try { await window.AdminMemberAssets?.ensureMedia?.(); }
     catch (_) { if(mediaRuntime===g_adminMemberRuntime&&mediaAuth===adminCertificateAuthId&&!window.frameElement?.hidden)myAlert('설정 도구를 불러오지 못했어요. 입력은 유지됩니다. 다시 열어 주세요.','warning');return; }
@@ -409,7 +418,7 @@ async function openMemberCertificateSettingsModal() {
         const owner=auth.data.user.id+'|'+await getAdminMemberCoopId();
         if(owner===memberOrgSettingsOwner&&memberOrgSettingsBaseline!==null&&memberOrgSettingsSnapshot()!==memberOrgSettingsBaseline){
             const check=await _supabase.rpc('get_my_site_member_org_settings');if(check.error)throw check.error;
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('memberCertificateSettingsModal')).show();return;
+            show(document.getElementById('memberCertificateSettingsModal'));return;
         }
         memberOrgSettingsOwner=owner;memberOrgSettingsBaseline=null;
         revokeMemberCertificateSealPreview();
@@ -468,7 +477,7 @@ async function openMemberCertificateSettingsModal() {
         memberOrgSettingsBaseline=memberOrgSettingsSnapshot();
         if(!modalEl.dataset.orgSavingGuard){modalEl.dataset.orgSavingGuard='1';modalEl.addEventListener('hide.bs.modal',event=>{if(memberOrgSettingsSaving)event.preventDefault();});}
         applyAdminMemberModalLayer(modalEl);
-        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        show(modalEl);
     } catch (error) {
         myAlert('조합 기본 설정을 불러오지 못했습니다: ' + (error?.message || error), 'error');
     } finally {
@@ -11905,6 +11914,11 @@ async function initializeAdminMember() {
     }
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && hasAdminMemberScopePermission('member_admin') && isAdminMemberRuntimeModuleEnabled('member_admin') && workEntry.get('sub') === 'payment-policy') {
         await window.MemberAdmissionPolicy?.open();
+    }
+    if (workEntry.get('sub')==='certificate-settings' && isAdminMemberSiteProfile() &&
+        ((ADMIN_MEMBER_PAGE_SCOPE==='member_admin'&&hasAdminMemberScopePermission('member_admin')&&isAdminMemberRuntimeModuleEnabled('member_admin'))||
+         (ADMIN_MEMBER_PAGE_SCOPE==='site_admin'&&hasAdminMemberScopePermission('site_admin')&&isAdminMemberRuntimeModuleEnabled('site_admin')))) {
+        await openMemberCertificateSettingsModal(workEntry.get('focus'));
     }
 
     if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {

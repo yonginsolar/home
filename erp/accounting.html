@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.203 | Change: 2026-11-10 - Verify the original payroll bundle before offering undo. -->
+<!-- Version: v1.0.204 | Change: 2026-11-10 - Allow the first account category to be entered directly. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -7460,11 +7460,7 @@ function openPrepayExpenseModal() {
 
 function openPrepayExpenseAddModal() {
     addContext = 'prepayExpense';
-    document.getElementById("addTypeSelect").value = '비용';
-    const catSel = document.getElementById("addCategorySelect");
-    catSel.innerHTML = "";
-    const cats = [...new Set(mData.filter(m => (m.Type || m.type) === '비용').map(m => m.Standard))].sort();
-    cats.forEach(c => catSel.add(new Option(c, c)));
+    prepareAccountCategoryInput('비용');
     addModal.show();
 }
 
@@ -7801,11 +7797,7 @@ function openReceivableIncomeModal() {
 function openReceivableIncomeAddModal() {
     addContext = 'receivableIncome';
     const selectedType = getReceivableIncomeType();
-    document.getElementById('addTypeSelect').value = selectedType;
-    const catSel = document.getElementById('addCategorySelect');
-    catSel.innerHTML = '';
-    const cats = [...new Set((mData || []).filter(m => (m.Type || m.type) === selectedType).map(m => m.Standard || m.standard))].sort();
-    cats.forEach(c => catSel.add(new Option(c, c)));
+    prepareAccountCategoryInput(selectedType);
     addModal.show();
 }
 
@@ -10679,13 +10671,24 @@ async function deleteTx(id, transId) {
 
 function openAddModal() {
     addContext = null;
-    document.getElementById("addTypeSelect").value = document.querySelector('input[name="inputType"]:checked').value;
-    const type = document.getElementById("addTypeSelect").value;
-    const catSel = document.getElementById("addCategorySelect");
-    catSel.innerHTML = "";
-    const cats = [...new Set(mData.filter(m => m.Type === type).map(m => m.Standard))].sort();
-    cats.forEach(c => catSel.add(new Option(c, c)));
+    prepareAccountCategoryInput(document.querySelector('input[name="inputType"]:checked').value);
     addModal.show();
+}
+function prepareAccountCategoryInput(type) {
+    document.getElementById('addTypeSelect').value=type;
+    const catSel = document.getElementById("addCategorySelect");
+    const previous=catSel.value,manual=document.getElementById('chkManualCat');
+    const cats = [...new Set((mData||[]).filter(m => (m.Type||m.type) === type).map(m => String(m.Standard||m.standard||'').trim()).filter(Boolean))].sort();
+    catSel.replaceChildren();
+    cats.forEach(c => catSel.add(new Option(c, c)));
+    if(cats.includes(previous))catSel.value=previous;
+    if(!cats.length){manual.checked=true;manual.dataset.autoCategory='1';}
+    else if(manual.dataset.autoCategory==='1'){
+        if(!document.getElementById('manualCatInput').value.trim())manual.checked=false;
+        delete manual.dataset.autoCategory;
+    }
+    manual.disabled=!cats.length;
+    toggleManualCat();
 }
 
 function toggleManualCat() {

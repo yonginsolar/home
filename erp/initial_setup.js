@@ -1,4 +1,4 @@
-/* v1.0.9 — Check a delayed save without replaying the write. */
+/* v1.0.10 — Open the requested account/seal settings after authorization. */
 (function(root){
  'use strict';const $=id=>document.getElementById(id);let client,runtime,status,busy=false,area='basic',identity='',generation=0,brandingReady=false,accessKnown=false,accessPending=null,accessIssue='',ownerLost=false;
  let brandingState='idle',brandingPending=null,brandingRetryBusy=false;
@@ -171,7 +171,7 @@
    if(epoch!==generation)return;if(result){root.ErpWorkspaceResume.checkpoint($('setCompany'));await tell('로고·파비콘을 저장했습니다.');}else await tell('새 파일을 선택해 주세요.');}
   catch(e){if(epoch===generation)await tell(root.ERPInitialSetupAccess.message(e));}finally{busy=false;availability();}}
  document.addEventListener('DOMContentLoaded',async()=>{
-  console.log('[Version] v1.0.9 | initial_setup');
+  console.log('[Version] v1.0.10 | initial_setup');
   client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
   const gate=await root.ErpRuntimeGuard.requireUser(client,{alertFn:tell,redirectUrl:'index.html'});if(!gate.ok)return;identity=gate.authUser?.id||'';runtime=await root.ErpRuntimeGuard.getRuntime(client);
   client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==identity)){generation++;ownerLost=true;accessKnown=false;accessIssue='로그인 상태가 바뀌었습니다. 입력은 유지되며 저장하지 않습니다.';certificateSetup?.invalidate();availability();}});
@@ -186,6 +186,11 @@
   root.ErpWorkspaceResume.register({authorize:async()=>{await refreshAccess();return accessKnown;},busy:()=>changed()||certificateSetup?.busy()||brandingRetryBusy||!!brandingPending,refresh:async()=>{if(!configReview.has(area))await load(area,{refresh:true});}});
   setInterval(()=>{if(!document.hidden&&!busy&&accessKnown)void refreshAccess();},45000);
   await checkAccessAndOpen();
+  const focus=new URLSearchParams(location.search).get('focus');
+  if(['deposit','seal'].includes(focus)&&authorized('basic')&&area==='basic'){
+   const section=$('certificateSetupContainer'),details=section.querySelector('details');
+   if(details){details.open=true;section.scrollIntoView?.({block:'start'});details.querySelector('summary')?.focus({preventScroll:true});}
+  }
  });
  root.addEventListener('beforeunload',event=>{if(changed()){event.preventDefault();event.returnValue='';}});
 })(window);

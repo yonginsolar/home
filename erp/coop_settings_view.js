@@ -1,4 +1,4 @@
-/* v1.0.3 — Retained settings drafts and scoped setting categories. */
+/* v1.0.4 — Retained settings with narrow checklist destinations. */
 (function (global) {
   'use strict';
   const isPage = new URLSearchParams(global.location.search).get('section') === 'settings';
@@ -75,12 +75,15 @@
     // The same form is a page here: saving does not close it or create a second copy.
     return { show() {
       document.getElementById('settingsModal').classList.remove('hidden');
-      if (!entryFocused && new URLSearchParams(global.location.search).get('focus') === 'capital') {
+      const focus=new URLSearchParams(global.location.search).get('focus');
+      if (!entryFocused && ['capital','deposit','seal'].includes(focus)) {
         entryFocused = true;
         global.ERPCoopSettingsGroups?.select('basic');
-        const heading=document.getElementById('companyCapitalHeading');
+        const deposit=focus==='deposit'?document.querySelector('#coopDepositSetup details'):null;
+        if(deposit)deposit.open=true;
+        const heading=focus==='deposit'?deposit?.querySelector('summary'):document.getElementById(focus==='seal'?'set_sealFile':'companyCapitalHeading');
         heading?.scrollIntoView({block:'center',behavior:'auto'});
-        heading?.closest('section')?.querySelector('button')?.focus({preventScroll:true});
+        (focus==='capital'?heading?.closest('section')?.querySelector('button'):heading)?.focus({preventScroll:true});
       }
     }, hide() {} };
   }

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.86
+Version: v1.0.87
 Change: 2026-10-31 - Preserve unresolved existing-member connection requests.
 -->
 <html lang="ko"> 
@@ -178,6 +178,8 @@ html[data-signup-social="disabled"] #signup-naver-option {
 display: none !important;
 }
 html[data-signup-auth="checking"] #step-gate { display: none !important; }
+html[data-signup-admission="blocked"] [data-new-signup-choice] { display:none !important; }
+#signup-entry-readiness { overflow-wrap:anywhere; }
 #signupAuthStatus { padding: 3rem 1rem; text-align: center; }
 
 </style>
@@ -204,13 +206,18 @@ gtag('config', 'G-TR217L7JN9');
 <p id="signupAuthMessage">인증 상태를 확인하고 있어요.</p>
 <button id="retrySignupAuth" type="button" class="btn btn-outline-secondary" onclick="retrySignupAuthCheck()" hidden>다시 확인</button>
 </div>
+<div id="signup-entry-readiness" class="alert alert-light border mt-3" hidden>
+<p id="signup-entry-readiness-message" class="mb-2" role="status"></p>
+<div class="d-flex flex-wrap gap-2"><button id="signup-entry-readiness-retry" type="button" class="btn btn-sm btn-outline-primary" onclick="checkNewSignupReadiness()">가입 가능 여부 다시 확인</button>
+<a href="/membermanage" class="btn btn-sm btn-outline-secondary">기존 조합원 로그인·계정 연결</a></div>
+</div>
 
 <div id="step-gate" class="text-center pt-5" style="display:none;">
 <span class="step-emoji">☀️</span>
 <h1 style="font-family:'GmarketSans'; font-weight:700; font-size:1.5rem;">함께 지구를 구해요!</h1>
 <p id="gateWelcomeText" class="text-muted mb-5">조합 가입을 환영합니다 🌱</p>
 
-<div class="d-grid gap-3">
+<div class="d-grid gap-3" data-new-signup-choice>
 <div class="gate-card" id="signup-kakao-option" onclick="startKakaoSignup()" hidden>
 <div class="d-flex align-items-center justify-content-center gap-2">
 <i class="bi bi-chat-fill" style="color:#3c1e1e;"></i> <span>카카오로 3초 만에 시작</span>
@@ -236,7 +243,7 @@ gtag('config', 'G-TR217L7JN9');
 <div id="email-gate-input" class="mt-4" style="display:none; animation: fadeIn 0.5s;">
 <div class="input-group mb-2 email-gate-group">
 <input type="email" id="init-email" class="form-control" placeholder="이메일 주소 입력">
-<button type="button" class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink">코드 발송</button>
+<button type="button" class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink" data-new-signup-choice>코드 발송</button>
 </div>
 <p id="mail-status" class="small mt-2"></p>
 <div id="signupRetryActions" class="signup-retry-actions">
@@ -266,7 +273,7 @@ gtag('config', 'G-TR217L7JN9');
 <label class="form-label fw-bold small" id="lbl-email">이메일 (인증됨)</label>
 <div class="input-group">
 <input type="email" id="verifiedEmail" class="form-control bg-light" readonly style="color:#555; font-weight:bold;" oninput="handleDeferredSignupEmailChanged(this)">
-<button type="button" class="btn btn-outline-success" id="btnDeferredSignupOtp" onclick="sendDeferredSignupOtp()" hidden>인증코드 받기</button>
+<button type="button" class="btn btn-outline-success" id="btnDeferredSignupOtp" onclick="sendDeferredSignupOtp()" data-new-signup-choice hidden>인증코드 받기</button>
 </div>
 <div id="deferred-signup-otp-area" class="mt-2" hidden>
 <div class="input-group">
@@ -701,6 +708,30 @@ let signupPublicSettingsPromise = null;
 let signupLegalDocuments = null;
 let signupPrivacyConsentVersion = 'signup-privacy-2026.08.24';
 let signupLegalRecovery=null,signupLegalRetryTask=null;
+let signupEntryReadinessFlight=null;
+
+function paintSignupEntryReadiness(message='') {
+ const box=document.getElementById('signup-entry-readiness');
+ if(!box)return;
+ document.documentElement.dataset.signupAdmission=message?'blocked':'ready';
+ box.hidden=!message;document.getElementById('signup-entry-readiness-message').textContent=message;
+ document.getElementById('signup-entry-readiness-retry').disabled=!!signupEntryReadinessFlight;
+}
+function checkNewSignupReadiness(){
+ const scope=signupIdentityScope(), coop=signupTenant?.coop_code;
+ if(signupEntryReadinessFlight&&isCurrentSignupIdentity(signupEntryReadinessFlight.scope)&&signupEntryReadinessFlight.coop===coop)return signupEntryReadinessFlight.promise;
+ const task={scope,coop};signupEntryReadinessFlight=task;
+ const button=document.getElementById('signup-entry-readiness-retry');if(button)button.disabled=true;
+ const owns=()=>signupEntryReadinessFlight===task&&isCurrentSignupIdentity(scope)&&(!coop||signupTenant?.coop_code===coop);
+ task.promise=(async()=>{
+  try{
+   await ensureSignupTenant();if(!owns())return false;
+   await loadSignupLegalDocuments(scope,owns);if(!owns())return false;
+   return signupLegalDocuments?.ready===true;
+  }catch(error){if(owns()){setSignupLegalRecovery(error);paintSignupEntryReadiness('가입 가능 여부를 확인하지 못했습니다. 다시 확인해 주세요.');}return false;}
+  finally{if(signupEntryReadinessFlight===task){signupEntryReadinessFlight=null;if(button)button.disabled=false;}}
+ })();return task.promise;
+}
 
 function renderSignupLegalStatus() {
 let notice=document.getElementById('signup-legal-pending');
@@ -747,16 +778,18 @@ task.promise=(async()=>{
 return task.promise;
 }
 
-async function loadSignupLegalDocuments(scope) {
+async function loadSignupLegalDocuments(scope,owns) {
 const {data,error,status}=await signupPublicReads.rpc('get_public_signup_documents',{p_coop_code:signupTenant.coop_code});
-if(scope&&!isCurrentSignupIdentity(scope))return false;
+if((scope&&!isCurrentSignupIdentity(scope))||(owns&&!owns()))return false;
 if(error)throw Object.assign(new Error('SIGNUP_LEGAL_READ_FAILED'),{status:status??error.status,code:error.code});
+if(typeof data?.ready!=='boolean')throw new Error('SIGNUP_LEGAL_READ_INVALID');
 const previousConsents=captureSignupConsentState();
 signupLegalDocuments=data;
 signupPrivacyConsentVersion=data?.version||'';
 applyTenantTerms();
 reconcileSignupConsentState(previousConsents);
 signupLegalRecovery=null;renderSignupLegalStatus();
+paintSignupEntryReadiness(data.ready?'':'신규 조합원 가입을 준비 중입니다. 기존 조합원은 로그인하거나 계정을 연결할 수 있어요.');
 if(data?.ready!==true){termsData.purpose.content='';termsData.privacy.content='';}
 refreshGuardianFields();
 }
@@ -1668,7 +1701,9 @@ hint.style.color = "red";
 }
 
 // [6] 초기화 및 매직링크
-function showEmailInput() {
+async function showEmailInput() {
+const scope=signupIdentityScope();
+if(!await checkNewSignupReadiness()||!isCurrentSignupIdentity(scope))return;
 window.CoopSignupFailure?.setProvider('email');
 yonginInlineEmailSelected = signupTenant?.coop_code === DEFAULT_SIGNUP_COOP_CODE;
 if (!yonginInlineEmailSelected) {
@@ -1711,7 +1746,7 @@ if(!email) return openResultModal('이메일을 입력하세요.', true);
 const task=beginSignupEmailWork('send','gate',email);
 if(!task)return;
 try {
-await ensureSignupTenant();
+if(!await checkNewSignupReadiness()){if(isCurrentSignupEmailWork(task))finishSignupEmailWork(task);return;}
 if(!isCurrentSignupEmailWork(task))return;
 } catch (tenantError) {
 if(!isCurrentSignupEmailWork(task))return;
@@ -1841,7 +1876,7 @@ const email=normalizeSignupEmail(document.getElementById('verifiedEmail')?.value
 const task=beginSignupEmailWork('send','inline',email);
 if(!task)return;
 try {
-await ensureSignupTenant();
+if(!await checkNewSignupReadiness())return;
 if(!isCurrentSignupEmailWork(task))return;
 if (!requiresInlineSignupEmailVerification()) return;
 const input = document.getElementById('verifiedEmail');
@@ -2190,6 +2225,7 @@ await checkCurrentSignupSessionOnLoad({ reason: 'load', showFailure: true });
 };
 
 window.addEventListener('pageshow', (event) => {
+if(event.persisted&&signupLegalDocuments?.ready===false)void checkNewSignupReadiness();
 if (event.persisted && signupSocialStartInFlight && !isSignupSocialReturnUrl()) {
 signupSocialStartInFlight = false;
 checkCurrentSignupSessionOnLoad({ reason: 'back-from-auth', showFailure: false });
@@ -2201,6 +2237,8 @@ return;
 }
 resumeSignupFromCurrentSession('pageshow');
 });
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&signupLegalDocuments?.ready===false)void checkNewSignupReadiness();});
+window.setInterval(()=>{if(!document.hidden&&signupLegalDocuments?.ready===false&&!signupLegalRecovery)void checkNewSignupReadiness();},15000);
 
 window.addEventListener('focus', () => {
 if (isSignupSocialReturnUrl()) {
@@ -2465,7 +2503,7 @@ async function startKakaoSignup() {
     let navigating = false;
     setSignupAuthBusy(true, '카카오 인증을 준비하고 있어요.');
     try {
-        await ensureSignupTenant();
+        if(!await checkNewSignupReadiness())return;
         if (isDeferredSignupProfile()) {
             openResultModal('시민조합 가입은 간편로그인 없이 신청서에 이메일을 직접 입력합니다.', true);
             return;
@@ -2535,7 +2573,7 @@ async function startNaverSignup() {
     let navigating = false;
     setSignupAuthBusy(true, '네이버 인증을 준비하고 있어요.');
     try {
-        await ensureSignupTenant();
+        if(!await checkNewSignupReadiness())return;
         if (isDeferredSignupProfile()) {
             openResultModal('시민조합 가입은 간편로그인 없이 신청서에 이메일을 직접 입력합니다.', true);
             return;

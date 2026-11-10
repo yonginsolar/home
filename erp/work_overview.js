@@ -1,4 +1,4 @@
-/* v1.2.2 — Distinguish admission readiness from delegated setup access. */
+/* v1.2.3 — Show existing account, deadline and seal readiness without widening access. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -13,9 +13,19 @@
   signup_purpose:['가입 안내 · 설립목적','admin_member.html?scope=site_admin&tab=site&sub=legal&document=signup_purpose'],
   signup_privacy:['가입 개인정보 수집·이용 동의','admin_member.html?scope=site_admin&tab=site&sub=legal&document=signup_privacy'],
   terms:['홈페이지 이용약관','admin_member.html?scope=site_admin&tab=site&sub=legal&document=terms'], privacy:['개인정보 처리방침','admin_member.html?scope=site_admin&tab=site&sub=legal&document=privacy'],
-  domain:['홈페이지·ERP 도메인','']
+  domain:['홈페이지·ERP 도메인',''],deposit:['출자금 납입 안내 계좌',''],seal:['출자증서용 조합 직인',''],payment_policy:['가입 출자금 납입기한','admin_member.html?scope=member_admin&sub=payment-policy']
  });
- const labels={ready:'등록됨',missing:'확인 필요',default:'기본 기준 · 확인 필요',legacy:'기존 적용본 유지',connected:'연결됨',optional:'선택 사항 · 미연결'};
+ const labels={ready:'등록됨',missing:'확인 필요',default:'기본 기준 · 확인 필요',legacy:'기존 적용본 유지',connected:'연결됨',optional:'선택 사항 · 미연결',unavailable:'조회 실패 · 다시 확인'};
+ function setupRoutes(rt,coop){
+  if(!rt||rt.coop_id!==coop||rt.is_active===false)return {};
+  const rights=new Set(rt.effective_permissions||[]),enabled=k=>rt.modules?.[k]!==false;
+  const member=rights.has('member.admin')&&enabled('member_admin'),site=rights.has('site.admin')&&enabled('site_admin');
+  const civic=rt.runtime_profile==='site_member';
+  const certificate=civic&&(member||site)?'admin_member.html?scope='+(member?'member_admin':'site_admin&tab=site')+'&sub=certificate-settings&focus=':
+   !civic&&rights.has('hr.admin')&&enabled('hr')?'admin_employee.html?section=settings&focus=':
+   rt.initial_setup?.active===true&&rt.initial_setup?.areas?.basic===true?'initial_setup.html?focus=':'';
+  return {certificate,deadline:member,civic};
+ }
  const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
  let binding;
  function mount(options) {
@@ -26,6 +36,38 @@
   const owner=key();
   let dialog=null,dialogReturnFocus=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0,contractListGeneration=0,contractListController=null;
   const current=()=>!disposed&&key()===owner&&!!owner&&container.isConnected&&!container.closest('.hidden');
+  const extras=()=>setupRoutes(options.runtime?.(),options.context()?.coop_id);
+  async function setupExtraItems(paths){
+   const coop=options.context()?.coop_id,controller=new AbortController();let timer;
+   controllers.set(controller,'setup-extra');
+   const unavailable=key=>({key,state:'unavailable'});
+   async function get(name,args){
+    const request=options.client.rpc(name,args);
+    const res=await Promise.race([request.abortSignal?request.abortSignal(controller.signal):request,new Promise((_,reject)=>{
+     if(controller.signal.aborted)reject(Error('SETUP_EXTRA_TIMEOUT'));
+     else controller.signal.addEventListener('abort',()=>reject(Error('SETUP_EXTRA_TIMEOUT')),{once:true});
+    })]);
+    if(res.error)throw res.error;return res.data;
+   }
+   const work=[];
+   timer=setTimeout(()=>controller.abort(),15000);
+   if(paths.certificate)work.push((async()=>{try{
+    let data;
+    if(paths.civic){
+     // This is the same existing read as the civic settings dialog.
+     const d=await get('get_my_site_member_org_settings');if(!d||typeof d.coop_name!=='string')throw Error('SETUP_SCOPE');
+     data={bank:d.member_capital_deposit_bank,account:d.member_capital_deposit_account,holder:d.member_capital_deposit_holder,seal_path:d.seal_url};
+    }else{data=await get('erp_coop_certificate_setup',{p_action:'get'});if(data?.coop_id!==coop)throw Error('SETUP_SCOPE');}
+    const filled=v=>typeof v==='string'&&!!v.trim();
+    return [{key:'deposit',state:[data.bank,data.account,data.holder].every(filled)?'ready':'missing'}, {key:'seal',state:filled(data.seal_path)?'ready':'missing'}];
+   }catch(e){return e?.code==='42501'||e?.status===403?[]:['deposit','seal'].map(unavailable);}})());
+   if(paths.deadline)work.push((async()=>{try{
+    const d=await get('erp_member_admission_policy',{p_action:'get'});
+    if(d?.coop_id!==coop||!(d.payment_days===null||Number.isInteger(d.payment_days)&&d.payment_days>=0&&d.payment_days<=365))throw Error('SETUP_SCOPE');
+    return [{key:'payment_policy',state:d.payment_days===null?'missing':'ready',days:d.payment_days}];
+   }catch(e){return e?.code==='42501'||e?.status===403?[]:[unavailable('payment_policy')];}})());
+   try{return (await Promise.all(work)).flat();}finally{clearTimeout(timer);controllers.delete(controller);}
+  }
   async function read(section){
    const ticket=++readSequence,controller=new AbortController();controllers.set(controller,section);let timer;
    // Reserve the boundary when a read starts, including reads that later fail.
@@ -64,7 +106,7 @@
     ||value.required_count<0||value.pending_count<0||value.pending_count>value.required_count||value.can_view!==(value.required_count>0)
     ||value.complete!==(value.required_count>0&&value.pending_count===0))throw Error('STATE_UNAVAILABLE');
    lastSetupTicket=ticket;
-   const panel=panels.get('setup');panel.root.hidden=!value.can_view||value.complete;
+   const panel=panels.get('setup'),paths=extras();panel.root.hidden=(!value.can_view||value.complete)&&!paths.certificate&&!paths.deadline;
    if(panel.root.hidden){panel.root.open=false;panel.list.replaceChildren();panel.reset();}
    return true;
   }
@@ -172,10 +214,13 @@
       if(!setupVisibility({can_view:required.length>0,complete:required.length>0&&required.every(item=>['ready','legacy'].includes(item.state)),required_count:required.length,pending_count:required.filter(item=>!['ready','legacy'].includes(item.state)).length},ticket))return;
       if(root.hidden)return;
      }
-     for(const item of data.items) {
+     const paths=section==='setup'?extras():{},extraItems=section==='setup'?await setupExtraItems(paths):[];
+     if(!isCurrent(serial)||section==='setup'&&(ticket!==lastSetupTicket||JSON.stringify(paths)!==JSON.stringify(extras())))return;
+     for(const item of [...data.items,...extraItems]) {
       const entry=links[item.key];if(!entry)throw new Error('UNKNOWN_ITEM');
       const row=el('div','d-flex align-items-center justify-content-between gap-3 border rounded p-2');
       let href=entry[1];
+      if(item.key==='deposit'||item.key==='seal')href=paths.certificate+item.key;
       if(item.key==='capital'&&data.items.some(x=>x.key==='company'))href='admin_employee.html?section=settings&focus=capital';
       const choose=['receipts','material','domain'].includes(item.key)||item.key.startsWith('contract_');
       const link=el(choose?'button':'a',choose?'btn btn-link text-start p-0 text-decoration-none':'text-decoration-none',entry[0]);
@@ -199,12 +244,13 @@
       row.classList.add('flex-wrap');
       const stateLabel=['signup_purpose','signup_privacy'].includes(item.key)&&item.state==='missing'?'미적용 · 문서 확인 필요':labels[item.state];
       const right=el('span','small text-end',stateLabel);
+       if(item.key==='payment_policy'&&item.state==='ready')right.textContent=item.days===0?'기한 없음으로 설정됨':`${item.days}일로 설정됨`;
        if(item.key==='capital')right.append(el('span','d-block text-muted',`최소 ${Number(item.minimum).toLocaleString('ko-KR')}원 · 1좌 ${Number(item.unit).toLocaleString('ko-KR')}원`));
        row.append(right);
       }
       list.append(row);
      }
-     status.textContent=data.items.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';
+     status.textContent=data.items.length||extraItems.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';
      if(section==='tasks')panels.get(section).snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
     }catch(_){if(isCurrent(serial)&&attemptTicket>=(section==='tasks'?lastTaskTicket:lastSetupTicket)){
      list.replaceChildren();status.textContent='불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.';
