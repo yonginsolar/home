@@ -1,4 +1,4 @@
-/* v1.1.3 — Reconcile verified overlapping bank records; no automatic writes. */
+/* v1.1.4 — Require a known bank for cross-file overlap; no automatic writes. */
 (function(host){
  'use strict';
  const MAX_ROWS=20000, MAX_FILE=5*1024*1024, MAX_FILES=50, MAX_BYTES=20*1024*1024, MAX_EXPANDED=50*1024*1024;
@@ -34,16 +34,32 @@
   }
   return ids.size===1?[...ids][0]:'';
  }
+ const bankHeading=/^(?:은행|은행명|조회은행|금융기관|금융기관명|계좌은행)$/;
+ function bankIdentity(value){
+  const s=String(value??'').normalize('NFKC').trim().toLowerCase().replace(/\s+/g,'');
+  return s.length>=2&&s.length<=60&&/[\p{L}]/u.test(s)&&/^[\p{L}\p{N}().·&-]+$/u.test(s)?s:'';
+ }
+ function sheetBank(rows,header){
+  const banks=new Map();
+  for(const row of rows.slice(0,Math.max(0,Math.min(header,50))))for(let i=0;i<row.length-1;i++){
+   if(bankHeading.test(String(row[i]??'').replace(/\s/g,''))){
+    const key=bankIdentity(row[i+1]);if(key)banks.set(key,String(row[i+1]).trim());
+   }
+  }
+  return {name:banks.size===1?[...banks.values()][0]:'',conflict:banks.size>1};
+ }
  function endingBalance(value){
   const s=String(value??'').trim();if(!/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(s))return null;
   const n=Number(s.replaceAll(',',''));return Number.isSafeInteger(n)?n:null;
  }
- function bankRows(rows,map,header,date1904=false){
+ function bankRows(rows,map,header,date1904=false,bankOverride=''){
   if(!Array.isArray(rows)||rows.length>MAX_ROWS+51)throw new Error('2만 행 이하의 파일을 선택해 주세요.');
   if(!Number.isInteger(header)||header<0||header>=rows.length)throw new Error('제목 행을 확인해 주세요.');
   if(![map.date,map.deposit,map.withdrawal].every(n=>Number.isInteger(n)&&n>=0&&n<rows[header].length)||new Set([map.date,map.deposit,map.withdrawal]).size!==3)throw new Error('거래일·입금·출금 열을 각각 선택해 주세요.');
   const valid=[],invalid=[],account=sheetAccount(rows,header);
   const headings=rows[header].map(x=>String(x??'').replace(/\s/g,''));
+  const rowBankCol=headings.findIndex(x=>/^(?:은행명|금융기관명|계좌은행)$/.test(x));
+  const bankMeta=sheetBank(rows,header),fileBank=bankMeta.conflict?'':bankIdentity(bankMeta.name||bankOverride);
   const balanceCol=headings.findIndex(x=>/^(?:잔액|거래후잔액|거래후금액)$/.test(x));
   const accountCol=headings.findIndex(x=>/^(?:계좌번호|입출금계좌번호)$/.test(x));
   const referenceCol=headings.findIndex(x=>/^(?:거래고유번호|거래번호|거래참조번호)$/.test(x));
@@ -57,11 +73,13 @@
     // Date/amount alone are not identifiers. A masked account, an incomplete
     // timestamp or a missing balance leaves the original row independent.
     const reference=referenceCol>=0?String(row[referenceCol]??'').trim():'';
-    const overlapKey=rowAccount&&time&&balance!==null?JSON.stringify([rowAccount,time,deposit,withdrawal,balance,description.trim(),reference]):'';
+    const bank=rowBankCol>=0?bankIdentity(row[rowBankCol]):fileBank;
+    const overlapKey=bank&&rowAccount&&time&&balance!==null?JSON.stringify([bank,rowAccount,time,deposit,withdrawal,balance,description.trim(),reference]):'';
     valid.push({line:i+1,date:d,deposit,withdrawal,description,overlapKey});
    }catch(_){invalid.push(i+1);}
   }
-  if(!valid.length)throw new Error('비교할 거래가 없습니다. 제목 행과 열 선택을 확인해 주세요.');return {valid,invalid};
+  if(!valid.length)throw new Error('비교할 거래가 없습니다. 제목 행과 열 선택을 확인해 주세요.');
+  return {valid,invalid,bankMeta,rowBankCol,bankKnown:!!fileBank};
  }
  function compare(bank,ledger,days){
   if(!Number.isInteger(days)||days<0||days>30)throw new Error('날짜 차이는 0~30일로 입력해 주세요.');
@@ -121,7 +139,7 @@
  function collectFiles(files){
   if(!files.length)throw new Error('통장 거래 파일을 선택해 주세요.');
   const banks=[],invalid=[],observed=new Map();let overlaps=0,inputCount=0;
-  for(const f of files){let parsed;try{parsed=bankRows(f.rows,f.map,f.header,f.workbook?.Workbook?.WBProps?.date1904===true);}catch(e){throw new Error(`${f.name}: ${e.message}`);}
+  for(const f of files){let parsed;try{parsed=bankRows(f.rows,f.map,f.header,f.workbook?.Workbook?.WBProps?.date1904===true,f.bankOverride);}catch(e){throw new Error(`${f.name}: ${e.message}`);}
    inputCount+=parsed.valid.length;if(inputCount>MAX_ROWS)throw new Error('전체 통장 거래는 2만 건 이하로 나누어 대조해 주세요.');
    const occurrences=new Map();
    for(const {overlapKey,...row} of parsed.valid){
@@ -180,7 +198,7 @@
   head.append(title,close);const body=el('div','modal-body');body.append(el('p','text-muted','XLSX·CSV 파일을 읽어 장부의 확인 후보를 보여줍니다. 파일은 서버로 전송하지 않으며, 날짜나 금액은 자동으로 수정하지 않습니다.'));
   function field(parent,key,label,type,value){const col=el('div','col-md-4'),l=el('label','form-label',label),input=el(type==='select'?'select':'input','form-control');input.id='bankCompare'+key;l.htmlFor=input.id;if(type!=='select')input.type=type;if(value!==undefined)input.value=value;input.dataset.erpQueryControl='true';col.append(l,input);parent.append(col);return input;}
   const grid=el('div','row g-3'),file=field(grid,'file','통장 파일 추가 (여러 개 선택)','file');file.accept='.xlsx,.csv';file.multiple=true;file.parentElement.className='col-12';
-  grid.append(el('div','small text-muted','파일당 5MB · 최대 50개, 전체 20MB · 여러 번 추가해도 함께 대조합니다.'));
+  grid.append(el('div','small text-muted','파일당 5MB · 최대 50개, 전체 20MB · 은행명이 없는 파일은 ‘파일 읽기 설정’에서 입력하면 중복을 확인할 수 있어요.'));
   const fileList=el('div','mt-3'),advanced=el('details','mt-3'),advancedGrid=el('div','row g-3 mt-1');advanced.append(el('summary','fw-semibold','상세 설정'));
   const days=field(advancedGrid,'days','날짜가 다른 장부 후보도 찾기 (±일)','number','7');days.min='0';days.max='30';advanced.append(advancedGrid,el('p','small text-muted mt-2','통장 날짜와 장부 기록일이 다른 거래도 찾습니다. 0이면 같은 날짜만 비교하며, 날짜는 자동으로 바뀌지 않습니다.'));
   body.append(grid,fileList,advanced);const preview=el('div','small text-muted mt-3'),status=el('p','mt-3');status.setAttribute('role','status');const result=el('div','table-responsive');
@@ -193,24 +211,41 @@
    const card=el('div','border rounded p-3 mb-2'),bar=el('div','d-flex align-items-start justify-content-between gap-2'),label=el('strong','text-break',f.name),remove=el('button','btn btn-sm btn-outline-secondary flex-shrink-0','제외');remove.type='button';label.style.minWidth='0';bar.append(label,remove);card.append(bar);
    const summary=el('div','small text-muted mt-1'),details=el('details','mt-2'),inputs=el('div','row g-3 mt-1');details.append(el('summary','','파일 읽기 설정'));details.append(inputs);card.append(summary,details);
    const sheet=field(inputs,'sheet'+f.id,'시트','select'),header=field(inputs,'header'+f.id,'제목 행 번호','number',f.header+1);header.min='1';header.max=String(MAX_ROWS);const cols={};
+   const bank=field(inputs,'bank'+f.id,'은행명 (중복 비교용)','text',f.bankOverride||'');
+   bank.maxLength=60;bank.autocomplete='off';bank.placeholder='파일에 은행명이 없으면 입력';
+   const bankHelp=el('div','form-text');bankHelp.id='bankCompareBankHelp'+f.id;bank.setAttribute('aria-describedby',bankHelp.id);bank.parentElement.append(bankHelp);
    for(const name of f.workbook.SheetNames){const op=el('option','',name);op.value=name;sheet.append(op);}sheet.value=f.sheet;
    for(const [key,text] of Object.entries({date:'거래일 열',deposit:'입금액 열',withdrawal:'출금액 열',description:'적요·입금자 열 (선택)'}))cols[key]=field(inputs,key+f.id,text,'select');
-   function rowSummary(){try{const p=bankRows(f.rows,f.map,f.header,f.workbook?.Workbook?.WBProps?.date1904===true);summary.textContent=`${f.sheet} · 제목 ${f.header+1}행 · 거래 ${p.valid.length.toLocaleString('ko-KR')}건${p.invalid.length?' · 제외된 행 '+p.invalid.length+'개':''}`;}catch(e){summary.textContent=e.message;details.open=true;}refreshPreview();}
+   function rowSummary(){try{
+    const p=bankRows(f.rows,f.map,f.header,f.workbook?.Workbook?.WBProps?.date1904===true,f.bankOverride);
+    bank.readOnly=p.rowBankCol>=0||!!p.bankMeta.name||p.bankMeta.conflict;
+    if(bank.readOnly)bank.value=p.bankMeta.name||'';
+    else if(bank!==document.activeElement)bank.value=f.bankOverride||'';
+    bankHelp.textContent=p.rowBankCol>=0?'각 거래 행의 은행명을 사용해요.':p.bankMeta.conflict?'은행명이 서로 달라 겹친 거래를 자동 제외하지 않아요.':p.bankMeta.name?'파일에 적힌 은행명을 사용해요.':'같은 은행의 파일에는 같은 이름을 입력해 주세요. 비워 두면 파일 간 중복을 자동 제외하지 않아요.';
+    summary.textContent=`${f.sheet} · 제목 ${f.header+1}행 · 거래 ${p.valid.length.toLocaleString('ko-KR')}건${p.invalid.length?' · 제외된 행 '+p.invalid.length+'개':''}${p.rowBankCol<0&&!p.bankKnown?' · 은행 미확인':''}`;
+   }catch(e){summary.textContent=e.message;details.open=true;}refreshPreview();}
    function mapping(){const row=f.rows[f.header]||[];for(const [key,select] of Object.entries(cols)){select.replaceChildren();const none=el('option','',key==='description'?'선택 안 함':'열 선택');none.value='-1';select.append(none);row.forEach((v,i)=>{const op=el('option','',`${i+1}열 · ${String(v??'').slice(0,80)}`);op.value=String(i);select.append(op);});select.value=String(f.map[key]);}rowSummary();}
-   sheet.onchange=()=>{invalidate();f.sheet=sheet.value;readSheet(f);header.value=f.header+1;mapping();};
+   sheet.onchange=()=>{invalidate();f.sheet=sheet.value;f.bankOverride='';readSheet(f);header.value=f.header+1;mapping();};
    header.oninput=()=>{invalidate();f.header=Number(header.value)-1;f.map=columns(f.rows[f.header]||[]);mapping();};
    for(const [key,input] of Object.entries(cols))input.onchange=()=>{invalidate();f.map[key]=Number(input.value);rowSummary();};
+   bank.addEventListener('input',()=>{if(!bank.readOnly){invalidate();f.bankOverride=bank.value;rowSummary();}});
    remove.onclick=()=>{invalidate();s.files=s.files.filter(x=>x!==f);card.remove();refreshPreview();};mapping();fileList.append(card);
   }
   file.onchange=async()=>{if(s.loading)return;const selected=[...file.files];file.value='';if(!selected.length)return;invalidate();const serial=s.seq;s.loading=true;file.disabled=run.disabled=true;status.textContent='통장 파일을 읽는 중…';
    const heldControls=[days,...fileList.querySelectorAll('input,select,button')].map(node=>({node,disabled:node.disabled}));heldControls.forEach(({node})=>{node.disabled=true;});
    try{if(selected.length+s.files.length>MAX_FILES||selected.reduce((n,f)=>n+f.size,0)+s.files.reduce((n,f)=>n+f.size,0)>MAX_BYTES)throw new Error('파일은 최대 50개, 전체 20MB까지 선택할 수 있습니다.');
     if(selected.some(f=>f.size>MAX_FILE||!/^.+\.(xlsx|csv)$/i.test(f.name)))throw new Error('파일당 5MB 이하의 XLSX·CSV를 선택해 주세요.');
-    await host.ErpWorkflowAssets.load('spreadsheet');const added=[],hashes=new Set(s.files.map(f=>f.hash));let duplicate=0,expandedTotal=s.files.reduce((n,f)=>n+f.expandedBytes,0);
+    await host.ErpWorkflowAssets.load('spreadsheet');const added=[],hashes=new Set(s.files.map(f=>f.bankFileKey).filter(Boolean));let duplicate=0,expandedTotal=s.files.reduce((n,f)=>n+f.expandedBytes,0);
     for(const f of selected){const bytes=await f.arrayBuffer();if(!current(serial))return;const hash=Array.from(new Uint8Array(await host.crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');if(!current(serial))return;
-     if(hashes.has(hash)){duplicate++;continue;}const expandedBytes=/\.xlsx$/i.test(f.name)?checkZip(bytes):bytes.byteLength;expandedTotal+=expandedBytes;
-     if(expandedTotal>MAX_EXPANDED)throw new Error('엑셀 압축을 푼 전체 데이터가 너무 큽니다. 파일을 나누어 대조해 주세요.');
-     const workbook=workbookFile(bytes,f.name);const item={id:s.nextId++,name:f.name,size:f.size,expandedBytes,hash,workbook,sheet:workbook.SheetNames[0]};readSheet(item);added.push(item);hashes.add(hash);}
+     const expandedBytes=/\.xlsx$/i.test(f.name)?checkZip(bytes):bytes.byteLength;
+     if(expandedTotal+expandedBytes>MAX_EXPANDED)throw new Error('엑셀 압축을 푼 전체 데이터가 너무 큽니다. 파일을 나누어 대조해 주세요.');
+     const workbook=workbookFile(bytes,f.name);const item={id:s.nextId++,name:f.name,size:f.size,expandedBytes,workbook,sheet:workbook.SheetNames[0]};readSheet(item);
+     // Identical bytes without a bank can still be independently exported
+     // by different banks. Keep both files available for bank selection.
+     const namedBank=workbook.SheetNames.length===1?bankIdentity(sheetBank(item.rows,item.header).name):'';
+     item.bankFileKey=namedBank?JSON.stringify([namedBank,hash]):'';
+     if(item.bankFileKey&&hashes.has(item.bankFileKey)){duplicate++;continue;}
+     expandedTotal+=expandedBytes;added.push(item);if(item.bankFileKey)hashes.add(item.bankFileKey);}
     if(!current(serial))return;s.files.push(...added);added.forEach(renderFile);refreshPreview();status.textContent=duplicate?`동일한 파일 ${duplicate}개는 중복 추가하지 않았습니다.`:'';
    }catch(e){if(current(serial))status.textContent=e.message||'파일을 읽지 못했습니다.';}finally{s.loading=false;file.disabled=run.disabled=false;heldControls.forEach(({node,disabled})=>{if(node.isConnected)node.disabled=disabled;});}
   };
