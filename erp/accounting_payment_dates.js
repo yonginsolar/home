@@ -1,7 +1,7 @@
-/* v1.2.2 — defer undated payments without canceling the rest of the review. */
+/* v1.2.3 — require a separate actual-payment confirmation for payroll. */
 (function () {
     'use strict';
-    let active = null, editing = false, draftOwner = '';
+    let active = null, salaryActive = null, editing = false, draftOwner = '';
     const drafts = new Map();
     const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) &&
         !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime()) &&
@@ -33,6 +33,17 @@
         if (payment?.confirmed !== true) return '지출 확인을 선택하지 않아 이번 연동에서 제외했습니다.';
         if (!validDate(payment.date)) return '실제 지출일 또는 카드 사용일을 입력해 주세요.';
         if (!validDate(today) || payment.date > today) return '실제 지출일은 오늘 이후로 입력할 수 없습니다.';
+        return '';
+    }
+    function salarySignature(doc, { salaryMonth, scheduledDate, earliestDate }) {
+        return JSON.stringify([signature(doc), salaryMonth, scheduledDate, earliestDate, doc.salary_ledger_snapshot]);
+    }
+    function validateSalaryPayment(doc, payment, today, schedule) {
+        if (payment?.confirmed !== true) return '실제 급여 지급을 확인하지 않아 지급전표는 이번 연동에서 제외했습니다.';
+        if (!validDate(payment.date)) return '실제 급여 지급일을 입력해 주세요.';
+        if (!validDate(today) || payment.date > today) return '실제 급여 지급일은 오늘 이후로 입력할 수 없습니다.';
+        if (!validDate(schedule.earliestDate) || payment.date < schedule.earliestDate) return '급여 지급전표를 반영할 수 있는 날짜 이후의 실제 지급일을 확인해 주세요.';
+        if (payment.signature !== salarySignature(doc, schedule)) return '급여 결재 내용이 달라졌습니다. 실제 지급 여부를 다시 확인해 주세요.';
         return '';
     }
     const el = (tag, cls, text) => {
@@ -152,6 +163,73 @@
         });
         return active;
     }
+    function collectSalary(candidates, today) {
+        if (!candidates.length) return Promise.resolve(new Map());
+        if (salaryActive) return salaryActive;
+        salaryActive = new Promise(resolve => {
+            const ui = dialog('급여 실제 지급 확인', 'salaryPaymentDateModal');
+            ui.cancel.textContent = '전체 취소';
+            ui.body.append(el('p', 'text-muted', '실제로 지급한 급여만 선택해 주세요. 아직 지급하지 않은 건은 지급전표만 다음에 연동할 수 있습니다.'));
+            const controls = candidates.map(({ doc, ...schedule }, index) => {
+                const section = el('section', 'border rounded p-3 mb-3');
+                section.append(el('h6', 'fw-bold', doc.title || `${schedule.salaryMonth} 급여`),
+                    el('p', 'small text-muted mb-2', `지급 예정일: ${schedule.scheduledDate}`));
+                const row = el('div', 'form-check mb-2'), check = el('input', 'form-check-input');
+                check.type = 'checkbox'; check.id = `salaryPaidCheck${index}`;
+                const paidLabel = el('label', 'form-check-label', '급여를 실제로 지급했습니다.');
+                paidLabel.htmlFor = check.id;
+                row.append(check, paidLabel);
+                const date = el('input', 'form-control'); date.type = 'date'; date.id = `salaryPaidDate${index}`;
+                date.min = schedule.earliestDate; date.max = today; date.disabled = true;
+                const dateLabel = el('label', 'form-label', '실제 지급일'); dateLabel.htmlFor = date.id;
+                check.addEventListener('change', () => {
+                    date.disabled = !check.checked;
+                    if (check.checked && !date.value) date.value = schedule.earliestDate;
+                });
+                section.append(row, dateLabel, date);
+                ui.body.append(section);
+                const boundSignature = salarySignature(doc, schedule);
+                return { doc, schedule, check, date, payment: () => ({
+                    confirmed: check.checked && Boolean(date.value), date: date.value, signature: boundSignature
+                }) };
+            });
+            let result = null, submitted = false, shown = false;
+            ui.cancel.disabled = ui.submit.disabled = true;
+            ui.root.addEventListener('shown.bs.modal', () => {
+                shown = true;
+                ui.cancel.disabled = ui.submit.disabled = false;
+            }, { once: true });
+            const updateAction = () => {
+                ui.submit.textContent = controls.some(control => {
+                    const payment = control.payment();
+                    return payment.confirmed && validDate(payment.date)
+                        && payment.date >= control.schedule.earliestDate && payment.date <= today;
+                })
+                    ? '연동 내용 확인' : '다음에 연동';
+            };
+            for (const { check, date } of controls) {
+                check.addEventListener('change', updateAction);
+                date.addEventListener('input', updateAction);
+                date.addEventListener('change', updateAction);
+            }
+            updateAction();
+            ui.root.addEventListener('hidden.bs.modal', () => { ui.modal.dispose(); ui.root.remove(); salaryActive = null; resolve(result); }, { once: true });
+            ui.form.addEventListener('submit', event => {
+                event.preventDefault(); if (!shown || submitted) return;
+                const values = new Map();
+                for (const control of controls) {
+                    const payment = control.payment();
+                    if (!payment.confirmed) continue;
+                    const message = validateSalaryPayment(control.doc, payment, today, control.schedule);
+                    if (message) { ui.error.textContent = message; control.date.focus(); return; }
+                    values.set(String(control.doc.id), payment);
+                }
+                submitted = true; result = values; ui.modal.hide();
+            });
+            ui.modal.show();
+        });
+        return salaryActive;
+    }
     async function edit(client, transIds, onSaved) {
         if (editing) return;
         editing = true;
@@ -214,5 +292,5 @@
             ui.modal.show();
         } catch (error) { editing = false; if (ui) ui.root.remove(); window.showAlert('날짜 수정 확인', error.message); }
     }
-    window.CoopPaymentDates = { version: '1.2.2', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, edit };
+    window.CoopPaymentDates = { version: '1.2.3', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, collectSalary, validateSalaryPayment, edit };
 })();

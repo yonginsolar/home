@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.199 | Change: 2026-11-10 - Show withholding submission dates and defer unconfirmed debits. -->
+<!-- Version: v1.0.200 | Change: 2026-11-10 - Confirm actual salary payment before posting its payment journal. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.199 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.200 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.0"></script>
@@ -50,7 +50,7 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="accounting_withholding_payment.js?v=1.0.2"></script>
   <script src="insurance_payment.js?v=1.0.1"></script>
-  <script src="accounting_payment_dates.js?v=1.2.2"></script>
+  <script src="accounting_payment_dates.js?v=1.2.3"></script>
 
   <style>
     .accounting-typo-dialog { box-sizing:border-box; width:min(36rem, calc(100vw - 1rem)); max-width:calc(100vw - 1rem); height:min(37rem, calc(100dvh - 1rem)); max-height:calc(100dvh - 1rem); overflow:auto; overflow-wrap:anywhere; }
@@ -4470,6 +4470,20 @@ function getSalaryScheduledPaymentDate(ym) {
     return buildAccountingDateFromYmDay(nextYm, 10, '');
 } // End of getSalaryScheduledPaymentDate
 
+function getApprovalSalaryPaymentSchedule(doc, salaryMonth, today) {
+    const scheduledDate = getSalaryScheduledPaymentDate(salaryMonth);
+    const earliestDate = [getApprovalJournalDate(doc, today), scheduledDate].filter(Boolean).sort().pop() || '';
+    return { salaryMonth, scheduledDate, earliestDate };
+}
+
+function getApprovalSalaryPaymentCandidates(targetState, today) {
+    return targetState.targetDocs.filter(doc => isSalaryExpenseApproval(doc) && isSalaryLikeApproval(doc) && Number(doc.amount) > 0)
+        .map(doc => ({ doc, ...getApprovalSalaryPaymentSchedule(doc, getApprovalSalaryMonth(doc), today) }))
+        .filter(target => target.salaryMonth && window.CoopPaymentDates.validDate(target.scheduledDate)
+            && window.CoopPaymentDates.validDate(target.earliestDate) && target.earliestDate <= today
+            && !targetState.existingSalaryPaymentMonths.has(target.salaryMonth));
+}
+
 function summarizeSalaryRowsForApproval(rows) {
     return (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
         acc.empCount += 1;
@@ -5218,8 +5232,8 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
                     salaryAccrualCount += 1;
                 }
 
-                const scheduledPaymentDate = getSalaryScheduledPaymentDate(salaryMonth);
-                paymentDate = [journalDate, scheduledPaymentDate].filter(Boolean).sort().pop() || journalDate;
+                const schedule = getApprovalSalaryPaymentSchedule(doc, salaryMonth, fallbackDate);
+                paymentDate = schedule.earliestDate;
                 if (paymentDate && fallbackDate < paymentDate) {
                     blockedDocs.push({
                         id: doc?.id,
@@ -5237,6 +5251,16 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
                     });
                     totalAmount += amount;
                     continue;
+                }
+                if (!existingTransIds.has(transId)) {
+                    const payment = options.salaryPayments?.get(String(doc.id));
+                    const reason = window.CoopPaymentDates.validateSalaryPayment(doc, payment, fallbackDate, schedule);
+                    if (reason) {
+                        blockedDocs.push({ id: doc.id, label, reason });
+                        if (salaryAccrualPlan) totalAmount += amount;
+                        continue;
+                    }
+                    paymentDate = payment.date;
                 }
             }
             if (!existingTransIds.has(transId)) {
@@ -9000,10 +9024,13 @@ function confirmSync(type) {
             await loadCards();
             const expensePayments = await window.CoopPaymentDates.collect(expenseCandidates, today, {cards:cardData,owner:myInfo.coop_id+':'+myInfo.emp_id});
             if (expensePayments === null) return;
+            const salaryPayments = await window.CoopPaymentDates.collectSalary(getApprovalSalaryPaymentCandidates(previewTargetState, today), today);
+            if (salaryPayments === null) return;
 
             const previewPlanResult = await buildApprovalSyncPlans(targetDocs, today, writer, {
                 withholdingPayments,
                 expensePayments,
+                salaryPayments,
                 existingTransIds: existingSet,
                 existingSalaryPaymentMonths: previewTargetState.existingSalaryPaymentMonths
             });
@@ -9028,6 +9055,8 @@ function confirmSync(type) {
                 `- 급여 원천세 납부전표: ${previewPlanResult.withholdingTaxCount || 0}건 (차)예수금 / (대)보통예금, 국세·지방세 별도 표시`,
                 ...previewPlanResult.plans.filter(plan => plan.kind === 'withholding_tax').map(plan => `  · ${plan.description}: 실제 납부일 ${plan.date}`),
                 `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
+                ...previewPlanResult.plans.filter(plan => plan.kind === 'payment' && plan.salaryMonth)
+                    .map(plan => `  · ${plan.salaryMonth} 급여: 확인한 실제 지급일 ${plan.date}`),
                 ...previewPlanResult.plans.filter(plan => expensePayments.has(String(parseApprovalDocIdFromTransId(plan.transId))))
                     .map(plan => `  · ${plan.description}: 실제 지출일 ${plan.date}`),
                 `- 재고 입고 매입전표: ${previewPlanResult.inventoryPurchaseCount || 0}건 · 취득원가 ${(previewPlanResult.inventoryPurchaseCostTotal || 0).toLocaleString()}원 · 공제 매입세액 ${(previewPlanResult.inventoryInputVatTotal || 0).toLocaleString()}원`,
@@ -9061,6 +9090,15 @@ function confirmSync(type) {
                 const runTargetState = getApprovalSyncTargetState(runApprovals, runExistingSet);
                 const runTargetDocs = runTargetState.targetDocs;
                 if (runTargetDocs.length === 0) return showAlert("알림", "이미 모두 연동되었습니다.");
+                const currentSalaryTargets = new Map(getApprovalSalaryPaymentCandidates(runTargetState, today)
+                    .map(target => [`APR-${target.doc.id}`, target]));
+                const confirmedSalaryPlans = previewPlanResult.plans.filter(plan => plan.kind === 'payment' && plan.salaryMonth);
+                if (confirmedSalaryPlans.some(plan => {
+                    const target = currentSalaryTargets.get(plan.transId);
+                    return !target || window.CoopPaymentDates.validateSalaryPayment(target.doc, salaryPayments.get(String(target.doc.id)), today, target);
+                })) {
+                    return showAlert('급여 지급 확인값 변경', '미리보기 후 급여 결재 또는 지급전표가 바뀌었습니다. 전자결재 연동을 다시 열어 확인해 주세요.');
+                }
 
                 let salarySupportWrite = { ids: [] };
                 try {
@@ -9077,6 +9115,7 @@ function confirmSync(type) {
                 const runPlanResult = await buildApprovalSyncPlans(runTargetDocs, today, writer, {
                     withholdingPayments,
                     expensePayments,
+                    salaryPayments,
                     existingTransIds: runExistingSet,
                     existingSalaryPaymentMonths: runTargetState.existingSalaryPaymentMonths,
                     recalculateSalaryCompanyShare: true
@@ -9084,6 +9123,13 @@ function confirmSync(type) {
                 if (runPlanResult.error) {
                     await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);
                     return showAlert("오류", "전자결재 연동 실패: " + runPlanResult.error.message);
+                }
+                const salaryPaymentPlanSignature = (plans) => JSON.stringify((plans || [])
+                    .filter(plan => plan.kind === 'payment' && plan.salaryMonth)
+                    .map(plan => [plan.transId, plan.salaryMonth, plan.date, plan.amount]).sort());
+                if (salaryPaymentPlanSignature(runPlanResult.plans) !== salaryPaymentPlanSignature(previewPlanResult.plans)) {
+                    await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);
+                    return showAlert('급여 지급 확인값 변경', '미리보기 후 급여 결재 또는 지급전표가 바뀌었습니다. 전자결재 연동을 다시 열어 확인해 주세요.');
                 }
                 const inventoryPlanSignature = (plans) => (plans || [])
                     .filter((plan) => plan.kind === 'inventory_purchase')
