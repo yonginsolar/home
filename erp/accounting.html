@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.206 | Change: 2026-11-10 - Restore the account category retry after menu navigation. -->
+<!-- Version: v1.0.207 | Change: 2026-11-10 - Prevent duplicate account creation and scope its result. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.206 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.207 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.0"></script>
@@ -1183,7 +1183,7 @@ function toggleLabor(target) {
     if (target.id === 'attrLabor88' && target.checked) document.getElementById('attrLabor33').checked = false;
 }
 </script>
-</div><div class="modal-footer"><button class="btn btn-primary w-100" id="addAccountConfirm" onclick="confAdd()">추가하기</button></div></div></div></div>
+</div><div class="modal-footer"><p id="addAccountSaveStatus" class="small mb-0 w-100" role="status" hidden></p><button type="button" class="btn btn-primary w-100" id="addAccountConfirm" aria-describedby="addAccountSaveStatus" onclick="confAdd()" disabled>추가하기</button></div></div></div></div>
 
 <div class="modal fade" id="reportModal" tabindex="-1">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -1290,6 +1290,7 @@ const accountingReviewRevisions = new Map();
 let assetReadPhase = 'idle', approvalQueuePhase = 'idle';
 let accountingMasterLoaded = false, accountingMasterPhase = 'idle', accountingMasterOwner = '';
 let accountingAddCategoryScope=null;
+let accountingAddVisit=0, accountingAddWrite=null;
 let closingPreparedScope = null, closingFormBaseline = null, closingBaselineYear = null, closingFormOwner = '';
 const closingYearDrafts = new Map();
 const closingYearManualTaxes = new Map();
@@ -1501,6 +1502,9 @@ function bindAccountingReadLifecycle() {
     });
     const cancelStale=()=>{for(const [kind,read] of accountingReadTasks)if(!read.current())cancelAccountingRead(kind);accountingReportSaveUI?.leave();capitalLinkUI?.leave();};
     const expireDiscards=()=>{invalidateAccountingDiscard('asset');invalidateAccountingDiscard('queue');};
+    const invalidateAddResult=event=>{if(!event.defaultPrevented)accountingAddVisit++;};
+    document.getElementById('addModal').addEventListener('hide.bs.modal',invalidateAddResult);
+    document.getElementById('accTab').addEventListener('hide.bs.tab',invalidateAddResult);
     for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('accTab').addEventListener(name,()=>{closingActionRevision++;if(name==='hidden.bs.tab')expireDiscards();cancelStale();});
     document.getElementById('closingModal').addEventListener('hidden.bs.modal',()=>{rememberClosingDraft();closingPreparedScope=null;cancelAccountingRead('closing');});
     document.getElementById('reportModal').addEventListener('hidden.bs.modal',()=>accountingReportSaveUI?.leave());
@@ -1511,7 +1515,7 @@ function bindAccountingReadLifecycle() {
         cancelStale();
         if(!frame.hidden)syncAccountingAddCategory();
     }).observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
-    window.addEventListener('pagehide',()=>{expireDiscards();accountingReportSaveUI?.leave();capitalLinkUI?.leave();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
+    window.addEventListener('pagehide',event=>{invalidateAddResult(event);expireDiscards();accountingReportSaveUI?.leave();capitalLinkUI?.leave();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('beforeunload',event=>{
         if(capitalLinkUI?.isBusy()||accountingReportSaveUI?.hasUnresolved()||assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
     });
@@ -10687,6 +10691,7 @@ function openAddModal() {
 function prepareAccountCategoryInput(type) {
     accountingAddCategoryScope=accountingReadScope();
     document.getElementById('addTypeSelect').value=type;
+    setAccountingAddSaveStatus('');
     syncAccountingAddCategory(true);
     if(accountingMasterPhase==='idle'&&accountingAddCategoryCurrent())void loadMasterData();
 }
@@ -10700,15 +10705,24 @@ function accountingAddCategoryReady(){
 function retryAccountingAddCategory(){
     if(accountingAddCategoryCurrent()&&['paused','error'].includes(accountingMasterPhase))void loadMasterData();
 }
+function setAccountingAddSaveStatus(text){
+    const status=document.getElementById('addAccountSaveStatus');
+    status.textContent=text;status.hidden=!text;
+}
+function syncAccountingAddSaveButton(){
+    const button=document.getElementById('addAccountConfirm');
+    button.disabled=!!accountingAddWrite||!accountingAddCategoryReady()||!canPerform('accounting.edit');
+    button.textContent=accountingAddWrite?'저장 중…':'추가하기';
+}
 function syncAccountingAddCategory(opening=false) {
     const modal=document.getElementById('addModal');
     if(!opening&&!modal?.classList.contains('show'))return;
     const status=document.getElementById('addCategoryReadStatus'),retry=document.getElementById('addCategoryReadRetry');
-    const confirm=document.getElementById('addAccountConfirm'),current=accountingAddCategoryCurrent(),ready=accountingAddCategoryReady();
+    const current=accountingAddCategoryCurrent(),ready=accountingAddCategoryReady();
     const type=document.getElementById('addTypeSelect').value;
     const catSel = document.getElementById("addCategorySelect");
     const previous=catSel.value,manual=document.getElementById('chkManualCat'),input=document.getElementById('manualCatInput');
-    confirm.disabled=!ready||!canPerform('accounting.edit');
+    syncAccountingAddSaveButton();
     const paused=accountingMasterPhase==='paused';
     const failed=current&&(paused||accountingMasterPhase==='error'),focused=document.activeElement===retry;
     retry.hidden=!failed&&!focused;
@@ -10742,59 +10756,60 @@ function toggleManualCat() {
     document.getElementById("manualCatInput").classList.toggle("hidden", !chk);
 }
 
-// [수정] 다중 속성 처리가 포함된 항목 추가 함수
+function accountingAddPayload(modal) {
+    const value=id=>document.getElementById(id).value;
+    const manual=document.getElementById('chkManualCat').checked;
+    const attributes=[...modal.querySelectorAll('.check-attr:checked')].map(e=>e.value);
+    return {Type:value('addTypeSelect'),Standard:value(manual?'manualCatInput':'addCategorySelect'),
+        Item:value('addNewItemName'),Usage:value('addUsageSelect'),tax_free:attributes.includes('tax_free')?'TRUE':'FALSE',
+        special_code:attributes.join(',')};
+}
 async function confAdd() {
-    if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
-    if (!accountingAddCategoryReady()) return;
-    const type = document.getElementById("addTypeSelect").value;
-    const name = document.getElementById("addNewItemName").value;
-
-    // 중분류 처리 (기존 로직 유지)
-    let cat = document.getElementById("addCategorySelect").value;
-    if(document.getElementById("chkManualCat").checked) cat = document.getElementById("manualCatInput").value;
-
-    const usage = document.getElementById("addUsageSelect").value;
-
-    if(!name || !cat) return showAlert("알림", "내용을 입력하세요");
-
-    // [변경 핵심] 다중 속성 값 수집
-    // 1. 체크된 모든 항목의 value를 배열로 가져옴
-    const checkedEls = document.querySelectorAll('.check-attr:checked');
-    const attrValues = Array.from(checkedEls).map(el => el.value);
-
-    // 2. DB 저장 데이터 매핑
-    // (1) SpecialType: 선택된 값들을 쉼표(,)로 연결 (예: "tax_free,labor_3.3")
-    const specialTypeVal = attrValues.join(',');
-
-    // (2) Tax_Free: 'tax_free' 값이 포함되어 있으면 TRUE, 아니면 FALSE
-    const isTaxFree = attrValues.includes('tax_free') ? "TRUE" : "FALSE";
-
-    // DB Insert
-    // SpecialType 칼럼 추가됨
-    const { error } = await _supabase.from('ac_master').insert({
-        Type: type,
-        Standard: cat,
-        Item: name,
-        Usage: usage,
-        tax_free: isTaxFree,
-        special_code: specialTypeVal
-    });
-
-    if (error) {
-        showAlert("오류", "저장 실패: " + error.message);
-    } else {
-        showAlert("성공", "추가되었습니다.");
+    if(accountingAddWrite)return;
+    if(!canPerform('accounting.edit'))return showAlert('수정 권한이 없습니다.');
+    const modal=document.getElementById('addModal');
+    if(!accountingAddCategoryReady()||!modal.classList.contains('show'))return;
+    const payload=accountingAddPayload(modal);
+    if(!payload.Item||!payload.Standard)return showAlert('알림','내용을 입력하세요');
+    const scope=accountingAddCategoryScope,visit=accountingAddVisit,purpose=addContext;
+    const frame=window.frameElement;let left=false;
+    const sawLeave=records=>records.some(record=>record.oldValue===null);
+    const observer=frame?new MutationObserver(records=>{left ||= sawLeave(records);}):null;
+    observer?.observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+    const current=()=>!left&&!(observer&&sawLeave(observer.takeRecords()))&&accountingAddVisit===visit
+        &&accountingAddCategoryScope===scope&&accountingReadScopeCurrent(scope)&&canPerform('accounting.edit')
+        &&modal.isConnected&&modal.classList.contains('show');
+    const sameInput=()=>JSON.stringify(accountingAddPayload(modal))===JSON.stringify(payload);
+    accountingAddWrite={scope};
+    setAccountingAddSaveStatus('');
+    syncAccountingAddSaveButton();
+    try {
+        const request=_supabase.from('ac_master').insert(payload);
+        const {error}=await (typeof request.retry==='function'?request.retry(false):request);
+        if(error)throw error;
+        if(!current())return;
+        if(!sameInput()){
+            setAccountingAddSaveStatus('이전 입력을 저장했습니다. 그 뒤에 수정한 내용은 아직 저장하지 않았습니다.');
+            return;
+        }
+        addContext=null;
         addModal.hide();
-        loadMasterData();
+        showAlert('성공','추가되었습니다.');
+        void loadMasterData({refresh:true});
         loadPrepayExpenseAccounts();
         loadReceivableIncomeAccounts();
-        if (addContext === 'prepayExpense') {
-            setPrepayExpenseAccount(name);
-            addContext = null;
-        } else if (addContext === 'receivableIncome') {
-            setReceivableIncomeAccount(name);
-            addContext = null;
+        if(purpose==='prepayExpense')setPrepayExpenseAccount(payload.Item);
+        else if(purpose==='receivableIncome')setReceivableIncomeAccount(payload.Item);
+    }catch(error){
+        if(current()){
+            const message=error?.message?'저장 실패: '+error.message:'저장 결과를 확인하지 못했습니다.';
+            if(sameInput())showAlert('오류',message);
+            else setAccountingAddSaveStatus(message+' 작성 중인 입력은 유지됩니다.');
         }
+    }finally{
+        observer?.disconnect();
+        accountingAddWrite=null;
+        if(modal.isConnected&&modal.classList.contains('show')&&!frame?.hidden)syncAccountingAddSaveButton();
     }
 }
 

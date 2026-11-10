@@ -1,8 +1,8 @@
-/* v1.1.1 — Resume interrupted policy reads without replaying writes. */
+/* v1.1.2 — Show a retry when a policy read was interrupted by closing its dialog. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,fields=null,baseline=null,revision=null,loaded=false,busy=false,pending=null,serial=0,opener=null,noticeTarget=null;
- let getRead=null;
+ let getRead=null,readPausedByClose=false;
  const node=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
  const identity=o=>{const c=o?.context();return c?.actor&&c?.coop_id?c.actor+'|'+c.coop_id:'';};
  const valid=b=>!!b&&b===binding&&b.owner===identity(b)&&!!b.owner&&b.current()&&!root.frameElement?.hidden;
@@ -20,7 +20,7 @@
   const reading=getRead;if(!reading)return false;
   getRead=null;++serial;busy=false;reading.abort();return true;
  }
- function clear(){interruptGet();++serial;dialog?.remove();binding=null;dialog=fields=baseline=revision=pending=noticeTarget=null;loaded=busy=false;launchers();}
+ function clear(){interruptGet();++serial;dialog?.remove();binding=null;dialog=fields=baseline=revision=pending=noticeTarget=null;loaded=busy=readPausedByClose=false;launchers();}
  function bind(options){const key=identity(options);if(!key)return;if(binding?.owner!==key)clear();if(binding)Object.assign(binding,options);else binding={...options,owner:key};update();launchers();}
  async function call(b,action,payload={},expected=null,id=null,controller=new AbortController()){let timer,onAbort;
   try{let q=b.client.rpc('erp_member_admission_policy',{p_action:action,p_payload:payload,p_expected_revision:expected,p_request_id:id});
@@ -40,7 +40,7 @@
  function good(data){return Number.isSafeInteger(data.revision)&&data.revision>=0&&(noticeTarget?data.member_uid===noticeTarget.id:((data.payment_days===null||Number.isInteger(data.payment_days)&&data.payment_days>=0&&data.payment_days<=365)&&['application_completed','acceptance_notified'].includes(data.basis_kind)&&typeof data.basis_reference==='string'));}
  const pausedMessage='화면을 옮겨 조회를 멈췄습니다. 다시 확인해 주세요.';
  async function read(){const b=binding;if(!valid(b)||busy||pending||noticeTarget)return;
-  const id=++serial,reading=getRead=new AbortController();busy=true;update();status('불러오는 중입니다…');
+  const id=++serial,reading=getRead=new AbortController();readPausedByClose=false;busy=true;update();status('불러오는 중입니다…');
   try{const r=await call(b,'get',{},null,null,reading);if(id!==serial||!valid(b))return;if(!good(r))throw Error('RESPONSE_INVALID');
    if(dirty()){status('현재 기준을 확인했습니다. 입력은 유지됩니다. 다른 변경이 있으면 입력 취소 후 다시 확인해 주세요.');}
    else{fill(r);status('');}
@@ -64,7 +64,10 @@
   try{const r=await call(b,'receipt',{},null,request.id);if(pending!==request)return;if(r.found)finish(r.result);else status('완료 기록이 아직 없습니다. 잠시 후 다시 결과를 확인해 주세요.');}
   catch(_){if(valid(b))status('결과를 확인하지 못했습니다. 기존 요청을 유지합니다.');}finally{if(b===binding){busy=false;update();}}
  }
- function close(){if(busy&&pending)return;interruptGet();++serial;busy=false;dialog?.close();if(opener?.isConnected)opener.focus({preventScroll:true});update();}
+ function close(){if(busy&&pending)return;
+  if(interruptGet()){readPausedByClose=true;status('창을 닫아 조회를 멈췄습니다. 다시 확인해 주세요.');}
+  ++serial;busy=false;dialog?.close();if(opener?.isConnected)opener.focus({preventScroll:true});update();
+ }
  async function help(){await root.CoopDialog.alert('정관에 따른 납입기한을 표시하고, 기한이 지난 미납 신청을 확인할 때 사용합니다.\n\n0은 기한 없음이며 미설정과 구분합니다. 변경한 기준은 이후 새 신청부터 적용되고 기존 신청의 기한은 유지됩니다.',{title:'납입기한을 설정하는 이유'});}
  function build(){const d=node('dialog','border rounded-3 p-4 bg-white text-dark');dialog=d;d.id='memberAdmissionPolicyDialog';d.style.cssText='width:min(560px,calc(100% - 32px));max-height:85vh;overflow:auto;word-break:keep-all;color-scheme:light';
   const heading=node('h2','h5',noticeTarget?'가입 승낙 통지일':'출자금 납입기한 설정');heading.id='admissionPolicyTitle';d.setAttribute('aria-labelledby',heading.id);d.append(heading);fields={};
@@ -89,13 +92,13 @@
   if([...document.querySelectorAll('.modal.show')].some(m=>!allowed||m!==parent))return root.CoopDialog.alert('열린 편집창을 먼저 닫아 주세요.');
   const mount=()=>{if(dialog&&dialog.parentElement!==(allowed?parent:document.body))(allowed?parent:document.body).append(dialog);};
   if(noticeTarget&&(dirty()||pending)){opener=document.activeElement;mount();if(!dialog.open)dialog.showModal();update();return true;}
-  if(noticeTarget){dialog?.remove();dialog=fields=baseline=null;noticeTarget=null;loaded=false;}
-  opener=document.activeElement;if(!dialog)build();mount();if(!dialog.open)dialog.showModal();if(!loaded)await read();else update();return true;
+  if(noticeTarget){dialog?.remove();dialog=fields=baseline=null;noticeTarget=null;loaded=readPausedByClose=false;}
+  opener=document.activeElement;if(!dialog)build();mount();if(!dialog.open)dialog.showModal();if(!loaded&&!readPausedByClose)await read();else update();return true;
  }
  async function openNotice(options,person,row){bind(options);if(!valid(binding)||busy||pending)return false;
   if(dialog&&(dirty()||pending)){if(!dialog.open)dialog.showModal();update();if(noticeTarget?.id===row.member_uid)return true;return root.CoopDialog.alert('작성 중인 변경을 먼저 저장하거나 입력 취소해 주세요.');}
   if(!['acceptance_notified'].includes(row.basis_kind)||!(row.payment_days>0))return false;
-  dialog?.remove();dialog=fields=baseline=null;noticeTarget={id:row.member_uid,submitted:row.submitted_on};loaded=false;opener=document.activeElement;build();
+  dialog?.remove();dialog=fields=baseline=null;noticeTarget={id:row.member_uid,submitted:row.submitted_on};loaded=readPausedByClose=false;opener=document.activeElement;build();
   fill({member_uid:row.member_uid,notified_on:row.basis_on,revision:row.revision});dialog.showModal();return true;
  }
  document.addEventListener('click',e=>{if(!e.target.closest?.('#member-admission-policy-button'))return;e.preventDefault();void open();});
