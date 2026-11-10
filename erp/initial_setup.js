@@ -1,7 +1,9 @@
-/* v1.0.10 — Open the requested account/seal settings after authorization. */
+/* v1.0.11 — Keep the requested account/seal section through access recovery. */
 (function(root){
  'use strict';const $=id=>document.getElementById(id);let client,runtime,status,busy=false,area='basic',identity='',generation=0,brandingReady=false,accessKnown=false,accessPending=null,accessIssue='',ownerLost=false;
  let brandingState='idle',brandingPending=null,brandingRetryBusy=false;
+ let requestedCertificateSection=new URLSearchParams(root.location.search).get('focus');
+ if(!['deposit','seal'].includes(requestedCertificateSection))requestedCertificateSection=null;
  let certificateSetup;const loaded=new Map(),baselines=new Map(),confirmed=new Map(),configPending=new Map(),configNotes=new Map(),configReview=new Set(),writeFlights=new Map();
  const helpers=()=>root.ERPInitialSetupAccess;
  const resultNotice='저장 결과를 아직 확인하지 못했습니다. 입력은 유지됩니다. 저장 결과만 확인해 주세요.';
@@ -126,9 +128,27 @@
   for(const node of document.querySelectorAll('[data-area]'))node.classList.toggle('active',node.dataset.area===key);
   await load(key);
  }
+ function openCertificateShortcut(followFocus=false){
+  if(!requestedCertificateSection||area!=='basic'||!authorized('basic')||root.frameElement?.hidden)return;
+  const section=$('certificateSetupContainer'),details=section.querySelector('details');
+  if(!details)return;
+  const target=details.querySelector('[data-cert="'+requestedCertificateSection+'"]')||details.querySelector('summary')||section;
+  requestedCertificateSection=null;
+  details.open=true;
+  if(followFocus){
+   if(target.tagName!=='SUMMARY')target.tabIndex=-1;
+   target.focus?.({preventScroll:true});
+   target.scrollIntoView?.({block:'start'});
+  }
+ }
  async function checkAccessAndOpen(){
+  const origin=document.activeElement;
   if(!await refreshAccess()||!status.active)return;
-  await switchArea(status.areas?.[area]?area:['basic','capital'].find(k=>status.areas?.[k])||'basic');
+  const config=switchArea(status.areas?.[area]?area:['basic','capital'].find(k=>status.areas?.[k])||'basic');
+  // Certificate settings authorize independently; a slow basic-info read must not hide them.
+  const current=document.activeElement;
+  openCertificateShortcut(current===origin||(origin===$('setupAccessRetry')&&current===document.body));
+  await config;
  }
  async function retryConfig(key){
   if(busy||configPending.has(key)||accessPending||(writeFlights.has(key)&&!writeFlights.get(key).waited))return;
@@ -171,26 +191,29 @@
    if(epoch!==generation)return;if(result){root.ErpWorkspaceResume.checkpoint($('setCompany'));await tell('로고·파비콘을 저장했습니다.');}else await tell('새 파일을 선택해 주세요.');}
   catch(e){if(epoch===generation)await tell(root.ERPInitialSetupAccess.message(e));}finally{busy=false;availability();}}
  document.addEventListener('DOMContentLoaded',async()=>{
-  console.log('[Version] v1.0.10 | initial_setup');
+  console.log('[Version] v1.0.11 | initial_setup');
   client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
   const gate=await root.ErpRuntimeGuard.requireUser(client,{alertFn:tell,redirectUrl:'index.html'});if(!gate.ok)return;identity=gate.authUser?.id||'';runtime=await root.ErpRuntimeGuard.getRuntime(client);
   client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==identity)){generation++;ownerLost=true;accessKnown=false;accessIssue='로그인 상태가 바뀌었습니다. 입력은 유지되며 저장하지 않습니다.';certificateSetup?.invalidate();availability();}});
   certificateSetup=root.CoopCertificateSetup?.mount($('certificateSetupContainer'),{client,coopId:()=>runtime.coop_id,authorize:async()=>await refreshAccess()&&status.active===true&&status.areas?.basic===true,seal:true});
   for(const formKey of Object.keys(forms))$(forms[formKey]).addEventListener('submit',event=>{event.preventDefault();void save(formKey);});
-  for(const button of document.querySelectorAll('[data-area]'))button.addEventListener('click',()=>void switchArea(button.dataset.area));
+  for(const button of document.querySelectorAll('[data-area]'))button.addEventListener('click',()=>{
+   requestedCertificateSection=null;void switchArea(button.dataset.area);
+  });
   $('setupBrandSave').addEventListener('click',()=>void brandSave());
   $('setupBrandRetry').addEventListener('click',()=>void retryBranding());
   $('setupAccessRetry').addEventListener('click',()=>void checkAccessAndOpen());
   for(const [key,prefix] of Object.entries(panels))$(prefix+'ReadRetry').addEventListener('click',()=>void retryConfig(key));
   for(const id of ['setupMinimum','setupUnit'])$(id).addEventListener('input',()=>{$(id).value=$(id).value.replace(/[^0-9]/g,'').replace(/\B(?=(\d{3})+(?!\d))/g,',');});
   root.ErpWorkspaceResume.register({authorize:async()=>{await refreshAccess();return accessKnown;},busy:()=>changed()||certificateSetup?.busy()||brandingRetryBusy||!!brandingPending,refresh:async()=>{if(!configReview.has(area))await load(area,{refresh:true});}});
+  const frame=root.frameElement;
+  if(frame){
+   const observer=new MutationObserver(()=>{if(!frame.hidden)openCertificateShortcut();});
+   const observe=()=>observer.observe(frame,{attributes:true,attributeFilter:['hidden']});
+   observe();root.addEventListener('pagehide',()=>observer.disconnect());root.addEventListener('pageshow',observe);
+  }
   setInterval(()=>{if(!document.hidden&&!busy&&accessKnown)void refreshAccess();},45000);
   await checkAccessAndOpen();
-  const focus=new URLSearchParams(location.search).get('focus');
-  if(['deposit','seal'].includes(focus)&&authorized('basic')&&area==='basic'){
-   const section=$('certificateSetupContainer'),details=section.querySelector('details');
-   if(details){details.open=true;section.scrollIntoView?.({block:'start'});details.querySelector('summary')?.focus({preventScroll:true});}
-  }
  });
  root.addEventListener('beforeunload',event=>{if(changed()){event.preventDefault();event.returnValue='';}});
 })(window);

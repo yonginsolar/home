@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.199
-Change: 2026-11-10 - Reuse the current site context for public signup readiness.
+Version: v1.0.200
+Change: 2026-11-10 - Keep the member portal available during signup and login checks.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -13,7 +13,7 @@ Change: 2026-11-10 - Reuse the current site context for public signup readiness.
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.199 | index.html');</script>
+<script>console.log('[Version] v1.0.200 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -147,10 +147,10 @@ Change: 2026-11-10 - Reuse the current site context for public signup readiness.
     }
     #header > .container { min-height:42px; }
     #home-auth-controls { display:flex; align-items:center; justify-content:flex-end; position:relative; width:200px; min-height:40px; flex-shrink:0; }
-    #homeAuthStatus { position:absolute; inset:0; margin:auto; border:0; background:transparent; color:#d3d8df; font-size:14px; width:max-content; max-width:100%; }
+    #homeAuthStatus { border:0; background:transparent; color:#d3d8df; font-size:12px; max-width:100%; padding:.25rem; overflow-wrap:anywhere; }
     #homeAuthStatus[hidden], #homeNavRetry[hidden] { display:none!important; }
-    html[data-home-auth-state="loading"] #home-auth-controls > a,
-    html[data-home-auth-state="failed"] #home-auth-controls > a { visibility:hidden; pointer-events:none; }
+    #homeAuthLink[data-portal-redundant]:not(:focus) { display:none; }
+    html:not([data-home-auth-state="ready"]) #home-auth-controls > :is(#homeSignupLink,.home-signup-closed) { display:none!important; }
     html[data-home-nav-state="loading"] #navbar ul,
     html[data-home-nav-state="failed"] #navbar ul { visibility:hidden; }
     #homeNavRetry { color:#fff; background:transparent; border:1px solid #7b8491; border-radius:6px; font-size:13px; }
@@ -1941,7 +1941,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 <div class="d-flex align-items-center">
     <div id="home-auth-controls">
         <button id="homeAuthStatus" type="button" disabled onclick="void refreshHomeAuthUi()" aria-live="polite">확인 중…</button>
-        <a id="homeAuthLink" href="javascript:void(0);" onclick="handleMainLogin(event)" class="scrollto me-3" style="color: #fff; font-size: 14px; text-decoration: none;">로그인</a>
+        <a id="homeAuthLink" href="/membermanage" aria-label="기존 조합원 로그인·계정 연결" class="me-3" style="color: #fff; font-size: 14px; text-decoration: none;">조합원 로그인</a>
         <a id="homeSignupLink" href="signup.html" class="get-started-btn scrollto">조합원 가입</a>
     </div>
 
@@ -7100,16 +7100,16 @@ function openPlantDetail(id, trigger = document.activeElement) {
         const authLink = document.getElementById('homeAuthLink');
         const signupLink = document.getElementById('homeSignupLink');
         const memberUrl = getHomeMembermanageUrl();
+        const hasProfile = isLoggedIn && ['active', 'pending', 'former'].includes(membershipState);
 
         if (authLink) {
-            authLink.style.display = isLoggedIn ? 'none' : '';
-            authLink.textContent = '로그인';
-            authLink.href = 'javascript:void(0);';
-            authLink.setAttribute('aria-label', '로그인 화면으로 이동');
+            // If the fallback has focus, let the user follow it instead of removing it.
+            authLink.toggleAttribute('data-portal-redundant',hasProfile);
+            authLink.textContent = isLoggedIn && !hasProfile ? '계정 연결' : '조합원 로그인';
+            authLink.href = memberUrl;
         }
 
         if (signupLink) {
-            const hasProfile = isLoggedIn && ['active', 'pending', 'former'].includes(membershipState);
             const label = membershipState === 'pending' ? '가입 신청 확인' : membershipState === 'former' ? '내 신청 보기' : '내 정보 보기';
             signupLink.textContent = hasProfile ? label : '조합원 가입';
             signupLink.href = hasProfile ? memberUrl : 'signup.html';
@@ -7127,6 +7127,11 @@ function openPlantDetail(id, trigger = document.activeElement) {
     let homeAuthTimer = null;
     function setHomeAuthPending(failed = false) {
         document.documentElement.dataset.homeAuthState = failed ? 'failed' : 'loading';
+        const authLink = document.getElementById('homeAuthLink');
+        if (authLink) {
+            authLink.removeAttribute('data-portal-redundant');
+            authLink.textContent = '조합원 로그인';
+        }
         const status = document.getElementById('homeAuthStatus');
         if (status) {
             status.hidden = false; status.disabled = !failed;
@@ -7201,25 +7206,6 @@ function openPlantDetail(id, trigger = document.activeElement) {
         });
     }
 
-    // [신규 기능] 메인 로그인 버튼 클릭 시 라우팅 처리
-let publicMainLoginInFlight = false;
-async function handleMainLogin(event) {
-    if (event && typeof event.preventDefault === 'function') event.preventDefault();
-    if (publicMainLoginInFlight) return;
-    publicMainLoginInFlight = true;
-    try {
-        const { data: { session } } = await _client.auth.getSession();
-        const memberUrl = getHomeMembermanageUrl();
-        if (!session) setHomeAuthUiState(false);
-
-        location.href = memberUrl;
-    } catch (error) {
-        console.warn('handleMainLogin failed:', error);
-        location.href = getHomeMembermanageUrl();
-    } finally {
-        publicMainLoginInFlight = false;
-    }
-}
    // [이스터 에그] 콘솔 환영 메시지
 function printConsoleSignature() {
     const titleStyle = "color: #2e7d32; font-size: 30px; font-weight: bold; font-family: 'GmarketSans', sans-serif; text-shadow: 2px 2px 0px #ebf5eb;";

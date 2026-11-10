@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.205 | Change: 2026-11-10 - Separate account category loading from empty results. -->
+<!-- Version: v1.0.206 | Change: 2026-11-10 - Restore the account category retry after menu navigation. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.203 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.206 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.0"></script>
@@ -1504,7 +1504,13 @@ function bindAccountingReadLifecycle() {
     for(const name of ['hidden.bs.tab','shown.bs.tab'])document.getElementById('accTab').addEventListener(name,()=>{closingActionRevision++;if(name==='hidden.bs.tab')expireDiscards();cancelStale();});
     document.getElementById('closingModal').addEventListener('hidden.bs.modal',()=>{rememberClosingDraft();closingPreparedScope=null;cancelAccountingRead('closing');});
     document.getElementById('reportModal').addEventListener('hidden.bs.modal',()=>accountingReportSaveUI?.leave());
-    if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden){closingActionRevision++;expireDiscards();}cancelStale();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+    const frame=window.frameElement;
+    if(frame)new MutationObserver(records=>{
+        if(frame.hidden){closingActionRevision++;expireDiscards();}
+        if(frame.hidden||records.some(record=>record.oldValue===null))cancelAccountingRead('master');
+        cancelStale();
+        if(!frame.hidden)syncAccountingAddCategory();
+    }).observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
     window.addEventListener('pagehide',()=>{expireDiscards();accountingReportSaveUI?.leave();capitalLinkUI?.leave();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('beforeunload',event=>{
         if(capitalLinkUI?.isBusy()||accountingReportSaveUI?.hasUnresolved()||assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
@@ -6255,13 +6261,13 @@ function saveAssetInventoryReview(approvalId,grossAmount) {
 function loadMasterData(options = {}) {
     const scope=accountingReadScope(null,options);
     const status=document.getElementById('accountMasterReadStatus'),button=document.getElementById('accountMasterRetry');
-    const render=()=>{status.textContent=accountingMasterPhase==='loading'?'계정과목을 불러오는 중입니다.':accountingMasterPhase==='error'?'계정과목을 불러오지 못했습니다. 다시 확인해 주세요.':'';button.setAttribute('aria-busy',String(accountingMasterPhase==='loading'));if(document.getElementById('selectModal').classList.contains('show'))filterAccounts();syncAccountingAddCategory();};
+    const render=()=>{status.textContent=accountingMasterPhase==='loading'?'계정과목을 불러오는 중입니다.':accountingMasterPhase==='paused'?'계정과목 조회를 멈췄습니다. 다시 확인해 주세요.':accountingMasterPhase==='error'?'계정과목을 불러오지 못했습니다. 다시 확인해 주세요.':'';button.setAttribute('aria-busy',String(accountingMasterPhase==='loading'));if(document.getElementById('selectModal').classList.contains('show'))filterAccounts();if(!window.frameElement?.hidden)syncAccountingAddCategory();};
     return runAccountingRead('master',scope.identity,scope,async read=>{
         const {data,error}=await _supabase.from('ac_master').select('*').order('Type').order('Standard').order('Item').abortSignal(read.controller.signal);
         if(error)throw error;if(!Array.isArray(data))throw Error('INVALID_MASTER_RESULT');return data;
     },data=>{mData=data;accountingMasterLoaded=true;accountingMasterPhase='loaded';render();},message=>{accountingMasterPhase='error';render();status.textContent=message;},{...options,
         start:()=>{if(accountingMasterOwner!==scope.identity){mData=[];accountingMasterLoaded=false;}accountingMasterOwner=scope.identity;accountingMasterPhase='loading';render();},
-        cancel:()=>{accountingMasterPhase='error';render();},finish:()=>button.setAttribute('aria-busy','false')
+        cancel:()=>{accountingMasterPhase='paused';render();},finish:()=>button.setAttribute('aria-busy','false')
     });
 }
 
@@ -10692,7 +10698,7 @@ function accountingAddCategoryReady(){
         &&accountingMasterOwner===accountingAddCategoryScope.identity;
 }
 function retryAccountingAddCategory(){
-    if(accountingAddCategoryCurrent()&&accountingMasterPhase==='error')void loadMasterData();
+    if(accountingAddCategoryCurrent()&&['paused','error'].includes(accountingMasterPhase))void loadMasterData();
 }
 function syncAccountingAddCategory(opening=false) {
     const modal=document.getElementById('addModal');
@@ -10703,13 +10709,14 @@ function syncAccountingAddCategory(opening=false) {
     const catSel = document.getElementById("addCategorySelect");
     const previous=catSel.value,manual=document.getElementById('chkManualCat'),input=document.getElementById('manualCatInput');
     confirm.disabled=!ready||!canPerform('accounting.edit');
-    const failed=current&&accountingMasterPhase==='error',focused=document.activeElement===retry;
+    const paused=accountingMasterPhase==='paused';
+    const failed=current&&(paused||accountingMasterPhase==='error'),focused=document.activeElement===retry;
     retry.hidden=!failed&&!focused;
     retry.disabled=!failed&&!focused;
     retry.setAttribute('aria-disabled',String(!failed));
     if(!ready){
         catSel.disabled=true;manual.disabled=true;
-        status.textContent=!current?'현재 권한으로 중분류를 확인할 수 없습니다.':failed?'중분류를 불러오지 못했습니다. 다시 확인해 주세요.':'중분류를 불러오는 중입니다.';
+        status.textContent=!current?'현재 권한으로 중분류를 확인할 수 없습니다.':paused?'화면을 옮겨 중분류 조회를 멈췄습니다. 다시 확인해 주세요.':failed?'중분류를 불러오지 못했습니다. 다시 확인해 주세요.':'중분류를 불러오는 중입니다.';
         return;
     }
     const cats = [...new Set((mData||[]).filter(m => (m.Type||m.type) === type).map(m => String(m.Standard||m.standard||'').trim()).filter(Boolean))].sort();

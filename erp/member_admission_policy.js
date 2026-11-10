@@ -1,7 +1,8 @@
-/* v1.1.0 — Capital-settings entry, with parent form and policy drafts retained. */
+/* v1.1.1 — Resume interrupted policy reads without replaying writes. */
 (function(root){
  'use strict';
  let binding=null,dialog=null,fields=null,baseline=null,revision=null,loaded=false,busy=false,pending=null,serial=0,opener=null,noticeTarget=null;
+ let getRead=null;
  const node=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
  const identity=o=>{const c=o?.context();return c?.actor&&c?.coop_id?c.actor+'|'+c.coop_id:'';};
  const valid=b=>!!b&&b===binding&&b.owner===identity(b)&&!!b.owner&&b.current()&&!root.frameElement?.hidden;
@@ -15,25 +16,39 @@
  }
  function checkpoint(){if(!dialog)return;for(const e of dialog.querySelectorAll('input,textarea'))e.defaultValue=e.value;for(const e of dialog.querySelectorAll('select option'))e.defaultSelected=e.selected;root.ErpWorkspaceResume?.checkpoint(dialog);}
  function launchers(){for(const button of document.querySelectorAll('[data-admission-policy-launcher]'))button.hidden=!valid(binding);}
- function clear(){++serial;dialog?.remove();binding=null;dialog=fields=baseline=revision=pending=noticeTarget=null;loaded=busy=false;launchers();}
+ function interruptGet(){
+  const reading=getRead;if(!reading)return false;
+  getRead=null;++serial;busy=false;reading.abort();return true;
+ }
+ function clear(){interruptGet();++serial;dialog?.remove();binding=null;dialog=fields=baseline=revision=pending=noticeTarget=null;loaded=busy=false;launchers();}
  function bind(options){const key=identity(options);if(!key)return;if(binding?.owner!==key)clear();if(binding)Object.assign(binding,options);else binding={...options,owner:key};update();launchers();}
- async function call(b,action,payload={},expected=null,id=null){let timer;const controller=new AbortController();
+ async function call(b,action,payload={},expected=null,id=null,controller=new AbortController()){let timer,onAbort;
   try{let q=b.client.rpc('erp_member_admission_policy',{p_action:action,p_payload:payload,p_expected_revision:expected,p_request_id:id});
    const reading=action==='get'||action==='receipt';if(reading&&q.abortSignal)q=q.abortSignal(controller.signal);
-   const r=reading?await Promise.race([q,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('READ_TIMEOUT'));},15000);})]):await q;
+   const r=reading?await Promise.race([q,new Promise((_,reject)=>{
+    onAbort=()=>reject(Error('READ_INTERRUPTED'));
+    if(controller.signal.aborted){onAbort();return;}
+    controller.signal.addEventListener('abort',onAbort,{once:true});
+    timer=setTimeout(()=>{reject(Error('READ_TIMEOUT'));controller.abort();},15000);
+   })]):await q;
    if(!valid(b))throw Error('CONTEXT_CHANGED');if(r.error)throw r.error;if(r.data?.coop_id!==b.context().coop_id)throw Error('CONTEXT_CHANGED');return r.data;
-  }finally{clearTimeout(timer);}
+  }finally{clearTimeout(timer);if(onAbort)controller.signal.removeEventListener('abort',onAbort);}
  }
  function fill(data){if(noticeTarget){fields.date.value=data.notified_on||'';}else{fields.mode.value=data.payment_days===null?'unset':data.payment_days===0?'none':'days';fields.days.value=data.payment_days>0?String(data.payment_days):'10';fields.basis.value=data.basis_kind;fields.reference.value=data.basis_reference;}
   revision=data.revision;baseline=values();loaded=true;checkpoint();update();
  }
  function good(data){return Number.isSafeInteger(data.revision)&&data.revision>=0&&(noticeTarget?data.member_uid===noticeTarget.id:((data.payment_days===null||Number.isInteger(data.payment_days)&&data.payment_days>=0&&data.payment_days<=365)&&['application_completed','acceptance_notified'].includes(data.basis_kind)&&typeof data.basis_reference==='string'));}
- async function read(){const b=binding;if(!valid(b)||busy||pending||noticeTarget)return;const id=++serial;busy=true;update();status('불러오는 중입니다…');
-  try{const r=await call(b,'get');if(id!==serial||!valid(b))return;if(!good(r))throw Error('RESPONSE_INVALID');
+ const pausedMessage='화면을 옮겨 조회를 멈췄습니다. 다시 확인해 주세요.';
+ async function read(){const b=binding;if(!valid(b)||busy||pending||noticeTarget)return;
+  const id=++serial,reading=getRead=new AbortController();busy=true;update();status('불러오는 중입니다…');
+  try{const r=await call(b,'get',{},null,null,reading);if(id!==serial||!valid(b))return;if(!good(r))throw Error('RESPONSE_INVALID');
    if(dirty()){status('현재 기준을 확인했습니다. 입력은 유지됩니다. 다른 변경이 있으면 입력 취소 후 다시 확인해 주세요.');}
    else{fill(r);status('');}
-  }catch(_){if(id===serial&&valid(b))status('불러오지 못했습니다. 입력을 유지했습니다. 다시 확인해 주세요.');}
-  finally{if(id===serial&&b===binding){busy=false;update();}}
+  }catch(_){if(id===serial&&b===binding){
+   if(root.frameElement?.hidden)status(pausedMessage);
+   else if(valid(b))status('불러오지 못했습니다. 입력을 유지했습니다. 다시 확인해 주세요.');
+  }}
+  finally{if(getRead===reading)getRead=null;if(id===serial&&b===binding){busy=false;update();}}
  }
  function finish(result){if(!good(result))throw Error('RESPONSE_INVALID');pending=null;fill(result);status('저장했습니다.');if(noticeTarget)binding.refresh?.();}
  async function save(){const b=binding;if(!valid(b)||busy||pending||!loaded||!dirty())return;
@@ -49,7 +64,7 @@
   try{const r=await call(b,'receipt',{},null,request.id);if(pending!==request)return;if(r.found)finish(r.result);else status('완료 기록이 아직 없습니다. 잠시 후 다시 결과를 확인해 주세요.');}
   catch(_){if(valid(b))status('결과를 확인하지 못했습니다. 기존 요청을 유지합니다.');}finally{if(b===binding){busy=false;update();}}
  }
- function close(){if(busy&&pending)return;++serial;busy=false;dialog?.close();if(opener?.isConnected)opener.focus({preventScroll:true});update();}
+ function close(){if(busy&&pending)return;interruptGet();++serial;busy=false;dialog?.close();if(opener?.isConnected)opener.focus({preventScroll:true});update();}
  async function help(){await root.CoopDialog.alert('정관에 따른 납입기한을 표시하고, 기한이 지난 미납 신청을 확인할 때 사용합니다.\n\n0은 기한 없음이며 미설정과 구분합니다. 변경한 기준은 이후 새 신청부터 적용되고 기존 신청의 기한은 유지됩니다.',{title:'납입기한을 설정하는 이유'});}
  function build(){const d=node('dialog','border rounded-3 p-4 bg-white text-dark');dialog=d;d.id='memberAdmissionPolicyDialog';d.style.cssText='width:min(560px,calc(100% - 32px));max-height:85vh;overflow:auto;word-break:keep-all;color-scheme:light';
   const heading=node('h2','h5',noticeTarget?'가입 승낙 통지일':'출자금 납입기한 설정');heading.id='admissionPolicyTitle';d.setAttribute('aria-labelledby',heading.id);d.append(heading);fields={};
@@ -85,5 +100,15 @@
  }
  document.addEventListener('click',e=>{if(!e.target.closest?.('#member-admission-policy-button'))return;e.preventDefault();void open();});
  root.addEventListener('beforeunload',e=>{if(dirty()||pending){e.preventDefault();e.returnValue='';}});
+ const frame=root.frameElement;
+ if(frame){
+  // A hide/show in a single turn still invalidates only the old settings read.
+  const observer=new MutationObserver(records=>{
+   if((frame.hidden||records.some(record=>record.oldValue===null))&&interruptGet())status(pausedMessage);
+   update();launchers();
+  });
+  const observe=()=>observer.observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+  observe();root.addEventListener('pagehide',()=>observer.disconnect());root.addEventListener('pageshow',observe);
+ }
  root.addEventListener('pagehide',clear);root.MemberAdmissionPolicy=Object.freeze({bind,open,openNotice,clear,attachLauncher,isDirty:dirty});
 })(window);
