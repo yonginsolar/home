@@ -7,7 +7,7 @@
 
   function formatDeduction(value){
     const minutes=Math.max(0,Math.round(Number(value)||0));
-    if(minutes<480)return root.CoopLeaveTime.formatMinutes(minutes);
+    if(minutes<=480)return root.CoopLeaveTime.formatMinutes(minutes);
     return `${Math.floor(minutes/480)}일 ${Math.floor(minutes%480/60)}시간${minutes%60?` ${minutes%60}분`:''}`;
   }
 
@@ -744,7 +744,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.17'};
+    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.18'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);

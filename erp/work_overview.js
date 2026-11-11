@@ -1,4 +1,4 @@
-/* v1.2.5 — Hide the setup checklist only after every permitted required check completes. */
+/* v1.2.6 — Keep the checklist recoverable until its latest status read succeeds. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -123,6 +123,7 @@
    for(const [controller,section]of controllers)if(section==='tasks')controller.abort();
    panel.badge.textContent='확인 중…';panel.badge.className='small text-muted ms-2';panel.status.textContent='대기 건수를 확인하는 중…';options.onTasks?.(null,'loading');
    const attemptTicket=readSequence+1;
+   panels.get('setup').beginSummary();
    summaryPending=(async()=>{try{
     const {data,ticket}=await read('summary');
     setupVisibility(data.setup,ticket,true);
@@ -133,7 +134,10 @@
    }catch(error){if(current()){
     failTasks(attemptTicket,'대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
     const setup=panels.get('setup');
-    if(attemptTicket>=lastSetupTicket&&readDenied(error)){setup.root.hidden=true;setup.root.open=false;setup.reset();}
+    if(attemptTicket>=lastSetupTicket){
+     if(readDenied(error)){setup.root.hidden=true;setup.root.open=false;setup.reset();}
+     else setup.failSummary();
+    }
    }}})().finally(()=>{summaryPending=null;panel.syncRetry();});
    panel.syncRetry();
    return summaryPending;
@@ -193,7 +197,7 @@
   function mountSetupPanel(root,status,list,retry){
    const names=['base','certificate','deadline'];
    const groups=new Map(names.map(name=>[name,{phase:'idle',scope:'',serial:0,rows:null,items:null}]));
-   let baseSummary=null;
+   let baseSummary=null,summaryPhase='idle';
    const timestamp=()=>new Date().toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'});
    function scopeFor(name,paths){
     if(name==='certificate')return paths.certificate;
@@ -208,6 +212,7 @@
     for(const [name,group] of groups){const next=scopeFor(name,paths);if(group.scope!==next){clearGroup(group);group.scope=next;}}
    }
    function syncVisibility(){
+    if(['loading','failed'].includes(summaryPhase)){if(baseSummary)root.hidden=false;return;}
     if(!baseSummary)return;
     const extraGroups=names.slice(1).map(name=>groups.get(name)).filter(group=>group.scope);
     const extrasComplete=extraGroups.every(group=>group.phase==='ready'&&Array.isArray(group.items)
@@ -216,7 +221,7 @@
     if(root.hidden)root.open=false;
    }
    function updateSummary(value,fromSummary){
-    baseSummary=value;syncScope();
+    baseSummary=value;summaryPhase='ready';syncScope();
     if(fromSummary&&(!value.can_view||value.complete)){
      if(groups.get('base').phase==='failed')clearGroup(groups.get('base'));
      for(const name of names.slice(1)){const group=groups.get(name);if(group.scope&&group.phase!=='loading')clearGroup(group);}
@@ -231,14 +236,15 @@
    }
    function renderStatus(){
     const available=[...groups.values()].filter(group=>group.scope), loading=available.some(group=>group.phase==='loading');
-    const failed=available.some(group=>group.phase==='failed');
-    status.textContent=loading?(list.childElementCount?'나머지 항목 확인 중…':'불러오는 중…')
+    const summaryFailed=summaryPhase==='failed',summaryLoading=summaryPhase==='loading';
+    const failed=summaryFailed||available.some(group=>group.phase==='failed');
+    status.textContent=summaryFailed?'설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.':summaryLoading?'설정 상태를 확인하는 중…':loading?(list.childElementCount?'나머지 항목 확인 중…':'불러오는 중…')
      :failed?'일부 항목을 확인하지 못했습니다.':list.childElementCount?'확인 시각 '+timestamp():'현재 권한으로 확인할 항목이 없습니다.';
     const focused=document.activeElement===retry;
     retry.hidden=!failed&&!focused;
-    retry.disabled=!failed&&!focused;
-    retry.setAttribute('aria-disabled',String(!failed));
-    retry.textContent=failed?'실패한 항목 다시 확인':loading?'확인 중…':'확인 완료';
+    retry.disabled=summaryLoading||!failed&&!focused;
+    retry.setAttribute('aria-disabled',String(summaryLoading||!failed));
+    retry.textContent=summaryLoading?'확인 중…':summaryFailed?'설정 상태 다시 확인':failed?'실패한 항목 다시 확인':loading?'확인 중…':'확인 완료';
    }
    function paint(name,items,paths){
     const group=groups.get(name),rows=el('div','d-grid gap-2');
@@ -288,15 +294,26 @@
    }
    function load(failedOnly=false){
     if(!current()||!root.open||root.hidden)return;
+    if(summaryPhase==='loading'||summaryPhase==='failed')return;
     syncScope();const paths=extras();
     for(const name of names){const group=groups.get(name);if(group.scope&&group.phase!=='loading'&&(!failedOnly||group.phase==='failed'))void loadGroup(name,paths);}
     renderStatus();
    }
-   const reset=()=>{for(const group of groups.values())clearGroup(group);retry.hidden=true;status.textContent='';};
-   panels.set('setup',{root,status,list,reset,syncScope,updateSummary});
+   const reset=()=>{baseSummary=null;summaryPhase='idle';for(const group of groups.values())clearGroup(group);retry.hidden=true;status.textContent='';};
+   const beginSummary=()=>{summaryPhase='loading';syncVisibility();renderStatus();};
+   const failSummary=()=>{summaryPhase='failed';syncVisibility();renderStatus();};
+   panels.set('setup',{root,status,list,reset,syncScope,updateSummary,beginSummary,failSummary});
    root.addEventListener('toggle',()=>{if(root.open)load();});
    retry.hidden=true;
-   retry.onclick=()=>{if(retry.getAttribute('aria-disabled')!=='true')load(true);};
+   retry.onclick=async()=>{
+    if(!current()||root.hidden||!root.open||retry.getAttribute('aria-disabled')==='true')return;
+    if(summaryPhase!=='failed'){load(true);return;}
+    await refresh();
+    if(!current()||root.hidden||!root.open||summaryPhase!=='ready')return;
+    syncScope();const paths=extras(),base=groups.get('base');
+    if(base.phase==='idle')void loadGroup('base',paths);
+    load(true);
+   };
    retry.addEventListener('blur',()=>{if(!root.hidden&&current())renderStatus();});
    sections.push(()=>{root.open=false;reset();});
   }
