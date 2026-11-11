@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.153 | Change: 2026-11-10 - Remove the print shortcut from approval history. -->
+<!-- Version: v1.2.154 | Change: 2026-11-11 - Omit the internal leave calculation basis from submitted documents. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.153 | approval.html');</script>
+  <script>console.log('[Version] v1.2.154 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -5646,20 +5646,6 @@ function formatApprovalMixedLeaveDetailText(items) {
     return normalized
         .map((item) => `- ${formatApprovalMixedLeaveItemLabel(item)}${item.slot==='hour'&&item.time_input_mode!=='hours'?` ${item.start_time}~${item.end_time}`:''}: ${CoopLeaveTime.formatDays(item.deducted_days,item.basis_day_minutes||480)}`)
         .join('\n');
-}
-
-function formatApprovalLeaveCalculationBasis(config, summary) {
-    if (!summary?.ok || !summary.items?.length || !isApprovalAnnualConfig(config)
-        || !['annual','clock'].includes(getApprovalAnnualMode())) return '';
-    const groups=getApprovalAnnualLeaveUi()?.calculationBasis?.(summary.items)||[];
-    if (!groups.length) return '';
-    const labels={contract:'확정 근로계약 기준',personal:'기존 휴가 계산용 근무시간(계약 아님)',registered:'해당 직원의 기존 등록 근무·휴게시간',default:'휴가 계산 기본값'};
-    const lines=groups.map(row=>{
-        const period=row.first===row.last?row.first:`${row.first}~${row.last} (신청 ${row.days}일)`;
-        const rest=row.breakStart?`휴게 ${row.breakStart}~${row.breakEnd}`:'휴게 없음';
-        return `- ${period} · ${labels[row.source]}: ${row.start}~${row.end} · ${rest} · 1일 환산 기준 ${CoopLeaveTime.formatMinutes(row.dayMinutes)}`;
-    });
-    return `\n\n[휴가 계산 기준]\n${lines.join('\n')}\n- 휴가 계산에 사용한 기준이며 근로계약은 변경되지 않습니다.`;
 }
 
 function formatApprovalLeaveWorkCorrection(config) {
@@ -13226,7 +13212,6 @@ function buildApprovalSubmitPreviewData() {
         const leavePeriodLabel = buildLeavePeriodLabelForDraft(lType, days);
         if (mixedSummary && mixedSummary.items.length > 0) {
             appendDesc += `\n\n[휴가 신청 내역]\n${formatApprovalMixedLeaveDetailText(mixedSummary.items)}`;
-            appendDesc += formatApprovalLeaveCalculationBasis(leaveTypeConfig, mixedSummary);
             appendDesc += formatApprovalLeaveWorkCorrection(leaveTypeConfig);
         }
         title = getApprovalResolvedTitle(mainType, leavePeriodLabel ? `${lType} 신청 (${leavePeriodLabel})` : `${lType} 신청`);
@@ -13620,7 +13605,8 @@ function captureApprovalSubmitSnapshot() {
     if(getCurrentDraftMainType()==='휴가'&&['annual','clock','legacy'].includes(draft.fields?.leave_annual_mode)&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
         const summary=getApprovalMixedLeaveSummary({requireComplete:true});
         annualCoverage=[summary.ok,summary.items.map(i=>[i.leave_date,i.slot,i.start_time,i.end_time,i.break_minutes,i.deducted_minutes]),
-            formatApprovalLeaveCalculationBasis(getApprovalCurrentLeaveTypeConfig(),summary),
+            summary.ok && ['annual','clock'].includes(getApprovalAnnualMode())
+                ? getApprovalAnnualLeaveUi()?.calculationBasis?.(summary.items) || [] : [],
             formatApprovalLeaveWorkCorrection(getApprovalCurrentLeaveTypeConfig())];
     }
     return {owner:approvalSubmitOwner(),form,revision:approvalComposerInputRevision,
@@ -14720,7 +14706,6 @@ async function handleDraftSubmit(e) {
         const leavePeriodLabel = buildLeavePeriodLabelForDraft(lType, days);
         if (mixedSummary && mixedSummary.items.length > 0) {
             appendDesc += `\n\n[휴가 신청 내역]\n${formatApprovalMixedLeaveDetailText(mixedSummary.items)}`;
-            appendDesc += formatApprovalLeaveCalculationBasis(leaveTypeConfig, mixedSummary);
             appendDesc += formatApprovalLeaveWorkCorrection(leaveTypeConfig);
         }
         title = getApprovalResolvedTitle(mainType, leavePeriodLabel ? `${lType} 신청 (${leavePeriodLabel})` : `${lType} 신청`);
