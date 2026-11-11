@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.156 | Change: 2026-11-11 - Show the selected half-day label in approval documents. -->
+<!-- Version: v1.2.157 | Change: 2026-11-11 - Improve leave dates and show a read-only request calendar. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.156 | approval.html');</script>
+  <script>console.log('[Version] v1.2.157 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -46,6 +46,7 @@
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script id="approvalLeaveTimeScript" src="leave_time.js?v=20261106-4"></script>
   <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=20261111-halfday-2"></script>
+  <script src="approval_leave_document.js?v=1.0.0"></script>
   <script src="leave_ledger.js?v=20261106-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
@@ -97,6 +98,17 @@
     #approvalAnnualClock .leave-clock-picker{min-width:0}
     #approvalAnnualClock .leave-half-shortcuts button{min-height:44px;min-width:0;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;flex:1 1 8rem}
     #approvalAnnualClock .leave-half-shortcuts p{overflow-wrap:anywhere}
+    .approval-leave-document{min-width:0;overflow-wrap:anywhere}
+    .approval-leave-calendar{display:flex;flex-wrap:wrap;gap:1rem;margin-top:1rem;white-space:normal;min-width:0;max-width:100%;overflow-x:auto;font-size:.875rem}
+    .approval-leave-month{flex:0 0 18rem;table-layout:fixed;width:18rem;min-width:14rem;max-width:100%;border-collapse:separate;border-spacing:2px;text-align:center;background:var(--bs-body-bg,#fff);border:1px solid var(--bs-border-color,#dee2e6);border-radius:.75rem;padding:.5rem;color:var(--bs-body-color,#212529)}
+    .approval-leave-month caption{caption-side:top;text-align:start;padding:.25rem .5rem .5rem;font-weight:700;color:inherit}
+    .approval-leave-month th{font-weight:500;padding:.2rem 0;font-size:.85em}
+    .approval-leave-month td{height:2.2rem;vertical-align:middle;padding:0}
+    .approval-leave-month .leave-sunday{color:#b42318}.approval-leave-month .leave-saturday{color:#175cd3}
+    .approval-leave-date{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:2rem;line-height:1.25;border-radius:.4rem;white-space:nowrap}
+    .leave-selected .approval-leave-date{background:var(--erp-primary,#176a46);color:#fff;font-weight:700;outline:1px solid currentColor;outline-offset:-2px}
+    .approval-leave-date small{font-size:.7em;font-weight:500}
+    @media(max-width:420px){.approval-leave-month{width:100%;padding:.25rem;border-spacing:1px}}
     #approvalAnnualClock .leave-clock-trigger{display:flex;align-items:center;gap:.55rem;width:100%;min-height:44px;text-align:start;white-space:normal;color:var(--bs-body-color,#212529)}
     #approvalAnnualClock .leave-clock-trigger:not(:disabled):is(:hover,[aria-expanded=true]){background:var(--bs-tertiary-bg,#f8f9fa);border-color:var(--bs-primary,#0d6efd);color:var(--bs-body-color,#212529)}
     #approvalAnnualClock .leave-clock-trigger:disabled{opacity:.65}
@@ -5639,12 +5651,14 @@ function formatApprovalMixedLeaveItemsLabel(items, totalDays = null) {
         : Number(totalDays || 0);
     const firstLabel = formatApprovalMixedLeaveItemLabel(normalized[0]);
     if (normalized.length === 1) return firstLabel;
-    return `${firstLabel} 외 ${normalized.length - 1}건 총 ${formatApprovalWorkDays(total)}`;
+    const duration=window.CoopApprovalLeaveDocument?.duration(Math.round(total*480))||formatApprovalWorkDays(total);
+    return `${firstLabel} 외 ${normalized.length - 1}건 총 ${duration}`;
 }
 
 function formatApprovalMixedLeaveDetailText(items) {
     const normalized = normalizeApprovalMixedLeaveItems(items);
     if (normalized.length === 0) return '';
+    if (window.CoopApprovalLeaveDocument) return window.CoopApprovalLeaveDocument.detailText(normalized);
     return normalized
         .map((item) => `- ${formatApprovalMixedLeaveItemLabel(item)}${item.slot==='hour'&&item.time_input_mode!=='hours'?` ${item.start_time}~${item.end_time}`:''}: ${CoopLeaveTime.formatDays(item.deducted_days,item.basis_day_minutes||480)}`)
         .join('\n');
@@ -13460,6 +13474,7 @@ function buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId, options
         contentEl.style.whiteSpace = 'pre-wrap';
         contentEl.textContent = contentSource;
     }
+    window.CoopApprovalLeaveDocument?.append(contentEl, relatedDoc);
     boxEl.appendChild(contentEl);
 
     const amountDisplay = getApprovalAmountDisplayPayload(relatedDoc);
@@ -13560,6 +13575,7 @@ async function openApprovalSubmitPreview() {
         }
 
         contentEl.appendChild(document.createElement("hr"));
+        window.CoopApprovalLeaveDocument?.append(contentBox, previewDoc);
         contentEl.appendChild(contentBox);
         appendApprovalInsuranceSnapshotSection(contentEl, previewDoc);
         appendApprovalWithholdingSnapshotSection(contentEl, previewDoc);
@@ -17739,6 +17755,7 @@ function renderApprovalReadOnlyDetail(contentEl, data) {
     contentEl.appendChild(titleEl);
     contentEl.appendChild(metaEl);
     contentEl.appendChild(hr);
+    window.CoopApprovalLeaveDocument?.append(contentBox, data);
     contentEl.appendChild(contentBox);
     appendApprovalInsuranceSnapshotSection(contentEl, data);
     appendApprovalWithholdingSnapshotSection(contentEl, data);

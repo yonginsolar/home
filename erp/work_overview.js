@@ -1,4 +1,4 @@
-/* v1.2.4 — Render setup checks independently and retry failed reads only. */
+/* v1.2.5 — Hide the setup checklist only after every permitted required check completes. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -102,15 +102,13 @@
    options.onTasks?.(data.items,'ready');
    return true;
   }
-  function setupVisibility(value,ticket){
+  function setupVisibility(value,ticket,fromSummary=false){
    if(ticket<lastSetupTicket)return false;
    if(typeof value?.can_view!=='boolean'||typeof value.complete!=='boolean'||!Number.isSafeInteger(value.required_count)||!Number.isSafeInteger(value.pending_count)
     ||value.required_count<0||value.pending_count<0||value.pending_count>value.required_count||value.can_view!==(value.required_count>0)
     ||value.complete!==(value.required_count>0&&value.pending_count===0))throw Error('STATE_UNAVAILABLE');
    lastSetupTicket=ticket;
-   const panel=panels.get('setup'),paths=extras();panel.root.hidden=(!value.can_view||value.complete)&&!paths.certificate&&!paths.deadline;
-   if(panel.root.hidden){panel.root.open=false;panel.reset();}
-   else panel.syncScope?.();
+   panels.get('setup').updateSummary(value,fromSummary);
    return true;
   }
   function failTasks(ticket,message){
@@ -127,7 +125,7 @@
    const attemptTicket=readSequence+1;
    summaryPending=(async()=>{try{
     const {data,ticket}=await read('summary');
-    setupVisibility(data.setup,ticket);
+    setupVisibility(data.setup,ticket,true);
     if(counts(data,ticket)){
      panel.status.textContent=data.items.some(item=>item.count>0)?'대기 건수를 확인했습니다. 펼치면 최신 목록을 볼 수 있습니다.':'현재 확인할 대기 업무가 없습니다.';
      if(current()&&panel.root.open&&ticket===lastTaskTicket)await panel.load();
@@ -194,7 +192,8 @@
   }
   function mountSetupPanel(root,status,list,retry){
    const names=['base','certificate','deadline'];
-   const groups=new Map(names.map(name=>[name,{phase:'idle',scope:'',serial:0,rows:null}]));
+   const groups=new Map(names.map(name=>[name,{phase:'idle',scope:'',serial:0,rows:null,items:null}]));
+   let baseSummary=null;
    const timestamp=()=>new Date().toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'});
    function scopeFor(name,paths){
     if(name==='certificate')return paths.certificate;
@@ -203,10 +202,32 @@
     return JSON.stringify([owner,runtime?.coop_id,runtime?.is_active,runtime?.runtime_profile,
      [...(runtime?.effective_permissions||[])].sort(),runtime?.modules]);
    }
-   function clearGroup(group){++group.serial;group.phase='idle';group.rows?.remove();group.rows=null;}
+   function clearGroup(group){++group.serial;group.phase='idle';group.rows?.remove();group.rows=null;group.items=null;}
    function syncScope(){
     const paths=extras();
     for(const [name,group] of groups){const next=scopeFor(name,paths);if(group.scope!==next){clearGroup(group);group.scope=next;}}
+   }
+   function syncVisibility(){
+    if(!baseSummary)return;
+    const extraGroups=names.slice(1).map(name=>groups.get(name)).filter(group=>group.scope);
+    const extrasComplete=extraGroups.every(group=>group.phase==='ready'&&Array.isArray(group.items)
+     &&group.items.every(item=>['ready','legacy'].includes(item.state)));
+    root.hidden=(!baseSummary.can_view||baseSummary.complete)&&extrasComplete&&!['loading','failed'].includes(groups.get('base').phase);
+    if(root.hidden)root.open=false;
+   }
+   function updateSummary(value,fromSummary){
+    baseSummary=value;syncScope();
+    if(fromSummary&&(!value.can_view||value.complete)){
+     if(groups.get('base').phase==='failed')clearGroup(groups.get('base'));
+     for(const name of names.slice(1)){const group=groups.get(name);if(group.scope&&group.phase!=='loading')clearGroup(group);}
+    }
+    syncVisibility();
+    // Only complete base settings need collapsed extra checks; incomplete settings stay lazy.
+    if((!value.can_view||value.complete)&&!root.hidden){
+     const paths=extras();
+     for(const name of names.slice(1)){const group=groups.get(name);if(group.scope&&group.phase==='idle')void loadGroup(name,paths);}
+    }
+    renderStatus();
    }
    function renderStatus(){
     const available=[...groups.values()].filter(group=>group.scope), loading=available.some(group=>group.phase==='loading');
@@ -246,20 +267,23 @@
     const group=groups.get(name),scope=group.scope,serial=++group.serial;group.phase='loading';
     const valid=()=>current()&&!root.hidden&&serial===group.serial&&scope===scopeFor(name,extras());
     try{
-     let items;
+     let items,visibility;
      if(name==='base'){
       const {data,ticket}=await read('setup');if(!valid())return;
       const required=data.items.filter(item=>item.key!=='notifications'),pending=required.filter(item=>!['ready','legacy'].includes(item.state)).length;
       if(data.items.some(item=>!links[item.key]||!labels[item.state]))throw Error('STATE_UNAVAILABLE');
-      setupVisibility({can_view:required.length>0,complete:required.length>0&&pending===0,required_count:required.length,pending_count:pending},ticket);
-      if(!valid())return;items=data.items;
+      if(ticket<lastSetupTicket){group.phase='idle';return;}
+      visibility={value:{can_view:required.length>0,complete:required.length>0&&pending===0,required_count:required.length,pending_count:pending},ticket};
+      items=data.items;
      }else{items=await readSetupExtra(name,paths);if(!valid())return;}
      paint(name,items,paths);
+     group.items=items;
      group.phase=items.some(item=>item.state==='unavailable')?'failed':'ready';
-    }catch(error){if(valid()){if(readDenied(error)){paint(name,[],paths);group.phase='ready';}else group.phase='failed';}}
+     if(visibility)setupVisibility(visibility.value,visibility.ticket);else syncVisibility();
+    }catch(error){if(valid()){if(readDenied(error)){paint(name,[],paths);group.items=[];group.phase='ready';}else group.phase='failed';syncVisibility();}}
     finally{
-     if(valid())renderStatus();
-     else if(current()&&!root.hidden&&serial===group.serial){syncScope();renderStatus();}
+     if(valid()){syncVisibility();if(!root.hidden)renderStatus();}
+     else if(current()&&!root.hidden&&serial===group.serial){syncScope();syncVisibility();if(!root.hidden)renderStatus();}
     }
    }
    function load(failedOnly=false){
@@ -269,7 +293,7 @@
     renderStatus();
    }
    const reset=()=>{for(const group of groups.values())clearGroup(group);retry.hidden=true;status.textContent='';};
-   panels.set('setup',{root,status,list,reset,syncScope});
+   panels.set('setup',{root,status,list,reset,syncScope,updateSummary});
    root.addEventListener('toggle',()=>{if(root.open)load();});
    retry.hidden=true;
    retry.onclick=()=>{if(retry.getAttribute('aria-disabled')!=='true')load(true);};
