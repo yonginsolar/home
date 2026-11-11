@@ -1,7 +1,8 @@
-/* v1.0.0 — Read-only leave dates, duration and compact month calendars. */
+/* v1.0.1 — Replace only the calendar owned by this read-only renderer. */
 (function(root){
  'use strict';
  const weekdays=['일','월','화','수','목','금','토'];
+ const mounted=new WeakMap();
  function date(value){
   if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return null;
   const d=new Date(value+'T00:00:00Z');
@@ -82,9 +83,9 @@
  }
  function append(container,doc){
   if(!container)return;
-  for(const child of [...container.children])if(child.classList.contains('approval-leave-calendar'))child.remove();
+  const previous=mounted.get(container);if(previous?.parentNode===container)previous.remove();
   const view=calendar(doc,container.ownerDocument);container.classList.toggle('approval-leave-document',!!view);
-  if(view)container.append(view);
+  if(view){container.append(view);mounted.set(container,view);}else mounted.delete(container);
  }
- root.CoopApprovalLeaveDocument=Object.freeze({detailText,duration,calendar,append,version:'1.0.0'});
+ root.CoopApprovalLeaveDocument=Object.freeze({detailText,duration,calendar,append,version:'1.0.1'});
 })(window);
