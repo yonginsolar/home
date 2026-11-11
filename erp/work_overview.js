@@ -1,4 +1,4 @@
-/* v1.2.6 — Keep the checklist recoverable until its latest status read succeeds. */
+/* v1.2.7 — Resume an opened checklist after its latest status read succeeds. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -232,6 +232,7 @@
      const paths=extras();
      for(const name of names.slice(1)){const group=groups.get(name);if(group.scope&&group.phase==='idle')void loadGroup(name,paths);}
     }
+    if(fromSummary&&root.open&&!root.hidden&&groups.get('base').phase==='idle')void loadGroup('base',extras());
     renderStatus();
    }
    function renderStatus(){
