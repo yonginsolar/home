@@ -684,7 +684,8 @@
       return state;
     }
     function summary({requireComplete=false}={}){
-      const s=refresh(),items=s.result?.items||[],totalHours=(s.result?.totalMinutes||0)/60;
+      const s=refresh(),totalHours=(s.result?.totalMinutes||0)/60;
+      const items=(s.result?.items||[]).map(item=>halfChoice?{...item,slot_label:`${halfLabel(halfChoice)} 반차`}:item);
       const blocker=correctionBlock();
       const error=requireComplete&&blocker?blocker:s.complete||requireComplete?s.error:null;
       return {ok:!error&&(!requireComplete||items.length>0),inputMode:'detail',items,totalHours,totalDays:time.roundDays(totalHours/8),errors:error?[error]:[]};
@@ -743,7 +744,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.16'};
+    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.17'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
