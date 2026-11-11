@@ -48,7 +48,7 @@
     const scheduleSave=button('요청 담기','btn btn-sm btn-primary'),cancel=button('취소');
     scheduleSave.id='annualWorkCorrectionAdd';
     cancel.id='annualWorkCorrectionCancel';
-    let owner=null, pref=null, editOpen=false, correction=null, follows=true;
+    let owner=null, pref=null, editOpen=false, correction=null, follows=true, halfChoice='';
     let epoch=0, ticket=null, editorBaseline=null, lastStart='';
     const correctionDrafts=new Map(),clockDrafts=new Map();
     let startMenu={values:[]}, activeMode='annual', snapshotRetry=null;
@@ -218,7 +218,7 @@
       });
       for(const event of ['click','focusin'])doc.addEventListener(event,e=>{if(open&&!wrapper.contains(e.target))close();},true);
       // The form rechecks submission on bubbling input, before change fires.
-      const picked=()=>{if(value===clock.value)return;value=clock.value;render();changed();};
+      const picked=()=>{if(value===clock.value)return;halfChoice='';value=clock.value;render();changed();};
       clock.addEventListener('input',picked);
       clock.addEventListener('change',picked);
       return {wrapper,close,get:()=>value,put:raw=>{close();value=String(raw||'').trim();reflect();render();},
@@ -232,6 +232,32 @@
     }
 
     const start=clockControl('Start','시작 시간'),end=clockControl('End','종료 시간');
+    const halfTools=make('div','leave-half-shortcuts mt-2');
+    const halfButtons=make('div','d-flex flex-wrap gap-2');
+    halfButtons.setAttribute('role','group');halfButtons.setAttribute('aria-label','반차 빠른 선택');
+    const halfHint=make('p','small text-muted mt-1 mb-0');halfHint.id='annualHalfDayHint';halfHint.setAttribute('role','status');
+    const halves=['am','pm'].map(slot=>{
+      const b=button(slot==='am'?'오전 반차':'오후 반차','btn btn-outline-secondary');
+      b.id=slot==='am'?'annualClockMorningHalf':'annualClockAfternoonHalf';
+      b.setAttribute('aria-describedby',halfHint.id);
+      b.addEventListener('click',()=>{
+        syncOwner();
+        if(!owner||activeMode!=='clock'||root.frameElement?.hidden)return;
+        const choice=halfDayChoice(slot,startDate.value,calendarModel());
+        if(choice.error){refresh();return;}
+        const previous=JSON.stringify(readClockDraft());
+        halfChoice=slot;start.close();end.close();clockStartPicker.close();clockEndPicker.close();
+        endDate.value=lastEnd=startDate.value;follows=true;
+        start.put(choice.start);end.put(choice.end);
+        if(previous!==JSON.stringify(readClockDraft()))startDate.dispatchEvent(new root.Event('input',{bubbles:true}));
+        changed();
+      });
+      halfButtons.append(b);return {slot,button:b};
+    });
+    halfTools.append(halfButtons,halfHint);
+    halfTools.addEventListener('keydown',e=>{
+      if(!e.defaultPrevented&&!e.isComposing&&e.keyCode!==229&&e.repeat&&['Enter',' '].includes(e.key))e.preventDefault();
+    },true);
     const dateField=(title,field)=>{const wrap=make('div');wrap.append(make('div','small fw-bold text-muted',title),field);return wrap;};
     const first=make('div','leave-entry-pair');first.append(dateField('시작일',startDate),start.wrapper);
     endGroup.append(dateField('종료일',endDate),end.wrapper);
@@ -251,7 +277,7 @@
     const correctionText=make('p','small mb-2');correctionText.setAttribute('role','status');
     const tools=make('div','d-flex gap-2 flex-wrap');tools.append(edit,remove);
     correctionPanel.append(correctionHint,correctionText,tools,editor);
-    area.append(first,endGroup,status,scheduleDescription,retry);
+    area.append(first,halfTools,endGroup,status,scheduleDescription,retry);
     // Preserve old correction drafts in memory/serialization, but no longer offer them in approvals.
     editor.disabled=true;
     const clockStartPicker=datePicker(startDate,'시작일',(date,m)=>clockDateReason(date,'start',m));
@@ -291,11 +317,12 @@
     const isCorrectionMode=()=>['annual','clock','legacy'].includes(activeMode);
     const unappliedSchedule=()=>editOpen&&!same(workEditorDraft(),editorBaseline);
     const workEditorDraft=()=>({...readWork(),break_start:breakStart.value});
-    const readClockDraft=()=>({start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows});
+    const readClockDraft=()=>({start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows,...(halfChoice?{half_day:halfChoice}:{})});
     function putClockDraft(data={}){
       startDate.value=data.start_date||'';endDate.value=data.end_date||'';
       lastStart=startDate.value;lastEnd=endDate.value;
       start.put(data.start_time);end.put(data.end_time);follows=data.follows!==false;
+      halfChoice=['am','pm'].includes(data.half_day)?data.half_day:'';
     }
     function syncOwner(){
       const next=ownerState();
@@ -324,10 +351,10 @@
     function changed(){syncDates();ctx.changed();}
     let lastEnd='';
     startDate.addEventListener('change',()=>{
-      if(startDate.value!==lastStart){start.put('');end.put('');endDate.value=lastEnd=startDate.value;follows=true;}
+      if(startDate.value!==lastStart){halfChoice='';start.put('');end.put('');endDate.value=lastEnd=startDate.value;follows=true;}
       lastStart=startDate.value;changed();
     });
-    endDate.addEventListener('change',()=>{if(endDate.value!==lastEnd)end.put('');lastEnd=endDate.value;follows=false;changed();});
+    endDate.addEventListener('change',()=>{if(endDate.value!==lastEnd){halfChoice='';end.put('');}lastEnd=endDate.value;follows=false;changed();});
     for(const field of [workStart,workEnd,breakStart])field.addEventListener('input',()=>{syncWorkBreak();ctx.changed();});
 
     async function withDeadline(run){
@@ -428,7 +455,9 @@
       if(needsWork&&!fallback)return {entry,complete,result:null,needsWork,error:scheduleError(),retry:canRetryPersonal()};
       try{
         const result=time.scheduledRange({...entry,fallback_schedule:fallback,strict_bounds:true},policy,calendar);
-        if(entry.start_time.slice(3)!==entry.end_time.slice(3)||result.totalMinutes<60||result.totalMinutes%60)
+        const half=halfChoice?selectedHalfDay(model):null;
+        if(halfChoice&&!half)throw Error('원하는 반차를 다시 선택하거나 시간을 직접 선택해 주세요.');
+        if(!half&&(entry.start_time.slice(3)!==entry.end_time.slice(3)||result.totalMinutes<60||result.totalMinutes%60))
           throw Error('시간차는 1시간 단위예요. 시작과 종료의 분을 같게 골라 주세요.');
         return {entry,complete,needsWork,fallback,result};
       }
@@ -491,6 +520,48 @@
     }
     function clockDateReason(date,side,model){const menu=getClockMenu(date,side,model);return menu.values.length?'':menu.message||'선택할 수 있는 시간이 없어요.';}
     function netMinutes(from,to,pause){return Math.max(0,to-from-(pause?Math.max(0,Math.min(to,pause.b)-Math.max(from,pause.a)):0));}
+    function halfDayChoice(slot,date,model){
+      const fail=error=>({error});
+      if(!owner||!date)return fail('날짜를 먼저 선택해 주세요.');
+      if(!time.inYear(date))return fail('올해 날짜를 선택해 주세요.');
+      const issue=calendarError(model);if(issue)return fail(issue);
+      const day=timedWorkday(date,model),{work,pause}=day;
+      if(!work)return fail(day.message||scheduleError());
+      if(pause&&(pause.a<work.a||pause.b>work.b)||!pause&&(day.schedule.break_start||day.schedule.break_end))
+        return fail('등록된 휴게시간을 확인해 주세요.');
+      const minutes=netMinutes(work.a,work.b,pause)/2;
+      if(minutes<=0||!Number.isInteger(minutes)||minutes>day.limit)return fail('등록된 근무시간을 확인해 주세요.');
+      const before=pause?pause.a-work.a:Infinity;
+      const boundary=work.a+minutes+(pause&&minutes>=before?pause.b-pause.a:0);
+      const from=slot==='am'?work.a:boundary;
+      const to=slot==='am'?(pause&&minutes===before?pause.a:boundary):work.b;
+      const start=time.clockLabel(from),end=time.clockLabel(to);
+      if(!CLOCK.test(start)||!CLOCK.test(end))return fail('반나절을 30분 단위로 나눌 수 없는 근무시간이에요.');
+      if(crosses(day.busy,from,to))return fail('이미 신청한 휴가와 겹쳐요.');
+      try{
+        const result=time.scheduledRange({leave_date:date,end_date:date,start_time:start,end_time:end,
+          fallback_schedule:fallbackSchedule(),strict_bounds:true},model.snapshot.workBasis,model.clock.calendar);
+        if(result.totalMinutes!==minutes)return fail('등록된 근무시간을 확인해 주세요.');
+        return {start,end,minutes};
+      }catch(e){return fail(e.message);}
+    }
+    function selectedHalfDay(model){
+      if(!halfChoice||startDate.value!==endDate.value)return null;
+      const choice=halfDayChoice(halfChoice,startDate.value,model);
+      return !choice.error&&choice.start===start.get()&&choice.end===end.get()?choice:null;
+    }
+    function refreshHalfDays(model){
+      halfTools.classList.toggle('hidden',activeMode!=='clock');
+      const messages=[];
+      for(const {slot,button:b} of halves){
+        const choice=halfDayChoice(slot,startDate.value,model),selected=!choice.error&&halfChoice===slot
+          &&endDate.value===startDate.value&&choice.start===start.get()&&choice.end===end.get();
+        b.disabled=activeMode!=='clock'||!!choice.error;b.setAttribute('aria-pressed',String(selected));
+        b.title=choice.error||`${choice.start}~${choice.end} · 차감 ${time.formatMinutes(choice.minutes)}`;
+        if(choice.error)messages.push(`${slot==='am'?'오전':'오후'}: ${choice.error}`);
+      }
+      setText(halfHint,messages.length===2&&messages[0].slice(4)===messages[1].slice(4)?messages[0].slice(4):messages.join(' · '));
+    }
     function timedWorkday(date,model){
       if(model.timedDays.has(date))return model.timedDays.get(date);
       const info=scheduleFor(date,model),{schedule}=info;
@@ -564,6 +635,9 @@
           if(canFinishClockStart(day,minute,model))values.push(time.clockLabel(minute));
         }
       }
+      const selected=halfChoice&&date===startDate.value?selectedHalfDay(model):null;
+      const extra=selected&&(side==='start'?selected.start:selected.end);
+      if(extra&&!values.includes(extra)){values.push(extra);values.sort();}
       return {...day,values,message:values.length?'':busy.length?reserved:'1시간 단위로 선택할 수 있는 시간이 없어요.'};
     }
     function refreshDates(model){
@@ -593,7 +667,7 @@
       const endMenu=getClockMenu(endDate.value,'end',model);
       start.update(startMenu.values,!!startMenu.values.length,'시간 선택');
       end.update(endMenu.values,startMenu.values.includes(start.get())&&!!endMenu.values.length,'시간 선택');
-      syncDates();const state=inspect(model);
+      syncDates();refreshHalfDays(model);const state=inspect(model);
       const retainedInvalid=(start.get()&&!startMenu.values.includes(start.get()))||(end.get()&&!endMenu.values.includes(end.get()));
       if(retainedInvalid&&!state.ledgerFailed){state.result=null;state.error=startMenu.message||endMenu.message||(state.error&&!state.error.includes('입력해')?state.error:'이전에 선택한 시간이 현재 범위에 없어요. 시간을 다시 선택해 주세요.');}
       const fallbackMenu=startMenu.fallback?startMenu:endMenu.fallback?endMenu:null;
@@ -669,7 +743,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.15'};
+    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.16'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);
