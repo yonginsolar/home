@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.164 | Change: 2026-11-12 - Fit payout cards to large text and preserve dialog cursors. -->
+<!-- Version: v1.2.165 | Change: 2026-11-12 - Scope original-document selection and recover shared inventory reads. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.164 | approval.html');</script>
+  <script>console.log('[Version] v1.2.165 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1342,6 +1342,7 @@
                       </div>
                     </div>
                     <div class="col-12"><div class="small text-muted" id="inventoryPurchaseHelp">물품이 없다면 ERP 메뉴의 `현금매출·재고`에서 먼저 등록할 수 있습니다.</div></div>
+                    <div class="col-12"><button type="button" class="btn btn-sm btn-outline-primary hidden" id="btnRetryInventoryItems" aria-controls="inventoryPurchaseItem" aria-describedby="inventoryPurchaseHelp" onclick="loadApprovalInventoryItems(true)">다시 확인</button></div>
                   </div>
                 </div>
               </div>
@@ -3938,7 +3939,11 @@ async function loadApprovalDraftFromServer(draftId) {
         if (inventoryPurchaseEnabledEl) inventoryPurchaseEnabledEl.checked = fields.inventory_purchase_enabled === true;
         syncApprovalInventoryPurchaseVisibility();
         if (inventoryPurchaseEnabledEl?.checked) {
+            const inventoryRestoreContext = captureApprovalExpenseLookupContext();
+            const inventoryRestoreRevision = approvalComposerInputRevision;
             await loadApprovalInventoryItems(false);
+            if (!isApprovalExpenseLookupContextCurrent(inventoryRestoreContext)
+                || inventoryRestoreRevision !== approvalComposerInputRevision) return;
             const inventoryPurchaseItemEl = document.getElementById('inventoryPurchaseItem');
             const inventoryPurchaseQuantityEl = document.getElementById('inventoryPurchaseQuantity');
             const inventoryPurchaseUnitCostEl = document.getElementById('inventoryPurchaseUnitCost');
@@ -7762,6 +7767,82 @@ let approvalInventoryItems = [];
 let approvalInventoryItemsLoaded = false;
 let approvalInventoryFinalAmountManual = false;
 let approvalInventoryWasEnabled = false;
+let approvalExpenseLookupGeneration = 0;
+let approvalRelatedSelectionSequence = 0;
+let approvalInventoryRead = null;
+let approvalInventoryVerifiedContext = null;
+let approvalInventoryListScope = '';
+let approvalInventoryReadMessage = '';
+const approvalInventoryFlights = new Set();
+
+function captureApprovalExpenseLookupContext() {
+    return {owner:approvalSubmitOwner(),actor:approvalSubmitActor(),form:document.getElementById('draftForm'),
+        epoch:approvalDraftComposerEpoch,generation:approvalExpenseLookupGeneration,
+        type:getCurrentDraftMainType(),subtype:document.getElementById('expenseSubType')?.value,
+        mode:getApprovalExpenseAdjustmentMode(),permission:canPerform('approval.submit')};
+}
+function isApprovalExpenseLookupContextCurrent(context) {
+    return !!context && context.permission && canPerform('approval.submit') && !!myAuthUserId && !!myInfo?.emp_id
+        && !!getApprovalScopedCoopId() && context.owner===approvalSubmitOwner() && context.actor===approvalSubmitActor()
+        && context.form===document.getElementById('draftForm') && context.epoch===approvalDraftComposerEpoch
+        && context.generation===approvalExpenseLookupGeneration && context.type===getCurrentDraftMainType()
+        && context.subtype===document.getElementById('expenseSubType')?.value && context.mode===getApprovalExpenseAdjustmentMode()
+        && activeApprovalTab==='draft' && !window.frameElement?.hidden;
+}
+function invalidateApprovalExpenseLookups() {
+    approvalExpenseLookupGeneration++;
+    approvalRelatedSelectionSequence++;
+    const read=approvalInventoryRead;
+    approvalInventoryRead=null;
+    if(read){approvalInventoryItemsLoaded=false;approvalInventoryVerifiedContext=null;
+        approvalInventoryReadMessage='입고 물품을 다시 확인해 주세요.';read.cancel?.();}
+    const search=document.getElementById('relSearchModal');
+    if(search?.classList.contains('show'))document.getElementById('relResultList').textContent='현재 기안 기준으로 다시 검색해 주세요.';
+    syncApprovalInventoryReadUi();
+}
+function bindApprovalExpenseLookupControls() {
+    const form=document.getElementById('draftForm');
+    if(!form || form.dataset.expenseLookupBound==='1')return;
+    form.dataset.expenseLookupBound='1';
+    document.getElementById('btnRetryInventoryItems')?.addEventListener('keydown',event=>{
+        if(event.key==='Enter' && event.repeat && !event.isComposing && event.keyCode!==229)event.preventDefault();
+    });
+    form.addEventListener('change',event=>{
+        if(['appCategory','expenseSubType','chkProxy','proxyTargetSelect','inventoryPurchaseEnabled'].includes(event.target?.id)
+            || event.target?.name==='expenseAdjustmentMode')invalidateApprovalExpenseLookups();
+    },true);
+    form.addEventListener('reset',invalidateApprovalExpenseLookups);
+}
+function syncApprovalInventoryReadUi() {
+    if(getCurrentDraftMainType()!=='지출결의' || document.getElementById('expenseSubType')?.value!=='일반'
+        || getApprovalExpenseAdjustmentMode()!=='new' || !document.getElementById('inventoryPurchaseEnabled')?.checked)return;
+    const pending=!!approvalInventoryRead && isApprovalExpenseLookupContextCurrent(approvalInventoryRead.context);
+    const verified=approvalInventoryItemsLoaded && isApprovalExpenseLookupContextCurrent(approvalInventoryVerifiedContext);
+    const select=document.getElementById('inventoryPurchaseItem'),help=document.getElementById('inventoryPurchaseHelp');
+    const retry=document.getElementById('btnRetryInventoryItems');
+    const authorized=canPerform('approval.submit') && !!myAuthUserId && !!myInfo?.emp_id && !!getApprovalScopedCoopId();
+    if(select)select.disabled=!authorized || (!verified && !approvalInventoryItems.length);
+    if(help)help.textContent=pending?'입고 물품을 확인 중입니다.':verified
+        ? approvalInventoryItems.length?'결재 완료 후 입고 대기로 등록됩니다. 물품 수령 후 재고 관리에서 입고 검수를 해 주세요.'
+            :'현금매출·재고에서 물품을 먼저 등록해 주세요.'
+        :approvalInventoryReadMessage || '입고 물품을 다시 확인해 주세요.';
+    if(retry){
+        const returnToSelect=verified && document.activeElement===retry && document.hasFocus();
+        retry.classList.toggle('hidden',verified);retry.classList.toggle('disabled',pending);retry.disabled=!authorized;
+        retry.setAttribute('aria-disabled',String(pending||!authorized));retry.textContent=pending?'확인 중…':'다시 확인';
+        if(returnToSelect && select && !select.disabled && select.getClientRects().length)select.focus({preventScroll:true});
+    }
+}
+function getApprovalInventoryFlight(context) {
+    const existing=[...approvalInventoryFlights].find(f=>f.owner===context.owner && f.epoch===context.epoch && f.form===context.form);
+    if(existing)return existing.promise;
+    const flight={owner:context.owner,epoch:context.epoch,form:context.form,controller:new AbortController()};
+    approvalInventoryFlights.add(flight);
+    flight.promise=Promise.resolve().then(()=>waitApprovalLegacyRead(_supabase.rpc('festival_receipts_admin', {
+        p_action:'inventory_items_for_approval',p_data:{}
+    }),flight.controller)).finally(()=>approvalInventoryFlights.delete(flight));
+    return flight.promise;
+}
 
 function getApprovalInventoryPurchaseCalculation() {
     const quantity = Math.trunc(Number(ERPNumberInput.raw(document.getElementById('inventoryPurchaseQuantity')?.value) || 0));
@@ -7815,44 +7896,56 @@ function applyApprovalInventoryBaseAmount() {
 
 async function loadApprovalInventoryItems(force = false) {
     const select = document.getElementById('inventoryPurchaseItem');
-    const help = document.getElementById('inventoryPurchaseHelp');
     if (!select) return [];
-    if (approvalInventoryItemsLoaded && !force) return approvalInventoryItems;
-    select.disabled = true;
-    if (help) help.textContent = '입고할 수 있는 물품을 불러오고 있습니다.';
-    try {
-        const { data, error } = await _supabase.rpc('festival_receipts_admin', {
-            p_action: 'inventory_items_for_approval',
-            p_data: {}
-        });
-        if (error) throw error;
-        approvalInventoryItems = Array.isArray(data?.items) ? data.items : [];
-        approvalInventoryItemsLoaded = true;
-        const previous = String(select.value || '').trim();
-        select.replaceChildren();
-        const placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.textContent = approvalInventoryItems.length ? '입고 물품 선택' : '등록된 물품 없음';
-        select.append(placeholder);
-        approvalInventoryItems.forEach((item) => {
-            const option = document.createElement('option');
-            option.value = String(item.id || '');
-            option.textContent = `${String(item.name || '물품')} (${String(item.unit || '개')})`;
-            select.append(option);
-        });
-        if (approvalInventoryItems.some((item) => String(item.id) === previous)) select.value = previous;
-        else if (approvalInventoryItems.length === 1) select.value = String(approvalInventoryItems[0].id || '');
-        if (help) help.textContent = approvalInventoryItems.length
-            ? '결재 완료 후 입고 대기로 등록됩니다. 물품 수령 후 재고 관리에서 입고 검수를 해 주세요.'
-            : 'ERP 메뉴의 `현금매출·재고`에서 물품을 먼저 등록해 주세요.';
-        return approvalInventoryItems;
-    } catch (error) {
-        approvalInventoryItemsLoaded = false;
-        if (help) help.textContent = '물품을 불러오지 못했습니다. ERP 로그인과 전자결재 권한을 확인해 주세요.';
-        return [];
-    } finally {
-        select.disabled = false;
+    const context=captureApprovalExpenseLookupContext();
+    if(!context.permission || !myAuthUserId || !myInfo?.emp_id || !getApprovalScopedCoopId()){
+        approvalInventoryItems=[];approvalInventoryItemsLoaded=false;approvalInventoryVerifiedContext=null;approvalInventoryListScope='';
+        select.replaceChildren(new Option('입고 물품 확인 필요',''));syncApprovalInventoryReadUi();return [];
     }
+    if(!isApprovalExpenseLookupContextCurrent(context) || context.type!=='지출결의' || context.subtype!=='일반'
+        || context.mode!=='new' || !document.getElementById('inventoryPurchaseEnabled')?.checked){syncApprovalInventoryReadUi();return [];}
+    if(approvalInventoryRead && isApprovalExpenseLookupContextCurrent(approvalInventoryRead.context))return approvalInventoryRead.promise;
+    if(approvalInventoryItemsLoaded && isApprovalExpenseLookupContextCurrent(approvalInventoryVerifiedContext) && !force)return approvalInventoryItems;
+    const scope=context.actor, firstList=approvalInventoryListScope!==scope;
+    if(firstList){approvalInventoryItems=[];select.replaceChildren(new Option('입고 물품 선택',''));}
+    approvalInventoryItemsLoaded=false;approvalInventoryVerifiedContext=null;approvalInventoryReadMessage='';
+    const read={context,promise:null,cancel:null};approvalInventoryRead=read;
+    const current=()=>approvalInventoryRead===read && isApprovalExpenseLookupContextCurrent(context)
+        && document.getElementById('inventoryPurchaseEnabled')?.checked;
+    read.promise=(async()=>{try{
+        const result=await Promise.race([getApprovalInventoryFlight(context),new Promise(resolve=>{read.cancel=()=>resolve(null);})]);
+        if(!current() || !result)return [];
+        if(result.error)throw result.error;
+        const items=result.data?.items;
+        if(!Array.isArray(items) || items.some(item=>!item || !String(item.id||'').trim())
+            || new Set(items.map(item=>String(item.id))).size!==items.length)throw new Error('INVALID_INVENTORY_ITEMS');
+        const previous=String(select.value||'').trim();
+        approvalInventoryItems=items;approvalInventoryListScope=scope;
+        const options=[new Option(items.length?'입고 물품 선택':'등록된 물품 없음',''),...items.map(item=>new Option(`${String(item.name||'물품')} (${String(item.unit||'개')})`,String(item.id)))];
+        const unchanged=options.length===select.options.length && options.every((o,i)=>o.value===select.options[i].value && o.textContent===select.options[i].textContent);
+        if(!unchanged)select.replaceChildren(...options);
+        if(items.some(item=>String(item.id)===previous))select.value=previous;
+        else select.value=firstList&&items.length===1?String(items[0].id):'';
+        approvalInventoryItemsLoaded=true;approvalInventoryVerifiedContext=context;
+        return items;
+    }catch(error){
+        if(!current())return [];
+        const denied=['401','403','42501','PGRST301','PGRST302'].includes(String(error?.code||'')) || [401,403].includes(Number(error?.status));
+        if(denied){approvalInventoryItems=[];approvalInventoryListScope='';select.replaceChildren(new Option('입고 물품 확인 필요',''));}
+        approvalInventoryReadMessage=denied?'입고 물품을 조회할 권한을 확인해 주세요.':error?.code==='APPROVAL_READ_TIMEOUT'
+            ?'조회 시간이 길어지고 있습니다. 다시 확인해 주세요.':'입고 물품을 불러오지 못했습니다. 다시 확인해 주세요.';
+        return [];
+    }finally{
+        if(approvalInventoryRead===read){
+            approvalInventoryRead=null;
+            if(context.actor!==approvalSubmitActor() || !canPerform('approval.submit') || !myAuthUserId){
+                approvalInventoryItems=[];approvalInventoryItemsLoaded=false;approvalInventoryVerifiedContext=null;approvalInventoryListScope='';
+                select.replaceChildren(new Option('입고 물품 확인 필요',''));
+            }
+            syncApprovalInventoryReadUi();
+        }
+    }})();
+    syncApprovalInventoryReadUi();return read.promise;
 }
 
 function syncApprovalInventoryPurchaseVisibility() {
@@ -7885,6 +7978,8 @@ function handleApprovalInventoryPurchaseToggle() {
 
 function collectApprovalInventoryPurchaseInput() {
     if (document.getElementById('inventoryPurchaseEnabled')?.checked !== true) return null;
+    if(approvalInventoryRead || !approvalInventoryItemsLoaded || !isApprovalExpenseLookupContextCurrent(approvalInventoryVerifiedContext))
+        throw new Error('입고 물품을 다시 확인한 뒤 상신해 주세요.');
     const itemId = String(document.getElementById('inventoryPurchaseItem')?.value || '').trim();
     const quantity = Math.trunc(Number(ERPNumberInput.raw(document.getElementById('inventoryPurchaseQuantity')?.value) || 0));
     const unitCostRaw = String(ERPNumberInput.raw(document.getElementById('inventoryPurchaseUnitCost')?.value) || '').trim();
@@ -13897,6 +13992,7 @@ function invalidateApprovalSubmitPreview() {
     if(button)button.disabled=true;
 }
 function leaveApprovalSubmitPreview() {
+    invalidateApprovalExpenseLookups();
     const preview=approvalSubmitPreviewState;
     approvalComposerInputRevision++;approvalRelViewRevision++;
     invalidateApprovalSubmitPreview();
@@ -17573,11 +17669,16 @@ const APPROVAL_REL_SEARCH_QUERY_LIMIT = 20;
 // 모달 초기화 (onload 밖에서도 호출 가능하도록)
 function initializeApprovalRelatedModals() {
     bindApprovalSubmitPreviewControls();
+    bindApprovalExpenseLookupControls();
     const relSearchModalEl = document.getElementById('relSearchModal');
     const relViewModalEl = document.getElementById('relViewModal');
     if (!relSearchModalEl || !relViewModalEl) return;
     relSearchModal = bootstrap.Modal.getOrCreateInstance(relSearchModalEl);
     relViewModal = bootstrap.Modal.getOrCreateInstance(relViewModalEl);
+    if(relSearchModalEl.dataset.relatedSelectionBound!=='1'){
+        relSearchModalEl.dataset.relatedSelectionBound='1';
+        relSearchModalEl.addEventListener('hide.bs.modal',()=>{approvalRelatedSelectionSequence++;relSearchRequestSequence++;});
+    }
     if (relViewModalEl.dataset.relatedModalBound !== '1') {
         relViewModalEl.dataset.relatedModalBound = '1';
         relViewModalEl.addEventListener('hide.bs.modal', () => {relViewModalEl.dataset.submitPreviewClosing='1';approvalRelViewRevision++;invalidateApprovalSubmitPreview();});
@@ -17594,7 +17695,16 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 else initializeApprovalRelatedModals();
 
 // 1. 검색 모달 열기
-function openRelSearch() {
+async function openRelSearch() {
+    approvalRelatedSelectionSequence++;
+    relSearchRequestSequence++;
+    const context=captureApprovalExpenseLookupContext(),opening=approvalRelatedSelectionSequence;
+    const searchModal=document.getElementById('relSearchModal');
+    if(relSearchModal?._isTransitioning && !relSearchModal._isShown){
+        await waitForModalHidden(searchModal,1500);
+        if(opening!==approvalRelatedSelectionSequence || !isApprovalExpenseLookupContextCurrent(context)
+            || relSearchModal._isTransitioning)return;
+    }
     const adjustmentMode = getCurrentDraftMainType() === '지출결의' ? getApprovalExpenseAdjustmentMode() : 'new';
     const isAdjustment = adjustmentMode !== 'new';
     const modalTitleEl = document.getElementById('relSearchModalTitle');
@@ -17609,7 +17719,10 @@ function openRelSearch() {
         : '';
     relSearchModal.show();
     if (isAdjustment) void runRelSearch({ recentOnly: true });
-    setTimeout(()=> document.getElementById("relKeyword").focus(), 500);
+    setTimeout(()=>{const keyword=document.getElementById('relKeyword'),modal=document.getElementById('relSearchModal'),active=document.activeElement;
+        if(opening===approvalRelatedSelectionSequence && isApprovalExpenseLookupContextCurrent(context) && modal?.classList.contains('show')
+            && document.hasFocus() && (active===document.body || active===modal))keyword?.focus({preventScroll:true});
+    },500);
 }
 
 // 2. 검색 실행 (완료/실물결재완료된 '일반품의' & 같은 부서)
@@ -17619,6 +17732,10 @@ async function runRelSearch(options = {}) {
     const listEl = document.getElementById("relResultList");
     const recentOnly = options?.recentOnly === true && !key;
     const requestSequence = ++relSearchRequestSequence;
+    const context=captureApprovalExpenseLookupContext(),modal=document.getElementById('relSearchModal');
+    const currentSearch=()=>requestSequence===relSearchRequestSequence && isApprovalExpenseLookupContextCurrent(context)
+        && modal===document.getElementById('relSearchModal') && (modal?.classList.contains('show') || relSearchModal?._isShown);
+    if(!currentSearch())return;
     listEl.innerHTML = '<div class="p-3 text-center">검색 중...</div>';
 
     // 내 부서 찾기 (ref_employees 이용 안 하고 allUsers에서 찾음)
@@ -17641,7 +17758,7 @@ async function runRelSearch(options = {}) {
     }
 
     const { data, error } = await query;
-    if (requestSequence !== relSearchRequestSequence) return;
+    if (!currentSearch()) return;
     if (error) {
         listEl.innerHTML = "";
         listEl.textContent = '오류: ' + error.message;
@@ -17665,8 +17782,9 @@ async function runRelSearch(options = {}) {
     if (isAdjustment && filtered.length > 0) {
         try {
             filtered = await annotateApprovalExpenseAdjustmentBalances(filtered);
-            if (requestSequence !== relSearchRequestSequence) return;
+            if (!currentSearch()) return;
         } catch (balanceError) {
+            if(!currentSearch())return;
             listEl.textContent = `원결재 누적 금액 조회 오류: ${balanceError.message}`;
             return;
         }
@@ -17708,16 +17826,25 @@ async function runRelSearch(options = {}) {
             : `${doc.drafter_name || ''} | ${formatApprovalAmountInline(doc)}`;
         item.appendChild(header);
         item.appendChild(meta);
-        item.onclick = () => selectRelDoc(doc);
+        item.onclick = () => {if(currentSearch())void selectRelDoc(doc);};
         listEl.appendChild(item);
     });
 }
 
 // 3. 문서 선택
 async function selectRelDoc(doc) {
+    const context=captureApprovalExpenseLookupContext(),sequence=++approvalRelatedSelectionSequence;
+    const modal=document.getElementById('relSearchModal'),previous=document.getElementById('relDocId')?.value;
+    const current=()=>sequence===approvalRelatedSelectionSequence && isApprovalExpenseLookupContextCurrent(context)
+        && modal===document.getElementById('relSearchModal') && modal?.classList.contains('show')
+        && previous===document.getElementById('relDocId')?.value;
+    if(!current())return;
     const adjustmentMode = getCurrentDraftMainType() === '지출결의' ? getApprovalExpenseAdjustmentMode() : 'new';
     if (adjustmentMode !== 'new') {
-        const targetResult = await loadApprovalExpenseAdjustmentTargetDoc(doc?.id, adjustmentMode, { checkPermission: true });
+        let targetResult;
+        try { targetResult = await loadApprovalExpenseAdjustmentTargetDoc(doc?.id, adjustmentMode, { checkPermission: true }); }
+        catch (_) {if(current())showAlert('원결재를 확인하지 못했습니다. 다시 검색해 주세요.');return;}
+        if(!current())return;
         if (!targetResult.ok || !targetResult.targetDoc) {
             return showAlert(targetResult.message || '원결재를 선택할 수 없습니다.');
         }
