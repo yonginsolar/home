@@ -1,4 +1,4 @@
-/* Cooperative dialogs v1.0.1 | 2026-10-13
+/* Cooperative dialogs v1.0.2 | 2026-11-12
  * Text-only, async choices. No Auth, network, storage or native-alert fallback. */
 (function (root) {
   'use strict';
@@ -38,16 +38,43 @@
     `;
     root.document.head.append(node);
   }
+  function captureSelection(item) {
+    try {
+      const field = item.focus;
+      item.textControl = /^(INPUT|TEXTAREA)$/.test(field?.tagName);
+      item.selection = null; item.range = null;
+      if (item.textControl) {
+        if (typeof field.selectionStart === 'number') item.selection = {
+          start:field.selectionStart,end:field.selectionEnd,direction:field.selectionDirection,
+          value:field.value,scrollTop:field.scrollTop,scrollLeft:field.scrollLeft
+        };
+      } else {
+        const selection = item.owner.getSelection();
+        if (selection?.rangeCount) item.range = selection.getRangeAt(0).cloneRange();
+      }
+    } catch (_) {}
+  }
   function finish(item, value) {
     if (active !== item || item.done) return;
     if (!visible(item.owner)) value=cancelled(item.kind);
+    const focused = root.document.activeElement;
+    const returnFocus = focused === item.focus || focused === root.document.body || item.dialog?.contains(focused);
     item.done = true; active = null;
     if (item.dialog?.open) item.dialog.close();
     item.dialog?.remove();
-    if (visible(item.owner) && item.focus?.isConnected && !item.focus.disabled) {
+    if (returnFocus && visible(item.owner) && item.focus?.isConnected && !item.focus.disabled
+        && !item.focus.closest('[hidden],[inert]') && item.focus.getClientRects().length
+        && (item.owner === root || item.owner.document.activeElement === item.focus
+            || item.owner.document.activeElement === item.owner.document.body)) {
       try {
         item.focus.focus({preventScroll:true});
-        if (item.range && item.range.startContainer.isConnected && item.range.endContainer.isConnected) {
+        if (item.textControl) {
+          if (item.selection && item.selection.value === item.focus.value) {
+            const saved = item.selection;
+            item.focus.setSelectionRange(saved.start,saved.end,saved.direction);
+            item.focus.scrollTop=saved.scrollTop;item.focus.scrollLeft=saved.scrollLeft;
+          }
+        } else if (item.range && item.range.startContainer.isConnected && item.range.endContainer.isConnected) {
           const selection = item.owner.getSelection(); selection.removeAllRanges(); selection.addRange(item.range);
         }
       } catch (_) {}
@@ -61,6 +88,7 @@
     if (!visible(item.owner) || !root.document.body) { item.resolve(cancelled(item.kind)); root.queueMicrotask(showNext); return; }
     active = item;
     try {
+      if (item.owner.document.activeElement === item.focus) captureSelection(item);
       style();
       const doc = root.document, dialog = doc.createElement('dialog'); item.dialog = dialog;
       dialog.className = 'coop-dialog'; dialog.dataset.coopDialog = 'true'; dialog.setAttribute('role','alertdialog');
@@ -107,7 +135,11 @@
     }
     if (queue.length>=10) return Promise.resolve(cancelled(kind));
     const item={kind,message:text,value:String(value??''),options:options&&typeof options==='object'?options:{},owner,done:false};
-    try {item.focus=owner.document.activeElement;const selection=owner.getSelection();if(selection?.rangeCount)item.range=selection.getRangeAt(0).cloneRange();}catch(_){}
+    try {
+      item.focus=owner.document.activeElement;
+      if(active?.owner===owner && active.dialog?.contains(item.focus))item.focus=active.focus;
+      captureSelection(item);
+    }catch(_){}
     item.promise=new Promise(resolve=>{item.resolve=resolve;});queue.push(item);showNext();return item.promise;
   }
   function request(kind,message,value,options) {
@@ -123,7 +155,7 @@
     confirm:(message,options)=>request('confirm',message,'',options),
     prompt:(message,value='',options)=>request('prompt',message,value,options),
     forOwner:(owner,kind,message,value,options)=>{const up=host();return up?up.forOwner(owner,kind,message,value,options):localRequest(kind,message,value,options,owner);},cancelAll,
-    hasPending:()=>!!active||queue.length>0,version:'1.0.1'
+    hasPending:()=>!!active||queue.length>0,version:'1.0.2'
   });
   root.addEventListener('pagehide',()=>cancelAll(root));
 })(window);
