@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.5.8 | Change: 2026-11-12 - Wrap quiz actions at large text sizes. -->
+<!-- Version: v1.5.9 | Change: 2026-11-12 - Keep quiz editor keyboard actions scoped and fit filters. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -36,7 +36,7 @@
     #addQuestionButton { min-width:0; max-width:100%; white-space:normal; overflow-wrap:anywhere; word-break:keep-all; }
     .toolbar-title { margin:0; font-size:16px; font-weight:850; }
     .search-line { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:9px; }
-    .filter-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:9px; margin-top:10px; }
+    .filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5em),1fr)); gap:9px; margin-top:10px; }
     .filter-field label { display:block; margin:0 0 5px; color:var(--quiz-admin-muted); font-size:11px; font-weight:800; }
     .toolbar-help { margin:10px 0 0; color:var(--quiz-admin-muted); font-size:12px; line-height:1.55; }
     .overview-panel { margin-bottom:22px; padding:20px; border:1px solid var(--quiz-admin-line); border-radius:20px; background:#fff; box-shadow:0 10px 35px rgba(26,56,34,.06); }
@@ -267,7 +267,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.8';
+    const VERSION = '1.5.9';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -290,6 +290,7 @@
     let quizScope = '', quizActor = '', quizVisit = 0;
     let statsQuestion = null, statsIntent = 0, statsClosing = false, statsOpening = false;
     let deleteOwner = null, deleteIntent = 0, deleteClosing = false, deleteOpening = false;
+    let editorView = null, editorOpening = false, editorClosing = false, editorTicket = 0, editorPending = null;
 
     function quizContext() { return {scope:quizScope,visit:quizVisit}; }
     function quizCurrent(context) {
@@ -297,6 +298,7 @@
     }
     function cancelQuizRead(kind) { quizReadSerial[kind]++; quizReads[kind]?.cancel(); quizReads[kind]=null; }
     function invalidateQuizView() {
+      invalidateQuestionEditor();
       quizVisit++; statsIntent++; deleteIntent++; deleteOwner=null; state.deleteId=''; statsQuestion=null;
       for(const kind of Object.keys(quizReads))cancelQuizRead(kind);
       state.loading=false; state.overallLoading=false; state.statsLoading=false;
@@ -361,6 +363,128 @@
           setQuizListVerified(false); $('questionList').replaceChildren(); $('overallContent').classList.add('d-none');
         }
       });
+    }
+
+    function editorCurrent(view) {
+      return view && editorView===view && view.ticket===editorTicket && quizCurrent(view);
+    }
+    function otherQuizDialog() {
+      return [...document.querySelectorAll('.modal.show,dialog[open],[role="dialog"][aria-modal="true"]')]
+        .some(node=>node!==$('questionModal')&&node.getClientRects().length&&getComputedStyle(node).visibility==='visible');
+    }
+    function editorOpenerVisible(view) {
+      const node=view?.opener;
+      if(!node?.isConnected||node.matches(':disabled')||node.closest('[inert]')||!node.getClientRects().length)return false;
+      const rect=node.getBoundingClientRect();
+      return getComputedStyle(node).visibility==='visible'&&rect.top>=0&&rect.left>=0&&rect.bottom<=innerHeight+.5&&rect.right<=innerWidth+.5;
+    }
+    function restoreEditorOpener(view) {
+      if(!editorCurrent(view)||view.moved||view.returned||!view.returnAllowed||!document.hasFocus()||otherQuizDialog()||!editorOpenerVisible(view))return false;
+      const active=document.activeElement;
+      if(active!==document.body&&active!==document.documentElement&&active!==view.opener&&!$('questionModal').contains(active))return false;
+      view.returned=true; view.opener.focus({preventScroll:true}); return true;
+    }
+    function dismissQuestionEditor(restore=true) {
+      const view=editorView;
+      if(!view||state.saving)return;
+      view.dismissed=true; view.restore=restore;
+      if(editorOpening) {
+        // Only this canceled instance's deferred autofocus is suppressed.
+        // Restore the pinned Bootstrap5.3 option after its own hidden event.
+        if(questionModal._config&&!view.restoreConfig) {
+          const focus=questionModal._config.focus;
+          view.restoreConfig=()=>{questionModal._config.focus=focus;};
+          questionModal._config.focus=false;
+        }
+      } else questionModal.hide();
+    }
+    function invalidateQuestionEditor() {
+      editorTicket++;
+      if(editorView)editorView.restore=false;
+      dismissQuestionEditor(false);
+    }
+    async function requestQuestionEditor(render,opener) {
+      if(state.saving)return;
+      if(editorOpening&&editorView&&!editorView.dismissed&&editorView.opener===opener)return;
+      const context=quizContext(),ticket=++editorTicket;
+      if(editorClosing||editorOpening) {
+        if(editorOpening&&!editorView?.dismissed)dismissQuestionEditor(false);
+        await new Promise(resolve=>$('questionModal').addEventListener('hidden.bs.modal',resolve,{once:true}));
+      }
+      if(ticket!==editorTicket||!quizCurrent(context)||state.saving)return;
+      editorPending={...context,ticket,opener:opener?.matches?.('button,a[href],[tabindex]')?opener:null,moved:false};
+      try { render(); }
+      finally {
+        if(editorPending) {
+          // An already-open explicit render does not emit another show event.
+          if($('questionModal').classList.contains('show'))editorView=editorPending;
+          editorPending=null;
+        }
+      }
+    }
+    function editorFocusable() {
+      return [...$('questionModal').querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]')]
+        .filter(node=>node.tabIndex>=0&&!node.matches(':disabled')&&!node.closest('[inert]')&&node.getClientRects().length&&getComputedStyle(node).visibility==='visible')
+        .sort((a,b)=>(a.tabIndex||Infinity)-(b.tabIndex||Infinity));
+    }
+    function editorKeyboard(event) {
+      const view=editorView,root=$('questionModal');
+      if(event.defaultPrevented||event.isComposing||event.keyCode===229||event.altKey||event.ctrlKey||event.metaKey||!editorCurrent(view)||!document.hasFocus()||otherQuizDialog())return;
+      if(event.key==='Escape'&&editorOpening&&!state.saving
+        &&(event.target===view.opener||root.contains(event.target))&&!event.target.matches?.('select')) {
+        event.preventDefault();event.stopPropagation();dismissQuestionEditor(true);return;
+      }
+      if(event.key!=='Tab'||!root.contains(document.activeElement))return;
+      if(editorClosing) {
+        if(restoreEditorOpener(view))event.preventDefault();
+        return;
+      }
+      if(!root.classList.contains('show'))return;
+      const items=editorFocusable(),first=items[0],last=items.at(-1),active=document.activeElement;
+      const target=!first?root:event.shiftKey&&(active===first||active===root)?last:!event.shiftKey&&(active===last||active===root)?first:null;
+      if(target){event.preventDefault();target.focus({preventScroll:true});}
+    }
+    function watchEditorFocus(event) {
+      const view=editorView;
+      if(!view||(!view.dismissed&&!editorClosing)||$('questionModal').contains(event.target)||event.target===view.opener)return;
+      if(event.type==='focusin'&&(event.target===document.body||event.target===document.documentElement))return;
+      view.moved=true;
+    }
+    function installQuestionEditorKeyboard() {
+      const root=$('questionModal');
+      root.addEventListener('show.bs.modal',()=>{
+        const opener=document.activeElement;
+        editorView=editorPending||{...quizContext(),ticket:++editorTicket,opener:opener?.matches?.('button,a[href],[tabindex]')?opener:null,moved:false};
+        editorPending=null;editorOpening=true;editorClosing=false;
+      });
+      root.addEventListener('shown.bs.modal',()=>{
+        editorOpening=false;
+        if(editorView?.dismissed||!editorCurrent(editorView))questionModal.hide();
+      });
+      root.addEventListener('hide.bs.modal',event=>{
+        if(event.defaultPrevented)return;
+        editorOpening=false;editorClosing=true;
+        if(editorView) {
+          const active=document.activeElement;
+          editorView.returnAllowed=!state.saving&&editorView.restore!==false&&(root.contains(active)||active===editorView.opener);
+        }
+      });
+      root.addEventListener('hidden.bs.modal',()=>{
+        const view=editorView;
+        editorOpening=false;editorClosing=false;
+        view?.restoreConfig?.();
+        restoreEditorOpener(view);
+        if(editorView===view)editorView=null;
+      });
+      root.addEventListener('click',event=>{
+        const close=event.target.closest('[data-bs-dismiss="modal"]');
+        if(!event.defaultPrevented&&close&&!close.disabled&&editorOpening&&editorCurrent(editorView)&&!state.saving) {
+          event.preventDefault();event.stopPropagation();dismissQuestionEditor(true);
+        }
+      },true);
+      document.addEventListener('keydown',editorKeyboard);
+      document.addEventListener('focusin',watchEditorFocus,true);
+      document.addEventListener('pointerdown',watchEditorFocus,true);
     }
 
     function escapeHtml(value) {
@@ -866,7 +990,8 @@
       $(id).addEventListener('keydown',event=>{if(event.key==='Enter'&&event.repeat&&!event.isComposing&&!event.defaultPrevented)event.preventDefault();});
     }
 
-    $('addQuestionButton').addEventListener('click',openNewQuestion);
+    installQuestionEditorKeyboard();
+    $('addQuestionButton').addEventListener('click',event=>void requestQuestionEditor(openNewQuestion,event.currentTarget));
     $('addOptionButton').addEventListener('click',addOption);
     $('typeInput').addEventListener('change',handleTypeChange);
     $('questionForm').addEventListener('submit',saveQuestion);
@@ -895,7 +1020,7 @@
       if(!state.listVerified)return;
       const button=event.target.closest('[data-action]'); if(!button)return;
       const card=button.closest('[data-question-id]'); const q=findQuestion(card?.dataset.questionId); if(!q)return;
-      if(button.dataset.action==='edit')openEditQuestion(q);
+      if(button.dataset.action==='edit')void requestQuestionEditor(()=>openEditQuestion(q),button);
       if(button.dataset.action==='delete')openDeleteQuestion(q);
       if(button.dataset.action==='stats')void openStats(q);
     });
