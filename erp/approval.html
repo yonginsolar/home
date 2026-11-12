@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.161 | Change: 2026-11-12 - Preserve explicit expense edits, current quick selection and active body cursor. -->
+<!-- Version: v1.2.162 | Change: 2026-11-12 - Isolate proxy expense fields and protect the pending payroll amount. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.161 | approval.html');</script>
+  <script>console.log('[Version] v1.2.162 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7551,6 +7551,8 @@ function getApprovalPayoutKind(expenseSubType = document.getElementById('expense
 
 function resetApprovalPayoutState() {
     approvalPayoutState = { kind: '', rows: [], selectedIds: new Set(), loading: false };
+    const button = document.getElementById('btnReloadPayoutCandidates');
+    if (button) button.disabled = false;
     const candidates = document.getElementById('payoutExpenseCandidates');
     const summary = document.getElementById('payoutExpenseSummary');
     if (candidates) candidates.innerHTML = '';
@@ -7620,17 +7622,26 @@ async function loadApprovalPayoutCandidates(showFailure = false) {
     const expenseSubType = String(document.getElementById('expenseSubType')?.value || '').trim();
     const kind = getApprovalPayoutKind(expenseSubType);
     if (!kind) return resetApprovalPayoutState();
+    if(activeApprovalTab!=='draft'||window.frameElement?.hidden||getCurrentDraftMainType()!=='지출결의')return;
     if (!canUseApprovalExpenseSubType(expenseSubType)) {
         resetApprovalPayoutState();
         if (showFailure) showAlert('이 지급 내역을 불러올 권한이 없습니다.');
         return;
     }
-    approvalPayoutState = { kind, rows: [], selectedIds: new Set(), loading: true };
+    const owner = approvalSubmitOwner(), epoch = approvalDraftComposerEpoch;
+    if (approvalPayoutState.loading && approvalPayoutState.owner === owner && approvalPayoutState.epoch === epoch
+        && approvalPayoutState.kind === kind) return approvalPayoutState.promise;
+    const state = { kind, rows: [], selectedIds: new Set(), loading: true, owner, epoch };
+    approvalPayoutState = state;
+    const current = () => approvalPayoutState === state && owner === approvalSubmitOwner() && epoch === approvalDraftComposerEpoch
+        && activeApprovalTab === 'draft' && !window.frameElement?.hidden && getCurrentDraftMainType() === '지출결의'
+        && document.getElementById('expenseSubType')?.value === expenseSubType && canUseApprovalExpenseSubType(expenseSubType);
     renderApprovalPayoutCandidates();
     const button = document.getElementById('btnReloadPayoutCandidates');
     if (button) button.disabled = true;
+    state.promise = (async () => { try {
     const { data, error } = await _supabase.rpc('admin_list_payout_approval_candidates', { p_kind: kind });
-    if (button) button.disabled = false;
+    if (!current()) return;
     if (error) {
         approvalPayoutState.loading = false;
         renderApprovalPayoutCandidates();
@@ -7640,14 +7651,23 @@ async function loadApprovalPayoutCandidates(showFailure = false) {
         return;
     }
     const rows = Array.isArray(data) ? data : [];
-    approvalPayoutState = { kind, rows, selectedIds: new Set(), loading: false };
+    state.rows = rows; state.selectedIds = new Set(); state.loading = false;
     if (kind === 'withdrawal_refund') rows.forEach((row) => approvalPayoutState.selectedIds.add(String(row.id)));
     else if (rows[0]) approvalPayoutState.selectedIds.add(String(rows[0].id));
     renderApprovalPayoutCandidates();
     syncApprovalPayoutAmountAndBody();
+    } catch (error) {
+        if (!current()) return;
+        state.loading = false;
+        const summary = document.getElementById('payoutExpenseSummary');
+        if (summary) summary.textContent = '지급 대상을 불러오지 못했습니다. 다시 불러와 주세요.';
+        if (showFailure) showAlert('지급 대상을 불러오지 못했습니다. 다시 불러와 주세요.');
+    } finally { if (approvalPayoutState === state) { state.loading = false; if (button) button.disabled = false; } } })();
+    return state.promise;
 }
 
 function buildApprovalPayoutSnapshot(expenseSubType) {
+    if (approvalPayoutState.needsVerification) throw new Error('지급 대상을 다시 불러와 확인해 주세요.');
     const kind = getApprovalPayoutKind(expenseSubType);
     const selectedRows = getSelectedApprovalPayoutRows();
     if (!kind || approvalPayoutState.kind !== kind || !selectedRows.length) {
@@ -11584,7 +11604,7 @@ function handlePayrollMonthChange() {
     syncApprovalTitleInput('지출결의');
 } // End of handlePayrollMonthChange
 
-function handleExpenseSubTypeChange() {
+function handleExpenseSubTypeChange(options = {}) {
     // Capture ownership before changing the subtype clears the old calculation state.
     const expenseBody = String(getApprovalEditorContent() || '').trim();
     const replaceExpenseBody = !expenseBody || isApprovalAutoGeneratedTemplateContent(expenseBody);
@@ -11639,7 +11659,7 @@ function handleExpenseSubTypeChange() {
         if (replaceExpenseBody) {
             setApprovalExpenseAutomaticBody(`${mode === '배당금' ? '확정 배당금 지급' : '총회에서 확정한 출자금 반환'}을 위해 지출결의를 상신합니다.`);
         }
-        void loadApprovalPayoutCandidates(false);
+        if (!options.skipPayoutRead) void loadApprovalPayoutCandidates(false);
         updateJeongyeolUi();
         syncApprovalTitleInput('지출결의');
         return;
@@ -11791,6 +11811,7 @@ function handleExpenseSubTypeChange() {
 function invalidateApprovalSalaryExpenseRead() {
     const read = approvalSalaryExpenseRead;
     approvalSalaryExpenseRead = null;
+    if (read?.amount && read.amount === document.getElementById('appAmount')) read.amount.readOnly = read.amountReadOnly;
     if (read?.button?.isConnected) {
         read.button.disabled = false;
         read.button.textContent = '📊 급여대장 불러오기';
@@ -11812,11 +11833,13 @@ async function loadSalaryLedgerForExpense() {
         && approvalSalaryExpenseRead?.month === ym) return approvalSalaryExpenseRead.promise;
     invalidateApprovalSalaryExpenseRead();
     const btn = document.getElementById("btnLoadPayroll");
-    const read = {owner, epoch, month:ym, button:btn};
+    const amount = document.getElementById('appAmount');
+    const read = {owner, epoch, month:ym, button:btn, amount, amountReadOnly:amount?.readOnly};
     const initialBody = normalizeApprovalExpenseAutomaticBody(getApprovalEditorContent());
     const replaceBody = !initialBody || isApprovalAutoGeneratedTemplateContent(getApprovalEditorContent());
     const flightKey = JSON.stringify([approvalSubmitActor(), ym]);
     approvalSalaryExpenseRead = read;
+    if (amount) amount.readOnly = true;
     const current = () => approvalSalaryExpenseRead === read && valid();
     if (btn) {
         btn.disabled = true;
@@ -11929,12 +11952,71 @@ function captureApprovalProxyDraft(){
     const categoryBodies=new Map(approvalCategoryBodyDrafts),notice=payload.category==='공문';
     categoryBodies.set(payload.category,{body:payload.body,title:{value:notice?payload.fields.notice_subject:payload.fields.proposal_subject,
         auto:notice?payload.fields.notice_subject_auto:payload.fields.proposal_subject_auto}});
-    return {category:payload.category,body:payload.body,fields:payload.fields,categoryBodies,
+    const expenseEvidence=payload.category==='지출결의'?{
+        salary:salaryExpenseState?{...salaryExpenseState}:null,
+        withholding:withholdingExpenseState?{...withholdingExpenseState}:null,
+        adjustment:approvalExpenseAdjustmentSelectedDoc,
+        payout:{kind:approvalPayoutState.kind,rows:approvalPayoutState.rows,selectedIds:[...approvalPayoutState.selectedIds]},
+        inventoryManual:approvalInventoryFinalAmountManual
+    }:null;
+    return {category:payload.category,body:payload.body,fields:payload.fields,categoryBodies,expenseEvidence,
         meetingLink:notice&&approvalMeetingNoticeLink?{...approvalMeetingNoticeLink}:null,
         approvers:finalApprovers.map(x=>({...x})),refs:finalRefs.map(x=>({...x})),
         files:Array.from(document.getElementById('attachFile')?.files||[]),saved:approvalDraftAttachmentRefs.slice(),
         order:approvalAttachmentOrder.slice(),id:currentApprovalDraftId,updatedAt:currentApprovalDraftUpdatedAt,
         baseline:approvalDraftSavedState,saveFailed:approvalDraftLastSaveFailed,saveUncertain:approvalDraftSaveUncertain};
+}
+function restoreApprovalProxyExpense(draft){
+    const own=draft?.category==='지출결의'?draft:null,f=own?.fields||{},evidence=own?.expenseEvidence;
+    const fields={appAmount:'amount',expenseSubType:'expense_sub_type',expensePaymentMethod:'expense_payment_method',
+        expensePrepaidDate:'expense_prepaid_date',expenseCardSelect:'expense_card_alias',payrollMonth:'payroll_month',
+        inventoryPurchaseItem:'inventory_purchase_item_id',inventoryPurchaseQuantity:'inventory_purchase_quantity',inventoryPurchaseUnitCost:'inventory_purchase_unit_cost',
+        withholdingFilingMonth:'withholding_filing_month',withholdingDueDate:'withholding_due_date',withholdingNationalTax:'withholding_national_tax',withholdingLocalTax:'withholding_local_tax',withholdingAdjustmentReason:'withholding_adjustment_reason',
+        insuranceBillingMonth:'insurance_billing_month',insurancePaymentMethod:'insurance_payment_method',insuranceDueDate:'insurance_due_date',
+        insurancePension:'insurance_pension',insuranceHealth:'insurance_health',insuranceCare:'insurance_care',insuranceEmployment:'insurance_employment',insuranceEmploymentStability:'insurance_employment_stability',insuranceIndustrial:'insurance_industrial',
+        insuranceDurunuriPension:'insurance_durunuri_pension',insuranceDurunuriEmployment:'insurance_durunuri_employment',insuranceDurunuriStability:'insurance_durunuri_stability',insurancePensionOffsetReceipts:'insurance_pension_offset_receipts',
+        insuranceNoticeCountBase:'insurance_notice_count_base',insuranceNoticeCountHealthCare:'insurance_notice_count_health_care',insuranceNoticeCountPension:'insurance_notice_count_pension',insuranceNoticeCountEmployment:'insurance_notice_count_employment',insuranceNoticeCountIndustrial:'insurance_notice_count_industrial'};
+    const put=()=>{
+        for(const [id,key]of Object.entries(fields)){const node=document.getElementById(id);if(node)node.value=String(f[key]??(id==='expenseSubType'?'일반':id==='expensePaymentMethod'?'auto':id==='insurancePaymentMethod'?'manual':''));}
+        const method=document.getElementById('expensePaymentMethod');
+        if(method&&['credit_card','check_card'].includes(f.expense_payment_method))method.value='card';
+        for(const [id,key]of [['expensePrepaid','expense_prepaid'],['inventoryPurchaseEnabled','inventory_purchase_enabled'],['withholdingPaymentConfirmed','withholding_payment_confirmed']]){
+            const node=document.getElementById(id);if(node)node.checked=f[key]===true;
+        }
+    };
+    invalidateApprovalWithholdingRead();salaryExpenseState=null;withholdingExpenseState=null;
+    approvalExpenseAdjustmentSelectedDoc=null;resetApprovalPayoutState();
+    put();
+    const inventory=document.getElementById('inventoryPurchaseEnabled');if(inventory)inventory.checked=false;
+    setApprovalEditorContent('');
+    handleExpenseSubTypeChange({skipPayoutRead:true});
+    setApprovalExpenseAdjustmentMode(f.expense_adjustment_mode||'new',{silent:true});
+    approvalExpenseAdjustmentSelectedDoc=evidence?.adjustment||null;
+    handleExpenseAdjustmentModeChange({keepRelatedDoc:true});
+    const effectiveSubtype=document.getElementById('expenseSubType')?.value||'일반';
+    put();
+    const subtypeSelect=document.getElementById('expenseSubType');if(subtypeSelect)subtypeSelect.value=effectiveSubtype;
+    handleExpensePaymentMethodChange();syncApprovalExpenseDateUi();
+    const insuranceMethod=document.getElementById('insurancePaymentMethod');if(insuranceMethod)insuranceMethod.dataset.initialized='1';
+    const insuranceDate=document.getElementById('insuranceDueDate');if(insuranceDate)delete insuranceDate.dataset.autoValue;
+    if(document.getElementById('expenseSubType')?.value==='4대보험')syncApprovalInsuranceExpenseTotal();
+    approvalInventoryWasEnabled=inventory?.checked===true;approvalInventoryFinalAmountManual=evidence?.inventoryManual===true;
+    document.getElementById('inventoryPurchaseFields')?.classList.toggle('hidden',!approvalInventoryWasEnabled);
+    if(effectiveSubtype==='급여'&&evidence?.salary)salaryExpenseState={...evidence.salary,loaded:false};
+    if(effectiveSubtype==='원천세'&&evidence?.withholding)withholdingExpenseState={...evidence.withholding,verified:false};
+    if(['출자금반환','배당금'].includes(effectiveSubtype)&&evidence?.payout?.kind){
+        approvalPayoutState={kind:evidence.payout.kind,rows:evidence.payout.rows,selectedIds:new Set(evidence.payout.selectedIds),loading:false,needsVerification:true};
+        renderApprovalPayoutCandidates();
+        const summary=document.getElementById('payoutExpenseSummary');if(summary)summary.textContent='지급 대상을 다시 불러와 확인해 주세요.';
+    }
+    const subtype=document.getElementById('expenseSubType')?.value;
+    if(subtype==='원천세'){
+        document.getElementById('withholdingAmountSection')?.classList.toggle('hidden',!evidence?.withholding);
+        document.getElementById('withholdingAdjustmentReasonWrap')?.classList.toggle('hidden',!String(f.withholding_adjustment_reason||'').trim());
+        const summary=document.getElementById('withholdingSummary');if(summary)summary.textContent='급여 원천세 계산을 다시 확인해 주세요.';
+        syncApprovalWithholdingReadButton(false,true);
+    }
+    const amount=document.getElementById('appAmount');if(amount)amount.value=String(f.amount??'');
 }
 function restoreApprovalProxyDraft(draft,files){
     const f=draft?.fields||{},type=getCurrentDraftMainType();
@@ -11953,6 +12035,7 @@ function restoreApprovalProxyDraft(draft,files){
     approvalCategoryBodyDrafts.clear();
     for(const [name,entry] of draft?.categoryBodies||[])approvalCategoryBodyDrafts.set(name,entry);
     const entry=approvalCategoryBodyDrafts.get(type);
+    if(type==='지출결의')restoreApprovalProxyExpense(draft);
     setApprovalEditorContent(draft?.category===type?draft.body:typeof entry==='string'?entry:entry?.body||'');
     const subject=document.getElementById(type==='공문'?'noticeSubject':'proposalSubject');
     if(subject){
@@ -11994,8 +12077,8 @@ function switchApprovalProxyDraft(){
     try{files=parked?.files.length?buildAttachmentFileTransfer(parked.files).files:null;}
     catch(_){setApprovalProxyDraftControls(previous);showAlert('첨부를 복원하지 못했습니다. 현재 초안과 파일은 그대로 남아 있습니다.');return false;}
     // The select has already changed; capture the old owner's clock and draft under its own scope.
-    invalidateApprovalSalaryExpenseRead();
     setApprovalProxyDraftControls(previous);
+    invalidateApprovalSalaryExpenseRead();invalidateApprovalWithholdingRead();
     approvalProxyDrafts.set(previous.key,captureApprovalProxyDraft());
     setApprovalProxyDraftControls(next);
     approvalProxyDrafts.delete(next.key);approvalProxyDraftActive=next;approvalDraftComposerEpoch++;
@@ -12625,6 +12708,7 @@ function decorateTodoDelegation(doc) {
 function switchTab(tab, options = {}) {
     if(activeApprovalTab !== String(tab || 'draft').trim()){
         invalidateApprovalSalaryExpenseRead();
+        if(approvalPayoutState.loading)resetApprovalPayoutState();
         if (activeApprovalTab === 'todo') approvalInboxUi?.leave();
         closeApprovalLegacyDialogs();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
@@ -13845,13 +13929,15 @@ function bindApprovalSubmitPreviewControls() {
     form.dataset.submitPreviewBound='1';
     const changed=event=>{rememberApprovalExpenseManualBody(event);approvalComposerInputRevision++;syncApprovalSubmitControls();};
     form.addEventListener('input',changed);form.addEventListener('change',changed);
-    form.addEventListener('reset',()=>{approvalComposerInputRevision++;invalidateApprovalSubmitPreview();invalidateApprovalWithholdingRead();invalidateApprovalSalaryExpenseRead();approvalExpenseAutomaticBodies.delete(document.getElementById('appDesc'));approvalExpenseManualBodies.delete(document.getElementById('appDesc'));});
+    form.addEventListener('reset',()=>{approvalComposerInputRevision++;invalidateApprovalSubmitPreview();invalidateApprovalWithholdingRead();invalidateApprovalSalaryExpenseRead();if(approvalPayoutState.loading)resetApprovalPayoutState();approvalExpenseAutomaticBodies.delete(document.getElementById('appDesc'));approvalExpenseManualBodies.delete(document.getElementById('appDesc'));});
     window.addEventListener('pagehide',()=>{
         invalidateApprovalSalaryExpenseRead();
+        if(approvalPayoutState.loading)resetApprovalPayoutState();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');leaveApprovalSubmitPreview();
     });
     if(window.frameElement)new MutationObserver(records=>{
         invalidateApprovalSalaryExpenseRead();
+        if(approvalPayoutState.loading)resetApprovalPayoutState();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
         if(window.frameElement.hidden||records.some(record=>record.oldValue===null))leaveApprovalSubmitPreview();
     }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
