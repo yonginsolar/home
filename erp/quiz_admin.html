@@ -305,6 +305,7 @@
       if(quizScope && quizScope!==scope) {
         invalidateQuizView(); state.questions=[]; state.overall=null; state.listVerified=false;
         $('questionList').replaceChildren(); $('overallContent').classList.add('d-none'); $('resultSummary').classList.add('d-none');
+        $('overallError').classList.add('d-none'); $('listError').classList.add('d-none');
       }
       quizActor=String(actor||''); quizScope=scope;
     }
@@ -326,7 +327,10 @@
       op.promise=Promise.race([request,stopped]).finally(()=>{clearTimeout(timer);if(quizReads[kind]===op)quizReads[kind]=null;});
       quizReads[kind]=op; return op;
     }
-    function quizReadDenied(error) { return ['401','403','42501'].some(value=>value===String(error?.status)||value===String(error?.code)); }
+    function quizReadDenied(error) {
+      return ['401','403','42501'].some(value=>value===String(error?.status)||value===String(error?.code))
+        || /QUIZ_ADMIN_PERMISSION_REQUIRED|QUIZ_ACTIVE_MEMBER_REQUIRED|JWT/.test(String(error?.message||''));
+    }
     function quizReadMessage(error,label) {
       if(quizReadDenied(error))return '조회 권한을 확인하지 못했습니다. 로그인·담당 권한을 확인해 주세요.';
       if(String(error?.status||error?.code)==='429')return '요청이 많아 조회가 제한되었습니다. 잠시 후 다시 확인해 주세요.';
