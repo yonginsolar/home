@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.162 | Change: 2026-11-12 - Isolate proxy expense fields and protect the pending payroll amount. -->
+<!-- Version: v1.2.163 | Change: 2026-11-12 - Preserve payout choices during refresh and require verified results. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.162 | approval.html');</script>
+  <script>console.log('[Version] v1.2.163 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1870,6 +1870,7 @@ const approvalExpenseManualBodies = new WeakMap();
 let withholdingExpenseState = null;
 let approvalWithholdingRead = null, approvalWithholdingReadGeneration = 0;
 let approvalPayoutState = { kind: '', rows: [], selectedIds: new Set(), loading: false };
+const approvalPayoutRenderCache = new WeakMap();
 let physicalRejectModalInstance = null;
 let cancelDraftModalInstance = null;
 let evidenceUploadModalInstance = null;
@@ -7559,6 +7560,19 @@ function resetApprovalPayoutState() {
     if (summary) summary.textContent = '확정된 지급 대상을 불러오세요.';
 }
 
+function invalidateApprovalPayoutRead() {
+    const state=approvalPayoutState;
+    if(!state.loading)return;
+    if(state.source!==document.getElementById('draftForm') || state.draftOwner!==approvalExpenseAutomaticBodyOwner()
+        || state.epoch!==approvalDraftComposerEpoch || !canUseApprovalExpenseSubType(document.getElementById('expenseSubType')?.value)){
+        resetApprovalPayoutState();return;
+    }
+    approvalPayoutState={...state,loading:false,needsVerification:true,promise:null};
+    const button=document.getElementById('btnReloadPayoutCandidates');if(button)button.disabled=false;
+    renderApprovalPayoutCandidates();
+    const summary=document.getElementById('payoutExpenseSummary');if(summary)summary.textContent='지급 대상을 다시 불러와 확인해 주세요.';
+}
+
 function getSelectedApprovalPayoutRows() {
     return (approvalPayoutState.rows || []).filter((row) => approvalPayoutState.selectedIds.has(String(row.id)));
 }
@@ -7576,15 +7590,26 @@ function syncApprovalPayoutSelection(sourceId, checked) {
 function renderApprovalPayoutCandidates() {
     const container = document.getElementById('payoutExpenseCandidates');
     if (!container) return;
-    if (approvalPayoutState.loading) {
+    const rows = Array.isArray(approvalPayoutState.rows) ? approvalPayoutState.rows : [];
+    if (approvalPayoutState.loading && !rows.length) {
         container.innerHTML = '<div class="text-muted py-2">확정된 지급 대상을 불러오는 중입니다.</div>';
         return;
     }
-    const rows = Array.isArray(approvalPayoutState.rows) ? approvalPayoutState.rows : [];
     if (!rows.length) {
-        container.innerHTML = '<div class="alert alert-warning mb-0">현재 결재에 올릴 확정 지급 대상이 없습니다.</div>';
+        container.textContent = approvalPayoutState.needsVerification
+            ? '지급 대상을 다시 불러와 확인해 주세요.' : '현재 결재에 올릴 확정 지급 대상이 없습니다.';
+        approvalPayoutRenderCache.delete(container);
         return;
     }
+    const scope = JSON.stringify([approvalExpenseAutomaticBodyOwner(), approvalDraftComposerEpoch, approvalPayoutState.kind]);
+    const signature = JSON.stringify(rows.map(row => [row.id,row.label,row.member_count,row.gross_amount,row.tax_amount,row.net_amount]));
+    const cached = approvalPayoutRenderCache.get(container), inputs = [...container.querySelectorAll('input')];
+    if(cached?.scope===scope && cached.signature===signature && inputs.length===rows.length
+        && inputs.every((input,index)=>input.id===`approvalPayout_${String(rows[index].id)}`)){
+        inputs.forEach((input,index)=>{input.checked=approvalPayoutState.selectedIds.has(String(rows[index].id));});
+        return;
+    }
+    const active=document.activeElement, returnId=cached?.scope===scope&&container.contains(active)?active.id:'';
     const inputType = approvalPayoutState.kind === 'dividend' ? 'radio' : 'checkbox';
     const inputName = approvalPayoutState.kind === 'dividend' ? 'approvalPayoutSource' : '';
     container.innerHTML = rows.map((row) => {
@@ -7599,6 +7624,11 @@ function renderApprovalPayoutCandidates() {
           <strong>${formatMoney(row.net_amount)}원</strong>
         </label>`;
     }).join('');
+    approvalPayoutRenderCache.set(container,{scope,signature});
+    if(returnId && document.activeElement===document.body && document.hasFocus()){
+        const target=document.getElementById(returnId);
+        if(target && container.contains(target))target.focus({preventScroll:true});
+    }
 }
 
 function syncApprovalPayoutAmountAndBody() {
@@ -7613,6 +7643,11 @@ function syncApprovalPayoutAmountAndBody() {
         summary.innerHTML = selectedRows.length
             ? `선택 <strong>${selectedRows.length.toLocaleString('ko-KR')}건</strong> · 지급 총액 ${formatMoney(totalGross)}원 · 원천세 ${formatMoney(totalTax)}원 · <strong>실지급 ${formatMoney(totalNet)}원</strong>`
             : '결재에 올릴 지급 대상을 선택하세요.';
+        if(approvalPayoutState.needsVerification){
+            const warning=document.createElement('div');
+            warning.textContent=approvalPayoutState.loading?'지급 대상을 확인 중입니다.':approvalPayoutState.failureMessage||'지급 대상을 다시 불러와 확인해 주세요.';
+            summary.prepend(warning);
+        }
     }
     updateJeongyeolUi();
     syncApprovalTitleInput('지출결의');
@@ -7625,49 +7660,62 @@ async function loadApprovalPayoutCandidates(showFailure = false) {
     if(activeApprovalTab!=='draft'||window.frameElement?.hidden||getCurrentDraftMainType()!=='지출결의')return;
     if (!canUseApprovalExpenseSubType(expenseSubType)) {
         resetApprovalPayoutState();
+        const amount=document.getElementById('appAmount');if(amount)amount.value='';
+        const summary=document.getElementById('payoutExpenseSummary');if(summary)summary.textContent='지급 대상을 조회할 권한이 없습니다.';
         if (showFailure) showAlert('이 지급 내역을 불러올 권한이 없습니다.');
         return;
     }
     const owner = approvalSubmitOwner(), epoch = approvalDraftComposerEpoch;
     if (approvalPayoutState.loading && approvalPayoutState.owner === owner && approvalPayoutState.epoch === epoch
         && approvalPayoutState.kind === kind) return approvalPayoutState.promise;
-    const state = { kind, rows: [], selectedIds: new Set(), loading: true, owner, epoch };
+    const source=document.getElementById('draftForm'),draftOwner=approvalExpenseAutomaticBodyOwner(),previous=approvalPayoutState;
+    const retain=previous.kind===kind && previous.epoch===epoch && previous.draftOwner===draftOwner && previous.source===source
+        && (previous.hasList===true || previous.rows?.length>0);
+    const state = { kind, rows:retain?previous.rows.slice():[], selectedIds:new Set(retain?previous.selectedIds:[]),
+        loading:true,needsVerification:true,hasList:retain,owner,epoch,source,draftOwner };
     approvalPayoutState = state;
     const current = () => approvalPayoutState === state && owner === approvalSubmitOwner() && epoch === approvalDraftComposerEpoch
         && activeApprovalTab === 'draft' && !window.frameElement?.hidden && getCurrentDraftMainType() === '지출결의'
-        && document.getElementById('expenseSubType')?.value === expenseSubType && canUseApprovalExpenseSubType(expenseSubType);
+        && source===document.getElementById('draftForm') && document.getElementById('expenseSubType')?.value === expenseSubType;
+    const failure = error => {
+        const denied=!canUseApprovalExpenseSubType(expenseSubType)||['42501','401','403','PGRST301','PGRST302'].includes(String(error?.code||''))
+            || [401,403].includes(Number(error?.status||error?.statusCode));
+        state.loading=false;state.needsVerification=true;
+        state.failureMessage=denied?'지급 대상을 조회할 권한이 없습니다.':'지급 대상을 불러오지 못했습니다. 다시 확인해 주세요.';
+        if(denied){state.rows=[];state.selectedIds.clear();state.hasList=false;const amount=document.getElementById('appAmount');if(amount)amount.value='';}
+        renderApprovalPayoutCandidates();
+        const summary=document.getElementById('payoutExpenseSummary');if(summary)summary.textContent=state.failureMessage;
+        if(showFailure && document.activeElement===button)showAlert(state.failureMessage);
+    };
     renderApprovalPayoutCandidates();
+    const summary=document.getElementById('payoutExpenseSummary');if(summary)summary.textContent='지급 대상을 확인 중입니다.';
     const button = document.getElementById('btnReloadPayoutCandidates');
     if (button) button.disabled = true;
     state.promise = (async () => { try {
     const { data, error } = await _supabase.rpc('admin_list_payout_approval_candidates', { p_kind: kind });
     if (!current()) return;
-    if (error) {
-        approvalPayoutState.loading = false;
-        renderApprovalPayoutCandidates();
-        const summary = document.getElementById('payoutExpenseSummary');
-        if (summary) summary.textContent = `대상 조회 실패: ${error.message}`;
-        if (showFailure) showAlert(`지급 대상을 불러오지 못했습니다: ${error.message}`);
-        return;
+    if (error || !canUseApprovalExpenseSubType(expenseSubType)) return failure(error);
+    if(!Array.isArray(data)||data.some(row=>!row||!['string','number'].includes(typeof row.id)||!String(row.id).trim())
+        || new Set(data.map(row=>String(row.id))).size!==data.length)return failure(null);
+    const rows=data, priorIds=new Set(state.selectedIds), available=new Set(rows.map(row=>String(row.id)));
+    state.rows=rows;state.selectedIds=new Set([...priorIds].filter(id=>available.has(id)));state.loading=false;
+    state.hasList=true;state.needsVerification=false;
+    if(!retain){
+        if(kind==='withdrawal_refund')rows.forEach(row=>state.selectedIds.add(String(row.id)));
+        else if(rows[0])state.selectedIds.add(String(rows[0].id));
     }
-    const rows = Array.isArray(data) ? data : [];
-    state.rows = rows; state.selectedIds = new Set(); state.loading = false;
-    if (kind === 'withdrawal_refund') rows.forEach((row) => approvalPayoutState.selectedIds.add(String(row.id)));
-    else if (rows[0]) approvalPayoutState.selectedIds.add(String(rows[0].id));
     renderApprovalPayoutCandidates();
     syncApprovalPayoutAmountAndBody();
+    if(retain && [...priorIds].some(id=>!available.has(id)) && summary)summary.append(document.createTextNode(' 일부 대상이 목록에서 제외되었습니다. 지급 대상을 확인해 주세요.'));
     } catch (error) {
         if (!current()) return;
-        state.loading = false;
-        const summary = document.getElementById('payoutExpenseSummary');
-        if (summary) summary.textContent = '지급 대상을 불러오지 못했습니다. 다시 불러와 주세요.';
-        if (showFailure) showAlert('지급 대상을 불러오지 못했습니다. 다시 불러와 주세요.');
+        failure(error);
     } finally { if (approvalPayoutState === state) { state.loading = false; if (button) button.disabled = false; } } })();
     return state.promise;
 }
 
 function buildApprovalPayoutSnapshot(expenseSubType) {
-    if (approvalPayoutState.needsVerification) throw new Error('지급 대상을 다시 불러와 확인해 주세요.');
+    if (approvalPayoutState.needsVerification || approvalPayoutState.loading) throw new Error('지급 대상을 다시 불러와 확인해 주세요.');
     const kind = getApprovalPayoutKind(expenseSubType);
     const selectedRows = getSelectedApprovalPayoutRows();
     if (!kind || approvalPayoutState.kind !== kind || !selectedRows.length) {
@@ -12005,7 +12053,8 @@ function restoreApprovalProxyExpense(draft){
     if(effectiveSubtype==='급여'&&evidence?.salary)salaryExpenseState={...evidence.salary,loaded:false};
     if(effectiveSubtype==='원천세'&&evidence?.withholding)withholdingExpenseState={...evidence.withholding,verified:false};
     if(['출자금반환','배당금'].includes(effectiveSubtype)&&evidence?.payout?.kind){
-        approvalPayoutState={kind:evidence.payout.kind,rows:evidence.payout.rows,selectedIds:new Set(evidence.payout.selectedIds),loading:false,needsVerification:true};
+        approvalPayoutState={kind:evidence.payout.kind,rows:evidence.payout.rows,selectedIds:new Set(evidence.payout.selectedIds),loading:false,needsVerification:true,
+            hasList:true,epoch:approvalDraftComposerEpoch,source:document.getElementById('draftForm'),draftOwner:approvalExpenseAutomaticBodyOwner()};
         renderApprovalPayoutCandidates();
         const summary=document.getElementById('payoutExpenseSummary');if(summary)summary.textContent='지급 대상을 다시 불러와 확인해 주세요.';
     }
@@ -12708,7 +12757,7 @@ function decorateTodoDelegation(doc) {
 function switchTab(tab, options = {}) {
     if(activeApprovalTab !== String(tab || 'draft').trim()){
         invalidateApprovalSalaryExpenseRead();
-        if(approvalPayoutState.loading)resetApprovalPayoutState();
+        if(approvalPayoutState.loading)invalidateApprovalPayoutRead();
         if (activeApprovalTab === 'todo') approvalInboxUi?.leave();
         closeApprovalLegacyDialogs();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
@@ -13932,12 +13981,12 @@ function bindApprovalSubmitPreviewControls() {
     form.addEventListener('reset',()=>{approvalComposerInputRevision++;invalidateApprovalSubmitPreview();invalidateApprovalWithholdingRead();invalidateApprovalSalaryExpenseRead();if(approvalPayoutState.loading)resetApprovalPayoutState();approvalExpenseAutomaticBodies.delete(document.getElementById('appDesc'));approvalExpenseManualBodies.delete(document.getElementById('appDesc'));});
     window.addEventListener('pagehide',()=>{
         invalidateApprovalSalaryExpenseRead();
-        if(approvalPayoutState.loading)resetApprovalPayoutState();
+        if(approvalPayoutState.loading)invalidateApprovalPayoutRead();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');leaveApprovalSubmitPreview();
     });
     if(window.frameElement)new MutationObserver(records=>{
         invalidateApprovalSalaryExpenseRead();
-        if(approvalPayoutState.loading)resetApprovalPayoutState();
+        if(approvalPayoutState.loading)invalidateApprovalPayoutRead();
         invalidateApprovalWithholdingRead('조회가 중단됐습니다. 다시 확인을 눌러 주세요.');
         if(window.frameElement.hidden||records.some(record=>record.oldValue===null))leaveApprovalSubmitPreview();
     }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
