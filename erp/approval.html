@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.168 | Change: 2026-11-12 - Keep attachment saves locked until verified and reconcile confirmed removals across menu visits. -->
+<!-- Version: v1.2.169 | Change: 2026-11-12 - Protect draft reloads, exclude confirmed removed references and keep result verification accessible. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.168 | approval.html');</script>
+  <script>console.log('[Version] v1.2.169 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1696,6 +1696,10 @@
           <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="expoApprovalExample" hidden onclick="chooseExpoApprovalExample()">📎 예시 영수증 첨부</button>
           <div class="small text-muted mt-2" id="attachmentDropZoneText">여기로 파일을 끌어놓거나 위에서 선택하세요. 업로드는 PDF 또는 이미지(PNG, JPG, JPEG) 파일만 가능합니다.</div>
         </div>
+        <div id="approvalAttachmentRemovalStatus" class="alert alert-warning py-2 mt-2 hidden" role="status">
+          <span id="approvalAttachmentRemovalMessage"></span>
+          <button type="button" id="btnApprovalAttachmentResult" class="btn btn-sm btn-outline-primary ms-2" onclick="checkApprovalDraftAttachmentResult(this.dataset.approvalRemovalKey)" onkeydown="if(event.key==='Enter'&amp;&amp;event.repeat&amp;&amp;!event.isComposing&amp;&amp;event.keyCode!==229)event.preventDefault()">결과 확인</button>
+        </div>
         <div id="fileListArea" class="mt-2" role="list"></div>
         <div class="small text-muted mt-2 hidden" id="attachmentOrderHint">첨부가 2개 이상이면 위·아래 버튼으로 순서를 바꿀 수 있습니다. 정렬 순서는 미리보기, 임시저장, 최종 상신 문서에 동일하게 적용됩니다.</div>
       </div>
@@ -1865,6 +1869,7 @@ let physicalCompleteIntent = null;
 const physicalCompleteRequests = new Map();
 let approvalDraftLoadIntent = null;
 const approvalDraftAttachmentRemovals = new Map();
+const approvalDraftRemovedAttachmentRefs = new Map();
 const approvalEvidenceRequests = new Map(), approvalEvidenceDrafts = new Map();
 let approvalEvidenceView = null;
 let pendingPhysicalRejectDocId = null;
@@ -3464,12 +3469,14 @@ function getApprovalDraftErrorMessage(error, fallback = '임시저장 처리 중
 } // End of getApprovalDraftErrorMessage
 
 async function fetchApprovalDraftList() {
+    const actor=approvalSubmitActor();
     const { data, error } = await _supabase
         .from('erp_approval_drafts')
         .select('id, doc_type, draft_title, form_payload, attachment_links, created_at, updated_at')
         .order('updated_at', { ascending: false });
     if (error) throw error;
-    approvalDraftCache = Array.isArray(data) ? data : [];
+    approvalDraftCache = Array.isArray(data) ? data.map(row=>({...row,
+        attachment_links:filterApprovalDraftRemovedAttachments(row.attachment_links,row.id,actor)})) : [];
     return approvalDraftCache;
 } // End of fetchApprovalDraftList
 
@@ -3524,7 +3531,7 @@ async function openApprovalDraftManager() {
 } // End of openApprovalDraftManager
 
 async function persistApprovalDraftRecord(draftId, payload, attachmentItems, options = {}) {
-    const normalizedAttachments = (Array.isArray(attachmentItems) ? attachmentItems : approvalDraftAttachmentRefs)
+    const normalizedAttachments = filterApprovalDraftRemovedAttachments(Array.isArray(attachmentItems) ? attachmentItems : approvalDraftAttachmentRefs,draftId)
         .map((item) => normalizeApprovalDraftAttachmentItem(item))
         .filter(Boolean);
     const { data, error } = await _supabase.rpc('erp_save_my_approval_draft', {
@@ -3861,7 +3868,11 @@ async function loadApprovalDraftFromServer(draftId) {
     const wasDraftModalOpen = !!draftModalEl?.classList.contains('show');
     let draftModalClosedBeforeRestore = false;
 
-    if (Number(currentApprovalDraftId || 0) !== safeDraftId && isApprovalComposerDirty()) {
+    const sameDraft=Number(currentApprovalDraftId||0)===safeDraftId;
+    const currentChanged=!sameDraft || !approvalDraftSavedState || approvalDraftSavedState!==getApprovalDraftStatusState()
+        || Array.from(document.getElementById('attachFile')?.files||[]).length>0 || hasParkedApprovalProxyDrafts()
+        || (window.CoopInsuranceNotice && approvalInsuranceNoticeReader?.hasCurrentDraft());
+    if (currentChanged && isApprovalComposerDirty()) {
         if (wasDraftModalOpen) {
             closeApprovalDraftModal();
             draftModalClosedBeforeRestore = true;
@@ -4133,7 +4144,7 @@ async function loadApprovalDraftFromServer(draftId) {
         currentApprovalDraftId = safeDraftId;
         currentApprovalDraftUpdatedAt = draftRow?.updated_at || draftRow?.created_at || '';
         resetApprovalAttachmentOrder();
-        approvalDraftAttachmentRefs = (Array.isArray(draftRow?.attachment_links) ? draftRow.attachment_links : [])
+        approvalDraftAttachmentRefs = filterApprovalDraftRemovedAttachments(draftRow?.attachment_links,safeDraftId)
             .map((item) => normalizeApprovalDraftAttachmentItem(item))
             .filter(Boolean);
 
@@ -4360,6 +4371,26 @@ function getApprovalDraftAttachmentRemoval(draftId=currentApprovalDraftId) {
     if(op?.phase==='settled')reconcileApprovalAttachmentRemoval(op);
     return approvalDraftAttachmentRemovals.get(key);
 }
+function filterApprovalDraftRemovedAttachments(items,draftId=currentApprovalDraftId,actor=approvalSubmitActor()) {
+    const removed=approvalDraftRemovedAttachmentRefs.get(JSON.stringify([actor,Number(draftId||0)]));
+    return (Array.isArray(items)?items:[]).filter(item=>!removed?.has(normalizeApprovalDraftAttachmentItem(item)?.rawRef));
+}
+function rememberApprovalDraftRemovedAttachment(op) {
+    if(op.actor!==approvalSubmitActor() || !myAuthUserId || !canPerform('approval.submit'))return;
+    let refs=approvalDraftRemovedAttachmentRefs.get(op.key);
+    if(!refs){refs=new Set();approvalDraftRemovedAttachmentRefs.set(op.key,refs);}
+    refs.add(op.target.rawRef);
+    // Keep confirmed ref removals across cached lists, late list reads and explicit reloads.
+    approvalDraftCache=approvalDraftCache.map(row=>Number(row.id)===op.draftId
+        ? {...row,attachment_links:filterApprovalDraftRemovedAttachments(row.attachment_links,op.draftId,op.actor)} : row);
+}
+async function checkApprovalDraftAttachmentResult(expectedKey) {
+    if(activeApprovalTab!=='draft' || window.frameElement?.hidden || !myAuthUserId || !canPerform('approval.submit'))return;
+    const op=getApprovalDraftAttachmentRemoval();
+    if(!op || op.key!==expectedKey || op.busy)return;
+    op.view=captureApprovalDraftLoadContext();
+    await finishApprovalDraftAttachmentRemoval(op);
+}
 function reconcileApprovalAttachmentRemoval(op) {
     if(op.phase!=='settled' || op.actor!==approvalSubmitActor() || !myAuthUserId || !canPerform('approval.submit')
         || Number(currentApprovalDraftId||0)!==op.draftId || approvalDraftAttachmentRemovals.get(op.key)!==op)return false;
@@ -4375,6 +4406,10 @@ function reconcileApprovalAttachmentRemoval(op) {
 }
 function syncApprovalAttachmentRemovalUi() {
     const op=getApprovalDraftAttachmentRemoval();
+    const status=document.getElementById('approvalAttachmentRemovalStatus'),message=document.getElementById('approvalAttachmentRemovalMessage'),resultButton=document.getElementById('btnApprovalAttachmentResult');
+    if(status)status.classList.toggle('hidden',!op);
+    if(message)message.textContent=op?(op.busy?'첨부 변경을 처리 중입니다.':'첨부 변경 결과를 확인해 주세요.') : '';
+    if(resultButton){resultButton.disabled=!op||!!op.busy||!canPerform('approval.submit');resultButton.dataset.approvalRemovalKey=op?.key||'';}
     document.querySelectorAll('[data-approval-remove-ref]').forEach(button=>{
         if(Number(button.dataset.approvalRemoveDraft)!==Number(currentApprovalDraftId||0))return;
         const target=op?.target.rawRef===button.dataset.approvalRemoveRef;
@@ -4422,6 +4457,7 @@ async function finishApprovalDraftAttachmentRemoval(op) {
             return;
         }
         op.confirmedRow=row;op.confirmedRefs=refs;
+        rememberApprovalDraftRemovedAttachment(op);
         op.phase='confirmed';
         if(!op.cleanupStarted){
             op.cleanupStarted=true;
@@ -17393,6 +17429,8 @@ function chooseExpoApprovalExample() {
 
 function updateFileList() {
     getApprovalDraftAttachmentRemoval();
+    approvalDraftAttachmentRefs=filterApprovalDraftRemovedAttachments(approvalDraftAttachmentRefs);
+    syncApprovalAttachmentRemovalUi();
     const area = document.getElementById("fileListArea");
     if (!area) return;
     area.innerHTML = "";
