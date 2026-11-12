@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.5.6 | Change: 2026-10-05 - Keep the active editor locked until saving finishes. -->
+<!-- Version: v1.5.7 | Change: 2026-11-12 - Recover scoped reads and isolate archive confirmations. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -165,13 +165,13 @@
             <a class="btn btn-outline-success btn-sm flex-shrink-0" href="admin_member.html?scope=member_admin&amp;tab=members" target="_blank" rel="noopener">조합원 관리에서 상세 보기</a>
           </div>
         </div>
-        <div id="overallError" class="alert alert-danger d-none mb-0"></div>
+        <div id="overallError" class="alert alert-danger d-none mb-0" aria-live="polite"><span id="overallMessage"></span> <button type="button" class="btn btn-outline-success btn-sm" id="overallRetry">다시 확인</button></div>
       </section>
 
       <section class="toolbar" aria-label="문제 검색과 필터">
         <div class="toolbar-head">
           <div>
-            <h2 class="toolbar-title">🔎 문제 찾기</h2>
+            <h2 class="toolbar-title" id="questionListTitle">🔎 문제 찾기</h2>
             <div class="toolbar-help mt-1">문제 목록은 자동으로 불러오지 않습니다. 검색어나 필터를 정한 뒤 검색해 주세요.</div>
           </div>
           <button type="button" class="btn btn-success flex-shrink-0" id="addQuestionButton">＋ 새 문제</button>
@@ -202,6 +202,7 @@
       </section>
 
       <section id="listLoading" class="loading-panel d-none" aria-live="polite"><div class="spinner-border spinner-border-sm text-success me-2" role="status"></div>문제를 불러오는 중입니다.</section>
+      <div id="listError" class="alert alert-danger d-none" aria-live="polite"><span id="listMessage"></span> <button type="button" class="btn btn-outline-success btn-sm" id="listRetry">다시 확인</button></div>
       <section class="question-list" id="questionList"></section>
       <section class="empty" id="searchPromptPanel"><div class="fs-2 mb-2">🗂️</div><strong>아직 문제 목록을 불러오지 않았습니다.</strong><div class="small mt-1">검색어를 입력하거나 필터를 고른 뒤 <code>검색</code>을 누르세요.</div></section>
       <section class="empty d-none" id="emptyPanel"><div class="fs-2 mb-2">🔎</div><strong>조건에 맞는 문제가 없습니다.</strong><div class="small mt-1">검색어 또는 상태 필터를 바꿔 보세요.</div></section>
@@ -246,11 +247,11 @@
   </div>
 
   <div class="modal fade" id="statsModal" tabindex="-1" aria-labelledby="statsModalTitle" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="statsModalTitle">문제별 응답 통계</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body" id="statsBody"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button></div></div></div>
+    <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="statsModalTitle">문제별 응답 통계</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body" id="statsBody"><div id="statsState" class="d-none" aria-live="polite"><span id="statsMessage"></span> <button type="button" class="btn btn-outline-success btn-sm d-none" id="statsRetry">다시 확인</button></div><div id="statsContent"></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button></div></div></div>
   </div>
 
   <div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalTitle" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="deleteModalTitle">문제를 삭제할까요?</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><p class="mb-2" id="deleteQuestionText"></p><div class="alert alert-warning mb-0">앞으로는 출제되지 않지만, 기존 참가자의 답변과 정답률은 지우지 않고 보관합니다. 필요하면 수정 화면에서 다시 ‘출제 중’으로 바꿀 수 있습니다.</div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-danger" id="confirmDeleteButton">삭제</button></div></div></div>
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="deleteModalTitle">문제를 삭제할까요?</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><p class="mb-2" id="deleteQuestionText"></p><div class="alert alert-warning mb-0">앞으로는 출제되지 않지만, 기존 참가자의 답변과 정답률은 지우지 않고 보관합니다. 필요하면 수정 화면에서 다시 ‘출제 중’으로 바꿀 수 있습니다.</div><p id="deletePendingHint" class="small mt-2 mb-0 d-none" aria-live="polite">이전 요청을 처리하고 있습니다.</p><p id="deleteError" class="text-danger mt-2 mb-0" aria-live="polite"></p></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-danger" id="confirmDeleteButton">삭제</button></div></div></div>
   </div>
 
   <div class="modal fade" id="alertModal" tabindex="-1" aria-labelledby="alertModalTitle" aria-hidden="true">
@@ -261,7 +262,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.6';
+    const VERSION = '1.5.7';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -270,7 +271,7 @@
     const state = {
       questions:[], overall:null, loading:false, overallLoading:false, loadSeq:0,
       saving:false, deleting:false, statsLoading:false, deleteId:'',
-      hasSearched:false, query:null, page:1, pageCount:0, totalCount:0
+      hasSearched:false, query:null, page:1, pageCount:0, totalCount:0, listVerified:false, retryPage:1
     };
     const $ = (id) => document.getElementById(id);
     const questionModal = bootstrap.Modal.getOrCreateInstance($('questionModal'));
@@ -279,6 +280,79 @@
     const statsModal = bootstrap.Modal.getOrCreateInstance($('statsModal'));
     const deleteModal = bootstrap.Modal.getOrCreateInstance($('deleteModal'));
     const alertModal = bootstrap.Modal.getOrCreateInstance($('alertModal'));
+    const quizReads = {overall:null,list:null,stats:null};
+    const quizReadSerial = {overall:0,list:0,stats:0};
+    let quizScope = '', quizActor = '', quizVisit = 0;
+    let statsQuestion = null, statsIntent = 0, statsClosing = false, statsOpening = false;
+    let deleteOwner = null, deleteIntent = 0, deleteClosing = false, deleteOpening = false;
+
+    function quizContext() { return {scope:quizScope,visit:quizVisit}; }
+    function quizCurrent(context) {
+      return context.scope===quizScope && context.visit===quizVisit && !window.frameElement?.hidden;
+    }
+    function cancelQuizRead(kind) { quizReadSerial[kind]++; quizReads[kind]?.cancel(); quizReads[kind]=null; }
+    function invalidateQuizView() {
+      quizVisit++; statsIntent++; deleteIntent++; deleteOwner=null; state.deleteId=''; statsQuestion=null;
+      for(const kind of Object.keys(quizReads))cancelQuizRead(kind);
+      state.loading=false; state.overallLoading=false; state.statsLoading=false;
+      $('listLoading').classList.add('d-none'); $('overallLoading').classList.add('d-none');
+      $('refreshStatsButton').disabled=false; setQuestionSearchBusy(false);
+      statsModal.hide(); deleteModal.hide();
+      $('confirmDeleteButton').disabled=true;
+    }
+    function setQuizScope(actor,runtime) {
+      const scope=JSON.stringify([String(actor||''),String(runtime?.coop_id||''),runtime?.effective_permissions||[],runtime?.module_access||{}]);
+      if(quizScope && quizScope!==scope) {
+        invalidateQuizView(); state.questions=[]; state.overall=null; state.listVerified=false;
+        $('questionList').replaceChildren(); $('overallContent').classList.add('d-none'); $('resultSummary').classList.add('d-none');
+      }
+      quizActor=String(actor||''); quizScope=scope;
+    }
+    function quizRead(kind,key,name,args) {
+      const previous=quizReads[kind];
+      if(previous && previous.key===key && quizCurrent(previous.context))return previous;
+      cancelQuizRead(kind);
+      const context=quizContext(), serial=quizReadSerial[kind], controller=new AbortController();
+      const op={key,context,serial,controller}; let timer,rejectWait;
+      const stopped=new Promise((_,reject)=>{rejectWait=reject;});
+      op.cancel=()=>{rejectWait(Object.assign(new Error('QUIZ_READ_CANCELLED'),{code:'QUIZ_READ_CANCELLED'}));controller.abort();};
+      const request=Promise.resolve().then(()=>{
+        if(!quizCurrent(context)||serial!==quizReadSerial[kind])throw Object.assign(new Error('QUIZ_READ_CANCELLED'),{code:'QUIZ_READ_CANCELLED'});
+        const query=client.rpc(name,args);
+        return typeof query?.abortSignal==='function'?query.abortSignal(controller.signal):query;
+      }).then(result=>{if(result.error)throw result.error;return result.data;});
+      timer=setTimeout(()=>{rejectWait(Object.assign(new Error('QUIZ_READ_TIMEOUT'),{code:'QUIZ_READ_TIMEOUT'}));controller.abort();},15000);
+      op.current=()=>quizCurrent(context)&&serial===quizReadSerial[kind];
+      op.promise=Promise.race([request,stopped]).finally(()=>{clearTimeout(timer);if(quizReads[kind]===op)quizReads[kind]=null;});
+      quizReads[kind]=op; return op;
+    }
+    function quizReadDenied(error) { return ['401','403','42501'].some(value=>value===String(error?.status)||value===String(error?.code)); }
+    function quizReadMessage(error,label) {
+      if(quizReadDenied(error))return '조회 권한을 확인하지 못했습니다. 로그인·담당 권한을 확인해 주세요.';
+      if(String(error?.status||error?.code)==='429')return '요청이 많아 조회가 제한되었습니다. 잠시 후 다시 확인해 주세요.';
+      if(error?.code==='QUIZ_READ_TIMEOUT')return `${label} 응답이 늦어지고 있습니다. 다시 확인해 주세요.`;
+      return errorMessage(error,`${label} 조회하지 못했습니다. 다시 확인해 주세요.`);
+    }
+    function quizRetryFocus(button,target) {
+      if(document.activeElement!==button || !document.hasFocus() || window.frameElement?.hidden)return;
+      target.tabIndex=-1; target.focus({preventScroll:true});
+    }
+    function setQuizListVerified(verified) {
+      state.listVerified=verified;
+      $('questionList').querySelectorAll('[data-action]').forEach(button=>{button.disabled=!verified;});
+    }
+    function watchQuizLifecycle() {
+      window.addEventListener('pagehide',invalidateQuizView);
+      if(window.frameElement)new MutationObserver(records=>{
+        if(window.frameElement.hidden||records.some(record=>record.oldValue!==null))invalidateQuizView();
+      }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+      client.auth?.onAuthStateChange?.((_event,session)=>{
+        if(quizActor && String(session?.user?.id||'')!==quizActor) {
+          invalidateQuizView(); quizActor=''; quizScope='signed-out';
+          setQuizListVerified(false); $('questionList').replaceChildren(); $('overallContent').classList.add('d-none');
+        }
+      });
+    }
 
     function escapeHtml(value) {
       return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -312,11 +386,14 @@
         if (!userGate.ok) return;
         const runtimeGate = await window.ErpRuntimeGuard.enforce(client,{moduleKey:'site_admin',moduleLabel:'퀴즈 관리',alertFn:showAlert,redirectUrl:'index.html'});
         if (!runtimeGate.ok) return;
+        setQuizScope(userGate.authUser?.id||userGate.user?.auth_user_id,runtimeGate.runtime);
+        watchQuizLifecycle();
         $('bootPanel').classList.add('d-none');
         $('mainPanel').classList.remove('d-none');
-        await loadOverallStats();
-        window.ErpWorkspaceResume.register({modules:['site_admin'],busy:()=>state.loading||state.overallLoading,
+        window.ErpWorkspaceResume.register({modules:['site_admin'],ownsReadRequests:true,busy:()=>state.saving||state.deleting,
+          authorize:runtime=>{setQuizScope(quizActor,runtime);return !!quizActor;},
           refresh:async()=>{if(state.hasSearched)await loadQuestions(state.page);else await loadOverallStats();}});
+        await loadOverallStats();
       } catch (error) {
         console.error(`[quiz-admin ${VERSION}] boot failed`,error);
         $('bootPanel').innerHTML=`<div class="fs-2 mb-2">🔒</div><strong>${escapeHtml(errorMessage(error,'퀴즈 관리 화면을 열지 못했습니다.'))}</strong><div class="mt-3"><a class="btn btn-outline-secondary" href="index.html" data-erp-home-link>ERP 메인으로</a></div>`;
@@ -326,28 +403,36 @@
     function formatPercent(value) { return `${Number(value||0).toLocaleString('ko-KR',{maximumFractionDigits:1})}%`; }
 
     async function loadOverallStats() {
-      if(state.overallLoading)return;
+      if(quizReads.overall?.uiPromise)return quizReads.overall.uiPromise;
+      const op=quizRead('overall','overall','quiz_admin_get_overall_stats');
+      op.uiPromise=(async()=>{
       state.overallLoading=true;
       $('refreshStatsButton').disabled=true;
+      $('overallRetry').setAttribute('aria-disabled','true');
       $('overallLoading').classList.remove('d-none');
-      $('overallContent').classList.add('d-none');
-      $('overallError').classList.add('d-none');
       try {
-        const {data,error}=await client.rpc('quiz_admin_get_overall_stats');
-        if(error)throw error;
+        const data=await op.promise;
+        if(!op.current())return;
         state.overall=data||{};
         renderOverallStats();
         $('overallLoading').classList.add('d-none');
         $('overallContent').classList.remove('d-none');
+        quizRetryFocus($('overallRetry'),$('overallTitle'));
+        $('overallError').classList.add('d-none');
       } catch(error) {
+        if(!op.current())return;
         console.error(`[quiz-admin ${VERSION}] overall stats failed`,error);
         $('overallLoading').classList.add('d-none');
-        $('overallError').textContent=errorMessage(error,'전체 참여 통계를 불러오지 못했습니다.');
+        if(quizReadDenied(error)){$('overallContent').classList.add('d-none');state.overall=null;}
+        $('overallMessage').textContent=quizReadMessage(error,'전체 참여 통계');
         $('overallError').classList.remove('d-none');
       } finally {
+        if(!op.current())return;
         state.overallLoading=false;
         $('refreshStatsButton').disabled=false;
+        $('overallRetry').setAttribute('aria-disabled','false');
       }
+      })();return op.uiPromise;
     }
 
     function renderOverallStats() {
@@ -395,21 +480,22 @@
     async function loadQuestions(page=1) {
       if(!state.hasSearched||!state.query)return;
       const requestedPage=Math.max(1,Number(page)||1);
+      state.retryPage=requestedPage;
+      const query={...state.query,p_page:requestedPage}, key=JSON.stringify(query);
+      if(quizReads.list?.key===key && quizReads.list.uiPromise)return quizReads.list.uiPromise;
+      const op=quizRead('list',key,'quiz_admin_search_questions',query);
       const loadSeq=++state.loadSeq;
+      op.uiPromise=(async()=>{
       state.loading=true;
+      setQuizListVerified(false);
       setQuestionSearchBusy(true);
+      $('listRetry').setAttribute('aria-disabled','true');
       $('listLoading').classList.remove('d-none');
-      $('questionList').classList.add('d-none');
       $('emptyPanel').classList.add('d-none');
       $('searchPromptPanel').classList.add('d-none');
-      $('paginationPanel').classList.add('d-none');
       try {
-        const {data,error}=await client.rpc('quiz_admin_search_questions',{
-          ...state.query,
-          p_page:requestedPage
-        });
-        if(error)throw error;
-        if(loadSeq!==state.loadSeq)return;
+        const data=await op.promise;
+        if(!op.current()||loadSeq!==state.loadSeq)return;
         const payload=data&&typeof data==='object'?data:{};
         const pageCount=Math.max(0,Number(payload.page_count)||0);
         if(pageCount>0&&requestedPage>pageCount) {
@@ -417,16 +503,23 @@
           return;
         }
         renderQuestions(payload);
+        setQuizListVerified(true);
+        quizRetryFocus($('listRetry'),$('questionListTitle'));
+        $('listError').classList.add('d-none');
       } catch(error) {
-        if(loadSeq!==state.loadSeq)return;
+        if(!op.current()||loadSeq!==state.loadSeq)return;
         console.error(`[quiz-admin ${VERSION}] search failed`,error);
-        showAlert(errorMessage(error,'문제 목록을 불러오지 못했습니다.'));
+        if(quizReadDenied(error)){$('questionList').classList.add('d-none');$('resultSummary').classList.add('d-none');$('paginationPanel').classList.add('d-none');}
+        $('listMessage').textContent=quizReadMessage(error,'문제 목록');
+        $('listError').classList.remove('d-none');
       } finally {
-        if(loadSeq!==state.loadSeq)return;
+        if(!op.current()||loadSeq!==state.loadSeq)return;
         state.loading=false;
         $('listLoading').classList.add('d-none');
         setQuestionSearchBusy(false);
+        $('listRetry').setAttribute('aria-disabled','false');
       }
+      })();return op.uiPromise;
     }
 
     function renderQuestions(payload) {
@@ -454,10 +547,12 @@
       list.classList.remove('d-none');
       $('paginationCopy').textContent=`${state.page.toLocaleString('ko-KR')} / ${state.pageCount.toLocaleString('ko-KR')}페이지 · 총 ${state.totalCount.toLocaleString('ko-KR')}문제`;
       $('paginationPanel').classList.remove('d-none');
+      setQuizListVerified(true);
       setQuestionSearchBusy(false);
     }
 
     function resetQuestionSearch() {
+      cancelQuizRead('list');
       ++state.loadSeq;
       $('questionSearchForm').reset();
       state.questions=[];
@@ -474,6 +569,8 @@
       $('emptyPanel').classList.add('d-none');
       $('paginationPanel').classList.add('d-none');
       $('searchPromptPanel').classList.remove('d-none');
+      $('listError').classList.add('d-none');
+      setQuizListVerified(false);
       setQuestionSearchBusy(false);
       $('searchInput').focus();
     }
@@ -649,31 +746,77 @@
       finally { allowSavedQuestionClose=false; setQuestionSaveBusy(false); }
     }
 
-    function openDeleteQuestion(q) { if(!q)return; state.deleteId=q.id; $('deleteQuestionText').textContent=q.prompt||''; deleteModal.show(); }
+    async function openDeleteQuestion(q) {
+      if(!q)return;
+      const owner={...quizContext(),intent:++deleteIntent,id:q.id}; deleteOwner=owner;
+      if(deleteClosing)await new Promise(resolve=>$('deleteModal').addEventListener('hidden.bs.modal',resolve,{once:true}));
+      if(deleteOwner!==owner||!quizCurrent(owner))return;
+      state.deleteId=owner.id; $('deleteQuestionText').textContent=q.prompt||''; $('deleteError').textContent='';
+      renderDeleteBusy(); deleteModal.show();
+    }
+    function renderDeleteBusy() {
+      $('confirmDeleteButton').disabled=state.deleting||!deleteOwner||!quizCurrent(deleteOwner);
+      $('confirmDeleteButton').textContent=state.deleting?'삭제 중...':'삭제';
+      $('deletePendingHint').classList.toggle('d-none',!state.deleting);
+    }
     async function deleteQuestion() {
-      if(state.deleting||!state.deleteId)return;
-      state.deleting=true; $('confirmDeleteButton').disabled=true; $('confirmDeleteButton').textContent='삭제 중...';
+      const owner=deleteOwner;
+      if(state.deleting||!state.deleteId||!owner||!quizCurrent(owner)||owner.id!==state.deleteId)return;
+      state.deleting=true; renderDeleteBusy();
       try {
-        const {data,error}=await client.rpc('quiz_admin_archive_question',{p_question_id:state.deleteId});
+        const {data,error}=await client.rpc('quiz_admin_archive_question',{p_question_id:owner.id});
         if(error)throw error;
-        deleteModal.hide(); state.deleteId=''; if(state.hasSearched)await loadQuestions(state.page);
-        showAlert(`문제를 삭제 상태로 옮겼습니다. 기존 답변 ${Number(data?.preserved_answer_count||0).toLocaleString('ko-KR')}건은 통계를 위해 보존했습니다.`,'삭제 완료');
-      } catch(error) { console.error(`[quiz-admin ${VERSION}] delete failed`,error); showAlert(errorMessage(error,'문제를 삭제하지 못했습니다.')); }
-      finally { state.deleting=false; $('confirmDeleteButton').disabled=false; $('confirmDeleteButton').textContent='삭제'; }
+        if(deleteOwner!==owner||!quizCurrent(owner))return;
+        deleteModal.hide(); state.deleteId=''; deleteOwner=null;
+        const noticeIntent=deleteIntent;
+        if(deleteClosing)await new Promise(resolve=>$('deleteModal').addEventListener('hidden.bs.modal',resolve,{once:true}));
+        if(!quizCurrent(owner)||deleteIntent!==noticeIntent)return;
+        if(state.hasSearched)await loadQuestions(state.page);
+        if(quizCurrent(owner)&&deleteIntent===noticeIntent&&!document.querySelector('.modal.show')&&!document.activeElement?.matches('input,textarea,select,[contenteditable="true"]'))
+          showAlert(`문제를 삭제 상태로 옮겼습니다. 기존 답변 ${Number(data?.preserved_answer_count||0).toLocaleString('ko-KR')}건은 통계를 위해 보존했습니다.`,'삭제 완료');
+      } catch(error) {
+        console.error(`[quiz-admin ${VERSION}] delete failed`,error);
+        if(deleteOwner===owner&&quizCurrent(owner))$('deleteError').textContent=errorMessage(error,'문제를 삭제하지 못했습니다.');
+      } finally { state.deleting=false; renderDeleteBusy(); }
     }
 
     async function openStats(q) {
-      if(!q||state.statsLoading)return;
-      state.statsLoading=true;
+      if(!q)return;
+      if(statsQuestion?.id===q.id&&quizReads.stats?.uiPromise)return quizReads.stats.uiPromise;
+      const intent=++statsIntent, context=quizContext(); statsQuestion=q;
+      cancelQuizRead('stats'); state.statsLoading=false;
+      if(statsClosing)await new Promise(resolve=>$('statsModal').addEventListener('hidden.bs.modal',resolve,{once:true}));
+      if(intent!==statsIntent||!quizCurrent(context))return;
       $('statsModalTitle').textContent=`📊 문제별 응답 통계${q.source_number?` · #${q.source_number}`:''}`;
-      $('statsBody').innerHTML='<div class="loading-panel"><div class="spinner-border text-success mb-2" role="status"></div><div>응답 통계를 계산하고 있습니다.</div></div>';
+      $('statsContent').replaceChildren();
       statsModal.show();
+      return loadQuestionStats(q,intent);
+    }
+    async function loadQuestionStats(q=statsQuestion,intent=statsIntent) {
+      if(!q||q!==statsQuestion||intent!==statsIntent)return;
+      if(quizReads.stats?.uiPromise)return quizReads.stats.uiPromise;
+      const op=quizRead('stats',String(q.id),'quiz_admin_get_question_stats',{p_question_id:q.id});
+      op.uiPromise=(async()=>{
+      state.statsLoading=true;
+      $('statsMessage').textContent='응답 통계를 계산하고 있습니다.';
+      $('statsState').classList.remove('d-none');
+      $('statsRetry').setAttribute('aria-disabled','true');
       try {
-        const {data,error}=await client.rpc('quiz_admin_get_question_stats',{p_question_id:q.id});
-        if(error)throw error;
+        const data=await op.promise;
+        if(!op.current()||intent!==statsIntent||statsQuestion!==q)return;
         renderStats(q,data||{});
-      } catch(error) { console.error(`[quiz-admin ${VERSION}] stats failed`,error); $('statsBody').innerHTML=`<div class="alert alert-danger mb-0">${escapeHtml(errorMessage(error,'통계를 불러오지 못했습니다.'))}</div>`; }
-      finally { state.statsLoading=false; }
+        quizRetryFocus($('statsRetry'),$('statsContent'));
+        $('statsState').classList.add('d-none');
+      } catch(error) {
+        if(!op.current()||intent!==statsIntent||statsQuestion!==q)return;
+        console.error(`[quiz-admin ${VERSION}] stats failed`,error);
+        if(quizReadDenied(error))$('statsContent').replaceChildren();
+        $('statsMessage').textContent=quizReadMessage(error,'응답 통계');
+        $('statsRetry').classList.remove('d-none');
+      } finally {
+        if(op.current()&&intent===statsIntent){state.statsLoading=false;$('statsRetry').setAttribute('aria-disabled','false');}
+      }
+      })();return op.uiPromise;
     }
 
     function renderStats(q,stats) {
@@ -686,7 +829,32 @@
         return `<div class="revision-group"><h3 class="revision-title">${revision}판 선택 현황${revision===Number(q.revision_no||1)?' · 현재 문제':''}</h3>${revisionChoices.map(choice=>`<div class="choice-stat"><div class="choice-stat-head"><span class="choice-stat-label${choice.is_correct_option?' correct':''}">${escapeHtml(choice.option_key)}. ${escapeHtml(choice.option_label)} ${choice.is_correct_option?'✓ 정답':'· 오답'}</span><span>${Number(choice.selected_count||0).toLocaleString('ko-KR')}회 · 전체의 ${Number(choice.selected_rate||0)}%</span></div><div class="choice-bar"><div class="choice-bar-fill${choice.is_correct_option?' correct':''}" style="width:${Math.max(0,Math.min(100,Number(choice.selected_rate||0)))}%"></div></div></div>`).join('')}</div>`;
       }).join('');
       const revisionHtml=revisions.length?`<div class="revision-group"><h3 class="revision-title">수정판별 정답률</h3><div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>문제판</th><th class="text-end">답변</th><th class="text-end">정답</th><th class="text-end">정답률</th></tr></thead><tbody>${revisions.map(row=>`<tr><td>${Number(row.revision_no)}판</td><td class="text-end">${Number(row.answer_count||0).toLocaleString('ko-KR')}</td><td class="text-end">${Number(row.correct_count||0).toLocaleString('ko-KR')}</td><td class="text-end fw-bold">${Number(row.correct_rate||0)}%</td></tr>`).join('')}</tbody></table></div></div>`:'';
-      $('statsBody').innerHTML=`<p class="fw-bold fs-5 mb-3">${escapeHtml(q.prompt)}</p><div class="stats-overview"><div class="stat-box"><span>전체 답변</span><strong>${Number(stats.answer_count||0).toLocaleString('ko-KR')}</strong></div><div class="stat-box"><span>정답</span><strong>${Number(stats.correct_count||0).toLocaleString('ko-KR')}</strong></div><div class="stat-box"><span>정답률</span><strong>${Number(stats.correct_rate||0)}%</strong></div></div>${Number(stats.answer_count||0)===0?'<div class="alert alert-light border">아직 이 문제에 답한 사람이 없습니다. 퀴즈를 풀면 선택지별 횟수와 오답 분포가 여기에 쌓입니다.</div>':''}${choiceHtml}${revisionHtml}<p class="form-help mt-3 mb-0">개인 이름은 표시하지 않고 문제별 선택 횟수만 집계합니다. 문제를 수정해도 이전 문제판의 통계는 섞이지 않습니다.</p>`;
+      $('statsContent').innerHTML=`<p class="fw-bold fs-5 mb-3">${escapeHtml(q.prompt)}</p><div class="stats-overview"><div class="stat-box"><span>전체 답변</span><strong>${Number(stats.answer_count||0).toLocaleString('ko-KR')}</strong></div><div class="stat-box"><span>정답</span><strong>${Number(stats.correct_count||0).toLocaleString('ko-KR')}</strong></div><div class="stat-box"><span>정답률</span><strong>${Number(stats.correct_rate||0)}%</strong></div></div>${Number(stats.answer_count||0)===0?'<div class="alert alert-light border">아직 이 문제에 답한 사람이 없습니다. 퀴즈를 풀면 선택지별 횟수와 오답 분포가 여기에 쌓입니다.</div>':''}${choiceHtml}${revisionHtml}<p class="form-help mt-3 mb-0">개인 이름은 표시하지 않고 문제별 선택 횟수만 집계합니다. 문제를 수정해도 이전 문제판의 통계는 섞이지 않습니다.</p>`;
+    }
+
+    $('statsModal').addEventListener('show.bs.modal',()=>{statsOpening=true;});
+    $('statsModal').addEventListener('shown.bs.modal',()=>{statsOpening=false;if(!statsQuestion)statsModal.hide();});
+    $('statsModal').addEventListener('hide.bs.modal',()=>{
+      statsClosing=true; statsIntent++; statsQuestion=null; cancelQuizRead('stats'); state.statsLoading=false;
+    });
+    $('statsModal').addEventListener('hidden.bs.modal',()=>{statsClosing=false;});
+    $('deleteModal').addEventListener('show.bs.modal',()=>{deleteOpening=true;});
+    $('deleteModal').addEventListener('shown.bs.modal',()=>{deleteOpening=false;if(!deleteOwner)deleteModal.hide();});
+    $('deleteModal').addEventListener('hide.bs.modal',()=>{deleteClosing=true;deleteIntent++;deleteOwner=null;state.deleteId='';});
+    $('deleteModal').addEventListener('hidden.bs.modal',()=>{deleteClosing=false;});
+    for(const id of ['statsModal','deleteModal']) {
+      const dismiss=()=>{
+        if(id==='statsModal'){statsIntent++;statsQuestion=null;cancelQuizRead('stats');state.statsLoading=false;}
+        else {deleteIntent++;deleteOwner=null;state.deleteId='';}
+      };
+      $(id).addEventListener('click',event=>{if(event.target.closest('[data-bs-dismiss="modal"]'))dismiss();},true);
+      $(id).addEventListener('keydown',event=>{
+        if(event.key==='Escape'&&!event.defaultPrevented&&!event.isComposing&&event.keyCode!==229&&(id==='statsModal'?statsOpening:deleteOpening))dismiss();
+      });
+    }
+    for(const [id,action] of [['overallRetry',loadOverallStats],['listRetry',()=>loadQuestions(state.retryPage)],['statsRetry',()=>loadQuestionStats()]]) {
+      $(id).addEventListener('click',()=>{if($(id).getAttribute('aria-disabled')!=='true')void action();});
+      $(id).addEventListener('keydown',event=>{if(event.key==='Enter'&&event.repeat&&!event.isComposing&&!event.defaultPrevented)event.preventDefault();});
     }
 
     $('addQuestionButton').addEventListener('click',openNewQuestion);
@@ -715,6 +883,7 @@
     $('nextPageButton').addEventListener('click',()=>{ if(!state.loading&&state.page<state.pageCount)void loadQuestions(state.page+1); });
     $('refreshStatsButton').addEventListener('click',()=>void loadOverallStats());
     $('questionList').addEventListener('click',(event)=>{
+      if(!state.listVerified)return;
       const button=event.target.closest('[data-action]'); if(!button)return;
       const card=button.closest('[data-question-id]'); const q=findQuestion(card?.dataset.questionId); if(!q)return;
       if(button.dataset.action==='edit')openEditQuestion(q);
