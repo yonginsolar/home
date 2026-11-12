@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.5.9 | Change: 2026-11-12 - Keep quiz editor keyboard actions scoped and fit filters. -->
+<!-- Version: v1.5.10 | Change: 2026-11-12 - Preserve question drafts and cancel displaced reopen requests. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -267,7 +267,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.9';
+    const VERSION = '1.5.10';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -291,6 +291,9 @@
     let statsQuestion = null, statsIntent = 0, statsClosing = false, statsOpening = false;
     let deleteOwner = null, deleteIntent = 0, deleteClosing = false, deleteOpening = false;
     let editorView = null, editorOpening = false, editorClosing = false, editorTicket = 0, editorPending = null;
+    const questionDrafts = new Map();
+    const questionDraftFields = ['sourceNumber','categoryInput','typeInput','difficultyInput','statusInput','promptInput','explanationInput','sourceLabelInput','sourceUrlInput','sourceAsOfInput'];
+    let questionDraftOwner = null, editorWait = null;
 
     function quizContext() { return {scope:quizScope,visit:quizVisit}; }
     function quizCurrent(context) {
@@ -399,6 +402,8 @@
       } else questionModal.hide();
     }
     function invalidateQuestionEditor() {
+      rememberQuestionDraft();
+      editorWait?.cancel();
       editorTicket++;
       if(editorView)editorView.restore=false;
       dismissQuestionEditor(false);
@@ -407,13 +412,14 @@
       if(state.saving)return;
       if(editorOpening&&editorView&&!editorView.dismissed&&editorView.opener===opener)return;
       const context=quizContext(),ticket=++editorTicket;
+      editorWait?.cancel();
       if(editorClosing||editorOpening) {
         if(editorOpening&&!editorView?.dismissed)dismissQuestionEditor(false);
-        await new Promise(resolve=>$('questionModal').addEventListener('hidden.bs.modal',resolve,{once:true}));
+        if(!await waitQuestionEditorClose(opener))return;
       }
       if(ticket!==editorTicket||!quizCurrent(context)||state.saving)return;
       editorPending={...context,ticket,opener:opener?.matches?.('button,a[href],[tabindex]')?opener:null,moved:false};
-      try { render(); }
+      try { renderQuestionDraft(render,context); }
       finally {
         if(editorPending) {
           // An already-open explicit render does not emit another show event.
@@ -421,6 +427,66 @@
           editorPending=null;
         }
       }
+    }
+    function readQuestionDraft() {
+      const options=[...$('optionEditor').querySelectorAll('.option-editor-row')].map(row=>({key:row.querySelector('.option-editor-key').textContent.trim(),label:row.querySelector('.option-label-input').value}));
+      const ranges=[...$('questionForm').querySelectorAll('input,textarea')].filter(node=>typeof node.selectionStart==='number').map(node=>({id:node.id,option:node.closest('.option-editor-row')?.dataset.optionIndex,start:node.selectionStart,end:node.selectionEnd,direction:node.selectionDirection}));
+      return {values:Object.fromEntries(questionDraftFields.map(id=>[id,$(id).value])),options,correct:document.querySelector('input[name="correctOption"]:checked')?.value||'',ranges};
+    }
+    function questionDraftContent(draft) { return JSON.stringify([draft.values,draft.options,draft.correct]); }
+    function rememberQuestionDraft() {
+      const owner=questionDraftOwner;
+      if(!owner||state.saving)return;
+      const snapshot=readQuestionDraft();
+      if(questionDraftContent(snapshot)===owner.baseline)questionDrafts.delete(owner.key);
+      else questionDrafts.set(owner.key,{scope:owner.scope,baseline:owner.baseline,snapshot});
+    }
+    function renderQuestionDraft(render,context) {
+      rememberQuestionDraft();
+      render();
+      if(!editorOpening&&!$('questionModal').classList.contains('show'))return;
+      const key=JSON.stringify([context.scope,$('questionId').value]);
+      const baseline=questionDraftContent(readQuestionDraft()),draft=questionDrafts.get(key);
+      questionDraftOwner={scope:context.scope,key,baseline};
+      if(!draft||draft.scope!==context.scope)return;
+      if(questionDraftContent(draft.snapshot)===baseline){questionDrafts.delete(key);return;}
+      for(const [id,value] of Object.entries(draft.snapshot.values))$(id).value=value;
+      renderOptionEditor(draft.snapshot.options,draft.snapshot.correct);
+      for(const range of draft.snapshot.ranges) {
+        const node=range.id?$(range.id):$('optionEditor').querySelector(`[data-option-index="${range.option}"] .option-label-input`);
+        if(typeof node?.selectionStart==='number')node.setSelectionRange(range.start,range.end,range.direction);
+      }
+      questionDraftOwner.baseline=draft.baseline;
+    }
+    function waitQuestionEditorClose(opener) {
+      return new Promise(resolve=>{
+        const root=$('questionModal'),wait={cancel:()=>finish(false)};
+        let settled=false;
+        function finish(accepted) {
+          if(settled)return;
+          settled=true;
+          root.removeEventListener('hidden.bs.modal',hidden);
+          document.removeEventListener('focusin',moved,true);
+          document.removeEventListener('pointerdown',moved,true);
+          window.removeEventListener('blur',wait.cancel);
+          if(editorWait===wait)editorWait=null;
+          resolve(accepted);
+        }
+        function moved(event) {
+          if(event.target===opener||opener?.contains(event.target))return;
+          if(event.type==='focusin'&&(event.target===document.body||event.target===document.documentElement))return;
+          finish(false);
+        }
+        function hidden() {
+          const active=document.activeElement;
+          finish(document.hasFocus()&&!otherQuizDialog()&&(!opener||editorOpenerVisible({opener}))&&(active===opener||active===document.body||active===document.documentElement||root.contains(active)));
+        }
+        editorWait=wait;
+        root.addEventListener('hidden.bs.modal',hidden,{once:true});
+        document.addEventListener('focusin',moved,true);
+        document.addEventListener('pointerdown',moved,true);
+        window.addEventListener('blur',wait.cancel);
+      });
     }
     function editorFocusable() {
       return [...$('questionModal').querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]')]
@@ -463,6 +529,10 @@
       });
       root.addEventListener('hide.bs.modal',event=>{
         if(event.defaultPrevented)return;
+        if(allowSavedQuestionClose) {
+          if(questionDraftOwner)questionDrafts.delete(questionDraftOwner.key);
+          questionDraftOwner=null;
+        } else rememberQuestionDraft();
         editorOpening=false;editorClosing=true;
         if(editorView) {
           const active=document.activeElement;
