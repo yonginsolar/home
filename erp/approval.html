@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.167 | Change: 2026-11-12 - Safely remove draft attachments, bind evidence submissions and recover acknowledged physical conflicts. -->
+<!-- Version: v1.2.168 | Change: 2026-11-12 - Keep attachment saves locked until verified and reconcile confirmed removals across menu visits. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.167 | approval.html');</script>
+  <script>console.log('[Version] v1.2.168 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -4356,7 +4356,22 @@ async function deleteApprovalDraft(draftId, options = {}) {
 } // End of deleteApprovalDraft
 
 function getApprovalDraftAttachmentRemoval(draftId=currentApprovalDraftId) {
-    return approvalDraftAttachmentRemovals.get(JSON.stringify([approvalSubmitActor(),Number(draftId||0)]));
+    const key=JSON.stringify([approvalSubmitActor(),Number(draftId||0)]),op=approvalDraftAttachmentRemovals.get(key);
+    if(op?.phase==='settled')reconcileApprovalAttachmentRemoval(op);
+    return approvalDraftAttachmentRemovals.get(key);
+}
+function reconcileApprovalAttachmentRemoval(op) {
+    if(op.phase!=='settled' || op.actor!==approvalSubmitActor() || !myAuthUserId || !canPerform('approval.submit')
+        || Number(currentApprovalDraftId||0)!==op.draftId || approvalDraftAttachmentRemovals.get(op.key)!==op)return false;
+    // A confirmed receipt belongs to the draft, not its menu visit. Never restore an old body/File array.
+    approvalDraftAttachmentRefs=approvalDraftAttachmentRefs.filter(x=>normalizeApprovalDraftAttachmentItem(x)?.rawRef!==op.target.rawRef);
+    const row=op.confirmedRow;
+    if(Date.parse(row.updated_at||row.created_at||'')>=Date.parse(currentApprovalDraftUpdatedAt||'') || !currentApprovalDraftUpdatedAt)
+        currentApprovalDraftUpdatedAt=row.updated_at||row.created_at||currentApprovalDraftUpdatedAt;
+    rememberApprovalDraftStatusState(op.payload,op.confirmedRefs);
+    approvalDraftAttachmentRemovals.delete(op.key);
+    updateFileList();syncApprovalDraftStatusText();
+    return true;
 }
 function syncApprovalAttachmentRemovalUi() {
     const op=getApprovalDraftAttachmentRemoval();
@@ -4382,21 +4397,31 @@ async function finishApprovalDraftAttachmentRemoval(op) {
     const sameActor=()=>op.actor===approvalSubmitActor() && !!myAuthUserId && canPerform('approval.submit');
     try{
         if(!sameActor())return;
+        if(!op.requestSettled){
+            if(isApprovalAttachmentRemovalCurrent(op))showAlert('원래 저장 요청을 확인 중입니다. 입력과 파일은 유지됩니다. 잠시 후 결과 확인을 눌러 주세요.');
+            return;
+        }
+        const error=op.saveError,status=Number(error?.status||0),code=String(error?.code||'');
+        if(error && ((status>=400 && status<500 && status!==408)||/^[0-9A-Z]{5}$/.test(code)||code.startsWith('PGRST'))){
+            op.phase='failed';
+            if(isApprovalAttachmentRemovalCurrent(op))showAlert('첨부 변경이 거절되었습니다. 입력과 파일은 유지했습니다. 권한과 현재 상태를 확인한 뒤 다시 선택해 주세요.');
+            return;
+        }
         const result=await waitApprovalLegacyRead(_supabase.from('erp_approval_drafts')
             .select('id,coop_id,auth_user_id,form_payload,attachment_links,updated_at,created_at')
             .eq('id',op.draftId).eq('coop_id',op.coopId).eq('auth_user_id',op.authId).single(),new AbortController());
         if(!sameActor())return;
         if(result.error)throw result.error;
         const row=result.data,refs=(Array.isArray(row?.attachment_links)?row.attachment_links:[]).map(normalizeApprovalDraftAttachmentItem).filter(Boolean);
-        if(!row || Number(row.id)!==op.draftId || !Array.isArray(row.attachment_links) || refs.some(x=>x.rawRef===op.target.rawRef)){
-            const error=op.saveError,status=Number(error?.status||0),code=String(error?.code||'');
-            if(op.requestSettled && ((status>=400 && status<500 && status!==408)||/^[0-9A-Z]{5}$/.test(code)||code.startsWith('PGRST'))){
-                op.phase='failed';
-                if(isApprovalAttachmentRemovalCurrent(op))showAlert('첨부 변경이 거절되었습니다. 입력과 파일은 유지했습니다. 권한과 현재 상태를 확인한 뒤 다시 선택해 주세요.');return;
-            }
+        const expected=(op.remaining||[]).map(normalizeApprovalDraftAttachmentItem).filter(Boolean);
+        if(!row || Number(row.id)!==op.draftId || row.coop_id!==op.coopId || row.auth_user_id!==op.authId
+            || !Array.isArray(row.attachment_links) || refs.some(x=>x.rawRef===op.target.rawRef)
+            || physicalRejectLineFingerprint(row.form_payload)!==physicalRejectLineFingerprint(op.payload)
+            || physicalRejectLineFingerprint(refs)!==physicalRejectLineFingerprint(expected)){
             if(isApprovalAttachmentRemovalCurrent(op))showAlert('첨부 처리 결과를 아직 확인하지 못했습니다. 같은 첨부의 결과 확인을 눌러 주세요.');
             return;
         }
+        op.confirmedRow=row;op.confirmedRefs=refs;
         op.phase='confirmed';
         if(!op.cleanupStarted){
             op.cleanupStarted=true;
@@ -4405,19 +4430,14 @@ async function finishApprovalDraftAttachmentRemoval(op) {
         }
         if(!sameActor())return;
         op.phase='settled';
-        if(isApprovalAttachmentRemovalCurrent(op)){
-            // Never apply an old array index or replace newer local files/body.
-            approvalDraftAttachmentRefs=approvalDraftAttachmentRefs.filter(x=>normalizeApprovalDraftAttachmentItem(x)?.rawRef!==op.target.rawRef);
-            currentApprovalDraftUpdatedAt=row.updated_at||row.created_at||currentApprovalDraftUpdatedAt;
-            rememberApprovalDraftStatusState(row.form_payload||op.payload,refs);
-            updateFileList();syncApprovalDraftStatusText();
-            showAlert('저장된 첨부 연결을 삭제했습니다.'+(op.cleanupWarning||''));
-        }
+        const notify=isApprovalAttachmentRemovalCurrent(op);
+        reconcileApprovalAttachmentRemoval(op);
+        if(notify)showAlert('저장된 첨부 연결을 삭제했습니다.'+(op.cleanupWarning||''));
     }catch(_){
         if(isApprovalAttachmentRemovalCurrent(op))showAlert('첨부 처리 결과를 아직 확인하지 못했습니다. 입력과 파일은 유지했습니다. 같은 첨부의 결과 확인을 눌러 주세요.');
     }finally{
         op.busy=false;
-        if(['settled','failed'].includes(op.phase) && approvalDraftAttachmentRemovals.get(op.key)===op)approvalDraftAttachmentRemovals.delete(op.key);
+        if(op.phase==='failed' && approvalDraftAttachmentRemovals.get(op.key)===op)approvalDraftAttachmentRemovals.delete(op.key);
         syncApprovalSubmitControls();
         syncApprovalAttachmentRemovalUi();
     }
@@ -4469,7 +4489,7 @@ async function removeSavedApprovalDraftAttachment(index,expectedRef='',expectedD
             : '첨부 처리 결과 미확인입니다. 같은 첨부의 결과 확인으로 확인해 주세요. 입력과 파일은 유지했습니다.');
     }finally{
         op.busy=false;
-        if(['confirming','failed','settled'].includes(op.phase) && approvalDraftAttachmentRemovals.get(op.key)===op)approvalDraftAttachmentRemovals.delete(op.key);
+        if(['confirming','failed'].includes(op.phase) && approvalDraftAttachmentRemovals.get(op.key)===op)approvalDraftAttachmentRemovals.delete(op.key);
         syncApprovalSubmitControls();
         syncApprovalAttachmentRemovalUi();
     }
@@ -17372,6 +17392,7 @@ function chooseExpoApprovalExample() {
 }
 
 function updateFileList() {
+    getApprovalDraftAttachmentRemoval();
     const area = document.getElementById("fileListArea");
     if (!area) return;
     area.innerHTML = "";
