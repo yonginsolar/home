@@ -1,4 +1,4 @@
-/* 20261010.1 — no network, storage, authorization or business writes. */
+/* 20261112.1 — no network, storage, authorization or business writes. */
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -47,7 +47,7 @@
         button.textContent = option.textContent.trim();
         button.setAttribute('aria-pressed', String(select.value === value));
         button.addEventListener('click', () => {
-          if (select.disabled || option.disabled || option.parentElement?.disabled || !option.isConnected) return;
+          if (select.disabled || option.disabled || option.parentElement?.disabled || !option.isConnected || select.value === value) return;
           select.value = value; select.dispatchEvent(new Event('change', { bubbles: true }));
         });
         quick.append(button);
