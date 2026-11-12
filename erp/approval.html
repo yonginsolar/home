@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.165 | Change: 2026-11-12 - Scope original-document selection and recover shared inventory reads. -->
+<!-- Version: v1.2.166 | Change: 2026-11-12 - Bind physical completion and saved-draft restore to the original operation. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.165 | approval.html');</script>
+  <script>console.log('[Version] v1.2.166 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1861,6 +1861,9 @@ let approvalHtml2PdfLoaderPromise = null;
 let permissionSet = new Set();
 let approvalExpenseServerAccess = { privileged: false, coopAdmin: false, dividend: false };
 let pendingPhysicalDocId = null;
+let physicalCompleteIntent = null;
+const physicalCompleteRequests = new Map();
+let approvalDraftLoadIntent = null;
 let pendingPhysicalRejectDocId = null;
 let pendingCancelDocId = null;
 let pendingEvidenceDocId = null;
@@ -3812,18 +3815,40 @@ function waitForModalHidden(modalEl, timeoutMs = 500) {
     });
 } // End of waitForModalHidden
 
+function captureApprovalDraftLoadContext() {
+    const form=document.getElementById('draftForm');
+    return {owner:approvalSubmitOwner(),form,epoch:approvalDraftComposerEpoch,
+        generation:approvalExpenseLookupGeneration,revision:approvalComposerInputRevision,
+        values:JSON.stringify([getApprovalEditorContent(),Array.from(form?.querySelectorAll('input,select,textarea')||[])
+            .filter(n=>n.type!=='file').map(n=>[n.id,n.name,n.value,n.checked])]),
+        files:Array.from(form?.querySelectorAll('input[type="file"]')||[]).flatMap(n=>Array.from(n.files||[]))};
+}
+function isApprovalDraftLoadCurrent(intent) {
+    if(!intent || approvalDraftLoadIntent!==intent || !myAuthUserId || !myInfo?.emp_id
+        || !getApprovalScopedCoopId() || !canPerform('approval.submit') || activeApprovalTab!=='draft'
+        || window.frameElement?.hidden)return false;
+    const before=intent.context,now=captureApprovalDraftLoadContext();
+    return !!before.form && before.owner===now.owner && before.form===now.form && before.epoch===now.epoch
+        && before.generation===now.generation && before.revision===now.revision && before.values===now.values
+        && before.files.length===now.files.length && before.files.every((file,i)=>file===now.files[i]);
+}
 async function loadApprovalDraftFromServer(draftId) {
     const safeDraftId = Number(draftId);
     if (!Number.isInteger(safeDraftId) || safeDraftId <= 0) return;
+    const intent={context:captureApprovalDraftLoadContext(),actor:approvalSubmitActor(),restoring:false};
+    approvalDraftLoadIntent=intent;
+    if(!isApprovalDraftLoadCurrent(intent))return;
 
+    try {
     const targetDraft = approvalDraftCache.find((item) => Number(item?.id || 0) === safeDraftId);
     let draftRow = targetDraft || null;
     if (!draftRow) {
-        const { data, error } = await _supabase
+        const { data, error } = await waitApprovalLegacyRead(_supabase
             .from('erp_approval_drafts')
             .select('id, doc_type, draft_title, form_payload, attachment_links, created_at, updated_at')
             .eq('id', safeDraftId)
-            .single();
+            .single(),new AbortController());
+        if(!isApprovalDraftLoadCurrent(intent))return;
         if (error || !data) return showAlert(getApprovalDraftErrorMessage(error, '임시저장 문서를 불러오지 못했습니다.'));
         draftRow = data;
     }
@@ -3838,17 +3863,20 @@ async function loadApprovalDraftFromServer(draftId) {
             closeApprovalDraftModal();
             draftModalClosedBeforeRestore = true;
             await waitForModalHidden(draftModalEl);
+            if(!isApprovalDraftLoadCurrent(intent))return;
         }
         const replaceOk = await showConfirm('현재 작성 중인 내용이 있습니다.\n선택한 임시문서를 불러오면 현재 내용은 화면에서 사라집니다.', {
             title: '임시문서 불러오기',
             okText: '불러오기',
             okClass: 'btn-primary'
         });
+        if(!isApprovalDraftLoadCurrent(intent))return;
         await waitForModalHidden(confirmModalEl);
+        if(!isApprovalDraftLoadCurrent(intent))return;
         if (!replaceOk) {
             if (wasDraftModalOpen && approvalDraftModalInstance) {
                 approvalDraftModalInstance.show();
-                setTimeout(normalizeModalStacking, 0);
+                setTimeout(()=>{if(isApprovalDraftLoadCurrent(intent))normalizeModalStacking();}, 0);
             }
             return;
         }
@@ -3857,10 +3885,12 @@ async function loadApprovalDraftFromServer(draftId) {
     if (wasDraftModalOpen && !draftModalClosedBeforeRestore) {
         closeApprovalDraftModal();
         await waitForModalHidden(draftModalEl);
+        if(!isApprovalDraftLoadCurrent(intent))return;
     }
 
-    try {
+        if(!isApprovalDraftLoadCurrent(intent))return;
         resetApprovalComposerForm({ keepDraftIdentity: true });
+        intent.restoring=true;
 
         const payload = draftRow?.form_payload && typeof draftRow.form_payload === 'object' ? draftRow.form_payload : {};
         const fields = payload?.fields && typeof payload.fields === 'object' ? payload.fields : {};
@@ -3893,7 +3923,11 @@ async function loadApprovalDraftFromServer(draftId) {
             handleExpenseAdjustmentModeChange({ keepRelatedDoc: true });
             const restoredRelatedDocId = toPositiveDocId(fields.related_doc_id);
             if (restoredAdjustmentMode !== 'new' && restoredRelatedDocId) {
+                intent.context=captureApprovalDraftLoadContext();
+                intent.restoring=false;
                 const targetResult = await loadApprovalExpenseAdjustmentTargetDoc(restoredRelatedDocId, restoredAdjustmentMode, { checkPermission: false });
+                if(!isApprovalDraftLoadCurrent(intent))return;
+                intent.restoring=true;
                 if (targetResult.ok && targetResult.targetDoc) {
                     applyApprovalExpenseAdjustmentTarget(targetResult.targetDoc, targetResult.balance, { keepBody: true });
                 } else {
@@ -3941,7 +3975,11 @@ async function loadApprovalDraftFromServer(draftId) {
         if (inventoryPurchaseEnabledEl?.checked) {
             const inventoryRestoreContext = captureApprovalExpenseLookupContext();
             const inventoryRestoreRevision = approvalComposerInputRevision;
+            intent.context=captureApprovalDraftLoadContext();
+            intent.restoring=false;
             await loadApprovalInventoryItems(false);
+            if(!isApprovalDraftLoadCurrent(intent))return;
+            intent.restoring=true;
             if (!isApprovalExpenseLookupContextCurrent(inventoryRestoreContext)
                 || inventoryRestoreRevision !== approvalComposerInputRevision) return;
             const inventoryPurchaseItemEl = document.getElementById('inventoryPurchaseItem');
@@ -4109,11 +4147,18 @@ async function loadApprovalDraftFromServer(draftId) {
         switchTab('draft');
         if (String(fields.expense_sub_type || '').trim() === '원천세') void loadApprovalWithholdingExpense({keepDraftValues:true});
     } catch (error) {
+        if(!isApprovalDraftLoadCurrent(intent) && !(intent.restoring && approvalDraftLoadIntent===intent
+            && intent.actor===approvalSubmitActor() && canPerform('approval.submit')
+            && activeApprovalTab==='draft' && !window.frameElement?.hidden))return;
+        if(!intent.restoring){
+            showAlert(getApprovalDraftErrorMessage(error,'임시문서를 불러오지 못했습니다. 현재 입력은 유지했습니다. 목록에서 같은 문서를 다시 선택해 주세요.'));
+            return;
+        }
         CoopSafeLog.error("Approval draft restore failed:", error);
         closeApprovalDraftModal({ force: true });
         showAlert('임시저장 문서를 불러오는 중 화면 구성에 실패했습니다.\n페이지를 새로고침한 뒤 다시 시도해 주세요.');
     } finally {
-        approvalDraftRestoreEditorModeHint = '';
+        if(approvalDraftLoadIntent===intent)approvalDraftRestoreEditorModeHint = '';
     }
 } // End of loadApprovalDraftFromServer
 
@@ -13992,6 +14037,9 @@ function invalidateApprovalSubmitPreview() {
     if(button)button.disabled=true;
 }
 function leaveApprovalSubmitPreview() {
+    physicalCompleteIntent=null;
+    pendingPhysicalDocId=null;
+    approvalDraftLoadIntent=null;
     invalidateApprovalExpenseLookups();
     const preview=approvalSubmitPreviewState;
     approvalComposerInputRevision++;approvalRelViewRevision++;
@@ -17449,10 +17497,119 @@ async function ensureApprovalPrintTemplates() {
 
 function startPhysicalComplete(docId) {
     if (!canPerform('approval.physical')) return showAlert("처리 권한이 없습니다.");
-    pendingPhysicalDocId = docId;
+    const id=Number(docId),owner=getApprovalActionOwner();
+    if(!Number.isSafeInteger(id) || id<=0 || !owner || window.frameElement?.hidden)return;
+    const key=JSON.stringify([owner,id]),prior=physicalCompleteRequests.get(key);
+    if(prior?.busy)return;
+    // A second picker must not retarget a file selected in the first picker.
+    if(physicalCompleteIntent?.picking)return;
+    const view={docId:id,owner,key,tab:activeApprovalTab,picking:!prior};
+    physicalCompleteIntent=view;
+    pendingPhysicalDocId=id;
+    if(prior){void processPhysicalComplete(prior,view);return;}
     const input = document.getElementById('signedDocInput');
     input.value = "";
     input.click();
+}
+
+function isPhysicalCompleteCurrent(view) {
+    return physicalCompleteIntent===view && view.owner===getApprovalActionOwner()
+        && canPerform('approval.physical') && activeApprovalTab===view.tab && !window.frameElement?.hidden;
+}
+async function processPhysicalComplete(op,view) {
+    if(op.busy)return;
+    op.busy=true;
+    physicalCompleteRequests.set(op.key,op);
+    const sameActor=()=>op.owner===getApprovalActionOwner() && canPerform('approval.physical');
+    const current=()=>isPhysicalCompleteCurrent(view);
+    const readDoc=async()=>{
+        const result=await waitApprovalLegacyRead(_supabase.from('ref_approval')
+            .select('id,status,approval_line,title,drafter_id,processed_at,signed_doc_url,physical_approved_at,physical_approved_by')
+            .eq('coop_id',op.coopId).eq('id',op.docId).single(),new AbortController());
+        if(result.error)throw result.error;
+        if(!result.data || Number(result.data.id)!==op.docId)throw Error('PHYSICAL_DOCUMENT_UNAVAILABLE');
+        return result.data;
+    };
+    try {
+        let doc=await readDoc();
+        if(!sameActor())return;
+        if(op.phase==='reading'){
+            if(!current())return;
+            if(doc.status!=='실물결재대기'){
+                op.phase='failed';
+                showAlert('이미 처리되었거나 실물결재 대기 상태가 아닙니다. 목록을 다시 확인해 주세요.');return;
+            }
+            op.doc=doc;
+            const {error}=await _supabase.storage.from('attachments').upload(op.safeName,op.file);
+            if(error){
+                op.phase='failed';
+                if(current()){
+                    const fileNames=[op.file.name];
+                    void notifyApprovalUploadFailure({error,contextKey:'physical_signed',contextLabel:'실물결재 서명본',docId:op.docId,docType:'실물결재',fileNames});
+                    showAlert(buildApprovalUploadErrorMessage(error,{contextLabel:'실물결재 서명본',docType:'실물결재',fileNames}));
+                }
+                return;
+            }
+            // The uploaded object and original document stay bound, even if a different document opens.
+            op.phase='uploaded';
+        }
+        if(op.phase==='uploaded'){
+            if(!sameActor())return;
+            doc=await readDoc();
+            if(!sameActor())return;
+            if(doc.status!=='실물결재대기' || doc.processed_at!==op.doc.processed_at
+                || physicalRejectLineFingerprint(doc.approval_line)!==physicalRejectLineFingerprint(op.doc.approval_line)){
+                op.phase='failed';
+                if(current())showAlert('문서가 변경되었습니다. 목록에서 현재 상태를 확인한 뒤 다시 선택해 주세요.');return;
+            }
+            op.stamp=new Date().toISOString();
+            op.line=(Array.isArray(doc.approval_line)?doc.approval_line:[]).map(l=>(l.position||'').includes('이사장')
+                ? {...l,status:'승인',processed_at:op.stamp,comment:'실물결재 확인'}:l);
+            let query=_supabase.from('ref_approval').update({status:'실물결재완료',signed_doc_url:op.ref,
+                physical_approved_at:op.stamp,physical_approved_by:op.empId,approval_line:op.line,current_approver:null,processed_at:op.stamp})
+                .eq('coop_id',op.coopId).eq('id',op.docId).eq('status','실물결재대기');
+            query=op.doc.processed_at==null?query.is('processed_at',null):query.eq('processed_at',op.doc.processed_at);
+            query=op.doc.approval_line==null?query.is('approval_line',null):query.eq('approval_line',JSON.stringify(op.doc.approval_line));
+            op.phase='unknown';
+            const result=await waitApprovalLegacyRead(query.select('id'),new AbortController());
+            if(result.error){
+                const status=Number(result.status||result.error.status||0),code=String(result.error.code||'');
+                if((status>=400 && status<500 && status!==408) || /^[0-9A-Z]{5}$/.test(code) || code.startsWith('PGRST'))op.phase='failed';
+                throw result.error;
+            }
+            if(!sameActor())return;
+            doc=await readDoc();
+        }
+        if(!sameActor())return;
+        const verified=doc.status==='실물결재완료' && doc.signed_doc_url===op.ref
+            && String(doc.physical_approved_by)===String(op.empId) && Date.parse(doc.processed_at)===Date.parse(op.stamp)
+            && physicalRejectLineFingerprint(doc.approval_line)===physicalRejectLineFingerprint(op.line);
+        if(!verified){
+            if(current())showAlert('처리 결과를 아직 확인하지 못했습니다. 같은 문서의 실물결재 완료를 눌러 결과만 다시 확인해 주세요.');return;
+        }
+        op.phase='settled';
+        if(!op.postProcessed){
+            op.postProcessed=true;
+            await logAudit('approval.physical_complete',op.docId,'실물결재 완료',{signed_doc_url:op.ref});
+            if(sameActor() && op.doc?.drafter_id && op.doc.drafter_id!==op.empId)
+                await createNotification(op.doc.drafter_id,'실물결재 완료',`${op.doc.title||'문서'} 실물결재가 완료되었습니다.`,
+                    `approval.html?doc=${op.docId}`,{doc_id:op.docId});
+        }
+        if(current()){
+            pendingPhysicalDocId=null;
+            const input=document.getElementById('signedDocInput');
+            if(input?.files?.[0]===op.file)input.value='';
+            showAlert('실물결재가 완료되었습니다.');loadHistoryList();
+        }
+    }catch(error){
+        if(current())showAlert(op.phase==='unknown'
+            ? '처리 결과 미확인입니다. 같은 문서의 실물결재 완료를 눌러 결과만 다시 확인해 주세요.'
+            : op.phase==='settled'?'완료는 확인됐지만 후속 안내를 마치지 못했습니다. 목록을 확인해 주세요.'
+                : '문서를 확인하지 못했습니다. 파일은 유지했으니 같은 문서에서 다시 확인해 주세요.');
+    }finally{
+        op.busy=false;
+        if((op.phase==='reading' || op.phase==='failed') && physicalCompleteRequests.get(op.key)===op)physicalCompleteRequests.delete(op.key);
+    }
 }
 
 function preservePhysicalRejectMemo() {
@@ -17596,66 +17753,21 @@ async function submitPhysicalReject() {
 
 document.getElementById('signedDocInput').addEventListener('change', async (e) => {
     const fileInput = e.target;
-    if (!pendingPhysicalDocId) return;
+    const view=physicalCompleteIntent;
+    if (!view || !isPhysicalCompleteCurrent(view) || physicalCompleteRequests.has(view.key)) return;
+    view.picking=false;
     if (!fileInput.files || fileInput.files.length === 0) return;
 
     const validation = validateAttachments(fileInput.files);
     if (!validation.ok) return showAlert(validation.message);
 
     const file = fileInput.files[0];
-	    const safeName = `${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-	    const { error: uploadErr } = await _supabase.storage.from('attachments').upload(safeName, file);
-	    if (uploadErr) {
-            const signedFileNames = [String(file?.name || '').trim()].filter(Boolean);
-            void notifyApprovalUploadFailure({
-                error: uploadErr,
-                contextKey: 'physical_signed',
-                contextLabel: '실물결재 서명본',
-                docId: pendingPhysicalDocId,
-                docType: '실물결재',
-                fileNames: signedFileNames
-            });
-            return showAlert(buildApprovalUploadErrorMessage(uploadErr, {
-                contextLabel: '실물결재 서명본',
-                docType: '실물결재',
-                fileNames: signedFileNames
-            }));
-        }
-	    const signedDocRef = `attachments/${safeName}?display_name=${encodeURIComponent(file.name || safeName)}`;
-
-    const { data: doc } = await scopeApprovalTenant(_supabase
-        .from('ref_approval')
-        .select('id, approval_line, title, drafter_id, doc_type, content, doc_no, receiver, via'))
-        .eq('id', pendingPhysicalDocId)
-        .single();
-    const nowIso = new Date().toISOString();
-    let line = Array.isArray(doc?.approval_line) ? doc.approval_line : [];
-    line = line.map(l => {
-        if ((l.position || '').includes('이사장')) {
-            return { ...l, status: '승인', processed_at: nowIso, comment: '실물결재 확인' };
-        }
-        return l;
-    });
-
-	    await scopeApprovalTenant(_supabase.from('ref_approval').update({
-	        status: '실물결재완료',
-	        signed_doc_url: signedDocRef,
-	        physical_approved_at: nowIso,
-	        physical_approved_by: myInfo?.emp_id || null,
-	        approval_line: line,
-	        current_approver: null,
-	        processed_at: nowIso
-	    })).eq('id', pendingPhysicalDocId);
-
-	    await logAudit('approval.physical_complete', pendingPhysicalDocId, '실물결재 완료', { signed_doc_url: signedDocRef });
-    if (doc?.drafter_id && doc.drafter_id !== myInfo?.emp_id) {
-        await createNotification(doc.drafter_id, '실물결재 완료', `${doc.title || '문서'} 실물결재가 완료되었습니다.`, `approval.html?doc=${pendingPhysicalDocId}`, { doc_id: pendingPhysicalDocId });
-    }
-
-    pendingPhysicalDocId = null;
-    fileInput.value = "";
-    showAlert("실물결재가 완료되었습니다.");
-    loadHistoryList();
+    const safeName=`${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+    await processPhysicalComplete({docId:view.docId,owner:view.owner,key:view.key,coopId:getApprovalScopedCoopId(),
+        empId:myInfo.emp_id,file,safeName,ref:`attachments/${safeName}?display_name=${encodeURIComponent(file.name||safeName)}`,phase:'reading'},view);
+});
+document.getElementById('signedDocInput').addEventListener('cancel',()=>{
+    if(physicalCompleteIntent?.picking){physicalCompleteIntent=null;pendingPhysicalDocId=null;}
 });
 
     // --- [신규 기능] 관련 문서 검색 및 보기 ---
