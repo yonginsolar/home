@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.166 | Change: 2026-11-12 - Bind physical completion and saved-draft restore to the original operation. -->
+<!-- Version: v1.2.167 | Change: 2026-11-12 - Safely remove draft attachments, bind evidence submissions and recover acknowledged physical conflicts. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.166 | approval.html');</script>
+  <script>console.log('[Version] v1.2.167 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1864,6 +1864,9 @@ let pendingPhysicalDocId = null;
 let physicalCompleteIntent = null;
 const physicalCompleteRequests = new Map();
 let approvalDraftLoadIntent = null;
+const approvalDraftAttachmentRemovals = new Map();
+const approvalEvidenceRequests = new Map(), approvalEvidenceDrafts = new Map();
+let approvalEvidenceView = null;
 let pendingPhysicalRejectDocId = null;
 let pendingCancelDocId = null;
 let pendingEvidenceDocId = null;
@@ -4187,6 +4190,7 @@ function reconcileApprovalDraftSavedAttachments(submitted, submittedItems, saved
 
 async function saveApprovalDraft() {
     if (approvalDraftSaving) return;
+    if(getApprovalDraftAttachmentRemoval())return showAlert('첨부 처리 결과를 먼저 확인해 주세요. 현재 입력은 유지됩니다.');
     if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) return showAlert('권한 받을 사람·업무 권한을 선택하고 기존 결재선에서 결재자를 지정한 뒤 상신해 주세요.');
     if (!canPerform('approval.submit')) return showAlert('임시저장 권한이 없습니다.');
     if (!approvalProxyDraftMatches()) return showAlert('기안 대상자를 다시 선택해 주세요.');
@@ -4351,33 +4355,123 @@ async function deleteApprovalDraft(draftId, options = {}) {
     }
 } // End of deleteApprovalDraft
 
-async function removeSavedApprovalDraftAttachment(index) {
+function getApprovalDraftAttachmentRemoval(draftId=currentApprovalDraftId) {
+    return approvalDraftAttachmentRemovals.get(JSON.stringify([approvalSubmitActor(),Number(draftId||0)]));
+}
+function syncApprovalAttachmentRemovalUi() {
+    const op=getApprovalDraftAttachmentRemoval();
+    document.querySelectorAll('[data-approval-remove-ref]').forEach(button=>{
+        if(Number(button.dataset.approvalRemoveDraft)!==Number(currentApprovalDraftId||0))return;
+        const target=op?.target.rawRef===button.dataset.approvalRemoveRef;
+        button.disabled=!!op?.busy || !!op && !target;
+        button.textContent=target?(op.busy?'처리 중…':'결과 확인'):'삭제';
+    });
+}
+function isApprovalAttachmentRemovalCurrent(op,strict=false) {
+    if(!op || op.actor!==approvalSubmitActor() || !myAuthUserId || !canPerform('approval.submit')
+        || Number(currentApprovalDraftId||0)!==op.draftId || activeApprovalTab!=='draft' || window.frameElement?.hidden)return false;
+    const before=op.view,now=captureApprovalDraftLoadContext();
+    return before.owner===now.owner && before.form===now.form && before.epoch===now.epoch && before.generation===now.generation
+        && (!strict || before.revision===now.revision && before.values===now.values && before.files.length===now.files.length
+            && before.files.every((file,i)=>file===now.files[i]) && op.refsFingerprint===physicalRejectLineFingerprint(approvalDraftAttachmentRefs));
+}
+async function finishApprovalDraftAttachmentRemoval(op) {
+    if(op.busy)return;
+    op.busy=true;
+    syncApprovalAttachmentRemovalUi();
+    const sameActor=()=>op.actor===approvalSubmitActor() && !!myAuthUserId && canPerform('approval.submit');
+    try{
+        if(!sameActor())return;
+        const result=await waitApprovalLegacyRead(_supabase.from('erp_approval_drafts')
+            .select('id,coop_id,auth_user_id,form_payload,attachment_links,updated_at,created_at')
+            .eq('id',op.draftId).eq('coop_id',op.coopId).eq('auth_user_id',op.authId).single(),new AbortController());
+        if(!sameActor())return;
+        if(result.error)throw result.error;
+        const row=result.data,refs=(Array.isArray(row?.attachment_links)?row.attachment_links:[]).map(normalizeApprovalDraftAttachmentItem).filter(Boolean);
+        if(!row || Number(row.id)!==op.draftId || !Array.isArray(row.attachment_links) || refs.some(x=>x.rawRef===op.target.rawRef)){
+            const error=op.saveError,status=Number(error?.status||0),code=String(error?.code||'');
+            if(op.requestSettled && ((status>=400 && status<500 && status!==408)||/^[0-9A-Z]{5}$/.test(code)||code.startsWith('PGRST'))){
+                op.phase='failed';
+                if(isApprovalAttachmentRemovalCurrent(op))showAlert('첨부 변경이 거절되었습니다. 입력과 파일은 유지했습니다. 권한과 현재 상태를 확인한 뒤 다시 선택해 주세요.');return;
+            }
+            if(isApprovalAttachmentRemovalCurrent(op))showAlert('첨부 처리 결과를 아직 확인하지 못했습니다. 같은 첨부의 결과 확인을 눌러 주세요.');
+            return;
+        }
+        op.phase='confirmed';
+        if(!op.cleanupStarted){
+            op.cleanupStarted=true;
+            try{await waitApprovalLegacyRead(deleteDraftAttachmentObjects([op.target]),new AbortController());}
+            catch(_){op.cleanupWarning=' 임시파일 정리는 완료하지 못했습니다.';}
+        }
+        if(!sameActor())return;
+        op.phase='settled';
+        if(isApprovalAttachmentRemovalCurrent(op)){
+            // Never apply an old array index or replace newer local files/body.
+            approvalDraftAttachmentRefs=approvalDraftAttachmentRefs.filter(x=>normalizeApprovalDraftAttachmentItem(x)?.rawRef!==op.target.rawRef);
+            currentApprovalDraftUpdatedAt=row.updated_at||row.created_at||currentApprovalDraftUpdatedAt;
+            rememberApprovalDraftStatusState(row.form_payload||op.payload,refs);
+            updateFileList();syncApprovalDraftStatusText();
+            showAlert('저장된 첨부 연결을 삭제했습니다.'+(op.cleanupWarning||''));
+        }
+    }catch(_){
+        if(isApprovalAttachmentRemovalCurrent(op))showAlert('첨부 처리 결과를 아직 확인하지 못했습니다. 입력과 파일은 유지했습니다. 같은 첨부의 결과 확인을 눌러 주세요.');
+    }finally{
+        op.busy=false;
+        if(['settled','failed'].includes(op.phase) && approvalDraftAttachmentRemovals.get(op.key)===op)approvalDraftAttachmentRemovals.delete(op.key);
+        syncApprovalSubmitControls();
+        syncApprovalAttachmentRemovalUi();
+    }
+}
+async function removeSavedApprovalDraftAttachment(index,expectedRef='',expectedDraftId=currentApprovalDraftId) {
     if (approvalDraftSaving) return showAlert('임시저장이 끝난 뒤 저장된 첨부를 삭제해 주세요.');
+    if(Number(expectedDraftId||0)!==Number(currentApprovalDraftId||0) || !myAuthUserId || !canPerform('approval.submit'))return;
+    const prior=getApprovalDraftAttachmentRemoval();
+    if(prior){
+        if(prior.busy)return;
+        if(expectedRef && expectedRef!==prior.target.rawRef)return showAlert('먼저 처리 중인 첨부의 결과를 확인해 주세요.');
+        prior.view=captureApprovalDraftLoadContext();
+        await finishApprovalDraftAttachmentRemoval(prior);return;
+    }
     const target = normalizeApprovalDraftAttachmentItem(approvalDraftAttachmentRefs[index]);
-    if (!target) return;
+    if (!target || expectedRef && expectedRef!==target.rawRef) return;
+    const op={actor:approvalSubmitActor(),authId:myAuthUserId,coopId:getApprovalScopedCoopId(),draftId:Number(currentApprovalDraftId||0),
+        target,view:captureApprovalDraftLoadContext(),refsFingerprint:physicalRejectLineFingerprint(approvalDraftAttachmentRefs),phase:'confirming',busy:true};
+    op.key=JSON.stringify([op.actor,op.draftId]);approvalDraftAttachmentRemovals.set(op.key,op);
+    syncApprovalSubmitControls();syncApprovalAttachmentRemovalUi();
+    try{
     const ok = await showConfirm(`저장된 첨부를 삭제하시겠습니까?\n파일: ${target.displayName || '첨부파일'}`, {
         title: '첨부 삭제',
         okText: '삭제',
         okClass: 'btn-danger'
     });
-    if (!ok) return;
-    if (approvalDraftSaving) return showAlert('임시저장이 끝난 뒤 저장된 첨부를 삭제해 주세요.');
-
-    try {
-        await deleteDraftAttachmentObjects([target]);
-        approvalDraftAttachmentRefs.splice(index, 1);
-        updateFileList();
-        if (currentApprovalDraftId) {
-            const orderedSavedAttachments = getApprovalOrderedAttachmentDescriptors()
+    if (!ok || !isApprovalAttachmentRemovalCurrent(op,true) || approvalDraftSaving)return;
+    if(!op.draftId){
+        // Without a saved owner record, unlink locally; never delete a possibly shared source object.
+        approvalDraftAttachmentRefs=approvalDraftAttachmentRefs.filter(x=>normalizeApprovalDraftAttachmentItem(x)?.rawRef!==target.rawRef);
+        updateFileList();syncApprovalDraftStatusText();return;
+    }
+        op.remaining=getApprovalOrderedAttachmentDescriptors()
                 .filter((descriptor) => descriptor.kind === 'saved')
-                .map((descriptor) => descriptor.item);
-            await persistApprovalDraftRecord(currentApprovalDraftId, collectApprovalDraftFormPayload(), orderedSavedAttachments);
-            await fetchApprovalDraftList();
-            renderApprovalDraftList();
-        }
-        showAlert('저장된 첨부를 삭제했습니다.');
+                .map((descriptor) => descriptor.item).filter(x=>normalizeApprovalDraftAttachmentItem(x)?.rawRef!==target.rawRef);
+        op.payload=collectApprovalDraftFormPayload();
+        op.phase='unknown';
+        // Unlink metadata first. A missing response must not delete the object or resend this save.
+        const request=persistApprovalDraftRecord(op.draftId,op.payload,op.remaining,{applySaved:false});
+        request.then(row=>{op.savedRow=row;op.requestSettled=true;},error=>{op.saveError=error;op.requestSettled=true;});
+        await waitApprovalLegacyRead(request,new AbortController());
+        op.busy=false;
+        await finishApprovalDraftAttachmentRemoval(op);
     } catch (error) {
-        showAlert(getApprovalDraftErrorMessage(error, '첨부 삭제에 실패했습니다.'));
+        const status=Number(error?.status||0),code=String(error?.code||'');
+        if((status>=400 && status<500 && status!==408) || /^[0-9A-Z]{5}$/.test(code) || code.startsWith('PGRST'))op.phase='failed';
+        if(isApprovalAttachmentRemovalCurrent(op))showAlert(op.phase==='failed'
+            ? getApprovalDraftErrorMessage(error,'첨부 연결을 변경하지 못했습니다. 입력과 파일은 유지했습니다.')
+            : '첨부 처리 결과 미확인입니다. 같은 첨부의 결과 확인으로 확인해 주세요. 입력과 파일은 유지했습니다.');
+    }finally{
+        op.busy=false;
+        if(['confirming','failed','settled'].includes(op.phase) && approvalDraftAttachmentRemovals.get(op.key)===op)approvalDraftAttachmentRemovals.delete(op.key);
+        syncApprovalSubmitControls();
+        syncApprovalAttachmentRemovalUi();
     }
 } // End of removeSavedApprovalDraftAttachment
 
@@ -11187,7 +11281,10 @@ window.onload = async function() {
     }
     const evidenceUploadEl = document.getElementById('evidenceUploadModal');
     if (evidenceUploadEl) {
+        evidenceUploadEl.addEventListener('hide.bs.modal',preserveApprovalEvidenceDraft);
         evidenceUploadEl.addEventListener('hidden.bs.modal', () => {
+            if(evidenceUploadEl.classList.contains('show') || approvalEvidenceView?.waitingForHidden)return;
+            approvalEvidenceView=null;
             pendingEvidenceDocId = null;
             const fileEl = document.getElementById('evidenceDocInput');
             const noteEl = document.getElementById('evidenceNote');
@@ -14037,6 +14134,8 @@ function invalidateApprovalSubmitPreview() {
     if(button)button.disabled=true;
 }
 function leaveApprovalSubmitPreview() {
+    preserveApprovalEvidenceDraft();
+    approvalEvidenceView=null;
     physicalCompleteIntent=null;
     pendingPhysicalDocId=null;
     approvalDraftLoadIntent=null;
@@ -14069,7 +14168,7 @@ function getApprovalAnnualSubmitBlock() {
     return isApprovalLeaveValidationBlocked(validation,summary.totalDays)?getApprovalLeaveValidationMessage(validation):'';
 }
 function syncApprovalSubmitControls() {
-    const leaveBlock=getApprovalAnnualSubmitBlock();
+    const leaveBlock=getApprovalAnnualSubmitBlock() || (getApprovalDraftAttachmentRemoval()?'첨부 처리 결과를 먼저 확인해 주세요.':'');
     const button=document.getElementById('btnSubmit');
     if(button){
         button.disabled=!!approvalSubmitAttempt || !canPerform('approval.submit') || !!leaveBlock;
@@ -15005,6 +15104,7 @@ function getApprovalSubmitTrigger(e) {
 
 async function handleDraftSubmit(e) {
     e.preventDefault();
+    if(getApprovalDraftAttachmentRemoval())return showAlert('첨부 처리 결과를 먼저 확인해 주세요. 현재 입력은 유지됩니다.');
     const submitTrigger = getApprovalSubmitTrigger(e);
     if (submitTrigger.id !== 'btnSubmit' || submitTrigger.type !== 'submit') {
         await logAudit('approval.submit_blocked', null, '명시적 상신 버튼 외 제출 차단', {
@@ -16219,78 +16319,93 @@ async function startBusinessTripCancelFromDoc(docId) {
     showAlert('출장 취소 신청서가 작성 화면에 준비되었습니다. 결재선을 확인한 뒤 상신하세요.');
 } // End of startBusinessTripCancelFromDoc
 
+function preserveApprovalEvidenceDraft() {
+    const view=approvalEvidenceView;
+    if(!view || view.waitingForHidden || view.owner!==getApprovalActionOwner())return;
+    approvalEvidenceDrafts.set(view.key,{files:Array.from(document.getElementById('evidenceDocInput')?.files||[]),note:document.getElementById('evidenceNote')?.value||''});
+}
+function isApprovalEvidenceCurrent(view) {
+    return !!view && approvalEvidenceView===view && view.owner===getApprovalActionOwner() && !!myAuthUserId
+        && activeApprovalTab===view.tab && view.generation===approvalExpenseLookupGeneration && !window.frameElement?.hidden
+        && document.getElementById('evidenceUploadModal')?.classList.contains('show');
+}
+function syncApprovalEvidenceButton(view=approvalEvidenceView) {
+    // Bootstrap adds .show after its backdrop transition; own opening buttons must already be locked.
+    if(!view || approvalEvidenceView!==view || view.owner!==getApprovalActionOwner() || !myAuthUserId
+        || view.waitingForHidden || view.tab!==activeApprovalTab || view.generation!==approvalExpenseLookupGeneration || window.frameElement?.hidden)return;
+    const op=approvalEvidenceRequests.get(view.key),button=document.getElementById('btnEvidenceUploadSubmit');
+    if(button){button.disabled=!!op?.busy;button.textContent=op?.busy?'처리 중…':op?'제출 결과 확인':'제출하기';}
+}
 function startEvidenceUpload(docId) {
-    pendingEvidenceDocId = toPositiveDocId(docId);
+    const id=toPositiveDocId(docId),owner=getApprovalActionOwner();
+    if(!id || !owner || !myAuthUserId || window.frameElement?.hidden)return;
+    preserveApprovalEvidenceDraft();
+    const view={docId:id,owner,coopId:getApprovalScopedCoopId(),empId:myInfo.emp_id,key:JSON.stringify([owner,id]),
+        tab:activeApprovalTab,generation:approvalExpenseLookupGeneration};
+    approvalEvidenceView=view;pendingEvidenceDocId=id;
+    const open=()=>{
+        if(approvalEvidenceView!==view || view.owner!==getApprovalActionOwner() || view.tab!==activeApprovalTab
+            || view.generation!==approvalExpenseLookupGeneration || window.frameElement?.hidden)return;
+        const saved=approvalEvidenceDrafts.get(view.key);
     const fileEl = document.getElementById('evidenceDocInput');
     const noteEl = document.getElementById('evidenceNote');
-    const submitEl = document.getElementById('btnEvidenceUploadSubmit');
     if (fileEl) fileEl.value = '';
-    if (noteEl) noteEl.value = '';
-    if (submitEl) {
-        submitEl.disabled = false;
-        submitEl.textContent = '제출하기';
-    }
+        if(saved?.files?.length && fileEl){try{fileEl.files=buildAttachmentFileTransfer(saved.files).files;}catch(_){showAlert('선택한 파일은 보관 중입니다. 파일 선택을 다시 확인해 주세요.');}}
+    if (noteEl) noteEl.value = saved?.note||'';
     evidenceUploadModalInstance?.show();
-    setTimeout(() => fileEl?.focus(), 120);
+        syncApprovalEvidenceButton(view);
+    };
+    if(evidenceUploadModalInstance?._isTransitioning && !evidenceUploadModalInstance._isShown){
+        view.waitingForHidden=true;
+        document.getElementById('evidenceUploadModal')?.addEventListener('hidden.bs.modal',()=>{view.waitingForHidden=false;open();},{once:true});
+    }else open();
 }
 
 async function submitEvidenceUpload() {
-    if (!pendingEvidenceDocId) return;
+    const view=approvalEvidenceView;
+    if(!isApprovalEvidenceCurrent(view))return;
+    const prior=approvalEvidenceRequests.get(view.key);
+    if(prior?.busy)return;
     const fileEl = document.getElementById('evidenceDocInput');
     const noteEl = document.getElementById('evidenceNote');
-    const submitEl = document.getElementById('btnEvidenceUploadSubmit');
     const files = Array.from(fileEl?.files || []);
-    if (files.length === 0) return showAlert('증빙 파일을 선택하세요.');
+    if (!prior && files.length === 0) return showAlert('증빙 파일을 선택하세요.');
     const validation = validateAttachments(files);
     if (!validation.ok) return showAlert(validation.message);
-    if (submitEl) {
-        submitEl.disabled = true;
-        submitEl.textContent = '업로드 중...';
-    }
-
-    const { data: doc, error: docErr } = await _supabase
+    const op=prior||{owner:view.owner,coopId:view.coopId,empId:view.empId,docId:view.docId,key:view.key,
+        files,note:String(noteEl?.value||'').trim(),phase:'preparing',uploadedRefs:[]};
+    op.busy=true;approvalEvidenceRequests.set(op.key,op);preserveApprovalEvidenceDraft();syncApprovalEvidenceButton(view);
+    const sameActor=()=>op.owner===getApprovalActionOwner() && !!myAuthUserId;
+    const current=()=>isApprovalEvidenceCurrent(view);
+    const readDoc=async()=>{
+        const result=await waitApprovalLegacyRead(_supabase
         .from('ref_approval')
-        .select('id, title, current_approver, drafter_id, status, file_links')
-        .eq('coop_id', getApprovalScopedCoopId())
-        .eq('id', pendingEvidenceDocId)
-        .single();
-    if (docErr || !doc) {
-        if (submitEl) {
-            submitEl.disabled = false;
-            submitEl.textContent = '제출하기';
-        }
-        return showAlert('문서를 찾을 수 없습니다.');
-    }
-    if (String(doc.drafter_id || '').trim() !== String(myInfo?.emp_id || '').trim()) {
-        if (submitEl) {
-            submitEl.disabled = false;
-            submitEl.textContent = '제출하기';
-        }
-        return showAlert('기안자만 증빙을 제출할 수 있습니다.');
-    }
-    if (String(doc.status || '').trim() !== '가승인') {
-        if (submitEl) {
-            submitEl.disabled = false;
-            submitEl.textContent = '제출하기';
-        }
-        return showAlert('가승인 상태에서만 증빙을 제출할 수 있습니다.');
-    }
-
-    const uploadedRefs = [];
-    for (const file of files) {
+        .select('id,title,current_approver,drafter_id,status,file_links,processed_at')
+        .eq('coop_id',op.coopId).eq('id',op.docId).single(),new AbortController());
+        if(result.error)throw result.error;
+        if(!result.data || Number(result.data.id)!==op.docId)throw Error('EVIDENCE_DOCUMENT_UNAVAILABLE');
+        return result.data;
+    };
+    try{
+    let doc=await readDoc();
+    if(!sameActor())return;
+    if(String(doc.drafter_id||'').trim()!==String(op.empId).trim())throw Error('기안자만 증빙을 제출할 수 있습니다.');
+    if(!prior){
+        if(!current())return;
+        if(doc.status!=='가승인')throw Error('가승인 상태에서만 증빙을 제출할 수 있습니다.');
+        op.doc=doc;
+    for (const file of op.files) {
+        if(!sameActor())return;
         const safeName = `${crypto.randomUUID()}_${String(file.name || 'evidence').replace(/[^a-zA-Z0-9.]/g, '_')}`;
         const { error: uploadErr } = await _supabase.storage.from('attachments').upload(safeName, file);
         if (uploadErr) {
-            if (submitEl) {
-                submitEl.disabled = false;
-                submitEl.textContent = '제출하기';
-            }
-            const evidenceFileNames = files.map((item) => String(item?.name || '').trim()).filter(Boolean);
+            if(!current())return;
+            const evidenceFileNames = op.files.map((item) => String(item?.name || '').trim()).filter(Boolean);
             void notifyApprovalUploadFailure({
                 error: uploadErr,
                 contextKey: 'evidence',
                 contextLabel: '증빙 첨부',
-                docId: pendingEvidenceDocId,
+                docId: op.docId,
                 docType: String(doc.doc_type || '').trim(),
                 fileNames: evidenceFileNames
             });
@@ -16300,44 +16415,63 @@ async function submitEvidenceUpload() {
                 fileNames: evidenceFileNames
             }));
         }
-        uploadedRefs.push(`attachments/${safeName}?display_name=${encodeURIComponent(`[증빙] ${file.name || safeName}`)}`);
+        op.uploadedRefs.push(`attachments/${safeName}?display_name=${encodeURIComponent(`[증빙] ${file.name || safeName}`)}`);
     }
-
-    const existingLinks = Array.isArray(doc.file_links)
-        ? doc.file_links.filter(link => typeof link === 'string' && link.trim())
-        : [];
-    const mergedLinks = [...existingLinks, ...uploadedRefs];
-    const note = String(noteEl?.value || '').trim();
-    const { error: evidenceErr } = await _supabase
-        .from('ref_approval')
-        .update({ status: '증빙확인중', file_links: mergedLinks })
-        .eq('id', pendingEvidenceDocId);
-    if (submitEl) {
-        submitEl.disabled = false;
-        submitEl.textContent = '제출하기';
+        if(!sameActor())return;
+        doc=await readDoc();
+        if(!sameActor())return;
+        if(doc.status!=='가승인' || doc.drafter_id!==op.doc.drafter_id || doc.processed_at!==op.doc.processed_at
+            || doc.current_approver!==op.doc.current_approver || physicalRejectLineFingerprint(doc.file_links)!==physicalRejectLineFingerprint(op.doc.file_links)){
+            op.phase='failed';if(current())showAlert('문서가 변경되었습니다. 현재 문서를 확인한 뒤 다시 선택해 주세요.');return;
+        }
+        op.merged=[...(Array.isArray(op.doc.file_links)?op.doc.file_links:[]),...op.uploadedRefs];
+        let query=_supabase.from('ref_approval').update({status:'증빙확인중',file_links:op.merged})
+            .eq('coop_id',op.coopId).eq('id',op.docId).eq('drafter_id',op.empId).eq('status','가승인');
+        for(const field of ['processed_at','current_approver'])query=op.doc[field]==null?query.is(field,null):query.eq(field,op.doc[field]);
+        query=op.doc.file_links==null?query.is('file_links',null):query.eq('file_links',JSON.stringify(op.doc.file_links));
+        op.phase='unknown';
+        const result=await waitApprovalLegacyRead(query.select('id'),new AbortController());
+        if(result.error){const status=Number(result.status||result.error.status||0),code=String(result.error.code||'');
+            if((status>=400 && status<500 && status!==408)||/^[0-9A-Z]{5}$/.test(code)||code.startsWith('PGRST'))op.phase='failed';throw result.error;}
+        op.acknowledgedEmpty=Array.isArray(result.data)&&result.data.length===0;
+        if(!sameActor())return;
+        doc=await readDoc();
     }
-    if (evidenceErr) {
-        return showAlert('증빙 제출 처리 실패: ' + evidenceErr.message);
+    if(!sameActor())return;
+    if(!op.uploadedRefs.length || !op.uploadedRefs.every(ref=>Array.isArray(doc.file_links)&&doc.file_links.includes(ref)) || doc.status==='가승인'){
+        if(op.acknowledgedEmpty || op.phase==='settled')op.phase='failed';
+        if(current())showAlert(op.phase==='failed'?'문서가 변경되었습니다. 현재 상태를 확인한 뒤 다시 선택해 주세요.':'제출 결과를 아직 확인하지 못했습니다. 제출 결과 확인을 눌러 주세요.');return;
     }
-
-    await logAudit('approval.evidence', pendingEvidenceDocId, '증빙 제출', {
-        note,
-        file_count: uploadedRefs.length,
-        files: uploadedRefs
+    op.phase='settled';
+    if(!op.postProcessed){op.postProcessed=true;
+    await logAudit('approval.evidence', op.docId, '증빙 제출', {
+        note:op.note,
+        file_count:op.uploadedRefs.length,
+        files:op.uploadedRefs
     });
-    if (doc?.current_approver) {
+    if (sameActor() && op.doc?.current_approver) {
         await createNotification(
-            doc.current_approver,
+            op.doc.current_approver,
             '증빙 제출',
-            `${doc.title || '문서'}에 증빙이 제출되었습니다.`,
-            `approval.html?doc=${pendingEvidenceDocId}`,
-            { doc_id: pendingEvidenceDocId, note, file_count: uploadedRefs.length }
+            `${op.doc.title || '문서'}에 증빙이 제출되었습니다.`,
+            `approval.html?doc=${op.docId}`,
+            { doc_id:op.docId,note:op.note,file_count:op.uploadedRefs.length }
         );
     }
-
-    evidenceUploadModalInstance?.hide();
-    showAlert('증빙 서류가 제출되었습니다.');
-    loadHistoryList();
+    }
+    if(current()){
+        const nowFiles=Array.from(fileEl?.files||[]);
+        if(String(noteEl?.value||'').trim()===op.note && nowFiles.length===op.files.length && nowFiles.every((file,i)=>file===op.files[i])){
+            fileEl.value='';if(noteEl)noteEl.value='';evidenceUploadModalInstance?.hide();approvalEvidenceDrafts.delete(op.key);
+        }else preserveApprovalEvidenceDraft();
+        showAlert('증빙 서류가 제출되었습니다.');loadHistoryList();
+    }
+    }catch(error){if(current())showAlert(op.phase==='unknown'?'제출 결과 미확인입니다. 재등록하지 말고 제출 결과 확인을 눌러 주세요.':error?.message||'증빙을 확인하지 못했습니다. 입력과 파일은 유지했습니다.');}
+    finally{
+        op.busy=false;
+        if(op.phase!=='unknown' && op.phase!=='settled' && approvalEvidenceRequests.get(op.key)===op)approvalEvidenceRequests.delete(op.key);
+        if(approvalEvidenceView?.key===op.key)syncApprovalEvidenceButton();
+    }
 }
 
 function getApprovalAttendanceSnapshot(doc) {
@@ -17272,7 +17406,8 @@ function updateFileList() {
             previewButton = canPreview
                 ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openSavedApprovalDraftAttachmentPreview(${descriptor.savedIndex})">바로보기</button>`
                 : '';
-            removeButton = `<button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSavedApprovalDraftAttachment(${descriptor.savedIndex})">삭제</button>`;
+            const removing=getApprovalDraftAttachmentRemoval();
+            removeButton = `<button type="button" class="btn btn-sm btn-outline-danger" data-approval-remove-ref="${escapeHtml(item.rawRef)}" data-approval-remove-draft="${Number(currentApprovalDraftId||0)}" onclick="removeSavedApprovalDraftAttachment(${descriptor.savedIndex},${escapeHtml(JSON.stringify(item.rawRef))},${Number(currentApprovalDraftId||0)})" ${removing?.busy || removing && removing.target.rawRef!==item.rawRef?'disabled':''}>${removing?.target.rawRef===item.rawRef?'결과 확인':'삭제'}</button>`;
         } else {
             const file = descriptor.file;
             const canPreview = canPreviewAttachment(file.name || '', file.type || '');
@@ -17301,6 +17436,9 @@ function updateFileList() {
             </div>
         `;
         area.appendChild(row);
+        row.querySelectorAll('[data-approval-remove-ref]').forEach(button=>button.addEventListener('keydown',event=>{
+            if(event.key==='Enter'&&event.repeat&&!event.isComposing&&event.keyCode!==229)event.preventDefault();
+        }));
     });
     updateAttachmentDropZoneUi();
 }
@@ -17577,6 +17715,7 @@ async function processPhysicalComplete(op,view) {
                 if((status>=400 && status<500 && status!==408) || /^[0-9A-Z]{5}$/.test(code) || code.startsWith('PGRST'))op.phase='failed';
                 throw result.error;
             }
+            op.acknowledgedEmpty=Array.isArray(result.data)&&result.data.length===0;
             if(!sameActor())return;
             doc=await readDoc();
         }
@@ -17585,7 +17724,8 @@ async function processPhysicalComplete(op,view) {
             && String(doc.physical_approved_by)===String(op.empId) && Date.parse(doc.processed_at)===Date.parse(op.stamp)
             && physicalRejectLineFingerprint(doc.approval_line)===physicalRejectLineFingerprint(op.line);
         if(!verified){
-            if(current())showAlert('처리 결과를 아직 확인하지 못했습니다. 같은 문서의 실물결재 완료를 눌러 결과만 다시 확인해 주세요.');return;
+            if(op.acknowledgedEmpty){op.phase='failed';if(current())showAlert('문서가 변경되어 반영하지 않았습니다. 현재 상태를 확인한 뒤 서명본을 다시 선택해 주세요.');}
+            else if(current())showAlert('처리 결과를 아직 확인하지 못했습니다. 같은 문서의 실물결재 완료를 눌러 결과만 다시 확인해 주세요.');return;
         }
         op.phase='settled';
         if(!op.postProcessed){
