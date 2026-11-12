@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.5.10 | Change: 2026-11-12 - Preserve question drafts and cancel displaced reopen requests. -->
+<!-- Version: v1.5.11 | Change: 2026-11-12 - Ignore held Enter on question openers. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -267,7 +267,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.10';
+    const VERSION = '1.5.11';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -487,6 +487,13 @@
         document.addEventListener('pointerdown',moved,true);
         window.addEventListener('blur',wait.cancel);
       });
+    }
+    function guardQuestionOpenKey(event) {
+      if(event.key!=='Enter'||!event.repeat||event.defaultPrevented||event.isComposing||event.keyCode===229||event.altKey||event.ctrlKey||event.metaKey)return;
+      const button=event.target.closest('button');
+      if(!button||button.disabled||button.getAttribute('aria-disabled')==='true')return;
+      if(button!==$('addQuestionButton')&&!(button.dataset.action==='edit'&&$('questionList').contains(button)))return;
+      event.preventDefault();
     }
     function editorFocusable() {
       return [...$('questionModal').querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]')]
@@ -1061,6 +1068,8 @@
     }
 
     installQuestionEditorKeyboard();
+    $('addQuestionButton').addEventListener('keydown',guardQuestionOpenKey);
+    $('questionList').addEventListener('keydown',guardQuestionOpenKey);
     $('addQuestionButton').addEventListener('click',event=>void requestQuestionEditor(openNewQuestion,event.currentTarget));
     $('addOptionButton').addEventListener('click',addOption);
     $('typeInput').addEventListener('change',handleTypeChange);
