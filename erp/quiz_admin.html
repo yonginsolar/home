@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.5.11 | Change: 2026-11-12 - Ignore held Enter on question openers. -->
+<!-- Version: v1.5.12 | Change: 2026-11-13 - 퀴즈 통계창 키보드 이동과 큰 글꼴 선택지 배치 개선. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -81,9 +81,16 @@
     .modal-footer { padding:16px 24px; background:#f8faf8; }
     .form-label { font-size:13px; font-weight:800; }
     .required::after { content:" *"; color:#c92d3a; }
-    .option-editor-row { display:grid; grid-template-columns:34px 1fr auto; align-items:center; gap:8px; margin-bottom:8px; }
-    .correct-radio { display:grid; place-items:center; width:34px; height:38px; margin:0; }
+    #optionEditor { container-type:inline-size; }
+    .option-editor-row { display:grid; grid-template-columns:minmax(34px,1.5em) minmax(0,1fr) auto; align-items:center; gap:8px; margin-bottom:8px; }
+    .correct-radio { display:grid; place-items:center; width:100%; min-height:38px; height:100%; margin:0; }
+    .option-editor-row > .input-group { min-width:0; }
     .option-remove { min-width:38px; }
+    @container (max-width:18em) {
+      .option-editor-row > .input-group { grid-column:1 / -1; grid-row:2; }
+      .option-editor-row > .option-remove { grid-column:3; grid-row:1; }
+      .option-editor-row .option-label-input { flex-basis:100%; width:100%; margin-left:0!important; }
+    }
     .form-help { color:var(--quiz-admin-muted); font-size:12px; }
     .stats-overview { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:20px; }
     .stat-box { padding:16px; border:1px solid var(--quiz-admin-line); border-radius:15px; background:#f8fbf9; text-align:center; }
@@ -267,7 +274,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.11';
+    const VERSION = '1.5.12';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -289,6 +296,7 @@
     const quizReadSerial = {overall:0,list:0,stats:0};
     let quizScope = '', quizActor = '', quizVisit = 0;
     let statsQuestion = null, statsIntent = 0, statsClosing = false, statsOpening = false;
+    let statsKeyboardOwner = null;
     let deleteOwner = null, deleteIntent = 0, deleteClosing = false, deleteOpening = false;
     let editorView = null, editorOpening = false, editorClosing = false, editorTicket = 0, editorPending = null;
     const questionDrafts = new Map();
@@ -1042,6 +1050,23 @@
       $('statsContent').innerHTML=`<p class="fw-bold fs-5 mb-3">${escapeHtml(q.prompt)}</p><div class="stats-overview"><div class="stat-box"><span>전체 답변</span><strong>${Number(stats.answer_count||0).toLocaleString('ko-KR')}</strong></div><div class="stat-box"><span>정답</span><strong>${Number(stats.correct_count||0).toLocaleString('ko-KR')}</strong></div><div class="stat-box"><span>정답률</span><strong>${Number(stats.correct_rate||0)}%</strong></div></div>${Number(stats.answer_count||0)===0?'<div class="alert alert-light border">아직 이 문제에 답한 사람이 없습니다. 퀴즈를 풀면 선택지별 횟수와 오답 분포가 여기에 쌓입니다.</div>':''}${choiceHtml}${revisionHtml}<p class="form-help mt-3 mb-0">개인 이름은 표시하지 않고 문제별 선택 횟수만 집계합니다. 문제를 수정해도 이전 문제판의 통계는 섞이지 않습니다.</p>`;
     }
 
+    function statsKeyboard(event) {
+      const root=$('statsModal'),owner=statsKeyboardOwner,active=document.activeElement;
+      if(event.key!=='Tab'||event.defaultPrevented||event.isComposing||event.keyCode===229||event.altKey||event.ctrlKey||event.metaKey)return;
+      if(!owner||!quizCurrent(owner)||owner.question!==statsQuestion||owner.intent!==statsIntent||statsClosing||!root.classList.contains('show')||!document.hasFocus())return;
+      if(event.target!==active||!root.contains(active)||!root.getClientRects().length||getComputedStyle(root).visibility!=='visible')return;
+      if(window.frameElement&&(window.frameElement.hidden||!window.frameElement.getClientRects().length))return;
+      if([...document.querySelectorAll('.modal.show,dialog[open],[role="dialog"][aria-modal="true"]')].some(node=>node!==root&&node.getClientRects().length&&getComputedStyle(node).visibility==='visible'))return;
+      const items=[...root.querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]')]
+        .filter(node=>node.tabIndex>=0&&!node.matches(':disabled')&&!node.closest('[inert]')&&node.getClientRects().length&&getComputedStyle(node).visibility==='visible')
+        .sort((a,b)=>(a.tabIndex||Infinity)-(b.tabIndex||Infinity));
+      const first=items[0],last=items.at(-1);
+      const target=!first?root:event.shiftKey&&(active===first||active===root)?last:!event.shiftKey&&(active===last||active===root)?first:null;
+      if(target){event.preventDefault();target.focus({preventScroll:true});}
+    }
+    $('statsModal').addEventListener('keydown',statsKeyboard);
+    $('statsModal').addEventListener('show.bs.modal',()=>{statsKeyboardOwner={...quizContext(),question:statsQuestion,intent:statsIntent};});
+    $('statsModal').addEventListener('hidden.bs.modal',()=>{statsKeyboardOwner=null;});
     $('statsModal').addEventListener('show.bs.modal',()=>{statsOpening=true;});
     $('statsModal').addEventListener('shown.bs.modal',()=>{statsOpening=false;if(!statsQuestion)statsModal.hide();});
     $('statsModal').addEventListener('hide.bs.modal',()=>{
