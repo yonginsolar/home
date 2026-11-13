@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.4.0 | Internal plant information, work history and monitoring. -->
+<!-- Version: v1.4.1 | Internal plant editor current-request protection. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.4.0 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.4.1 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -495,6 +495,29 @@
     let monitorReadSequence = 0;
     let monitorEditRevision = 0;
     let monitorReadPending = null;
+    let plantEditorRead = null;
+    let plantEditorIntent = 0;
+
+    function cancelPlantEditorRead() {
+      plantEditorIntent++;
+      plantEditorRead?.controller.abort();
+      plantEditorRead = null;
+    }
+
+    function plantEditorInputSnapshot() {
+      return [...document.querySelectorAll('#plantInfoModal input,#plantInfoModal select,#plantInfoModal textarea')]
+        .map(node => ({node,value:node.value,checked:node.checked,files:[...(node.files||[])]}));
+    }
+
+    function plantEditorReadCurrent(op) {
+      const coopId=String(monitorData?.dashboard?.coop_id||monitorData?.selected?.coop_id||'');
+      return plantEditorRead===op && op.intent===plantEditorIntent
+        && op.owner.userId===monitorReadOwner.userId && op.owner.revision===monitorReadOwner.revision
+        && op.coopId===coopId && op.scope===currentScopeKey && !isDirty
+        && !document.hidden && !window.frameElement?.hidden
+        && op.inputs.every(row=>row.node.isConnected && row.node.value===row.value && row.node.checked===row.checked
+          && [...(row.node.files||[])].length===row.files.length && row.files.every((file,i)=>row.node.files[i]===file));
+    }
 
     function monitorReadCurrent(owner, sequence, scopeKey, editRevision, allowHidden = false) {
       return owner.userId === monitorReadOwner.userId && owner.revision === monitorReadOwner.revision
@@ -1044,6 +1067,9 @@
     }
 
     async function openPlantInfoEditor(monitorPlantId, sitePowerPlantId) {
+      if (!monitorReadOwner.userId || document.hidden || window.frameElement?.hidden
+          || document.getElementById('plantInfoModal').classList.contains('show')
+          || document.getElementById('savePlantInfoButton').disabled) return;
       if (isDirty) {
         setStatus('먼저 모니터 연결 설정의 변경사항을 저장해주세요.', 'alert-warning');
         return;
@@ -1062,17 +1088,32 @@
         return;
       }
 
+      const key=JSON.stringify([monitorReadOwner.userId,monitorReadOwner.revision,coopId,currentScopeKey,monitorPlantId,sitePowerPlantId]);
+      if(plantEditorRead?.key===key)return plantEditorRead.promise;
+      cancelPlantEditorRead();
+      const op={key,intent:plantEditorIntent,owner:{...monitorReadOwner},coopId,scope:currentScopeKey,
+        inputs:plantEditorInputSnapshot(),controller:new AbortController(),promise:null};
+      plantEditorRead=op;
+
       setStatus('발전소 기본정보를 불러오는 중입니다.', 'alert-info');
       let sitePlant = null;
-      try {
+      op.promise=(async()=>{let timer;try {
         if (sitePowerPlantId) {
-          const { data, error } = await _supabase.rpc('platform_get_site_power_plant_editor', {
+          let request = _supabase.rpc('platform_get_site_power_plant_editor', {
             p_coop_id: coopId,
             p_site_power_plant_id: sitePowerPlantId
           });
+          if(request.abortSignal)request=request.abortSignal(op.controller.signal);
+          const {data,error}=await Promise.race([request,new Promise((_,reject)=>{
+            timer=setTimeout(()=>{op.controller.abort();reject(new Error('PLANT_EDITOR_TIMEOUT'));},15000);
+          })]);
+          if(!plantEditorReadCurrent(op))return;
           if (error) throw error;
           sitePlant = data || null;
+          if(!sitePlant||String(sitePlant.id)!==String(sitePowerPlantId)
+            || sitePlant.coop_id&&String(sitePlant.coop_id)!==coopId)throw new Error('발전소 정보를 다시 확인해 주세요.');
         }
+        if(!plantEditorReadCurrent(op))return;
 
         editingPlantContext = {
           coopId,
@@ -1111,9 +1152,11 @@
         setStatus('');
         plantInfoModal.show();
       } catch (error) {
+        if(!plantEditorReadCurrent(op))return;
         console.error('[power-monitor-admin] plant editor load failed', error);
-        setStatus(`기본정보를 불러오지 못했습니다: ${errorMessage(error)}`, 'alert-danger');
-      }
+        setStatus('기본정보를 불러오지 못했습니다. 같은 발전소의 기본정보 수정을 다시 눌러 주세요.', 'alert-danger');
+      } finally {clearTimeout(timer);if(plantEditorRead===op)plantEditorRead=null;}})();
+      return op.promise;
     }
 
     function nullableNumberFromInput(id) {
@@ -1361,6 +1404,7 @@
         monitorReadOwner = { userId:userData.user.id, revision:monitorReadOwner.revision + 1 };
         _supabase.auth.onAuthStateChange((event, session) => {
           if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== monitorReadOwner.userId)) {
+            cancelPlantEditorRead();
             monitorReadOwner = { userId:null, revision:monitorReadOwner.revision + 1 };
             monitorReadSequence++;
             monitorData = null; vendorContacts = [];
@@ -1384,6 +1428,9 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+      if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden)cancelPlantEditorRead();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+      window.addEventListener('pagehide',cancelPlantEditorRead);
+      document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelPlantEditorRead();});
       document.getElementById('plantManagementTabs').addEventListener('click',event=>{const button=event.target.closest('[data-plant-view]');if(!button)return;plantView=button.dataset.plantView;applyPlantView();});
       window.addEventListener('plant-work-show',()=>{plantView='history';applyPlantView();});
       document.getElementById('addBasePlant').onclick=()=>openPlantInfoEditor(null,null);
@@ -1434,7 +1481,9 @@
         document.getElementById('plantEditorPhotoFile').value = '';
         setPlantEditorStatus('');
       });
+      plantInfoModalElement.addEventListener('hide.bs.modal',cancelPlantEditorRead);
       document.getElementById('scopeSelect').addEventListener('change', async (event) => {
+        cancelPlantEditorRead();
         if (isDirty && !(await window.CoopDialog.confirm('저장하지 않은 변경사항이 있습니다. 다른 조합으로 이동할까요?'))) {
           event.target.value = currentScopeKey;
           return;

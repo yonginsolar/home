@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.3.31 | Change: 2026-11-05 - Resolve external education source for the current cooperative. -->
+<!-- Version: v1.3.32 | Change: 2026-11-13 - Keep scoped education drafts and selected files. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -190,6 +190,8 @@
       .education-roster-print-table td.attendance-confirmation { font-size:11pt; line-height:1.3; }
       .education-roster-print-page-number { position:absolute; right:14mm; bottom:8mm; color:#64748b; font-size:11pt; }
     }
+    #discardEventDraftBtn { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+    #eventDraftStatus { min-width:0; max-width:100%; overflow-wrap:anywhere; }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <style>
@@ -487,6 +489,8 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-danger me-auto d-none" id="deleteEventBtn">행사 삭제</button>
+          <button type="button" class="btn btn-outline-secondary d-none" id="discardEventDraftBtn">초안 버리기</button>
+          <span id="eventDraftStatus" class="small text-muted" role="status" aria-live="polite"></span>
           <button type="button" class="btn btn-outline-success d-none" id="openSiteActivityDraftBtn"><i class="bi bi-newspaper me-1"></i>우리 소식 작성</button>
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">닫기</button>
           <button type="button" class="btn btn-primary" id="saveEventBtn">저장</button>
@@ -635,6 +639,109 @@
     let lightboxRequestVersion = 0;
     let newPhotoPreviewUrls = [];
     const signedFileUrlCache = new Map();
+    const eventDrafts = new Map();
+    const eventDraftFields = ['eventType','eventTitle','eventStartsAt','eventEndsAt','eventLocation','educationContent','eventInstructor','sourceMinute','memberSearchInput','manualAttendeeName','manualAttendeeNote','includeHumanitiesManual'];
+    const eventDraftFileFields = ['materialFiles','photoFiles','rosterScanFiles'];
+    let activeEventDraft = null;
+    let eventDraftVisit = 0;
+    let eventEditorClosing = false;
+    let eventEditorReopen = null;
+
+    function waitEventEditorClose(revision) {
+      if(!eventEditorClosing)return Promise.resolve(true);
+      eventEditorReopen?.cancel();
+      const owner=eventDraftOwner(),visit=eventDraftVisit,modal=document.getElementById('eventModal');
+      return new Promise(resolve=>{
+        let done=false;
+        const finish=value=>{if(done)return;done=true;modal.removeEventListener('hidden.bs.modal',hidden);document.removeEventListener('focusin',moved,true);document.removeEventListener('pointerdown',moved,true);window.removeEventListener('blur',blur);if(eventEditorReopen===pending)eventEditorReopen=null;resolve(value);};
+        const hidden=()=>finish(revision===eventOpenRevision&&owner===eventDraftOwner()&&visit===eventDraftVisit&&!window.frameElement?.hidden);
+        const moved=event=>{if(!modal.contains(event.target)&&!event.target.closest?.('#newEventBtn,[data-edit-event]')&&event.target!==document.body)finish(false);};
+        const blur=()=>finish(false),pending={cancel:()=>finish(false)};eventEditorReopen=pending;
+        modal.addEventListener('hidden.bs.modal',hidden,{once:true});document.addEventListener('focusin',moved,true);document.addEventListener('pointerdown',moved,true);window.addEventListener('blur',blur);
+      });
+    }
+
+    function eventDraftOwner() {
+      return participationReadOwner.userId&&participationReadOwner.coopId
+        ? JSON.stringify([participationReadOwner.userId,participationReadOwner.coopId]) : '';
+    }
+    function eventDraftKey(id) { return eventDraftOwner()+'|'+(id||'new'); }
+    function eventDraftSignature(draft) {
+      const values=Object.fromEntries(Object.entries(draft.values).filter(([id])=>!['memberSearchInput','manualAttendeeName','manualAttendeeNote'].includes(id)));
+      return JSON.stringify([values,draft.form.attendees,draft.form.guestAttendees,draft.form.manualAttendees,
+        draft.importState.selectedCourseId||null]);
+    }
+    function eventDraftDirty(draft) {
+      return !!draft&&(eventDraftSignature(draft)!==draft.baseline||eventDraftFileFields.some(id=>draft.files[id]?.length)
+        || !!String(draft.values.manualAttendeeName||draft.values.manualAttendeeNote||'').trim());
+    }
+    function rememberEventDraft() {
+      const draft=activeEventDraft;
+      if(!PARTICIPATION_EDUCATION_VIEW||!draft||draft.owner!==eventDraftOwner()||draft.form!==formState)return null;
+      draft.values=Object.fromEntries(eventDraftFields.map(id=>{const node=document.getElementById(id);return[id,node.type==='checkbox'?node.checked:node.value];}));
+      draft.files=Object.fromEntries(eventDraftFileFields.map(id=>[id,[...document.getElementById(id).files]]));
+      draft.ranges=eventDraftFields.map(id=>{const n=document.getElementById(id);return typeof n.selectionStart==='number'?{id,start:n.selectionStart,end:n.selectionEnd,direction:n.selectionDirection}:null;}).filter(Boolean);
+      draft.linkState=humanitiesLinkState;draft.importState=humanitiesImportState;
+      draft.sitePhotoRows=siteActivityPhotoRows;draft.linkedPhotoPaths=linkedPhotoPaths;
+      document.getElementById('eventDraftStatus').textContent=eventDraftDirty(draft)?'저장하지 않은 초안':'';
+      return draft;
+    }
+    function bindEventDraft(key) {
+      if(!PARTICIPATION_EDUCATION_VIEW)return;
+      const previous=eventDrafts.get(key);
+      if(previous?.discarding)for(const [oldKey,value]of eventDrafts)if(value===previous)eventDrafts.delete(oldKey);
+      activeEventDraft={owner:eventDraftOwner(),key,form:formState,values:{},files:{},importState:humanitiesImportState,linkState:humanitiesLinkState,ranges:[],baseline:''};
+      rememberEventDraft();activeEventDraft.baseline=eventDraftSignature(activeEventDraft);
+      eventDrafts.set(key,activeEventDraft);document.getElementById('eventDraftStatus').textContent='';
+    }
+    function prepareEventDraftFiles(draft) {
+      return Object.fromEntries(eventDraftFileFields.map(id=>{
+        const files=draft.files[id]||[];if(!files.length)return[id,null];
+        const transfer=new DataTransfer();files.forEach(file=>transfer.items.add(file));return[id,transfer.files];
+      }));
+    }
+    function restoreEventDraft(draft,prepared) {
+      if(!draft||draft.owner!==eventDraftOwner())return false;
+      formState=draft.form;humanitiesLinkState=draft.linkState;humanitiesImportState=draft.importState;
+      siteActivityPhotoRows=draft.sitePhotoRows||[];linkedPhotoPaths=draft.linkedPhotoPaths||new Set();
+      pendingGuestLinkId=null;pendingManualAttendeeLinkId=null;
+      for(const [id,value]of Object.entries(draft.values)){const n=document.getElementById(id);if(n.type==='checkbox')n.checked=value;else n.value=value;}
+      setEventTypeUi(document.getElementById('eventType').value);
+      for(const [id,value]of Object.entries(draft.values)){const n=document.getElementById(id);if(n.type==='checkbox')n.checked=value;else n.value=value;}
+      for(const id of eventDraftFileFields){if(prepared[id])document.getElementById(id).files=prepared[id];else document.getElementById(id).value='';}
+      for(const range of draft.ranges||[]){const n=document.getElementById(range.id);try{n.setSelectionRange(range.start,range.end,range.direction);}catch(_){}}
+      activeEventDraft=draft;renderNewPhotoPreviews();renderAttendees();
+      document.getElementById('deleteEventBtn').classList.toggle('d-none',!formState.eventId);
+      document.getElementById('eventModalTitle').textContent=formState.eventId?'행사 확인·수정':'신규 교육 입력';
+      rememberEventDraft();return true;
+    }
+    async function discardEventDraft() {
+      const draft=rememberEventDraft(),revision=eventOpenRevision,visit=eventDraftVisit;
+      if(!draft||formState.saving)return;
+      const signature=eventDraftSignature(draft),files=Object.fromEntries(eventDraftFileFields.map(id=>[id,[...draft.files[id]]]));
+      if(!(await window.CoopDialog.confirm('이 초안을 버릴까요?')))return;
+      rememberEventDraft();
+      if(draft!==activeEventDraft||draft.owner!==eventDraftOwner()||formState.saving||revision!==eventOpenRevision||visit!==eventDraftVisit||window.frameElement?.hidden)return;
+      if(signature!==eventDraftSignature(draft)||eventDraftFileFields.some(id=>draft.files[id].length!==files[id].length||draft.files[id].some((file,i)=>file!==files[id][i])))return;
+      const id=draft.form.eventId;
+      if(id){draft.discarding=true;try{await openEditEvent(id);}finally{draft.discarding=false;}return;}
+      for(const [key,value]of eventDrafts)if(value===draft)eventDrafts.delete(key);
+      activeEventDraft=null;await openNewEvent();
+    }
+    function finishEventDraftSave(draft,sent,eventId) {
+      if(!draft)return false;
+      if(activeEventDraft===draft)rememberEventDraft();
+      draft.form.eventId=eventId;draft.baseline=sent.signature;
+      for(const id of eventDraftFileFields){
+        const remaining=(draft.files[id]||[]).filter(file=>!sent.files[id].includes(file));draft.files[id]=remaining;
+        if(activeEventDraft===draft){const node=document.getElementById(id);if(remaining.length){const transfer=new DataTransfer();remaining.forEach(file=>transfer.items.add(file));node.files=transfer.files;}else node.value='';}
+      }
+      eventDrafts.set(draft.owner+'|'+eventId,draft);
+      const changed=eventDraftDirty(draft);
+      if(!changed&&eventDrafts.get(draft.owner+'|new')===draft)eventDrafts.delete(draft.owner+'|new');
+      if(activeEventDraft===draft){document.getElementById('eventDraftStatus').textContent=changed?'저장하지 않은 초안':'';renderNewPhotoPreviews();syncManualEducationAttendeeUi();syncEducationMemberSearchVisibility();}
+      return changed;
+    }
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -2246,25 +2353,39 @@
     }
 
     async function openNewEvent() {
+      if(PARTICIPATION_EDUCATION_VIEW&&(!eventDraftOwner()||formState.saving))return;
+      rememberEventDraft();
       const revision = ++eventOpenRevision;
+      if(PARTICIPATION_EDUCATION_VIEW&&!await waitEventEditorClose(revision))return;
       try {
         if (!PARTICIPATION_EDUCATION_VIEW) {
           showLoading(true, '회의 정보를 불러오는 중...');
           await ensureMeetingContext();
         }
         if (revision !== eventOpenRevision || window.frameElement?.hidden) return;
-        resetEventForm();
+        const key=eventDraftKey(null),draft=eventDrafts.get(key);
+        if(PARTICIPATION_EDUCATION_VIEW&&eventDraftDirty(draft)){
+          const prepared=prepareEventDraftFiles(draft);restoreEventDraft(draft,prepared);
+        }else{activeEventDraft=null;resetEventForm();bindEventDraft(key);}
         eventModalInstance.show();
       } catch (error) {
+        if(PARTICIPATION_EDUCATION_VIEW&&(revision!==eventOpenRevision||window.frameElement?.hidden))return;
         showAlert('pageAlert', error?.message || '회의 정보를 불러오지 못했습니다.');
       } finally {
         if (revision === eventOpenRevision) showLoading(false);
       }
     } // End of openNewEvent
 
-    async function openEditEvent(eventId) {
+    async function openEditEvent(eventId, savedDraft = null) {
+      if(PARTICIPATION_EDUCATION_VIEW&&(!eventDraftOwner()||formState.saving&&savedDraft!==activeEventDraft))return;
+      rememberEventDraft();
       const revision = ++eventOpenRevision;
+      if(PARTICIPATION_EDUCATION_VIEW&&!await waitEventEditorClose(revision))return;
       const owner = { ...participationReadOwner };
+      const draftKey=eventDraftKey(eventId),draft=eventDrafts.get(draftKey),snapshot=draft&&eventDraftSignature(draft);
+      let prepared;
+      try{prepared=draft&&!draft.discarding&&eventDraftDirty(draft)?prepareEventDraftFiles(draft):null;}
+      catch(_){showAlert('formAlert','첨부파일을 유지한 채 현재 초안을 계속 작성해 주세요.');return;}
       showLoading(true, '행사 정보를 불러오는 중...');
       showAlert('pageAlert', '');
       try {
@@ -2276,6 +2397,17 @@
         if (!event) throw new Error('행사 정보를 찾을 수 없습니다.');
         if (event.event_type !== 'EDUCATION') await ensureMeetingContext();
         if (revision !== eventOpenRevision || !participationReadStillCurrent(owner)) return;
+        if(draft&&snapshot!==eventDraftSignature(draft))return;
+        if(prepared){
+          draft.form.currentFiles=Array.isArray(mediaData?.files)?mediaData.files:(data.files||[]);
+          draft.form.qrToken=event.qr_token||null;
+          restoreEventDraft(draft,prepared);
+          await renderCurrentFiles();
+          if(revision===eventOpenRevision&&participationReadStillCurrent(owner))eventModalInstance.show();
+          return;
+        }
+        activeEventDraft=null;
+        linkedPhotoPaths=new Set();
         revokeNewPhotoPreviewUrls();
         formState = {
           eventId:event.id,
@@ -2339,8 +2471,10 @@
         renderSourceOptions(event.event_type, event.source_minute_id || 'MANUAL');
         await Promise.all([renderCurrentFiles(), loadHumanitiesLink(false), loadSiteActivityPhotoCandidates()]);
         if (revision !== eventOpenRevision || !participationReadStillCurrent(owner)) return;
+        bindEventDraft(draftKey);
         eventModalInstance.show();
       } catch (error) {
+        if(PARTICIPATION_EDUCATION_VIEW&&(revision!==eventOpenRevision||!participationReadStillCurrent(owner)))return;
         showAlert('pageAlert', error?.message || '행사 정보를 불러오지 못했습니다.');
       } finally {
         if (revision === eventOpenRevision) showLoading(false);
@@ -3241,7 +3375,10 @@
         return;
       }
 
+      const savingDraft=rememberEventDraft(),savingForm=formState,savingOwner=eventDraftOwner(),savingVisit=eventDraftVisit;
+      const sentDraft=savingDraft?{signature:eventDraftSignature(savingDraft),files:Object.fromEntries(eventDraftFileFields.map(id=>[id,[...savingDraft.files[id]]]))}:null;
       formState.saving = true;
+      if(PARTICIPATION_EDUCATION_VIEW){document.getElementById('newEventBtn').disabled=true;document.getElementById('discardEventDraftBtn').disabled=true;}
       document.getElementById('saveEventBtn').disabled = true;
       showLoading(true, '행사를 저장하는 중...');
       try {
@@ -3294,9 +3431,9 @@
           eventId = data?.event_id || null;
         }
         if (!eventId) throw new Error('저장된 행사 번호를 확인하지 못했습니다.');
-        const materialFiles = document.getElementById('materialFiles').files;
-        const photoFiles = document.getElementById('photoFiles').files;
-        const rosterScanFiles = document.getElementById('rosterScanFiles').files;
+        const materialFiles = sentDraft?sentDraft.files.materialFiles:document.getElementById('materialFiles').files;
+        const photoFiles = sentDraft?sentDraft.files.photoFiles:document.getElementById('photoFiles').files;
+        const rosterScanFiles = sentDraft?sentDraft.files.rosterScanFiles:document.getElementById('rosterScanFiles').files;
         if (materialFiles.length > 0) {
           showLoading(true, '강의 자료를 업로드하는 중...');
           await uploadEventFiles(eventId, 'MATERIAL', materialFiles);
@@ -3309,9 +3446,13 @@
           showLoading(true, '출석부 스캔본을 업로드하는 중...');
           await uploadEventFiles(eventId, 'ROSTER_SCAN', rosterScanFiles);
         }
+        const changedAfterSave=savingDraft?finishEventDraftSave(savingDraft,sentDraft,eventId):false;
+        if(PARTICIPATION_EDUCATION_VIEW&&(savingOwner!==eventDraftOwner()||savingVisit!==eventDraftVisit||window.frameElement?.hidden))return;
         await loadDashboard(false);
+        if(PARTICIPATION_EDUCATION_VIEW&&(savingOwner!==eventDraftOwner()||savingVisit!==eventDraftVisit||window.frameElement?.hidden))return;
         if (values.type === 'EDUCATION') {
-          await openEditEvent(eventId);
+          if(changedAfterSave){showAlert('formAlert','교육을 저장했습니다. 추가로 작성한 내용은 아직 저장하지 않았습니다.','success');return;}
+          await openEditEvent(eventId,savingDraft);
           showAlert('formAlert', importingHumanities
             ? '모두의 인문학 교육을 수정한 내용으로 저장하고 연동했습니다.'
             : '교육을 저장했습니다. 첨부파일과 출석 QR을 확인할 수 있습니다.', 'success');
@@ -3320,13 +3461,20 @@
           showAlert('pageAlert', '회의 참여 이력을 저장했습니다.', 'success');
         }
       } catch (error) {
+        if(PARTICIPATION_EDUCATION_VIEW&&(savingOwner!==eventDraftOwner()||savingVisit!==eventDraftVisit||window.frameElement?.hidden))return;
         showAlert('formAlert', error?.message || '저장하지 못했습니다.');
         const alert = document.getElementById('formAlert');
-        document.querySelector('#eventModal .modal-body')?.scrollTo({ top:0, behavior:'smooth' });
-        window.setTimeout(function() { alert?.focus(); }, 180);
+        const activeAtError=document.activeElement;
+        if(!PARTICIPATION_EDUCATION_VIEW||!activeAtError?.matches('input,textarea,select,[contenteditable="true"]')){
+          document.querySelector('#eventModal .modal-body')?.scrollTo({ top:0, behavior:'smooth' });
+          window.setTimeout(function() {
+            if(!PARTICIPATION_EDUCATION_VIEW||(savingOwner===eventDraftOwner()&&savingVisit===eventDraftVisit&&!window.frameElement?.hidden&&document.activeElement===activeAtError))alert?.focus({preventScroll:true});
+          }, 180);
+        }
       } finally {
-        formState.saving = false;
-        document.getElementById('saveEventBtn').disabled = false;
+        savingForm.saving = false;
+        document.getElementById('saveEventBtn').disabled = !!formState.saving;
+        if(PARTICIPATION_EDUCATION_VIEW){document.getElementById('newEventBtn').disabled=!!formState.saving;document.getElementById('discardEventDraftBtn').disabled=!!formState.saving;}
         showLoading(false);
       }
     } // End of saveEvent
@@ -3424,6 +3572,15 @@
         if (trigger?.isConnected && !window.frameElement?.hidden) trigger.focus();
       });
       document.getElementById('newEventBtn').addEventListener('click', openNewEvent);
+      document.getElementById('discardEventDraftBtn').classList.toggle('d-none',!PARTICIPATION_EDUCATION_VIEW);
+      document.getElementById('discardEventDraftBtn').addEventListener('click',discardEventDraft);
+      document.getElementById('eventModal').addEventListener('input',rememberEventDraft);
+      document.getElementById('eventModal').addEventListener('change',rememberEventDraft);
+      document.getElementById('eventModal').addEventListener('hide.bs.modal',rememberEventDraft);
+      const leaveEventDraft=()=>{rememberEventDraft();eventEditorReopen?.cancel();eventDraftVisit++;eventOpenRevision++;sourceReadRevision++;humanitiesLinkReadRevision++;};
+      if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden)leaveEventDraft();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+      window.addEventListener('pagehide',leaveEventDraft);
+      window.addEventListener('beforeunload',event=>{rememberEventDraft();if(activeEventDraft&&eventDraftDirty(activeEventDraft)){event.preventDefault();event.returnValue='';}});
       document.getElementById('openHumanitiesImportBtn').addEventListener('click', openHumanitiesImport);
       document.getElementById('searchHumanitiesImportBtn').addEventListener('click', searchHumanitiesImport);
       document.getElementById('humanitiesImportSearch').addEventListener('keydown', function(event) {
@@ -3441,12 +3598,14 @@
       });
       document.getElementById('sourceMinute').addEventListener('change', handleSourceMinuteChange);
       document.getElementById('eventModal').addEventListener('hidden.bs.modal', function() {
+        eventEditorClosing=false;
         storedPhotoRenderVersion += 1;closeImageLightbox();
         humanitiesPhotoRenderVersion += 1;
-        eventOpenRevision++;
+        if(!eventEditorReopen)eventOpenRevision++;
         sourceReadRevision++;
         document.getElementById('saveEventBtn').disabled = formState.saving;
       });
+      document.getElementById('eventModal').addEventListener('hide.bs.modal',()=>{eventEditorClosing=true;});
       document.getElementById('meetingRosterBtn').addEventListener('click', loadMeetingRosterFromDate);
       document.getElementById('eventStartsAt').addEventListener('input', function() {
         syncEventDateRange();
@@ -3528,6 +3687,8 @@
       participationReadOwner = { userId:session.user.id, coopId:guard.runtime.coop_id, revision:participationReadOwner.revision + 1 };
       _supabase.auth.onAuthStateChange(function(event, nextSession) {
         if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== participationReadOwner.userId)) {
+          rememberEventDraft();eventDraftVisit++;
+          eventModalInstance?.hide();
           participationReadOwner = { userId:null, coopId:null, revision:participationReadOwner.revision + 1 };
           humanitiesSourceState.enabled=false;humanitiesSourceState.owner='';humanitiesSourceState.revision++;humanitiesSourceState.pending=null;humanitiesImportReadRevision++;renderHumanitiesSourceControls();
           meetingContextRevision++;
@@ -3542,7 +3703,7 @@
       document.getElementById('eventTypeFilter').value = PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'ALL';
       await loadDashboard(true);
       if(PARTICIPATION_EDUCATION_VIEW)void loadHumanitiesSource();
-      window.ErpWorkspaceResume.register({modules:[PARTICIPATION_EDUCATION_VIEW?'education':'minutes'],refresh:()=>{if(PARTICIPATION_EDUCATION_VIEW)void loadHumanitiesSource();return loadDashboard(false);}});
+      window.ErpWorkspaceResume.register({modules:[PARTICIPATION_EDUCATION_VIEW?'education':'minutes'],busy:()=>formState.saving,refresh:()=>{if(PARTICIPATION_EDUCATION_VIEW)void loadHumanitiesSource();return loadDashboard(false);}});
       const linkedEvent = new URLSearchParams(window.location.search).get('event') || '';
       if (PARTICIPATION_EDUCATION_VIEW && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(linkedEvent)) {
         await openEducationDetail(linkedEvent);
