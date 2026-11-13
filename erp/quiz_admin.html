@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.5.12 | Change: 2026-11-13 - 퀴즈 통계창 키보드 이동과 큰 글꼴 선택지 배치 개선. -->
+<!-- Version: v1.5.13 | Change: 2026-11-13 - 퀴즈 창 전환과 큰 글꼴 전체 조작부 보완. -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -79,6 +79,15 @@
     .modal-header { padding:20px 24px; background:#f8faf8; }
     .modal-body { padding:24px; }
     .modal-footer { padding:16px 24px; background:#f8faf8; }
+    .modal-header .modal-title { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; word-break:keep-all; }
+    .modal-header .btn-close { flex:0 0 auto; }
+    .modal-body { overflow-wrap:anywhere; }
+    .modal-body .form-control, .modal-body .form-select { min-width:0; max-width:100%; }
+    .modal-footer { gap:.5rem; }
+    .modal-footer > .btn { min-width:0; max-width:100%; margin:0; white-space:normal; overflow-wrap:anywhere; word-break:keep-all; }
+    .option-editor-toolbar { flex-wrap:wrap; }
+    .option-editor-toolbar > .form-label { min-width:0; max-width:100%; }
+    #addOptionButton { min-width:0; max-width:100%; white-space:normal; overflow-wrap:anywhere; word-break:keep-all; }
     .form-label { font-size:13px; font-weight:800; }
     .required::after { content:" *"; color:#c92d3a; }
     #optionEditor { container-type:inline-size; }
@@ -87,8 +96,10 @@
     .option-editor-row > .input-group { min-width:0; }
     .option-remove { min-width:38px; }
     @container (max-width:18em) {
-      .option-editor-row > .input-group { grid-column:1 / -1; grid-row:2; }
-      .option-editor-row > .option-remove { grid-column:3; grid-row:1; }
+      .option-editor-row { display:flex; flex-wrap:wrap; }
+      .option-editor-row > .correct-radio { flex:0 0 max(34px,1.5em); width:auto; height:auto; }
+      .option-editor-row > .input-group { flex:1 1 100%; order:1; }
+      .option-editor-row > .option-remove { flex:0 1 auto; min-width:0; max-width:100%; margin-left:auto; }
       .option-editor-row .option-label-input { flex-basis:100%; width:100%; margin-left:0!important; }
     }
     .form-help { color:var(--quiz-admin-muted); font-size:12px; }
@@ -98,6 +109,14 @@
     .stat-box strong { display:block; margin-top:3px; font-size:25px; }
     .choice-stat { margin-bottom:13px; }
     .choice-stat-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:5px; font-size:13px; }
+    .choice-stat-head { flex-wrap:wrap; }
+    .choice-stat-head > span { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+    @media (max-width:800px), (max-height:600px) {
+      #questionModal .modal-dialog, #statsModal .modal-dialog, #deleteModal .modal-dialog, #alertModal .modal-dialog { width:calc(100% - 16px); height:auto; min-height:0; margin:8px auto; }
+      #questionModal .modal-content, #statsModal .modal-content, #deleteModal .modal-content, #alertModal .modal-content { display:block!important; max-height:calc(100vh - 16px)!important; max-height:calc(100dvh - 16px)!important; overflow-y:auto!important; }
+      #questionModal .modal-content > form { display:block!important; min-height:0!important; overflow:visible!important; }
+      #questionModal .modal-body, #statsModal .modal-body, #deleteModal .modal-body, #alertModal .modal-body { height:auto!important; max-height:none!important; overflow-y:visible!important; flex:none!important; }
+    }
     .choice-stat-label { font-weight:750; }
     .choice-stat-label.correct { color:var(--quiz-admin-green); }
     .choice-bar { height:10px; overflow:hidden; border-radius:999px; background:#e8ece9; }
@@ -241,7 +260,7 @@
               <div class="col-md-2"><label class="form-label required" for="statusInput">상태</label><select class="form-select" id="statusInput" required><option value="DRAFT">작성 중</option><option value="PUBLISHED">출제 중</option><option value="ARCHIVED">삭제됨</option></select></div>
               <div class="col-12"><label class="form-label required" for="promptInput">문제</label><textarea class="form-control" id="promptInput" rows="3" maxlength="1000" required></textarea></div>
               <div class="col-12">
-                <div class="d-flex justify-content-between align-items-center gap-2 mb-2"><label class="form-label required mb-0">선택지와 정답</label><button type="button" class="btn btn-outline-success btn-sm" id="addOptionButton">＋ 선택지 추가</button></div>
+                <div class="option-editor-toolbar d-flex justify-content-between align-items-center gap-2 mb-2"><label class="form-label required mb-0">선택지와 정답</label><button type="button" class="btn btn-outline-success btn-sm" id="addOptionButton">＋ 선택지 추가</button></div>
                 <div id="optionEditor"></div>
                 <div class="form-help">왼쪽 동그라미로 정답 하나를 고르세요. O/X 문제는 선택지가 고정됩니다.</div>
               </div>
@@ -274,7 +293,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.12';
+    const VERSION = '1.5.13';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -302,6 +321,7 @@
     const questionDrafts = new Map();
     const questionDraftFields = ['sourceNumber','categoryInput','typeInput','difficultyInput','statusInput','promptInput','explanationInput','sourceLabelInput','sourceUrlInput','sourceAsOfInput'];
     let questionDraftOwner = null, editorWait = null;
+    const quizDialogs = new Map();
 
     function quizContext() { return {scope:quizScope,visit:quizVisit}; }
     function quizCurrent(context) {
@@ -310,6 +330,7 @@
     function cancelQuizRead(kind) { quizReadSerial[kind]++; quizReads[kind]?.cancel(); quizReads[kind]=null; }
     function invalidateQuizView() {
       invalidateQuestionEditor();
+      for(const dialog of quizDialogs.values()){dialog.ticket++;dialog.wait?.cancel();dialog.dismiss(false);}
       quizVisit++; statsIntent++; deleteIntent++; deleteOwner=null; state.deleteId=''; statsQuestion=null;
       for(const kind of Object.keys(quizReads))cancelQuizRead(kind);
       state.loading=false; state.overallLoading=false; state.statsLoading=false;
@@ -523,7 +544,7 @@
       if(!root.classList.contains('show'))return;
       const items=editorFocusable(),first=items[0],last=items.at(-1),active=document.activeElement;
       const target=!first?root:event.shiftKey&&(active===first||active===root)?last:!event.shiftKey&&(active===last||active===root)?first:null;
-      if(target){event.preventDefault();target.focus({preventScroll:true});}
+      if(target){event.preventDefault();focusQuizControl(root,target);}
     }
     function watchEditorFocus(event) {
       const view=editorView;
@@ -1062,7 +1083,7 @@
         .sort((a,b)=>(a.tabIndex||Infinity)-(b.tabIndex||Infinity));
       const first=items[0],last=items.at(-1);
       const target=!first?root:event.shiftKey&&(active===first||active===root)?last:!event.shiftKey&&(active===last||active===root)?first:null;
-      if(target){event.preventDefault();target.focus({preventScroll:true});}
+      if(target){event.preventDefault();focusQuizControl(root,target);}
     }
     $('statsModal').addEventListener('keydown',statsKeyboard);
     $('statsModal').addEventListener('show.bs.modal',()=>{statsKeyboardOwner={...quizContext(),question:statsQuestion,intent:statsIntent};});
@@ -1077,16 +1098,109 @@
     $('deleteModal').addEventListener('shown.bs.modal',()=>{deleteOpening=false;if(!deleteOwner)deleteModal.hide();});
     $('deleteModal').addEventListener('hide.bs.modal',()=>{deleteClosing=true;deleteIntent++;deleteOwner=null;state.deleteId='';});
     $('deleteModal').addEventListener('hidden.bs.modal',()=>{deleteClosing=false;});
-    for(const id of ['statsModal','deleteModal']) {
-      const dismiss=()=>{
-        if(id==='statsModal'){statsIntent++;statsQuestion=null;cancelQuizRead('stats');state.statsLoading=false;}
-        else {deleteIntent++;deleteOwner=null;state.deleteId='';}
+    function focusQuizControl(root,target) {
+      target.focus({preventScroll:true});
+      const context=quizContext(),align=()=>{
+        if(!quizCurrent(context)||!document.hasFocus()||document.activeElement!==target||!root.contains(target)||!root.classList.contains('show')||!root.getClientRects().length)return;
+        for(let box=target.parentElement;box&&root.contains(box);box=box.parentElement) {
+          if(box.clientHeight<=0||box.scrollHeight<=box.clientHeight+1||!/auto|scroll/.test(getComputedStyle(box).overflowY))continue;
+          const item=target.getBoundingClientRect(),rect=box.getBoundingClientRect(),top=rect.top+box.clientTop,bottom=top+box.clientHeight;
+          if(item.top<top)box.scrollTop+=item.top-top;
+          else if(item.bottom>bottom)box.scrollTop+=item.height>box.clientHeight?item.top-top:item.bottom-bottom;
+        }
       };
-      $(id).addEventListener('click',event=>{if(event.target.closest('[data-bs-dismiss="modal"]'))dismiss();},true);
-      $(id).addEventListener('keydown',event=>{
-        if(event.key==='Escape'&&!event.defaultPrevented&&!event.isComposing&&event.keyCode!==229&&(id==='statsModal'?statsOpening:deleteOpening))dismiss();
-      });
+      align();
+      // 스크롤 보정 CSS가 재배치된 뒤에도 같은 초점의 창 내부 위치만 확인한다.
+      if(typeof window.requestAnimationFrame==='function')window.requestAnimationFrame(()=>window.requestAnimationFrame(align));
     }
+    function guardQuizDialogOpenKey(event) {
+      if(event.key!=='Enter'||!event.repeat||event.defaultPrevented||event.isComposing||event.keyCode===229||event.altKey||event.ctrlKey||event.metaKey)return;
+      const button=event.target.closest('button[data-action="stats"],button[data-action="delete"]');
+      if(button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'&&$('questionList').contains(button))event.preventDefault();
+    }
+    function installQuizDialog(id,modal) {
+      const root=$(id),dialog={ticket:0,view:null,opening:false,closing:false,wait:null,opener:null};
+      quizDialogs.set(id,dialog);
+      const current=view=>view&&dialog.view===view&&view.ticket===dialog.ticket&&quizCurrent(view);
+      const competing=()=>[...document.querySelectorAll('.modal.show,dialog[open],[role="dialog"][aria-modal="true"]')].some(node=>node!==root&&node.getClientRects().length&&getComputedStyle(node).visibility==='visible');
+      const openerVisible=view=>{
+        const node=view.opener;if(!node?.isConnected||node.matches(':disabled')||node.closest('[inert]')||!node.getClientRects().length)return false;
+        const r=node.getBoundingClientRect();return getComputedStyle(node).visibility==='visible'&&r.top>=0&&r.left>=0&&r.bottom<=innerHeight+.5&&r.right<=innerWidth+.5;
+      };
+      const restore=view=>{
+        const active=document.activeElement;
+        if(!current(view)||view.moved||view.restore===false||!document.hasFocus()||competing()||!openerVisible(view))return false;
+        if(active!==document.body&&active!==document.documentElement&&active!==view.opener&&!root.contains(active))return false;
+        view.opener.focus({preventScroll:true});return true;
+      };
+      dialog.dismiss=(restoreFocus=true)=>{
+        const view=dialog.view;if(!view)return;
+        if(!restoreFocus)view.restore=false;
+        if(!view.dismissed){
+          view.dismissed=true;
+          if(id==='statsModal'){statsIntent++;statsQuestion=null;cancelQuizRead('stats');state.statsLoading=false;}
+          if(id==='deleteModal'){deleteIntent++;deleteOwner=null;state.deleteId='';}
+        }
+        if(dialog.opening&&modal._config&&!view.restoreConfig){const focus=modal._config.focus;view.restoreConfig=()=>{modal._config.focus=focus;};modal._config.focus=false;}
+        if(!dialog.opening)modal.hide();
+      };
+      const key=event=>{
+        const view=dialog.view,active=document.activeElement;
+        if(event.defaultPrevented||event.isComposing||event.keyCode===229||event.altKey||event.ctrlKey||event.metaKey||!current(view)||!document.hasFocus()||competing())return;
+        if(event.key==='Escape'&&dialog.opening&&(event.target===view.opener||root.contains(event.target))&&!event.target.matches?.('select')){event.preventDefault();dialog.dismiss();return;}
+        if(event.key!=='Tab'||event.target!==active||!root.contains(active))return;
+        if(dialog.closing){if(restore(view))event.preventDefault();return;}
+        if(!root.classList.contains('show')||id==='statsModal')return;
+        const items=[...root.querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]')].filter(node=>node.tabIndex>=0&&!node.matches(':disabled')&&!node.closest('[inert]')&&node.getClientRects().length&&getComputedStyle(node).visibility==='visible').sort((a,b)=>(a.tabIndex||Infinity)-(b.tabIndex||Infinity));
+        const first=items[0],last=items.at(-1),target=!first?root:event.shiftKey&&(active===first||active===root)?last:!event.shiftKey&&(active===last||active===root)?first:null;
+        if(target){event.preventDefault();focusQuizControl(root,target);}
+      };
+      const moved=event=>{
+        const view=dialog.view;if(!view||root.contains(event.target)||event.target===view.opener||event.target===document.body||event.target===document.documentElement)return;
+        if(dialog.opening){view.moved=true;dialog.dismiss(false);}
+        else if(dialog.closing||view.dismissed)view.moved=true;
+      };
+      root.addEventListener('show.bs.modal',()=>{
+        const opener=dialog.opener||document.activeElement;
+        dialog.view={...quizContext(),ticket:dialog.ticket,opener:opener?.matches?.('button,a[href],[tabindex]')?opener:null,moved:false,restore:true};dialog.opening=true;dialog.closing=false;
+        dialog.view.opener?.addEventListener('keydown',key);
+        document.addEventListener('focusin',moved,true);document.addEventListener('pointerdown',moved,true);
+      });
+      root.addEventListener('shown.bs.modal',()=>{
+        dialog.opening=false;dialog.view?.opener?.removeEventListener('keydown',key);
+        if(dialog.view?.dismissed||!current(dialog.view))modal.hide();
+      });
+      root.addEventListener('hide.bs.modal',event=>{if(!event.defaultPrevented){dialog.opening=false;dialog.closing=true;}});
+      root.addEventListener('hidden.bs.modal',()=>{
+        const view=dialog.view;view?.restoreConfig?.();view?.opener?.removeEventListener('keydown',key);
+        document.removeEventListener('focusin',moved,true);document.removeEventListener('pointerdown',moved,true);
+        restore(view);if(dialog.view===view)dialog.view=null;dialog.closing=false;
+      });
+      root.addEventListener('keydown',key,true);
+      root.addEventListener('click',event=>{const button=event.target.closest('[data-bs-dismiss="modal"]');if(!event.defaultPrevented&&button&&!button.disabled)dialog.dismiss();},true);
+    }
+    async function requestQuizDialog(id,render,opener) {
+      const dialog=quizDialogs.get(id);if(!dialog)return;
+      if(dialog.view&&!dialog.view.dismissed&&!dialog.closing&&dialog.view.opener===opener)return;
+      const context=quizContext(),ticket=++dialog.ticket;dialog.wait?.cancel();
+      if(dialog.opening||dialog.closing||dialog.view){
+        dialog.dismiss(false);
+        const accepted=await new Promise(resolve=>{
+          let settled=false;
+          const finish=ok=>{if(settled)return;settled=true;$(id).removeEventListener('hidden.bs.modal',hidden);document.removeEventListener('focusin',moved,true);document.removeEventListener('pointerdown',moved,true);window.removeEventListener('blur',blur);if(dialog.wait===wait)dialog.wait=null;resolve(ok);};
+          const moved=event=>{if(event.target!==opener&&!opener?.contains(event.target)&&event.target!==document.body&&event.target!==document.documentElement)finish(false);};
+          const hidden=()=>finish(document.hasFocus()&&(!opener||opener.isConnected&&!opener.disabled)&&(document.activeElement===opener||document.activeElement===document.body||document.activeElement===document.documentElement||$(id).contains(document.activeElement)));
+          const blur=()=>finish(false),wait={cancel:()=>finish(false)};dialog.wait=wait;
+          $(id).addEventListener('hidden.bs.modal',hidden,{once:true});document.addEventListener('focusin',moved,true);document.addEventListener('pointerdown',moved,true);window.addEventListener('blur',blur);
+        });
+        if(!accepted)return;
+      }
+      if(ticket!==dialog.ticket||!quizCurrent(context)||opener&&(!opener.isConnected||opener.disabled))return;
+      dialog.opener=opener;try{return await render();}finally{if(dialog.opener===opener)dialog.opener=null;}
+    }
+    installQuizDialog('statsModal',statsModal);
+    installQuizDialog('deleteModal',deleteModal);
+    installQuizDialog('alertModal',alertModal);
     for(const [id,action] of [['overallRetry',loadOverallStats],['listRetry',()=>loadQuestions(state.retryPage)],['statsRetry',()=>loadQuestionStats()]]) {
       $(id).addEventListener('click',()=>{if($(id).getAttribute('aria-disabled')!=='true')void action();});
       $(id).addEventListener('keydown',event=>{if(event.key==='Enter'&&event.repeat&&!event.isComposing&&!event.defaultPrevented)event.preventDefault();});
@@ -1095,6 +1209,7 @@
     installQuestionEditorKeyboard();
     $('addQuestionButton').addEventListener('keydown',guardQuestionOpenKey);
     $('questionList').addEventListener('keydown',guardQuestionOpenKey);
+    $('questionList').addEventListener('keydown',guardQuizDialogOpenKey);
     $('addQuestionButton').addEventListener('click',event=>void requestQuestionEditor(openNewQuestion,event.currentTarget));
     $('addOptionButton').addEventListener('click',addOption);
     $('typeInput').addEventListener('change',handleTypeChange);
@@ -1125,8 +1240,8 @@
       const button=event.target.closest('[data-action]'); if(!button)return;
       const card=button.closest('[data-question-id]'); const q=findQuestion(card?.dataset.questionId); if(!q)return;
       if(button.dataset.action==='edit')void requestQuestionEditor(()=>openEditQuestion(q),button);
-      if(button.dataset.action==='delete')openDeleteQuestion(q);
-      if(button.dataset.action==='stats')void openStats(q);
+      if(button.dataset.action==='delete')void requestQuizDialog('deleteModal',()=>openDeleteQuestion(q),button);
+      if(button.dataset.action==='stats')void requestQuizDialog('statsModal',()=>openStats(q),button);
     });
 
     console.log(`[Version] quiz_admin.html v${VERSION}`);
