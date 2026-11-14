@@ -1,4 +1,4 @@
-/* 시청 변경신고 준비 모형 0.2.13 — 저장·발송 없음. */
+/* 시청 변경신고 준비 모형 0.2.15 — 저장·발송 없음. */
 (function(root){
  'use strict';
  const kinds={capital:'출자금',members:'조합원 수',appointment:'임원 취임',renewal:'임원 중임',retirement:'임원 퇴임',resignation:'임원 사임',office:'주사무소 주소',purpose:'사업 목적',name:'조합 명칭',chair:'이사장 변경',chairAddress:'이사장 개인 주소',articles:'그 밖의 정관 변경'};
@@ -21,8 +21,9 @@
  function deadline(end){if(!date(end))return '';const [y,m,d]=end.split('-').map(Number),target=new Date(Date.UTC(y,m+2,1)),last=new Date(Date.UTC(target.getUTCFullYear(),target.getUTCMonth()+1,0)).getUTCDate();target.setUTCDate(Math.min(d,last));return target.toISOString().slice(0,10);}
  function access(runtime){return !!runtime?.coop_id&&runtime.is_active!==false&&runtime.modules?.member_admin!==false&&Array.isArray(runtime.effective_permissions)&&runtime.effective_permissions.includes('member.admin')&&(!Array.isArray(runtime.base_effective_permissions)||runtime.base_effective_permissions.includes('member.admin'))&&(runtime.runtime_profile!=='site_member'||runtime.module_access?.member_admin===true);}
  function changeScope(input){const k=new Set(input.kinds||[]),other=[...k].some(x=>!['capital','members'].includes(x));return {unitReduced:k.has('capital')&&!!input.unitReduced,businessAccountingChanged:(k.has('purpose')||k.has('articles'))&&!!input.businessAccountingChanged,resolutionRequired:other&&!!input.resolutionRequired};}
- // 과거 신고 사실만 별도 표시한다. ERP 집계·가입사건·원장은 보정하지 않는다.
- function reportedMembershipNote(input){return input.coopId==='a4e65bb0-aa8e-4cef-a895-cd7865a67fef'&&String(input.reportYear)==='2027'&&(input.kinds||[]).some(k=>k==='capital'||k==='members')?'2025년 기말 신고 인원: 240명':'';}
+ // 저장한 직전 기말 신고 인원과 대상연도 말 인원을 비교한다. 원장 집계는 별도로 보존한다.
+ function reportedMembershipNote(input){const b=input.reportedBaseline;return b&&b.coopId===input.coopId&&Number.isInteger(b.year)&&b.year===Number(input.reportYear)-2&&Number.isInteger(b.members)&&b.members>=0&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(b.revision||'')&&(input.kinds||[]).some(k=>k==='capital'||k==='members')?b.year+'년 기말 신고 인원: '+b.members.toLocaleString('ko-KR')+'명':'';}
+ function reportMemberComparison(input){if(!reportedMembershipNote(input))return null;let after;try{after=number(input.afterMembers);}catch{return null;}if(after===null)return null;const before=input.reportedBaseline.members,difference=after-before;return{before,after,difference,increase:Math.max(difference,0),decrease:Math.max(-difference,0)};}
  function model(raw){
   const input=Object.fromEntries(Object.entries(raw).map(([k,v])=>[k,typeof v==='string'?str(v):v]));
   Object.assign(input,changeScope(input));const selected=new Set((input.kinds||[]).filter(k=>Object.hasOwn(kinds,k)));if(!selected.size)throw Error('변경 유형을 하나 이상 선택해 주세요.');
@@ -57,6 +58,11 @@
    let p;try{p=period(input.reportYear);}catch(_){missing.push('신고연도');}if(p&&(input.fiscalEnd!==p.end||input.beforeDate!==p.before))missing.push('신고연도에 맞는 대상연도·기준일');if(selected.has('capital')&&String(input.capitalSourceYear)!==String(input.reportYear))missing.push('대상연도의 ERP 출자금 조회');
    const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());if(input.fiscalEnd>today)missing.push('아직 종료되지 않은 회계연도');if(date(input.beforeDate)&&input.beforeDate>input.fiscalEnd)warnings.push('변경 전 기준일이 기말 기준일보다 늦습니다.');
   }
+  if(annual&&input.reportedBaselineState&&input.reportedBaselineState!=='ready')missing.push('과거 신고 인원 다시 확인');
+  if(annual&&input.reportedBaseline&&!reportedMembershipNote(input))missing.push('과거 신고 인원 근거 확인');
+  if(annual&&input.reportedBaselineDirty)missing.push('과거 신고 인원 저장 결과 확인');
+  const erpValues={...values},memberComparison=annual?reportMemberComparison(input):null;
+  if(memberComparison){Object.assign(values,{beforeMembers:memberComparison.before,increaseMembers:memberComparison.increase,decreaseMembers:memberComparison.decrease,afterMembers:memberComparison.after});for(const row of rows)if(row.key==='members'){row.before=memberComparison.before;row.after=memberComparison.after;}}
   const attachments=[{group:'법정 서식',text:'별지 제7호 변경신고서'}];
   if(active.articles||active.name||active.purpose)attachments.push({group:'유형별 법정 첨부',text:'변경한 정관 사본'});
   if(input.resolutionRequired||active.articles||active.name||active.purpose)attachments.push({group:'유형별 법정 첨부',text:'변경을 의결한 총회 의사록 사본'});
@@ -64,7 +70,7 @@
   if(input.unitReduced)attachments.push({group:'유형별 법정 첨부',text:'재무상태표·출자감소 의결·채권자 공고·이의신청 처리 등 증명서류'});
   if(selected.has('members'))attachments.push({group:'유형별 첨부',text:'시청 제출용 조합원 명부'});
   attachments.push({group:'담당 공무원 확인',text:'법인 등기사항증명서. 행정정보 공동이용에 동의하지 않으면 직접 제출합니다.'});
-  return{input,reportedMembershipNote:reportedMembershipNote(input),selected:[...selected].map(k=>kinds[k]),rows,values,unit,annual,deadline:annual?deadline(input.fiscalEnd):'',attachments,missing:[...new Set(missing)],warnings,draft:missing.length>0||warnings.some(x=>/다릅니다|늦습니다/.test(x))};
+  return{input,reportedMembershipNote:reportedMembershipNote(input),memberComparison,erpValues,selected:[...selected].map(k=>kinds[k]),rows,values,unit,annual,deadline:annual?deadline(input.fiscalEnd):'',attachments,missing:[...new Set(missing)],warnings,draft:missing.length>0||warnings.some(x=>/다릅니다|늦습니다/.test(x))};
  }
  function activityCounts(value,year,day){
   const today=day||new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date()),end=String(year)+'-12-31',asof=end<today?end:today;
@@ -80,14 +86,16 @@
   for(const r of rows){if(!r||typeof r.member_uid!=='string'||!r.member_uid||seen.has(r.member_uid)||!Array.isArray(r.review_codes)||r.review_codes.some(c=>typeof c!=='string')||![true,false,null].includes(r.is_member_on_cutoff)||!r.member_updated_at||!Number.isFinite(Date.parse(r.member_updated_at)))throw Error('연말 인원 응답이 불완전하거나 중복되었습니다.');seen.add(r.member_uid);if(excluded.has(r.member_uid.toLowerCase()))continue;if(r.is_member_on_cutoff===null||r.review_codes.length)review++;else if(r.is_member_on_cutoff)count++;}
   return{count:review?null:count,confirmed:count,review,revision:JSON.stringify(rows.map(r=>[r.member_uid,r.is_member_on_cutoff,r.review_codes,r.member_updated_at]).sort((a,b)=>a[0].localeCompare(b[0])))};
  }
+ function registeredOfficer(r){return r?.category==='executive'&&r.is_registered===true&&['이사장','이사','감사'].includes(str(r.role));}
+ function officialOptions(kind,records){return records.filter(r=>registeredOfficer(r)&&!officialChange(kind,r.id,records).error);}
  function officialSummary(r){return [r.name,r.role,r.term_count?'제'+r.term_count+'기':''].filter(Boolean).join(' · ')+'\n임기 '+(r.term_start_date||'미등록')+' ~ '+(r.term_end_date||'미등록');}
- function officialChange(kind,id,records){const row=records.find(r=>String(r.id)===String(id));if(!row)return{before:'',after:'',error:'ERP 임원을 선택해 주세요.'};if(!row.name||!row.role||!date(row.term_start_date)||!date(row.term_end_date))return{before:'',after:'',error:'임원 성명·직책·임기를 ERP에서 확인해 주세요.'};
-  if(kind==='appointment')return{before:'없음',after:officialSummary(row)};
+ function officialChange(kind,id,records){const row=records.find(r=>String(r.id)===String(id)&&registeredOfficer(r));if(!row)return{before:'',after:'',error:'ERP에 등록된 등기 이사·감사를 선택해 주세요.'};if(!row.name||!row.role||!date(row.term_start_date)||!date(row.term_end_date))return{before:'',after:'',error:'임원 성명·직책·임기를 ERP에서 확인해 주세요.'};
+  if(kind==='appointment')return Number(row.term_count)===1?{before:'없음',after:officialSummary(row)}:{before:'',after:'',error:'취임은 ERP의 최초 임기 이력을 선택해 주세요.'};
   if(row.term_end_date<row.term_start_date)return{before:'',after:'',error:'ERP 임기 순서를 확인해 주세요.'};
-  if(kind==='renewal'){if(!row.member_id||!Number.isSafeInteger(Number(row.term_count))||Number(row.term_count)<2)return{before:'',after:'',error:'중임 회원 연결·기수를 확인해 주세요.'};const previous=records.filter(r=>r.id!==row.id&&r.member_id===row.member_id&&r.role===row.role&&r.category===row.category&&Number(r.term_count)===Number(row.term_count)-1&&date(r.term_start_date)&&date(r.term_end_date)&&r.term_start_date<row.term_start_date&&r.term_end_date<row.term_start_date);return previous.length===1?{before:officialSummary(previous[0]),after:officialSummary(row)}:{before:'',after:officialSummary(row),error:'중임 전 임기를 ERP 이력에서 하나로 확인하지 못했습니다.'};}
+  if(kind==='renewal'){if(!row.member_id||!Number.isSafeInteger(Number(row.term_count))||Number(row.term_count)<2)return{before:'',after:'',error:'중임 회원 연결·기수를 확인해 주세요.'};const previous=records.filter(r=>registeredOfficer(r)&&r.id!==row.id&&r.member_id===row.member_id&&r.role===row.role&&r.category===row.category&&Number(r.term_count)===Number(row.term_count)-1&&date(r.term_start_date)&&date(r.term_end_date)&&r.term_start_date<row.term_start_date&&r.term_end_date<row.term_start_date);return previous.length===1?{before:officialSummary(previous[0]),after:officialSummary(row)}:{before:'',after:officialSummary(row),error:'중임 전 임기를 ERP 이력에서 하나로 확인하지 못했습니다.'};}
   if(kind==='resignation')return row.end_reason==='resignation'&&date(row.real_end_date)&&row.real_end_date>=row.term_start_date?{before:officialSummary(row),after:row.name+' · '+row.role+'\n사임일 '+row.real_end_date}:{before:officialSummary(row),after:'',error:'ERP에 처리된 사임 효력일이 없습니다.'};
   if(kind==='retirement')return date(row.real_end_date)&&row.real_end_date>=row.term_start_date&&!!row.end_reason&&row.end_reason!=='resignation'?{before:officialSummary(row),after:row.name+' · '+row.role+'\n퇴임일 '+row.real_end_date}:{before:officialSummary(row),after:'',error:'ERP에 처리된 퇴임일이 없습니다.'};return{before:'',after:'',error:'변경 구분을 확인해 주세요.'};
  }
  function purposeFromText(text){const value=String(text||'').replace(/\r/g,''),matches=[...value.matchAll(/(?:^|\n)\s*제\s*\d+\s*조\s*[（(]\s*목\s*적\s*[)）]/g)];if(matches.length!==1)return'';const start=matches[0].index,tail=value.slice(start+matches[0][0].length),next=tail.search(/\n\s*제\s*\d+\s*조\s*[（(]/);return value.slice(start,start+matches[0][0].length+(next<0?tail.length:next)).trim();}
- root.CoopRegistryModel={model,reportedMembershipNote,number,display,deadline,date,access,kinds,fieldRows,period,capitalAt,membershipAt,activityCounts,changeScope,officialSummary,officialChange,purposeFromText,birthFromRrn,originalCharter};
+ root.CoopRegistryModel={model,reportedMembershipNote,reportMemberComparison,number,display,deadline,date,access,kinds,fieldRows,period,capitalAt,membershipAt,activityCounts,changeScope,registeredOfficer,officialOptions,officialSummary,officialChange,purposeFromText,birthFromRrn,originalCharter};
 })(typeof window==='undefined'?globalThis:window);

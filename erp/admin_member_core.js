@@ -40,6 +40,7 @@ function ensureMemberOrgProfileFields() {
         const business=document.getElementById('member-org-business-number')?.parentElement;
         if (business) {const box=document.createElement('div');box.className='col-12';box.innerHTML='<label class="form-label small fw-bold" for="member-org-corporate-number">법인등록번호</label><input id="member-org-corporate-number" class="form-control" type="text" inputmode="numeric" maxlength="14" autocomplete="off" pattern="[0-9]{6}-?[0-9]{7}" placeholder="000000-0000000">';business.after(box);}
     }
+    window.ERPCorporateNumber?.bind(document.getElementById('member-org-corporate-number'));
     window.ERPCoopProfileHistory?.begin(document.getElementById('member-org-address')?.closest('.row'),adminCertificateAuthId&&g_adminMemberRuntime?.coop_id?adminCertificateAuthId+'|'+g_adminMemberRuntime.coop_id:'');
     if (document.getElementById('member-org-contact-name')) return;
     const row = document.getElementById('member-org-address')?.closest('.row');
@@ -451,7 +452,7 @@ async function openMemberCertificateSettingsModal(focus) {
         document.getElementById('member-org-contact-name').value = String(config.company_contact_name || '');
         document.getElementById('member-org-est-date').value = String(config.estDate || '');
         document.getElementById('member-org-business-number').value = String(config.bizNum || '');
-        document.getElementById('member-org-corporate-number').value = String(config.corporate_registration_number || '');
+        document.getElementById('member-org-corporate-number').value = window.ERPCorporateNumber?.format(config.corporate_registration_number || '') ?? String(config.corporate_registration_number || '');
         document.getElementById('member-org-deposit-bank').value = String(config.member_capital_deposit_bank || '');
         document.getElementById('member-org-deposit-account').value = String(config.member_capital_deposit_account || '');
         document.getElementById('member-org-deposit-holder').value = String(config.member_capital_deposit_holder || '');
