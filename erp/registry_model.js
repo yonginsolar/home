@@ -1,4 +1,4 @@
-/* 시청 변경신고 준비 모형 0.2.10 — 저장·발송 없음. */
+/* 시청 변경신고 준비 모형 0.2.13 — 저장·발송 없음. */
 (function(root){
  'use strict';
  const kinds={capital:'출자금',members:'조합원 수',appointment:'임원 취임',renewal:'임원 중임',retirement:'임원 퇴임',resignation:'임원 사임',office:'주사무소 주소',purpose:'사업 목적',name:'조합 명칭',chair:'이사장 변경',chairAddress:'이사장 개인 주소',articles:'그 밖의 정관 변경'};
@@ -49,7 +49,7 @@
   if(annual&&input.manualMembers&&String(input.manualMembersYear)!==String(input.reportYear))missing.push('직접 입력 인원의 신고연도 재확인');
   if(annual&&!input.manualMembers&&input.activityState==='confirmed'&&input.activityMemberValues&&(['beforeMembers','increaseMembers','decreaseMembers','afterMembers'].some(key=>values[key]!==input.activityMemberValues[key])||String(input.activityMemberValues.year)!==String(input.reportYear)))missing.push('ERP 집계와 다른 인원 입력 확인');
   if(annual&&input.activityState&&input.activityState!=='confirmed'&&!input.manualMembers)missing.push('연중 가입·탈퇴 인원 확인');
-  if(annual&&!/^\d{6}-?\d{7}$/.test(input.corporateNumber||''))missing.push('출자금 확인서의 ERP 조합 법인등록번호');
+  if(annual&&!/^\d{6}-?\d{7}$/.test(input.corporateNumber||''))missing.push('출자금 확인서의 법인등록번호 13자리');
   if(annual){for(const q of ['Members','Shares','Capital']){const b=values['before'+q],i=values['increase'+q],d=values['decrease'+q],a=values['after'+q];if([b,i,d,a].every(x=>x!==null)&&b+i-d!==a)warnings.push(({Members:'조합원 수',Shares:'출자좌수',Capital:'출자금'})[q]+'의 전기 + 증가 - 감소가 기말과 다릅니다.');}
    for(const p of ['before','increase','decrease','after'])for(const q of ['Members','Shares','Capital'])if(values[p+q]===null)missing.push(({before:'변경 전',increase:'당기 증가',decrease:'당기 감소',after:'기말'})[p]+' '+({Members:'조합원 수',Shares:'출자좌수',Capital:'출자금'})[q]);
    if(unit&&values.afterCapital!==null&&values.afterShares!==null&&unit*values.afterShares!==values.afterCapital)warnings.push('기말 좌수 × 1좌 금액과 기말 출자금이 다릅니다.');

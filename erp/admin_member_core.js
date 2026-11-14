@@ -1933,6 +1933,11 @@ function validateCityReportMembership(records, membership, cutoffDate, coopId) {
             || Date.parse(record.updated_at) !== Date.parse(proof.member_updated_at)) throw new Error('MEMBER_EXPORT_LIST_CHANGED');
         ids.add(id);
         if (isTestMemberExport(record)) continue;
+        // 시청용 서버가 명시한 미가입 승인대기만 제외한다. 과거 가입일만 있는 불명확 이력은 유지한다.
+        if (String(record.status || '').trim().toLowerCase() === '승인대기'
+            && (record.join_date === null || (validDate(record.join_date) && record.join_date > cutoffDate))
+            && proof.is_member_on_cutoff === false && proof.joined_on === null
+            && proof.ended_on === null && proof.review_codes.length === 0) continue;
         if (proof.is_member_on_cutoff === null || proof.review_codes.length) {
             review.push({ record, codes: proof.review_codes.length ? proof.review_codes : ['MEMBERSHIP_PERIOD_UNCONFIRMED'] });
         } else if (!validDate(proof.joined_on)
