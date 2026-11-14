@@ -1,4 +1,4 @@
-/* 0.2.15 · 신고내용 한 칸·선택 신고인·이메일 확인서·시청용 명부. */
+/* 0.2.17 · 신고내용 셀 축소·공식 하단 전체 보존·별첨 분리. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -9,13 +9,15 @@
  async function create(model,provided,scope){
   const check=()=>{if(scope?.signal?.aborted||scope?.current&&!scope.current())throw Error('출력 준비가 취소되었습니다.');};check();
   if(!provided)await tools();const lib=provided?.lib||root.PDFLib,kit=provided?.fontkit||root.fontkit;
-  const original=provided?.original||await load('/erp/registry-assets/change-report-reference-20261114.pdf'),fontBytes=provided?.font||await load('/erp/assets/hr-forms/NanumGothic-Regular.ttf');
-  check();const source=await lib.PDFDocument.load(original);if(source.getPageCount()!==2)throw Error('공식 서식의 페이지 구성을 확인해 주세요.');
+  const original=provided?.original||await load('/erp/registry-assets/change-report-complete-onepage-20261115.pdf'),fontBytes=provided?.font||await load('/erp/assets/hr-forms/NanumGothic-Regular.ttf');
+  check();const source=await lib.PDFDocument.load(original);if(source.getPageCount()!==1)throw Error('전체 문구를 보존한 신고 서식 한 면을 확인해 주세요.');
   const doc=await lib.PDFDocument.create();doc.registerFontkit(kit);const font=await doc.embedFont(fontBytes,{subset:false});
-  // 공식 원본은 앞쪽 신고서와 뒤쪽 안내로 구성된다. 제출 묶음에는 신고서 앞쪽 한 면만 넣는다.
-  check();const embedded=await doc.embedPages([source.getPages()[0]]);check();for(const p of embedded){const page=doc.addPage([p.width,p.height]);page.drawPage(p);page.pushOperators(lib.setTextRenderingMode(0));}
+  // 원본의 앞·뒤 문구는 모두 파생서식 한 면에 있다. 페이지를 잘라 버리지 않는다.
+  check();const embedded=await doc.embedPages(source.getPages());check();for(const p of embedded){const page=doc.addPage([p.width,p.height]);page.drawPage(p);page.pushOperators(lib.setTextRenderingMode(0));}
   const page=doc.getPages()[0],H=page.getHeight(),D=x=>x==null?'':typeof x==='number'?x.toLocaleString('ko-KR'):String(x);
-  function box(text,x,top,width,height,label){const t=String(text??'').trim();if(!t)return;let lines=wrap(t,font,11,width-4);if(label==='신고인 주소'){lines=[];let line='';for(const ch of t){if(line&&font.widthOfTextAtSize(line+ch,11)>width-4){const at=line.lastIndexOf(' ');if(at>0){lines.push(line.slice(0,at));line=line.slice(at+1)+ch;}else{lines.push(line);line=ch;}}else line+=ch;}if(line)lines.push(line);}if(lines.length*13>height+2)throw Error(label+'가 입력 칸보다 깁니다.');lines.forEach((s,i)=>page.drawText(s,{x:x+2,y:H-top-11-i*13,size:11,font}));}
+  const frontMap=[[0,0],[58,18],[375,335],[569,357],[595,371],[618,385],[697,408],[733,428],[768,448],[793,472],[841,475]];
+  function frontTop(top){let i=0;while(i<frontMap.length-2&&top>frontMap[i+1][0])i++;const[a,b]=frontMap[i],[c,d]=frontMap[i+1];return b+(top-a)*(d-b)/(c-a);}
+  function box(text,x,top,width,height,label){const t=String(text??'').trim();if(!t)return;let lines=wrap(t,font,11,width-4);if(label==='신고인 주소'){lines=[];let line='';for(const ch of t){if(line&&font.widthOfTextAtSize(line+ch,11)>width-4){const at=line.lastIndexOf(' ');if(at>0){lines.push(line.slice(0,at));line=line.slice(at+1)+ch;}else{lines.push(line);line=ch;}}else line+=ch;}if(line)lines.push(line);}if(lines.length*13>height+2)throw Error(label+'가 입력 칸보다 깁니다.');lines.forEach((s,i)=>page.drawText(s,{x:x+2,y:H-frontTop(top+11)-i*13,size:11,font}));}
   const d=model.input,provisional=model.annual&&d.asOf&&d.asOf<d.fiscalEnd,actualDate=provisional?d.asOf:d.fiscalEnd;
   box('V',179,82,15,15,'조합 구분');
   box(d.applicant,115,185,250,15,'신고인 성명');box(d.applicantBirth,375,185,158,15,'신고인 생년월일·법인등록번호');
@@ -24,10 +26,11 @@
   box(d.chairName,115,302,250,14,'이사장 성명');box(d.chairIdentity,375,302,158,14,'이사장 식별정보');
   box(d.chairPhone,115,329,250,14,'이사장 전화번호');box(d.companyEmail,375,329,158,14,'이사장 전자우편주소');box(d.chairAddress,115,356,420,14,'이사장 개인 주소');
   // 공개 원본의 다른 칸은 유지하고 신고내용 내부만 한 칸으로 사용한다.
-  page.drawText('첨부서류 참조',{x:(110.341+537.671-font.widthOfTextAtSize('첨부서류 참조',11))/2,y:H-474,size:11,font});
+  page.drawText('첨부서류 참조',{x:(110.341+537.671-font.widthOfTextAtSize('첨부서류 참조',11))/2,y:H-frontTop(474),size:11,font});
   if(/^\d{4}-\d{2}-\d{2}$/.test(d.printDate)){const [y,m,day]=d.printDate.split('-');box(y,420,697,32,15,'작성 연도');box(String(Number(m)),466,697,18,15,'작성 월');box(String(Number(day)),498,697,18,15,'작성 일');}
   box(d.applicant,343,733,122,16,'하단 신고인');
-  function stamp(pg){if(provided?.test)pg.drawText('합성 검증용',{x:60,y:pg.getHeight()-35,size:11,font,color:lib.rgb(.65,.15,.1)});}
+  if(d.applicant)page.drawText(String(d.applicant),{x:345,y:H-704,size:11,font});
+  function stamp(pg){if(provided?.test)pg.drawText('합성 검증용',{x:60,y:pg.getHeight()-(pg===page?12:35),size:11,font,color:lib.rgb(.65,.15,.1)});}
   doc.getPages().forEach(stamp);
   let current,y;
   function newPage(title){current=doc.addPage([595,842]);stamp(current);const change=title.startsWith('변경하려는 내용을 적은 서류'),size=change?15:17;y=change?715:775;current.drawText(title,{x:change?(595-font.widthOfTextAtSize(title,size))/2:45,y,size,font});y=change?657:739;}
@@ -64,5 +67,5 @@
   for(const [i,pg]of doc.getPages().entries())if(i>=1)pg.drawText(String(i+1)+' / '+doc.getPageCount(),{x:500,y:30,size:11,font});
   check();doc.setTitle('시청 변경신고 작성자료');doc.setCreator('협동조합 운영시스템');const bytes=await doc.save();try{check();return bytes;}catch(e){bytes.fill(0);throw e;}
  }
- root.CoopRegistryPdf={create,wrap,tools,version:'0.2.15'};
+ root.CoopRegistryPdf={create,wrap,tools,version:'0.2.17'};
 })(typeof window==='undefined'?globalThis:window);
