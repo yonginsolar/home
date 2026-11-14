@@ -1,4 +1,4 @@
-/* 시청 변경신고 준비 모형 0.2.6 — 저장·발송 없음. */
+/* 시청 변경신고 준비 모형 0.2.10 — 저장·발송 없음. */
 (function(root){
  'use strict';
  const kinds={capital:'출자금',members:'조합원 수',appointment:'임원 취임',renewal:'임원 중임',retirement:'임원 퇴임',resignation:'임원 사임',office:'주사무소 주소',purpose:'사업 목적',name:'조합 명칭',chair:'이사장 변경',chairAddress:'이사장 개인 주소',articles:'그 밖의 정관 변경'};
@@ -21,6 +21,8 @@
  function deadline(end){if(!date(end))return '';const [y,m,d]=end.split('-').map(Number),target=new Date(Date.UTC(y,m+2,1)),last=new Date(Date.UTC(target.getUTCFullYear(),target.getUTCMonth()+1,0)).getUTCDate();target.setUTCDate(Math.min(d,last));return target.toISOString().slice(0,10);}
  function access(runtime){return !!runtime?.coop_id&&runtime.is_active!==false&&runtime.modules?.member_admin!==false&&Array.isArray(runtime.effective_permissions)&&runtime.effective_permissions.includes('member.admin')&&(!Array.isArray(runtime.base_effective_permissions)||runtime.base_effective_permissions.includes('member.admin'))&&(runtime.runtime_profile!=='site_member'||runtime.module_access?.member_admin===true);}
  function changeScope(input){const k=new Set(input.kinds||[]),other=[...k].some(x=>!['capital','members'].includes(x));return {unitReduced:k.has('capital')&&!!input.unitReduced,businessAccountingChanged:(k.has('purpose')||k.has('articles'))&&!!input.businessAccountingChanged,resolutionRequired:other&&!!input.resolutionRequired};}
+ // 과거 신고 사실만 별도 표시한다. ERP 집계·가입사건·원장은 보정하지 않는다.
+ function reportedMembershipNote(input){return input.coopId==='a4e65bb0-aa8e-4cef-a895-cd7865a67fef'&&String(input.reportYear)==='2027'&&(input.kinds||[]).some(k=>k==='capital'||k==='members')?'2025년 기말 신고 인원: 240명':'';}
  function model(raw){
   const input=Object.fromEntries(Object.entries(raw).map(([k,v])=>[k,typeof v==='string'?str(v):v]));
   Object.assign(input,changeScope(input));const selected=new Set((input.kinds||[]).filter(k=>Object.hasOwn(kinds,k)));if(!selected.size)throw Error('변경 유형을 하나 이상 선택해 주세요.');
@@ -62,7 +64,7 @@
   if(input.unitReduced)attachments.push({group:'유형별 법정 첨부',text:'재무상태표·출자감소 의결·채권자 공고·이의신청 처리 등 증명서류'});
   if(selected.has('members'))attachments.push({group:'유형별 첨부',text:'시청 제출용 조합원 명부'});
   attachments.push({group:'담당 공무원 확인',text:'법인 등기사항증명서. 행정정보 공동이용에 동의하지 않으면 직접 제출합니다.'});
-  return{input,selected:[...selected].map(k=>kinds[k]),rows,values,unit,annual,deadline:annual?deadline(input.fiscalEnd):'',attachments,missing:[...new Set(missing)],warnings,draft:missing.length>0||warnings.some(x=>/다릅니다|늦습니다/.test(x))};
+  return{input,reportedMembershipNote:reportedMembershipNote(input),selected:[...selected].map(k=>kinds[k]),rows,values,unit,annual,deadline:annual?deadline(input.fiscalEnd):'',attachments,missing:[...new Set(missing)],warnings,draft:missing.length>0||warnings.some(x=>/다릅니다|늦습니다/.test(x))};
  }
  function activityCounts(value,year,day){
   const today=day||new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date()),end=String(year)+'-12-31',asof=end<today?end:today;
@@ -87,5 +89,5 @@
   if(kind==='retirement')return date(row.real_end_date)&&row.real_end_date>=row.term_start_date&&!!row.end_reason&&row.end_reason!=='resignation'?{before:officialSummary(row),after:row.name+' · '+row.role+'\n퇴임일 '+row.real_end_date}:{before:officialSummary(row),after:'',error:'ERP에 처리된 퇴임일이 없습니다.'};return{before:'',after:'',error:'변경 구분을 확인해 주세요.'};
  }
  function purposeFromText(text){const value=String(text||'').replace(/\r/g,''),matches=[...value.matchAll(/(?:^|\n)\s*제\s*\d+\s*조\s*[（(]\s*목\s*적\s*[)）]/g)];if(matches.length!==1)return'';const start=matches[0].index,tail=value.slice(start+matches[0][0].length),next=tail.search(/\n\s*제\s*\d+\s*조\s*[（(]/);return value.slice(start,start+matches[0][0].length+(next<0?tail.length:next)).trim();}
- root.CoopRegistryModel={model,number,display,deadline,date,access,kinds,fieldRows,period,capitalAt,membershipAt,activityCounts,changeScope,officialSummary,officialChange,purposeFromText,birthFromRrn,originalCharter};
+ root.CoopRegistryModel={model,reportedMembershipNote,number,display,deadline,date,access,kinds,fieldRows,period,capitalAt,membershipAt,activityCounts,changeScope,officialSummary,officialChange,purposeFromText,birthFromRrn,originalCharter};
 })(typeof window==='undefined'?globalThis:window);

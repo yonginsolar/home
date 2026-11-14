@@ -1,4 +1,4 @@
-/* 0.2.6 · 별지 제7호만 원본 고정 글씨 유지. 입력·별지 최소11pt. */
+/* 0.2.10 · 별지 제7호만 원본 고정 글씨 유지. 입력·별지 최소11pt. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -34,7 +34,7 @@
   newPage('변경하려는 내용을 적은 서류');
   function changeTable(){const width=231.6;function row(cells,heading=false){const lines=cells.map(s=>wrap(s,font,11,width-16)),count=Math.max(...lines.map(a=>a.length));let offset=0;do{if(y<110)newPage('변경하려는 내용을 적은 서류 · 계속');const take=Math.min(count-offset,Math.max(1,Math.floor((y-88)/18))),height=Math.max(30,take*18+14);for(let i=0;i<2;i++){const x=66.1+i*width;current.drawRectangle({x,y:y-height,width,height,borderWidth:.5,borderColor:lib.rgb(.5,.5,.5)});lines[i].slice(offset,offset+take).forEach((s,j)=>current.drawText(s,{x:heading?x+(width-font.widthOfTextAtSize(s,11))/2:x+8,y:y-19-j*18,size:11,font}));}y-=height;offset+=take;}while(offset<count);}
    row(['변경전','변경후'],true);for(const r of model.rows){const unit=r.key==='capital'?'원':r.key==='members'?'명':'',label=r.key==='capital'?'출자금':r.label;row([label+' '+D(r.before)+unit,label+(provisional&&['capital','members'].includes(r.key)?' (현재 집계)':'')+' '+D(r.after)+unit]);}}
-  changeTable();y-=20;
+  changeTable();y-=20;if(model.reportedMembershipNote)line(model.reportedMembershipNote);
   const covered=new Set(['조합명','주사무소 소재지',...model.rows.flatMap(r=>[r.label+' 변경 전',r.label+' 변경 후'])]);
   for(const [label,value]of overflow){if(covered.has(label))continue;line('공식 신고서 별지 참조 · '+label,12);line(value);}
   if(model.annual){newPage('출자금 변동내역 확인서');line('협동조합명: '+D(d.companyName));line('법인등록번호: '+D(d.corporateNumber));line('소재지: '+D(d.officeAddress));line((provisional?'현재 집계 기준일: '+D(d.asOf)+' · '+D(d.fiscalEnd)+' 기말 미확정':'기준일: '+D(d.fiscalEnd))+' · 계산 1좌 금액: '+D(model.unit)+'원 ('+(d.unitSource==='erp_current'?'ERP 현재 설정':d.unitSource==='entered'?'직접 수정':'입력값')+')');
@@ -48,5 +48,5 @@
   for(const [i,pg]of doc.getPages().entries())if(i>=2)pg.drawText(String(i+1)+' / '+doc.getPageCount(),{x:500,y:30,size:11,font});
   check();doc.setTitle('시청 변경신고 작성자료');doc.setCreator('협동조합 운영시스템');const bytes=await doc.save();try{check();return bytes;}catch(e){bytes.fill(0);throw e;}
  }
- root.CoopRegistryPdf={create,wrap,tools,version:'0.2.6'};
+ root.CoopRegistryPdf={create,wrap,tools,version:'0.2.10'};
 })(typeof window==='undefined'?globalThis:window);
