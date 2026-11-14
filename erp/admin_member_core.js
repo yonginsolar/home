@@ -1887,6 +1887,104 @@ async function fetchAllMembersForExport(signal) {
     }));
 } // End of fetchAllMembersForExport
 
+async function fetchCityReportMembersForExport(cutoffDate, signal) {
+    const runtime = g_adminMemberRuntime;
+    const coopId = String(runtime?.coop_id || '').trim();
+    if (!/^\d{4}-12-31$/.test(cutoffDate) || !coopId) throw new Error('CITY_ROSTER_INVALID_YEAR');
+    const members = await readMemberExportPages(first => _supabase.from('coop_members')
+        .select('id,coop_id,member_id,name,member_type,status,join_date,birth_date,rrn_display,corp_number,business_number,updated_at', first ? { count: 'exact' } : {})
+        .eq('coop_id', coopId).order('name', { ascending: true }).order('id', { ascending: true }), 'id', signal, runtime);
+    const readMembership = () => readMemberExportPages(first => _supabase.rpc(
+        'member_export_city_membership_at_year_end', { p_year: Number(cutoffDate.slice(0, 4)) }, first ? { count: 'exact' } : {})
+        .order('member_uid', { ascending: true }), 'member_uid', signal, runtime);
+    const membership = await readMembership();
+    // 페이지 사이의 이력 변경도 감지한다. 두 번의 읽기가 하나의 DB 스냅샷을 뜻하지는 않는다.
+    const confirmed = await readMembership();
+    const signature = rows => JSON.stringify(rows.map(row => [row.member_uid, row.is_member_on_cutoff,
+        row.joined_on, row.ended_on, row.review_codes, row.member_updated_at]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+    if (signature(membership) !== signature(confirmed)) throw new Error('MEMBER_EXPORT_LIST_CHANGED');
+    validateCityReportMembership(members, confirmed, cutoffDate, coopId);
+    return { members, membership: confirmed };
+}
+
+function validateCityReportMembership(records, membership, cutoffDate, coopId) {
+    if (!/^\d{4}-12-31$/.test(cutoffDate) || !Array.isArray(membership) || records.length !== membership.length) {
+        throw new Error('MEMBER_EXPORT_READ_INCOMPLETE');
+    }
+    const byId = new Map(membership.map(row => [String(row?.member_uid || ''), row]));
+    if (byId.size !== membership.length || byId.has('')) throw new Error('MEMBER_EXPORT_LIST_CHANGED');
+    const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+        && Number.isFinite(Date.parse(value + 'T00:00:00Z'))
+        && new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) === value;
+    const ids = new Set(), review = [];
+    for (const record of records) {
+        const id = String(record?.id || '');
+        const proof = byId.get(id);
+        if (!id || ids.has(id) || !proof || (coopId && record.coop_id !== coopId)
+            || !Array.isArray(proof.review_codes) || proof.review_codes.some(code => typeof code !== 'string')
+            || ![true, false, null].includes(proof.is_member_on_cutoff)
+            || !record.updated_at || !proof.member_updated_at
+            || !Number.isFinite(Date.parse(record.updated_at))
+            || Date.parse(record.updated_at) !== Date.parse(proof.member_updated_at)) throw new Error('MEMBER_EXPORT_LIST_CHANGED');
+        ids.add(id);
+        if (isTestMemberExport(record)) continue;
+        if (proof.is_member_on_cutoff === null || proof.review_codes.length) {
+            review.push({ record, codes: proof.review_codes.length ? proof.review_codes : ['MEMBERSHIP_PERIOD_UNCONFIRMED'] });
+        } else if (!validDate(proof.joined_on)
+            || (proof.ended_on !== null && (!validDate(proof.ended_on) || proof.ended_on < proof.joined_on))
+            || proof.is_member_on_cutoff !== (proof.joined_on <= cutoffDate && (!proof.ended_on || proof.ended_on > cutoffDate))) {
+            throw new Error('MEMBER_EXPORT_READ_INCOMPLETE');
+        }
+    }
+    if (review.length) {
+        const error = new Error('CITY_ROSTER_REVIEW_REQUIRED');
+        error.cityReview = review;
+        throw error;
+    }
+    return byId;
+}
+
+function filterCityReportMembersByMembership(records, cutoffDate, membership) {
+    const byId = validateCityReportMembership(records, membership, cutoffDate);
+    return records.filter(record => !isTestMemberExport(record) && byId.get(String(record.id)).is_member_on_cutoff === true);
+}
+
+function showCityReportMembershipReview(items) {
+    const modal = document.getElementById('excelModal');
+    const body = modal?.querySelector('.modal-body');
+    if (!body) return;
+    let notice = document.getElementById('memberExportCityReview');
+    if (!notice) {
+        notice = document.createElement('div'); notice.id = 'memberExportCityReview';
+        notice.className = 'alert alert-warning mt-3'; notice.setAttribute('role', 'status');
+        body.appendChild(notice);
+        const clear = () => { notice.replaceChildren(); notice.hidden = true; };
+        modal.addEventListener('hide.bs.modal', clear);
+        modal.addEventListener('input', clear);
+        modal.addEventListener('change', clear);
+    }
+    notice.replaceChildren(); notice.hidden = !items.length;
+    if (!items.length) return;
+    const title = document.createElement('p');
+    title.textContent = `연말 회원 여부 확인 필요 ${items.length}명 — 확인 전에는 확정 명부를 내려받지 않습니다.`;
+    notice.appendChild(title);
+    const labels = {
+        JOIN_DATE_MISSING: '가입일 미기록', JOIN_TERM_CONFLICT: '가입일과 가입 이력 불일치',
+        TERM_SEQUENCE_CONFLICT: '재가입 구간·순서 확인 필요', END_EFFECTIVE_UNCONFIRMED: '탈퇴 효력일 근거 확인 필요',
+        END_TERM_CONFLICT: '탈퇴 기록과 가입 이력 불일치', REJOIN_PERIOD_UNCONFIRMED: '재가입 기간 확인 필요',
+        END_BEFORE_JOIN: '가입·탈퇴 날짜 확인 필요', END_EFFECTIVE_MISSING: '탈퇴 효력일 미확인',
+        CURRENT_TERM_CONFLICT: '현재 상태와 가입 이력 불일치', MEMBERSHIP_PERIOD_UNCONFIRMED: '가입 기간 확인 필요'
+    };
+    const list = document.createElement('ul');
+    for (const item of items) {
+        const li = document.createElement('li');
+        li.textContent = `${item.record.name || '-'} (${item.record.member_id || '-'}) · `
+            + [...new Set(item.codes.map(code => labels[code] || '가입·탈퇴 이력 확인 필요'))].join(', ');
+        list.appendChild(li);
+    }
+    notice.appendChild(list);
+}
+
 function normalizeMemberExportDateValue(value) {
     const safeValue = String(value || '').trim();
     return /^\d{4}-\d{2}-\d{2}$/.test(safeValue) ? safeValue : '';
@@ -1929,7 +2027,9 @@ function buildMemberExportRows(records, options = {}) {
     const shareUnitAmount = normalizeMemberExportShareUnitAmount(options.shareUnitAmount);
     const snapshotMap = options.snapshotMap || {};
     const exportType = String(options.exportType || 'public');
-    const eligibleRecords = filterMemberExportRecordsByCutoffDate(safeRecords, cutoffDate, options.confirmedTestNumbers);
+    const eligibleRecords = exportType === 'city-report'
+        ? filterCityReportMembersByMembership(safeRecords, cutoffDate, options.cityMembership)
+        : filterMemberExportRecordsByCutoffDate(safeRecords, cutoffDate, options.confirmedTestNumbers);
 
     const normalizedRecords = eligibleRecords.map((record) => {
         const memberId = String(record.member_id || '').trim();
@@ -3002,6 +3102,7 @@ async function downloadExcel() {
     let dataToExport = [];
     let fileName = "조합원명부_일반.xlsx";
     let exportSourceRecords = [];
+    let cityMembership;
 
     if (!cutoffDate) {
         return myAlert(type === 'city-report' ? '시청 신고용 연도를 입력해주세요.' : '기준일을 선택해주세요.', 'warning');
@@ -3023,10 +3124,27 @@ async function downloadExcel() {
     }
 
     try {
-        exportSourceRecords = await readMemberExcelExport(attempt,signal=>fetchAllMembersForExport(signal));
+        if (type === 'city-report') {
+            showCityReportMembershipReview([]);
+            const city = await readMemberExcelExport(attempt,signal=>fetchCityReportMembersForExport(cutoffDate, signal));
+            exportSourceRecords = city.members;
+            cityMembership = city.membership;
+        } else {
+            exportSourceRecords = await readMemberExcelExport(attempt,signal=>fetchAllMembersForExport(signal));
+        }
     } catch (memberError) {
         if(!isCurrentMemberExcelExport(attempt))return;
         attempt.releaseLoading();
+        if (type === 'city-report') {
+            if (memberError.cityReview) {
+                showCityReportMembershipReview(memberError.cityReview);
+                return;
+            }
+            const reason = memberError.code === '22023' && memberError.message === 'CITY_ROSTER_YEAR_NOT_ENDED'
+                ? '선택한 연도가 끝난 뒤 확정 명부를 내려받을 수 있습니다.'
+                : '연말 회원 여부를 끝까지 확인하지 못했습니다. 입력은 그대로 두고 다시 시도해 주세요.';
+            return myAlert(reason, 'warning');
+        }
         CoopSafeLog.error("[erp/admin_member] operation failed", memberError);
         return myAlert('조합원 명부를 끝까지 확인하지 못했습니다. 다시 시도해 주세요.', 'error');
     }
@@ -3097,7 +3215,8 @@ async function downloadExcel() {
             cutoffDate,
             shareUnitAmount,
             snapshotMap,
-            exportType: type
+            exportType: type,
+            ...(type === 'city-report' ? { cityMembership } : {})
         });
         dataToExport = exportResult.rows;
         fileName = type === 'city-report'
