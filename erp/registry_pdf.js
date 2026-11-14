@@ -1,4 +1,4 @@
-/* 0.2.2 · 별지 제7호만 원본 고정 글씨 유지. 입력·별지 최소11pt. */
+/* 0.2.5 · 별지 제7호만 원본 고정 글씨 유지. 입력·별지 최소11pt. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -17,11 +17,11 @@
   function box(text,x,top,width,height,label){const t=String(text??'').trim();if(!t)return;let lines=wrap(t,font,11,width-4);if(lines.length*13>height){overflow.push([label,t]);lines=['별지 참조'];}if(font.widthOfTextAtSize(lines[0],11)>width-4)throw Error('공식 서식의 입력 칸 너비를 확인해 주세요.');lines.forEach((s,i)=>page.drawText(s,{x:x+2,y:H-top-11-i*13,size:11,font}));}
   const d=model.input;
   box('V',179,82,15,15,'조합 구분');
-  box(d.applicant,115,185,250,15,'신고인 성명');box(d.applicantBirth,375,185,158,15,'신고인 생년월일·법인등록번호');
+  box(d.applicant,115,185,250,15,'신고인 성명');box(d.applicantBirth||(d.applicantBirthFromSecure?'보안 확인 후 표시':''),375,185,158,15,'신고인 생년월일·법인등록번호');
   box(d.applicantAddress,115,216,250,15,'신고인 주소');box(d.applicantPhone,375,216,158,15,'신고인 전화');
   box(d.companyName,115,248,250,14,'조합명');box(d.companyPhone,375,248,158,14,'조합 전화');box(d.officeAddress,115,275,420,14,'주사무소 소재지');
   box(d.chairName,115,302,250,14,'이사장 성명');box(d.chairIdentity,375,302,158,14,'이사장 식별정보');
-  box(d.companyPhone,115,329,250,14,'전화번호');box(d.companyEmail,375,329,158,14,'전자우편주소');box(d.chairAddress,115,356,420,14,'이사장 개인 주소');
+  box(d.chairPhone,115,329,250,14,'이사장 전화번호');box(d.companyEmail,375,329,158,14,'이사장 전자우편주소');box(d.chairAddress,115,356,420,14,'이사장 개인 주소');
   // 3월 제출 예시처럼 한 번만 기재한다. 개정된 공식 표의 고정 선·문구는 지우지 않는다.
   box('첨부서류 참조',260,408,270,20,'신고내용');
   if(/^\d{4}-\d{2}-\d{2}$/.test(d.printDate)){const [y,m,day]=d.printDate.split('-');box(y,420,697,32,15,'작성 연도');box(String(Number(m)),466,697,18,15,'작성 월');box(String(Number(day)),498,697,18,15,'작성 일');}

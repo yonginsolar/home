@@ -36,6 +36,7 @@ function canOpenFullCoopSettings() {
         || g_adminMemberRuntime?.initial_setup?.active === true);
 }
 function ensureMemberOrgProfileFields() {
+    window.ERPCoopProfileHistory?.begin(document.getElementById('member-org-address')?.closest('.row'),adminCertificateAuthId&&g_adminMemberRuntime?.coop_id?adminCertificateAuthId+'|'+g_adminMemberRuntime.coop_id:'');
     if (document.getElementById('member-org-contact-name')) return;
     const row = document.getElementById('member-org-address')?.closest('.row');
     if (!row) return;
@@ -421,6 +422,7 @@ async function openMemberCertificateSettingsModal(focus) {
             show(document.getElementById('memberCertificateSettingsModal'));return;
         }
         memberOrgSettingsOwner=owner;memberOrgSettingsBaseline=null;
+        window.ERPCoopProfileHistory?.begin(document.getElementById('member-org-address')?.closest('.row'),owner);
         revokeMemberCertificateSealPreview();
         revokeMemberOrgLogoPreview();
         sealFileInput.value = '';
@@ -435,6 +437,7 @@ async function openMemberCertificateSettingsModal(focus) {
         const profile = await _supabase.rpc('erp_coop_profile');
         if (profile.error) throw profile.error;
         memberOrgProfileRevision = profile.data.revision;
+        if(owner===memberOrgSettingsOwner&&owner.startsWith(adminCertificateAuthId+'|')&&!window.frameElement?.hidden)window.ERPCoopProfileHistory?.render(document.getElementById('member-org-address')?.closest('.row'),profile.data.history,owner);
         Object.assign(config,profile.data.data);
         chairmanInput.value = String(config.chairman_name || config.ceoName || '');
         await refreshMemberCapitalDisplays();
@@ -520,6 +523,7 @@ async function saveMemberCertificateSettings() {
     let profileSettingsSaved = false;
     const previousLogoUrl = memberOrgOriginalLogoUrl;
     try {
+        const profileHistoryOwner=memberOrgSettingsOwner;
         const readProfile = id => String(document.getElementById(id)?.value || '').trim();
         const profileSaved = await _supabase.rpc('erp_coop_profile',{p_action:'save',p_expected_revision:memberOrgProfileRevision,p_data:{
           chairman_name:chairmanName,company_address:readProfile('member-org-address'),company_contact_name:readProfile('member-org-contact-name'),
@@ -529,6 +533,7 @@ async function saveMemberCertificateSettings() {
         if (profileSaved.error) throw profileSaved.error;
         memberOrgProfileRevision = profileSaved.data.revision;
         profileSettingsSaved = true;
+        if(profileHistoryOwner===memberOrgSettingsOwner&&profileHistoryOwner.startsWith(adminCertificateAuthId+'|')&&!window.frameElement?.hidden)window.ERPCoopProfileHistory?.render(document.getElementById('member-org-address')?.closest('.row'),profileSaved.data.history,profileHistoryOwner);
         let sealPath = memberCertificateSealStoragePath;
         if (sealFile) {
             const uploadFile = await convertMemberCertificateSealToPng(sealFile);
