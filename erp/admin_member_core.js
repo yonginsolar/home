@@ -36,6 +36,10 @@ function canOpenFullCoopSettings() {
         || g_adminMemberRuntime?.initial_setup?.active === true);
 }
 function ensureMemberOrgProfileFields() {
+    if (!document.getElementById('member-org-corporate-number')) {
+        const business=document.getElementById('member-org-business-number')?.parentElement;
+        if (business) {const box=document.createElement('div');box.className='col-12';box.innerHTML='<label class="form-label small fw-bold" for="member-org-corporate-number">법인등록번호</label><input id="member-org-corporate-number" class="form-control" type="text" inputmode="numeric" maxlength="14" autocomplete="off" pattern="[0-9]{6}-?[0-9]{7}" placeholder="000000-0000000">';business.after(box);}
+    }
     window.ERPCoopProfileHistory?.begin(document.getElementById('member-org-address')?.closest('.row'),adminCertificateAuthId&&g_adminMemberRuntime?.coop_id?adminCertificateAuthId+'|'+g_adminMemberRuntime.coop_id:'');
     if (document.getElementById('member-org-contact-name')) return;
     const row = document.getElementById('member-org-address')?.closest('.row');
@@ -447,6 +451,7 @@ async function openMemberCertificateSettingsModal(focus) {
         document.getElementById('member-org-contact-name').value = String(config.company_contact_name || '');
         document.getElementById('member-org-est-date').value = String(config.estDate || '');
         document.getElementById('member-org-business-number').value = String(config.bizNum || '');
+        document.getElementById('member-org-corporate-number').value = String(config.corporate_registration_number || '');
         document.getElementById('member-org-deposit-bank').value = String(config.member_capital_deposit_bank || '');
         document.getElementById('member-org-deposit-account').value = String(config.member_capital_deposit_account || '');
         document.getElementById('member-org-deposit-holder').value = String(config.member_capital_deposit_holder || '');
@@ -515,6 +520,8 @@ async function saveMemberCertificateSettings() {
 
     const saveButton = document.getElementById('member-certificate-settings-save');
     const orgControls=[...document.querySelectorAll('#memberCertificateSettingsModal input,#memberCertificateSettingsModal select,#memberCertificateSettingsModal button')].map(element=>({element,disabled:element.disabled}));
+    const corporateNumber=String(document.getElementById('member-org-corporate-number')?.value||'').trim();
+    if(corporateNumber&&!/^[0-9]{6}-?[0-9]{7}$/.test(corporateNumber))return myAlert('사업자등록번호와 구분해 법인등록번호 13자리를 입력해 주세요.','warning');
     memberOrgSettingsSaving=true;orgControls.forEach(({element})=>element.disabled=true);
     if (saveButton) saveButton.disabled = true;
     showLoading(true);
@@ -528,7 +535,7 @@ async function saveMemberCertificateSettings() {
         const profileSaved = await _supabase.rpc('erp_coop_profile',{p_action:'save',p_expected_revision:memberOrgProfileRevision,p_data:{
           chairman_name:chairmanName,company_address:readProfile('member-org-address'),company_contact_name:readProfile('member-org-contact-name'),
           company_contact_phone:readProfile('member-org-contact'),company_contact_email:readProfile('member-org-email'),
-          bizNum:readProfile('member-org-business-number'),estDate:readProfile('member-org-est-date')
+          bizNum:readProfile('member-org-business-number'),estDate:readProfile('member-org-est-date'),corporate_registration_number:readProfile('member-org-corporate-number').replace('-','')
         }});
         if (profileSaved.error) throw profileSaved.error;
         memberOrgProfileRevision = profileSaved.data.revision;
