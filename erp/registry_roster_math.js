@@ -263,5 +263,17 @@ function buildMemberExportRows(records, options = {}) {
     const missingJoinDateCount = normalizedRecords.filter(record => !normalizeMemberExportDateValue(record.join_date)).length;
     return { rows, overLimitMembers, totalCapital, missingJoinDateCount };
 }
-root.CoopRegistryRosterMath=Object.freeze({build:buildMemberExportRows,validate:validateCityReportMembership});
+// 오늘 기준 임시 명부는 기존 일반 명부의 대상 판정·좌수·비율을 그대로 쓴다.
+// 기말 가입 proof를 생성하거나 조합원 가입 이력으로 간주하지 않는다.
+const currentPreview=(records,options)=>{
+    const result=buildMemberExportRows(records,{...options,exportType:'public'});
+    const byNumber=new Map(records.map(r=>[String(r.member_id||'').trim(),r]));
+    return{...result,rows:result.rows.map((r,i)=>({
+        '연번':i+1,'성명(법인명)':r['이름'],
+        '생년월일(법인등록번호)':formatMemberExportIdentityValue(byNumber.get(r['조합원번호'])),
+        '출자좌수':r['출자좌수'],'출자금액':r['출자금액'],'비율':r['비율(%)'],
+        '30% 초과 여부':r['30% 초과 여부']
+    }))};
+};
+root.CoopRegistryRosterMath=Object.freeze({build:buildMemberExportRows,validate:validateCityReportMembership,currentPreview});
 })(typeof window==='undefined'?globalThis:window);

@@ -1,4 +1,4 @@
-/* 시청 변경신고 0.3.0: 기존 신고 수치·권한을 유지한 첨부 선택. */
+/* 시청 변경신고 0.3.1: 같은 시청용 출자자명부·등록 일반직인을 미리보기에도 포함. */
 (function(){
  'use strict';
  const M=window.CoopRegistryModel,$=id=>document.getElementById(id),form=$('registryForm');
@@ -102,13 +102,15 @@
 
 
  async function prepare(){
-  if(busy||!authorized)return;busy=true;$('preview').disabled=true;const id=++task,v=visit,sig=signature(),controller=new AbortController();outputController=controller;let preparation=null,attachments=null;
+  if(busy||!authorized)return;busy=true;$('preview').disabled=true;const id=++task,v=visit,sig=signature(),controller=new AbortController();outputController=controller;let preparation=null,attachments=null,bundle=null,preparedBytes=null;
+  const cleanPreview=()=>{preparedBytes?.fill(0);preparedBytes=null;bundle?.seal?.fill(0);for(const row of bundle?.roster?.rows||[])for(const key of Object.keys(row))row[key]='';bundle=null;};outputCleanup=cleanPreview;
   const current=()=>task===id&&authorized&&visit===v&&sig===signature()&&visible()&&!controller.signal.aborted;
   try{await access();if(!current())return;const m=preparation=M.model({...raw(),chairIdentity:''});preparingModel=m;text('reviewStatus','서류를 준비하고 있습니다.');
    if(registryDocuments)attachments=await registryDocuments.prepare(m.input,{current,signal:controller.signal,chairBirth:chair?.birth_date||'',final:false});
-   const bytes=await window.CoopRegistryPdf.create(m,undefined,{current,documents:attachments?.bundle});if(!current()){bytes.fill(0);return;}invalidatePreview();const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));preview={url,bytes,signature:sig,owner,coop};$('pdfPreview').src=url;$('pdfPreview').hidden=false;$('download').disabled=false;$('print').disabled=false;text('reviewStatus',[...m.missing.map(s=>'확인 필요: '+s),...m.warnings].join('\n'));
-  }catch(e){if(current())text('reviewStatus',/입력 칸|너비|위임장|확인 필요/.test(e.message||'')?e.message:'미리보기를 준비하지 못했습니다. 입력은 유지됩니다.');}
-  finally{controller.abort();attachments?.clean();if(outputController===controller)outputController=null;if(preparation?.input)preparation.input.corporateNumber='';if(preparingModel===preparation)preparingModel=null;if(task===id){busy=false;$('preview').disabled=false;}}
+   if(m.annual)bundle=await read('previewMaterials',(op,isCurrent)=>window.CoopRegistryBundle.load(client,{coop,cutoff:m.input.fiscalEnd,unit:m.unit,signal:op.controller.signal,current:()=>current()&&isCurrent(),verify:access,preview:true}));if(!current())return;
+   const bytes=preparedBytes=await window.CoopRegistryPdf.create(m,undefined,{current,signal:controller.signal,preview:true,previewVerified:true,coop,seal:bundle?.seal,roster:bundle?.roster,documents:attachments?.bundle});await access();if(!current())return;invalidatePreview();const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));preview={url,bytes,signature:sig,owner,coop};preparedBytes=null;$('pdfPreview').src=url;$('pdfPreview').hidden=false;$('download').disabled=false;$('print').disabled=false;text('reviewStatus',[...m.missing.map(s=>'확인 필요: '+s),...m.warnings,bundle?.sealMissing?'등록된 조합 직인이 없습니다. 최종 출력 전에 조합 설정에서 등록해 주세요.':'',bundle?.provisional?'출자자명부 기준일: '+bundle.roster.cutoff+' · 임시':''].filter(Boolean).join('\n'));
+  }catch(e){if(current())text('reviewStatus',/입력 칸|너비|위임장|확인 필요|직인|시청용 명부|인원·출자금|조회가 지연|다시 확인/.test(e.message||'')?e.message:'미리보기를 준비하지 못했습니다. 입력은 유지됩니다.');}
+  finally{controller.abort();attachments?.clean();cleanPreview();if(outputController===controller){outputController=null;outputCleanup=null;}if(preparation?.input)preparation.input.corporateNumber='';if(preparingModel===preparation)preparingModel=null;if(task===id){busy=false;$('preview').disabled=false;}}
  }
  function askPin(current){if(!current())return Promise.resolve(null);return new Promise(resolve=>{const dialog=$('secureOutputDialog');pinFinish=value=>{if(!pinFinish)return;pinFinish=null;$('securePin').value='';if(dialog.open){pinCloses++;dialog.close();}resolve(value);};try{dialog.showModal();$('securePin').focus({preventScroll:true});}catch(_){pinFinish(null);}});}
  $('secureOutputForm').addEventListener('submit',e=>{e.preventDefault();if(pinFinish){const pin=$('securePin').value;pinFinish(pin||null);}});$('secureOutputForm').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});$('cancelSecureOutput').onclick=()=>pinFinish?.(null);$('secureOutputDialog').addEventListener('cancel',e=>{e.preventDefault();pinFinish?.(null);});$('secureOutputDialog').addEventListener('close',()=>{if(pinCloses){pinCloses--;return;}pinFinish?.(null);});

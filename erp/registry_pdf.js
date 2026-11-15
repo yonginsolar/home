@@ -1,4 +1,4 @@
-/* 0.3.0 · 기존 신고서 전체 보존·선택한 첨부만 추가. */
+/* 0.3.1 · 일반 직인·출자자명부의 안전한 미리보기와 최종 출력 연결. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -19,6 +19,7 @@
   function frontTop(top){let i=0;while(i<frontMap.length-2&&top>frontMap[i+1][0])i++;const[a,b]=frontMap[i],[c,d]=frontMap[i+1];return b+(top-a)*(d-b)/(c-a);}
   function box(text,x,top,width,height,label){const t=String(text??'').trim();if(!t)return;let lines=wrap(t,font,11,width-4);if(label==='신고인 주소'){lines=[];let line='';for(const ch of t){if(line&&font.widthOfTextAtSize(line+ch,11)>width-4){const at=line.lastIndexOf(' ');if(at>0){lines.push(line.slice(0,at));line=line.slice(at+1)+ch;}else{lines.push(line);line=ch;}}else line+=ch;}if(line)lines.push(line);}if(lines.length*13>height+2)throw Error(label+'가 입력 칸보다 깁니다.');lines.forEach((s,i)=>page.drawText(s,{x:x+2,y:H-frontTop(top+11)-i*13,size:11,font}));}
   const d=model.input,provisional=model.annual&&d.asOf&&d.asOf<d.fiscalEnd,actualDate=provisional?d.asOf:d.fiscalEnd;
+  const verifiedMaterials=scope?.outputVerified||scope?.preview===true&&scope?.previewVerified===true&&scope?.coop===d.coopId;
   box('V',179,82,15,15,'조합 구분');
   box(d.applicant,115,185,250,15,'신고인 성명');box(d.applicantBirth,375,185,158,15,'신고인 생년월일·법인등록번호');
   box('주소',113,203,32,27,'주소 제목');box(d.applicantAddress,145,203,226,27,'신고인 주소');box(d.applicantPhone,375,216,158,15,'신고인 전화');
@@ -52,13 +53,15 @@
    draw('위 출자금 변동사항은 사실과 같음을 확인합니다.',104,465,400,30,11,true);
    draw(String(d.printDate||'').replaceAll('-','.'),114,521,390,22,12,true);
    draw(D(d.companyName)+' 이사장 '+D(d.chairName),104,578,340,32,12,true);
-   if(scope?.seal){if(!scope.outputVerified)throw Error('직인 출력 권한을 확인해 주세요.');check();const seal=await doc.embedPng(scope.seal);check();const scale=Math.min(55/seal.width,55/seal.height);pg.drawImage(seal,{x:442.322+(55-seal.width*scale)/2,y:229.908+(55-seal.height*scale)/2,width:seal.width*scale,height:seal.height*scale});}
+   if(scope?.seal){if(!verifiedMaterials)throw Error('직인 출력 권한을 확인해 주세요.');check();const seal=await doc.embedPng(scope.seal);check();const scale=Math.min(55/seal.width,55/seal.height);pg.drawImage(seal,{x:442.322+(55-seal.width*scale)/2,y:229.908+(55-seal.height*scale)/2,width:seal.width*scale,height:seal.height*scale});}
   }
   if(scope?.roster){
-   const r=scope.roster;if(!scope.outputVerified||r.cutoff!==d.fiscalEnd||r.coop!==scope.coop||r.unit!==model.unit||!Array.isArray(r.rows)||!r.rows.length)throw Error('시청용 명부의 권한·기준일을 확인해 주세요.');
-   if(model.values.afterMembers!==r.rows.length||model.values.afterCapital!==r.totalCapital)throw Error('신고서와 시청용 명부의 인원·출자금이 다릅니다.');
+   const r=scope.roster,today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date()),temporary=r.provisional===true;
+   if(!verifiedMaterials||r.coop!==scope.coop||r.unit!==model.unit||!Array.isArray(r.rows)||!r.rows.length||
+      (temporary?!(scope.preview===true&&scope.previewVerified===true&&d.fiscalEnd>today&&r.targetCutoff===d.fiscalEnd&&r.cutoff===today):r.cutoff!==d.fiscalEnd))throw Error('시청용 명부의 권한·기준일을 확인해 주세요.');
+   if(!temporary&&(model.values.afterMembers!==r.rows.length||model.values.afterCapital!==r.totalCapital))throw Error('신고서와 시청용 명부의 인원·출자금이 다릅니다.');
    const widths=[35,102,130,65,105,65],headers=['연번','성명\n(법인명)','생년월일\n(법인등록번호)','출자좌수','출자금액','비율'];let index=0;
-   while(index<r.rows.length){check();newPage(D(d.companyName)+' 출자자 명부');current.drawText('기준일: '+r.cutoff,{x:36,y:695,size:11,font});current.drawText('1좌당 금액: '+D(r.unit)+'원',{x:36,y:676,size:11,font});y=640;
+   while(index<r.rows.length){check();newPage(D(d.companyName)+' 출자자 명부'+(temporary?' · 임시':''));current.drawText('기준일: '+r.cutoff,{x:36,y:695,size:11,font});current.drawText('1좌당 금액: '+D(r.unit)+'원',{x:36,y:676,size:11,font});y=640;
     const row=(values,height)=>{let x=36;values.forEach((s,i)=>{const lines=wrap(String(s),font,11,widths[i]-6);if(lines.length*13>height-6)throw Error('명부 입력 칸보다 내용이 깁니다.');current.drawRectangle({x,y:y-height,width:widths[i],height,borderWidth:.4,borderColor:lib.rgb(0,0,0)});lines.forEach((t,j)=>current.drawText(t,{x:x+(widths[i]-font.widthOfTextAtSize(t,11))/2,y:y-16-j*13,size:11,font}));x+=widths[i];});y-=height;};
     row(headers,40);while(index<r.rows.length){const v=r.rows[index],values=[v['연번'],v['성명(법인명)'],v['생년월일(법인등록번호)'],v['출자좌수'],v['출자금액'],Number(v['비율']).toFixed(2)],height=Math.max(22,...values.map((s,i)=>wrap(String(s),font,11,widths[i]-6).length*13+8));if(height>540)throw Error('명부 입력 칸보다 내용이 깁니다.');if(y-height<60)break;row(values,height);index++;}
    }
@@ -67,5 +70,5 @@
   for(const [i,pg]of doc.getPages().entries())if(i>=1)pg.drawText(String(i+1)+' / '+doc.getPageCount(),{x:500,y:30,size:11,font});
   check();doc.setTitle('시청 변경신고 작성자료');doc.setCreator('협동조합 운영시스템');const bytes=await doc.save();try{check();return bytes;}catch(e){bytes.fill(0);throw e;}
  }
- root.CoopRegistryPdf={create,wrap,tools,version:'0.3.0'};
+ root.CoopRegistryPdf={create,wrap,tools,version:'0.3.1'};
 })(typeof window==='undefined'?globalThis:window);
