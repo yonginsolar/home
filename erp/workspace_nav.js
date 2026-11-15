@@ -3,7 +3,7 @@
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261115.registry1';
+  const VERSION = '20261115.registry2';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -43,7 +43,8 @@
       ['cardSignatureAdmin','서명자 준비',u=>/\/officials_signature_admin(?:\.html)?\/?$/.test(u.pathname)]
     ]},
     btnRegistryHub: {root:'registry_hub',branches:[
-      ['cardCityRegistry','시청 변경신고',u=>/\/registry(?:\.html)?\/?$/.test(u.pathname)]
+      ['cardCityRegistry','시청 변경신고',u=>/\/registry(?:\.html)?\/?$/.test(u.pathname)],
+      ['cardRegistryGuide','변경등기 가이드',u=>/\/registry_guide(?:\.html)?\/?$/.test(u.pathname)]
     ]},
     btnVoteHub: {root:'vote_hub',branches:[
       ['cardVoteCreate','새 선거 만들기',u=>/\/vote\/admin_setup(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('mode')==='create'],
@@ -78,7 +79,7 @@
       if (path === leaf) return (params.get('section') === 'settings') === settings;
       return !settings && ['hr_insurance', 'employment_contracts', 'village_company_info'].includes(path);
     }
-    if (leaf === 'registry_hub') return ['registry_hub', 'registry'].includes(path);
+    if (leaf === 'registry_hub') return ['registry_hub', 'registry', 'registry_guide'].includes(path);
     if (leaf === 'governance') return ['governance', 'meeting_workspace', 'admin_minutes', 'officials_signature_admin'].includes(path)
       || (path === 'admin_member' && params.get('scope') === 'documents_admin')
       || (path === 'participation' && params.get('view') === 'meeting');
