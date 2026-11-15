@@ -1,8 +1,8 @@
-/* 변경등기 따라 하기 1.1.0 · 유형별 입력 참고·관할 추천과 공식 위치 안내. */
+/* 변경등기 따라 하기 1.2.0 · 실제 특수법인 출자 항목·내용 입력과 대조. */
 (function(root){
  'use strict';
  const types={
-  capital:{label:'출자금 변경',category:'출자/자산사항의 변경',deadline:'회계연도 말 기준의 변경은 그 회계연도가 끝난 후 3개월 이내에 등기합니다.',prepare:'등기부의 출자총좌수·납입총액과 해당 회계연도 말 ERP 출자총좌수·납입총액을 준비하세요. 현재 잔액이나 조합원 수를 출자금으로 입력하지 않습니다.',erp:'시청 변경신고 → 출자금·조합원 수에서 대상연도와 기말 값을 확인하고 출자금 변동내역 자료를 준비합니다.',entry:'출자총좌수와 납입한 출자금 총액의 변경 전·후 값을 해당 칸에 입력합니다. 변경일은 준비한 회계연도 말 기준과 맞춥니다.',proof:'출자금 납입·변동을 증명하는 자료를 준비합니다. 금액이 줄었다면 탈퇴 정산인지 출자감소 의결인지 구분하고, 해당 절차의 채권자 보호 증빙을 확인합니다.'},
+  capital:{label:'출자금 변경',category:'특수법인 변경등기',deadline:'회계연도 말 기준의 변경은 그 회계연도가 끝난 후 3개월 이내에 등기합니다.',prepare:'등기부의 출자총좌수·납입총액과 해당 회계연도 말 ERP 출자총좌수·납입총액을 준비하세요. 현재 잔액이나 조합원 수를 출자금으로 입력하지 않습니다.',erp:'시청 변경신고 → 출자금·조합원 수에서 대상연도와 기말 값을 확인하고 출자금 변동내역 자료를 준비합니다.',entry:'등기할사항에서 기타사항 → 1. 출자에관한사항 → 변경을 선택합니다. 내용 한 칸에 변경 후 전체 출자총좌수와 납입출자금 총액을 함께 적습니다. 변경 전 등기값은 대조용이며, 증가분만 적거나 변경 전·후를 각각 숫자 칸에 넣는 방식이 아닙니다. 등기원인 종류와 원인일자는 내용과 별도입니다.',proof:'출자금 납입·변동을 증명하는 자료를 준비합니다. 금액이 줄었다면 탈퇴 정산인지 출자감소 의결인지 구분하고, 해당 절차의 채권자 보호 증빙을 확인합니다.'},
   officers:{label:'임원 변경',category:'(대표)이사/감사 등의 임원사항 변경',deadline:'등기사항이 바뀐 날부터 21일 이내에 변경등기합니다.',prepare:'취임·중임·퇴임·사임을 구분하고 각 임원의 직책, 임기와 효력일을 준비하세요. ERP 정보를 수정한 날짜로 대신하지 않습니다.',erp:'임원·위원회 관리의 처리된 임기 이력과 회의·문서 관리의 의결 의사록을 참고합니다.',entry:'해당 임원의 변경 종류와 효력일을 구분해 입력합니다. 중임을 새 취임으로, 사임을 임기 만료로 바꾸어 입력하지 않습니다.',proof:'해당 의결 의사록과 변경 종류에 맞는 취임승낙·사임 등 증명서류를 준비합니다. 인감증명·등초본·의사록 인증 등은 해당 신청의 첨부 안내와 대조합니다.'},
   office:{label:'주소 변경',category:'주사무소/분사무소 등의 변경',deadline:'주사무소를 이전한 날부터 21일 이내에 새 소재지와 이전일을 등기합니다.',prepare:'등기부의 종전 주사무소, 새 주사무소 주소와 실제 이전일을 준비하세요. 이사장 개인 주소 변경과 구분합니다.',erp:'시청 변경신고의 주사무소 변경 전·후 정보와 이전을 의결한 회의자료를 참고합니다.',entry:'주사무소 이전 항목에서 종전·새 주소와 이전일을 입력합니다. 같은 주소의 표기 정정과 실제 이전도 구분합니다.',proof:'주사무소 이전을 증명하는 의결·변경 자료를 준비합니다.',note:'관할 내·외 이전에 따라 절차가 다를 수 있습니다. 종전·새 주소의 관할 등기소를 먼저 확인하고 해당 경로의 안내를 따르세요.'},
   purpose:{label:'목적 변경',category:'명칭/목적 등의 변경',deadline:'등기사항이 바뀐 날부터 21일 이내에 변경등기합니다.',prepare:'등기부의 기존 목적과 변경 정관의 목적을 준비하세요. 정관의 목적과 개별 사업 목록을 혼동하지 않습니다.',erp:'시청 변경신고의 사업 목적 변경 전·후 정보, 변경 정관과 이를 의결한 총회 의사록을 참고합니다.',entry:'목적의 추가·삭제·변경을 구분하고 의결된 문구와 효력일에 맞게 입력합니다. ERP 저장일을 변경일로 쓰지 않습니다.',proof:'변경 정관과 정관 변경을 의결한 의사록 등 변경을 증명하는 서류를 준비합니다.'},
@@ -14,7 +14,7 @@
  function officialExample(stage){const label={1:'기본정보',2:'등기할 사항',3:'등록면허세·수수료',4:'신청인·대리인·첨부서면'}[stage];return `<p class="rg-note" data-rg-example="${stage}">공식 예시 확인: <a href="https://www.iros.go.kr/" target="_blank" rel="noopener noreferrer" aria-label="인터넷등기소 첫 화면 열기 · 공식 예시 ${stage}단계">인터넷등기소 첫 화면 ↗</a><br>빠른메뉴 → 간편길잡이 → e-form신청 → 법인 → 신청서 작성 → <strong>${stage}. ${label}</strong></p>`;}
  function steps(key){const t=types[key];if(!t)throw Error('변경 유형을 선택해 주세요.');const items=[
   ['ERP 자료 준비',`<p>${t.prepare}</p><p><strong>ERP 참고:</strong> ${t.erp}</p><p class="rg-note">${t.deadline} 시청 변경신고와 등기소 변경등기는 별도 절차입니다.</p>`],
-  ['전자표준양식에서 등기 유형 선택',`<p>인터넷등기소에 로그인한 뒤 아래 순서로 이동합니다.</p><ol class="rg-path">${['신청','법인','법인등기 신청','신청서 작성/제출','전자표준양식','등기유형 더보기','특수법인','변경등기'].map(x=>'<li>'+x+'</li>').join('')}</ol><p><strong>${t.category}</strong>를 선택합니다. 여러 등기사항을 함께 바꾸면 <strong>여러 등기사항의 일괄 변경</strong> 경로에서 해당 사항을 고릅니다.</p>`],
+  ['전자표준양식에서 등기 유형 선택',`<p>인터넷등기소에 로그인한 뒤 아래 순서로 이동합니다.</p><ol class="rg-path">${['신청','법인','법인등기 신청','신청서 작성/제출','전자표준양식','등기유형 더보기','특수법인','변경등기'].map(x=>'<li>'+x+'</li>').join('')}</ol><p>${key==='capital'?`<strong>${t.category}</strong>로 진행합니다. 출자 항목은 다음 등기할사항 단계에서 고릅니다.`:`<strong>${t.category}</strong>를 선택합니다. 여러 등기사항을 함께 바꾸면 <strong>여러 등기사항의 일괄 변경</strong> 경로에서 해당 사항을 고릅니다.`}</p>`],
   ['대상법인 조회·등기사유',`<p><strong>대상법인 조회 → 상호/명칭 검색</strong>에서 현재 등기된 조합을 찾아 선택합니다. 등기부와 법인등록번호·관할·명칭을 대조한 뒤 등기사유를 적고 <strong>저장 후 다음</strong>으로 이동합니다.</p><p>등기사유에는 실제 변경한 사항과 근거 날짜를 적습니다. ERP 입력일이 아니라 의결·취임·이전 등 효력 근거의 날짜를 사용합니다.</p><p class="rg-note">ERP가 이미 변경 후 정보라면 검색에는 등기부의 변경 전 명칭을 사용하세요. 법인등록번호와 사업자등록번호는 다른 번호입니다.</p>`],
   ['등기할 사항 입력',`<p>다음 <strong>등기할사항</strong> 단계에서 선택한 변경 내용을 작성합니다.</p><p>${t.entry}</p>${t.note?'<p class="rg-note">'+t.note+'</p>':''}`],
   ['등록면허세·수수료와 납부정보',`<p><strong>등록면허세·수수료/납부정보</strong> 단계에서 이번 신청의 세액·수수료와 납부정보를 확인합니다. 금액을 임의로 정하지 말고 해당 신청과 관할의 안내를 따르세요.</p><p>등록면허세 납부서와 영수필확인정보, 등기신청수수료 납부정보를 서로 구분해 입력합니다. <a href="https://www.wetax.go.kr/" target="_blank" rel="noopener noreferrer">위택스 열기 ↗</a></p>`],
@@ -34,7 +34,7 @@
   root.addEventListener('pagehide',leave);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();});if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)leave();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
   return{leave,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.1.0'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.2.0'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',authorized=false,view=0,ui;
  const context=()=>({coop,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};
