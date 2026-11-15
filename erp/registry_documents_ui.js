@@ -1,4 +1,4 @@
-/* 0.3.3 · 선택·파일을 보존하며 변경 유형에 맞춰 추천 표시 갱신. */
+/* 0.3.4 · 변경·삭제된 자료를 표시하고 재선택을 요청. */
 (function(root){
  'use strict';
  function attach(config){
@@ -17,7 +17,7 @@
   function available(key){return catalog.filter(d=>d.coop_id===context().coop&&(d.types||[]).includes(key));}
   function recommendationScope(raw){return JSON.stringify([raw.coopId,raw.kinds||[]]);}
   function optionLabel(raw,d){const matches=M.recommend(raw,d,(data.meeting_package_agendas||[]).filter(a=>(data.meeting_packages||[]).some(pack=>pack.id===a.package_id&&pack.published_minute_id===d.id)));return(matches.length?'추천 · ':'')+d.title+(d.event_date?' · '+d.event_date:'');}
-  function selectOptions(key,p){const old=p.select.value,rows=available(key),raw=input();p.select.replaceChildren(new Option(p.req.mode==='generate'?'ERP 정보로 작성':'자료 선택',''),...rows.map(d=>new Option(optionLabel(raw,d),d.key)));p.select.value=old;p.recommendationScope=recommendationScope(raw);const saved=selections.get(key),latest=rows.find(d=>d.key===saved?.sourceKey);if(saved&&(!latest||latest.revision!==saved.revision))p.review.checked=false;}
+  function selectOptions(key,p){const old=p.select.value,rows=available(key),raw=input();p.select.replaceChildren(new Option(p.req.mode==='generate'?'ERP 정보로 작성':'자료 선택',''),...rows.map(d=>new Option(optionLabel(raw,d),d.key)));p.select.value=old;p.recommendationScope=recommendationScope(raw);const saved=selections.get(key),latest=rows.find(d=>d.key===saved?.sourceKey);p.sourceWarning=saved&&(!latest||latest.revision!==saved.revision)?'선택한 자료가 변경되었거나 목록에 없습니다. 다시 선택해 주세요.':'';if(p.sourceWarning){p.select.value='';p.review.checked=false;if(p.whole)p.whole.checked=false;}}
   function refreshRecommendations(key,p){if(!p.select)return;const raw=input(),scope=recommendationScope(raw);if(p.recommendationScope===scope)return;const rows=new Map(available(key).map(d=>[d.key,d]));for(const option of p.select.options){const row=rows.get(option.value);if(row){const label=optionLabel(raw,row);if(option.textContent!==label)option.textContent=label;}}p.recommendationScope=scope;}
   function sync(){
    const c=context();if(!identity&&c.owner&&c.coop){for(const p of panels.values())p.root.remove();panels.clear();identity=c.key;}else if(identity&&identity!==c.key){leave(true);identity=c.owner&&c.coop?c.key:'';}
@@ -41,7 +41,7 @@
    }
    lastNeeds=JSON.stringify(needs.map(r=>r.key));
   }
-  function updateSource(key,reset=false){const p=panels.get(key),d=catalog.find(r=>r.key===p.select.value),saved=selections.get(key);p.reviewLabel.hidden=p.automatic||!d;p.fileLabel.hidden=!!(p.automatic&&d&&!d.local);p.files.replaceChildren();if(d?.local)p.files.append(new Option('선택한 PDF','0'));else{p.files.append(new Option('출력할 PDF 선택',''));for(const[f,i]of(d?.files||[]).map((f,i)=>[f,i]))p.files.append(new Option('첨부파일 '+(i+1),String(i)));if(!reset&&saved&&d&&saved.sourceKey===d.key&&saved.revision===d.revision&&Number.isInteger(saved.fileIndex))p.files.value=String(saved.fileIndex);}p.files.hidden=p.automatic||!d||d.local||!d.files.length;p.excerpt.textContent='';}
+  function updateSource(key,reset=false){const p=panels.get(key),d=catalog.find(r=>r.key===p.select.value),saved=selections.get(key);p.reviewLabel.hidden=p.automatic||!d;p.fileLabel.hidden=!!(p.automatic&&d&&!d.local);p.files.replaceChildren();if(d?.local)p.files.append(new Option('선택한 PDF','0'));else{p.files.append(new Option('출력할 PDF 선택',''));for(const[f,i]of(d?.files||[]).map((f,i)=>[f,i]))p.files.append(new Option('첨부파일 '+(i+1),String(i)));if(!reset&&saved&&d&&saved.sourceKey===d.key&&saved.revision===d.revision&&Number.isInteger(saved.fileIndex))p.files.value=String(saved.fileIndex);}p.files.hidden=p.automatic||!d||d.local||!d.files.length;if(reset)p.sourceWarning='';p.excerpt.textContent=d?'':p.sourceWarning||'';}
   function capture(key){const p=panels.get(key);if(!active()||p?.identity!==context().key)return;const d=catalog.find(r=>r.key===p.select.value);selections.set(key,{sourceKey:p.select.value,revision:d?.revision||'',reviewed:p.review.checked,fileIndex:p.files.value===''?null:Number(p.files.value),wholeYear:!!p.whole?.checked,year:Number(year.value)});change();}
   year.addEventListener('input',e=>{e.stopPropagation();for(const key of ['plan','budget']){const p=panels.get(key);if(p){p.whole.checked=false;capture(key);}}change();});
   load.onclick=async()=>{if(!active())return;const e=epoch;status.textContent='첨부자료를 확인하고 있습니다.';try{await scoped(async(op,current)=>{const result=await S.catalog(config.client(),{coop:context().coop,signal:op.controller.signal,current,verify:config.verify});if(!current())return;const failedTables=new Set(result.failures),fresh=result.catalog;catalog=catalog.filter(d=>d.local||failedTables.has(d.table)).concat(fresh);data={...data,...Object.fromEntries(Object.entries(result.data).filter(([,v])=>v!==null))};for(const[key,p]of panels)if(p.select){selectOptions(key,p);updateSource(key);}sync();const drafts=(data.meeting_packages||[]).filter(p=>p.meeting_type==='GENERAL_ASSEMBLY'&&Number(p.fiscal_year)===Number(year.value));status.textContent=(result.failures.length?'일부 자료를 확인하지 못했습니다. 같은 버튼으로 다시 확인해 주세요.':'첨부자료를 불러왔습니다.')+(drafts.some(p=>M.planReadiness(p,year.value).available)?' 총회 사업·예산 초안은 별지 제4·5호 보완이 필요합니다.':'');config.invalidate();});}catch(error){if(e===epoch&&active())status.textContent=error.message;}};
@@ -62,5 +62,5 @@
   function leave(clear=false){epoch++;flight?.controller.abort();flight=null;pending=false;load.disabled=!active();if(clear){for(const p of panels.values())p.root.remove();panels.clear();selections.clear();localFiles.clear();catalog=[];data={};revision++;identity='';lastNeeds='';}}
   sync();return Object.freeze({sync,snapshot,prepare,leave,clear:()=>leave(true),busy:()=>pending});
  }
- root.CoopRegistryDocumentsUi=Object.freeze({attach,version:'0.3.3'});
+ root.CoopRegistryDocumentsUi=Object.freeze({attach,version:'0.3.4'});
 })(typeof window==='undefined'?globalThis:window);
