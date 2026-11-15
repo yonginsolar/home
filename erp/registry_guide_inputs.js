@@ -1,4 +1,4 @@
-/* 변경등기 입력 참고 1.1.0 · 기존 권한의 명시 읽기만 사용. 저장·신청·민감번호 조회 없음. */
+/* 변경등기 입력 참고 1.1.1 · 계산값 변경 시 지난 복사 안내 정리. */
 (function(root){
  'use strict';
  const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());
@@ -55,7 +55,7 @@
   const visible=()=>!d.hidden&&(!root.frameElement||!root.frameElement.hidden),allowed=()=>context().authorized&&visible();
   function cancel(){generation++;flight?.controller.abort();flight=null;loadButton.disabled=false;data=null;rows.replaceChildren();officer.replaceChildren();status.textContent='';unitLabel.hidden=true;}
   function row(label,value,copyValue,enabled=true){const box=make('div','',rows);box.className='rg-info-row';make('strong',label,box);const out=make('output',value||'ERP에서 확인할 값이 없습니다.',box);if(copyValue!==undefined&&copyValue!==''){const b=make('button','복사',box);b.type='button';b.disabled=!enabled||copies.has(label);b.setAttribute('aria-label',label+' 복사');b.dataset.rgInputCopy=label;b.dataset.rgCopyReady=String(enabled);b.onclick=async()=>{if(!allowed()||b.disabled||copies.has(label))return;const g=generation,k=context().key,v=valueVersion,op={};copies.set(label,op);b.disabled=true;const active=()=>g===generation&&v===valueVersion&&k===context().key&&allowed();try{await navigator.clipboard.writeText(String(copyValue));if(active())status.textContent='복사했습니다.';}catch{if(active())status.textContent='복사하지 못했습니다. 표시된 값을 선택해 복사해 주세요.';}finally{if(copies.get(label)===op)copies.delete(label);if(k===context().key&&allowed())for(const n of rows.querySelectorAll('[data-rg-input-copy]'))if(n.dataset.rgInputCopy===label)n.disabled=n.dataset.rgCopyReady!=='true';}};}return out;}
-  function render(){valueVersion++;rows.replaceChildren();unitLabel.hidden=true;if(!data)return;
+  function render(){valueVersion++;if(status.textContent.startsWith('복사'))status.textContent='';rows.replaceChildren();unitLabel.hidden=true;if(!data)return;
    const recommendation=court(data.address);row('현재 ERP 주사무소',data.address,data.address);
    row('관할 추천',recommendation||'인터넷등기소의 전국등기소안내에서 확인해 주세요.');
    make('p','추천은 주소를 기준으로 한 안내입니다. 인터넷등기소 → 전국등기소안내에서 실제 법인·상업등기 관할을 확인해 주세요.',rows).className='rg-note';
@@ -77,5 +77,5 @@
   loadButton.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});
   return{element:el,open,leave:cancel};
  }
- root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,version:'1.1.0'});
+ root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,version:'1.1.1'});
 })(typeof window==='undefined'?globalThis:window);
