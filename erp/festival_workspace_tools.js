@@ -1,12 +1,12 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v1.2.0 — Refresh scoped stock summaries without replacing newer edits. */
+/* v1.3.0 — Keep event-setting drafts until explicit save or discard. */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
   const money = value => `${Number(value || 0).toLocaleString('ko-KR')}원`;
   const count = value => Number(value || 0).toLocaleString('ko-KR');
   const node = (tag,text,cls) => {const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
-  window.FestivalWorkspaceTools = { init({rpc,getEvent,getItems,editable,isBusy,onChanged,onStockChanged,readable,status,today,beginRead=()=>()=>true}) {
+  window.FestivalWorkspaceTools = { init({rpc,getEvent,getItems,editable,isBusy,onChanged,onStockChanged,readable,status,today,beginRead=()=>()=>true,getOwner=()=> 'workspace'}) {
     let busy=false,inventoryOffset=0,inventoryRevision=0,dashboardRevision=0,pendingUsage=null,settingsEvent=null;
     let inventoryDraftEventId=null;
     const inventoryDrafts=new Map();
@@ -18,12 +18,44 @@
       });
     }
     const dialog=$('eventSettingsDialog');
+    const settingsDrafts=new Map(),settingsFields=['editEventName','editEventDate','eventNoCash','guideActivity','guidePrice','guideCoupon','guideCouponValue','guideShowDate','guideTime','guideCapacity'];
+    let settingsRow=null,settingsOwner='';
+    const settingsValues=()=>Object.fromEntries(settingsFields.map(id=>[id,$(id).type==='checkbox'?$(id).checked:$(id).value]));
+    const settingsFingerprint=v=>JSON.stringify(settingsFields.map(id=>['guidePrice','guideCouponValue','guideCapacity'].includes(id)?String(v[id]).replace(/,/g,''):v[id]));
+    const settingsCurrent=row=>row&&row===settingsRow&&row.owner===getOwner();
+    function rememberSettings(){
+      const row=settingsRow;if(!settingsCurrent(row))return;
+      row.values=settingsValues();const dirty=settingsFingerprint(row.values)!==settingsFingerprint(row.baseline);
+      if(dirty)settingsDrafts.set(row.key,row);else settingsDrafts.delete(row.key);
+      if($('eventSettingsDraftStatus'))$('eventSettingsDraftStatus').textContent=dirty?'작성 중 · 미저장':'';
+      if($('discardEventSettings'))$('discardEventSettings').disabled=busy||!editable||!dirty;
+      if(!dirty)window.ErpWorkspaceResume?.checkpoint?.($('eventSettingsForm'));
+    }
+    function openSettings(){
+      rememberSettings();const owner=getOwner();if(!owner)return;
+      if(settingsOwner!==owner){settingsDrafts.clear();settingsOwner=owner;}
+      settingsEvent=getEvent();const g=settingsEvent.guide_settings||{};
+      const key=JSON.stringify([owner,settingsEvent.id]),draft=settingsDrafts.get(key);
+      settingsRow=draft||{owner,key,event:settingsEvent,values:{editEventName:settingsEvent.event_name,editEventDate:settingsEvent.event_date,eventNoCash:settingsEvent.no_cash_sales===true,guideActivity:g.activity_name||'태양광 선풍기 만들기 체험',guidePrice:String(g.unit_price??2000),guideCoupon:g.coupon_enabled===true,guideCouponValue:String(g.coupon_value??3000),guideShowDate:g.show_date===true,guideTime:g.time_text||'',guideCapacity:g.capacity==null?'':String(g.capacity)}};
+      for(const id of settingsFields)if($(id).type==='checkbox')$(id).checked=settingsRow.values[id];else $(id).value=settingsRow.values[id]??'';
+      settingsRow.baseline ||= settingsValues();settingsEvent=settingsRow.event;
+      $('eventSettingsStatus').textContent='';syncSettings();rememberSettings();
+    }
+    $('eventSettingsForm').addEventListener('input',rememberSettings);
+    $('eventSettingsForm').addEventListener('change',rememberSettings);
+    $('discardEventSettings')?.addEventListener('click',async()=>{
+      const row=settingsRow,values=settingsFingerprint(settingsValues());if(!settingsCurrent(row)||busy||!editable||!dialog.open)return;
+      if(!await window.CoopDialog.confirm('이 초안을 버릴까요?'))return;
+      if(!settingsCurrent(row)||busy||!dialog.open||getEvent()?.id!==row.event.id||values!==settingsFingerprint(settingsValues()))return;
+      const focus=document.activeElement;settingsDrafts.delete(row.key);settingsRow=null;openSettings();if([document.body,dialog,$('discardEventSettings')].includes(focus))$('editEventName').focus({preventScroll:true});
+    });
+    window.addEventListener('beforeunload',event=>{rememberSettings();if(settingsDrafts.size){event.preventDefault();event.returnValue='';}});
     const showError=(id,error)=>{$(id).textContent=readable(error);$(id).classList.add('error');};
     async function run(fn,id='eventSettingsStatus') {
       if(busy||isBusy())return;
       busy=true;
       dialog.querySelectorAll('button,input').forEach(e=>{e.disabled=true;});
-      try{await fn();}catch(e){showError(id,e);}finally{busy=false;syncSettings();dialog.querySelectorAll('button').forEach(e=>{e.disabled=!editable;});}
+      try{await fn();}catch(e){showError(id,e);}finally{busy=false;dialog.querySelectorAll('button').forEach(e=>{e.disabled=!editable;});syncSettings();}
     }
     function syncSettings() {
       $('eventSettingsForm').querySelectorAll('input').forEach(e=>{e.disabled=busy||!editable;});
@@ -32,22 +64,17 @@
       $('guideCoupon').disabled=busy||!editable||noCash;
       $('guideCouponValue').disabled=busy||!editable||noCash||!$('guideCoupon').checked;
       $('guideCouponValue').required=$('guideCoupon').checked&&!noCash;
+      if($('discardEventSettings'))$('discardEventSettings').disabled=busy||!editable||!settingsRow||!settingsDrafts.has(settingsRow.key);
     }
     $('eventNoCash').addEventListener('change',syncSettings);
     $('guideCoupon').addEventListener('change',syncSettings);
     $('editEvent').addEventListener('click',()=>{
       if(!editable||busy||isBusy()||dialog.open||!getEvent())return;
-      settingsEvent=getEvent();const g=settingsEvent.guide_settings||{};
-      $('editEventName').value=settingsEvent.event_name;$('editEventDate').value=settingsEvent.event_date;
-      $('eventNoCash').checked=settingsEvent.no_cash_sales===true;
-      $('guideActivity').value=g.activity_name||'태양광 선풍기 만들기 체험';$('guidePrice').value=g.unit_price??2000;
-      $('guideCoupon').checked=g.coupon_enabled===true;$('guideCouponValue').value=g.coupon_value??3000;
-      $('guideShowDate').checked=g.show_date===true;$('guideTime').value=g.time_text||'';$('guideCapacity').value=g.capacity??'';
-      $('eventSettingsStatus').textContent='';syncSettings();dialog.showModal();document.body.classList.add('event-dialog-open');$('editEventName').focus();
+      openSettings();if(!settingsCurrent(settingsRow))return;dialog.showModal();document.body.classList.add('event-dialog-open');$('editEventName').focus();
     });
     $('closeEventSettings').addEventListener('click',()=>{if(!busy)dialog.close();});
     dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault();});
-    dialog.addEventListener('close',()=>{document.body.classList.remove('event-dialog-open');});
+    dialog.addEventListener('close',()=>{rememberSettings();document.body.classList.remove('event-dialog-open');});
     $('eventSettingsForm').addEventListener('submit',e=>{
       e.preventDefault();if(!editable||!settingsEvent||!e.currentTarget.reportValidity())return;
       const noCash=$('eventNoCash').checked;
@@ -55,7 +82,8 @@
         guide_settings:{activity_name:$('guideActivity').value.trim(),unit_price:noCash?0:Number(ERPNumberInput.raw($('guidePrice').value)),coupon_enabled:!noCash&&$('guideCoupon').checked,
           coupon_value:Number(ERPNumberInput.raw($('guideCouponValue').value||3000)),show_date:$('guideShowDate').checked,time_text:$('guideTime').value.trim(),capacity:$('guideCapacity').value?Number(ERPNumberInput.raw($('guideCapacity').value)):null}};
       if(data.guide_settings.coupon_enabled&&data.guide_settings.coupon_value>data.guide_settings.unit_price){$('eventSettingsStatus').textContent='쿠폰 금액은 체험비보다 클 수 없습니다.';return;}
-      run(async()=>{await rpc('update_event',data);dialog.close();await onChanged(settingsEvent.id);status('축제명과 체험·인쇄 안내를 저장했습니다.');});
+      rememberSettings();const row=settingsRow,submitted=settingsValues();
+      run(async()=>{await rpc('update_event',data);row.baseline=submitted;if(!settingsCurrent(row))return;rememberSettings();if(!settingsDrafts.has(row.key))dialog.close();await onChanged(row.event.id);if(!settingsCurrent(row))return;const latest=getEvent();if(latest?.id===row.event.id)settingsEvent=row.event=latest;status('축제명과 체험·인쇄 안내를 저장했습니다.');});
     });
     function dates() {
       const current=today(),year=current.slice(0,4),month=current.slice(0,7);
@@ -126,6 +154,6 @@
       if(!(await window.CoopDialog.confirm(`${event.event_name}\n${data.quantity}개를 사용한 기록을 저장할까요? 재고가 줄어들고 매출 전표는 만들지 않습니다.`)))return;
       run(async()=>{await rpc('movement',{...data,request_key:pendingUsage.key});pendingUsage=null;$('eventUseQuantity').value='';$('eventUseNote').value='';await onStockChanged();status('이 축제의 사용 수량과 재고를 저장했습니다. 매출을 추가로 만들지 않았습니다.');},'operationStatus');
     });
-    return {isBusy:()=>busy,reloadDashboard,reloadInventory,refreshItems,selectEvent:()=>reloadInventory(true),close:()=>{if(dialog.open&&!busy)dialog.close();}};
+    return {isBusy:()=>busy,hasUnsavedSettings:()=>{rememberSettings();return settingsDrafts.size>0;},reloadDashboard,reloadInventory,refreshItems,selectEvent:()=>reloadInventory(true),close:()=>{settingsDrafts.clear();settingsRow=null;settingsOwner='';if(dialog.open&&!busy)dialog.close();}};
   }};
 })();

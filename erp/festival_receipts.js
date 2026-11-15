@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v2.9.6 — Bound/cancel post-registration reads without repeating the create. */
+/* v2.9.8 — Keep closed event-setting drafts in their original workspace. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -1648,7 +1648,7 @@
       $('itemForm').querySelectorAll('input,button').forEach((element) => { element.disabled = !editable; });
       $('movementForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable; });
       workspaceTools=window.FestivalWorkspaceTools.init({rpc:operationsRpc,getEvent:()=>eventById(selectedEventId),getItems:()=>inventory.items||[],editable,
-        beginRead,
+        beginRead,getOwner:()=>tabsReady?taskUserId+':'+identityRevision:'',
         isBusy:()=>operationBusy||eventBusy||receiptBusy||incomeController?.isBusy(),
         onChanged:async id=>{await loadEventContext(id);await selectEvent(id,true);await workspaceTools.reloadDashboard();},
         onStockChanged:loadInventory,readable:readableError,status:setOperationStatus,today:kstToday});
@@ -1676,7 +1676,7 @@
       const entryTarget = workEntry.get('work') === 'inventory' ? $('purchaseReceiptRows')
         : validEvent && workEntry.get('work') === 'material' ? $('festivalIncomeRoot') : null;
       entryTarget?.scrollIntoView({block:'start',behavior:'auto'});
-      window.ErpWorkspaceResume.register({busy:()=>operationBusy||eventBusy||receiptBusy||incomeController?.isBusy()||workspaceTools?.isBusy()||hasInlineEditor(),
+      window.ErpWorkspaceResume.register({busy:()=>operationBusy||eventBusy||receiptBusy||incomeController?.isBusy()||workspaceTools?.isBusy()||workspaceTools?.hasUnsavedSettings()||hasInlineEditor(),
         authorize:async()=>{const access=await rpc('access');return access.allowed===true&&access.editable===editable;},
         refresh:async()=>{
           loadedPanels.clear();

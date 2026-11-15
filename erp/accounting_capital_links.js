@@ -1,15 +1,15 @@
-/* v1.0.0 — review and link existing entries without posting money again. */
+/* v1.0.1 — retain reviewed selections while a list is revalidated. */
 (function(root){'use strict';
  function create(api){
   const dialog=document.getElementById('capitalLinkModal'),body=document.getElementById('capitalLinkItems'),status=document.getElementById('capitalLinkStatus');
   const refresh=document.getElementById('capitalLinkRefresh'),commit=document.getElementById('capitalLinkCommit');
-  const pending=new Map(),working=new Map();let epoch=0,rows=[],scope=null,returnTo=null;
+  const pending=new Map(),working=new Map();let epoch=0,rows=[],scope=null,returnTo=null,listReady=false;
   const modal=bootstrap.Modal.getOrCreateInstance(dialog);
   const own=()=>api.owner(),live=t=>t.epoch===epoch&&t.owner===own()&&api.editable()&&api.current(t.scope)&&dialog.classList.contains('show');
   const token=()=>({epoch,owner:own(),scope});
   function message(t,text){if(live(t))status.textContent=text;}
   function sync(){const p=pending.get(own()),busy=working.has(own());refresh.textContent=p?'연결 결과 확인':'다시 확인';refresh.disabled=busy||!api.editable();
-   commit.disabled=busy||!!p||!api.editable()||!body.querySelector('input:checked');for(const n of body.querySelectorAll('input'))n.disabled=busy||!!p||!api.editable();}
+   commit.disabled=busy||!!p||!api.editable()||!listReady||!body.querySelector('input:checked');for(const n of body.querySelectorAll('input'))n.disabled=busy||!!p||!api.editable()||!listReady;}
   async function call(action,t){const controller=new AbortController();let timer;
    try{const query=api.client().rpc('accounting_capital_links',{p_action:action,p_items:t.items||[],p_request_key:t.key||null});
     const request=typeof query.abortSignal==='function'?query.abortSignal(controller.signal):query;
@@ -17,24 +17,24 @@
     if(r.error)throw r.error;return r.data;
    }finally{clearTimeout(timer);controller.abort();}}
   function error(e){return e?.code==='42501'?'현재 권한을 다시 확인해 주세요.':e?.code==='PT409'?'전표나 출자금 내역이 달라졌습니다. 다시 확인해 주세요.':'조회하지 못했습니다. 다시 확인해 주세요.';}
-  function render(items){body.replaceChildren();rows=items;
+  function render(items){const checked=new Map([...body.querySelectorAll('input:checked')].map(n=>[n.dataset.source,rows.find(r=>String(r.source_id)===n.dataset.source)?.revision]));body.replaceChildren();rows=items;
    for(const row of items){const card=document.createElement('section');card.className='border rounded p-3 mb-3';
     const label=document.createElement('label');label.className='d-flex align-items-start gap-2 fw-bold';
-    if(row.revision&&!row.review_required){const check=document.createElement('input');check.type='checkbox';check.className='form-check-input flex-shrink-0';check.dataset.source=String(row.source_id);check.addEventListener('change',sync);label.append(check);}
+    if(row.revision&&!row.review_required){const check=document.createElement('input');check.type='checkbox';check.className='form-check-input flex-shrink-0';check.dataset.source=String(row.source_id);check.checked=checked.get(String(row.source_id))===row.revision;check.addEventListener('change',sync);label.append(check);}
     const title=document.createElement('span');title.textContent=`${row.date} · ${row.name} · ${Number(row.amount).toLocaleString()}원`;label.append(title);card.append(label);
     if(row.mode==='donation_conversion'){const note=document.createElement('p');note.className='small mt-2 mb-1';note.textContent='기부금 입금 → 출자금 전환';card.append(note);}
     for(const e of row.evidence||[]){const line=document.createElement('p');line.className='small mb-1 mt-2';line.style.overflowWrap='anywhere';line.textContent=`${e.date} · ${e.transaction||'전표번호 없음'} · ${e.account} · 차변 ${Number(e.debit||0).toLocaleString()} / 대변 ${Number(e.credit||0).toLocaleString()}원\n${e.description||''}`;card.append(line);}
     if(row.review_required){const note=document.createElement('p');note.className='mt-2 mb-0 text-danger';note.textContent='일치하는 전표를 하나로 확정하지 못했습니다. 장부와 원입금 내역을 확인해 주세요.';card.append(note);}body.append(card);
    }
   }
-  async function read(){if(!api.editable()||working.has(own())||pending.has(own()))return;const t=token();working.set(t.owner,t);sync();message(t,'기존 전표를 확인하고 있습니다…');
-   try{const r=await call('list',t);if(!live(t))return;if(!Array.isArray(r?.items))throw Error('INVALID');render(r.items);message(t,r.items.length?'입금일·입금자·금액과 전표를 대조한 뒤 연결할 항목을 선택해 주세요.':'연결을 확인할 이전 내역이 없습니다.');}
-   catch(e){if(live(t)){render([]);message(t,error(e));}}finally{if(working.get(t.owner)===t)working.delete(t.owner);if(live(t))sync();}}
+  async function read(){if(!api.editable()||working.has(own())||pending.has(own()))return;const t=token();working.set(t.owner,t);listReady=false;sync();message(t,'기존 전표를 확인하고 있습니다…');
+   try{const r=await call('list',t);if(!live(t))return;if(!Array.isArray(r?.items))throw Error('INVALID');render(r.items);listReady=true;message(t,r.items.length?'입금일·입금자·금액과 전표를 대조한 뒤 연결할 항목을 선택해 주세요.':'연결을 확인할 이전 내역이 없습니다.');}
+   catch(e){if(live(t)){if(e?.code==='42501')render([]);message(t,error(e)+(rows.length?' 이전 목록과 선택은 유지했습니다. 다시 확인한 뒤 연결할 수 있습니다.':''));}}finally{if(working.get(t.owner)===t)working.delete(t.owner);if(live(t))sync();}}
   function settled(t,r){if(r?.verified!==true||r.linked!==t.items.length)throw Error('UNVERIFIED');if(pending.get(t.owner)!==t)return;pending.delete(t.owner);if(live(t)){render(rows.filter(x=>!t.items.some(y=>String(y.source_id)===String(x.source_id))));message(t,`${r.linked}건의 기존 전표를 연결했습니다.`);}}
   async function send(t){try{settled(t,await call('link',t));}catch(e){if(pending.get(t.owner)!==t)return;
    if(['42501','PT409','22023','55P03','57014','23505'].includes(e?.code)){pending.delete(t.owner);message(t,error(e));}
    else message(t,'연결 결과를 아직 확인하지 못했습니다. ‘연결 결과 확인’을 눌러 주세요.');}}
-  async function save(){if(!api.editable()||pending.has(own())||working.has(own()))return;
+  async function save(){if(!api.editable()||!listReady||pending.has(own())||working.has(own()))return;
    const ids=new Set([...body.querySelectorAll('input:checked')].map(x=>x.dataset.source));const items=rows.filter(r=>ids.has(String(r.source_id))&&r.revision).map(r=>({source_id:r.source_id,revision:r.revision}));if(!items.length)return;
    const t={...token(),items,key:crypto.randomUUID()};working.set(t.owner,t);sync();
    try{const accepted=await api.confirm(`${items.length}건을 기존 전표에 연결할까요?\n금액을 다시 기표하지 않고 연결 정보만 저장합니다.`);
@@ -50,7 +50,7 @@
    }catch(e){message(view,error(e));}finally{if(working.get(t.owner)===view)working.delete(t.owner);if(live(view))sync();}}
   function detach(){const t=working.get(own());if(t&&!pending.has(own()))working.delete(own());}
   function leave(){detach();epoch++;scope=null;modal.hide();}
-  function open(button){if(!api.editable())return;returnTo=button||document.activeElement;scope=api.scope();epoch++;render([]);status.textContent=pending.has(own())?'이전 연결 결과를 먼저 확인해 주세요.':'';modal.show();sync();}
+  function open(button){if(!api.editable())return;returnTo=button||document.activeElement;scope=api.scope();epoch++;listReady=false;render([]);status.textContent=pending.has(own())?'이전 연결 결과를 먼저 확인해 주세요.':'';modal.show();sync();}
   dialog.addEventListener('shown.bs.modal',()=>{if(!pending.has(own()))void read();});
   dialog.addEventListener('hidden.bs.modal',()=>{detach();const oldScope=scope,origin=returnTo;epoch++;scope=null;rows=[];body.replaceChildren();
    if(oldScope&&api.current(oldScope)&&origin?.isConnected&&[document.body,dialog].includes(document.activeElement))origin.focus({preventScroll:true});});
@@ -64,5 +64,5 @@
   });
   return Object.freeze({open,leave,isBusy:()=>pending.size>0});
  }
- root.AccountingCapitalLinks=Object.freeze({version:'1.0.0',create});
+  root.AccountingCapitalLinks=Object.freeze({version:'1.0.1',create});
 })(window);

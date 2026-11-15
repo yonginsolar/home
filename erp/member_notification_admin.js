@@ -1,9 +1,10 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Member notification administration v1.1.0. Provider checks are separate from policies and drafts. */
+/* Member notification administration v1.2.0. Keep search inputs while list reads settle. */
 (() => {
  'use strict';
  let client,owner='',generation=0,tab='summary',ctx,events=[],detailRevision=0;
  const drafts=new Map(),reads=new Map(),busy=new Set();
+ const listDrafts=new Map();let listPending=null,listObserver=null,frameObserver=null;
  let connection=null,connectionKnown=false,connectionEditable=false,connectionError='',connectionReading=false,connectionBusy=false,connectionSequence=0,connectionOperation=0;
  const $=id=>document.getElementById(id);
  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -47,6 +48,8 @@
    const save=root.querySelector('[data-notification-save="'+key+'"]');if(save)save.disabled=!drafts.has(key);
    const usage=root.querySelector('[data-notification-usage="'+key+'"]');if(usage)usage.textContent=drafts.has(key)?'미저장':event.requested_enabled?'사용':'사용 안 함';
   });
+  for(const name of ['input','change'])root.addEventListener(name,recordListEdit);
+  listObserver?.disconnect();listObserver=new MutationObserver(records=>{if(records.length)invalidateList();});listObserver.observe(root,{attributes:true,attributeFilter:['class','style']});
  }
  async function refresh(){
   mount();if(!client)return;
@@ -54,9 +57,9 @@
   document.querySelectorAll('[data-notification-tab]').forEach(b=>{b.classList.toggle('active',b.dataset.notificationTab===tab);b.setAttribute('aria-selected',String(b.dataset.notificationTab===tab));});
   $('notification-period').classList.toggle('d-none',!['summary','history'].includes(tab));$('notification-status').textContent='조회 중…';
   // Keep a settings editor and its drafts while revalidating the server context.
-  if(tab!=='settings')$('notification-content').replaceChildren();
+  if(!['settings','connections','history'].includes(tab)){$('notification-content').replaceChildren();delete $('notification-content').dataset.listMode;}
   try{
-   if(tab==='connections'||tab==='history'){await loadList(0);if(current())$('notification-status').textContent='';return;}
+   if(tab==='connections'||tab==='history'){await loadList(0);return;}
    const result=await rpc(tab,range());if(!current())return;ctx=result;
    if(tab==='settings'){events=result.events||[];renderSettings();void loadConnection();}
    else {
@@ -71,6 +74,7 @@
   }}
  }
  function renderSettings(){
+  delete $('notification-content').dataset.listMode;
   $('notification-content').innerHTML='<div class="notification-channel border rounded p-3 mb-3"><strong>발송 원칙</strong><span class="ms-3 text-secondary">문자 대체발송: 꺼짐</span><p class="mt-2 mb-0 notification-routing">텔레그램 연결 시 먼저 발송합니다. 일시적인 실패는 한 번 재시도하며, 연결되지 않은 경우에만 아래 설정에 따라 카톡을 발송합니다. 접수 여부가 불확실하면 중복 발송을 막기 위해 재전송을 멈추고 결과를 확인합니다. 법정대리인 동의 요청·접수는 카톡으로 발송합니다. 검수·연동 대기 알림은 아직 발송하지 않습니다.</p></div>'+
    '<section id="notification-provider-panel" class="notification-provider-panel mb-3" aria-label="발송업체 연동"></section>'+
    '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>알림</th><th>카톡 사용</th><th>알림별 준비 상태</th><th>사용 여부</th><th>문구</th><th>저장</th></tr></thead><tbody>'+events.map(e=>{
@@ -141,23 +145,38 @@
   }
   finally{if(gen===generation){busy.delete(key);renderSettings();}}
  }
- async function loadList(offset){
-  const current=capture('list'),mode=tab;if(!['history','connections'].includes(mode))return;
-  const content=$('notification-content'),search=$('notification-search')?.value||'',channel=$('notification-channel-filter')?.value||'',status=$('notification-result-filter')?.value||'',connectionState=$('notification-connection-filter')?.value||'';
-  $('notification-status').textContent='조회 중…';
-  try{
-   const result=await rpc(mode,{...range(),offset,search,channel,status,...(mode==='connections'?{connection_state:connectionState}:{})});if(!current()||tab!==mode)return;ctx=result;
-   const all=mode==='history'?(result.history||[]):(result.rows||[]),more=all.length>25,rows=all.slice(0,25);
-   content.innerHTML='<form id="notification-search-form" class="d-flex flex-wrap gap-2 mb-3"><input class="form-control notification-search" id="notification-search" data-erp-query-control placeholder="이름 검색" aria-label="이름 검색">'+
+ function listValues(mode){const content=$('notification-content');if(content?.dataset.listMode!==mode)return listDrafts.get(mode)||{search:'',channel:'',status:'',connectionState:''};return{search:$('notification-search')?.value||'',channel:$('notification-channel-filter')?.value||'',status:$('notification-result-filter')?.value||'',connectionState:$('notification-connection-filter')?.value||''};}
+ function lockList(){document.querySelectorAll('#notification-list-results button').forEach(b=>b.disabled=true);}
+ function invalidateList(){capture('list');listPending=null;$('notification-list-results')?.removeAttribute('aria-busy');lockList();}
+ function recordListEdit(e){if(!['connections','history'].includes(tab)||!['notification-search','notification-channel-filter','notification-result-filter','notification-connection-filter','notification-start','notification-end'].includes(e.target.id))return;listDrafts.set(tab,listValues(tab));invalidateList();$('notification-status').textContent='검색 조건을 바꿨습니다. 검색을 눌러 다시 확인해 주세요.';}
+ const listVisible=()=>!document.hidden&&!window.frameElement?.hidden&&(!$('tab-notifications')?.closest('.main-content')||$('tab-notifications').classList.contains('active'));
+ function listForm(mode){
+  const content=$('notification-content');if(content.dataset.listMode===mode&&$('notification-search-form'))return;
+  const values=listDrafts.get(mode)||{search:'',channel:'',status:'',connectionState:''};content.dataset.listMode=mode;
+  content.innerHTML='<form id="notification-search-form" class="d-flex flex-wrap gap-2 mb-3"><input class="form-control notification-search" id="notification-search" data-erp-query-control placeholder="이름 검색" aria-label="이름 검색">'+
     (mode==='history'?'<select class="form-select notification-filter" id="notification-channel-filter" data-erp-query-control aria-label="발송 채널"><option value="">전체 채널</option><option value="telegram">텔레그램</option><option value="kakao">카톡</option></select><select class="form-select notification-filter" id="notification-result-filter" data-erp-query-control aria-label="발송 결과"><option value="">전체 결과</option>'+['accepted','failed','unknown','skipped','queued','legacy_unconfirmed'].map(k=>'<option value="'+k+'">'+stateLabel[k]+'</option>').join('')+'</select>':'<select class="form-select notification-filter" id="notification-connection-filter" data-erp-query-control aria-label="텔레그램 연결 상태"><option value="">전체 연결 상태</option><option value="linked">연결됨</option><option value="unlinked">연결 안됨</option></select>')+
     '<button class="btn btn-outline-primary" type="submit">검색</button></form>'+
-    (rows.length?'<div class="table-responsive"><table class="table align-middle"><thead><tr>'+ (mode==='connections'?'<th>조합원</th><th>연결 상태</th><th>연결일</th>':'<th>시간</th><th>대상자</th><th>알림</th><th>채널</th><th>결과</th>')+'</tr></thead><tbody>'+rows.map(r=>mode==='connections'?'<tr><td><button type="button" class="btn btn-link p-0" data-notification-member="'+esc(r.member_uid)+'">'+esc(r.name)+'</button><span class="small text-secondary ms-2">'+esc(r.member_number)+'</span></td><td>'+esc(stateLabel[r.state]||'확인 필요')+'</td><td>'+esc(date(r.linked_at))+'</td></tr>':
+    '<div id="notification-list-results"></div>';
+  $('notification-search').value=values.search;if(mode==='history'){$('notification-channel-filter').value=values.channel;$('notification-result-filter').value=values.status;}else $('notification-connection-filter').value=values.connectionState;
+  $('notification-search-form').addEventListener('submit',e=>{e.preventDefault();void loadList(0);});
+ }
+ async function loadList(offset){
+  const mode=tab;if(!client||!['history','connections'].includes(mode)||!listVisible())return;
+  if((listObserver?.takeRecords().length||0)+(frameObserver?.takeRecords().length||0))invalidateList();
+  listForm(mode);const values=listValues(mode),{search,channel,status,connectionState}=values,period=range(),fingerprint=JSON.stringify([mode,offset,values,period]);listDrafts.set(mode,values);
+  if(listPending?.fingerprint===fingerprint&&listPending.current())return listPending.promise;
+  const captured=capture('list'),results=$('notification-list-results'),op={fingerprint};
+  const current=op.current=()=>listPending===op&&captured()&&tab===mode&&listVisible()&&results===$('notification-list-results')&&fingerprint===JSON.stringify([mode,offset,listValues(mode),range()]);
+  listPending=op;lockList();results.setAttribute('aria-busy','true');$('notification-status').textContent='조회 중…';
+  let timer;op.promise=(async()=>{try{
+   const result=await Promise.race([rpc(mode,{...period,offset,search,channel,status,...(mode==='connections'?{connection_state:connectionState}:{})}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('LIST_TIMEOUT')),15000);})]);if(!current())return;ctx=result;
+   const all=mode==='history'?(result.history||[]):(result.rows||[]),more=all.length>25,rows=all.slice(0,25);
+   results.innerHTML=(rows.length?'<div class="table-responsive"><table class="table align-middle"><thead><tr>'+ (mode==='connections'?'<th>조합원</th><th>연결 상태</th><th>연결일</th>':'<th>시간</th><th>대상자</th><th>알림</th><th>채널</th><th>결과</th>')+'</tr></thead><tbody>'+rows.map(r=>mode==='connections'?'<tr><td><button type="button" class="btn btn-link p-0" data-notification-member="'+esc(r.member_uid)+'">'+esc(r.name)+'</button><span class="small text-secondary ms-2">'+esc(r.member_number)+'</span></td><td>'+esc(stateLabel[r.state]||'확인 필요')+'</td><td>'+esc(date(r.linked_at))+'</td></tr>':
      '<tr><td>'+esc(date(r.at))+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.event)+'</td><td>'+(r.channel==='telegram'?'텔레그램':'카톡')+'</td><td>'+esc(stateLabel[r.status]||'확인 필요')+(r.error_code?'<div class="small text-secondary">'+esc(r.error_code)+'</div>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<div class="border rounded p-4 text-secondary">조회된 내역이 없습니다.</div>')+
     '<div class="d-flex justify-content-end gap-2 mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-offset="'+Math.max(0,offset-25)+'" '+(!offset?'disabled':'')+'>이전</button><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-offset="'+(offset+25)+'" '+(!more?'disabled':'')+'>다음</button></div>';
-   $('notification-search').value=search;if(mode==='history'){$('notification-channel-filter').value=channel;$('notification-result-filter').value=status;}else $('notification-connection-filter').value=connectionState;
-   $('notification-search-form').addEventListener('submit',e=>{e.preventDefault();void loadList(0);});
    $('notification-status').textContent='';
-  }catch(e){if(current()){$('notification-status').textContent=errorText(e);content.replaceChildren();}}
+  }catch(e){if(current()){if(/42501|PT401|PT403|DENIED|REQUIRED/.test(String(e?.code||'')+' '+String(e?.message||'')))results.replaceChildren();lockList();$('notification-status').textContent=(e?.message==='LIST_TIMEOUT'?'조회가 지연되고 있습니다.':errorText(e))+' 입력을 유지했습니다. 검색 또는 새로 확인으로 다시 조회해 주세요.';}}
+  finally{clearTimeout(timer);if(listPending===op){listPending=null;results.removeAttribute('aria-busy');}}})();return op.promise;
  }
  async function preview(key){
   let dialog=$('notification-message-dialog');
@@ -190,7 +209,7 @@
  }
  function clearDetail(){++detailRevision;const box=$('md-notification-status');if(box){box.replaceChildren();box.hidden=true;}}
  function clear(){
-  ++generation;++detailRevision;reads.clear();drafts.clear();busy.clear();ctx=null;events=[];owner='';client=null;
+  ++generation;++detailRevision;reads.clear();drafts.clear();busy.clear();listDrafts.clear();listPending=null;listObserver?.disconnect();listObserver=null;ctx=null;events=[];owner='';client=null;
   ++connectionSequence;++connectionOperation;connection=null;connectionKnown=false;connectionEditable=false;connectionError='';connectionReading=false;connectionBusy=false;
   const root=$('tab-notifications');if(root){root.replaceChildren();delete root.dataset.mounted;}
   const d=$('notification-message-dialog');if(d){if(d.open)d.close();d.remove();}clearDetail();
@@ -199,5 +218,7 @@
   const key=String(userId||'')+':'+String(runtime?.coop_id||'');if(key!==owner){clear();owner=key;}client=api;
  }
  window.addEventListener('beforeunload',e=>{if(drafts.size||busy.size){e.preventDefault();e.returnValue='';}});
+ window.addEventListener('pagehide',invalidateList);document.addEventListener('visibilitychange',()=>{if(document.hidden)invalidateList();});
+ if(window.frameElement){frameObserver=new MutationObserver(records=>{if(records.length)invalidateList();});frameObserver.observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});}
  window.MemberNotificationAdmin={configure,open:refresh,refresh,select:async value=>{if(!['summary','connections','history','settings'].includes(value))return;tab=value;await refresh();},detail,clearDetail,clear,hasUnsaved:()=>drafts.size>0||busy.size>0};
 })();
