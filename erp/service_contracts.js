@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* 1.6.7 · Preserve edits made while an explicit reload is pending. */
+/* 1.6.8 · Bound read-only requests without releasing pending writes. */
 (function () {
  'use strict';
  const $=id=>document.getElementById(id), BASE='https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -18,8 +18,20 @@
  const errors={SERVICE_ACCESS_DENIED:'이 조합의 계약을 확인할 권한이 없습니다.',SERVICE_ADMIN_REQUIRED:'지정 관리자만 처리할 수 있습니다.',SERVICE_REPRESENTATIVE_REQUIRED:'조합 기본정보에 등록된 이사장 본인 계정에서 서명해 주세요.',SERVICE_STALE_VERSION:'다른 화면에서 계약이 변경되었습니다. 새로 불러온 내용을 확인해 주세요.',SERVICE_DOCUMENT_LOCKED:'결재·서명이 시작된 계약서는 수정할 수 없습니다.',SERVICE_UNRESOLVED_TERMS:'개인정보 처리 위탁 명세의 미확정 항목을 먼저 확인·수정하고 확인란에 체크해 주세요.',SERVICE_APPROVALS_PENDING:'양측 조합의 내부 결재가 모두 완료된 뒤 서명할 수 있습니다.',SERVICE_APPROVAL_EXISTS:'이 조합의 내부 결재가 이미 연결되어 있습니다.',SERVICE_EXPORT_DENIED:'자료 다운로드 담당자와 이용기간을 확인해 주세요.',SERVICE_CONFIRM_ON_END_DATE:'종료 예정일 당일에 종료를 확정해 주세요.',SERVICE_ENDED_READ_ONLY:'종료된 조합은 자료 다운로드만 이용할 수 있습니다.',SERVICE_INVALID_DOWNLOAD_MANAGER:'해당 조합의 현직 관리자 중 자료를 받을 담당자를 선택해 주세요.',SERVICE_EXPORT_RATE_LIMIT:'다운로드 준비 요청이 많습니다. 잠시 뒤 다시 시도해 주세요.',SERVICE_FILE_CHANGED:'준비하는 동안 첨부가 변경되었습니다. 새 다운로드를 준비해 주세요.',SERVICE_INVALID_TERMS:'이용기간과 이용료를 확인해 주세요.',SERVICE_ENDING_LOCKED:'체결 완료된 계약만 종료를 요청할 수 있습니다.'};
  function message(value,kind='info'){ $('message').textContent=value;$('message').className='alert alert-'+kind; }
  Object.assign(errors,{INVALID_SECURE_PIN:'PIN이 일치하지 않습니다.',SECURE_PIN_NOT_CONFIGURED:'먼저 다운로드 PIN을 설정해 주세요.',SERVICE_RETURN_PIN_RATE_LIMIT:'PIN 확인이 여러 번 실패했습니다. 10분 뒤 다시 시도해 주세요.',SERVICE_RETURN_PIN_FORMAT:'PIN은 4자리 이상 입력해 주세요.',SERVICE_RETURN_SESSION_REQUIRED:'로그인 상태가 만료되었습니다. 같은 계정으로 다시 로그인해 주세요.',SERVICE_RETURN_DECRYPT_FAILED:'복호화하지 못한 자료가 있어 다운로드를 중단했습니다. 담당자에게 확인을 요청해 주세요.',SERVICE_RETURN_KEY_UNAVAILABLE:'자료 암호화 설정을 확인해야 합니다. 담당자에게 문의해 주세요.',SERVICE_EXPORT_TOO_LARGE:'자료가 한 번에 처리할 수 있는 크기를 넘었습니다. 담당자에게 분할 반환을 요청해 주세요.'});
+ errors.SERVICE_READ_TIMEOUT='조회가 지연되고 있습니다. 작성 내용은 유지했습니다. 다시 확인해 주세요.';
  function errorText(e){const s=String(e?.message||'');return Object.entries(errors).find(([k])=>s.includes(k))?.[1]||'처리하지 못했습니다. 연결 상태와 입력 내용을 확인한 뒤 다시 시도해 주세요.';}
- async function rpc(action,payload={},id=current?.id){const {data,error}=await db.rpc('erp_service_contract',{p_action:action,p_id:id||null,p_payload:payload});if(error)throw error;return data;}
+ const boundedReads=new Set(['list','get','proposal_get','proposal_list','history_get','history_list']);
+ async function rpc(action,payload={},id=current?.id){
+  if(boundedReads.has(action)){
+   const controller=new AbortController();let timer;
+   try{const query=db.rpc('erp_service_contract',{p_action:action,p_id:id||null,p_payload:payload});
+    const request=typeof query.abortSignal==='function'?query.abortSignal(controller.signal):query;
+    const {data,error}=await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('SERVICE_READ_TIMEOUT'));},15000);})]);
+    if(error)throw error;return data;
+   }finally{clearTimeout(timer);controller.abort();}
+  }
+  const {data,error}=await db.rpc('erp_service_contract',{p_action:action,p_id:id||null,p_payload:payload});if(error)throw error;return data;
+ }
  async function task(fn){if(busy)return;busy=true;const buttons=[...document.querySelectorAll('#detail button,#newForm button,#signForm button,#reviewForm button,#reviewerLinkForm button,#resolutionForm button,#draftHistoryDialog button')],disabled=buttons.map(x=>x.disabled);buttons.forEach(x=>x.disabled=true);try{await fn();}catch(e){message(errorText(e),'danger');}finally{busy=false;buttons.forEach((x,i)=>{if(x.isConnected)x.disabled=disabled[i];});updateReviewerLinkSelection();}}
  function oneYearEnd(start){if(!/^\d{4}-\d{2}-\d{2}$/.test(start||''))return '';const [y,m,d]=start.split('-').map(Number);if(y<1000||y>9998)return '';const date=new Date(Date.UTC(y,m-1,d));if(date.toISOString().slice(0,10)!==start)return '';const leap=m===2&&d===29;const next=new Date(Date.UTC(y+1,m-1,leap?28:d));if(!leap)next.setUTCDate(next.getUTCDate()-1);return next.toISOString().slice(0,10);}
  function draftSnapshot(){return $('editForm')?JSON.stringify({title:$('contractTitle').value.trim(),terms:readTerms(),body:$('contractBody').value}):'';}

@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* 1.1.1 · Contract and addendum proposals, including grouped fee inputs. */
+/* 1.1.2 · Cancel stale comparison reads and retry without changing drafts. */
 (function(){
  'use strict';
  const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -7,6 +7,23 @@
  const names={pending:'확인 대기',accepted:'반영 완료',rejected:'미반영',superseded:'이후 수정안으로 대체'};
  const sources={existing:'기존 저장본',created:'초안 작성',review:'검토 요청본',final:'결재용 최종본',saved:'초안 저장',proposal:'상대 수정안 반영',reopened:'수정본 만들기'};
  let api=null,record=null,editorBase=null,editorProposal=null,editorBaseline='',sending=false;
+ let comparisonRead=null,comparisonEpoch=0,comparisonObserver=null;
+ const comparisonVisible=()=>!document.hidden&&!window.frameElement?.hidden;
+ function cancelComparisonRead(close=false){const op=comparisonRead;comparisonRead=null;++comparisonEpoch;op?.cancel();if(close&&op&&$('comparisonDialog').open)$('comparisonDialog').close();}
+ async function loadComparison(read,target=record,callbacks=api){
+  if(comparisonObserver?.takeRecords().length)cancelComparisonRead(true);
+  if(target!==record||callbacks!==api||!comparisonVisible())return;
+  cancelComparisonRead();const epoch=++comparisonEpoch,dialog=$('comparisonDialog');
+  const current=()=>epoch===comparisonEpoch&&target===record&&callbacks===api&&comparisonVisible()&&dialog.open;
+  const retryFocused=document.activeElement===$('retryComparison');
+  $('comparisonTitle').textContent='변경 내용 비교';$('comparisonBody').textContent='불러오는 중…';$('retryComparison').hidden=true;
+  if(retryFocused)$('closeComparison').focus({preventScroll:true});
+  if(!dialog.open)dialog.showModal();
+  let cancel;const cancelled=new Promise(resolve=>{cancel=()=>resolve(null);}),op={cancel};comparisonRead=op;
+  try{const result=await Promise.race([read(),cancelled]);if(!result||!current())return;showComparison(result.before,result.after,result.left,result.right);}
+  catch(error){if(current()){$('comparisonBody').textContent=callbacks.errorText(error);$('retryComparison').hidden=false;$('retryComparison').onclick=()=>callbacks.task(()=>loadComparison(read,target,callbacks));}}
+  finally{if(comparisonRead===op)comparisonRead=null;}
+ }
  const field=(id,label,value,type='text',extra='')=>`<div><label for="${id}" class="form-label">${esc(label)}</label><input id="${id}" class="form-control" type="${type}" ${type==='number'?'data-number-group':''} value="${esc(value)}" ${extra}></div>`;
  function rows(before,after){
   const changes=[],get=(obj,path)=>path.split('.').reduce((v,k)=>v?.[k],obj),add=(label,a,b)=>{if(JSON.stringify(a??null)!==JSON.stringify(b??null))changes.push({label,before:String(a??''),after:String(b??'')});};
@@ -46,9 +63,10 @@
   $('proposalError').textContent='';$('proposalDialog').showModal();editorBaseline=editorState();$('proposalTitle').focus();
  }
  function editorSnapshot(){const t=structuredClone(editorBase.pending_proposal?.snapshot?.terms||editorBase.terms);t.start=$('proposalStart').value;t.end=$('proposalEnd').value;t.annual_supply=Number(ERPNumberInput.raw($('proposalAnnual').value));t.free_start=$('proposalFree').value||null;t.free_end=t.free_start?'2026-12-31':null;t.setup=$('proposalSetup').value;t.special=$('proposalSpecial').value;t.village_enabled=$('proposalVillageEnabled').checked;t.village_annual_supply=t.village_enabled?Number(ERPNumberInput.raw($('proposalVillageFee').value)):0;if(editorBase.amendment)t.change_effective_on=$('proposalEffective').value;return {title:$('proposalTitle').value.trim(),terms:t,body:$('proposalBody').value};}
- async function compareProposal(id){const data=await api.rpc('proposal_get',{proposal_id:id},record.id);showComparison(data.before,data.after,'제'+data.proposal.base_revision+'판','수정안 '+data.proposal.proposal_no);}
- function showComparison(before,after,left,right){$('comparisonTitle').textContent=left+' → '+right;$('comparisonBody').innerHTML=comparison(before,after,left,right);$('comparisonDialog').showModal();}
- function bind(r,callbacks){record=r;api=callbacks;
+ async function compareProposal(id){const target=record,callbacks=api;return loadComparison(async()=>{const data=await callbacks.rpc('proposal_get',{proposal_id:id},target.id);return{before:data.before,after:data.after,left:'제'+data.proposal.base_revision+'판',right:'수정안 '+data.proposal.proposal_no};},target,callbacks);}
+ function compareHistory(r,revision){const callbacks=api;return loadComparison(async()=>({before:await callbacks.rpc('history_get',{revision},r.id),after:r,left:'제'+revision+'판',right:'현재 제'+r.revision+'판'}),r,callbacks);}
+ function showComparison(before,after,left,right){const retryFocused=document.activeElement===$('retryComparison');cancelComparisonRead();$('retryComparison').hidden=true;$('comparisonTitle').textContent=left+' → '+right;$('comparisonBody').innerHTML=comparison(before,after,left,right);if(!$('comparisonDialog').open)$('comparisonDialog').showModal();if(retryFocused)$('closeComparison').focus({preventScroll:true});}
+ function bind(r,callbacks){cancelComparisonRead(true);record=r;api=callbacks;
   if($('writeProposal'))$('writeProposal').onclick=()=>openEditor(r);
   $('cancelProposal').onclick=closeEditor;$('proposalDialog').oncancel=e=>{e.preventDefault();closeEditor();};
   $('proposalForm').onsubmit=async e=>{e.preventDefault();if(sending||!$('proposalForm').reportValidity())return;sending=true;
@@ -58,7 +76,7 @@
    }catch(err){$('proposalError').textContent=api.errorText(err);}finally{sending=false;controls.forEach(x=>x.disabled=false);}
   };
   $('previewProposal').onclick=()=>{if($('proposalForm').reportValidity())showComparison(editorBase,editorSnapshot(),'현재 저장본','작성 중인 수정안');};
-  $('closeComparison').onclick=()=>$('comparisonDialog').close();$('closeDraftHistory').onclick=()=>$('draftHistoryDialog').close();
+  $('closeComparison').onclick=()=>{cancelComparisonRead();$('comparisonDialog').close();};$('closeDraftHistory').onclick=()=>{cancelComparisonRead(true);$('draftHistoryDialog').close();};
   const compareButtons=()=>document.querySelectorAll('[data-proposal-compare]').forEach(b=>b.onclick=()=>api.task(()=>compareProposal(b.dataset.proposalCompare)));compareButtons();
   if($('olderProposals')){let cursor=r.proposal_history.at(-1).proposal_no;$('olderProposals').onclick=()=>api.task(async()=>{const older=await api.rpc('proposal_list',{before_no:cursor},r.id);$('proposalHistoryRows').insertAdjacentHTML('beforeend',proposalHistoryHtml(older));compareButtons();if(older.length)cursor=older.at(-1).proposal_no;if(older.length<20)$('olderProposals').hidden=true;});}
   if($('comparePendingProposal'))$('comparePendingProposal').onclick=()=>api.task(()=>compareProposal(r.pending_proposal.id));
@@ -71,11 +89,21 @@
    let history=[...(r.draft_history||[])];const renderHistory=()=>{
     $('draftHistoryRows').innerHTML=history.map(v=>`<tr><th scope="row">제${Number(v.revision)}판</th><td>${esc(v.actor_name||'기존 저장본')}<br>${esc(dates(v.created_at))}<br>${esc(sources[v.source]||'저장본')}</td><td><button type="button" class="btn btn-outline-secondary" data-version="${Number(v.revision)}">현재 판과 비교</button></td></tr>`).join('');
     $('historyBefore').innerHTML=history.map(v=>`<option value="${Number(v.revision)}">제${Number(v.revision)}판</option>`).join('');if(history.length>1)$('historyBefore').value=history[1].revision;
-    $('draftHistoryRows').querySelectorAll('[data-version]').forEach(b=>b.onclick=()=>api.task(async()=>showComparison(await api.rpc('history_get',{revision:Number(b.dataset.version)},r.id),r,'제'+b.dataset.version+'판','현재 제'+r.revision+'판')));
+    $('draftHistoryRows').querySelectorAll('[data-version]').forEach(b=>b.onclick=()=>api.task(()=>compareHistory(r,Number(b.dataset.version))));
    };renderHistory();$('olderDrafts').hidden=history.length<20;$('draftHistoryDialog').showModal();
-   $('compareDraftVersions').onclick=()=>api.task(async()=>showComparison(await api.rpc('history_get',{revision:Number($('historyBefore').value)},r.id),r,'제'+$('historyBefore').value+'판','현재 제'+r.revision+'판'));
+   $('compareDraftVersions').onclick=()=>api.task(()=>compareHistory(r,Number($('historyBefore').value)));
    $('olderDrafts').onclick=()=>api.task(async()=>{const older=await api.rpc('history_list',{before_revision:history.at(-1).revision},r.id);history.push(...older);renderHistory();$('olderDrafts').hidden=older.length<20;});
   });
  }
+ $('comparisonDialog').addEventListener('close',()=>cancelComparisonRead());
+ $('comparisonDialog').addEventListener('keydown',event=>{
+  if(event.key!=='Tab'||event.defaultPrevented||document.querySelector('dialog.coop-dialog[open]'))return;
+  const dialog=event.currentTarget,targets=[...dialog.querySelectorAll('button,a[href],input,select,textarea,[tabindex]')].filter(n=>!n.disabled&&!n.hidden&&n.tabIndex>=0&&n.getClientRects().length);
+  if(!dialog.open||!targets.length)return;const index=targets.indexOf(document.activeElement);
+  if(index<0||event.shiftKey&&index===0||!event.shiftKey&&index===targets.length-1){event.preventDefault();targets[event.shiftKey?targets.length-1:0].focus({preventScroll:true});}
+ });
+ $('draftHistoryDialog').addEventListener('close',()=>cancelComparisonRead(true));
+ window.addEventListener('pagehide',()=>cancelComparisonRead(true));document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelComparisonRead(true);});
+ if(window.frameElement){comparisonObserver=new MutationObserver(records=>{if(records.length)cancelComparisonRead(true);});comparisonObserver.observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});}
  window.ServiceContractCollaboration={html,bind,dirty,comparison,rows};
 })();
