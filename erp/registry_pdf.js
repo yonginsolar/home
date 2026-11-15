@@ -1,4 +1,4 @@
-/* 0.2.18 · 신고내용 셀 축소·공식 하단 전체 보존·별첨 분리. */
+/* 0.3.0 · 기존 신고서 전체 보존·선택한 첨부만 추가. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -63,8 +63,9 @@
     row(headers,40);while(index<r.rows.length){const v=r.rows[index],values=[v['연번'],v['성명(법인명)'],v['생년월일(법인등록번호)'],v['출자좌수'],v['출자금액'],Number(v['비율']).toFixed(2)],height=Math.max(22,...values.map((s,i)=>wrap(String(s),font,11,widths[i]-6).length*13+8));if(height>540)throw Error('명부 입력 칸보다 내용이 깁니다.');if(y-height<60)break;row(values,height);index++;}
    }
   }
+  if(scope?.documents){if(!root.CoopRegistryDocumentsPdf)throw Error('첨부 출력 도구를 불러오지 못했습니다.');await root.CoopRegistryDocumentsPdf.append(doc,model,scope.documents,{lib,font,load,check,test:provided?.test,templates:provided?.templates});}
   for(const [i,pg]of doc.getPages().entries())if(i>=1)pg.drawText(String(i+1)+' / '+doc.getPageCount(),{x:500,y:30,size:11,font});
   check();doc.setTitle('시청 변경신고 작성자료');doc.setCreator('협동조합 운영시스템');const bytes=await doc.save();try{check();return bytes;}catch(e){bytes.fill(0);throw e;}
  }
- root.CoopRegistryPdf={create,wrap,tools,version:'0.2.18'};
+ root.CoopRegistryPdf={create,wrap,tools,version:'0.3.0'};
 })(typeof window==='undefined'?globalThis:window);

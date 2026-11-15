@@ -1,4 +1,4 @@
-/* 0.2.13 · 기존 시청용 RPC/RLS·직인 Storage 권한만 사용. */
+/* 0.3.0 · 기존 권한 유지·별지6과 출자자 명부의 같은 가입 근거 확인. */
 (function(root){
  'use strict';
  async function load(client,options){
@@ -13,6 +13,7 @@
    const proof=()=>pages(()=>client.rpc('member_export_city_membership_at_year_end',{p_year:Number(cutoff.slice(0,4))},{count:'exact'}).order('member_uid'),'member_uid');
    const first=await proof(),confirmed=await proof();const sig=rows=>JSON.stringify(rows.map(r=>[r.member_uid,r.is_member_on_cutoff,r.joined_on,r.ended_on,r.review_codes,r.member_updated_at]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))));
    if(sig(first)!==sig(confirmed))throw Error('조회 중 가입 이력이 바뀌었습니다.');
+   if(options.membershipProof&&sig(confirmed)!==options.membershipProof)throw Error('조합원 명부와 출자자 명부의 가입 근거가 달라졌습니다. 다시 확인해 주세요.');
    root.CoopRegistryRosterMath.validate(members,confirmed,cutoff,coop);
    const ledger=await pages(()=>site?client.rpc('member_export_capital_snapshot_secure',{p_cutoff_date:cutoff},{count:'exact'}).order('member_id'):client.from('ref_members').select('id,coop_id,member_id,amount',{count:'exact'}).eq('coop_id',coop).lte('deposit_date',cutoff).order('id'),site?'member_id':'id'),snapshot={};
    for(const r of ledger){const amount=Number(r.total_capital??r.amount);if((!site&&r.coop_id!==coop)||!r.member_id||!Number.isSafeInteger(amount))throw Error('명부 출자 원장을 확인해 주세요.');snapshot[r.member_id]=site?amount:(snapshot[r.member_id]||0)+amount;if(!Number.isSafeInteger(snapshot[r.member_id]))throw Error('출자금 합계를 확인해 주세요.');}
@@ -30,5 +31,5 @@
    await verify();check();return {seal,roster:{coop,cutoff,unit,rows:result.rows,totalCapital:result.totalCapital}};
   }catch(e){seal?.fill(0);if(Array.isArray(e?.cityReview))throw Error('가입 이력 확인 필요 '+e.cityReview.length+'명: 시청용 명부를 확인해 주세요.');throw e;}
  }
- root.CoopRegistryBundle=Object.freeze({load,version:'0.2.13'});
+ root.CoopRegistryBundle=Object.freeze({load,version:'0.3.0'});
 })(typeof window==='undefined'?globalThis:window);

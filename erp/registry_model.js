@@ -1,4 +1,4 @@
-/* 시청 변경신고 준비 모형 0.2.18 — 원장과 신고 수정값 분리. */
+/* 시청 변경신고 준비 모형 0.3.0 — 원장과 신고 수정값 분리. */
 (function(root){
  'use strict';
  const kinds={capital:'출자금',members:'조합원 수',appointment:'임원 취임',renewal:'임원 중임',retirement:'임원 퇴임',resignation:'임원 사임',office:'주사무소 주소',purpose:'사업 목적',name:'조합 명칭',chair:'이사장 변경',chairAddress:'이사장 개인 주소',articles:'그 밖의 정관 변경'};
@@ -76,6 +76,7 @@
   if(input.unitReduced)attachments.push({group:'유형별 법정 첨부',text:'재무상태표·출자감소 의결·채권자 공고·이의신청 처리 등 증명서류'});
   if(selected.has('members'))attachments.push({group:'유형별 첨부',text:'시청 제출용 조합원 명부'});
   attachments.push({group:'담당 공무원 확인',text:'법인 등기사항증명서. 행정정보 공동이용에 동의하지 않으면 직접 제출합니다.'});
+  if(input.documentBundle?.missing)missing.push(...input.documentBundle.missing);
   return{input,reportedMembershipNote:reportedMembershipNote(input),memberComparison,erpValues,selected:[...selected].map(k=>kinds[k]),rows,values,unit,annual,deadline:annual?deadline(input.fiscalEnd):'',attachments,missing:[...new Set(missing)],warnings,draft:missing.length>0||warnings.some(x=>/다릅니다|늦습니다/.test(x))};
  }
  function activityCounts(value,year,day){
