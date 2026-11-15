@@ -1,4 +1,4 @@
-/* 변경등기 따라 하기 1.0.0 · 기존 보호 조회만 사용. 신청 저장·전송·출력 없음. */
+/* 변경등기 따라 하기 1.0.1 · 기존 보호 조회만 사용. 신청 저장·전송·출력 없음. */
 (function(root){
  'use strict';
  const types={
@@ -10,7 +10,8 @@
   chair:{label:'이사장 변경',category:'(대표)이사/감사 등의 임원사항 변경',deadline:'등기사항이 바뀐 날부터 21일 이내에 변경등기합니다.',prepare:'종전·새 이사장과 각 효력일, 새 이사장 선임을 증명하는 자료를 준비하세요. 이사 취임과 대표자 변경을 구분합니다.',erp:'임원·위원회 관리의 이사장 이력과 시청 변경신고의 이사장 변경 전·후 정보, 선임 의사록을 참고합니다.',entry:'종전 대표자의 퇴임·사임과 새 대표자의 취임 등 실제 변경을 나누어 입력합니다. 대표권과 효력일은 의결·등기 근거에 맞춥니다.',proof:'선임 의사록과 취임·사임 증명, 새 이사장의 인감·주소 관련 서류 등 신청 안내의 첨부를 준비합니다. 법인 인감 신고가 함께 필요한지도 확인합니다.'}
  };
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- function steps(key){const t=types[key];if(!t)throw Error('변경 유형을 선택해 주세요.');return[
+ function officialExample(stage){const label={1:'기본정보',2:'등기할 사항',3:'등록면허세·수수료',4:'신청인·대리인·첨부서면'}[stage];return `<p class="rg-note" data-rg-example="${stage}">공식 예시 확인: <a href="https://www.iros.go.kr/" target="_blank" rel="noopener noreferrer" aria-label="인터넷등기소 첫 화면 열기 · 공식 예시 ${stage}단계">인터넷등기소 첫 화면 ↗</a><br>빠른메뉴 → 간편길잡이 → e-form신청 → 법인 → 신청서 작성 → <strong>${stage}. ${label}</strong></p>`;}
+ function steps(key){const t=types[key];if(!t)throw Error('변경 유형을 선택해 주세요.');const items=[
   ['ERP 자료 준비',`<p>${t.prepare}</p><p><strong>ERP 참고:</strong> ${t.erp}</p><p class="rg-note">${t.deadline} 시청 변경신고와 등기소 변경등기는 별도 절차입니다.</p>`],
   ['전자표준양식에서 등기 유형 선택',`<p>인터넷등기소에 로그인한 뒤 아래 순서로 이동합니다.</p><ol class="rg-path">${['신청','법인','법인등기 신청','신청서 작성/제출','전자표준양식','등기유형 더보기','특수법인','변경등기'].map(x=>'<li>'+x+'</li>').join('')}</ol><p><strong>${t.category}</strong>를 선택합니다. 여러 등기사항을 함께 바꾸면 <strong>여러 등기사항의 일괄 변경</strong> 경로에서 해당 사항을 고릅니다.</p>`],
   ['대상법인 조회·등기사유',`<p><strong>대상법인 조회 → 상호/명칭 검색</strong>에서 현재 등기된 조합을 찾아 선택합니다. 등기부와 법인등록번호·관할·명칭을 대조한 뒤 등기사유를 적고 <strong>저장 후 다음</strong>으로 이동합니다.</p><p>등기사유에는 실제 변경한 사항과 근거 날짜를 적습니다. ERP 입력일이 아니라 의결·취임·이전 등 효력 근거의 날짜를 사용합니다.</p><p class="rg-note">ERP가 이미 변경 후 정보라면 검색에는 등기부의 변경 전 명칭을 사용하세요. 법인등록번호와 사업자등록번호는 다른 번호입니다.</p>`],
@@ -18,7 +19,7 @@
   ['등록면허세·수수료와 납부정보',`<p><strong>등록면허세·수수료/납부정보</strong> 단계에서 이번 신청의 세액·수수료와 납부정보를 확인합니다. 금액을 임의로 정하지 말고 해당 신청과 관할의 안내를 따르세요.</p><p>등록면허세 납부서와 영수필확인정보, 등기신청수수료 납부정보를 서로 구분해 입력합니다. <a href="https://www.wetax.go.kr/" target="_blank" rel="noopener noreferrer">위택스 열기 ↗</a></p>`],
   ['신청인·대리인과 첨부서면',`<p><strong>신청인/대리인·첨부서면</strong> 단계에서 실제 신청인과 위임 관계를 기재하고 해당 서류를 정리합니다.</p><p>${t.proof}</p><p>ERP PDF가 있다는 이유만으로 원본·인증·날인 요건까지 충족되는 것은 아닙니다. 선택한 신청의 첨부 목록에 맞춰 원본과 사본을 구분합니다.</p>`],
   ['작성완료·출력 후 등기소 접수',`<p>입력 내용과 첨부 목록을 검토해 <strong>작성완료·출력</strong>으로 진행합니다. 출력한 신청서에 필요한 서명·날인을 하고 첨부서류와 함께 등기소에 서면으로 접수합니다.</p><p class="rg-note">전자표준양식의 저장·작성완료·출력만으로 등기 접수가 끝난 것은 아닙니다. 접수 뒤 접수번호와 보정 여부·완료 결과를 확인하세요.</p>`]
- ];}
+ ];return items.map(([title,html],index)=>[title,html+(index?officialExample([0,1,1,2,3,4,4][index]):'')]);}
  function mount({client,authorize,context}){
   const $=id=>document.getElementById(id),drafts=new Map();let topic='capital',epoch=0,flight=null,fields={name:'',number:''};
   const visible=()=>!document.hidden&&(!root.frameElement||!root.frameElement.hidden),current=op=>context().authorized&&visible()&&epoch===op.epoch&&context().key===op.key&&!op.controller.signal.aborted;
@@ -32,7 +33,7 @@
   root.addEventListener('pagehide',leave);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();});if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)leave();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
   return{leave,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.0.0'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.0.1'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',authorized=false,view=0,ui;
  const context=()=>({coop,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};
