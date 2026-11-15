@@ -1,4 +1,4 @@
-/* Plant work log1.0.0. Internal records only, original monitor administration authority. */
+/* 작업 이력1.0.1 · 새 검색 실패의 기존 목록 보존·동일 진행 검색 공유. */
 (function (root) {
   "use strict";
   const kinds = {
@@ -46,6 +46,7 @@
       selected = "",
       currentList = null,
       reading = false,
+      pendingQuery = null,
       modal,
       form,
       editing = null,
@@ -149,7 +150,7 @@
     }
     function showList() {
       list.replaceChildren();
-      if (!currentList) return;
+      if (!currentList) { more.hidden = true; return; }
       for (const row of currentList.rows) {
         const card = el("article");
         card.className = "border rounded-3 p-3 mb-2";
@@ -182,6 +183,7 @@
           ),
         );
       more.hidden = !currentList.hasMore;
+      more.disabled = reading || currentList.query !== search.value.trim() || currentList.plant !== selected;
     }
     async function load(append = false) {
       if (!allowed() || !active || !selected || reading) return;
@@ -190,14 +192,15 @@
         plant = selected,
         query = search.value.trim(),
         cache = key + "|" + plant + "|" + query;
-      currentList = lists.get(cache) || { rows: [], hasMore: false };
+      const base = lists.get(cache) || { rows: [], hasMore: false };
       reading = true;
+      pendingQuery = cache;
       retry.disabled = true;
       more.disabled = true;
       status.textContent = "작업 이력을 불러오고 있어요…";
       showList();
       try {
-        const last = append ? currentList.rows.at(-1) : null;
+        const last = append ? base.rows.at(-1) : null;
         const result = await read(
           "list",
           {
@@ -220,16 +223,18 @@
           rows: append
             ? [
                 ...new Map(
-                  [...currentList.rows, ...rows].map((r) => [r.id, r]),
+                  [...base.rows, ...rows].map((r) => [r.id, r]),
                 ).values(),
               ]
             : rows,
           hasMore: result.rows.length > 20,
+          query,
+          plant,
         };
         lists.set(cache, currentList);
         status.textContent = "";
       } catch (e) {
-        if (current(key, t)) {
+        if (current(key, t) && search.value.trim() === query) {
           status.textContent =
             e.code === "42501"
               ? "현재 권한으로는 이력을 확인할 수 없습니다."
@@ -238,9 +243,11 @@
       } finally {
         if (scope === key && seq === t) {
           reading = false;
+          pendingQuery = null;
           retry.disabled = false;
           more.disabled = false;
           if (active) showList();
+          if (active && search.value.trim() !== query) status.textContent = '검색어를 바꿨습니다. 검색을 눌러 주세요.';
         }
       }
     }
@@ -270,6 +277,7 @@
       plantSelect.onchange = change;
       const find = () => {
         if (!allowed()) return;
+        if (reading && pendingQuery === scope + '|' + selected + '|' + search.value.trim()) return;
         seq++;
         reading = false;
         detailSeq++;
@@ -279,9 +287,11 @@
       search.onkeydown = (e) => {
         if (e.key === "Enter" && !e.isComposing) {
           e.preventDefault();
+          if (e.repeat) return;
           find();
         }
       };
+      search.oninput = () => { more.disabled = reading || !currentList || currentList.query !== search.value.trim() || currentList.plant !== selected; };
       retry.onclick = () => void load();
       more.onclick = () => void load(true);
       add.onclick = () => void newRecord();
