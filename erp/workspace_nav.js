@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.6.2 — expose existing navigation without leaving retained tasks. */
+/* ERP workspace navigation v1.6.3 — separate the registry task menu. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261020.5';
+  const VERSION = '20261115.registry1';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -18,6 +18,7 @@
     ['btnProposalBuilder', '제안서 만들기', 'proposal_builder.html', 'site_admin', ['site.admin', 'member.admin'], '▧'],
     ['btnOfficialsAdmin', '임원·위원회 관리', 'officials_admin.html', '', ['member.admin', 'signature.manage'], '♙'],
     ['btnGovernanceHub', '회의·문서·서명', 'governance.html', '', ['member.admin', 'site.admin', 'minutes.manage', 'documents.manage', 'signature.manage'], '▱', true],
+    ['btnRegistryHub', '등기·변경신고', 'registry_hub.html', 'member_admin', ['member.admin'], '▧', true],
     ['btnAudit', '감사 로그', 'audit_logs.html', 'audit', ['audit.view'], '◷'],
     ['btnPerm', '권한 관리', 'permissions.html', 'permission', ['permission.manage'], '⚿']
   ];
@@ -40,6 +41,9 @@
       ['cardMeetingAttendance','회의 출석 관리',u=>/\/participation(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('view')==='meeting'],
       ['cardDocumentAdmin','규정·정관 관리',u=>/\/admin_member(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('scope')==='documents_admin'],
       ['cardSignatureAdmin','서명자 준비',u=>/\/officials_signature_admin(?:\.html)?\/?$/.test(u.pathname)]
+    ]},
+    btnRegistryHub: {root:'registry_hub',branches:[
+      ['cardCityRegistry','시청 변경신고',u=>/\/registry(?:\.html)?\/?$/.test(u.pathname)]
     ]},
     btnVoteHub: {root:'vote_hub',branches:[
       ['cardVoteCreate','새 선거 만들기',u=>/\/vote\/admin_setup(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('mode')==='create'],
@@ -74,6 +78,7 @@
       if (path === leaf) return (params.get('section') === 'settings') === settings;
       return !settings && ['hr_insurance', 'employment_contracts', 'village_company_info'].includes(path);
     }
+    if (leaf === 'registry_hub') return ['registry_hub', 'registry'].includes(path);
     if (leaf === 'governance') return ['governance', 'meeting_workspace', 'admin_minutes', 'officials_signature_admin'].includes(path)
       || (path === 'admin_member' && params.get('scope') === 'documents_admin')
       || (path === 'participation' && params.get('view') === 'meeting');
@@ -84,6 +89,9 @@
 
   // Runtime and all capability answers come from existing authenticated, tenant-scoped RPCs.
   // This does not grant access: destination pages and servers retain their checks.
+  function canOpenRegistryHub(runtime) {
+    return !!runtime?.coop_id&&runtime.is_active!==false&&runtime.modules?.member_admin!==false&&Array.isArray(runtime.effective_permissions)&&runtime.effective_permissions.includes('member.admin')&&(!Array.isArray(runtime.base_effective_permissions)||runtime.base_effective_permissions.includes('member.admin'))&&(runtime.runtime_profile!=='site_member'||runtime.module_access?.member_admin===true);
+  }
   function allowedItems(runtime) {
     const set = permissions(runtime);
     const narrow = runtime.runtime_profile === 'site_member';
@@ -91,12 +99,13 @@
     const items = catalog.filter(item => {
       const [id, , , key, rights] = item;
       if (!enabled(runtime, key) || !any(set, rights)) return false;
+      if (id === 'btnRegistryHub' && !canOpenRegistryHub(runtime)) return false;
       if (runtime.initial_setup?.active && !any(baseSet, rights) && id !== 'btnSiteAdmin') return false;
       if (id === 'btnGovernanceHub' && !['minutes', 'documents', 'signature'].some(k => enabled(runtime, k))) return false;
       if (id === 'btnOfficialsAdmin' && !['member_admin', 'signature'].some(k => enabled(runtime, k))) return false;
       if (id === 'btnPerm' && runtime.runtime_profile === 'workforce_lite') return false;
       if (narrow) {
-        if (!['btnMemberAdmin', 'btnSiteAdmin', 'btnAudit'].includes(id)) return false;
+        if (!['btnMemberAdmin', 'btnSiteAdmin', 'btnAudit', 'btnRegistryHub'].includes(id)) return false;
         if (['member_admin', 'site_admin'].includes(key) && runtime.module_access?.[key] !== true) return false;
       }
       return true;

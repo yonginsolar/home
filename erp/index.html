@@ -1,16 +1,16 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.131 | Change: 2026-11-12 - Recover the latest setup status and resume opened checks. -->
+<!-- Version: v1.0.132 | Change: 2026-11-15 - Add the independent registry task menu. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
   <script src="/shared/coop_dialog.js?v=20261112-caret-1" integrity="sha384-dtSAC1/LrXrXqO9RVxDSzlj1VBHozxdBNK/3cNkJhkB2M2iA/zbF2Z+M2J4oyHGN" crossorigin="anonymous"></script>
   <script src="/shared/workflow_help.js?v=20261026-mobile-help-1" integrity="sha384-aDygb3b3+ARJmbKazWhergFuAz+9LZCHQH8bfj4EIisehZMMJM8FvaxnmRoObWjM" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
-  <script src="/erp/workspace_boot.js?v=20261014-setup"></script>
+  <script src="/erp/workspace_boot.js?v=20261115-registry-menu-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.131 | index.html');</script>
+  <script>console.log('[Version] v1.0.132 | index.html');</script>
 <script src="work_overview.js?v=1.2.7"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -134,7 +134,7 @@
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
   <link rel="stylesheet" href="/erp/erp_palette.css?v=1.0.0" integrity="sha384-Q4SLjWvt6mfxBkeAZ7tJM0NA2HVAOsGJKBHupNsyjJ943mTY5sSRiDPFS8WQSY3j" crossorigin="anonymous" data-erp-palette-style>
   <script src="/erp/erp_palette.js?v=1.0.0" integrity="sha384-eqzWMk2JERd7XhuNeGNbJ48/w3Hit4umqaZoA6gO9BLNrCkvVuoF8YKOipNIJB1y" crossorigin="anonymous"></script>
-  <script src="/erp/workspace_nav.js?v=20261109-staff-mobile-1" defer></script>
+  <script src="/erp/workspace_nav.js?v=20261115-registry-menu-1" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 <body class="erp-unified erp-menu-workspace erp-auth-screen" data-erp-mobile-task="menu">
@@ -329,6 +329,11 @@
         <button class="btn btn-white btn-menu hidden" id="btnGovernanceHub" onclick="location.href='governance.html'">
           🗂️ <strong>회의·문서 관리</strong>
           <span class="d-block small text-muted">총회·이사회 자료와 시나리오 만들기, 의사록·문서함·전자서명</span>
+        </button>
+
+        <button class="btn btn-white btn-menu hidden" id="btnRegistryHub" data-mobile-task="registry" onclick="location.href='registry_hub.html'">
+          📑 <strong>등기·변경신고</strong>
+          <span class="d-block small text-muted">시청 변경신고와 변경등기 안내</span>
         </button>
 
         <button class="btn btn-white btn-menu hidden" id="btnMinutesAdmin" onclick="openMinutesRoute('minutes_admin')">
@@ -2357,6 +2362,10 @@ window.addEventListener('erp-menu-order-saved',event=>{
     cacheMenuOrder(event.detail.order);applyMenuOrder();renderMenuOrderList();
 });
 
+function canOpenRegistryHub(runtime) {
+    return !!runtime?.coop_id&&runtime.is_active!==false&&runtime.modules?.member_admin!==false&&Array.isArray(runtime.effective_permissions)&&runtime.effective_permissions.includes('member.admin')&&(!Array.isArray(runtime.base_effective_permissions)||runtime.base_effective_permissions.includes('member.admin'))&&(runtime.runtime_profile!=='site_member'||runtime.module_access?.member_admin===true);
+}
+
 function applyMenuPermissions(user, platformCtx, runtime) {
     const hasKnownBasePermissions = Array.isArray(runtime?.base_effective_permissions);
     const menuPermissions = hasKnownBasePermissions ? new Set(runtime.base_effective_permissions) : permissionSet;
@@ -2365,6 +2374,7 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     applyMenuPermissions.checkVersion = menuCheck;
     const isCurrentMenuCheck = () => applyMenuPermissions.checkVersion === menuCheck;
     const isSiteMemberProfile = String(runtime?.runtime_profile || '') === 'site_member';
+    document.getElementById('btnRegistryHub')?.classList.add('hidden');
     document.getElementById('btnServiceContracts')?.classList.add('hidden');
     ['mobileDocumentsMenu', 'btnMobileDocuments', 'btnMobileSignature'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
     if (!isSiteMemberProfile) _supabase.rpc('erp_service_contract', { p_action: 'context' }).then(({ data, error }) => {
@@ -2487,12 +2497,14 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         if (canOpenMemberAdmin) document.getElementById('btnMemberAdmin')?.classList.remove('hidden');
         if (canOpenSiteAdmin) document.getElementById('btnSiteAdmin')?.classList.remove('hidden');
         if (canOpenAudit) document.getElementById('btnAudit')?.classList.remove('hidden');
+        if (canOpenRegistryHub(runtime)) document.getElementById('btnRegistryHub')?.classList.remove('hidden');
         applyMenuOrder();
         updateMenuOrderButtonVisibility(false);
         return;
     }
 
     applyHrMenuLabel(runtime);
+    if (canOpenRegistryHub(runtime)) document.getElementById('btnRegistryHub')?.classList.remove('hidden');
 
     if (!approvalEnabled || (canApproval !== null && !canApproval)) document.getElementById('btnApproval')?.classList.add('hidden');
     if (!mypageEnabled || (canMypage !== null && !canMypage)) document.getElementById('btnMypage')?.classList.add('hidden');
@@ -2687,6 +2699,7 @@ const ERP_MENU_BUTTON_ORDER_IDS = [
     'btnSunVillageDemo',
     'btnOfficialsAdmin',
     'btnGovernanceHub',
+    'btnRegistryHub',
     'btnVoteHub',
     'btnMinutesAdmin',
     'btnNoticesAdmin',
