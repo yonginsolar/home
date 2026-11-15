@@ -1,4 +1,4 @@
-/* 0.3.2 · 선택 문서 자동 첨부·본문 텍스트 미리보기 없음. */
+/* 0.3.3 · 선택·파일을 보존하며 변경 유형에 맞춰 추천 표시 갱신. */
 (function(root){
  'use strict';
  function attach(config){
@@ -15,13 +15,16 @@
   function guard(op){const c=context();return active()&&c.key===op.identity&&epoch===op.epoch&&!op.controller.signal.aborted;}
   function scoped(work){if(flight)return flight.promise;const c=context(),op={identity:c.key,epoch,controller:new AbortController()};flight=op;pending=true;load.disabled=true;op.promise=(async()=>{let timer;try{return await Promise.race([work(op,()=>guard(op)),new Promise((_,reject)=>{timer=setTimeout(()=>{op.controller.abort();reject(Error('조회가 지연되고 있습니다. 같은 버튼으로 다시 확인해 주세요.'));},15000);})]);}finally{clearTimeout(timer);if(flight===op){flight=null;pending=false;load.disabled=!active();}}})();return op.promise;}
   function available(key){return catalog.filter(d=>d.coop_id===context().coop&&(d.types||[]).includes(key));}
-  function selectOptions(key,p){const old=p.select.value,rows=available(key);p.select.replaceChildren(new Option(p.req.mode==='generate'?'ERP 정보로 작성':'자료 선택',''),...rows.map(d=>{const matches=M.recommend(input(),d,(data.meeting_package_agendas||[]).filter(a=>(data.meeting_packages||[]).some(pack=>pack.id===a.package_id&&pack.published_minute_id===d.id)));return new Option((matches.length?'추천 · ':'')+d.title+(d.event_date?' · '+d.event_date:''),d.key);}));p.select.value=old;const saved=selections.get(key),latest=rows.find(d=>d.key===saved?.sourceKey);if(saved&&(!latest||latest.revision!==saved.revision))p.review.checked=false;}
+  function recommendationScope(raw){return JSON.stringify([raw.coopId,raw.kinds||[]]);}
+  function optionLabel(raw,d){const matches=M.recommend(raw,d,(data.meeting_package_agendas||[]).filter(a=>(data.meeting_packages||[]).some(pack=>pack.id===a.package_id&&pack.published_minute_id===d.id)));return(matches.length?'추천 · ':'')+d.title+(d.event_date?' · '+d.event_date:'');}
+  function selectOptions(key,p){const old=p.select.value,rows=available(key),raw=input();p.select.replaceChildren(new Option(p.req.mode==='generate'?'ERP 정보로 작성':'자료 선택',''),...rows.map(d=>new Option(optionLabel(raw,d),d.key)));p.select.value=old;p.recommendationScope=recommendationScope(raw);const saved=selections.get(key),latest=rows.find(d=>d.key===saved?.sourceKey);if(saved&&(!latest||latest.revision!==saved.revision))p.review.checked=false;}
+  function refreshRecommendations(key,p){if(!p.select)return;const raw=input(),scope=recommendationScope(raw);if(p.recommendationScope===scope)return;const rows=new Map(available(key).map(d=>[d.key,d]));for(const option of p.select.options){const row=rows.get(option.value);if(row){const label=optionLabel(raw,row);if(option.textContent!==label)option.textContent=label;}}p.recommendationScope=scope;}
   function sync(){
    const c=context();if(!identity&&c.owner&&c.coop){for(const p of panels.values())p.root.remove();panels.clear();identity=c.key;}else if(identity&&identity!==c.key){leave(true);identity=c.owner&&c.coop?c.key:'';}
    const needs=M.requirements(input()),keys=new Set(needs.map(r=>r.key));yearLabel.hidden=!keys.has('plan')&&!keys.has('budget');load.disabled=pending||!active();
    for(const[key,p]of panels)p.root.hidden=!keys.has(key);
    for(const req of needs){
-    let p=panels.get(req.key);if(p){p.root.hidden=false;continue;}
+    let p=panels.get(req.key);if(p){p.root.hidden=false;refreshRecommendations(req.key,p);continue;}
     const section=create('fieldset'),legend=create('legend',req.label);section.append(legend);list.append(section);p={root:section,req};panels.set(req.key,p);
     const templates={officers:'officers-annex3-20200929.pdf',members:'members-annex6-20200929.pdf',plan:'business-plan-annex4-20200929.pdf',budget:'budget-annex5-20200929.pdf',proxy:'proxy-minwon-annex3-20230330.pdf'};
     if(templates[req.key]){const link=create('a','서식 보기');link.href='registry-assets/'+templates[req.key];link.target='_blank';link.rel='noopener noreferrer';section.append(link);}
@@ -59,5 +62,5 @@
   function leave(clear=false){epoch++;flight?.controller.abort();flight=null;pending=false;load.disabled=!active();if(clear){for(const p of panels.values())p.root.remove();panels.clear();selections.clear();localFiles.clear();catalog=[];data={};revision++;identity='';lastNeeds='';}}
   sync();return Object.freeze({sync,snapshot,prepare,leave,clear:()=>leave(true),busy:()=>pending});
  }
- root.CoopRegistryDocumentsUi=Object.freeze({attach,version:'0.3.2'});
+ root.CoopRegistryDocumentsUi=Object.freeze({attach,version:'0.3.3'});
 })(typeof window==='undefined'?globalThis:window);
