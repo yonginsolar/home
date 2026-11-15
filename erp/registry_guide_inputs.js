@@ -1,0 +1,81 @@
+/* 변경등기 입력 참고 1.1.0 · 기존 권한의 명시 읽기만 사용. 저장·신청·민감번호 조회 없음. */
+(function(root){
+ 'use strict';
+ const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());
+ function court(address){
+  const a=String(address||'').trim(),m=a.match(/^(?:(?:경기도|경기)\s+)?(용인(?:특례)?시|화성(?:특례)?시|수원(?:특례)?시)(?:\s|$)/);
+  if(!m)return '';
+  return m[1].startsWith('용인')?'수원지방법원 용인등기소':'수원지방법원 등기국';
+ }
+ async function load(client,{coop,topic,year,signal,current,verify,model,day=today()}){
+  const check=()=>{if(signal.aborted||!current())throw Error('조회가 취소되었습니다.');};
+  async function read(q){check();const r=await q.abortSignal(signal);check();if(r.error)throw Error(r.error.code==='42501'?'현재 권한으로 입력 기준을 확인할 수 없습니다.':'입력 기준 조회에 실패했습니다. 같은 버튼으로 다시 확인해 주세요.');return r;}
+  async function pages(make,key){let total;const out=[],seen=new Set();for(let start=0;start<100000;start+=500){const r=await read(make().range(start,start+499));if(!Array.isArray(r.data)||!Number.isSafeInteger(r.count)||r.count<0||total!==undefined&&total!==r.count)throw Error('전체 건수 또는 조회 중 변경을 확인해 주세요.');total=r.count;for(const row of r.data){if(row[key]===null||row[key]===undefined||seen.has(String(row[key])))throw Error('조회 자료가 중복되거나 불완전합니다.');seen.add(String(row[key]));out.push(row);}if(out.length===total)return out;if(r.data.length<500||out.length>total)break;}throw Error('전체 자료를 확인하지 못했습니다. 다시 확인해 주세요.');}
+  const runtime=await verify();check();
+  const keys=['company_name','orgName','company_address','address','chairman_name'];
+  const p=await read(client.from('ref_company_info').select('coop_id,key,value').eq('coop_id',coop).in('key',keys).limit(10));
+  if(!Array.isArray(p.data)||p.data.some(r=>r.coop_id!==coop||!keys.includes(r.key)||typeof r.value!=='string')||new Set(p.data.map(r=>r.key)).size!==p.data.length)throw Error('조합 정보의 소속·항목을 확인해 주세요.');
+  const profile=Object.fromEntries(p.data.map(r=>[r.key,r.value.trim()])),result={name:profile.company_name||profile.orgName||'',address:profile.company_address||profile.address||'',chair:profile.chairman_name||''};
+  if(topic==='capital'){
+   if(runtime?.runtime_profile==='site_member')throw Error('현재 권한에서는 전체 출자 원장 합계를 확인할 수 없습니다. 시청 변경신고의 기존 자료 검토로 확인해 주세요.');
+   if(!Number.isInteger(year)||year<1901||year>9998)throw Error('기준연도를 확인해 주세요.');
+   const period=model.period(year+1),cutoff=period.end<day?period.end:day;
+   if(period.start>day)throw Error('아직 시작되지 않은 연도의 출자금을 확정하지 않습니다.');
+   const rules=await read(client.rpc('get_member_capital_rules')),unit=Number(rules.data?.unit);
+   if(!Number.isSafeInteger(unit)||unit<=0)throw Error('ERP의 1좌 금액을 확인하지 못했습니다.');
+   const make=()=>client.from('ref_members').select('id,coop_id,deposit_date,amount',{count:'exact'}).eq('coop_id',coop).lte('deposit_date',cutoff).order('id');
+   const rows=await pages(make,'id'),again=await pages(make,'id');
+   if(JSON.stringify(rows)!==JSON.stringify(again))throw Error('조회 중 출자 원장이 바뀌었습니다. 다시 확인해 주세요.');
+   if(!rows.length)throw Error('출자 원장이 없습니다. 0원으로 확정하지 않습니다.');
+   const missing=await read(client.from('ref_members').select('id',{count:'exact',head:true}).eq('coop_id',coop).is('deposit_date',null));if(missing.count!==0)throw Error('납입일이 없는 원장이 있어 기준일을 확인해야 합니다.');const total=model.capitalAt(rows,period,unit,coop).afterCapital;
+   const latest=await read(client.rpc('get_member_capital_rules'));if(Number(latest.data?.unit)!==unit)throw Error('조회 중 1좌 금액이 바뀌었습니다. 다시 확인해 주세요.');
+   if(total<0)throw Error('납입출자금 합계가 음수입니다. 원장을 확인해 주세요.');
+   result.capital={year,cutoff,provisional:period.end>day,total,unit,shares:total%unit===0?total/unit:null};
+  }else if(topic==='officers'||topic==='chair'){
+   const rows=await pages(()=>client.from('coop_officials').select('id,coop_id,member_id,name,category,role,is_registered,status,term_start_date,term_end_date,real_end_date,term_count,end_reason',{count:'exact'}).eq('coop_id',coop).order('id'),'id');
+   if(rows.some(r=>r.coop_id!==coop))throw Error('임원 이력의 조합을 확인해 주세요.');result.officials=rows.filter(r=>topic!=='chair'||r.role==='이사장');
+  }else if(topic==='purpose'){
+   const rows=await pages(()=>client.from('site_documents').select('id,coop_id,title,content,is_current,is_active',{count:'exact'}).eq('coop_id',coop).eq('category','doc').eq('is_current',true).eq('is_active',true).order('id'),'id');
+   if(rows.some(r=>r.coop_id!==coop))throw Error('정관의 조합을 확인해 주세요.');const articles=rows.filter(r=>/정관/.test(r.title||''));result.purpose=articles.length===1?model.purposeFromText(articles[0].content):'';
+  }
+  check();return result;
+ }
+ function attach({client,authorize,context}){
+  const d=document,el=d.createElement('section');el.id='rgInputReference';el.className='rg-input-reference';
+  const make=(tag,text,parent=el)=>{const n=d.createElement(tag);if(text)n.textContent=text;parent.append(n);return n;};
+  make('h2','입력할 내용 확인');const controls=make('div','');controls.className='rg-input-controls';
+  const yearLabel=make('label','출자금 기준연도 ',controls),year=make('input','',yearLabel);year.type='number';year.min='1901';year.max='9998';year.value=String(Number(today().slice(0,4))-1);year.id='rgInputYear';
+  const kindLabel=make('label','변경 종류 ',controls),kind=make('select','',kindLabel);kind.id='rgInputKind';for(const[v,label]of[['appointment','취임'],['renewal','중임'],['resignation','사임'],['retirement','퇴임']])kind.add(new Option(label,v));
+  const officerLabel=make('label','ERP 처리 이력 ',controls),officer=make('select','',officerLabel);officer.id='rgInputOfficer';
+  const loadButton=make('button','입력 기준 불러오기',controls);loadButton.type='button';loadButton.id='rgInputLoad';
+  const status=make('p','');status.id='rgInputStatus';status.setAttribute('role','status');status.setAttribute('aria-live','polite');
+  const rows=make('div','');rows.id='rgInputRows';const caution=make('p','');caution.className='rg-note';
+  const unitLabel=make('label','해당 연도 말의 1좌 금액(원) ',controls),basisUnit=make('input','',unitLabel);basisUnit.type='text';basisUnit.inputMode='numeric';basisUnit.id='rgInputUnit';basisUnit.maxLength=20;
+  let topic='',generation=0,valueVersion=0,flight=null,data=null,state=null,subject='';const drafts=new Map(),copies=new Map();
+  const visible=()=>!d.hidden&&(!root.frameElement||!root.frameElement.hidden),allowed=()=>context().authorized&&visible();
+  function cancel(){generation++;flight?.controller.abort();flight=null;loadButton.disabled=false;data=null;rows.replaceChildren();officer.replaceChildren();status.textContent='';unitLabel.hidden=true;}
+  function row(label,value,copyValue,enabled=true){const box=make('div','',rows);box.className='rg-info-row';make('strong',label,box);const out=make('output',value||'ERP에서 확인할 값이 없습니다.',box);if(copyValue!==undefined&&copyValue!==''){const b=make('button','복사',box);b.type='button';b.disabled=!enabled||copies.has(label);b.setAttribute('aria-label',label+' 복사');b.dataset.rgInputCopy=label;b.dataset.rgCopyReady=String(enabled);b.onclick=async()=>{if(!allowed()||b.disabled||copies.has(label))return;const g=generation,k=context().key,v=valueVersion,op={};copies.set(label,op);b.disabled=true;const active=()=>g===generation&&v===valueVersion&&k===context().key&&allowed();try{await navigator.clipboard.writeText(String(copyValue));if(active())status.textContent='복사했습니다.';}catch{if(active())status.textContent='복사하지 못했습니다. 표시된 값을 선택해 복사해 주세요.';}finally{if(copies.get(label)===op)copies.delete(label);if(k===context().key&&allowed())for(const n of rows.querySelectorAll('[data-rg-input-copy]'))if(n.dataset.rgInputCopy===label)n.disabled=n.dataset.rgCopyReady!=='true';}};}return out;}
+  function render(){valueVersion++;rows.replaceChildren();unitLabel.hidden=true;if(!data)return;
+   const recommendation=court(data.address);row('현재 ERP 주사무소',data.address,data.address);
+   row('관할 추천',recommendation||'인터넷등기소의 전국등기소안내에서 확인해 주세요.');
+   make('p','추천은 주소를 기준으로 한 안내입니다. 인터넷등기소 → 전국등기소안내에서 실제 법인·상업등기 관할을 확인해 주세요.',rows).className='rg-note';
+   if(topic==='capital') {const c=data.capital;let unit=null;try{unit=root.CoopRegistryModel.number(basisUnit.value);}catch{}const shares=unit>0&&c.total%unit===0?c.total/unit:null;row('집계 기준',c.cutoff+(c.provisional?' · 연말 미확정':' · 종료연도 ERP 원장 집계'));row('변경 후 납입출자금 총액',c.total.toLocaleString('ko-KR')+'원',c.total,!c.provisional);row('ERP 현재 1좌 금액',c.unit.toLocaleString('ko-KR')+'원');unitLabel.hidden=false;basisUnit.placeholder='현재 ERP '+c.unit.toLocaleString('ko-KR')+'원';row('변경 후 출자총좌수',shares===null?(unit>0?'납입총액이 입력한 1좌 금액으로 나누어떨어지지 않습니다.':'해당 연도 말의 1좌 금액을 입력해 주세요.'):shares.toLocaleString('ko-KR')+'좌',shares===null?'':shares,!c.provisional);caution.textContent='등기할 사항에는 증가분이 아닌 변경 후 총좌수·납입총액을 입력합니다. 현재 1좌 금액을 과거 기준으로 가정하지 않으며, 입력한 연도 말 금액으로 좌수를 계산합니다. 변경 전 값과 최근 등기완료일은 등기사항증명서에서 확인하세요.';}
+   else if(topic==='officers'||topic==='chair'){const change=root.CoopRegistryModel.officialChange(kind.value,officer.value,data.officials);row('변경 전',change.error?'ERP 처리 이력을 선택해 주세요.':change.before,change.error?'':change.before);row('변경 후',change.error||change.after,change.error?'':change.after);caution.textContent='처리된 임원 이력만 참고합니다. 의결문과 효력일을 확인하고, 개인 식별번호·필요한 주소는 인터넷등기소에 직접 입력하세요. 이사장 직위 변경과 이사 취임을 혼동하지 마세요.';}
+   else if(topic==='purpose'){row('현재 정관의 목적',data.purpose||'현재 정관에서 목적 조항을 하나로 확인하지 못했습니다.',data.purpose);caution.textContent='현재 목적은 변경 후 참고값입니다. 등기된 기존 목적과 의결된 추가·삭제 문구를 대조하세요. ERP 저장일을 효력일로 쓰지 않습니다.';}
+   else if(topic==='name'){row('ERP 현재 조합명',data.name,data.name);caution.textContent='대상법인 검색·신청서 기존 명칭에는 등기부의 변경 전 명칭을 사용합니다. ERP가 이미 새 명칭이면 이 값은 변경 후 참고값입니다. 기존 명칭과 효력일은 등기부·의결문에서 확인하세요.';}
+   else{caution.textContent='현재 ERP 주소가 새 주소라면 변경 후 참고값입니다. 변경 전 등기주소·실제 이전일과 이전 전후의 법인·상업등기 관할을 각각 확인하세요.';}
+  }
+  function options(){const old=state.officials[kind.value]||'';officer.replaceChildren(new Option('처리 이력 선택',''));for(const r of root.CoopRegistryModel.officialOptions(kind.value,data?.officials||[]))officer.add(new Option(r.name+' · '+r.role+' · '+r.term_start_date,String(r.id)));officer.value=old;if(!officer.value)state.officials[kind.value]='';}
+  function open(next){const k=context().key;if(state){state.year=year.value;state.kind=kind.value;}cancel();if(subject&&subject!==k)drafts.clear();subject=k;topic=next;const key=k+'|'+next;state=drafts.get(key)||{year:String(Number(today().slice(0,4))-1),kind:'appointment',officials:{},units:{}};drafts.set(key,state);year.value=state.year;basisUnit.value=state.units[state.year]||'';kind.value=state.kind;yearLabel.hidden=next!=='capital';kindLabel.hidden=officerLabel.hidden=!['officers','chair'].includes(next);caution.textContent='현재 ERP 값을 불러와 등기사항증명서와 대조하세요.';}
+  loadButton.onclick=async()=>{if(flight||!allowed())return;const op={g:generation,key:context().key,controller:new AbortController()};flight=op;data=null;render();loadButton.disabled=true;status.textContent='입력 기준을 확인하고 있습니다.';const current=()=>flight===op&&generation===op.g&&context().key===op.key&&allowed()&&!op.controller.signal.aborted;let timer;
+   try{const work=load(client,{coop:context().coop,topic,year:Number(year.value),signal:op.controller.signal,current,verify:authorize,model:root.CoopRegistryModel});const value=await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>{op.controller.abort();reject(Error('조회가 지연되고 있습니다. 같은 버튼으로 다시 확인해 주세요.'));},15000);})]);if(!current())return;data=value;options();render();status.textContent='';}
+   catch(e){if(generation===op.g&&context().key===op.key&&allowed())status.textContent=e.message||'확인하지 못했습니다. 같은 버튼으로 다시 확인해 주세요.';}
+   finally{clearTimeout(timer);if(flight===op){flight=null;loadButton.disabled=false;}}
+  };
+  year.oninput=()=>{state.year=year.value;basisUnit.value=state.units[state.year]||'';cancel();caution.textContent='연도를 바꿨습니다. 입력 기준을 다시 불러와 주세요.';};
+  kind.onchange=()=>{state.kind=kind.value;options();render();};officer.onchange=()=>{state.officials[kind.value]=officer.value;render();};basisUnit.oninput=()=>{state.units[year.value]=basisUnit.value;render();};
+  loadButton.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});
+  return{element:el,open,leave:cancel};
+ }
+ root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,version:'1.1.0'});
+})(typeof window==='undefined'?globalThis:window);
