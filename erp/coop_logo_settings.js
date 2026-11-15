@@ -1,4 +1,4 @@
-/* v1.1.3 — Illustrated logo locations without changing the save/permission gate. */
+/* v1.1.4 · 늦은 저장 결과로 최신 로고·선택 파일을 덮지 않습니다. */
 (function(root){
  'use strict';let info={},preview='',epoch=0,iconField=null;
  const get=id=>document.getElementById(id);
@@ -15,7 +15,7 @@
   if(get('companyBrandingFields')){iconField.node.classList.add('col-lg-6');seal?.before(iconField.node);}
   get('set_logoCancel').addEventListener('click',()=>{epoch++;get('set_logoFile').value='';revoke();paint();});get('set_logoFile').addEventListener('change',()=>{epoch++;revoke();const file=get('set_logoFile').files[0];if(file){try{root.CoopLogoUpload.validate(file);preview=URL.createObjectURL(file);}catch(e){get('set_logoFile').value='';root.showAlert?.(e.message);}}paint();});paint();
  }
- async function saveIfSelected(client,coopId){const file=get('set_logoFile')?.files[0],icon=iconField?.file();if(!file&&!icon)return null;const generation=epoch;const result=await root.CoopLogoUpload.saveSelection(client,coopId,file,icon,info.logo_revision);info={...info,logo_horizontal_url:result.display_url,logo_original_url:result.original_url,logo_favicon_url:result.icon_url,logo_favicon_original_url:result.icon_original_url,logo_favicon_custom:String(result.icon_custom),logo_revision:result.revision};if(generation===epoch&&get('set_logoFile')?.files[0]===file){get('set_logoFile').value='';revoke();}iconField?.clearSaved(icon);sync(info);try{root.parent.ErpWorkspace?.refreshBrand();}catch(_){}return result;}
+ async function saveIfSelected(client,coopId){const file=get('set_logoFile')?.files[0],icon=iconField?.file();if(!file&&!icon)return null;const generation=epoch,baseline=info;const result=await root.CoopLogoUpload.saveSelection(client,coopId,file,icon,info.logo_revision);if(info!==baseline)return result;info={...info,logo_horizontal_url:result.display_url,logo_original_url:result.original_url,logo_favicon_url:result.icon_url,logo_favicon_original_url:result.icon_original_url,logo_favicon_custom:String(result.icon_custom),logo_revision:result.revision};if(generation===epoch&&get('set_logoFile')?.files[0]===file){get('set_logoFile').value='';revoke();}iconField?.clearSaved(icon);sync(info);try{root.parent.ErpWorkspace?.refreshBrand();}catch(_){}return result;}
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
  root.CoopLogoSettings=Object.freeze({sync,saveIfSelected,reset});
 })(window);

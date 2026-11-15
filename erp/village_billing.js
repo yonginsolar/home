@@ -1,15 +1,16 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* 1.3.2 · Load billing records only when the billing tab is opened. */
+/* 1.3.3 · 청구서 읽기 대기 제한과 명시 재확인. 쓰기 잠금은 유지합니다. */
 (() => {
  'use strict';
  const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const money=n=>Number(n||0).toLocaleString('ko-KR'),states={issued:'납부 대기',paid:'입금 완료',cancelled:'취소'};
- let db,ctx,co='',setting={},villages=[],preview=null,selected=null,contractInfo={},pending=false,feeBaseline='',loaded=false;
+ let db,ctx,co='',setting={},villages=[],preview=null,selected=null,contractInfo={},pending=false,feeBaseline='',loaded=false,initializing=null;
+ const readActions=new Set(['context','settings','villages','list','contract_info','get','notices']);
  const errors={SERVICE_SIGNED_CONTRACT_REQUIRED:'양측 서명이 완료된 계약이 있어야 연간 이용료를 청구할 수 있습니다.',SERVICE_VILLAGE_NOT_INCLUDED:'선택한 기간의 계약에 햇빛소득마을 이용이 포함되지 않았습니다. 변경합의서를 먼저 체결해 주세요.',SERVICE_FEE_CHANGE_REQUIRES_AMENDMENT:'체결된 요금은 변경합의서에서 변경해 주세요.',VILLAGE_FEE_CHANGED:'다른 화면에서 요금이 바뀌었습니다. 다시 불러온 뒤 확인해 주세요.',VILLAGE_FEE_ACCESS_DENIED:'이 조합의 청구서를 확인할 권한이 없습니다.',VILLAGE_FEE_PROVIDER_REQUIRED:'청구서 발행과 입금 확인은 제공자만 처리할 수 있습니다.',VILLAGE_FEE_NOT_CONFIGURED:'마을당 요금을 먼저 등록해 주세요.',VILLAGE_INVOICE_PERIOD_ALREADY_BILLED:'선택한 마을·기간에 이미 청구서가 있습니다. 기존 청구서를 확인해 주세요.',VILLAGE_INVOICE_NO_USAGE:'선택한 기간에 이용 일수가 없습니다.',VILLAGE_INVOICE_LOCKED:'이미 입금 완료 또는 취소된 청구서입니다.',VILLAGE_INVOICE_INVALID_PERIOD:'요금 적용기간 안에서 청구기간과 마을을 선택해 주세요.',VILLAGE_FEE_INVALID_INPUT:'금액·기간·확인 항목을 확인해 주세요.'};
  Object.assign(errors,{SERVICE_INVOICE_USE_CONTRACT_END:'청구 종료일은 체결된 계약의 종료일을 사용합니다.',SERVICE_ACCOUNTING_PERMISSION_REQUIRED:'세금계산서와 입금 확인에는 회계 수정 권한이 필요합니다.',SERVICE_INVOICE_DATE_LOCKED:'이미 기록한 날짜는 이 화면에서 변경할 수 없습니다.',SERVICE_INVOICE_ACCOUNTED_CANCEL_REVIEW:'회계에 연동된 청구서입니다. 수정세금계산서와 회계 취소 처리를 먼저 확인해 주세요.',SERVICE_LEGACY_PAYMENT_RECONCILE:'기존 입금 확인 건은 먼저 회계 기록과 대조해 주세요.',SERVICE_ACCOUNT_SETUP_REQUIRED:'이용료 계정과목 설정을 확인해 주세요.'});
  Object.assign(errors,{SERVICE_INVOICE_FULL_UNPAID_CORRECTION_ONLY:'세금계산서를 발행한 미입금 청구서의 전액 취소만 처리할 수 있습니다. 입금 완료 건은 계약 종료·환급에서 처리해 주세요.',SERVICE_INVOICE_ACCOUNTING_CHANGED:'연결된 전표가 변경되었거나 확인되지 않습니다. 회계 기록을 대조한 뒤 처리해 주세요.',SERVICE_INVOICE_CANCEL_CHANGED:'청구·전표가 변경되었습니다. 취소 창을 닫고 다시 열어 금액을 확인해 주세요.',SERVICE_INVOICE_CANCEL_CONFIRM_REQUIRED:'수정 발행일·사유와 전액 취소 확인 항목을 확인해 주세요.'});
  function errorText(e){return e?.code==='55000'?'마감된 회계기간에는 전표를 기록할 수 없습니다. 회계 마감 상태를 확인해 주세요.':Object.entries(errors).find(([k])=>String(e?.message||'').includes(k))?.[1]||'처리하지 못했습니다. 입력 내용은 유지됩니다. 연결 상태를 확인해 주세요.';}
- async function call(action,payload={},id=null){const {data,error}=await db.rpc('erp_village_billing',{p_action:action,p_id:id,p_payload:{...payload,coop_id:co||null}});if(error)throw error;return data;}
+ async function call(action,payload={},id=null){let request=db.rpc('erp_village_billing',{p_action:action,p_id:id,p_payload:{...payload,coop_id:co||null}});if(!readActions.has(action)){const {data,error}=await request;if(error)throw error;return data;}const controller=new AbortController();if(typeof request.abortSignal==='function')request=request.abortSignal(controller.signal);let timer;try{const {data,error}=await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>{reject(Object.assign(new Error('BILLING_READ_TIMEOUT'),{code:'BILLING_READ_TIMEOUT'}));controller.abort();},15000);})]);if(error)throw error;return data;}finally{clearTimeout(timer);}}
  function status(text,bad=false){$('billingStatus').textContent=text;$('billingStatus').className='alert alert-'+(bad?'danger':'info');}
  async function run(fn){if(pending)return;pending=true;const buttons=[...$('billingWorkspace').querySelectorAll('button,input,select')];const disabled=buttons.map(x=>x.disabled);buttons.forEach(x=>x.disabled=true);try{await fn();}catch(e){status(errorText(e),true);}finally{pending=false;buttons.forEach((x,i)=>{if(x.isConnected)x.disabled=disabled[i];});if($('invoiceIncludeContract'))$('invoiceIncludeContract').disabled=!contractInfo.signed;}}
  function feeValues(){return JSON.stringify({annual:String($('villageAnnualFee')?.value||'').replace(/,/g,''),start:$('villagePeriodStart')?.value,end:$('villagePeriodEnd')?.value,payment:$('villagePaymentInfo')?.value});}
@@ -119,9 +120,10 @@
   }catch(e){root.replaceChildren();root.removeAttribute('style');throw e;}
   root.removeAttribute('style');const old=document.title;document.title='운영시스템_이용료_청구서_'+i.snapshot.client.name+'_'+i.invoice_number;window.print();document.title=old;
  }
- async function init(client){db=client;try{ctx=await call('context');co=ctx.provider?(ctx.coops.find(c=>c.id===ctx.coop_id)?.id||ctx.coops[0]?.id):ctx.coop_id;if(!co)return;render();$('billingTab').hidden=false;
-   const toggle=b=>{$('billingWorkspace').hidden=!b;$('contractWorkspace').hidden=b;$('billingTab').className='btn '+(b?'btn-primary':'btn-outline-primary');$('contractTab').className='btn '+(b?'btn-outline-primary':'btn-primary');if(b&&!loaded)void run(load);};$('billingTab').onclick=()=>toggle(true);$('contractTab').onclick=()=>toggle(false);if(new URLSearchParams(location.search).get('view')==='billing')toggle(true);
-  }catch{/* Billing access failures must not block contracts or data return. */}}
+ async function init(client){if(initializing)return initializing;db=client;const button=$('billingTab');button.disabled=true;initializing=(async()=>{try{ctx=await call('context');co=ctx.provider?(ctx.coops.find(c=>c.id===ctx.coop_id)?.id||ctx.coops[0]?.id):ctx.coop_id;if(!co)return;render();button.hidden=false;button.textContent='청구서 확인';
+   const toggle=b=>{$('billingWorkspace').hidden=!b;$('contractWorkspace').hidden=b;button.className='btn '+(b?'btn-primary':'btn-outline-primary');$('contractTab').className='btn '+(b?'btn-outline-primary':'btn-primary');if(b&&!loaded)void run(load);};button.onclick=()=>toggle(true);$('contractTab').onclick=()=>toggle(false);if(new URLSearchParams(location.search).get('view')==='billing')toggle(true);
+  }catch(error){if(!ctx){const denied=['401','403','42501','PGRST301','PGRST302'].some(code=>code===String(error?.code)||code===String(error?.status));button.hidden=denied;button.onclick=denied?null:()=>void init(client);if(!denied)button.textContent='청구서 다시 확인';}}
+  finally{button.disabled=false;initializing=null;}})();return initializing;}
  window.addEventListener('beforeunload',e=>{if(dirty()){e.preventDefault();e.returnValue='';}});
  async function refreshVisible(){if(ctx&&!$('billingWorkspace').hidden&&!dirty()&&!pending)await run(load);}
  window.VillageBilling={init,printInvoice,invoiceHtml,refreshVisible,isBusy:()=>pending};
