@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v1.3.0 — Preserve drafts and discard stale scoped reads on resume. */
+/* v1.3.1 — 메뉴·행사 이동 후 옛 확인 차단 및 확인 대기 중 중복 방지. */
 (() => {
   'use strict';
   const money = (n) => `${Number(n || 0).toLocaleString('ko-KR')}원`;
@@ -62,6 +62,12 @@
     init({ root, rpc, getEvents, getSelectedEvent, editable, beginRead = () => () => true }) {
       let busy = false, offset = 0, total = 0, items = [];
       let loadRevision = 0;
+      let lifecycleRevision = 0;
+      const leave=()=>{lifecycleRevision++;loadRevision++;};
+      const currentRead=()=>{const revision=lifecycleRevision,check=beginRead();return()=>revision===lifecycleRevision&&!document.hidden&&!window.frameElement?.hidden&&check();};
+      window.addEventListener?.('pagehide',leave);
+      document.addEventListener?.('visibilitychange',()=>{if(document.hidden)leave();});
+      if(window.frameElement&&typeof MutationObserver==='function')new MutationObserver(()=>{if(window.frameElement.hidden)leave();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
       let registrationEventId = null;
       const createDrafts = new Map();
       const eventSelects = new Set();
@@ -149,17 +155,23 @@
         const form=node('form',undefined,'form-grid income-form');
         const date=field(form,'실제 입금일','received_date','date',today(),{required:true});date.max=today();
         const amount=field(form,'실제 받은 금액','amount','number',plan.outstanding_amount,{required:true,max:plan.outstanding_amount});
-        const submit=node('button','입금 확인·회계 기록');submit.type='submit';form.append(submit);
+        const submit=node('button','입금 확인·회계 기록');submit.type='submit';form.append(submit);let confirming=false;
         form.addEventListener('submit',async e=>{
-          e.preventDefault();if(!editable || !form.reportValidity() || busy)return;
+          e.preventDefault();if(!editable || !form.reportValidity() || busy || confirming)return;
           const data={id:plan.id,version:plan.version,received_date:date.value,amount:Number(ERPNumberInput.raw(amount.value))};
-          if(!(await window.CoopDialog.confirm(`${plan.payer_name}에서 ${money(data.amount)}을 실제로 받으셨나요?\n입금 확인과 회계 전표를 함께 저장합니다. 이미 회계에 입력했다면 취소하고 ‘기존 전표 연결’을 이용해 주세요.`)))return;
-          run(async()=>{await rpc('receive',keyed(`receive:${plan.id}`,data));requestKeys.delete(`receive:${plan.id}`);await reload();setStatus('입금 확인과 회계 전표 저장을 완료했습니다.');});
+          const isCurrent=currentRead(),eventId=getSelectedEvent?.()?.id;confirming=true;submit.disabled=true;
+          try{
+            if(!(await window.CoopDialog.confirm(`${plan.payer_name}에서 ${money(data.amount)}을 실제로 받으셨나요?\n입금 확인과 회계 전표를 함께 저장합니다. 이미 회계에 입력했다면 취소하고 ‘기존 전표 연결’을 이용해 주세요.`)))return;
+            if(!isCurrent()||!root.contains(form)||busy||getSelectedEvent&&getSelectedEvent()?.id!==eventId)return;
+            await run(async()=>{await rpc('receive',keyed(`receive:${plan.id}`,data));requestKeys.delete(`receive:${plan.id}`);if(!isCurrent())return;await reload();if(isCurrent())setStatus('입금 확인과 회계 전표 저장을 완료했습니다.');});
+          }finally{confirming=false;submit.disabled=busy||!editable;}
         });
         showEditor(card,'실제 입금 확인',form);
       }
       async function linkEditor(card,plan) {
+        const isCurrentRead=currentRead(),readEvent=getSelectedEvent?.()?.id;
         const result=await rpc('journals',{id:plan.id});
+        if(!isCurrentRead()||!root.contains(card)||getSelectedEvent&&getSelectedEvent()?.id!==readEvent)return;
         const journals=result.items || [];
         if(!journals.length){setStatus('연결할 수 있는 재료비 입금 전표가 없습니다. 회계의 날짜·계정·금액을 확인해 주세요.');return;}
         const form=node('form',undefined,'form-grid income-form');
@@ -168,12 +180,16 @@
         journals.forEach((j,i)=>{const option=node('option',`${j.received_date} · ${j.description || '행사 재료비 입금'} · ${money(j.amount)}`);option.value=String(i);select.append(option);});
         const info=node('p','선택한 기존 전표에 연결합니다. 새 전표는 만들지 않습니다.','muted full');form.append(info);
         select.addEventListener('change',()=>{const j=journals[Number(select.value)];info.textContent=select.value!==''&&j?`${j.received_date} · ${money(j.amount)} 입금에 연결합니다. 새 전표는 만들지 않습니다.`:'선택한 기존 전표에 연결합니다. 새 전표는 만들지 않습니다.';});
-        const submit=node('button','기존 전표 연결');submit.type='submit';form.append(submit);
+        const submit=node('button','기존 전표 연결');submit.type='submit';form.append(submit);let confirming=false;
         form.addEventListener('submit',async e=>{
-          e.preventDefault();if(!editable || !form.reportValidity() || busy)return;
+          e.preventDefault();if(!editable || !form.reportValidity() || busy || confirming)return;
           const j=journals[Number(select.value)];if(!j || select.value==='')return;
-          if(!(await window.CoopDialog.confirm(`${j.received_date} · ${money(j.amount)}\n${j.description || ''}\n이 기존 전표에 연결할까요? 회계 금액을 다시 입력하지 않습니다.`)))return;
-          run(async()=>{await rpc('link',keyed(`link:${plan.id}`,{id:plan.id,version:plan.version,received_date:j.received_date,amount:Number(j.amount),journal_trans_id:j.journal_trans_id}));requestKeys.delete(`link:${plan.id}`);await reload();setStatus('기존 전표에 연결했습니다. 새 회계 전표는 만들지 않았습니다.');});
+          const isCurrent=currentRead(),eventId=getSelectedEvent?.()?.id;confirming=true;submit.disabled=true;
+          try{
+            if(!(await window.CoopDialog.confirm(`${j.received_date} · ${money(j.amount)}\n${j.description || ''}\n이 기존 전표에 연결할까요? 회계 금액을 다시 입력하지 않습니다.`)))return;
+            if(!isCurrent()||!root.contains(form)||busy||getSelectedEvent&&getSelectedEvent()?.id!==eventId)return;
+            await run(async()=>{await rpc('link',keyed(`link:${plan.id}`,{id:plan.id,version:plan.version,received_date:j.received_date,amount:Number(j.amount),journal_trans_id:j.journal_trans_id}));requestKeys.delete(`link:${plan.id}`);if(!isCurrent())return;await reload();if(isCurrent())setStatus('기존 전표에 연결했습니다. 새 회계 전표는 만들지 않았습니다.');});
+          }finally{confirming=false;submit.disabled=busy||!editable;}
         });
         showEditor(card,'기존 회계 전표 연결',form);setStatus('연결할 기존 전표를 선택해 주세요.');
       }
@@ -207,7 +223,7 @@
         syncBusy();
       }
       async function reload({ preserveEdits = false } = {}) {
-        const revision = ++loadRevision, isCurrent = beginRead();
+        const revision = ++loadRevision, isCurrent = currentRead();
         const event=getSelectedEvent?.();
         if(getSelectedEvent&&!event){items=[];total=0;list.replaceChildren();summary.replaceChildren();return;}
         const data=await rpc('list',{filter:'all',offset,...(event?{event_id:event.id}:{})});
