@@ -1,4 +1,4 @@
-/* 시청 변경신고 0.3.1: 같은 시청용 출자자명부·등록 일반직인을 미리보기에도 포함. */
+/* 시청 변경신고 0.3.2: 직접 선택한 회의·소집 문서를 출력에 자동 포함. */
 (function(){
  'use strict';
  const M=window.CoopRegistryModel,$=id=>document.getElementById(id),form=$('registryForm');
@@ -109,7 +109,7 @@
    if(registryDocuments)attachments=await registryDocuments.prepare(m.input,{current,signal:controller.signal,chairBirth:chair?.birth_date||'',final:false});
    if(m.annual)bundle=await read('previewMaterials',(op,isCurrent)=>window.CoopRegistryBundle.load(client,{coop,cutoff:m.input.fiscalEnd,unit:m.unit,signal:op.controller.signal,current:()=>current()&&isCurrent(),verify:access,preview:true}));if(!current())return;
    const bytes=preparedBytes=await window.CoopRegistryPdf.create(m,undefined,{current,signal:controller.signal,preview:true,previewVerified:true,coop,seal:bundle?.seal,roster:bundle?.roster,documents:attachments?.bundle});await access();if(!current())return;invalidatePreview();const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));preview={url,bytes,signature:sig,owner,coop};preparedBytes=null;$('pdfPreview').src=url;$('pdfPreview').hidden=false;$('download').disabled=false;$('print').disabled=false;text('reviewStatus',[...m.missing.map(s=>'확인 필요: '+s),...m.warnings,bundle?.sealMissing?'등록된 조합 직인이 없습니다. 최종 출력 전에 조합 설정에서 등록해 주세요.':'',bundle?.provisional?'출자자명부 기준일: '+bundle.roster.cutoff+' · 임시':''].filter(Boolean).join('\n'));
-  }catch(e){if(current())text('reviewStatus',/입력 칸|너비|위임장|확인 필요|직인|시청용 명부|인원·출자금|조회가 지연|다시 확인/.test(e.message||'')?e.message:'미리보기를 준비하지 못했습니다. 입력은 유지됩니다.');}
+  }catch(e){if(current())text('reviewStatus',/입력 칸|너비|위임장|확인 필요|직인|시청용 명부|인원·출자금|조회가 지연|다시 확인|선택.*문서|의사록|소집공고|전자서명|PDF 원본|외부 이미지/.test(e.message||'')?e.message:'미리보기를 준비하지 못했습니다. 입력은 유지됩니다.');}
   finally{controller.abort();attachments?.clean();cleanPreview();if(outputController===controller){outputController=null;outputCleanup=null;}if(preparation?.input)preparation.input.corporateNumber='';if(preparingModel===preparation)preparingModel=null;if(task===id){busy=false;$('preview').disabled=false;}}
  }
  function askPin(current){if(!current())return Promise.resolve(null);return new Promise(resolve=>{const dialog=$('secureOutputDialog');pinFinish=value=>{if(!pinFinish)return;pinFinish=null;$('securePin').value='';if(dialog.open){pinCloses++;dialog.close();}resolve(value);};try{dialog.showModal();$('securePin').focus({preventScroll:true});}catch(_){pinFinish(null);}});}
@@ -147,7 +147,7 @@
    if(status.error||status.data!==true)throw Error('보안명부 PIN 설정을 기존 명부 화면에서 확인해 주세요.');
    pin=await askPin(current);if(pin===null||!current())return;
    await Promise.race([execute(),new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('출력 준비 시간이 초과되었습니다. 다시 눌러 주세요.'));},15000);})]);
-  }catch(e){if(authorized&&task===id&&visit===v&&visible())text('reviewStatus',/PIN|법인등록번호|사업자등록번호|법인정보|이사장|보안명부|PDF 창|출력 준비 시간|시청용|직인|확인 필요|입력 칸/.test(e.message||'')?e.message:'출력 준비를 완료하지 못했습니다. 입력은 유지됩니다.');}
+  }catch(e){if(authorized&&task===id&&visit===v&&visible())text('reviewStatus',/PIN|법인등록번호|사업자등록번호|법인정보|이사장|보안명부|PDF 창|출력 준비 시간|시청용|직인|확인 필요|입력 칸|선택.*문서|의사록|소집공고|전자서명|PDF 원본|외부 이미지/.test(e.message||'')?e.message:'출력 준비를 완료하지 못했습니다. 입력은 유지됩니다.');}
   finally{clearTimeout(timer);controller.abort();clean();if(outputController===controller){outputController=null;outputCleanup=null;$('securePin').value='';}if(task===id)busy=false;}
  }
  async function boot(){client=window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(window.location)||window.location.hostname}}});$('printDate').value=today();$('reportYear').value=today().slice(0,4);syncPeriod();form.querySelector('[name=kind][value=capital]').checked=true;form.querySelector('[name=kind][value=members]').checked=true;baseline=raw();light();try{await access();const restoredYear=numeric?.restoreYear();if(restoredYear){$('reportYear').value=String(restoredYear);syncPeriod();}numeric?.activate();const numericReady=numeric?.refresh(),reportedReady=reportedMembers?.refresh();await basics();if(authorized){await Promise.all([capital(),activity(),reportedReady,numericReady]);}}catch(e){deactivate(e.message);}client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||session?.user?.id&&session.user.id!==owner)deactivate('로그인을 다시 확인해 주세요.',true);});window.ErpWorkspaceResume.register({modules:['member_admin'],authorize:r=>M.access(r)&&r.coop_id===coop,busy:()=>busy||!!reportedMembers?.busy()||!!numeric?.busy(),refresh:async()=>{await access();await Promise.all([corporate(),reportedMembers?.refresh(),numeric?.refresh()]);}});}

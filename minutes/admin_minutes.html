@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.90
+Version: v1.2.91
 Change: 2026-10-26 - Open separate document retention review without leaving the editor.
 -->
 <html lang="ko">
@@ -16,7 +16,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.90 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.91 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -654,6 +654,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
     </div>
 
     <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
+    <script src="/minutes/print_templates.js?v=1.0.0" integrity="sha384-0Dv/+nsMEE2YYei/8w61byahJg70q7qweSwpU9j7SEJKf4xdQPFjB8p8b5Y18gcO" crossorigin="anonymous" defer></script>
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.61';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
@@ -2349,68 +2350,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
         }
 
         function buildPrintableNoticeHtml(title, noticeHtml, footerHtml, filename = '') {
-            const safeTitle = escapeHtml(title || '공문');
-            const safeFilename = escapeHtml(filename || title || '공문');
-            const printedAtLabel = escapeHtml(formatMinutesAdminKstDateTime(new Date().toISOString()));
-            return `<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <title>${safeFilename}</title>
-    <style>
-        @page { size: A4 portrait; margin: 16mm 14mm 18mm 14mm; }
-        html, body { width: auto; height: auto; }
-        body { margin: 0; font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; color: #111827; background: #ffffff; }
-        .print-shell { position: relative; }
-        .print-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 18px; padding-bottom: 10px; border-bottom: 1px solid #d1d5db; }
-        .print-head-title { font-size: 24px; font-weight: 800; color: #0f172a; }
-        .print-head-meta { font-size: 12px; color: #64748b; text-align: right; }
-        .print-notice-wrap, .print-notice-wrap * { box-sizing: border-box; max-width: 100%; }
-        .print-notice-wrap { font-size: 14px; line-height: 1.8; color: #111827; }
-        .print-notice-wrap img { max-width: 100% !important; height: auto !important; }
-        .print-notice-wrap table { width: 100% !important; border-collapse: collapse; table-layout: fixed; }
-        .print-notice-wrap th, .print-notice-wrap td { word-break: break-word; overflow-wrap: anywhere; }
-        .print-foot { margin-top: 28px; color: #111111; }
-        .print-foot-sign { display: flex; justify-content: center; align-items: center; gap: 6px; flex-wrap: nowrap; text-align: center; font-size: 18px; font-weight: 700; color: #111827; }
-        .print-foot-sign-text { white-space: nowrap; word-break: keep-all; }
-        .print-foot-seal { width: 68px; height: 68px; object-fit: contain; margin-left: 6px; vertical-align: middle; }
-        .print-foot-approvals { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-top: 0; color: #111111; flex-wrap: nowrap; }
-        .print-foot-approval-item { flex: 1 1 0; min-width: 0; }
-        .print-foot-approval-item.is-left { text-align: left; }
-        .print-foot-approval-item.is-center { text-align: center; }
-        .print-foot-approval-item.is-right { text-align: right; }
-        .print-foot-approval-name { font-size: 16px; font-weight: 700; color: #111111; white-space: nowrap; word-break: keep-all; }
-        .print-foot-approval-meta { margin-top: 4px; font-size: 10px; color: #111111; white-space: nowrap; }
-        .print-foot-divider { margin: 14px 0 12px; border-top: 4px solid #9ca3af; }
-        .print-foot-contact-grid { display: grid; grid-template-columns: 0.9fr 2.2fr 1.3fr; gap: 12px; align-items: center; margin-top: 4px; font-size: 12px; color: #111111; }
-        .print-foot-contact-grid .is-left { text-align: left; }
-        .print-foot-contact-grid .is-center { text-align: center; }
-        .print-foot-contact-grid .is-right { text-align: right; }
-        .print-foot-row-divider { margin: 8px 0; border-top: 1px solid #111111; }
-        .print-foot-contact-split { display: flex; justify-content: space-between; gap: 16px; margin-top: 8px; font-size: 12px; color: #111111; }
-        .print-foot-contact-split .is-left { text-align: left; }
-        .print-foot-contact-split .is-right { text-align: right; }
-        @media print {
-            html, body { margin: 0; padding: 0; }
-            body, body * { font-size: 11pt !important; word-break: keep-all; overflow-wrap: break-word; }
-            .print-head-title { font-size: 18pt !important; }
-            .print-foot-sign, .print-foot-approval-name { font-size: 12pt !important; white-space: normal; }
-            .print-foot-approval-meta { white-space: normal; }
-            .print-head, .print-foot { break-inside: avoid; }
-        }
-    </style>
-</head>
-<body>
-    <div class="print-shell">
-        <div class="print-head">
-            <div class="print-head-title">${safeTitle}</div>
-            <div class="print-head-meta">출력 ${printedAtLabel}</div>
-        </div>
-        <div class="print-notice-wrap">${noticeHtml || '<div>내용이 없습니다.</div>'}</div>
-        <div class="print-foot">${footerHtml || ''}</div>
-    </div>
-</body>
-</html>`;
+            return window.CoopMinutesPrintTemplates.create().noticePage(title,noticeHtml,footerHtml,filename);
         }
 
         function getRoleLabel(off) {
@@ -3071,113 +3011,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
         }
 
         async function buildPrintableMinuteHtml(minute, signatures) {
-            const title = escapeHtml(minute?.title || '의사록');
-            const typeLabel = escapeHtml(getDocTypeLabel(minute?.doc_type));
-            const dateLabel = escapeHtml(formatMinutesAdminKstDate(minute?.created_at));
-            const isCertifiedPrint = isMinuteSignatureFullyCompleted(minute, signatures || []);
-            const minuteIdLabel = escapeHtml(String(minute?.id || '-'));
-            const printedAtLabel = escapeHtml(formatMinutesAdminKstDateTime(new Date().toISOString()));
-            const originalBodyHtml = minute?.content
-                ? sanitizeHtml(normalizeMinuteContent(minute.content))
-                : '<div style="color:#64748b;">내용이 없습니다.</div>';
-            if (window.ExpoRuntimeBridge) return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>${title}</title><style>
-                @page{size:A4;margin:18mm}body{font-family:system-ui,sans-serif;color:#172033;line-height:1.7}.expo-watermark{position:fixed;top:42%;left:18%;font-size:90px;font-weight:800;color:rgba(16,100,70,.16);transform:rotate(-25deg);pointer-events:none}main{position:relative}img,table{max-width:100%}table{width:100%}header{border-bottom:2px solid #10b981;padding-bottom:10px;margin-bottom:18px}header p{font-size:13px}@media print{.expo-watermark{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-                </style></head><body><div class="expo-watermark">DEMO</div><main><header><strong>🌱 박람회 시연용 예시 문서</strong><p>체험용 가상 정보와 예시 확인을 담은 문서입니다.</p></header><h1>${title}</h1><p>${typeLabel} · 작성일 ${dateLabel}</p>${originalBodyHtml}</main></body></html>`;
-            const bodyHtml = await injectInlineSignatureImages(originalBodyHtml, minute, signatures || []);
-            const signaturePrintHtml = bodyHtml === originalBodyHtml
-                ? await buildMinuteSignaturePrintHtml(minute, signatures || [])
-                : '';
-            const certificationSheetHtml = await buildMinuteCertificationSheetHtml(minute, signatures || []);
-            const certificationBadgeHtml = isCertifiedPrint
-                ? `<div class="print-cert-badge">전자서명 완료 문서 출력본</div>`
-                : '';
-            const certificationWatermarkHtml = isCertifiedPrint
-                ? `<div class="print-cert-watermark" aria-hidden="true">전자서명 완료 문서 출력본</div>`
-                : '';
-            const certificationFooterHtml = isCertifiedPrint
-                ? `
-                    <tfoot>
-                        <tr>
-                            <td>
-                                <div class="print-cert-footer">
-                                    <span>전자서명 완료 문서 출력본</span>
-                                    <span>문서 ID ${minuteIdLabel}</span>
-                                    <span>출력 ${printedAtLabel}</span>
-                                </div>
-                            </td>
-                        </tr>
-                    </tfoot>
-                `
-                : '';
-            const certificationNoticeHtml = isCertifiedPrint
-                ? `<div class="print-cert-notice">이 문서는 전자서명 완료 문서의 출력본이며, 원본은 시스템에 전자적으로 보관됩니다.</div>`
-                : '';
-
-            return `<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <title>${title}</title>
-    <style>
-        @page { size: A4 portrait; margin: 16mm 14mm 18mm 14mm; }
-        html, body { width: auto; height: auto; }
-        body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; margin: 0; color: #111827; position: relative; }
-        .print-frame { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        .print-frame td { padding: 0; vertical-align: top; }
-        .meta { font-size: 13px; color: #64748b; margin-bottom: 20px; }
-        .content { line-height: 1.8; font-size: 14px; overflow-wrap: anywhere; word-break: break-word; }
-        .content, .content * { box-sizing: border-box; max-width: 100%; }
-        .content img, img { max-width: 100% !important; height: auto !important; }
-        .content table { width: 100% !important; table-layout: fixed; border-collapse: collapse; }
-        .content th, .content td { word-break: break-word; overflow-wrap: anywhere; }
-        .content pre { white-space: pre-wrap; word-break: break-word; }
-        .print-cert-badge { display:inline-block; margin:0 0 14px; padding:6px 12px; border:1px solid #cbd5e1; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-size:12px; font-weight:700; letter-spacing:0.02em; }
-        .print-cert-notice { margin-top:24px; padding-top:10px; border-top:1px solid #d1d5db; color:#475569; font-size:12px; line-height:1.6; }
-        .print-cert-watermark { position:fixed; top:45%; left:50%; transform:translate(-50%, -50%) rotate(-22deg); font-size:56px; font-weight:800; color:rgba(148,163,184,0.18); white-space:nowrap; z-index:0; pointer-events:none; }
-        .print-layer { position:relative; z-index:1; }
-        .print-cert-footer { padding-top: 8mm; margin-top: 8mm; border-top: 1px dashed rgba(37, 99, 235, 0.38); font-size: 10.5px; color: #475569; display: flex; justify-content: space-between; gap: 12px; }
-        .print-cert-sheet { break-before: page; page-break-before: always; padding-top: 10mm; }
-        .print-cert-sheet-badge { display:inline-block; margin:0 0 12px; padding:6px 12px; border:1px solid #bfdbfe; border-radius:999px; background:#dbeafe; color:#1d4ed8; font-size:12px; font-weight:800; }
-        .print-cert-sheet-title { margin:0 0 10px; font-size:24px; color:#0f172a; }
-        .print-cert-sheet-desc { margin-bottom:16px; color:#475569; font-size:13px; line-height:1.6; }
-        .print-cert-sheet-meta { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px 16px; margin-bottom:18px; padding:14px 16px; border:1px solid #dbeafe; border-radius:14px; background:#f8fbff; }
-        .print-cert-sheet-meta div { display:flex; flex-direction:column; gap:4px; font-size:13px; color:#334155; }
-        .print-cert-sheet-meta strong { color:#0f172a; font-size:12px; }
-        .print-cert-sheet-table { width:100%; border-collapse:collapse; table-layout:fixed; }
-        .print-cert-sheet-table th, .print-cert-sheet-table td { border:1px solid #cbd5e1; padding:10px 8px; font-size:12px; word-break:break-word; overflow-wrap:anywhere; text-align:left; }
-        .print-cert-sheet-table th { background:#f8fafc; color:#0f172a; font-weight:800; }
-        .print-cert-sheet-sign-image { width:60px; height:60px; object-fit:contain; background:#fff; display:block; }
-        .print-cert-sheet-sign-status { display:inline-flex; align-items:center; justify-content:center; min-width:58px; padding:6px 10px; border-radius:999px; background:#dcfce7; color:#166534; font-size:11px; font-weight:800; }
-        .print-cert-sheet-note { margin-top:16px; color:#475569; font-size:12px; line-height:1.6; }
-        @media print {
-            html, body { margin: 0; padding: 0; }
-            tfoot { display: table-footer-group; }
-            .print-cert-watermark, .print-cert-sheet-badge, .print-cert-sheet-meta, .print-cert-sheet-sign-status { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        }
-    </style>
-</head>
-<body>
-    ${certificationWatermarkHtml}
-    <div class="print-layer">
-        <table class="print-frame" role="presentation">
-            ${certificationFooterHtml}
-            <tbody>
-                <tr>
-                    <td>
-                        ${certificationBadgeHtml}
-                        <h1 style="margin:0 0 10px; font-size:24px;">${title}</h1>
-                        <div class="meta">${typeLabel} | 작성일 ${dateLabel}</div>
-                        <div class="content">${bodyHtml}</div>
-                        ${signaturePrintHtml}
-                        ${certificationNoticeHtml}
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-        ${certificationSheetHtml}
-    </div>
-</body>
-</html>`;
+            return window.CoopMinutesPrintTemplates.create({allOfficials,MinutesService}).minute(minute,signatures);
         }
 
         async function waitForPrintWindowImages(printWindow, timeoutMs = 3000) {
