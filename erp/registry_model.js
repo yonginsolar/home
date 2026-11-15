@@ -1,8 +1,8 @@
-/* 시청 변경신고 준비 모형 0.2.17 — 원장과 신고 수정값 분리. */
+/* 시청 변경신고 준비 모형 0.2.18 — 원장과 신고 수정값 분리. */
 (function(root){
  'use strict';
  const kinds={capital:'출자금',members:'조합원 수',appointment:'임원 취임',renewal:'임원 중임',retirement:'임원 퇴임',resignation:'임원 사임',office:'주사무소 주소',purpose:'사업 목적',name:'조합 명칭',chair:'이사장 변경',chairAddress:'이사장 개인 주소',articles:'그 밖의 정관 변경'};
- const fieldRows=[['name','조합 명칭'],['purpose','사업 목적'],['articles','정관'],['office','주된 사무소의 소재지'],['officers','임원'],['chair','이사장'],['chairAddress','이사장(회장)의 주소'],['capital','출자금 납입총액'],['members','조합원(회원) 수']];
+ const fieldRows=[['name','조합 명칭'],['purpose','사업 목적'],['articles','정관'],['office','주된 사무소의 소재지'],['officers','임원'],['chair','이사장'],['chairAddress','이사장(회장)의 주소'],['capital','출자금 납입총액'],['members','조합원 수']];
  const date=s=>/^\d{4}-\d{2}-\d{2}$/.test(String(s))&&!Number.isNaN(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
  const str=x=>String(x??'').trim();
  function number(x){const s=str(x);if(!s)return null;if(!/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(s))throw Error('금액·인원·좌수는 0 이상의 정수로 입력해 주세요.');const n=Number(s.replace(/,/g,''));if(!Number.isSafeInteger(n))throw Error('입력한 숫자가 너무 큽니다.');return n;}
@@ -22,9 +22,10 @@
  function access(runtime){return !!runtime?.coop_id&&runtime.is_active!==false&&runtime.modules?.member_admin!==false&&Array.isArray(runtime.effective_permissions)&&runtime.effective_permissions.includes('member.admin')&&(!Array.isArray(runtime.base_effective_permissions)||runtime.base_effective_permissions.includes('member.admin'))&&(runtime.runtime_profile!=='site_member'||runtime.module_access?.member_admin===true);}
  function changeScope(input){const k=new Set(input.kinds||[]),other=[...k].some(x=>!['capital','members'].includes(x));return {unitReduced:k.has('capital')&&!!input.unitReduced,businessAccountingChanged:(k.has('purpose')||k.has('articles'))&&!!input.businessAccountingChanged,resolutionRequired:other&&!!input.resolutionRequired};}
  // 저장한 직전 기말 신고 인원과 대상연도 말 인원을 비교한다. 원장 집계는 별도로 보존한다.
- function reportedMembershipNote(input){const b=input.reportedBaseline;return b&&b.coopId===input.coopId&&Number.isInteger(b.year)&&b.year===Number(input.reportYear)-2&&Number.isInteger(b.members)&&b.members>=0&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(b.revision||'')&&(input.kinds||[]).some(k=>k==='capital'||k==='members')?b.year+'년 기말 신고 인원: '+b.members.toLocaleString('ko-KR')+'명':'';}
+ function hasReportedBaseline(input){const b=input.reportedBaseline;return !!(b&&b.coopId===input.coopId&&Number.isInteger(b.year)&&b.year===Number(input.reportYear)-2&&Number.isInteger(b.members)&&b.members>=0&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(b.revision||''));}
+ function reportedMembershipNote(){return '';}
  function managedValues(input){const v=input.registryValues;return v&&v.coopId===input.coopId&&v.year===Number(input.reportYear)&&v.values&&v.sources&&['before','increase','decrease','after'].flatMap(p=>['Members','Capital','Shares'].map(s=>p+s)).concat('unit').every(k=>Object.hasOwn(v.values,k)&&['draft','saved','prior','erp','derived'].includes(v.sources[k])&&String(v.values[k])===String(input[k]))?v:null;}
- function reportMemberComparison(input){const managed=managedValues(input);if(!managed&&!reportedMembershipNote(input)||managed&&managed.sources.beforeMembers==='erp'&&managed.sources.afterMembers==='erp')return null;let after,before;try{after=number(input.afterMembers);before=managed?number(input.beforeMembers):input.reportedBaseline.members;}catch{return null;}if(after===null||before===null)return null;const difference=after-before;return{before,after,difference,increase:Math.max(difference,0),decrease:Math.max(-difference,0)};}
+ function reportMemberComparison(input){const managed=managedValues(input);if(!managed&&!hasReportedBaseline(input)||managed&&managed.sources.beforeMembers==='erp'&&managed.sources.afterMembers==='erp'&&managed.sources.decreaseMembers==='erp')return null;let after,before,decrease;try{after=number(input.afterMembers);before=managed?number(input.beforeMembers):input.reportedBaseline.members;decrease=number(input.decreaseMembers);}catch{return null;}if(after===null||before===null)return null;const difference=after-before,increase=decrease===null?null:difference+decrease;return{before,after,difference,increase:Number.isSafeInteger(increase)&&increase>=0?increase:null,decrease};}
  function model(raw){
   const input=Object.fromEntries(Object.entries(raw).map(([k,v])=>[k,typeof v==='string'?str(v):v]));
   Object.assign(input,changeScope(input));const selected=new Set((input.kinds||[]).filter(k=>Object.hasOwn(kinds,k)));if(!selected.size)throw Error('변경 유형을 하나 이상 선택해 주세요.');
@@ -38,6 +39,8 @@
   if(!input.chairMemberId)missing.push('ERP 이사장 회원 연결');
   if(!date(input.printDate))missing.push('작성일');if(annual&&!date(input.fiscalEnd))missing.push('회계연도 말');
   const values={};for(const p of ['before','increase','decrease','after'])for(const q of ['Members','Shares','Capital'])values[p+q]=annual?number(input[p+q]):null;
+  const erpValues={...values},memberComparison=annual?reportMemberComparison(input):null;
+  if(memberComparison&&!managed)Object.assign(values,{beforeMembers:memberComparison.before,increaseMembers:memberComparison.increase,decreaseMembers:memberComparison.decrease,afterMembers:memberComparison.after});
   const unit=annual?number(input.unit):null;if(annual&&(!unit||unit<=0))missing.push('계산에 사용할 1좌 금액');
   const rows=[];
   const active={name:selected.has('name'),purpose:selected.has('purpose'),chair:selected.has('chair'),articles:selected.has('articles')||input.unitReduced||input.businessAccountingChanged,office:selected.has('office'),officers:['appointment','renewal','retirement','resignation'].some(k=>selected.has(k)),chairAddress:selected.has('chairAddress'),capital:selected.has('capital'),members:selected.has('members')};
@@ -51,7 +54,7 @@
    rows.push({key,label,before,after});
   }
   if(annual&&!managed&&input.manualMembers&&String(input.manualMembersYear)!==String(input.reportYear))missing.push('직접 입력 인원의 신고연도 재확인');
-  if(annual&&!managed&&!input.manualMembers&&input.activityState==='confirmed'&&input.activityMemberValues&&(['beforeMembers','increaseMembers','decreaseMembers','afterMembers'].some(key=>values[key]!==input.activityMemberValues[key])||String(input.activityMemberValues.year)!==String(input.reportYear)))missing.push('ERP 집계와 다른 인원 입력 확인');
+  if(annual&&!managed&&!input.manualMembers&&input.activityState==='confirmed'&&input.activityMemberValues&&(['beforeMembers','increaseMembers','decreaseMembers','afterMembers'].some(key=>erpValues[key]!==input.activityMemberValues[key])||String(input.activityMemberValues.year)!==String(input.reportYear)))missing.push('ERP 집계와 다른 인원 입력 확인');
   if(annual&&managed&&input.activityState==='confirmed'&&input.activityMemberValues&&['beforeMembers','increaseMembers','decreaseMembers','afterMembers'].some(key=>managed.sources[key]==='erp'&&values[key]!==input.activityMemberValues[key]))missing.push('ERP 집계와 다른 자동 인원 확인');
   if(annual&&input.activityState&&input.activityState!=='confirmed'&&!(managed?['beforeMembers','afterMembers'].every(key=>['draft','saved','prior'].includes(managed.sources[key])):input.manualMembers))missing.push('연중 가입·탈퇴 인원 확인');
   if(annual&&!/^\d{6}-?\d{7}$/.test(input.corporateNumber||''))missing.push('출자금 확인서의 법인등록번호 13자리');
@@ -63,11 +66,9 @@
    const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());if(input.fiscalEnd>today)missing.push('아직 종료되지 않은 회계연도');if(date(input.beforeDate)&&input.beforeDate>input.fiscalEnd)warnings.push('변경 전 기준일이 기말 기준일보다 늦습니다.');
   }
   if(annual&&input.reportedBaselineState&&input.reportedBaselineState!=='ready')missing.push('과거 신고 인원 다시 확인');
-  if(annual&&input.reportedBaseline&&!reportedMembershipNote(input))missing.push('과거 신고 인원 근거 확인');
+  if(annual&&input.reportedBaseline&&!hasReportedBaseline(input))missing.push('과거 신고 인원 근거 확인');
   if(annual&&input.reportedBaselineDirty)missing.push('과거 신고 인원 저장 결과 확인');
-  const erpValues={...values},memberComparison=annual?reportMemberComparison(input):null;
   if(managed)for(const[key,value]of Object.entries(managed.erp||{}))if(Object.hasOwn(erpValues,key))erpValues[key]=number(value);
-  if(memberComparison&&!managed){Object.assign(values,{beforeMembers:memberComparison.before,increaseMembers:memberComparison.increase,decreaseMembers:memberComparison.decrease,afterMembers:memberComparison.after});for(const row of rows)if(row.key==='members'){row.before=memberComparison.before;row.after=memberComparison.after;}}
   const attachments=[{group:'법정 서식',text:'별지 제7호 변경신고서'}];
   if(active.articles||active.name||active.purpose)attachments.push({group:'유형별 법정 첨부',text:'변경한 정관 사본'});
   if(input.resolutionRequired||active.articles||active.name||active.purpose)attachments.push({group:'유형별 법정 첨부',text:'변경을 의결한 총회 의사록 사본'});

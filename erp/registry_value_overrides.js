@@ -13,7 +13,7 @@
   function candidate(s){const out={...(s.record?.values||{})},base=resolve({...s,record:null,drafts:{}}).values;for(const[id,raw]of Object.entries(s.drafts)){if(raw===null){delete out[id];continue;}const v=number(raw,id);let same=false;try{same=v===number(base[id],id);}catch{}if(same)delete out[id];else out[id]=v;}return out;}
   function dirty(s){try{return stable(candidate(s))!==stable(s.record?.values||{});}catch{return true;}}
   function resolve(s){const values={},sources={},base=fallback(s);for(const id of ids){const draft=has(s.drafts,id)&&s.drafts[id]!==null;values[id]=draft?s.drafts[id]:has(s.record?.values||{},id)?String(s.record.values[id]):String(base[id]??'');sources[id]=draft?'draft':has(s.record?.values||{},id)?'saved':has(s.external,id)?'prior':'erp';if(has(s.drafts,id)&&s.drafts[id]===null){values[id]=String(base[id]??'');sources[id]=has(s.external,id)?'prior':'erp';}}
-   if(sources.beforeMembers!=='erp'||sources.afterMembers!=='erp'){try{const delta=number(values.afterMembers,'afterMembers')-number(values.beforeMembers,'beforeMembers');for(const[id,v]of[['increaseMembers',Math.max(delta,0)],['decreaseMembers',Math.max(-delta,0)]])if(sources[id]==='erp'){values[id]=String(v);sources[id]='derived';}}catch{}}
+   if((sources.beforeMembers!=='erp'||sources.afterMembers!=='erp'||sources.decreaseMembers!=='erp')&&sources.increaseMembers==='erp'){values.increaseMembers='';sources.increaseMembers='derived';try{const increase=number(values.afterMembers,'afterMembers')-number(values.beforeMembers,'beforeMembers')+number(values.decreaseMembers,'decreaseMembers');if(Number.isSafeInteger(increase)&&increase>=0)values.increaseMembers=String(increase);}catch{}}
    for(const p of ['before','increase','decrease','after'])if(sources[p+'Shares']==='erp'){try{const amount=number(values[p+'Capital'],p+'Capital'),unit=number(values.unit,'unit');values[p+'Shares']=amount%unit===0?String(amount/unit):'';sources[p+'Shares']='derived';}catch{values[p+'Shares']='';}}
    return{values,sources};
   }
@@ -41,7 +41,7 @@
   save.onclick=()=>void submit();check.onclick=()=>void refresh();reset.onclick=resetValues;for(const button of[save,check,reset])button.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});
   for(const n of Object.values(fields))n.addEventListener('blur',()=>queueMicrotask(()=>{if(active)render(active);}));
   function restoreYear(){const c=get();if(!c)return null;try{const year=Number((storage||root.sessionStorage).getItem(prefix+c.owner+'|'+c.coop+'|lastYear'));return Number.isInteger(year)&&year>=1901&&year<=9999?year:c.year;}catch{return c.year;}}
-  return{activate,refresh,updateAuto,setExternal,capture,snapshot,leave,clearDraft,restoreYear,busy:()=>!!active?.write,ids,version:'0.2.17'};
+  return{activate,refresh,updateAuto,setExternal,capture,snapshot,leave,clearDraft,restoreYear,busy:()=>!!active?.write,ids,version:'0.2.18'};
  }
- root.RegistryValueOverrides={attach,ids,number,version:'0.2.17'};
+ root.RegistryValueOverrides={attach,ids,number,version:'0.2.18'};
 })(typeof window==='undefined'?globalThis:window);

@@ -1,4 +1,4 @@
-/* 0.2.17 · 신고내용 셀 축소·공식 하단 전체 보존·별첨 분리. */
+/* 0.2.18 · 신고내용 셀 축소·공식 하단 전체 보존·별첨 분리. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -32,13 +32,12 @@
   if(d.applicant)page.drawText(String(d.applicant),{x:345,y:H-704,size:11,font});
   function stamp(pg){if(provided?.test)pg.drawText('합성 검증용',{x:60,y:pg.getHeight()-(pg===page?12:35),size:11,font,color:lib.rgb(.65,.15,.1)});}
   doc.getPages().forEach(stamp);
-  let current,y;
-  function newPage(title){current=doc.addPage([595,842]);stamp(current);const change=title.startsWith('변경하려는 내용을 적은 서류'),size=change?15:17;y=change?715:775;current.drawText(title,{x:change?(595-font.widthOfTextAtSize(title,size))/2:45,y,size,font});y=change?657:739;}
+  let current,y;const changePages=[];
+  function newPage(title){current=doc.addPage([595,842]);stamp(current);const change=title.startsWith('변경하려는 내용을 적은 서류'),size=change?15:17;if(change)changePages.push(current);y=change?715:775;current.drawText(title,{x:change?(595-font.widthOfTextAtSize(title,size))/2:45,y,size,font});y=change?657:739;}
   newPage('변경하려는 내용을 적은 서류');
-  function changeTable(){const width=231.6;function row(cells,heading=false){const lines=cells.map(s=>wrap(s,font,11,width-16)),count=Math.max(...lines.map(a=>a.length));let offset=0;do{if(y<110){newPage('변경하려는 내용을 적은 서류 · 계속');row(['변경전','변경후'],true);}const take=Math.min(count-offset,Math.max(1,Math.floor((y-88)/18))),height=Math.max(30,take*18+14);for(let i=0;i<2;i++){const x=66.1+i*width;current.drawRectangle({x,y:y-height,width,height,borderWidth:.5,borderColor:lib.rgb(.5,.5,.5)});lines[i].slice(offset,offset+take).forEach((s,j)=>current.drawText(s,{x:heading?x+(width-font.widthOfTextAtSize(s,11))/2:x+8,y:y-19-j*18,size:11,font}));}y-=height;offset+=take;}while(offset<count);}
-   row(['변경전','변경후'],true);for(const r of model.rows){const unit=r.key==='capital'?'원':r.key==='members'?'명':'',label=r.key==='capital'?'출자금':r.label,dated=['capital','members'].includes(r.key);row([label+(dated?'\n'+d.beforeDate:'')+'\n'+D(r.before)+unit,label+(dated?'\n'+actualDate:'')+'\n'+D(r.after)+unit]);}}
-  changeTable();y-=20;if(model.reportedMembershipNote){const lines=wrap(model.reportedMembershipNote,font,11,463.2);for(const text of lines){if(y<80)newPage('변경하려는 내용을 적은 서류 · 계속');current.drawText(text,{x:66.1,y,size:11,font});y-=18;}}
-  if(model.memberComparison){if(y<80)newPage('변경하려는 내용을 적은 서류 · 계속');const difference=model.memberComparison.difference;current.drawText('직전 신고 대비 인원 차이: '+(difference>=0?'+':'')+D(difference)+'명',{x:66.1,y,size:11,font});y-=18;}
+  function changeTable(){const width=231.6;function row(cells,heading=false){const lines=cells.map(s=>wrap(s,font,11,width-16)),count=Math.max(...lines.map(a=>a.length));let offset=0;do{if(y<155){newPage('변경하려는 내용을 적은 서류 · 계속');row(['변경전','변경후'],true);}const take=Math.min(count-offset,Math.max(1,Math.floor((y-128)/18))),height=Math.max(30,take*18+14);for(let i=0;i<2;i++){const x=66.1+i*width;current.drawRectangle({x,y:y-height,width,height,borderWidth:.5,borderColor:lib.rgb(.5,.5,.5)});lines[i].slice(offset,offset+take).forEach((s,j)=>current.drawText(s,{x:heading?x+(width-font.widthOfTextAtSize(s,11))/2:x+8,y:y-19-j*18,size:11,font}));}y-=height;offset+=take;}while(offset<count);}
+   row(['변경전','변경후'],true);for(const r of model.rows){const cells=[r.before,r.after].map(v=>r.key==='capital'?D(v)+'원':r.key==='members'?'조합원\n'+D(v)+'명':r.label+'\n'+D(v));row(cells);}}
+  changeTable();const companyLines=wrap(d.companyName||'',font,11,463.2);if(companyLines.length>2)throw Error('조합명이 변경사항 문서 하단 칸보다 깁니다.');for(const pg of changePages){const date=String(d.printDate||'').replaceAll('-','.');pg.drawText(date,{x:(595-font.widthOfTextAtSize(date,11))/2,y:91,size:11,font});companyLines.forEach((line,i)=>pg.drawText(line,{x:(595-font.widthOfTextAtSize(line,11))/2,y:73-i*14,size:11,font}));}
   if(model.annual){
    current=doc.addPage([595,841]);stamp(current);const pg=current;
    const draw=(text,x,top,width,height,size=11,center=false)=>{const lines=wrap(text,font,size,width);if(lines.length*(size+2)>height+2)throw Error('확인서 입력 칸보다 내용이 깁니다.');lines.forEach((s,i)=>pg.drawText(s,{x:center?x+(width-font.widthOfTextAtSize(s,size))/2:x,y:841-top-size-i*(size+2),size,font}));};
@@ -67,5 +66,5 @@
   for(const [i,pg]of doc.getPages().entries())if(i>=1)pg.drawText(String(i+1)+' / '+doc.getPageCount(),{x:500,y:30,size:11,font});
   check();doc.setTitle('시청 변경신고 작성자료');doc.setCreator('협동조합 운영시스템');const bytes=await doc.save();try{check();return bytes;}catch(e){bytes.fill(0);throw e;}
  }
- root.CoopRegistryPdf={create,wrap,tools,version:'0.2.17'};
+ root.CoopRegistryPdf={create,wrap,tools,version:'0.2.18'};
 })(typeof window==='undefined'?globalThis:window);
