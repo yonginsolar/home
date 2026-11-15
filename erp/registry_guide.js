@@ -1,4 +1,4 @@
-/* 변경등기 따라 하기 1.2.0 · 실제 특수법인 출자 항목·내용 입력과 대조. */
+/* 변경등기 따라 하기 1.2.1 · 사용자 제공 실제 출자 입력창 원본과 위치 안내. */
 (function(root){
  'use strict';
  const types={
@@ -11,6 +11,7 @@
  };
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  function officialCapture(stage){const [title,width,height,alt]=({1:['전자표준양식·등기유형 선택',1406,1094,'전자표준양식 선택과 등기유형 더보기의 위치를 표시한 공식 화면'],2:['등기할 항목 선택',900,538,'등기할 항목 선택과 선택항목 적용·저장 후 다음 버튼의 공식 화면'],3:['등록면허세 납입금액',900,303,'등록면허세 납입금액과 면제·행추가 입력 영역의 공식 화면'],4:['신청인·대리인 입력',900,498,'신청인·대리인의 구분·주소·연락처 입력칸을 보여주는 공식 화면']})[stage],src=`/erp/assets/registry-guide/official-step-${stage}.png`,marks=({1:[[49.1,24.7,18.6,7.7,'전자표준양식'],[77.2,82.3,18.7,8.4,'등기유형 더보기']],2:[[47.5,68,12.3,8,'선택항목 적용'],[82.3,89,14.5,10,'저장 후 다음']],3:[[29,24,67,12,'이번 신청의 납입금액 입력칸']],4:[[75.6,88.3,8.7,7,'등록완료']]})[stage];return `<figure class="rg-official-capture" data-rg-capture="${stage}"><figcaption>공식 ${stage}단계 · ${title} <span>(주식회사 예시)</span></figcaption><a class="rg-capture-map" href="${src}" target="_blank" rel="noopener noreferrer" aria-label="공식 ${stage}단계 화면 원본 크게 보기"><img src="${src}" width="${width}" height="${height}" loading="lazy" decoding="async" alt="${alt}">${marks.map(([x,y,w,h,label],i)=>`<span class="rg-capture-mark" aria-hidden="true" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%"><b>${i+1}</b></span>`).join('')}</a><ol class="rg-capture-legend">${marks.map(m=>'<li>'+m[4]+'</li>').join('')}</ol><p class="rg-capture-source">파란 테두리는 공식 예시에서 확인한 버튼·입력칸입니다. 협동조합의 후속 항목을 재현한 화면은 아닙니다.<br>출처: 대한민국 법원 인터넷등기소 간편길잡이 · 확인 2026. 11. 15. · <a href="${src}" target="_blank" rel="noopener noreferrer">크게 보기 ↗</a></p></figure>`;}
+ function actualCapitalCapture(){const src='/erp/assets/registry-guide/capital-change-actual-20261115.png',marks=[[15.59,40.44,78.41,26.23,'내용: 변경 후 전체 출자총좌수와 납입출자금 총액을 한 칸에 입력'],[15.59,70.22,47.14,6.77,'등기원인: 이번 신청의 사유를 확인해 선택·직접 입력'],[78.59,70.22,15.59,6.77,'등기원인일자: 이번 원인의 근거 날짜를 별도로 입력']];return `<figure class="rg-official-capture" data-rg-capital-capture><figcaption>실제 특수법인 화면 · 기타사항 입력</figcaption><a class="rg-capture-map" href="${src}" target="_blank" rel="noopener noreferrer" aria-label="실제 출자 항목 입력창 원본 크게 보기"><img src="${src}" width="1135" height="591" loading="lazy" decoding="async" alt="출자에관한사항의 내용 한 칸과 별도의 등기원인·등기원인일자를 보여주는 실제 인터넷등기소 화면">${marks.map(([x,y,w,h],i)=>`<span class="rg-capture-mark" aria-hidden="true" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%"><b>${i+1}</b></span>`).join('')}</a><ol class="rg-capture-legend">${marks.map(m=>'<li>'+m[4]+'</li>').join('')}</ol><p class="rg-capture-source">사용자 제공 · 인터넷등기소 실제 입력창 · 확인 2026. 11. 15.<br>이미지의 금액·등기원인·날짜는 기존 등기 예시이며 이번 신청에 그대로 쓰는 값이 아닙니다. 원인과 날짜가 확정되지 않았다면 빈칸으로 두세요. 파란 테두리와 번호는 위치 안내이며 원본 이미지를 수정하지 않았습니다.</p></figure>`;}
  function officialExample(stage){const label={1:'기본정보',2:'등기할 사항',3:'등록면허세·수수료',4:'신청인·대리인·첨부서면'}[stage];return `<p class="rg-note" data-rg-example="${stage}">공식 예시 확인: <a href="https://www.iros.go.kr/" target="_blank" rel="noopener noreferrer" aria-label="인터넷등기소 첫 화면 열기 · 공식 예시 ${stage}단계">인터넷등기소 첫 화면 ↗</a><br>빠른메뉴 → 간편길잡이 → e-form신청 → 법인 → 신청서 작성 → <strong>${stage}. ${label}</strong></p>`;}
  function steps(key){const t=types[key];if(!t)throw Error('변경 유형을 선택해 주세요.');const items=[
   ['ERP 자료 준비',`<p>${t.prepare}</p><p><strong>ERP 참고:</strong> ${t.erp}</p><p class="rg-note">${t.deadline} 시청 변경신고와 등기소 변경등기는 별도 절차입니다.</p>`],
@@ -20,7 +21,7 @@
   ['등록면허세·수수료와 납부정보',`<p><strong>등록면허세·수수료/납부정보</strong> 단계에서 이번 신청의 세액·수수료와 납부정보를 확인합니다. 금액을 임의로 정하지 말고 해당 신청과 관할의 안내를 따르세요.</p><p>등록면허세 납부서와 영수필확인정보, 등기신청수수료 납부정보를 서로 구분해 입력합니다. <a href="https://www.wetax.go.kr/" target="_blank" rel="noopener noreferrer">위택스 열기 ↗</a></p>`],
   ['신청인·대리인과 첨부서면',`<p><strong>신청인/대리인·첨부서면</strong> 단계에서 실제 신청인과 위임 관계를 기재하고 해당 서류를 정리합니다.</p><p>${t.proof}</p><p>ERP PDF가 있다는 이유만으로 원본·인증·날인 요건까지 충족되는 것은 아닙니다. 선택한 신청의 첨부 목록에 맞춰 원본과 사본을 구분합니다.</p>`],
   ['작성완료·출력 후 등기소 접수',`<p>입력 내용과 첨부 목록을 검토해 <strong>작성완료·출력</strong>으로 진행합니다. 출력한 신청서에 필요한 서명·날인을 하고 첨부서류와 함께 등기소에 서면으로 접수합니다.</p><p class="rg-note">전자표준양식의 저장·작성완료·출력만으로 등기 접수가 끝난 것은 아닙니다. 접수 뒤 접수번호와 보정 여부·완료 결과를 확인하세요.</p>`]
- ];return items.map(([title,html],index)=>[title,html+({1:1,3:2,4:3,5:4}[index]?officialCapture({1:1,3:2,4:3,5:4}[index]):'')+(index?officialExample([0,1,1,2,3,4,4][index]):'')]);}
+ ];return items.map(([title,html],index)=>[title,html+(key==='capital'&&index===3?actualCapitalCapture():{1:1,3:2,4:3,5:4}[index]?officialCapture({1:1,3:2,4:3,5:4}[index]):'')+(index?officialExample([0,1,1,2,3,4,4][index]):'')]);}
  function mount({client,authorize,context}){
   const $=id=>document.getElementById(id),drafts=new Map();let topic='capital',epoch=0,flight=null,infoVersion=0,fields={name:'',number:''},inputs;const copyFlights=new Map();
   const visible=()=>!document.hidden&&(!root.frameElement||!root.frameElement.hidden),current=op=>context().authorized&&visible()&&epoch===op.epoch&&context().key===op.key&&!op.controller.signal.aborted;
@@ -34,7 +35,7 @@
   root.addEventListener('pagehide',leave);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();});if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)leave();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
   return{leave,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.2.0'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.2.1'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',authorized=false,view=0,ui;
  const context=()=>({coop,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};
