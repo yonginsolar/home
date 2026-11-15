@@ -1,8 +1,8 @@
-/* Sun-income-village management hub v3.4.1 */
+/* 햇빛소득마을 운영관리 · 조회/준비 수명주기 보완 */
 (() => {
   'use strict';
 
-  const VERSION = '3.4.2';
+  const VERSION = '3.4.3';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -21,6 +21,18 @@
   let loading = false;
   let openingWorkspaceId = '';
   let pendingCreate = null;
+  let viewRevision = 0, listPending = null, createPreparation = null, createRevision = 0, createWriting = false;
+  const managerSaving = new Map();
+  const viewVisible = () => !document.hidden && !window.frameElement?.hidden;
+  const createSnapshot = () => JSON.stringify([...new FormData($('createForm')).entries()]);
+  let viewObserver = null;
+
+  function invalidateReadViews() {
+    ++viewRevision; ++managerRequest; managerPending = null;
+    if(listPending){listPending=null;$('reload').disabled=false;}
+    if(createPreparation){createPreparation=null;if(!createWriting){loading=false;$('createSubmit').disabled=false;}}
+  }
+  function drainViewChanges() {if(viewObserver?.takeRecords().length)invalidateReadViews();}
 
   function setMessage(text, isError = false) {
     const el = $('message');
@@ -67,6 +79,15 @@
 
   async function rpc(name, args = {}) {
     const controller = new AbortController();
+    if(['sun_village_management_context','sun_village_manager_context','sun_village_creation_fee_quote'].includes(name)) {
+      let deadline;
+      try {
+        const {data,error}=await Promise.race([getClient().rpc(name,args).abortSignal(controller.signal),new Promise((_,reject)=>{
+          deadline=setTimeout(()=>{controller.abort();reject(new Error('VILLAGE_READ_TIMEOUT'));},15000);
+        })]);
+        if(error)throw error;return data;
+      } finally {clearTimeout(deadline);}
+    }
     const timer = setTimeout(() => controller.abort(), 20000);
     try {
       const { data, error } = await getClient().rpc(name, args).abortSignal(controller.signal);
@@ -278,23 +299,25 @@
   }
 
   async function openManagerDialog(coopId) {
-    const owner=context,request=++managerRequest;
+    drainViewChanges();const owner=context,request=++managerRequest,visit=viewRevision;
+    if(!owner||!viewVisible())return;
     try{
       if(!managerContext){
         if(managerPending?.owner!==owner){
           const pending={owner,promise:null};managerPending=pending;
-          pending.promise=rpc('sun_village_manager_context').then(result=>{if(context===owner&&managerPending===pending)managerContext=result;return result;}).finally(()=>{if(managerPending===pending)managerPending=null;});
+          pending.promise=rpc('sun_village_manager_context').then(result=>{if(context===owner&&visit===viewRevision&&managerPending===pending)managerContext=result;return result;}).finally(()=>{if(managerPending===pending)managerPending=null;});
         }
         await managerPending.promise;
       }
-      if(request!==managerRequest||context!==owner||window.frameElement?.hidden)return;
-    }catch(error){if(request===managerRequest&&context===owner&&!window.frameElement?.hidden)setMessage(friendly(error),true);return;}
+      if(request!==managerRequest||context!==owner||visit!==viewRevision||!viewVisible())return;
+    }catch(error){if(request===managerRequest&&context===owner&&visit===viewRevision&&viewVisible())setMessage(friendly(error),true);return;}
     const row = (Array.isArray(context?.villages) ? context.villages : [])
       .find(village => String(village?.coop_id || '') === String(coopId || ''));
     if (!row || !managerContext) return;
     $('managerVillageId').value = String(coopId);
     $('managerDialogTitle').textContent = `${row.coop_name} 관리자 지정`;
     $('managerDialogError').hidden = true;
+    $('managerSave').disabled=managerSaving.has(String(owner.managing_coop_id)+'|'+String(coopId));
     const assigned = new Set((managerContext.assignments || [])
       .filter(item => String(item.village_coop_id) === String(coopId))
       .map(item => String(item.source_emp_id)));
@@ -314,63 +337,76 @@
 
   async function saveVillageManagers(event) {
     event.preventDefault();
+    drainViewChanges();if(!context||!viewVisible()||!$('managerDialog').open)return;
     const villageId = String($('managerVillageId').value || '');
     const selected = [...$('managerCandidates').querySelectorAll('input[type="checkbox"]:checked')]
       .map(input => input.value);
     const errorEl = $('managerDialogError');
+    const owner=context,visit=viewRevision,request=managerRequest,key=String(owner.managing_coop_id)+'|'+villageId;
+    if(managerSaving.has(key))return;
+    const current=()=>context===owner&&visit===viewRevision&&request===managerRequest&&viewVisible()&&$('managerDialog').open&&$('managerVillageId').value===villageId;
     if (!selected.length) {
       errorEl.textContent = '마을 관리자를 한 명 이상 지정해 주세요.';
       errorEl.hidden = false;
       return;
     }
     $('managerSave').disabled = true;
+    const operation={};managerSaving.set(key,operation);
     errorEl.hidden = true;
     try {
-      managerContext = await rpc('sun_village_set_village_managers', {
+      const result = await rpc('sun_village_set_village_managers', {
         p_village_coop_id: villageId,
         p_source_emp_ids: selected
       });
-      $('managerDialog').close();
+      if(context!==owner||visit!==viewRevision)return;managerContext=result;
+      if(!current())return;
+      const unchanged=JSON.stringify(selected)===JSON.stringify([...$('managerCandidates').querySelectorAll('input[type="checkbox"]:checked')].map(input=>input.value));
       const village = (context?.villages || []).find(item => String(item.coop_id) === villageId);
-      setMessage(`${village?.coop_name || '마을조합'} 관리자 지정을 저장했습니다.`);
+      setMessage(unchanged?`${village?.coop_name || '마을조합'} 관리자 지정을 저장했습니다.`:'저장했습니다. 추가로 바꾼 선택은 아직 저장되지 않았습니다.');
+      if(unchanged)$('managerDialog').close();
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] manager save failed`, String(error?.code || 'unknown'));
-      errorEl.textContent = friendly(error);
-      errorEl.hidden = false;
+      if(current()){errorEl.textContent = friendly(error);errorEl.hidden = false;}
     } finally {
-      $('managerSave').disabled = false;
+      if(managerSaving.get(key)===operation)managerSaving.delete(key);
+      if(context===owner&&viewVisible()&&$('managerDialog').open)$('managerSave').disabled=managerSaving.has(String(owner.managing_coop_id)+'|'+$('managerVillageId').value);
     }
   }
 
-  async function load() {
-    if (loading) return;
-    loading = true;
+  function load(options={}) {
+    const allowHidden=options.allowHidden===true;
+    drainViewChanges();if(loading||document.hidden||!allowHidden&&window.frameElement?.hidden)return Promise.resolve();
+    if(listPending)return listPending.promise;
+    const operation={visit:viewRevision,promise:null};listPending=operation;
+    const current=()=>listPending===operation&&operation.visit===viewRevision&&!document.hidden&&(allowHidden||!window.frameElement?.hidden);
     $('reload').disabled = true;
     setMessage('마을조합 현황을 불러오고 있습니다…');
-    try {
-      context = await rpc('sun_village_management_context');
+    operation.promise=(async()=>{try {
+      const next=await rpc('sun_village_management_context');if(!current())return;
+      if(!next?.managing_coop_id||!Array.isArray(next.villages))throw new Error('VILLAGE_CONTEXT_INVALID');
+      context = next;
       managerContext=null;
       managerPending=null;
       ++managerRequest;
+      canCreateCooperative=false;render();setMessage('');
       try {
-        canCreateCooperative = (await rpc('sun_village_creation_fee_quote'))?.can_create === true;
+        const quote=await rpc('sun_village_creation_fee_quote');if(!current())return;
+        canCreateCooperative=quote?.can_create===true;$('openCreate').hidden=!canCreateCooperative;
       } catch (capabilityError) {
-        canCreateCooperative = false;
-        console.warn(`[sun-village-hub ${VERSION}] create capability unavailable`, capabilityError);
+        if(!current())return;canCreateCooperative=false;
+        if(capabilityError?.code!=='42501')setMessage('마을 추가 권한과 이용요금을 확인하지 못했습니다. 다시 확인해 주세요.',true);
       }
-      render();
-      setMessage('');
     } catch (error) {
-      console.error(`[sun-village-hub ${VERSION}] load failed`, error);
+      if(!current())return;
+      if(error?.code==='42501'){context=null;managerContext=null;canCreateCooperative=false;$('content').hidden=true;}
       setMessage(friendly(error), true);
     } finally {
-      loading = false;
-      $('reload').disabled = false;
-    }
+      if(listPending===operation){listPending=null;$('reload').disabled=false;}
+    }})();return operation.promise;
   }
 
   function openCreate() {
-    $('createForm').reset();
+    drainViewChanges();if(loading||!context||!viewVisible()||!canCreateCooperative)return;
     $('createError').hidden = true;
     $('createError').textContent = '';
     $('createDialog').showModal();
@@ -378,7 +414,9 @@
 
   async function createVillage(event) {
     event.preventDefault();
-    if (loading) return;
+    drainViewChanges();if (loading||!context||!viewVisible()||!$('createDialog').open) return;
+    const operation={owner:context,visit:viewRevision,revision:createRevision,snapshot:createSnapshot()};createPreparation=operation;
+    const current=()=>createPreparation===operation&&context===operation.owner&&viewRevision===operation.visit&&createRevision===operation.revision&&createSnapshot()===operation.snapshot&&viewVisible()&&$('createDialog').open;
     const values = Object.fromEntries(new FormData(event.currentTarget));
     const name = String(values.coop_name || '').trim();
     loading = true;
@@ -386,27 +424,29 @@
     $('createError').hidden = true;
     try {
       const quote = await rpc('sun_village_creation_fee_quote');
-      pendingCreate = {values, name, quote};
+      if(!current())return;
+      pendingCreate = {values, name, quote,ownerCoopId:operation.owner.managing_coop_id};
       $('feeSummary').innerHTML = quote.configured
         ? `<strong>${esc(name)}</strong><p>마을당 연간 이용료: ${number(quote.annual_supply)}원 · 부가세 별도</p><p>${esc(quote.charge_start)} ~ ${esc(quote.charge_end)} · ${number(quote.days)}일 / ${number(quote.annual_days)}일</p>${Array.isArray(quote.segments)&&quote.segments.length>1?`<details><summary>기간별 이용료</summary>${quote.segments.map(s=>`<p>${esc(s.start)} ~ ${esc(s.end)}<br>연간 단가 ${number(s.annual_supply)}원 · 해당 기간 ${number(s.supply)}원 (부가세 별도)</p>`).join('')}</details>`:''}<strong>해당 기간 예상 청구액: ${number(Number(quote.supply)+Number(quote.vat))}원 · 부가세 포함</strong>${quote.days===0?'<p>현재 요금 적용기간이 끝났습니다. 이후 이용요금은 별도 협의합니다.</p>':''}`
         : `<strong>${esc(name)}</strong><p>마을당 이용요금은 별도 협의합니다. 요금 확정 후 청구서를 확인해 주세요.</p>`;
       $('feeError').hidden = true;
       $('feeDialog').showModal();
     } catch (error) {
-      $('createError').textContent = friendly(error);
-      $('createError').hidden = false;
+      if(current()){$('createError').textContent = friendly(error);$('createError').hidden = false;}
     } finally {
-      loading = false;
-      $('createSubmit').disabled = false;
+      if(createPreparation===operation){createPreparation=null;loading=false;$('createSubmit').disabled=false;}
     }
   }
 
   async function confirmVillageFee() {
-    if (!pendingCreate || loading) return;
+    drainViewChanges();if (!pendingCreate || loading||!context||!viewVisible()||pendingCreate.ownerCoopId!==context.managing_coop_id) return;
+    const operation=pendingCreate,owner=context,visit=viewRevision;
+    const current=()=>context===owner&&viewRevision===visit&&viewVisible();
     loading = true;
+    createWriting = true;
     $('confirmFee').disabled = true;
     $('cancelFee').disabled = true;
-    const {values,name,quote} = pendingCreate;
+    const {values,name,quote} = operation;
     try {
       const result = await rpc('sun_village_create_with_fee_notice', {
         p_coop_name:name,p_address:String(values.address||'').trim(),
@@ -415,17 +455,16 @@
         p_fee_quote:quote.quote,p_acknowledged:true,p_request_id:quote.request_id
       });
       if (!result?.fee_notice_recorded) throw new Error('CREATE_RESULT_INVALID');
-      pendingCreate = null;
-      $('feeDialog').close();
-      $('createDialog').close();
+      if(pendingCreate===operation){pendingCreate=null;if(context===owner){$('feeDialog').close();if(createSnapshot()===JSON.stringify(Object.entries(values))){$('createDialog').close();$('createForm').reset();}}}
       loading = false;
+      if(!current())return;
       await load();
-      setMessage(`${name}을 추가했습니다. 준비가 끝나면 목록에서 업무 화면을 열 수 있습니다.`);
+      if(viewRevision===visit&&viewVisible()&&context?.managing_coop_id===owner?.managing_coop_id)setMessage(`${name}을 추가했습니다. 준비가 끝나면 목록에서 업무 화면을 열 수 있습니다.`);
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] create failed`, error);
-      $('feeError').textContent = friendly(error);
-      $('feeError').hidden = false;
+      if(current()&&pendingCreate===operation){$('feeError').textContent = friendly(error);$('feeError').hidden = false;}
     } finally {
+      createWriting = false;
       loading = false;
       $('confirmFee').disabled = false;
       $('cancelFee').disabled = false;
@@ -435,28 +474,38 @@
   async function boot() {
     initTheme();
     $('openCreate').addEventListener('click', openCreate);
-    $('closeCreate').addEventListener('click', () => $('createDialog').close());
+    const cancelPreparation=()=>{++createRevision;if(!createWriting){pendingCreate=null;if(createPreparation){createPreparation=null;loading=false;$('createSubmit').disabled=false;}}};
+    $('closeCreate').addEventListener('click', () => {if(!createWriting)$('createDialog').close();});
+    $('createDialog').addEventListener('close',cancelPreparation);
+    $('createForm').addEventListener('input',()=>{++createRevision;});
+    $('createForm').addEventListener('change',()=>{++createRevision;});
     $('reload').addEventListener('click', load);
     $('createForm').addEventListener('submit', createVillage);
     $('cancelFee').onclick = () => { if (!loading) {pendingCreate=null;$('feeDialog').close();} };
     $('feeDialog').addEventListener('cancel',event=>{if(loading)event.preventDefault();else pendingCreate=null;});
     $('confirmFee').onclick = confirmVillageFee;
     $('closeManager').addEventListener('click', () => $('managerDialog').close());
+    $('managerDialog').addEventListener('close',()=>{++managerRequest;});
     $('managerForm').addEventListener('submit', saveVillageManagers);
     try {
       const gate = await window.ErpRuntimeGuard.requireUser(getClient(), { redirectUrl: 'index.html' });
       if (!gate.ok) return;
+      getClient().auth.onAuthStateChange?.((event,session)=>{if(event==='SIGNED_OUT'||session?.user?.id&&session.user.id!==gate.authUser.id){invalidateReadViews();context=null;managerContext=null;canCreateCooperative=false;$('content').hidden=true;setMessage('로그인 상태를 확인한 뒤 다시 열어 주세요.',true);}});
       void window.ErpWorkspace?.connect(getClient());
       await load();
       window.ErpWorkspaceResume.register({busy:()=>loading,authorize:async runtime=>{
         const next=await rpc('sun_village_management_context');
         return Boolean(next?.managing_coop_id)&&String(next.managing_coop_id)===String(runtime.coop_id);
-      },refresh:load});
+      },refresh:()=>load({allowHidden:true})});
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] boot failed`, error);
       setMessage(friendly(error), true);
     }
   }
+
+  window.addEventListener('pagehide',invalidateReadViews);
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)invalidateReadViews();});
+  if(window.frameElement){viewObserver=new MutationObserver(records=>{if(records.length)invalidateReadViews();});viewObserver.observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});}
 
   boot();
 })();
