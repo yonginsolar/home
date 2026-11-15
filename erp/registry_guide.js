@@ -1,4 +1,4 @@
-/* 변경등기 따라 하기 1.0.1 · 기존 보호 조회만 사용. 신청 저장·전송·출력 없음. */
+/* 변경등기 따라 하기 1.0.2 · 기존 보호 조회만 사용. 신청 저장·전송·출력 없음. */
 (function(root){
  'use strict';
  const types={
@@ -10,6 +10,7 @@
   chair:{label:'이사장 변경',category:'(대표)이사/감사 등의 임원사항 변경',deadline:'등기사항이 바뀐 날부터 21일 이내에 변경등기합니다.',prepare:'종전·새 이사장과 각 효력일, 새 이사장 선임을 증명하는 자료를 준비하세요. 이사 취임과 대표자 변경을 구분합니다.',erp:'임원·위원회 관리의 이사장 이력과 시청 변경신고의 이사장 변경 전·후 정보, 선임 의사록을 참고합니다.',entry:'종전 대표자의 퇴임·사임과 새 대표자의 취임 등 실제 변경을 나누어 입력합니다. 대표권과 효력일은 의결·등기 근거에 맞춥니다.',proof:'선임 의사록과 취임·사임 증명, 새 이사장의 인감·주소 관련 서류 등 신청 안내의 첨부를 준비합니다. 법인 인감 신고가 함께 필요한지도 확인합니다.'}
  };
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ function officialCapture(stage){const [title,width,height,alt]=({1:['전자표준양식·등기유형 선택',1406,1094,'전자표준양식 선택과 등기유형 더보기의 위치를 표시한 공식 화면'],2:['등기할 항목 선택',900,538,'등기할 항목 선택과 선택항목 적용·저장 후 다음 버튼의 공식 화면'],3:['등록면허세 납입금액',900,303,'등록면허세 납입금액과 면제·행추가 입력 영역의 공식 화면'],4:['신청인·대리인 입력',900,498,'신청인·대리인의 구분·주소·연락처 입력칸을 보여주는 공식 화면']})[stage],src=`/erp/assets/registry-guide/official-step-${stage}.png`;return `<figure class="rg-official-capture" data-rg-capture="${stage}"><figcaption>공식 ${stage}단계 · ${title} <span>(주식회사 예시)</span></figcaption><a href="${src}" target="_blank" rel="noopener noreferrer" aria-label="공식 ${stage}단계 화면 원본 크게 보기"><img src="${src}" width="${width}" height="${height}" loading="lazy" decoding="async" alt="${alt}"></a><p class="rg-capture-source">출처: 대한민국 법원 인터넷등기소 간편길잡이 · 확인 2026. 11. 15. · <a href="${src}" target="_blank" rel="noopener noreferrer">크게 보기 ↗</a></p></figure>`;}
  function officialExample(stage){const label={1:'기본정보',2:'등기할 사항',3:'등록면허세·수수료',4:'신청인·대리인·첨부서면'}[stage];return `<p class="rg-note" data-rg-example="${stage}">공식 예시 확인: <a href="https://www.iros.go.kr/" target="_blank" rel="noopener noreferrer" aria-label="인터넷등기소 첫 화면 열기 · 공식 예시 ${stage}단계">인터넷등기소 첫 화면 ↗</a><br>빠른메뉴 → 간편길잡이 → e-form신청 → 법인 → 신청서 작성 → <strong>${stage}. ${label}</strong></p>`;}
  function steps(key){const t=types[key];if(!t)throw Error('변경 유형을 선택해 주세요.');const items=[
   ['ERP 자료 준비',`<p>${t.prepare}</p><p><strong>ERP 참고:</strong> ${t.erp}</p><p class="rg-note">${t.deadline} 시청 변경신고와 등기소 변경등기는 별도 절차입니다.</p>`],
@@ -19,7 +20,7 @@
   ['등록면허세·수수료와 납부정보',`<p><strong>등록면허세·수수료/납부정보</strong> 단계에서 이번 신청의 세액·수수료와 납부정보를 확인합니다. 금액을 임의로 정하지 말고 해당 신청과 관할의 안내를 따르세요.</p><p>등록면허세 납부서와 영수필확인정보, 등기신청수수료 납부정보를 서로 구분해 입력합니다. <a href="https://www.wetax.go.kr/" target="_blank" rel="noopener noreferrer">위택스 열기 ↗</a></p>`],
   ['신청인·대리인과 첨부서면',`<p><strong>신청인/대리인·첨부서면</strong> 단계에서 실제 신청인과 위임 관계를 기재하고 해당 서류를 정리합니다.</p><p>${t.proof}</p><p>ERP PDF가 있다는 이유만으로 원본·인증·날인 요건까지 충족되는 것은 아닙니다. 선택한 신청의 첨부 목록에 맞춰 원본과 사본을 구분합니다.</p>`],
   ['작성완료·출력 후 등기소 접수',`<p>입력 내용과 첨부 목록을 검토해 <strong>작성완료·출력</strong>으로 진행합니다. 출력한 신청서에 필요한 서명·날인을 하고 첨부서류와 함께 등기소에 서면으로 접수합니다.</p><p class="rg-note">전자표준양식의 저장·작성완료·출력만으로 등기 접수가 끝난 것은 아닙니다. 접수 뒤 접수번호와 보정 여부·완료 결과를 확인하세요.</p>`]
- ];return items.map(([title,html],index)=>[title,html+(index?officialExample([0,1,1,2,3,4,4][index]):'')]);}
+ ];return items.map(([title,html],index)=>[title,html+({1:1,3:2,4:3,5:4}[index]?officialCapture({1:1,3:2,4:3,5:4}[index]):'')+(index?officialExample([0,1,1,2,3,4,4][index]):'')]);}
  function mount({client,authorize,context}){
   const $=id=>document.getElementById(id),drafts=new Map();let topic='capital',epoch=0,flight=null,fields={name:'',number:''};
   const visible=()=>!document.hidden&&(!root.frameElement||!root.frameElement.hidden),current=op=>context().authorized&&visible()&&epoch===op.epoch&&context().key===op.key&&!op.controller.signal.aborted;
@@ -33,7 +34,7 @@
   root.addEventListener('pagehide',leave);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();});if(root.frameElement)new MutationObserver(()=>{if(root.frameElement.hidden)leave();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
   return{leave,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.0.1'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.0.2'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',authorized=false,view=0,ui;
  const context=()=>({coop,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};
