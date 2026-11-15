@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.5 | Change: 2026-10-20 - Resume interrupted reads while preserving Korean date filters. -->
+<!-- Version: v1.0.7 | 2026-11-15 · 참여 통계 조회·권한 재확인 지연 복구 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.6 | participation_analytics.html');</script>
+  <script>console.log('[Version] v1.0.7 | participation_analytics.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -480,6 +480,7 @@
       const to = document.getElementById('dateTo').value;
       if (!from || !to || from > to) {
         analyticsReadSequence++;
+        analyticsReadPending?.controller?.abort();
         analyticsReadPending = null;
         showLoading(false);
         showError('조회 시작일과 종료일을 올바르게 확인해 주세요.');
@@ -505,12 +506,22 @@
     async function loadAnalyticsPeriod(owner, sequence, from, to, allowHidden, controller = new AbortController()) {
       const isCurrent = () => analyticsReadCurrent(owner, sequence, from, to, allowHidden);
       showError(''); showLoading(true);
-      const timer = setTimeout(() => controller.abort(), 15000);
+      let timer;
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_get_analytics',{ p_from:from, p_to:to }).abortSignal(controller.signal);
-        if (!isCurrent()) return;
-        if (error) throw error;
-        if (!await analyticsReadAuthorized(owner)) {
+        const result = await Promise.race([
+          (async () => {
+            const { data, error } = await _supabase.rpc('participation_admin_get_analytics',{ p_from:from, p_to:to }).abortSignal(controller.signal);
+            if (!isCurrent() || controller.signal.aborted) return null;
+            if (error) throw error;
+            const authorized = await analyticsReadAuthorized(owner);
+            return {data, authorized};
+          })(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => { controller.abort(); reject(new Error('ANALYTICS_READ_TIMEOUT')); }, 15000);
+          })
+        ]);
+        if (!isCurrent() || !result || controller.signal.aborted) return;
+        if (!result.authorized) {
           if (isCurrent()) {
             clearAnalyticsResults();
             showError('현재 조합과 조회 권한을 다시 확인해 주세요.');
@@ -518,6 +529,7 @@
           return;
         }
         if (!isCurrent()) return;
+        const data = result.data;
         state.data = data || {};
         state.activities = classifyResponses(Array.isArray(data?.activities) ? data.activities : []);
         document.querySelectorAll('.summary-grid,.dashboard-grid,.dividend-panel').forEach(el => { el.classList.remove('d-none'); });

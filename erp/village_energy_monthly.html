@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.0.7 | 2026-10-26 — Omit the unused plant owner field from the response; keep tenant filtering. -->
+<!-- Version: v1.0.8 | 2026-11-15 · 발전소 저장 중 새 입력과 현재 편집창 보존 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -100,6 +100,7 @@
     let saving = false;
     let savingPlant = false;
     let editingPlantId = '';
+    let plantEditorEpoch = 0, plantInputRevision = 0;
     let plants = [];
     let records = [];
     let actorId = '', contextEpoch = 0, editorEpoch = 0, entryInputRevision = 0;
@@ -184,14 +185,17 @@
       });
     }
     function openPlant(plant=null) {
+      ++plantEditorEpoch;
       editingPlantId=plant?.id||'';$('plantForm').reset();
       $('plantName').value=plant?.name||'';$('plantLocation').value=plant?.location||'';
       $('plantCapacity').value=plant?.capacity??'';$('plantStatus').value=['준비중','공사중','운영중'].includes(plant?.status)?plant.status:'준비중';
       $('plantForm').classList.remove('d-none');$('plantName').focus();
     }
-    function closePlant() {editingPlantId='';$('plantForm').reset();$('plantForm').classList.add('d-none');}
+    function closePlant() {++plantEditorEpoch;editingPlantId='';$('plantForm').reset();$('plantForm').classList.add('d-none');}
     async function loadPlants() {
+      const context=recordContext();
       const {data,error}=await db.from('site_power_plants').select('id,name,location,capacity,status').eq('coop_id',coopId).order('display_order',{ascending:true}).order('name');
+      if(!sameRecordContext(context))return;
       if(error)throw error;plants=(data||[]).filter(row=>row.id&&row.name);
       const selectedPlant=$('plantId').value,selectedFilter=$('plantFilter').value;
       $('plantId').replaceChildren();$('plantFilter').replaceChildren();
@@ -331,24 +335,35 @@
       retainEntryDraft();
       if(saving||[...entryDrafts.values()].some(draft=>draft.owner===entryOwner()&&entryDirty(draft))){event.preventDefault();event.returnValue='';}
     });
-    window.addEventListener('pagehide',()=>{retainEntryDraft();++editorEpoch;invalidateRecordReads();});
+    window.addEventListener('pagehide',()=>{retainEntryDraft();++editorEpoch;++plantEditorEpoch;invalidateRecordReads();});
     if(window.frameElement)new MutationObserver(()=>{
-      if(window.frameElement.hidden){retainEntryDraft();++editorEpoch;invalidateRecordReads();}
+      if(window.frameElement.hidden){retainEntryDraft();++editorEpoch;++plantEditorEpoch;invalidateRecordReads();}
     }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
     $('newButton').addEventListener('click',resetForm);$('reloadButton').addEventListener('click',()=>{void loadRecords().catch(()=>{});});$('plantFilter').addEventListener('change',renderRows);
     $('plantAddButton').addEventListener('click',()=>openPlant());
     $('plantCancelButton').addEventListener('click',closePlant);
+    $('plantForm').addEventListener('input',()=>{++plantInputRevision;});
+    $('plantForm').addEventListener('change',()=>{++plantInputRevision;});
     $('plantForm').addEventListener('submit',async event=>{
       event.preventDefault();if(!canManagePlants||savingPlant)return;
+      const request={context:recordContext(),id:editingPlantId,epoch:plantEditorEpoch,revision:plantInputRevision};
+      const sameEditor=()=>sameRecordContext(request.context)&&plantEditorEpoch===request.epoch;
+      const currentView=()=>sameRecordContext(request.context)&&!document.hidden&&!window.frameElement?.hidden;
       savingPlant=true;$('plantSaveButton').disabled=true;
       try{
         const name=$('plantName').value.trim(),locationText=$('plantLocation').value.trim();
         const capacityRaw=ERPNumberInput.raw($('plantCapacity').value).trim(),capacity=capacityRaw?Number(capacityRaw):null;
         if(name.length<2||name.length>100||locationText.length>200||
           (capacity!==null&&(!Number.isFinite(capacity)||capacity<0||capacity>1000000)))throw new Error('발전소명·위치·설비용량을 확인해 주세요.');
-        const {error}=await db.rpc('sun_village_save_plant',{p_id:editingPlantId||null,p_name:name,p_location:locationText||null,p_capacity:capacity,p_status:$('plantStatus').value});
-        if(error)throw error;closePlant();await loadPlants();renderRows();message('발전소 기본정보를 저장했습니다.','success');
-      }catch(error){message(`발전소를 저장하지 못했습니다: ${error?.message||'다시 시도해 주세요.'}`,'danger');}
+        const {data:savedId,error}=await db.rpc('sun_village_save_plant',{p_id:request.id||null,p_name:name,p_location:locationText||null,p_capacity:capacity,p_status:$('plantStatus').value});
+        if(error)throw error;if(!sameRecordContext(request.context))return;
+        const unchanged=sameEditor()&&plantInputRevision===request.revision,notify=sameEditor();
+        if(!request.id&&sameEditor()&&typeof savedId==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(savedId))editingPlantId=savedId;
+        if(unchanged)closePlant();
+        try{await loadPlants();if(sameRecordContext(request.context))renderRows();}
+        catch(error){if(currentView()&&notify&&(unchanged?plantEditorEpoch===request.epoch+1:sameEditor()))message('발전소 기본정보를 저장했습니다. 목록은 다시 확인해 주세요.','warning');return;}
+        if(currentView()&&notify&&(unchanged?plantEditorEpoch===request.epoch+1:sameEditor()))message(unchanged?'발전소 기본정보를 저장했습니다.':'저장했습니다. 추가로 수정한 내용은 아직 저장되지 않았습니다.','success');
+      }catch(error){if(currentView()&&sameEditor())message(`발전소를 저장하지 못했습니다: ${error?.message||'다시 시도해 주세요.'}`,'danger');}
       finally{savingPlant=false;$('plantSaveButton').disabled=false;}
     });
     boot();
