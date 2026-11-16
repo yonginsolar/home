@@ -10,8 +10,8 @@
     const saveRevisions = new Map();
     const el = id => document.getElementById(id);
     const owner = () => adminCertificateAuthId && g_adminMemberRuntime?.coop_id && g_adminMemberRuntime.is_active !== false
-        && canAccessAdminMemberTab('funds-manage') && !isAdminMemberSiteProfile()
-        ? JSON.stringify([adminCertificateAuthId,g_adminMemberRuntime.coop_id]) : '';
+        && canUseAdminMemberDividends()
+        ? JSON.stringify([adminCertificateAuthId,g_adminMemberRuntime.coop_id,window.CoopRules.policy(g_adminMemberRuntime.coop_name).kind]) : '';
     const pane = mode => el('sub-tab-dividend-' + (mode === 'manage' ? 'batches' : 'exports'));
     const active = mode => !!owner() && !window.frameElement?.hidden && el('tab-funds-manage')?.classList.contains('active') && pane(mode)?.classList.contains('active');
     const selected = mode => String((mode === 'manage' ? g_dividend_batch_state : g_dividend_export_state).selectedBatchId || '');

@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.207 | Change: 2026-11-10 - Prevent duplicate account creation and scope its result. -->
+<!-- Version: v1.0.208 | Change: 2026-11-16 - 법인유형별 결산 적립 기준 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.207 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.208 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -47,6 +47,7 @@
     }
   })();
 </script>
+<script src="/shared/cooperative_rules.js?v=1.0.0" integrity="sha384-CNofpCsGT79mVM66AV3CQF70jY7BgpDxeT0jL1BAEx0675brG6fVT0wfhFXtF9Bn" crossorigin="anonymous"></script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="accounting_withholding_payment.js?v=1.0.2"></script>
@@ -878,15 +879,15 @@
           <input type="text" class="form-control bg-light" id="closingExpectedTaxPayable" readonly>
         </div>
         <div class="small text-muted mb-2" id="closingCapitalInfo">출자금/법정적립금 정보를 계산 중입니다.</div>
-        <div class="alert alert-info small p-2">
-          법정적립금은 회계연도 말 출자금 납입총액의 3배에 도달할 때까지 잉여금의 10% 이상을 적립해야 합니다.
-        </div>
+        <div class="alert alert-info small p-2" id="closingReserveRule"></div>
+        <div class="mb-2"><label for="closingReserveRate" class="small text-muted">정관 적용 적립률(%)</label><input type="number" id="closingReserveRate" class="form-control" min="10" max="100" step="0.01"><p class="small text-muted mb-0">법정 최저보다 높은 정관 비율이 있으면 입력하세요.</p></div>
+        <p id="closingReserveStatus" class="small text-danger" role="status"></p>
         <div class="row g-2">
           <div class="col-6">
             <label class="small text-muted">법정적립금</label>
             <input data-number-group type="number" class="form-control" id="closingLegalInput" min="0" step="1">
             <div class="small text-muted mt-1" id="closingLegalHint"></div>
-            <div class="small text-danger mt-1 hidden" id="closingLegalWarn">법정적립금이 최소 기준(법인세 차감후 순손익의 10%)보다 작습니다.</div>
+            <div class="small text-danger mt-1 hidden" id="closingLegalWarn">법정적립금이 적용 최소액보다 작습니다.</div>
           </div>
           <div class="col-6">
             <label class="small text-muted">임의적립금</label>
@@ -1278,6 +1279,7 @@ let vatSummaryMode = 'half_year';
 let accountingDashboardRefreshPromise = null;
 let accountingDashboardRefreshQueued = false;
 let accountingDataAuthorized = false;
+let accountingFormalName = '';
 let accountingEntrySaveContext = null, accountingEntryRetainedDraft = null;
 let selectContext = null;
 let addContext = null;
@@ -1295,7 +1297,7 @@ let closingPreparedScope = null, closingFormBaseline = null, closingBaselineYear
 const closingYearDrafts = new Map();
 const closingYearManualTaxes = new Map();
 const closingYearExplicitInputs = new Map();
-const CLOSING_EXPLICIT_INPUT_IDS = Object.freeze(['closingLegalInput','closingVoluntaryInput','closingTaxCreditInput','closingPrepaidNationalTaxInput','closingPrepaidLocalTaxInput']);
+const CLOSING_EXPLICIT_INPUT_IDS = Object.freeze(['closingLegalInput','closingVoluntaryInput','closingReserveRate','closingTaxCreditInput','closingPrepaidNationalTaxInput','closingPrepaidLocalTaxInput']);
 let closingLegalManual = false;
 let closingTaxEditRevision = 0;
 let closingActiveYear = null, closingActionRevision = 0;
@@ -2250,6 +2252,7 @@ window.onload = async function() {
     document.getElementById("closingYearInput").addEventListener("change", refreshClosingContext);
     document.getElementById("closingYearInput").addEventListener("input",()=>{closingActionRevision++;closingPreparedScope=null;document.getElementById('btnClosingRun').disabled=true;cancelAccountingRead('closing');});
     document.getElementById("closingLegalInput").addEventListener("input", handleClosingLegalInputChange);
+    document.getElementById('closingReserveRate').addEventListener('input',event=>{if(closingActiveYear&&closingFormOwner===accountingReadIdentity()&&accountingDataAuthorized&&canPerform('accounting.edit')&&!event.target.disabled)closingYearExplicitInputs.set(closingActiveYear,{...(closingYearExplicitInputs.get(closingActiveYear)||{}),closingReserveRate:String(ERPNumberInput.raw(event.target.value))});syncClosingFormState(false,{preserveManualTax:true});});
     document.getElementById("closingTaxCreditInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
     document.getElementById("closingPrepaidNationalTaxInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
     document.getElementById("closingPrepaidLocalTaxInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
@@ -2296,6 +2299,7 @@ window.onload = async function() {
         redirectUrl: 'index.html'
     });
     if (!accountingRuntimeGate.ok) return;
+    accountingFormalName = String(accountingRuntimeGate.runtime.coop_name || '');
     accountingDataAuthorized = true;
     document.getElementById('btnClosingReport').disabled = !(canPerform('accounting.view') || canPerform('accounting.edit'));
     document.querySelector('[data-bs-target="#tabGuide"]').addEventListener('shown.bs.tab', mountAccountingGuide);
@@ -8472,7 +8476,10 @@ async function buildClosingContext(targetYear, options = {}) {
     let legalBalance = 0;
     if (capRows) capRows.forEach(r => { capitalTotal += (Number(r.Credit||0) - Number(r.Debit||0)); });
     if (legalRows) legalRows.forEach(r => { legalBalance += (Number(r.Credit||0) - Number(r.Debit||0)); });
-    if (capitalTotal < 0) capitalTotal = 0;
+    const carryResult = await query(_supabase.from('ac_journal').select('Debit,Credit').eq('Account','이월이익잉여금').lt('Date',startDate));
+    if(carryResult.error)throw carryResult.error;
+    const carryBalance=(carryResult.data||[]).reduce((sum,r)=>sum+Number(r.Credit||0)-Number(r.Debit||0),0);
+    if(![capitalTotal,legalBalance,carryBalance].every(Number.isSafeInteger)||capitalTotal<0||legalBalance<0)throw Error('출자금·적립금·이월손익 잔액을 확인해 주세요.');
 
     const thresholdMet = legalBalance >= (capitalTotal * 3);
 
@@ -8495,6 +8502,9 @@ async function buildClosingContext(targetYear, options = {}) {
         existingVoluntary: closingSummary.voluntary,
         capitalTotal,
         legalBalance,
+        formalName: accountingFormalName,
+        carryBalance,
+        deficit: Math.max(0,-carryBalance),
         thresholdMet,
         minLegal: 0,
         autoLegal: 0
@@ -8639,9 +8649,18 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
 
     closingContext.taxExpense = taxExpense;
     closingContext.netIncome = Number(closingContext.preTaxNetIncome || 0) - taxExpense;
-    closingContext.minLegal = (closingContext.netIncome > 0 && !closingContext.thresholdMet)
-        ? Math.ceil(closingContext.netIncome * 0.1)
-        : 0;
+    const reservePolicy=window.CoopRules.policy(closingContext.formalName);
+    const rateInput=document.getElementById('closingReserveRate');
+    const rateDraft=closingYearExplicitInputs.get(closingActiveYear)?.closingReserveRate;
+    if(rateDraft!==undefined&&document.activeElement!==rateInput)rateInput.value=rateDraft;
+    else if(rateDraft===undefined)rateInput.value=reservePolicy.reserveRate??'';
+    rateInput.min=reservePolicy.reserveRate??0;rateInput.disabled=closingContext.isClosed;
+    document.getElementById('closingReserveRule').textContent=reservePolicy.known?reservePolicy.label+' · 법정 최저 '+reservePolicy.reserveRate+'% · 연말 납입출자금의 3배까지'+(!reservePolicy.dividends?' · 남은 잉여금은 임의적립':''):'법인유형 확인 후 적립금을 계산할 수 있습니다.';
+    closingContext.reserveError='';
+    try{closingContext.reserve=window.CoopRules.reserve({formalName:closingContext.formalName,profit:closingContext.netIncome,capital:closingContext.capitalTotal,balance:closingContext.legalBalance,deficit:closingContext.deficit,rate:rateInput.value.trim()===''?NaN:Number(rateInput.value)});}
+    catch(error){closingContext.reserve=null;closingContext.reserveError=error.message;}
+    document.getElementById('closingReserveStatus').textContent=closingContext.isClosed?'':closingContext.reserveError;
+    closingContext.minLegal = closingContext.reserve?.minimum??0;
     closingContext.autoLegal = closingContext.minLegal;
 
     if (pretaxEl) pretaxEl.value = Number(closingContext.preTaxNetIncome || 0).toLocaleString();
@@ -8686,7 +8705,7 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
         if (closingContext.thresholdMet) {
             hint.innerText = "출자금 3배 기준을 충족하여 법정적립금 0 입력이 가능합니다.";
         } else {
-            hint.innerText = `법정적립금 최소액: ${closingContext.minLegal.toLocaleString()}원 (법인세 차감후 순손익의 10%)`;
+            hint.innerText = `법정적립금 최소액: ${closingContext.minLegal.toLocaleString()}원 (결손 보전 후 잉여금의 ${closingContext.reserve?.rate??'미확인'}%)`;
         }
     }
 
@@ -8698,11 +8717,12 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
     }
     warn.classList.add("hidden");
     handleClosingLegalInputChange();
+    if(!closingContext.isClosed&&closingContext.reserveError)runBtn.disabled=true;
     if(!closingPreparedScope || !accountingReadScopeCurrent(closingPreparedScope) || accountingReadTasks.has('closing') || !canPerform('accounting.edit'))runBtn.disabled=true;
 }
 
 function closingInputSnapshot() {
-    return Object.fromEntries(['closingLegalInput','closingVoluntaryInput','closingTaxExpenseInput','closingTaxCreditInput','closingPrepaidNationalTaxInput','closingPrepaidLocalTaxInput'].map(id=>[id,String(ERPNumberInput.raw(document.getElementById(id).value))]));
+    return Object.fromEntries(['closingLegalInput','closingVoluntaryInput','closingReserveRate','closingTaxExpenseInput','closingTaxCreditInput','closingPrepaidNationalTaxInput','closingPrepaidLocalTaxInput'].map(id=>[id,String(ERPNumberInput.raw(document.getElementById(id).value))]));
 }
 function rememberClosingDraft() {
     if(closingFormOwner!==accountingReadIdentity()||!closingActiveYear)return;
@@ -8758,7 +8778,7 @@ function refreshClosingContext() {
     status.textContent='';rememberClosingDraft();
     },message=>{closingPreparedScope=null;button.disabled=true;status.textContent=message.replace('다시 확인','재계산');},{
         start:()=>{closingPendingDraft={identity:scope.identity,year:yearVal,before,saved,savedManualTax,taxRevision};closingLegalManual=Object.hasOwn(closingYearExplicitInputs.get(yearVal)||{},'closingLegalInput');closingPreparedScope=null;button.disabled=true;status.textContent=yearVal+'년 결산 자료를 불러오는 중입니다.';calc.setAttribute('aria-busy','true');},
-        finish:()=>{rememberClosingDraft();if(closingBaselineYear===yearVal)closingPendingDraft=null;calc.setAttribute('aria-busy','false');button.disabled=!closingPreparedScope||!accountingReadScopeCurrent(closingPreparedScope)||!!closingContext?.isClosed||!canPerform('accounting.edit');},
+        finish:()=>{rememberClosingDraft();if(closingBaselineYear===yearVal)closingPendingDraft=null;calc.setAttribute('aria-busy','false');button.disabled=!closingPreparedScope||!accountingReadScopeCurrent(closingPreparedScope)||!!closingContext?.isClosed||!!closingContext?.reserveError||!canPerform('accounting.edit');},
         cancel:()=>{rememberClosingDraft();if(closingBaselineYear===yearVal)closingPendingDraft=null;closingPreparedScope=null;button.disabled=true;calc.setAttribute('aria-busy','false');status.textContent='재계산을 눌러 결산 자료를 확인해 주세요.';}
     });
 }
@@ -8767,6 +8787,11 @@ function handleClosingLegalInputChange() {
     const warn = document.getElementById("closingLegalWarn");
     if (!closingContext) { warn.classList.add("hidden"); return; }
     const current = getClosingRoundedInputValue("closingLegalInput");
+    if(!closingContext.isClosed&&closingContext.reserve){
+      const limit=closingContext.reserve.available,vol=document.getElementById('closingVoluntaryInput');
+      document.getElementById('closingLegalInput').max=limit;vol.max=limit;
+      if(window.CoopRules.policy(closingContext.formalName).dividends===false){vol.value=Math.max(0,limit-current);vol.readOnly=true;}else vol.readOnly=false;
+    }
     if (closingContext.netIncome <= 0 || closingContext.thresholdMet || closingContext.minLegal <= 0) {
         warn.classList.add("hidden");
         return;
@@ -8781,6 +8806,7 @@ async function runClosingFromModal() {
     if (!closingPreparedScope || !accountingReadScopeCurrent(closingPreparedScope) || accountingReadTasks.has('closing') || Number(closingContext?.year)!==Number(document.getElementById('closingYearInput').value)) return;
 
     const ctx = closingContext;
+    if(ctx.reserveError)return showAlert('적립 기준 확인',ctx.reserveError);
     const actionRevision=closingActionRevision,signature=JSON.stringify(closingInputSnapshot()),scope={...closingPreparedScope,modal:null};
     const current=()=>actionRevision===closingActionRevision&&accountingReadScopeCurrent(scope)&&canPerform('accounting.edit')&&signature===JSON.stringify(closingInputSnapshot());
     if (ctx.isClosed) return showAlert("알림", `이미 ${ctx.year}년도 결산이 완료되어 읽기 전용으로만 확인할 수 있습니다.`);
@@ -8797,6 +8823,9 @@ async function runClosingFromModal() {
     const estimate = buildClosingTaxEstimate(ctx.preTaxNetIncome, ctx.taxAdjust?.fines || 0, taxCredit, prepaidNationalTax, prepaidLocalTax, ctx.year);
     const legal = getClosingRoundedInputValue("closingLegalInput");
     const vol = getClosingRoundedInputValue("closingVoluntaryInput");
+    const available=ctx.reserve?.available??0;
+    if(legal+vol>available)return showAlert('적립금 확인','결손 보전 후 남은 잉여금 범위에서 적립해 주세요.');
+    if(!window.CoopRules.policy(ctx.formalName).dividends&&legal+vol!==available)return showAlert('적립금 확인','사회적협동조합의 남은 잉여금은 임의적립금에 포함해야 합니다.');
 
     if (ctx.netIncome <= 0) {
         if (legal > 0 || vol > 0) return showAlert("오류", "순이익이 0 이하일 때는 적립금을 0으로 입력하세요.");
@@ -8846,7 +8875,7 @@ async function runClosingFromModal() {
         if (latest.isClosed || latest.inventoryDelta !== ctx.inventoryDelta ||
             Number(latest.inventoryValuation.unpriced_quantity || 0) > 0 ||
             Number(latest.inventoryValuation.pending_approval_count || 0) > 0 ||
-            latest.preTaxNetIncome !== ctx.preTaxNetIncome) {
+            latest.preTaxNetIncome !== ctx.preTaxNetIncome || latest.capitalTotal!==ctx.capitalTotal || latest.legalBalance!==ctx.legalBalance || latest.carryBalance!==ctx.carryBalance || latest.formalName!==ctx.formalName) {
             return showAlert('결산 자료 변경', '재고 또는 회계 자료가 바뀌었습니다. 결산 화면을 다시 불러와 확인해 주세요.');
         }
         await executeClosing(ctx, legal, vol, taxExpense);
@@ -8867,6 +8896,9 @@ async function runClosingFromModal() {
 }
 
 async function executeClosing(ctx, legal, vol, taxExpense) {
+    if(!accountingDataAuthorized||!canPerform('accounting.edit')||ctx.formalName!==accountingFormalName)return;
+    let reserve;
+    try{reserve=window.CoopRules.reserve({formalName:ctx.formalName,profit:ctx.preTaxNetIncome-taxExpense,capital:ctx.capitalTotal,balance:ctx.legalBalance,deficit:ctx.deficit,rate:ctx.reserve?.rate});if(![legal,vol].every(n=>Number.isSafeInteger(n)&&n>=0)||legal<reserve.minimum||legal+vol>reserve.available||!window.CoopRules.policy(ctx.formalName).dividends&&legal+vol!==reserve.available)throw Error('적립금과 결산 기준을 다시 확인해 주세요.');}catch(error){return showAlert('결산 기준 확인',error.message);}
     const relatedKey = `CLOSE-${ctx.year}`;
     const writer = myInfo ? myInfo.emp_name : "System";
 

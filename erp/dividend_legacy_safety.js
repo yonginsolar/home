@@ -5,8 +5,8 @@
     let state = null, epoch = 0, bound = false;
     const node = id => document.getElementById(id);
     const owner = () => adminCertificateAuthId && g_adminMemberRuntime?.coop_id && g_adminMemberRuntime.is_active !== false
-        && canAccessAdminMemberTab('funds-manage') && !isAdminMemberSiteProfile()
-        ? JSON.stringify([adminCertificateAuthId, g_adminMemberRuntime.coop_id]) : '';
+        && canUseAdminMemberDividends()
+        ? JSON.stringify([adminCertificateAuthId,g_adminMemberRuntime.coop_id,window.CoopRules.policy(g_adminMemberRuntime.coop_name).kind]) : '';
     const menu = () => !!owner() && !window.frameElement?.hidden && node('tab-funds-manage')?.classList.contains('active');
     const visible = () => menu() && node('dividendModal')?.classList.contains('show');
     const current = (s, ticket = epoch) => !!s && state === s && s.owner === owner() && ticket === epoch && visible();
@@ -47,6 +47,7 @@
         const result = await bounded(() => _supabase.rpc('get_my_erp_runtime'));
         const runtime=result.data;
         return valid() && !result.error && runtime?.is_active !== false && runtime?.runtime_profile !== 'site_member'
+            && window.CoopRules?.policy(runtime.coop_name).dividends===true
             && String(runtime?.coop_id || '') === String(g_adminMemberRuntime?.coop_id || '')
             && guard.isModuleEnabled(runtime,'member_admin') && guard.isModuleAssigned(runtime,'member_admin');
     }

@@ -6501,6 +6501,11 @@ if (activePane?.id === 'sub-docs') selectAdminMemberSiteSubTab('sub-sections');
 }
 }
 
+function canUseAdminMemberDividends() {
+const r=g_adminMemberRuntime;
+return !!r?.coop_id && r.is_active!==false && canAccessAdminMemberTab('funds-manage') && !isAdminMemberSiteProfile() && window.CoopRules?.policy(r.coop_name).dividends===true;
+}
+
 function applyAdminMemberRuntimeUi(runtime) {
 if (g_adminMemberRuntime !== runtime) cancelMemberExportPreparation();
 const oldInformationScope = g_adminMemberRuntime?.coop_id;
@@ -6510,6 +6515,7 @@ if (oldInformationScope !== g_adminMemberRuntime?.coop_id) invalidateMemberInfor
 if (oldInformationScope !== g_adminMemberRuntime?.coop_id || !canAccessAdminMemberTab('members')) window.MemberDemographics?.pauseOtherList(true);
 const isSiteMemberProfile = isAdminMemberSiteProfile();
 const memberAdminEnabled = isAdminMemberRuntimeModuleEnabled('member_admin') && hasAdminMemberScopePermission('member_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
+const dividendEnabled = canUseAdminMemberDividends();
 // Cross-page shortcuts belong to the ERP's main menu, not member work tabs.
 const meetingParticipationEnabled = false;
 const voteEnabled = false;
@@ -6563,28 +6569,34 @@ if (el) el.classList.toggle('hidden', !enabled);
 
 const fundsNav = document.getElementById('nav-funds-manage');
 if (fundsNav) {
-  fundsNav.innerHTML = isSiteMemberProfile
+  fundsNav.innerHTML = !dividendEnabled
     ? '<i class="bi bi-piggy-bank-fill"></i> 운영자금 관리'
     : '<i class="bi bi-piggy-bank-fill"></i> 자금 및 이용고 배당 관리';
 }
 const fundsTitle = document.getElementById('funds-manage-title');
-if (fundsTitle) fundsTitle.textContent = isSiteMemberProfile ? '💰 운영자금 관리' : '💰 운영자금 및 배당 관리';
+if (fundsTitle) fundsTitle.textContent = !dividendEnabled ? '💰 운영자금 관리' : '💰 운영자금 및 배당 관리';
 ['funds-usage-ledger-tab', 'funds-dividend-batches-tab', 'funds-dividend-exports-tab'].forEach((id) => {
   const el = document.getElementById(id);
   const item = el?.closest('li');
-  if (item) item.classList.toggle('hidden', isSiteMemberProfile);
+  if (item) item.classList.toggle('hidden', !dividendEnabled);
 });
 ['sub-tab-dividends', 'sub-tab-dividend-batches', 'sub-tab-dividend-exports'].forEach((id) => {
   const el = document.getElementById(id);
-  if (el) el.classList.toggle('hidden', isSiteMemberProfile);
+  if (el) { el.classList.toggle('hidden', !dividendEnabled); if(!dividendEnabled)el.classList.remove('active','show'); }
 });
+if(!dividendEnabled){
+  window.DividendWorkflow?.invalidate();
+  document.querySelectorAll('#tab-funds-manage [data-bs-target^="#sub-tab-dividend"]').forEach(n=>{n.classList.remove('active');n.setAttribute('aria-selected','false');});
+  const fallback=document.querySelector('[data-bs-target="#sub-tab-donations"]');
+  if(!document.querySelector('#tab-funds-manage .tab-pane.active')){fallback?.classList.add('active');fallback?.setAttribute('aria-selected','true');document.getElementById('sub-tab-donations')?.classList.add('active','show');}
+}
 
 const detailFundsTab = document.getElementById('member-detail-funds-tab');
-if (detailFundsTab) detailFundsTab.textContent = isSiteMemberProfile ? '💰 출자금' : '💰 출자/배당/자금';
+if (detailFundsTab) detailFundsTab.textContent = !dividendEnabled ? '💰 출자금' : '💰 출자/배당/자금';
 const detailBankHeading = document.getElementById('member-detail-bank-heading');
 if (detailBankHeading) detailBankHeading.textContent = '🏦 조합원 계좌 정보';
 const faqFinanceCategory = document.getElementById('faq-finance-category');
-if (faqFinanceCategory) faqFinanceCategory.textContent = isSiteMemberProfile ? '출자/자금' : '출자/배당';
+if (faqFinanceCategory) faqFinanceCategory.textContent = !dividendEnabled ? '출자/자금' : '출자/배당';
 [
   'member-detail-donation-card',
   'member-detail-point-card',
@@ -6598,7 +6610,7 @@ if (faqFinanceCategory) faqFinanceCategory.textContent = isSiteMemberProfile ? '
   'member-detail-sns-status-column'
 ].forEach((id) => {
   const el = document.getElementById(id);
-  if (el) el.classList.toggle('hidden', isSiteMemberProfile);
+  if (el) el.classList.toggle('hidden', isSiteMemberProfile || id==='member-detail-dividend-card' && !dividendEnabled);
 });
 const detailBadgesGroup = document.getElementById('member-detail-badges-group');
 if (detailBadgesGroup) detailBadgesGroup.classList.toggle('hidden', !canManageAdminMemberIndividualBadges());
