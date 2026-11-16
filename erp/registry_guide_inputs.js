@@ -1,4 +1,4 @@
-/* 변경등기 입력1.4.1 · 기존 ERP 기준 자동 조회·현재 단가 적용. */
+/* 변경등기 입력1.5.0 · 기존 읽기·조건이 갖춰진 납부액 계산. */
 (function(root){
  'use strict';
  const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());
@@ -42,7 +42,32 @@
   check();return result;
  }
  function officialFields(kind,id,records,model){const change=model.officialChange(kind,id,records);if(change.error)return null;const row=records.find(r=>String(r.id)===String(id)&&model.registeredOfficer(r));if(!row||typeof row.name!=='string'||!row.name.trim()||typeof row.role!=='string')return null;const label={appointment:'취임',renewal:'중임',resignation:'사임',retirement:'퇴임'}[kind];if(!label)return null;return{name:row.name,role:row.role,kind:label,dates:'임기 '+row.term_start_date+' ~ '+row.term_end_date+(model.date(row.real_end_date)?' · ERP 종료일 '+row.real_end_date:'')};}
- function attach({client,authorize,context,onValues=()=>{},onProfile=()=>{}}){
+ function payment({topic,date,entity,scope,treatment,before,capital,authorized=true}){
+  const r={base:null,registration:null,education:null,fee:null,needs:[],formula:[]},need=s=>r.needs.push(s);
+  if(!authorized){need('현재 조합 권한을 먼저 확인해야 합니다.');return r;}
+  if(!['capital','officers','chair','name','purpose','office'].includes(topic)){need('변경 유형이 필요합니다.');return r;}
+  let increase=null;
+  if(topic==='capital'){
+   if(!capital||capital.provisional!==false||!Number.isInteger(capital.year)||capital.cutoff!==capital.year+'-12-31'||!Number.isSafeInteger(capital.total)||capital.total<0)need('종료된 기준연도의 ERP 출자금 집계가 필요합니다.');
+   else{const s=String(before??'').trim();if(!/^(?:0|[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)$/.test(s)||!Number.isSafeInteger(Number(s.replaceAll(',',''))))need('직전 등기부의 납입출자금 총액이 필요합니다.');else{increase=capital.total-Number(s.replaceAll(',',''));if(increase>0)r.base=increase;else need(increase===0?'직전 등기액과 같아 출자 증가가 아닙니다.':'출자 감소는 이번 증액 산식 대상이 아닙니다.');}}
+  }
+  const validDate=typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)&&Number.isFinite(Date.parse(date))&&new Date(date).toISOString().slice(0,10)===date;
+  if(topic==='capital'&&validDate&&capital&&capital.cutoff>=date){increase=null;r.base=null;need('신청일보다 앞선 종료연도의 출자금 집계가 필요합니다.');}
+  if(!validDate)need('신청 예정일이 필요합니다.');else if(date<'2026-10-02'||date>'2026-12-31')need('이 신청일의 시행 법령은 아직 계산 기준에 반영되지 않았습니다.');
+  if(entity!=='ordinary')need(entity==='other'?'사회적협동조합·그 밖의 법인은 별도 세율·감면 검토 대상입니다.':'일반 협동조합(영리법인) 여부가 필요합니다.');
+  if(scope!=='single')need('단독 신청 1건·등기목적 1개·수수료 면제 없음의 신청인지 정해야 합니다. 복합신청·관할 이전은 별도 계산입니다.');
+  const eligible=validDate&&date>='2026-10-02'&&date<='2026-12-31'&&entity==='ordinary'&&scope==='single';
+  if(eligible&&topic!=='office'){r.fee=5000;r.formula.push('전자표준양식 단독 1목적: 신청수수료 5,000원');}
+  if(topic==='office'){need('주사무소 이전의 관할내·외와 구·신 소재지별 과세·신청 구분이 필요합니다.');return r;}
+  if(!['standard','triple'].includes(treatment)){need('중과·감면·조례 특례 적용 여부가 필요합니다.');return r;}
+  if(!eligible)return r;
+  if(topic==='capital'&&increase>0){const multiplier=treatment==='triple'?3n:1n,raw=BigInt(increase)*4n,minimum=112500n*1000n,scaled=(raw>minimum?raw:minimum)*multiplier;r.registration=Number(scaled/10000n*10n);r.formula.push('증가액 × 0.4%, 최저 112,500원'+(multiplier===3n?'의 3배 중과':'')+' · 10원 미만 버림');}
+  else if(topic!=='capital'&&treatment==='standard'){r.registration=40200;r.formula.push('지방세법 제28조 제1항 제6호 바목: 기타 변경등기 1건 40,200원');}
+  else if(topic!=='capital'){need('선택한 일반 변경은 출자증가 3배 중과 산식 대상이 아닙니다.');}
+  if(r.registration!==null){r.education=Number(BigInt(r.registration)*20n/1000n*10n);r.formula.push('지방교육세 = 등록면허세 × 20% · 10원 미만 버림');}
+  return r;
+ }
+ function attach({client,authorize,context,onValues=()=>{},onProfile=()=>{},onScope=()=>{}}){
   const d=document,el=d.createElement('section');el.id='rgInputReference';el.className='rg-input-reference';
   const make=(tag,text,parent=el)=>{const n=d.createElement(tag);if(text)n.textContent=text;parent.append(n);return n;};
   make('h2','ERP 값');const controls=make('div','');controls.className='rg-input-controls';
@@ -61,14 +86,14 @@
    const recommendation=court(data.address);row('현재 ERP 주사무소',data.address,data.address);
    row('관할 추천',recommendation||'인터넷등기소의 전국등기소안내에서 확인해 주세요.');
    make('p','전국등기소안내에서 실제 법인·상업등기 관할을 확인하세요.',rows).className='rg-note';
-   if(topic==='capital') {const c=data.capital,shares=c.shares;row('집계 기준',c.cutoff+(c.provisional?' · 연말 미확정':' · 종료연도 ERP 원장 집계'));row('변경 후 납입출자금 총액',c.total.toLocaleString('ko-KR')+'원');row('계산에 사용한 ERP 현재 1좌 금액',c.unit.toLocaleString('ko-KR')+'원');row('변경 후 출자총좌수',shares===null?'납입총액이 ERP 현재 1좌 금액으로 나누어떨어지지 않습니다.':shares.toLocaleString('ko-KR')+'좌');const content=shares===null?'':'출자총좌수 '+shares.toLocaleString('ko-KR')+'좌\n납입출자금 총액 '+c.total.toLocaleString('ko-KR')+'원';row('등기할 내용',content||'ERP 출자 기준과 원장을 확인해 주세요.',content,!c.provisional,'내용 복사');onValues({topic,content:c.provisional?'':content,state:c.provisional?'연말 미확정':'ERP 출자 기준 확인 필요'});row('등기원인·원인일자','이번 변경의 원인과 근거 날짜를 직접 입력하세요.');caution.textContent='ERP 현재 단가로 계산한 좌수입니다. 과거 연말 단가를 확정한 값은 아닙니다.';}
+   if(topic==='capital') {const c=data.capital,shares=c.shares;row('집계 기준',c.cutoff+(c.provisional?' · 연말 미확정':' · 종료연도 ERP 원장 집계'));row('변경 후 납입출자금 총액',c.total.toLocaleString('ko-KR')+'원');row('계산에 사용한 ERP 현재 1좌 금액',c.unit.toLocaleString('ko-KR')+'원');row('변경 후 출자총좌수',shares===null?'납입총액이 ERP 현재 1좌 금액으로 나누어떨어지지 않습니다.':shares.toLocaleString('ko-KR')+'좌');const content=shares===null?'':'출자총좌수 '+shares.toLocaleString('ko-KR')+'좌\n납입출자금 총액 '+c.total.toLocaleString('ko-KR')+'원';row('등기할 내용',content||'ERP 출자 기준과 원장을 확인해 주세요.',content,!c.provisional,'내용 복사');onValues({topic,capital:c,content:c.provisional?'':content,state:c.provisional?'연말 미확정':'ERP 출자 기준 확인 필요'});row('등기원인·원인일자','이번 변경의 원인과 근거 날짜를 직접 입력하세요.');caution.textContent='ERP 현재 단가로 계산한 좌수입니다. 과거 연말 단가를 확정한 값은 아닙니다.';}
    else if(topic==='officers'||topic==='chair'){const change=root.CoopRegistryModel.officialChange(kind.value,officer.value,data.officials);onValues({topic,official:officialFields(kind.value,officer.value,data.officials,root.CoopRegistryModel)});row('변경 전',change.error?'ERP 처리 이력을 선택해 주세요.':change.before,change.error?'':change.before);row('변경 후',change.error||change.after,change.error?'':change.after);caution.textContent='등기원인·효력일은 이번 근거와 대조하세요. 대표자 주소와 식별번호는 인터넷등기소에서 직접 입력합니다.';}
    else if(topic==='purpose'){row('현재 정관의 목적',data.purpose||'현재 정관에서 목적 조항을 하나로 확인하지 못했습니다.',data.purpose);caution.textContent='현재 목적은 변경 후 참고값입니다. 등기된 기존 목적과 의결된 추가·삭제 문구를 대조하세요. ERP 저장일을 효력일로 쓰지 않습니다.';}
    else if(topic==='name'){row('ERP 현재 조합명',data.name,data.name);caution.textContent='대상법인 검색·신청서 기존 명칭에는 등기부의 변경 전 명칭을 사용합니다. ERP가 이미 새 명칭이면 이 값은 변경 후 참고값입니다. 기존 명칭과 효력일은 등기부·의결문에서 확인하세요.';}
    else{caution.textContent='현재 ERP 주소가 새 주소라면 변경 후 참고값입니다. 변경 전 등기주소·실제 이전일과 이전 전후의 법인·상업등기 관할을 각각 확인하세요.';}
   }
   function options(){const old=state.officials[kind.value]||'';officer.replaceChildren(new Option('처리 이력 선택',''));for(const r of root.CoopRegistryModel.officialOptions(kind.value,data?.officials||[]))officer.add(new Option(r.name+' · '+r.role+' · '+r.term_start_date,String(r.id)));officer.value=old;if(!officer.value)state.officials[kind.value]='';}
-  function open(next){const k=context().key;if(state){state.year=year.value;state.kind=kind.value;}cancel();if(subject&&subject!==k)drafts.clear();subject=k;topic=next;const key=k+'|'+next;state=drafts.get(key)||{year:String(Number(today().slice(0,4))-1),kind:'appointment',officials:{}};drafts.set(key,state);year.value=state.year;kind.value=state.kind;yearLabel.hidden=next!=='capital';kindLabel.hidden=officerLabel.hidden=!['officers','chair'].includes(next);caution.textContent='';void refresh();}
+  function open(next){const k=context().key;if(state){state.year=year.value;state.kind=kind.value;}cancel();if(subject&&subject!==k)drafts.clear();subject=k;topic=next;const key=k+'|'+next;state=drafts.get(key)||{year:String(Number(today().slice(0,4))-1),kind:'appointment',officials:{}};drafts.set(key,state);year.value=state.year;kind.value=state.kind;yearLabel.hidden=next!=='capital';kindLabel.hidden=officerLabel.hidden=!['officers','chair'].includes(next);caution.textContent='';onScope(topic,year.value);void refresh();}
   function refresh(){if(!allowed()||!state)return;if(subject!==context().key){cancel();return;}const key=requestKey();if(flight?.requestKey===key)return flight.promise;if(validated===key)return;if(topic==='capital'&&(!/^\d{4}$/.test(year.value)||Number(year.value)<1901||Number(year.value)>9998)){onValues({topic,state:'기준연도 확인 필요'});status.textContent='기준연도를 확인해 주세요.';return;}
    const op={g:generation,key:context().key,requestKey:key,controller:new AbortController()};flight=op;data=null;render();loadButton.disabled=true;loadButton.hidden=true;status.textContent='ERP 값을 확인하고 있습니다.';const current=()=>flight===op&&generation===op.g&&context().key===op.key&&requestKey()===op.requestKey&&allowed()&&!op.controller.signal.aborted;
    op.promise=(async()=>{let timer;try{const work=load(client,{coop:context().coop,topic,year:Number(year.value),signal:op.controller.signal,current,verify:authorize,model:root.CoopRegistryModel,onProfile:value=>{if(current()){op.profileReceived=true;onProfile(value);}}});const value=await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>{op.controller.abort();reject(Error('조회가 지연되고 있습니다. 다시 확인해 주세요.'));},15000);})]);if(!current())return;data=value;validated=key;options();render();status.textContent='';}
@@ -77,10 +102,10 @@
    })();return op.promise;
   }
   loadButton.onclick=()=>{if(!loadButton.hidden)void refresh();};
-  year.oninput=()=>{if(state.year===year.value)return;state.year=year.value;cancel();caution.textContent='';void refresh();};
+  year.oninput=()=>{if(state.year===year.value)return;state.year=year.value;onScope(topic,year.value);cancel();caution.textContent='';void refresh();};
   kind.onchange=()=>{state.kind=kind.value;if(data){options();render();}};officer.onchange=()=>{state.officials[kind.value]=officer.value;if(data)render();};
   loadButton.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});
   return{element:el,open,refresh,leave:cancel};
  }
- root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,officialFields,version:'1.4.1'});
+ root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,officialFields,payment,version:'1.5.0'});
 })(typeof window==='undefined'?globalThis:window);
