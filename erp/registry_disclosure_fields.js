@@ -26,22 +26,22 @@
    ['첨부: 정관·규약·규정','','현재 유효한 날인본의 공개용 사본']
   ]],
   ['재정 및 성과',[
-   ['자산총계','assets','승인 재무상태표 → 당기 자산총계'],
-   ['부채총계','liabilities','승인 재무상태표 → 당기 부채총계'],
-   ['자본총계','equity','승인 재무상태표 → 당기 자본총계'],
-   ['조합원출자금','capital','승인 재무상태표 → 납입출자금'],
-   ['누적 법정적립금 총액','reserveBalance','승인 재무상태표 → 법정적립금 잔액'],
-   ['누적 미처분이익잉여금·미처리결손금','retained','승인 재무상태표 → 미처분이익잉여금·미처리결손금'],
-   ['매출액','revenue','승인 손익계산서 → 매출액'],
-   ['매출총손익','gross','승인 손익계산서 → 이익·손실 구분과 금액'],
-   ['판매비와 관리비','selling','승인 손익계산서 → 판매비와 관리비'],
-   ['영업손익','','포털 자동 계산값을 승인 손익계산서와 대조'],
-   ['영업외수익','otherRevenue','승인 손익계산서 → 영업외수익'],
-   ['영업외비용','otherExpense','승인 손익계산서 → 영업외비용'],
-   ['법인세차감전손익','pretax','승인 손익계산서 → 이익·손실 구분과 금액'],
-   ['법인세 등','tax','승인 손익계산서 → 법인세비용'],
-   ['당기순손익','net','승인 손익계산서 → 이익·손실 구분과 금액'],
-   ['법정적립금 처분액','reserveDisposition','승인 잉여금처분계산서 → 이번 처분액. 위 누적 잔액과 구분'],
+   ['자산총계','assets','회계관리 재무상태표 → 자산총계'],
+   ['부채총계','liabilities','회계관리 재무상태표 → 부채총계'],
+   ['자본총계','equity','자본 계정 잔액과 아직 마감하지 않은 당기순손익'],
+   ['조합원출자금','capital','출자금 계정의 납입 잔액'],
+   ['누적 법정적립금 총액','reserveBalance','법정적립금 계정 잔액'],
+   ['누적 미처분이익잉여금·미처리결손금','retained','이월·미처분 잉여금 계정 잔액과 미마감 당기순손익'],
+   ['매출액','revenue','회계관리 손익계산서 → 매출액'],
+   ['매출총손익','gross','이익·손실 구분과 금액. 현재 원천에는 별도 구분 없음'],
+   ['판매비와 관리비','selling','회계관리 결산보고서의 판매비와관리비(비용 합계)'],
+   ['영업손익','operating','회계관리 결산보고서 → 영업손익'],
+   ['영업외수익','otherRevenue','회계관리 손익계산서 → 영업외수익'],
+   ['영업외비용','otherExpense','현재 결산보고서 원천에는 별도 구분 없음'],
+   ['법인세차감전손익','pretax','당기순손익 + 원장에 기록된 법인세비용'],
+   ['법인세 등','tax','조회기간에 원장에 기록된 법인세비용'],
+   ['당기순손익','net','회계관리 결산보고서 → 당기순손익'],
+   ['법정적립금 처분액','reserveDisposition','조회기간의 법정적립금 처분 기록. 위 누적 잔액과 구분'],
    ['첨부 1: 사업결산보고서','','총회 승인본: 일반·일반연합회 별지 제9호, 사회적·사회적연합회·이종연합회 별지 제23호'],
    ['첨부 2: 재무제표','','전기·당기 비교식 재무상태표·손익계산서·잉여금처분계산서 또는 결손금처리계산서']
   ]],
@@ -69,19 +69,19 @@
    ['제출 전 확인','','첨부의 주민번호·개인 주소·휴대전화 등은 가린 사본 사용. 포털 마지막 단계에서 제출하면 공개']
   ]]
  ];
- function mount(element,formalName,{current=()=>true}={}){
+ function mount(element,formalName,{current=()=>true,onStep=()=>{}}={}){
   const doc=element.ownerDocument,p=root.CoopRules.policy(formalName),outputs=new Map(),pages=[],tabs=[];
-  let active=0,generation=0;
+  let active=0,generation=0,finance=null;
   const node=(tag,text,cls)=>{const n=doc.createElement(tag);if(text)n.textContent=text;if(cls)n.className=cls;return n;};
   const allowed=type=>!type||!p.known&&p.kind!=='mixed_federation'||type==='ordinary'&&p.dividends||type==='social'&&p.kind==='social'||type==='social_group'&&['social','social_federation','mixed_federation'].includes(p.kind)||type==='plan'&&p.kind!=='social';
   element.replaceChildren();const nav=node('nav',null,'disclosure-steps');nav.setAttribute('aria-label','공시 작성 순서');
   const message=node('p',null,'disclosure-copy-status');message.setAttribute('role','status');
   const footer=node('div',null,'disclosure-paging'),prev=node('button','이전'),position=node('span'),next=node('button','다음');prev.type=next.type='button';footer.append(prev,position,next);
-  function show(index,focus=false){active=Math.max(0,Math.min(3,index));pages.forEach((page,i)=>{page.hidden=i!==active;tabs[i].setAttribute('aria-current',i===active?'step':'false');});prev.disabled=active===0;next.disabled=active===3;position.textContent=(active+1)+' / 4';if(focus){pages[active].querySelector('h3').focus();}}
+  function show(index,focus=false){active=Math.max(0,Math.min(3,index));pages.forEach((page,i)=>{page.hidden=i!==active;tabs[i].setAttribute('aria-current',i===active?'step':'false');});prev.disabled=active===0;next.disabled=active===3;position.textContent=(active+1)+' / 4';if(focus){pages[active].querySelector('h3').focus();}onStep(active);}
   steps.forEach(([title,fields],index)=>{
    const tab=node('button',(index+1)+'. '+title);tab.type='button';tab.onclick=()=>show(index,true);nav.append(tab);tabs.push(tab);
    const page=node('section',null,'disclosure-step-panel'),heading=node('h3',(index+1)+'. '+title);heading.tabIndex=-1;page.append(heading);
-   if(index===1){const notice=node('p','총회 승인 여부와 대상 기간이 확인된 결산 수치가 아직 연결되어 있지 않습니다.','disclosure-source-status');notice.dataset.disclosureFinanceStatus='';page.append(notice);}
+   if(index===1){const controls=node('div',null,'disclosure-finance-controls'),label=node('label','조회기준일'),end=node('input'),read=node('button','다시 조회'),notice=node('p',null,'disclosure-source-status'),source=node('p',null,'disclosure-registration-note');end.type='date';end.id='disclosureFinanceEnd';end.dataset.erpQueryControl='';label.htmlFor=end.id;label.append(end);read.type='button';read.id='disclosureFinanceRead';notice.dataset.disclosureFinanceStatus='';notice.setAttribute('role','status');controls.append(label,read);page.append(controls,source,notice);finance={end,read,notice,source};}
    if(index===2){const n=node('p',null,'disclosure-source-status');n.dataset.disclosureAssembly='';page.append(n);}
    const grid=node('div',null,'disclosure-field-grid');page.append(grid);
    for(const[field,key,source,type]of fields){
@@ -96,7 +96,7 @@
   });
   element.append(nav,...pages,message,footer);prev.onclick=()=>show(active-1,true);next.onclick=()=>show(active+1,true);
   element.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat&&e.target.matches('button'))e.preventDefault();});show(0);
-  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:'';item.output.textContent=item.value;item.copy.hidden=!item.value;}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';},step:()=>active});
+  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:typeof value?.copy==='string'?value.copy:'';item.output.textContent=typeof value?.display==='string'?value.display:item.value;item.copy.hidden=!item.value;}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';},step:()=>active,finance});
  }
- root.RegistryDisclosureFields=Object.freeze({mount,version:'1.1.0'});
+ root.RegistryDisclosureFields=Object.freeze({mount,version:'1.2.0'});
 })(window);
