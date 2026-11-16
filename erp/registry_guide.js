@@ -1,4 +1,4 @@
-/* 변경등기 가이드1.6.1 · 실제 확인한 명칭·주소·목적 입력항목. 새 이미지 없음. */
+/* 변경등기 가이드1.7.0 · 검증한 명칭·주소·목적·납부·첨부 화면. */
 (function(root){
  'use strict';
  const types={
@@ -10,6 +10,20 @@
   chair:{label:'이사장 변경',category:'(대표)이사/감사 등의 임원사항 변경',deadline:'등기사항이 바뀐 날부터 21일 이내에 변경등기합니다.',prepare:'종전·새 이사장과 각 효력일, 새 이사장 선임을 증명하는 자료를 준비하세요. 이사 취임과 대표자 변경을 구분합니다.',erp:'임원·위원회 관리의 이사장 이력과 시청 변경신고의 이사장 변경 전·후 정보, 선임 의사록을 참고합니다.',entry:'종전 대표자의 퇴임·사임과 새 대표자의 취임 등 실제 변경을 나누어 입력합니다. 대표권과 효력일은 의결·등기 근거에 맞춥니다.',proof:'선임 의사록과 취임·사임 증명, 새 이사장의 인감·주소 관련 서류 등 신청 안내의 첨부를 준비합니다. 법인 인감 신고가 함께 필요한지도 확인합니다.'}
  };
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ function verifiedCapture(key){
+  const captures={
+   name:['final-01-name-address.jpg',1015,555,'명칭·주사무소 입력',''],
+   address:['final-02-address-search.jpg',880,779,'주소검색',''],
+   purposeAdd:['final-03-purpose-add.jpg',1000,690,'목적 추가',''],
+   purposeChange:['final-04-purpose-change.jpg',1000,690,'기존 목적 변경','기존 목적 문구는 화면 예시이며 새로 작성할 값이 아닙니다.'],
+   tax:['final-05-tax.jpg',1015,725,'등록면허세 입력','입력 전 화면입니다. 표시된 0원은 확정 세액이 아닙니다.'],
+   fees:['final-06-fees.jpg',1015,720,'신청수수료·납부정보','화면의 5,000원은 해당 신청의 참조값입니다. 실제 신청의 납부액을 확인하세요.'],
+   attachments:['final-07-attachments.jpg',1015,1030,'행정정보 연계·첨부서면',''],
+   picker:['final-08-attachment-picker.jpg',798,718,'첨부서면 목록 검색','']
+  };
+  const [file,width,height,title,note]=captures[key],src='/erp/assets/registry-guide/'+file;
+  return `<figure class="rg-official-capture" data-rg-verified-capture="${key}"><figcaption>${title}</figcaption><div class="rg-screen-scroll" tabindex="0" aria-label="${title} 화면 · 작은 화면에서는 좌우로 이동"><div class="rg-capture-map" style="max-width:${width}px"><img src="${src}" width="${width}" height="${height}" loading="lazy" decoding="async" alt="인터넷등기소의 ${title} 실제 화면"></div></div>${note?'<p class="rg-capture-source">'+note+'</p>':''}<p class="rg-capture-source">사용자 제공 · 대한민국 법원 인터넷등기소 · <a href="${src}" target="_blank" rel="noopener noreferrer">원본 보기</a></p></figure>`;
+ }
  function actualCapitalCapture(){const src='/erp/assets/registry-guide/capital-change-actual-20261115.png';return `<figure class="rg-official-capture" data-rg-capital-capture><figcaption>기타사항 입력 · 출자에관한사항</figcaption><div class="rg-screen-scroll" tabindex="0" aria-label="출자 입력창 · 작은 화면에서는 좌우로 이동"><div class="rg-capture-map"><img src="${src}" width="1135" height="591" loading="lazy" decoding="async" alt="사용자가 제공한 실제 출자 입력창"><output class="rg-value-overlay" data-rg-capital-value style="left:15.59%;top:40.44%;width:78.41%;height:26.23%" aria-label="내용칸에 입력할 값">ERP 값 확인 중</output><span class="rg-empty-overlay" style="left:15.59%;top:70.22%;width:47.14%;height:8.4%">등기원인 선택·입력</span><span class="rg-empty-overlay" style="left:78.59%;top:70.22%;width:15.59%;height:8.4%">원인일자 입력</span></div></div><p class="rg-capture-source">사용자 제공 · 대한민국 법원 인터넷등기소 · <a href="${src}" target="_blank" rel="noopener noreferrer">원본 보기</a></p></figure>`;}
  function fieldTable(rows){return '<table class="rg-field-map"><tbody>'+rows.map(([name,text])=>'<tr><th scope="row">'+name+'</th><td>'+text+'</td></tr>').join('')+'</tbody></table>';}
  function officerEntry(){return '<ol><li><strong>임원/출자항목</strong>에서 임원을 검색합니다. <strong>검색</strong> 또는 <strong>전체보기</strong>로 대상 행을 찾습니다.</li><li>이미 등기된 임원을 바꾸면 해당 행의 <strong>변경</strong>, 새 임원을 넣으면 <strong>임원 추가</strong>를 누릅니다.</li><li>아래 항목을 확인해 입력합니다.</li></ol>'+fieldTable([
@@ -32,7 +46,7 @@
    ['일자','확인한 원인의 효력일을 입력합니다.'],
    ['변경할 명칭','의결된 새 정식 명칭을 입력합니다.'],
    ['로마자','변경 근거에 맞는 로마자 표기를 확인합니다.']
-  ]);
+  ])+verifiedCapture('name');
   if(key==='office')return '<p>'+basis+'</p>'+fieldTable([
    ['원인','이번 주사무소 변경의 실제 원인을 선택·입력합니다.'],
    ['일자','확인한 이전 효력일을 입력합니다.'],
@@ -40,14 +54,14 @@
    ['상세주소','선택한 기본주소에 이어 실제 상세주소를 입력합니다.'],
    ['읍면동','실제 주소에 맞는 읍·면·동 표기를 확인합니다.'],
    ['공동주택명','실제 주소의 공동주택명 표기를 확인합니다.']
-  ]);
+  ])+verifiedCapture('name')+verifiedCapture('address');
   if(key==='purpose')return '<p>'+basis+'</p>'+fieldTable([
    ['원인','목적 추가·변경의 실제 원인을 선택·입력합니다.'],
    ['일자','확인한 변경 효력일을 입력합니다.'],
    ['사업목적','의결된 정관의 목적 문구를 입력합니다.'],
    ['로마자','변경 근거에 맞는 로마자 표기를 확인합니다.'],
    ['각호설정','의결된 사업목적의 각 호 구분을 확인합니다.']
-  ])+'<p>입력 내용을 확인한 뒤 <strong>등록완료</strong>를 누릅니다.</p>';
+  ])+'<p>입력 내용을 확인한 뒤 <strong>등록완료</strong>를 누릅니다.</p>'+verifiedCapture('purposeAdd')+verifiedCapture('purposeChange');
   return '';
  }
  function steps(key){const t=types[key];if(!t)throw Error('변경 유형을 선택해 주세요.');let entry;
@@ -60,7 +74,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
 ['스캔첨부·전자납부 조회','종이 납부서는 스캔첨부, 전자납부한 건은 전자납부 조회로 납부정보를 연결합니다.'],
 ['농어촌특별세·면제','감면을 적용하는 건은 감면 근거에 따른 농어촌특별세 과세 여부·세액이 별도로 필요합니다. 이 계산에는 포함하지 않습니다.'],
 ['신청수수료 납부정보','납부정보 추가에서 실제 이용한 전자납부·은행·무인발급기를 고르고 영수증의 납부번호·금액을 옮깁니다.']
-])+'</div></details><details class="rg-step" data-rg-stage="4" data-rg-observed-for="capital"><summary>4 행정정보 연계 및 첨부서면</summary><div class="rg-step-body"><h3>신청인/대리인 추가</h3><p><strong>신청인/대리인 추가</strong>를 누르고 실제 신청인을 확인합니다. 로그인 계정으로 나타난 사람이 조합 대표자와 같은지 확인하세요.</p>'+fieldTable([
+])+verifiedCapture('tax')+verifiedCapture('fees')+'</div></details><details class="rg-step" data-rg-stage="4" data-rg-observed-for="capital"><summary>4 행정정보 연계 및 첨부서면</summary><div class="rg-step-body">'+verifiedCapture('attachments')+'<h3>신청인/대리인 추가</h3><p><strong>신청인/대리인 추가</strong>를 누르고 실제 신청인을 확인합니다. 로그인 계정으로 나타난 사람이 조합 대표자와 같은지 확인하세요.</p>'+fieldTable([
 ['유형','법무사·변호사·일반인·신청인 중 실제 신청 관계에 맞게 선택합니다.'],
 ['성명','실제 신청인 또는 대리인의 성명을 입력합니다.'],
 ['대표권자 조회','대표권자를 조회하는 경우 해당 법인의 실제 대표자를 확인합니다.'],
@@ -74,7 +88,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
 ['이름','선택한 첨부서류의 이름을 확인합니다.'],
 ['통수','실제로 첨부할 통수를 입력합니다.'],
 ['원용선택','원용하는 서면이 있는 경우 선택합니다.']
-])+'<p>첨부서면 목록을 확인하고 <strong>저장</strong>을 누릅니다. 알림서비스는 필요한 경우에만 선택합니다. 내용을 검토한 뒤 <strong>작성완료</strong>를 누릅니다.</p><p class="rg-pending">작성완료 이후 출력 화면은 추가 확인 예정입니다.</p></div></details>';}
+])+verifiedCapture('picker')+'<p>첨부서면 목록을 확인하고 <strong>저장</strong>을 누릅니다. 알림서비스는 필요한 경우에만 선택합니다. 내용을 검토한 뒤 <strong>신청서작성완료</strong>를 누릅니다.</p><p class="rg-pending">작성완료 이후 출력 화면은 추가 확인 예정입니다.</p></div></details>';}
  function paymentPanel({context}){
   const el=document.getElementById('rgPayment'),cache=new Map();let key='',topic='capital',year='',capital=null;
   el.innerHTML='<h3>ERP 납부액 계산</h3><p class="rg-note">전자표준양식 · 선택한 등기사항 기준 · 법령 확인 2026.11.16</p><div class="rg-payment-controls"><p>법인 구분: <output id="rgPayEntity"></output><br><output id="rgPayScope"></output><br><output id="rgPayYear"></output></p><label>중과·감면·조례 특례<select id="rgPayTreatment"><option value="">미확인</option><option value="standard">중과·감면에 해당하지 않음</option><option value="triple">출자증가 3배 중과·감면 없음</option><option value="other">감면·그 밖의 특례</option></select></label><label id="rgPayBeforeLabel">직전 등기부의 납입출자금 총액(원)<output id="rgPayBefore">자동 연결 보류</output></label></div><p id="rgPayAfter"></p>'+fieldTable([['과세표준액 · 증가액','<output id="rgPayBase"></output>'],['등록면허세','<output id="rgPayRegistration"></output>'],['지방교육세','<output id="rgPayEducation"></output>'],['신청수수료','<output id="rgPayFee"></output>']])+'<ul id="rgPayNeeds" class="rg-payment-needs" aria-live="polite"></ul><p id="rgPayFormula"></p><p class="rg-note">수수료는 면제 전 기본액입니다. 여러 변경을 묶거나 관할을 이전하면 이 단독 산식을 사용하지 않습니다.</p><details><summary>중과·감면 판단</summary><p>출자증가 3배 중과는 대도시 내 설립·전입·사업장 설치와 그 시점 등 지방세법 제28조 제2항의 조건으로 판단합니다. 주소가 수도권이라는 이유만으로 선택하지 않습니다.</p><p>사회적협동조합은 별도 세율과 조례상 감면 조건을 검토합니다. 경기도 도세감면조례 제13조 등에서 정한 설립·출자금 규모·기간·대상 등기 조건을 충족해야 하므로 사회적이라는 이유만으로 일괄 감면하지 않습니다.</p><a href="https://www.law.go.kr/LSW/ordinInfoP.do?gubun=ELIS&amp;ordinSeq=2114419" target="_blank" rel="noopener noreferrer">경기도 도세감면조례</a></details><details><summary>계산 근거</summary><ul><li><a href="https://www.law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&amp;lsJoLnkSeq=1031543199" target="_blank" rel="noopener noreferrer">지방세법 제28조 제1항 제6호</a> · 일반 협동조합 출자증가 0.4%/최저 112,500원, 기타 변경 40,200원</li><li><a href="https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1031175707" target="_blank" rel="noopener noreferrer">지방세법 제28조 제2항</a> · 대도시 등 3배 중과 적용조건</li><li><a href="https://www.law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&amp;lsJoLnkSeq=1031196225" target="_blank" rel="noopener noreferrer">지방세법 제151조 제1항 제2호</a> · 지방교육세 20%</li><li><a href="https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&amp;lspttninfSeq=113800" target="_blank" rel="noopener noreferrer">등기사항증명서 등 수수료규칙 제5조의3·제5조의5</a> · 전자표준양식 일반 변경 1목적 5,000원</li><li><a href="https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&amp;lsJoLnkSeq=1000577035" target="_blank" rel="noopener noreferrer">지방세기본법 제59조</a>·<a href="https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&amp;lsJoLnkSeq=1030471335" target="_blank" rel="noopener noreferrer">국고금 관리법 제47조</a> · 10원 미만 끝수 버림</li></ul><p>소규모 협동조합 최저세액 감면 개편안은 확정 시행 근거를 확인하기 전까지 적용하지 않습니다.</p></details>';
@@ -104,7 +118,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
   root.addEventListener('pagehide',leave);root.addEventListener('pageshow',resume);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else resume();});if(root.frameElement)new MutationObserver(records=>{if(root.frameElement.hidden||records.some(r=>r.oldValue===null))leave();if(!root.frameElement.hidden)resume();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});queueMicrotask(resume);
   return{leave,resume,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.6.1'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.7.0'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',formalName='',authorized=false,view=0,ui;
  const context=()=>({coop,formalName,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};
