@@ -1,4 +1,4 @@
-/* 변경등기 가이드1.8.0 · 확인한 화면별 입력칸·기존 ERP 값 연결. */
+/* 변경등기 가이드1.9.0 · 단일 출자 경로·확인한 클릭 위치. */
 (function(root){
  'use strict';
  const types={
@@ -65,7 +65,7 @@
   return '';
  }
  function steps(key){const t=types[key];if(!t)throw Error('변경 유형을 선택해 주세요.');let entry;
-if(key==='capital')entry='<ol><li><strong>기타사항 → 1. 출자에관한사항 → 변경</strong>을 누릅니다.</li><li>제목의 대/소분류와 <strong>1. 출자에관한사항</strong>을 확인합니다.</li><li><strong>내용</strong> 한 칸에 아래의 변경 후 전체 출자총좌수·납입출자금 총액을 함께 입력합니다.</li><li><strong>등기원인</strong>은 변경·말소·경정·회복 중 이번 근거에 맞게 선택하고 필요한 원인은 직접 입력합니다.</li><li><strong>등기원인일자</strong>에 확인한 효력일을 YYYY-MM-DD로 입력한 뒤 <strong>등록완료</strong>를 누릅니다.</li></ol><p>내용칸은 ERP 변경 후 값입니다. 등기부의 기존 값은 증명서와 별도로 대조합니다.</p>'+root.CoopRegistryGuideScreens.capital()+actualCapitalCapture();
+if(key==='capital')entry=root.CoopRegistryGuideScreens.capital();
 else if(key==='officers'||key==='chair')entry=officerEntry();
 else entry=observedEntry(key);
 return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장과 ERP 현재 1좌 금액을 자동으로 불러와 계산합니다.':t.erp)+'</p>'],[key==='capital'?'출자에관한사항 입력':t.label+' 입력',entry]];}
@@ -90,14 +90,27 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
  }
  function mount({client,authorize,context}){
   const $=id=>document.getElementById(id),drafts=new Map();let topic='capital',epoch=0,flight=null,infoVersion=0,fields={name:'',number:''},infoState={name:'unloaded',number:'unloaded'},inputs,paymentUi,screens;const copyFlights=new Map();
-  $('rgCommon').innerHTML=root.CoopRegistryGuideScreens.common();$('rgBatch').querySelector('.rg-step-body').insertAdjacentHTML('beforeend',root.CoopRegistryGuideScreens.batch());
+  $('rgCommon').innerHTML=root.CoopRegistryGuideScreens.common();$('rgBatch').querySelector('.rg-step-body').innerHTML=root.CoopRegistryGuideScreens.batch();
   const visible=()=>!document.hidden&&(!root.frameElement||!root.frameElement.hidden),current=op=>context().authorized&&visible()&&epoch===op.epoch&&context().key===op.key&&!op.controller.signal.aborted;
   function updateValues(value){const active=context().authorized&&visible(),output=document.querySelector('[data-rg-capital-value]');paymentUi?.setCapital(active?value?.capital:null);if(output)output.textContent=value?.topic==='capital'&&active?(value.content||value.state):'ERP 값 확인 중';for(const node of document.querySelectorAll('[data-rg-officer-field]')){const text=active&&value?.official?.[node.dataset.rgOfficerField];node.textContent=typeof text==='string'&&text?text:'ERP 처리 이력 선택';}}
   function clearInfo(){infoVersion++;fields={name:'',number:''};infoState={name:'unloaded',number:'unloaded'};for(const id of ['rgCompanyName','rgCorporateNumber'])if($(id))$(id).textContent='';for(const n of document.querySelectorAll('[data-rg-copy]'))n.disabled=true;}
   function infoStatus(){const notes=[];for(const[key,label]of [['name','조합명'],['number','법인등록번호']]){if(infoState[key]==='failed')notes.push(label+' 조회 실패');else if(infoState[key]==='missing')notes.push(label+' 미등록');else if(infoState[key]==='loading'||infoState[key]==='unloaded')notes.push(label+' 확인 중');}$('rgInfoStatus').textContent=notes.join(' · ');$('rgInfoRetry').hidden=!Object.values(infoState).includes('failed');$('rgInfoRetry').disabled=!!flight;}
   function profileReady(value){if(!context().authorized||!visible())return;if(value?.error){infoState.name='failed';fields.name='';}else{fields.name=String(value?.name||'').trim();infoState.name=fields.name?'ready':'missing';}infoVersion++;$('rgCompanyName').textContent=fields.name;for(const n of document.querySelectorAll('[data-rg-copy="name"]'))n.disabled=!fields.name||copyFlights.has('name');infoStatus();}
   function leave(){epoch++;screens?.leave();flight?.controller.abort();flight=null;inputs?.leave();paymentUi?.leave();clearInfo();if($('rgInfoRetry')){$('rgInfoRetry').hidden=true;$('rgInfoRetry').disabled=false;}if($('rgInfoStatus'))$('rgInfoStatus').textContent='';}
-  function draw(key){if(topic===key&&$('rgSteps').children.length){void inputs?.refresh();return;}if($('rgSteps').children.length)drafts.set(topic,new Set([...$('rgSteps').querySelectorAll('details[open]')].map(x=>Number(x.dataset.step))));topic=key;for(const n of $('rgTopics').children)n.setAttribute('aria-pressed',String(n.dataset.topic===key));$('rgSelectedCategory').textContent=types[key].category;$('rgSelectedItem').textContent={capital:'기타사항',officers:'임원/출자항목',chair:'임원/출자항목',office:'주사무소',purpose:'목적',name:'명칭'}[key];$('rgCauseHint').textContent=key==='capital'?'선택한 회계연도 말의 출자총좌수·납입총액 변경입니다.':types[key].label+'의 의결·변경 근거입니다.';$('rgTypeNote').hidden=key!=='office';$('rgTopicTitle').textContent=types[key].label;const opened=drafts.get(key)||new Set([0,1]);$('rgSteps').innerHTML=steps(key).map(([title,html],i)=>`<details class="rg-step" data-step="${i}"${opened.has(i)?' open':''}><summary>${title}</summary><div class="rg-step-body">${html}</div></details>`).join('');for(const n of $('rgSteps').querySelectorAll('details'))n.addEventListener('toggle',()=>{if(n.isConnected&&n.parentElement===$('rgSteps'))drafts.set(key,new Set([...n.parentElement.querySelectorAll('details[open]')].map(x=>Number(x.dataset.step))));});if(inputs){inputs.open(key);$('rgSteps').querySelector('[data-step="0"] .rg-step-body').append(inputs.element);}screens?.sync();}
+  function draw(key){
+   if(topic===key&&$('rgSteps').children.length){void inputs?.refresh();return;}
+   if($('rgSteps').children.length)drafts.set(topic,new Set([...$('rgSteps').querySelectorAll('details[open]')].map(x=>Number(x.dataset.step))));
+   topic=key;for(const n of $('rgTopics').children)n.setAttribute('aria-pressed',String(n.dataset.topic===key));
+   $('rgSelectedCategory').textContent=types[key].category;
+   $('rgExpandLabel').textContent=key==='office'?'실제 이전은 주사무소이전(관할내/관할외)을 구분합니다. 해당 후속 절차는 아직 확인하지 않았습니다.':'변경등기 왼쪽 +를 눌러 세부 변경유형을 펼칩니다.';
+   document.querySelector('[data-rg-other-single]').hidden=['capital','office'].includes(key);
+   $('rgSelectedItem').textContent={capital:'기타사항',officers:'임원/출자항목',chair:'임원/출자항목',office:'주사무소',purpose:'목적',name:'명칭'}[key];
+   $('rgCauseHint').textContent=key==='capital'?'선택한 회계연도 말의 출자총좌수·납입총액 변경입니다.':types[key].label+'의 의결·변경 근거입니다.';
+   $('rgTypeNote').hidden=key!=='office';$('rgTopicTitle').textContent=types[key].label;
+   const opened=drafts.get(key)||new Set([0,1]);$('rgSteps').innerHTML=steps(key).map(([title,html],i)=>`<details class="rg-step" data-step="${i}"${opened.has(i)?' open':''}><summary>${title}</summary><div class="rg-step-body">${html}</div></details>`).join('');
+   for(const n of $('rgSteps').querySelectorAll('details'))n.addEventListener('toggle',()=>{if(n.isConnected&&n.parentElement===$('rgSteps'))drafts.set(key,new Set([...n.parentElement.querySelectorAll('details[open]')].map(x=>Number(x.dataset.step))));});
+   if(inputs){inputs.open(key);$('rgSteps').querySelector('[data-step="0"] .rg-step-body').append(inputs.element);}screens?.sync();
+  }
   $('rgAfterFields').innerHTML=commonAfter();
   paymentUi=paymentPanel({context});
   for(const [key,t]of Object.entries(types)){const b=document.createElement('button');b.type='button';b.dataset.topic=key;b.textContent=t.label;b.onclick=()=>draw(key);$('rgTopics').append(b);}
@@ -109,7 +122,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
   root.addEventListener('pagehide',leave);root.addEventListener('pageshow',resume);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else resume();});if(root.frameElement)new MutationObserver(records=>{if(root.frameElement.hidden||records.some(r=>r.oldValue===null))leave();if(!root.frameElement.hidden)resume();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});queueMicrotask(resume);
   return{leave,resume,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.8.0'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.9.0'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',formalName='',authorized=false,view=0,ui;
  const context=()=>({coop,formalName,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};
