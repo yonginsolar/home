@@ -1,4 +1,4 @@
-/* 변경등기 입력1.5.0 · 기존 읽기·조건이 갖춰진 납부액 계산. */
+/* 변경등기 입력1.5.1 · 기존 조회값의 항목별 복사. */
 (function(root){
  'use strict';
  const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());
@@ -83,11 +83,11 @@
   function cancel(){onValues(null);generation++;flight?.controller.abort();flight=null;validated='';loadButton.disabled=false;loadButton.hidden=true;data=null;rows.replaceChildren();officer.replaceChildren();status.textContent='';}
   function row(label,value,copyValue,enabled=true,buttonText='복사'){const box=make('div','',rows);box.className='rg-info-row';make('strong',label,box);const out=make('output',value||'ERP에서 확인할 값이 없습니다.',box);if(copyValue!==undefined&&copyValue!==''){const b=make('button',buttonText,box);b.type='button';b.disabled=!enabled||copies.has(label);b.setAttribute('aria-label',label+' 복사');b.dataset.rgInputCopy=label;b.dataset.rgCopyReady=String(enabled);b.onclick=async()=>{if(!allowed()||b.disabled||copies.has(label))return;const g=generation,k=context().key,v=valueVersion,op={};copies.set(label,op);b.disabled=true;const active=()=>g===generation&&v===valueVersion&&k===context().key&&allowed();try{await navigator.clipboard.writeText(String(copyValue));if(active())status.textContent='복사했습니다.';}catch{if(active())status.textContent='복사하지 못했습니다. 표시된 값을 선택해 복사해 주세요.';}finally{if(copies.get(label)===op)copies.delete(label);if(k===context().key&&allowed())for(const n of rows.querySelectorAll('[data-rg-input-copy]'))if(n.dataset.rgInputCopy===label)n.disabled=n.dataset.rgCopyReady!=='true';}};}return out;}
   function render(){onValues(null);valueVersion++;if(status.textContent.startsWith('복사'))status.textContent='';rows.replaceChildren();if(!data)return;
-   const recommendation=court(data.address);row('현재 ERP 주사무소',data.address,data.address);
+   const recommendation=court(data.address);row('현재 ERP 주사무소',data.address,data.address);row('현재 ERP 이사장',data.chair,data.chair);
    row('관할 추천',recommendation||'인터넷등기소의 전국등기소안내에서 확인해 주세요.');
    make('p','전국등기소안내에서 실제 법인·상업등기 관할을 확인하세요.',rows).className='rg-note';
    if(topic==='capital') {const c=data.capital,shares=c.shares;row('집계 기준',c.cutoff+(c.provisional?' · 연말 미확정':' · 종료연도 ERP 원장 집계'));row('변경 후 납입출자금 총액',c.total.toLocaleString('ko-KR')+'원');row('계산에 사용한 ERP 현재 1좌 금액',c.unit.toLocaleString('ko-KR')+'원');row('변경 후 출자총좌수',shares===null?'납입총액이 ERP 현재 1좌 금액으로 나누어떨어지지 않습니다.':shares.toLocaleString('ko-KR')+'좌');const content=shares===null?'':'출자총좌수 '+shares.toLocaleString('ko-KR')+'좌\n납입출자금 총액 '+c.total.toLocaleString('ko-KR')+'원';row('등기할 내용',content||'ERP 출자 기준과 원장을 확인해 주세요.',content,!c.provisional,'내용 복사');onValues({topic,capital:c,content:c.provisional?'':content,state:c.provisional?'연말 미확정':'ERP 출자 기준 확인 필요'});row('등기원인·원인일자','이번 변경의 원인과 근거 날짜를 직접 입력하세요.');caution.textContent='ERP 현재 단가로 계산한 좌수입니다. 과거 연말 단가를 확정한 값은 아닙니다.';}
-   else if(topic==='officers'||topic==='chair'){const change=root.CoopRegistryModel.officialChange(kind.value,officer.value,data.officials);onValues({topic,official:officialFields(kind.value,officer.value,data.officials,root.CoopRegistryModel)});row('변경 전',change.error?'ERP 처리 이력을 선택해 주세요.':change.before,change.error?'':change.before);row('변경 후',change.error||change.after,change.error?'':change.after);caution.textContent='등기원인·효력일은 이번 근거와 대조하세요. 대표자 주소와 식별번호는 인터넷등기소에서 직접 입력합니다.';}
+   else if(topic==='officers'||topic==='chair'){const change=root.CoopRegistryModel.officialChange(kind.value,officer.value,data.officials),official=officialFields(kind.value,officer.value,data.officials,root.CoopRegistryModel);onValues({topic,official});row('변경 전',change.error?'ERP 처리 이력을 선택해 주세요.':change.before,change.error?'':change.before);row('변경 후',change.error||change.after,change.error?'':change.after);if(official){row('ERP 임원 성명',official.name,official.name);row('ERP 임원 직책',official.role,official.role);row('ERP 임원 처리 구분',official.kind,official.kind);}caution.textContent='등기원인·효력일은 이번 근거와 대조하세요. 대표자 주소와 식별번호는 인터넷등기소에서 직접 입력합니다.';}
    else if(topic==='purpose'){row('현재 정관의 목적',data.purpose||'현재 정관에서 목적 조항을 하나로 확인하지 못했습니다.',data.purpose);caution.textContent='현재 목적은 변경 후 참고값입니다. 등기된 기존 목적과 의결된 추가·삭제 문구를 대조하세요. ERP 저장일을 효력일로 쓰지 않습니다.';}
    else if(topic==='name'){row('ERP 현재 조합명',data.name,data.name);caution.textContent='대상법인 검색·신청서 기존 명칭에는 등기부의 변경 전 명칭을 사용합니다. ERP가 이미 새 명칭이면 이 값은 변경 후 참고값입니다. 기존 명칭과 효력일은 등기부·의결문에서 확인하세요.';}
    else{caution.textContent='현재 ERP 주소가 새 주소라면 변경 후 참고값입니다. 변경 전 등기주소·실제 이전일과 이전 전후의 법인·상업등기 관할을 각각 확인하세요.';}
@@ -107,5 +107,5 @@
   loadButton.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});
   return{element:el,open,refresh,leave:cancel};
  }
- root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,officialFields,payment,version:'1.5.0'});
+ root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,officialFields,payment,version:'1.5.1'});
 })(typeof window==='undefined'?globalThis:window);
