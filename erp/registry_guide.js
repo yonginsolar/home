@@ -1,4 +1,4 @@
-/* 변경등기 가이드1.9.0 · 단일 출자 경로·확인한 클릭 위치. */
+/* 변경등기 가이드1.9.1 · 단일 출자 경로·확인한 클릭 위치. */
 (function(root){
  'use strict';
  const types={
@@ -29,7 +29,7 @@
  function officerEntry(){return '<ol><li><strong>임원/출자항목</strong>에서 임원을 검색합니다. <strong>검색</strong> 또는 <strong>전체보기</strong>로 대상 행을 찾습니다.</li><li>이미 등기된 임원을 바꾸면 해당 행의 <strong>변경</strong>, 새 임원을 넣으면 <strong>임원 추가</strong>를 누릅니다.</li><li>아래 항목을 확인해 입력합니다.</li></ol>'+root.CoopRegistryGuideScreens.officers(fieldTable([
 ['등기원인','취임·선임·중임·해임·사임·임기만료·퇴임 등 이번 근거에 맞는 원인을 선택합니다.'+root.CoopRegistryGuideScreens.ref('ERP 임원 처리 구분','ERP 처리 구분 · 등기 근거와 대조','kind')],
 ['원인 직접입력','추가할 원인 문구가 있으면 직접 입력합니다.'],
-['등기원인일자','확인한 원인의 효력일을 YYYY-MM-DD로 입력합니다. 아래 임기와 같은 날로 단정하지 않습니다.<br>ERP 임기 대조: <output data-rg-officer-field="dates">ERP 처리 이력 선택</output>'],
+['등기원인일자','확인한 원인의 효력일을 YYYY-MM-DD로 입력합니다.<br>ERP 임기 대조: <output data-rg-officer-field="dates">ERP 처리 이력 선택</output>'],
 ['직책','이사·이사장·감사 중 실제 등기할 직책을 고릅니다.'+root.CoopRegistryGuideScreens.ref('ERP 임원 직책','ERP 직책 · 실제 등기 직책과 대조','role')],
 ['대표권 있음','실제 대표권이 있으면 체크합니다. 이사장 직책 선택과는 별개이며, 체크하면 주소가 필수로 나타납니다.'],
 ['임시·일시·공동','해당 근거가 있는 구분만 선택합니다.'],
@@ -40,7 +40,7 @@
 ['출자항목·규정','이번 신청의 해당 사항을 확인해 입력합니다.']
 ]))+'<p>기존 행 수정은 <strong>등록완료</strong>를 누릅니다. 임원 추가는 다음 임원도 입력하면 <strong>저장 후 계속입력</strong>, 마지막이면 <strong>등록완료</strong>를 누릅니다. 입력을 새로 시작할 때는 <strong>다시 작성하기</strong>, 그만두면 <strong>등록취소</strong>를 선택합니다.</p>';}
  function observedEntry(key){
-  const basis='의결·등기 근거의 원인과 실제 효력일을 사용합니다. ERP 저장일이나 예시 문구를 대신 넣지 않습니다.';
+  const basis='의결·등기 근거의 원인과 실제 효력일을 입력합니다.';
   if(key==='name')return '<p>'+basis+'</p>'+fieldTable([
    ['등기원인','이번 명칭 변경의 실제 원인을 선택·입력합니다.'],
    ['일자','확인한 원인의 효력일을 입력합니다.'],
@@ -69,7 +69,7 @@ if(key==='capital')entry=root.CoopRegistryGuideScreens.capital();
 else if(key==='officers'||key==='chair')entry=officerEntry();
 else entry=observedEntry(key);
 return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장과 ERP 현재 1좌 금액을 자동으로 불러와 계산합니다.':t.erp)+'</p>'],[key==='capital'?'출자에관한사항 입력':t.label+' 입력',entry]];}
- function commonAfter(){return '<p class="rg-note">3·4단계의 입력칸은 출자 변경 경로에서 확인했습니다.</p><details class="rg-step" data-rg-stage="3" data-rg-observed-for="capital"><summary>3 등록면허세 및 수수료</summary><div class="rg-step-body"><div id="rgPayment"></div>'+fieldTable([
+ function commonAfter(){return '<details class="rg-step" data-rg-stage="3" data-rg-observed-for="capital"><summary>3 등록면허세 및 수수료</summary><div class="rg-step-body"><div id="rgPayment"></div>'+fieldTable([
 ['납입지역·납세번호','발급된 등록면허세 납부서의 지역과 납세번호를 그대로 옮깁니다. 세금 신고·납부는 <a href="https://www.wetax.go.kr/" target="_blank" rel="noopener noreferrer">위택스</a> 또는 관할 지방세 부서에서 진행합니다.'],
 ['스캔첨부·전자납부 조회','종이 납부서는 스캔첨부, 전자납부한 건은 전자납부 조회로 납부정보를 연결합니다.'],
 ['농어촌특별세·면제','감면을 적용하는 건은 감면 근거에 따른 농어촌특별세 과세 여부·세액이 별도로 필요합니다. 이 계산에는 포함하지 않습니다.'],
@@ -102,7 +102,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
    if($('rgSteps').children.length)drafts.set(topic,new Set([...$('rgSteps').querySelectorAll('details[open]')].map(x=>Number(x.dataset.step))));
    topic=key;for(const n of $('rgTopics').children)n.setAttribute('aria-pressed',String(n.dataset.topic===key));
    $('rgSelectedCategory').textContent=types[key].category;
-   $('rgExpandLabel').textContent=key==='office'?'실제 이전은 주사무소이전(관할내/관할외)을 구분합니다. 해당 후속 절차는 아직 확인하지 않았습니다.':'변경등기 왼쪽 +를 눌러 세부 변경유형을 펼칩니다.';
+   $('rgExpandLabel').textContent=key==='office'?'주사무소이전(관할내/관할외) 중 해당 경로를 선택합니다.':'변경등기 왼쪽 +를 눌러 세부 변경유형을 펼칩니다.';
    document.querySelector('[data-rg-other-single]').hidden=['capital','office'].includes(key);
    $('rgSelectedItem').textContent={capital:'기타사항',officers:'임원/출자항목',chair:'임원/출자항목',office:'주사무소',purpose:'목적',name:'명칭'}[key];
    $('rgCauseHint').textContent=key==='capital'?'선택한 회계연도 말의 출자총좌수·납입총액 변경입니다.':types[key].label+'의 의결·변경 근거입니다.';
@@ -122,7 +122,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
   root.addEventListener('pagehide',leave);root.addEventListener('pageshow',resume);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else resume();});if(root.frameElement)new MutationObserver(records=>{if(root.frameElement.hidden||records.some(r=>r.oldValue===null))leave();if(!root.frameElement.hidden)resume();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});queueMicrotask(resume);
   return{leave,resume,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.9.0'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.9.1'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',formalName='',authorized=false,view=0,ui;
  const context=()=>({coop,formalName,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};

@@ -23,7 +23,7 @@
    f.read.disabled=false;f.read.setAttribute('aria-disabled',String(!!op));f.read.setAttribute('aria-busy',String(!!op));f.read.textContent=op?'조회 중…':phases.finance==='error'?'다시 확인':'다시 조회';
    const revision=finance?.revision?.split(' · '),saved=revision?.[0]?new Date(revision[0]).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})+(revision[1]?' · '+revision[1]:''):'';
    f.source.textContent=mode==='live'?year()+'-01-01 ~ '+(end()||'기준일 선택')+' · 실시간 장부 · 단위: 원':year()+'-01-01 ~ '+year()+'-12-31 · '+(finance?.source||'결산용 자료')+(saved?' · '+saved:'')+' · 단위: 원';
-   f.notice.textContent=mode==='live'&&!validEnd()?'해당 회계연도 안에서 오늘까지의 조회기준일을 선택해 주세요.':phases.finance==='error'?financeForbidden?'현재 조합의 결산 자료 조회 권한이 없습니다.':'자료를 확인하지 못했습니다. 다시 확인해 주세요.':phases.finance==='ready'?(finance?.empty?(mode==='closing'?'결산 자료 준비 전':'조회기준일까지 등록된 전표가 없습니다.'):(mode==='live'?'실시간 재무값은 복사할 수 없습니다.':finance?.missing.join(' ')||'')):phases.finance==='paused'?'기간이 바뀌었습니다. 다시 조회해 주세요.':financeWanted?'자료를 불러오는 중…':'';
+   f.notice.textContent=mode==='live'&&!validEnd()?'해당 회계연도 안에서 오늘까지의 조회기준일을 선택해 주세요.':phases.finance==='error'?financeForbidden?'현재 조합의 결산 자료 조회 권한이 없습니다.':'자료를 확인하지 못했습니다. 다시 확인해 주세요.':phases.finance==='ready'?(finance?.empty?(mode==='closing'?'결산 자료 준비 전':'조회기준일까지 등록된 전표가 없습니다.'):(mode==='live'?'실시간 재무값은 복사할 수 없습니다.':finance?.balance==='mismatch'?'자산총계가 부채총계와 자본총계의 합계와 맞지 않아 재무값 복사를 잠갔습니다. 결산 자료를 확인해 주세요.':finance?.balance==='unverified'?'자산·부채·자본 총계 중 빠진 값이 있어 합계를 확인하지 못했습니다.':finance?.missing.join(' ')||'')):phases.finance==='paused'?'기간이 바뀌었습니다. 다시 조회해 주세요.':financeWanted?'자료를 불러오는 중…':'';
   }
   function render(){
    if(!allowed())return;const p=root.CoopRules.policy(context().formalName),y=year();
@@ -36,7 +36,7 @@
    }
    const biz=String(profile.bizNum||'').replace(/[-\s]/g,''),established=String(profile.estDate||''),validDate=/^\d{4}-\d{2}-\d{2}$/.test(established)&&Number.isFinite(Date.parse(established))&&new Date(established).toISOString().slice(0,10)===established;
    const values={year:String(y),name:context().formalName,members:count===null||!ended()?'':String(count),bizNum:/^\d{10}$/.test(biz)?biz.slice(0,3)+'-'+biz.slice(3,5)+'-'+biz.slice(5):'',estDate:validDate?established:'',address:profile.company_address||'',phone:profile.company_contact_phone||'',assemblyYears:y+'년 사업계획 승인 총회 · '+(y+1)+'년에 열린 '+y+'년 결산 승인 총회'};
-   if(phases.finance==='ready'&&financeKey===financeSelection())for(const[key,n]of Object.entries(finance.values)){const loss=['gross','pretax','net'].includes(key);values[key]={copy:String(loss?Math.abs(n):n),copyable:mode==='closing',display:(loss?(n<0?'손실 ':'이익 '):'')+(loss?Math.abs(n):n).toLocaleString('ko-KR')+'원'};}
+   if(phases.finance==='ready'&&financeKey===financeSelection())for(const[key,n]of Object.entries(finance.values)){const loss=['gross','pretax','net'].includes(key);values[key]={copy:String(loss?Math.abs(n):n),copyable:mode==='closing'&&finance.balance!=='mismatch',display:(loss?(n<0?'손실 ':'이익 '):'')+(loss?Math.abs(n):n).toLocaleString('ko-KR')+'원'};}
    guide.update(values);configureFinance();if(guide.step()===2)void activityUI?.show();
   }
   function leave(){
@@ -89,5 +89,5 @@
   document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else if(allowed())void refresh();});
   return {open:()=>{leave();return refresh();},leave,refresh};
  }
- root.RegistryDisclosure=Object.freeze({attach,version:'1.4.1'});
+ root.RegistryDisclosure=Object.freeze({attach,version:'1.4.2'});
 })(window);
