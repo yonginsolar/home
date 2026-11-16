@@ -1,67 +1,102 @@
-/* 2026 공식 경영공시 가이드 인쇄 20~33쪽의 입력칸·원천 매핑. 공시 작성/제출 기능 아님. */
+/* 2026 공식 작성가이드(2025 회계연도) 20~33쪽. 안내·복사만 제공하며 저장·제출하지 않는다. */
 (function(root){
  'use strict';
  const steps=[
-  ['1. 협동조합 기본정보',[
-   ['협동조합명','현재 인가·신고된 정식 명칭을 사용합니다.','ERP 정식 조합명 · 인가증/신고확인증','name'],
-   ['회계연도 기간','공시하는 실적연도의 시작일과 종료일입니다. 12월 말 결산이면 아래 기간을 사용합니다.','정관의 회계연도 조항','period'],
-   ['설립연월일','창립총회일이 아니라 법인등기부의 회사성립연월일입니다.','법인등기사항증명서 → 회사성립연월일 · ERP 조합설정 설립일','estDate'],
-   ['사업자등록번호','사업자등록증의 10자리 등록번호 또는 고유번호증의 고유번호입니다. 둘 다 없을 때만 없음에 표시합니다.','사업자등록증/고유번호증 → 등록번호 · ERP 조합설정','bizNum'],
-   ['주소·제1지사무소·제2지사무소','주사무소와 실제 설치한 지사무소의 주소를 각각 적습니다. 이사장 개인 주소가 아닙니다.','법인등기사항증명서 → 본점/주사무소와 지점/분사무소 · ERP 조합설정의 현재 주사무소','address'],
-   ['연락처·홈페이지','조합의 공식 연락처와 공개 홈페이지 주소를 적습니다.','ERP 조합설정 → 공식 연락처 · 조합 공개 홈페이지','phone'],
-   ['설립목적','인가·신고된 정관의 목적 조항을 적습니다. 사업의 종류 조항을 대신 넣지 않습니다.','ERP 문서함 → 유효한 정관의 목적 조항'],
-   ['업종 및 업태','사업자등록증에 적힌 업종과 업태를 각각 옮깁니다.','사업자등록증 → 업태/종목'],
-   ['인가번호','법인등록번호나 사업자번호가 아닌 설립인가·신고 번호입니다.','인가증 또는 신고확인증 → 인가/신고 번호'],
-   ['조직연혁','주요 설립·변경 사건을 날짜와 내용으로 적습니다. 최대 5개입니다.','설립·변경 등기와 인가/신고 자료의 실제 효력일'],
-   ['의사결정기구','총회·이사회·대의원총회 등 실제 설치한 기구를 선택합니다. 적법하게 이사회를 두지 않은 경우는 정관·총회 의결에 따릅니다.','정관의 총회/이사회/대의원총회 조항과 설치 의결 의사록'],
-   ['임원현황','대상연도 말 재임한 이사장·이사·감사를 한 명씩 입력합니다. 현재 임원만 그대로 쓰지 않습니다.','ERP 임원·위원회 관리 → 임기 이력 · 기준일 당시 임기'],
-   ['조합원 현황','대상연도 말 명부의 전체 인원을 사용합니다. 사업자(생산자)·소비자·직원·자원봉사자·후원자별 인원은 가입 유형으로 나누며, ERP의 개인/단체 구분으로 대신하지 않습니다.','ERP 조합원 관리 → 시청용 명부의 기준일을 대상연도 말로 지정 · 가입신청서의 조합원 유형','members'],
-   ['직원','대상연도 말 4대보험 가입자를 기준으로 인원(명)을 적고 성별·정규직·취약계층별 합계를 전체 인원과 맞춥니다.','해당 연도 말 4대보험 가입자 명부 · ERP 직원 관리의 입·퇴사 이력'],
-   ['배당금','일반협동조합의 대상연도 배당금을 입력합니다. 출자금 납입액과 구분합니다.','총회 승인 잉여금처분계산서의 배당금 · ERP 확정 배당 회차','', 'ordinary'],
-   ['첨부파일: 정관·규약·규정','현재 인가·신고되어 유효한 날인본의 공개용 사본을 첨부합니다.','ERP 문서함 → 정관/규약 · 개인번호·개인 주소·연락처를 가린 사본']
+  ['협동조합 기본정보',[
+   ['회계연도','year','실적이 발생한 회계연도'],
+   ['협동조합명','name','인가증·신고확인증의 정식 명칭'],
+   ['회계연도 기간','period','정관의 회계연도 시작일·종료일'],
+   ['설립연월일','estDate','법인등기부의 회사성립연월일'],
+   ['업종·업태','','사업자등록증의 업종·업태'],
+   ['인가번호','','설립인가증·신고확인증의 번호'],
+   ['사업자등록번호','bizNum','사업자등록증·고유번호증'],
+   ['카테고리 분류','','포털의 해당 분류 선택'],
+   ['주소','address','주사무소 주소'],
+   ['제1지사무소','','실제 설치한 지사무소 주소'],
+   ['제2지사무소','','실제 설치한 지사무소 주소'],
+   ['연락처','phone','조합 공식 연락처'],
+   ['홈페이지','','조합 공개 홈페이지 주소'],
+   ['설립목적','','유효한 정관의 목적 조항'],
+   ['조직연혁','','날짜·주요 내용, 최대 5개'],
+   ['의사결정기구','','정관과 설치 의결: 총회·대의원총회·이사회 등'],
+   ['임원현황','','회계연도 말 재임 임원: 직위·성명·경력·의결권'],
+   ['조합원 현황','members','회계연도 말 전체 인원. 사업자·소비자·직원·자원봉사자·후원자별 구분은 가입 유형 확인'],
+   ['직원현황','','회계연도 말 4대보험 가입자: 성별·고용형태·취약계층 구분'],
+   ['배당금','','총회 승인 잉여금처분계산서의 배당금','ordinary'],
+   ['첨부: 정관·규약·규정','','현재 유효한 날인본의 공개용 사본']
   ]],
-  ['2. 재정 및 성과',[
-   ['자산 총계','대상연도 말 재무상태표의 자산총계를 원 단위로 입력합니다. 부채총계+자본총계와 같아야 합니다.','총회 승인 비교식 재무상태표 → 당기 자산총계'],
-   ['부채 총계','재무상태표의 부채총계입니다. 현금 지급액이나 미지급금 한 계정만 넣지 않습니다.','총회 승인 비교식 재무상태표 → 당기 부채총계'],
-   ['자본 총계','재무상태표의 자본총계입니다. 조합원 출자금만 입력하는 칸이 아닙니다.','총회 승인 비교식 재무상태표 → 당기 자본총계'],
-   ['조합원 출자금','재무상태표 자본 항목의 대상연도 말 조합원출자금(납입총액)을 입력합니다. 약정액은 제외합니다.','총회 승인 비교식 재무상태표 → 조합원출자금 · ERP 회계관리 결산보고서'],
-   ['누적 법정적립금 총액','대상연도 재무상태표에 표시된 법정적립금 잔액입니다. 이번 결산으로 새로 처분할 적립액을 더하지 않습니다.','총회 승인 비교식 재무상태표 → 법정적립금(전기까지 적립한 잔액)'],
-   ['누적 미처분이익잉여금','자본 상세내역에 들어갈 대상연도 재무상태표의 미처분이익잉여금입니다. 출자금·법정적립금과 구분합니다.','총회 승인 비교식 재무상태표 → 미처분이익잉여금 또는 결손금'],
-   ['법정적립금 처분액','이번 잉여금처분계산서에서 법정적립금으로 처분한 금액입니다. 위의 잔액과 별개입니다.','총회 승인 이익잉여금처분계산서 → 법정적립금'],
-   ['매출액','대상연도 손익계산서의 매출액을 원 단위로 적습니다. 출자금·지원금·후원금·회비를 매출에 임의로 합치지 않습니다.','총회 승인 비교식 손익계산서 → 당기 매출액 · ERP 회계관리 결산보고서'],
-   ['매출총손익','매출총이익/매출총손실 중 해당 구분을 먼저 고르고 금액을 입력합니다. 손실 구분은 포털에서 음수로 계산됩니다.','총회 승인 손익계산서 → 매출총이익 또는 매출총손실'],
-   ['판매비와 관리비','손익계산서의 대상연도 판매비와관리비 합계입니다. 개별 비용 한 계정만 입력하지 않습니다.','총회 승인 비교식 손익계산서 → 당기 판매비와관리비 합계'],
-   ['영업외수익·영업외비용','영업 외 수익과 비용을 각 칸에 따로 적습니다. 지원금·후원금·회비 등은 승인된 손익계산서의 계정 분류를 그대로 따릅니다.','총회 승인 비교식 손익계산서 → 당기 영업외수익/영업외비용 총액'],
-   ['법인세차감전손익','법인세차감전이익/법인세차감전손실을 고른 뒤 금액을 입력합니다. 당기순손익과 혼동하지 않습니다.','총회 승인 손익계산서 → 법인세차감전이익 또는 손실'],
-   ['법인세 등·당기순손익','각 칸에 손익계산서의 해당 당기 금액을 적습니다. 법인세 납부액 대신 법인세비용을 사용하고 손실은 손실 구분으로 표시합니다.','총회 승인 비교식 손익계산서 → 법인세 등 · 당기순이익/순손실'],
-   ['첨부파일 1: 사업결산 보고서','일반협동조합·일반연합회는 별지 제9호, 사회적협동조합·사회적연합회·이종연합회는 별지 제23호 서식입니다.','협동조합 기본법 시행규칙 해당 별지의 총회 승인본'],
-   ['첨부파일 2: 재무제표','전기와 당기를 함께 보여주는 재무상태표·손익계산서·이익잉여금처분계산서 또는 결손금처리계산서를 첨부합니다.','총회 승인 비교식 재무제표 3종 · 현재 ERP 원장 출력만으로 승인본을 대체하지 않음']
+  ['재정 및 성과',[
+   ['자산총계','assets','승인 재무상태표 → 당기 자산총계'],
+   ['부채총계','liabilities','승인 재무상태표 → 당기 부채총계'],
+   ['자본총계','equity','승인 재무상태표 → 당기 자본총계'],
+   ['조합원출자금','capital','승인 재무상태표 → 납입출자금'],
+   ['누적 법정적립금 총액','reserveBalance','승인 재무상태표 → 법정적립금 잔액'],
+   ['누적 미처분이익잉여금·미처리결손금','retained','승인 재무상태표 → 미처분이익잉여금·미처리결손금'],
+   ['매출액','revenue','승인 손익계산서 → 매출액'],
+   ['매출총손익','gross','승인 손익계산서 → 이익·손실 구분과 금액'],
+   ['판매비와 관리비','selling','승인 손익계산서 → 판매비와 관리비'],
+   ['영업손익','','포털 자동 계산값을 승인 손익계산서와 대조'],
+   ['영업외수익','otherRevenue','승인 손익계산서 → 영업외수익'],
+   ['영업외비용','otherExpense','승인 손익계산서 → 영업외비용'],
+   ['법인세차감전손익','pretax','승인 손익계산서 → 이익·손실 구분과 금액'],
+   ['법인세 등','tax','승인 손익계산서 → 법인세비용'],
+   ['당기순손익','net','승인 손익계산서 → 이익·손실 구분과 금액'],
+   ['법정적립금 처분액','reserveDisposition','승인 잉여금처분계산서 → 이번 처분액. 위 누적 잔액과 구분'],
+   ['첨부 1: 사업결산보고서','','총회 승인본: 일반·일반연합회 별지 제9호, 사회적·사회적연합회·이종연합회 별지 제23호'],
+   ['첨부 2: 재무제표','','전기·당기 비교식 재무상태표·손익계산서·잉여금처분계산서 또는 결손금처리계산서']
   ]],
-  ['3. 활동상황',[
-   ['활동상황','총회·대의원총회·이사회·기타 중 실제 열린 회의 구분을 선택하고 회의별로 추가합니다.','ERP 회의·문서 관리 → 해당 회의의 확정 의사록'],
-   ['총회 활동 상황','대상연도 사업계획을 승인한 총회와 그 사업결산을 승인한 다음 해 총회를 각각 적습니다.','사업계획·예산 승인 의사록과 사업결산 승인 의사록','assemblyYears'],
-   ['이사회·기타 기구의 실적','대상연도에 실제 개최한 회의 날짜와 안건·의결 결과를 의사록과 같게 적습니다. 무산 회의를 개최 실적으로 넣지 않습니다.','ERP 회의·문서 관리 → 대상연도 개최·완료 의사록'],
-   ['첨부파일: 총회·대의원총회 의사록','사업계획 승인과 사업결산 승인 의사록 두 종류를 첨부합니다. 의장과 선출된 조합원 3명 이상의 서명·날인본입니다.','위 총회 활동 상황에 입력한 회의의 서명·날인된 공개용 사본'],
-   ['첨부파일: 이사회 의사록','활동상황에 적은 대상연도 이사회 내역에 대응하는 의사록을 첨부합니다.','ERP 회의·문서 관리 → 해당 이사회의 확정·날인본']
+  ['활동상황',[
+   ['활동기구','','총회·대의원총회·이사회·기타 중 실제 활동한 기구'],
+   ['총회 활동상황','','일시·장소·조합원·참석자·결정사항·비고'],
+   ['이사회 활동상황','','일시·장소·이사·참석자·결정사항·비고. 무산 회의 제외'],
+   ['기타 활동상황','','해당 기구의 실제 활동 기록'],
+   ['첨부 1: 총회·대의원총회 의사록','','대상연도 사업계획 승인 총회와 다음 해 결산 승인 총회 두 종류. 의장·선출 조합원 3명 이상 서명·날인본'],
+   ['첨부 2: 이사회 의사록','','대상연도 활동상황에 대응하는 확정·날인본']
   ]],
-  ['4. 사업결과',[
-   ['사업계획·사업결과','대상연도 총회가 승인한 계획과 실제 실행 결과를 사업별로 요약합니다. 상담·교육훈련·정보제공, 조합 간 협력, 홍보·지역사회 사업 등 필수사업도 빠뜨리지 않습니다.','총회 승인 사업계획서와 사업보고서 · ERP 사업·교육·회의 기록','', 'plan'],
-   ['지역사회 기여실적','주사업과 중복되지 않는 별도의 인적·물적 기여만 적고, 실적이 없으면 비워둡니다.','대상연도 사업보고서의 별도 지역사회 활동·지원 실적','', 'social_group'],
-   ['인가 부처 감독상황과 조치 결과','대상연도에 받은 소관부처의 감독·행정조치와 이행 결과가 있을 때만 적습니다.','소관부처 공문과 조치 결과 회신','', 'social_group'],
-   ['주사업유형·주사업·기타사업','포털의 자동 주사업유형이 정관과 같은지 대조하고, 사업명도 정관의 사업 조항대로 추가합니다.','인가된 정관 → 사업 종류와 주사업 유형','', 'social'],
-   ['지역사업형·기타 공익증진형','사업비(원) 또는 서비스 공급(명·시간·회 중 하나)을 선택하고 주사업과 기타사업의 계획·실적을 같은 단위로 적습니다.','사업계획서 예산 · 손익계산서의 사업별 실제 비용 또는 서비스 제공 실적','', 'social'],
-   ['취약계층 사회서비스 제공형','명·시간·회 중 한 단위로 취약계층과 기타 대상의 공급 실적을 나눠 적습니다.','사회서비스 제공 실적 및 취약계층 증빙자료','', 'social'],
-   ['취약계층 고용형','인건비(원) 또는 직원 수(명)를 선택하고 취약계층과 기타 고용 실적을 나눕니다.','고용보험 가입자 명부·인건비 지출명세·취약계층 고용비율 확인서와 증빙','', 'social'],
-   ['위탁사업형','국가·지방자치단체와 체결한 위탁계약의 사업명과 실적입니다. 공공기관·학교와의 계약을 이 유형에 넣지 않습니다.','위탁계약서의 사업명·계약금 · 세금계산서 등 수행 증빙','', 'social'],
-   ['미이행 사유','정관상 주사업을 대상연도에 이행하지 못했다면 실제 사유를 적습니다.','대상연도 사업보고서의 미수행·지연 사유','', 'social'],
-   ['소액대출 및 상호부조 사업 실시 여부','정관상 해당 사업을 실제 실시했다면 실시를 선택하고 별지 제25호 사업결과보고서를 첨부합니다.','정관의 소액대출/상호부조 조항과 해당 사업 원장·결과보고서','', 'social'],
-   ['제출','모든 입력과 첨부를 마친 뒤 마지막 4단계에서 제출합니다. 임시저장만 하면 공시 완료가 아닙니다.','제출 즉시 공개 · 개인정보를 가린 첨부 사본으로 제출']
+  ['사업결과',[
+   ['사업계획','','대상연도 총회가 승인한 사업계획','plan'],
+   ['사업결과','','계획 대비 실제 사업실적. 상담·교육·협력·지역사회 등 필수사업 포함','plan'],
+   ['지역사회 기여실적','','주사업과 중복되지 않는 별도 기여실적. 없으면 공란','social_group'],
+   ['인가 부처 감독상황과 조치 결과','','대상연도 감독·행정조치가 있을 때 작성','social_group'],
+   ['주사업유형·주사업·기타사업','','인가 정관의 주사업유형·사업명과 대조','social'],
+   ['지역사업형·기타 공익증진형','','사업비(원) 또는 서비스(명·시간·회): 계획과 실적을 같은 단위로 작성','social'],
+   ['취약계층 사회서비스 제공형','','명·시간·회 중 한 단위. 취약계층·기타 대상별 계획과 실적','social'],
+   ['취약계층 고용형','','인건비(원) 또는 직원 수(명). 취약계층·기타별 계획과 실적','social'],
+   ['위탁사업형','','국가·지방자치단체 위탁계약의 사업명·사업비. 공공기관·학교 계약과 구분','social'],
+   ['미이행 사유','','대상연도 주사업 미이행 시 실제 사유','social'],
+   ['소액대출 및 상호부조 사업 실시 여부','','실시한 경우 별지 제25호 결과보고서 첨부','social'],
+   ['첨부: 사업결과 증빙서류','','기간·필수 내용이 맞는 기존 사업보고서·총회자료집·주사업 증빙 재사용 가능','social'],
+   ['제출 전 확인','','첨부의 주민번호·개인 주소·휴대전화 등은 가린 사본 사용. 포털 마지막 단계에서 제출하면 공개']
   ]]
  ];
- function mount(element,formalName){
-  const p=root.CoopRules.policy(formalName),allowed=type=>!type||!p.known&&p.kind!=='mixed_federation'||type==='ordinary'&&p.dividends||type==='social'&&p.kind==='social'||type==='social_group'&&['social','social_federation','mixed_federation'].includes(p.kind)||type==='plan'&&p.kind!=='social';
-  element.replaceChildren();const outputs=new Map();for(const[title,fields]of steps){const details=document.createElement('details'),summary=document.createElement('summary'),grid=document.createElement('div');summary.textContent=title;grid.className='disclosure-field-grid';details.append(summary,grid);details.open=title.startsWith('1.');for(const[field,instruction,source,key,type]of fields){if(!allowed(type))continue;const card=document.createElement('article'),h=document.createElement('h4'),body=document.createElement('p'),origin=document.createElement('small');h.textContent=field;body.textContent=instruction;origin.textContent='가져올 곳: '+source;card.append(h,body);if(key){const output=document.createElement('output');output.dataset.disclosureValue=key;card.append(output);if(!outputs.has(key))outputs.set(key,[]);outputs.get(key).push(output);}card.append(origin);grid.append(card);}element.append(details);}
-  return{update(values){for(const[key,nodes]of outputs)for(const node of nodes)node.textContent=values[key]||'';}};
+ function mount(element,formalName,{current=()=>true}={}){
+  const doc=element.ownerDocument,p=root.CoopRules.policy(formalName),outputs=new Map(),pages=[],tabs=[];
+  let active=0,generation=0;
+  const node=(tag,text,cls)=>{const n=doc.createElement(tag);if(text)n.textContent=text;if(cls)n.className=cls;return n;};
+  const allowed=type=>!type||!p.known&&p.kind!=='mixed_federation'||type==='ordinary'&&p.dividends||type==='social'&&p.kind==='social'||type==='social_group'&&['social','social_federation','mixed_federation'].includes(p.kind)||type==='plan'&&p.kind!=='social';
+  element.replaceChildren();const nav=node('nav',null,'disclosure-steps');nav.setAttribute('aria-label','공시 작성 순서');
+  const message=node('p',null,'disclosure-copy-status');message.setAttribute('role','status');
+  const footer=node('div',null,'disclosure-paging'),prev=node('button','이전'),position=node('span'),next=node('button','다음');prev.type=next.type='button';footer.append(prev,position,next);
+  function show(index,focus=false){active=Math.max(0,Math.min(3,index));pages.forEach((page,i)=>{page.hidden=i!==active;tabs[i].setAttribute('aria-current',i===active?'step':'false');});prev.disabled=active===0;next.disabled=active===3;position.textContent=(active+1)+' / 4';if(focus){pages[active].querySelector('h3').focus();}}
+  steps.forEach(([title,fields],index)=>{
+   const tab=node('button',(index+1)+'. '+title);tab.type='button';tab.onclick=()=>show(index,true);nav.append(tab);tabs.push(tab);
+   const page=node('section',null,'disclosure-step-panel'),heading=node('h3',(index+1)+'. '+title);heading.tabIndex=-1;page.append(heading);
+   if(index===1){const notice=node('p','총회 승인 여부와 대상 기간이 확인된 결산 수치가 아직 연결되어 있지 않습니다.','disclosure-source-status');notice.dataset.disclosureFinanceStatus='';page.append(notice);}
+   if(index===2){const n=node('p',null,'disclosure-source-status');n.dataset.disclosureAssembly='';page.append(n);}
+   const grid=node('div',null,'disclosure-field-grid');page.append(grid);
+   for(const[field,key,source,type]of fields){
+    if(!allowed(type))continue;
+    const card=node('article'),h=node('h4',field),origin=node('small',source);card.append(h);
+    if(key){const line=node('div',null,'disclosure-value-line'),output=node('output'),copy=node('button','복사');output.dataset.disclosureValue=key;copy.type='button';copy.dataset.disclosureCopy=key;copy.setAttribute('aria-label',field+' 복사');copy.hidden=true;line.append(output,copy);card.append(line);const item={output,copy,value:'',busy:false};outputs.set(key,item);
+     copy.onclick=async()=>{if(item.busy||!item.value||!current()||page.hidden)return;const value=item.value,token=generation;item.busy=true;copy.disabled=true;message.textContent='';try{await root.navigator.clipboard.writeText(value);if(token===generation&&current()&&item.value===value)message.textContent=field+' 복사 완료';}catch(_){if(token===generation&&current()&&item.value===value)message.textContent='복사하지 못했습니다. 표시된 값을 직접 선택해 주세요.';}finally{item.busy=false;copy.disabled=false;}};
+    }
+    card.append(origin);grid.append(card);
+   }
+   pages.push(page);
+  });
+  element.append(nav,...pages,message,footer);prev.onclick=()=>show(active-1,true);next.onclick=()=>show(active+1,true);
+  element.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat&&e.target.matches('button'))e.preventDefault();});show(0);
+  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:'';item.output.textContent=item.value;item.copy.hidden=!item.value;}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';},step:()=>active});
  }
- root.RegistryDisclosureFields=Object.freeze({mount,version:'1.0.0'});
+ root.RegistryDisclosureFields=Object.freeze({mount,version:'1.1.0'});
 })(window);
