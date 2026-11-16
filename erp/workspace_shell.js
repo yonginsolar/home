@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.14 — accept the current task's late readiness without a reload. */
+/* Persistent ERP workspace v1.2.15 — reuse an explicitly validated internal task route. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -101,7 +101,7 @@
     // The child validates scope, all parameters and open editors. Other pages,
     // deep links, tenants and business identifiers are never canonicalized here.
     return [...new Set([activeEntry,...retained.values()])].find(entry => {
-      try { return canRetain(entry) && task(entry)?.canNavigateMemberRoute?.(target) === true; }
+      try { const adapter=task(entry);return canRetain(entry) && (adapter?.canNavigateTaskRoute?.(target) === true || adapter?.canNavigateMemberRoute?.(target) === true); }
       catch (_) { return false; }
     });
   }
@@ -295,7 +295,7 @@
           }
           await task(cached).refresh({runtime:access.runtime,dirty:changed(cached)});
           if (ticket !== transition) return;
-          if (cached.route !== target && task(cached)?.navigateMemberRoute?.(target) !== true) {
+          if (cached.route !== target && task(cached)?.navigateTaskRoute?.(target) !== true && task(cached)?.navigateMemberRoute?.(target) !== true) {
             cancelLoading();status.textContent='작성 중인 화면을 보존했습니다. 창을 닫은 뒤 메뉴를 다시 선택해 주세요.';
             status.hidden=false;error.hidden=false;return;
           }

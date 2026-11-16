@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.4.0 | 활동상황의 기존 회의·의사록 조회·복사 -->
+<!-- Version: v1.4.1 | 경영공시 메뉴 복귀와 화면 이력 -->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
@@ -21,7 +21,7 @@
   <script src="registry_disclosure.js?v=1.3.0" defer integrity="sha384-GbXGbNAIZd2LOB9+6SrA/zm+7T5mYcYYg3FvHvtSoKWcB59x3O4zXlyCzPiBTDlW" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="/erp/erp_theme.css?v=1.1.1">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261020-hierarchy-1">
-  <script src="/erp/workspace_nav.js?v=20261115-registry-guide-1" defer></script>
+  <script src="/erp/workspace_nav.js?v=20261116-registry-navigation-1" defer></script>
   <style>
     #registryHub{max-width:1080px;margin:auto;padding:24px;line-height:1.6;overflow-wrap:anywhere}
     #registryHub header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}
@@ -34,6 +34,7 @@
     #registryHub :focus-visible{outline:3px solid #2e69b2;outline-offset:3px}
     #registryHub [hidden]{display:none!important}
     #registryDisclosure{min-width:0;max-width:100%}
+    #registryDisclosure .registry-return{position:sticky;top:0;z-index:5;padding:10px 0;background:var(--erp-bg,#f4f7fb);border-bottom:1px solid var(--erp-border,#d7dfe7)}
     #registryDisclosure button,#registryDisclosure select{font:inherit;color:inherit;max-width:100%;box-sizing:border-box;border:1px solid var(--erp-border,#c4cfda);border-radius:9px;background:var(--erp-surface,#fff);padding:8px 14px;cursor:pointer;overflow-wrap:anywhere;white-space:normal}
     #registryDisclosure button:disabled{cursor:default;opacity:.5}#registryDisclosure button[aria-disabled=true]{opacity:.6}
     #registryDisclosure .disclosure-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin:20px 0 12px}
@@ -81,7 +82,7 @@
       <button id="cardDisclosure" type="button" class="registry-menu-card"><strong>경영공시</strong><span>공식 입력 순서와 ERP 값 복사</span></button>
     </div>
     <section id="registryDisclosure" hidden aria-labelledby="disclosureTitle">
-      <button type="button" id="disclosureBack">← 등기·변경신고</button>
+      <nav class="registry-return" aria-label="상위 메뉴"><button type="button" id="disclosureBack">← 등기·변경신고 메뉴</button></nav>
       <div class="disclosure-heading"><h2 id="disclosureTitle" tabindex="-1">경영공시</h2><label for="disclosureYear">실적 회계연도<select id="disclosureYear" data-erp-query-control></select></label></div>
       <div class="disclosure-meta"><p id="disclosureType"></p><p id="disclosureResult" role="status"></p></div>
       <p id="disclosurePeriod"></p>
@@ -100,8 +101,20 @@
       let authorized=false,owner='',coop='',formalName='',disclosure;
       document.getElementById('cardCityRegistry').onclick=()=>window.ErpWorkspaceResume.navigate('registry.html');
       document.getElementById('cardRegistryGuide').onclick=()=>window.ErpWorkspaceResume.navigate('registry_guide.html');
-      document.getElementById('cardDisclosure').onclick=()=>{if(!authorized)return;cards.hidden=true;document.getElementById('registryDisclosure').hidden=false;disclosure.open();document.getElementById('disclosureTitle').focus({preventScroll:true});};
-      document.getElementById('disclosureBack').onclick=()=>{disclosure?.leave();document.getElementById('registryDisclosure').hidden=true;cards.hidden=!authorized;if(authorized)document.getElementById('cardDisclosure').focus({preventScroll:true});};
+      function applyView(focus=false){
+        if(!authorized||!disclosure)return;
+        const panel=document.getElementById('registryDisclosure'),open=location.hash==='#disclosure',changed=panel.hidden===open;
+        cards.hidden=open;panel.hidden=!open;
+        if(!changed)return;
+        if(open)disclosure.open();else disclosure.leave();
+        if(focus&&!document.hidden&&(!window.frameElement||!window.frameElement.hidden)){
+          const active=document.activeElement;
+          if(active===document.body||active===document.getElementById('cardDisclosure')||active===document.getElementById('disclosureBack')||active?.closest('[hidden]'))document.getElementById(open?'disclosureTitle':'cardDisclosure').focus({preventScroll:true});
+        }
+      }
+      document.getElementById('cardDisclosure').onclick=()=>{if(!authorized)return;location.hash='disclosure';applyView(true);};
+      document.getElementById('disclosureBack').onclick=()=>{if(!authorized)return;location.hash='';applyView(true);};
+      window.addEventListener('hashchange',()=>applyView(true));
       client.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||owner&&session?.user?.id&&session.user.id!==owner){authorized=false;disclosure?.leave();document.getElementById('registryDisclosure').hidden=true;cards.hidden=true;status.hidden=false;status.textContent='로그인을 다시 확인해 주세요.';}});
       async function init(){
         const user=await window.ErpRuntimeGuard.requireUser(client,{redirectUrl:'index.html'});if(!user.ok)return;
@@ -109,8 +122,14 @@
         const runtime=gate.runtime;if(!window.CoopRegistryModel.access(runtime)){status.textContent='현재 권한으로 등기·변경신고를 열 수 없습니다.';return;}
         coop=runtime.coop_id;owner=user.authUser.id;formalName=String(runtime.coop_name||'');authorized=true;cards.hidden=false;status.hidden=true;
         disclosure=window.RegistryDisclosure.attach({client,context:()=>({authorized,formalName,coop,key:owner+'|'+coop+'|'+formalName}),authorize:async()=>{const latest=await window.ErpRuntimeGuard.enforce(client,{moduleKey:'member_admin',moduleLabel:'경영공시',redirectUrl:'index.html'});if(!latest.ok||latest.runtime.coop_id!==coop||!window.CoopRegistryModel.access(latest.runtime)){authorized=false;disclosure?.leave();document.getElementById('registryDisclosure').hidden=true;cards.hidden=true;status.hidden=false;status.textContent='현재 조합 권한을 다시 확인해 주세요.';throw Error('현재 조합 권한을 다시 확인해 주세요.');}formalName=String(latest.runtime.coop_name||'');}});
+        applyView();
         await window.ErpWorkspace?.connect(client,runtime);
         window.ErpWorkspaceResume.register({modules:['member_admin'],authorize:value=>{const ok=value.coop_id===coop&&window.CoopRegistryModel.access(value);if(ok)formalName=String(value.coop_name||'');return ok;},refresh:async()=>{if(!document.getElementById('registryDisclosure').hidden)await disclosure.refresh();}});
+        const registryTarget=value=>{try{const target=new URL(value,location.href);return authorized&&target.origin===location.origin&&target.pathname.replace(/\.html$/,'').replace(/\/$/,'')===location.pathname.replace(/\.html$/,'').replace(/\/$/,'')&&target.search===location.search&&['','#disclosure'].includes(target.hash);}catch(_){return false;}};
+        if(window.ErpWorkspaceTask){
+          window.ErpWorkspaceTask.canNavigateTaskRoute=registryTarget;
+          window.ErpWorkspaceTask.navigateTaskRoute=value=>{if(!registryTarget(value))return false;history.replaceState(history.state,'',new URL(value,location.href).href);applyView();return true;};
+        }
       }
       const start=()=>init().catch(()=>{cards.hidden=true;status.hidden=false;status.textContent='메뉴를 불러오지 못했습니다. 전체 메뉴에서 다시 열어 주세요.';});
       if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();

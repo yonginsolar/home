@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.6.3 — separate the registry task menu. */
+/* ERP workspace navigation v1.6.4 — keep the three registry destinations available. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261115.registry2';
+  const VERSION = '20261116.registry3';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -41,10 +41,6 @@
       ['cardMeetingAttendance','회의 출석 관리',u=>/\/participation(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('view')==='meeting'],
       ['cardDocumentAdmin','규정·정관 관리',u=>/\/admin_member(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('scope')==='documents_admin'],
       ['cardSignatureAdmin','서명자 준비',u=>/\/officials_signature_admin(?:\.html)?\/?$/.test(u.pathname)]
-    ]},
-    btnRegistryHub: {root:'registry_hub',branches:[
-      ['cardCityRegistry','시청 변경신고',u=>/\/registry(?:\.html)?\/?$/.test(u.pathname)],
-      ['cardRegistryGuide','변경등기 가이드',u=>/\/registry_guide(?:\.html)?\/?$/.test(u.pathname)]
     ]},
     btnVoteHub: {root:'vote_hub',branches:[
       ['cardVoteCreate','새 선거 만들기',u=>/\/vote\/admin_setup(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('mode')==='create'],
@@ -272,6 +268,13 @@
     return null;
   }
   function hierarchyRows(owner,sources) {
+    // These three read-only destinations have the same existing registry access gate.
+    // Do not depend on a previously visited/visible hub or copy its hidden controls.
+    if (owner.dataset.menuId === 'btnRegistryHub') return [
+      ['city','시청 변경신고','registry.html',path==='registry'],
+      ['guide','변경등기 가이드','registry_guide.html',path==='registry_guide'],
+      ['disclosure','경영공시','registry_hub.html#disclosure',path==='registry_hub'&&pageUrl.hash==='#disclosure']
+    ].map(([key,label,route,selected])=>({key:'registry:'+key,label,href:url(route),selected,parent:null,children:[],registryView:key==='disclosure'}));
     let current=sources.map(source=>({source,label:localLabel(source),selected:localSelected(source),pane:paneFor(source),parent:null}));
     const hub=hubBranches[owner.dataset.menuId];
     let rows=current,branch=null;
@@ -321,6 +324,12 @@
     if (row.group && row.selected) { setRowOpen(row,row.group.hidden); return; }
     if (row.source) row.source.click();
     else if (row.href) {
+      if (row.registryView && path==='registry_hub') {
+        // Native fragment history keeps the current disclosure filters/DOM in this task.
+        taskDocument.defaultView.location.hash='disclosure';
+        window.ErpWorkspace.closeDrawer();
+        return;
+      }
       // The same parent-shell route handler owns cancellation, authorization and draft retention.
       if (!window.ErpWorkspaceShell?.navigate(row.href)) location.href=row.href;
     }
