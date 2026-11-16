@@ -1,4 +1,4 @@
-/* v1.0.0 — 저장된 총회 재무표 우선, 없을 때만 연간 회계 마감본. 읽기 전용. */
+/* v1.0.1 — 저장된 총회 재무표 우선, 없을 때만 연간 회계 마감본. 읽기 전용. */
 (function(root){'use strict';
  const fail=()=>{throw Error('DISCLOSURE_CLOSING_REVIEW');};
  const integer=v=>{if(typeof v!=='number'||!Number.isSafeInteger(v))fail();return v;};
@@ -6,7 +6,7 @@
  const stamp=v=>typeof v==='string'&&Number.isFinite(Date.parse(v));
  const result=(values,source,revision)=>({values,source,revision,empty:!Object.keys(values).length,missing:[],end:''});
  function snapshot(row,{coop,year}){
-  if(row.coop_id!==coop||typeof row.id!=='string'||!stamp(row.generated_at))fail();
+  if(row.coop_id!==coop||row.fiscal_year!==year||typeof row.id!=='string'||!stamp(row.generated_at))fail();
   if(!annual(row,year))return null;
   const s=row.summary;
   if(row.report_source!=='accounting_closing_report'||row.payload_version!==1||!s||s.fiscal_year!==year||s.period_start!==row.period_start||s.period_end!==row.period_end)fail();
@@ -58,5 +58,5 @@
   const r=await client.from('accounting_closing_report_snapshots').select('id,coop_id,fiscal_year,period_start,period_end,generated_at,report_source:report_payload->>source,payload_version:report_payload->schema_version,summary:report_payload->summary').eq('coop_id',coop).eq('fiscal_year',year).limit(2).abortSignal(signal);if(r.error)throw r.error;
   check();if(!Array.isArray(r.data)||r.data.length>1)fail();return r.data.length?snapshot(r.data[0],{coop,year})||result({},'결산 자료 준비 전',''):result({},'결산 자료 준비 전','');
  }
- root.DisclosureClosing=Object.freeze({load,snapshot,materials,version:'1.0.0'});
+ root.DisclosureClosing=Object.freeze({load,snapshot,materials,version:'1.0.1'});
 })(window);

@@ -88,7 +88,7 @@
     if(!allowed(type))continue;
     const card=node('article'),h=node('h4',field),origin=node('small',source);card.append(h);
     if(key){const line=node('div',null,'disclosure-value-line'),output=node('output'),copy=node('button','복사');output.dataset.disclosureValue=key;copy.type='button';copy.dataset.disclosureCopy=key;copy.setAttribute('aria-label',field+' 복사');copy.hidden=true;line.append(output,copy);card.append(line);const item={output,copy,value:'',busy:false};outputs.set(key,item);
-     copy.onclick=async()=>{if(item.busy||!item.value||item.noCopy||!current()||page.hidden)return;const value=item.value,token=generation;item.busy=true;copy.disabled=true;message.textContent='';try{await root.navigator.clipboard.writeText(value);if(token===generation&&current()&&item.value===value)message.textContent=field+' 복사 완료';}catch(_){if(token===generation&&current()&&item.value===value)message.textContent='복사하지 못했습니다. 표시된 값을 직접 선택해 주세요.';}finally{item.busy=false;copy.disabled=item.noCopy;}};
+     copy.onclick=async()=>{if(item.busy||!item.value||item.noCopy||!current()||page.hidden)return;const value=item.value,token=generation;item.busy=true;copy.disabled=true;message.textContent='';try{await root.navigator.clipboard.writeText(value);if(token===generation&&current()&&item.value===value)message.textContent=field+' 복사 완료';}catch(_){if(token===generation&&current()&&item.value===value)message.textContent='복사하지 못했습니다. 표시된 값을 직접 선택해 주세요.';}finally{item.busy=false;copy.disabled=item.noCopy||!current();}};
     }
     if(index===1&&key)origin.hidden=true;card.append(origin);grid.append(card);
    }
@@ -96,7 +96,7 @@
   });
   element.append(nav,...pages,message,footer);prev.onclick=()=>show(active-1,true);next.onclick=()=>show(active+1,true);
   element.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat&&e.target.matches('button'))e.preventDefault();});show(0);
-  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:typeof value?.copy==='string'?value.copy:'';item.noCopy=value?.copyable===false;item.output.textContent=typeof value?.display==='string'?value.display:item.value;item.copy.hidden=!item.value||item.noCopy;item.copy.disabled=item.busy||item.noCopy;}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';},step:()=>active,finance,activity});
+  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:typeof value?.copy==='string'?value.copy:'';item.noCopy=value?.copyable===false;item.output.textContent=typeof value?.display==='string'?value.display:item.value;item.copy.hidden=!item.value||item.noCopy;item.copy.disabled=item.busy||item.noCopy||!current();}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';for(const item of outputs.values())item.copy.disabled=true;},step:()=>active,finance,activity});
  }
- root.RegistryDisclosureFields=Object.freeze({mount,version:'1.4.0'});
+ root.RegistryDisclosureFields=Object.freeze({mount,version:'1.4.1'});
 })(window);

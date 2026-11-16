@@ -46,12 +46,13 @@
   function refresh(onlyFailed=false){
    if(!allowed())return Promise.resolve();if(op)return op.promise;
    const identity=context(),p=root.CoopRules.policy(identity.formalName),nextKey=identity.key+'|'+year();
+   verified=false;
    if(displayKey!==nextKey){displayKey=nextKey;profile={};count=null;finance=null;financeKey='';phases.profile=phases.members=phases.finance='idle';}
    render();
    const lanes=['profile',...(!p.federation&&p.known&&ended()?['members']:[]),...(financeWanted&&(mode==='closing'||validEnd())?['finance']:[])].filter(lane=>onlyFailed?phases[lane]==='error':!['ready','review'].includes(phases[lane]));
    const job={key:identity.key,coop:identity.coop,year:year(),end:end(),mode,epoch,lanes,controller:new AbortController()};op=job;
    for(const lane of lanes){phases[lane]='loading';if(lane==='finance'){finance=null;financeKey='';financeForbidden=false;}}
-   retry.disabled=true;retry.hidden=true;status.textContent=lanes.length?'등록값 확인 중…':'';
+   retry.disabled=true;retry.hidden=true;status.textContent=lanes.length?'등록값 확인 중…':'권한 확인 중…';
    const current=()=>op===job&&epoch===job.epoch&&context().key===job.key&&year()===job.year&&end()===job.end&&mode===job.mode&&allowed()&&!job.controller.signal.aborted;
    render();
    async function readLane(lane){
@@ -88,5 +89,5 @@
   document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else if(allowed())void refresh();});
   return {open:()=>{leave();return refresh();},leave,refresh};
  }
- root.RegistryDisclosure=Object.freeze({attach,version:'1.4.0'});
+ root.RegistryDisclosure=Object.freeze({attach,version:'1.4.1'});
 })(window);
