@@ -77,26 +77,26 @@
   element.replaceChildren();const nav=node('nav',null,'disclosure-steps');nav.setAttribute('aria-label','공시 작성 순서');
   const message=node('p',null,'disclosure-copy-status');message.setAttribute('role','status');
   const footer=node('div',null,'disclosure-paging'),prev=node('button','이전'),position=node('span'),next=node('button','다음');prev.type=next.type='button';footer.append(prev,position,next);
-  function show(index,focus=false){active=Math.max(0,Math.min(3,index));pages.forEach((page,i)=>{page.hidden=i!==active;tabs[i].setAttribute('aria-current',i===active?'step':'false');});prev.disabled=active===0;next.disabled=active===3;position.textContent=(active+1)+' / 4';if(focus){pages[active].querySelector('h3').focus();}onStep(active);}
+  function show(index,focus=false){generation++;message.textContent='';active=Math.max(0,Math.min(3,index));pages.forEach((page,i)=>{page.hidden=i!==active;tabs[i].setAttribute('aria-current',i===active?'step':'false');});prev.disabled=active===0;next.disabled=active===3;position.textContent=(active+1)+' / 4';if(focus){pages[active].querySelector('h3').focus();}onStep(active);}
   steps.forEach(([title,fields],index)=>{
    const tab=node('button',(index+1)+'. '+title);tab.type='button';tab.onclick=()=>show(index,true);nav.append(tab);tabs.push(tab);
    const page=node('section',null,'disclosure-step-panel'),heading=node('h3',(index+1)+'. '+title);heading.tabIndex=-1;page.append(heading);
-   if(index===1){const controls=node('div',null,'disclosure-finance-controls'),label=node('label','조회기준일'),end=node('input'),read=node('button','다시 조회'),notice=node('p',null,'disclosure-source-status'),source=node('p',null,'disclosure-registration-note');end.type='date';end.id='disclosureFinanceEnd';end.dataset.erpQueryControl='';label.htmlFor=end.id;label.append(end);read.type='button';read.id='disclosureFinanceRead';notice.dataset.disclosureFinanceStatus='';notice.setAttribute('role','status');controls.append(label,read);page.append(controls,source,notice);finance={end,read,notice,source};}
+   if(index===1){const modes=node('div',null,'disclosure-finance-modes'),closing=node('button','결산용 자료'),live=node('button','실시간 조회');modes.setAttribute('role','group');modes.setAttribute('aria-label','재무자료 선택');closing.type=live.type='button';closing.id='disclosureModeClosing';live.id='disclosureModeLive';modes.append(closing,live);const controls=node('div',null,'disclosure-finance-controls'),label=node('label','조회기준일'),end=node('input'),read=node('button','다시 조회'),notice=node('p',null,'disclosure-source-status'),source=node('p',null,'disclosure-registration-note');end.type='date';end.id='disclosureFinanceEnd';end.dataset.erpQueryControl='';label.htmlFor=end.id;label.append(end);read.type='button';read.id='disclosureFinanceRead';notice.dataset.disclosureFinanceStatus='';notice.setAttribute('role','status');controls.append(label,read);page.append(modes,controls,source,notice);finance={end,label,closing,live,read,notice,source};}
    if(index===2){const n=node('p',null,'disclosure-source-status');n.dataset.disclosureAssembly='';activity=node('div');activity.dataset.disclosureActivity='';page.append(n,activity);}
    const grid=node('div',null,'disclosure-field-grid');page.append(grid);
    for(const[field,key,source,type]of fields){
     if(!allowed(type))continue;
     const card=node('article'),h=node('h4',field),origin=node('small',source);card.append(h);
     if(key){const line=node('div',null,'disclosure-value-line'),output=node('output'),copy=node('button','복사');output.dataset.disclosureValue=key;copy.type='button';copy.dataset.disclosureCopy=key;copy.setAttribute('aria-label',field+' 복사');copy.hidden=true;line.append(output,copy);card.append(line);const item={output,copy,value:'',busy:false};outputs.set(key,item);
-     copy.onclick=async()=>{if(item.busy||!item.value||!current()||page.hidden)return;const value=item.value,token=generation;item.busy=true;copy.disabled=true;message.textContent='';try{await root.navigator.clipboard.writeText(value);if(token===generation&&current()&&item.value===value)message.textContent=field+' 복사 완료';}catch(_){if(token===generation&&current()&&item.value===value)message.textContent='복사하지 못했습니다. 표시된 값을 직접 선택해 주세요.';}finally{item.busy=false;copy.disabled=false;}};
+     copy.onclick=async()=>{if(item.busy||!item.value||item.noCopy||!current()||page.hidden)return;const value=item.value,token=generation;item.busy=true;copy.disabled=true;message.textContent='';try{await root.navigator.clipboard.writeText(value);if(token===generation&&current()&&item.value===value)message.textContent=field+' 복사 완료';}catch(_){if(token===generation&&current()&&item.value===value)message.textContent='복사하지 못했습니다. 표시된 값을 직접 선택해 주세요.';}finally{item.busy=false;copy.disabled=item.noCopy;}};
     }
-    card.append(origin);grid.append(card);
+    if(index===1&&key)origin.hidden=true;card.append(origin);grid.append(card);
    }
    pages.push(page);
   });
   element.append(nav,...pages,message,footer);prev.onclick=()=>show(active-1,true);next.onclick=()=>show(active+1,true);
   element.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat&&e.target.matches('button'))e.preventDefault();});show(0);
-  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:typeof value?.copy==='string'?value.copy:'';item.output.textContent=typeof value?.display==='string'?value.display:item.value;item.copy.hidden=!item.value;}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';},step:()=>active,finance,activity});
+  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:typeof value?.copy==='string'?value.copy:'';item.noCopy=value?.copyable===false;item.output.textContent=typeof value?.display==='string'?value.display:item.value;item.copy.hidden=!item.value||item.noCopy;item.copy.disabled=item.busy||item.noCopy;}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';},step:()=>active,finance,activity});
  }
- root.RegistryDisclosureFields=Object.freeze({mount,version:'1.3.0'});
+ root.RegistryDisclosureFields=Object.freeze({mount,version:'1.4.0'});
 })(window);
