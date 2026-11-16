@@ -11,7 +11,7 @@
   const allowed=()=>context().authorized&&!el.hidden&&!document.hidden&&(!root.frameElement||!root.frameElement.hidden);
   const end=()=>{const key=context().key+'|'+year();return ends.has(key)?ends.get(key):year()===currentYear?day():year()+'-12-31';};
   const validEnd=()=>{const e=end();return /^\d{4}-\d{2}-\d{2}$/.test(e)&&e.slice(0,4)===String(year())&&e<=day()&&Number.isFinite(Date.parse(e))&&new Date(e).toISOString().slice(0,10)===e;};
-  let epoch=0,op=null,guide=null,guideKind='',displayKey='',profile={},count=null,verified=false,finance=null,financeWanted=false,financeKey='',financeForbidden=false;
+  let epoch=0,op=null,guide=null,guideKind='',displayKey='',profile={},count=null,verified=false,finance=null,financeWanted=false,financeKey='',financeForbidden=false,activityUI=null;
   const phases={profile:'idle',members:'idle',finance:'idle'},financeSelection=()=>context().key+'|'+year()+'|'+end();
   function configureFinance(){
    const f=guide.finance;f.end.min=year()+'-01-01';f.end.max=year()===currentYear?day():year()+'-12-31';if(f.end.value!==end())f.end.value=end();
@@ -28,15 +28,16 @@
    el.querySelector('#disclosurePeriod').textContent=(y===2025?'2026년 공식 작성화면 기준':(y+1)+'년 작성가이드 미확인 · 2026년 화면 참고')+(ended()?'':' · 회계연도 종료 전');
    el.querySelector('#disclosureResult').textContent=p.allDisclosure?'공시 대상':!p.known?'법인유형 확인 필요':!ended()?'회계연도 종료 후 대상 확인':count===null?'공시 대상 기준 확인':count>=200?'공시 대상 · '+y+'년 말 '+count.toLocaleString('ko-KR')+'명':y+'년 말 '+count.toLocaleString('ko-KR')+'명 · 인원 기준 미해당, 납입출자금 기준 확인 필요';
    if(!guide||guideKind!==p.kind){
-    guide?.invalidate();guide=root.RegistryDisclosureFields.mount(el.querySelector('#disclosureGuideFields'),context().formalName,{current:()=>verified&&allowed()&&displayKey===context().key+'|'+year(),onStep:i=>{financeWanted=i===1;if(financeWanted)void refresh();}});guideKind=p.kind;
+    activityUI?.leave();guide?.invalidate();guide=root.RegistryDisclosureFields.mount(el.querySelector('#disclosureGuideFields'),context().formalName,{current:()=>verified&&allowed()&&displayKey===context().key+'|'+year(),onStep:i=>{financeWanted=i===1;if(i!==2)activityUI?.leave();if(financeWanted)void refresh();if(i===2)void activityUI?.show();}});guideKind=p.kind;
+    activityUI=root.DisclosureActivity.attach({element:guide.activity,client,context,authorize,year,day,current:()=>verified&&allowed()&&guide?.step()===2&&displayKey===context().key+'|'+year()});
    }
    const biz=String(profile.bizNum||'').replace(/[-\s]/g,''),established=String(profile.estDate||''),validDate=/^\d{4}-\d{2}-\d{2}$/.test(established)&&Number.isFinite(Date.parse(established))&&new Date(established).toISOString().slice(0,10)===established;
    const values={year:String(y),name:context().formalName,members:count===null||!ended()?'':String(count),bizNum:/^\d{10}$/.test(biz)?biz.slice(0,3)+'-'+biz.slice(3,5)+'-'+biz.slice(5):'',estDate:validDate?established:'',address:profile.company_address||'',phone:profile.company_contact_phone||'',assemblyYears:y+'년 사업계획 승인 총회 · '+(y+1)+'년에 열린 '+y+'년 결산 승인 총회'};
    if(phases.finance==='ready'&&financeKey===financeSelection())for(const[key,n]of Object.entries(finance.values)){const loss=['gross','pretax','net'].includes(key);values[key]={copy:String(loss?Math.abs(n):n),display:(loss?(n<0?'손실 ':'이익 '):'')+(loss?Math.abs(n):n).toLocaleString('ko-KR')+'원'};}
-   guide.update(values);configureFinance();
+   guide.update(values);configureFinance();if(guide.step()===2)void activityUI?.show();
   }
   function leave(){
-   epoch++;verified=false;guide?.invalidate();op?.controller.abort();if(op)for(const lane of op.lanes)if(phases[lane]==='loading')phases[lane]='idle';
+   epoch++;verified=false;activityUI?.leave();guide?.invalidate();op?.controller.abort();if(op)for(const lane of op.lanes)if(phases[lane]==='loading')phases[lane]='idle';
    op=null;finance=null;financeKey='';phases.finance='idle';financeForbidden=false;financeWanted=guide?.step()===1;retry.disabled=false;
   }
   function refresh(onlyFailed=false){
@@ -82,5 +83,5 @@
   document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else if(allowed())void refresh();});
   return {open:()=>{leave();return refresh();},leave,refresh};
  }
- root.RegistryDisclosure=Object.freeze({attach,version:'1.2.0'});
+ root.RegistryDisclosure=Object.freeze({attach,version:'1.3.0'});
 })(window);

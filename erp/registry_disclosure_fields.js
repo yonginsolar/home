@@ -71,7 +71,7 @@
  ];
  function mount(element,formalName,{current=()=>true,onStep=()=>{}}={}){
   const doc=element.ownerDocument,p=root.CoopRules.policy(formalName),outputs=new Map(),pages=[],tabs=[];
-  let active=0,generation=0,finance=null;
+  let active=0,generation=0,finance=null,activity=null;
   const node=(tag,text,cls)=>{const n=doc.createElement(tag);if(text)n.textContent=text;if(cls)n.className=cls;return n;};
   const allowed=type=>!type||!p.known&&p.kind!=='mixed_federation'||type==='ordinary'&&p.dividends||type==='social'&&p.kind==='social'||type==='social_group'&&['social','social_federation','mixed_federation'].includes(p.kind)||type==='plan'&&p.kind!=='social';
   element.replaceChildren();const nav=node('nav',null,'disclosure-steps');nav.setAttribute('aria-label','공시 작성 순서');
@@ -82,7 +82,7 @@
    const tab=node('button',(index+1)+'. '+title);tab.type='button';tab.onclick=()=>show(index,true);nav.append(tab);tabs.push(tab);
    const page=node('section',null,'disclosure-step-panel'),heading=node('h3',(index+1)+'. '+title);heading.tabIndex=-1;page.append(heading);
    if(index===1){const controls=node('div',null,'disclosure-finance-controls'),label=node('label','조회기준일'),end=node('input'),read=node('button','다시 조회'),notice=node('p',null,'disclosure-source-status'),source=node('p',null,'disclosure-registration-note');end.type='date';end.id='disclosureFinanceEnd';end.dataset.erpQueryControl='';label.htmlFor=end.id;label.append(end);read.type='button';read.id='disclosureFinanceRead';notice.dataset.disclosureFinanceStatus='';notice.setAttribute('role','status');controls.append(label,read);page.append(controls,source,notice);finance={end,read,notice,source};}
-   if(index===2){const n=node('p',null,'disclosure-source-status');n.dataset.disclosureAssembly='';page.append(n);}
+   if(index===2){const n=node('p',null,'disclosure-source-status');n.dataset.disclosureAssembly='';activity=node('div');activity.dataset.disclosureActivity='';page.append(n,activity);}
    const grid=node('div',null,'disclosure-field-grid');page.append(grid);
    for(const[field,key,source,type]of fields){
     if(!allowed(type))continue;
@@ -96,7 +96,7 @@
   });
   element.append(nav,...pages,message,footer);prev.onclick=()=>show(active-1,true);next.onclick=()=>show(active+1,true);
   element.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat&&e.target.matches('button'))e.preventDefault();});show(0);
-  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:typeof value?.copy==='string'?value.copy:'';item.output.textContent=typeof value?.display==='string'?value.display:item.value;item.copy.hidden=!item.value;}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';},step:()=>active,finance});
+  return Object.freeze({update(values){generation++;message.textContent='';for(const[key,item]of outputs){const value=values[key];item.value=typeof value==='string'?value:typeof value?.copy==='string'?value.copy:'';item.output.textContent=typeof value?.display==='string'?value.display:item.value;item.copy.hidden=!item.value;}const a=element.querySelector('[data-disclosure-assembly]');a.textContent=values.assemblyYears||'';},invalidate(){generation++;message.textContent='';},step:()=>active,finance,activity});
  }
- root.RegistryDisclosureFields=Object.freeze({mount,version:'1.2.0'});
+ root.RegistryDisclosureFields=Object.freeze({mount,version:'1.3.0'});
 })(window);
