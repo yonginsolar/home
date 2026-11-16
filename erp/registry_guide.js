@@ -1,4 +1,4 @@
-/* 변경등기 가이드1.6.0 · 검증된 ERP 값과 명시 조건의 납부액 산식. */
+/* 변경등기 가이드1.6.1 · 실제 확인한 명칭·주소·목적 입력항목. 새 이미지 없음. */
 (function(root){
  'use strict';
  const types={
@@ -25,10 +25,35 @@
 ['주소','대표권 있음으로 나타난 주소칸에 대표자 본인의 주소를 입력합니다. 주소 검색 → 기본주소 → 상세주소 순서이며 해외주소는 직접입력을 선택합니다.'],
 ['출자항목·규정','이번 신청의 해당 사항을 확인해 입력합니다.']
 ])+'<p>기존 행 수정은 <strong>등록완료</strong>를 누릅니다. 임원 추가는 다음 임원도 입력하면 <strong>저장 후 계속입력</strong>, 마지막이면 <strong>등록완료</strong>를 누릅니다. 입력을 새로 시작할 때는 <strong>다시 작성하기</strong>, 그만두면 <strong>등록취소</strong>를 선택합니다.</p>';}
+ function observedEntry(key){
+  const basis='의결·등기 근거의 원인과 실제 효력일을 사용합니다. ERP 저장일이나 예시 문구를 대신 넣지 않습니다.';
+  if(key==='name')return '<p>'+basis+'</p>'+fieldTable([
+   ['등기원인','이번 명칭 변경의 실제 원인을 선택·입력합니다.'],
+   ['일자','확인한 원인의 효력일을 입력합니다.'],
+   ['변경할 명칭','의결된 새 정식 명칭을 입력합니다.'],
+   ['로마자','변경 근거에 맞는 로마자 표기를 확인합니다.']
+  ]);
+  if(key==='office')return '<p>'+basis+'</p>'+fieldTable([
+   ['원인','이번 주사무소 변경의 실제 원인을 선택·입력합니다.'],
+   ['일자','확인한 이전 효력일을 입력합니다.'],
+   ['주소검색','도로명·지번 구분 → 시군구 조회 → 주소 선택 순서로 찾고 건물번호를 확인합니다.'],
+   ['상세주소','선택한 기본주소에 이어 실제 상세주소를 입력합니다.'],
+   ['읍면동','실제 주소에 맞는 읍·면·동 표기를 확인합니다.'],
+   ['공동주택명','실제 주소의 공동주택명 표기를 확인합니다.']
+  ]);
+  if(key==='purpose')return '<p>'+basis+'</p>'+fieldTable([
+   ['원인','목적 추가·변경의 실제 원인을 선택·입력합니다.'],
+   ['일자','확인한 변경 효력일을 입력합니다.'],
+   ['사업목적','의결된 정관의 목적 문구를 입력합니다.'],
+   ['로마자','변경 근거에 맞는 로마자 표기를 확인합니다.'],
+   ['각호설정','의결된 사업목적의 각 호 구분을 확인합니다.']
+  ])+'<p>입력 내용을 확인한 뒤 <strong>등록완료</strong>를 누릅니다.</p>';
+  return '';
+ }
  function steps(key){const t=types[key];if(!t)throw Error('변경 유형을 선택해 주세요.');let entry;
 if(key==='capital')entry='<ol><li><strong>기타사항 → 1. 출자에관한사항 → 변경</strong>을 누릅니다.</li><li>제목의 대/소분류와 <strong>1. 출자에관한사항</strong>을 확인합니다.</li><li><strong>내용</strong> 한 칸에 아래의 변경 후 전체 출자총좌수·납입출자금 총액을 함께 입력합니다.</li><li><strong>등기원인</strong>은 변경·말소·경정·회복 중 이번 근거에 맞게 선택하고 필요한 원인은 직접 입력합니다.</li><li><strong>등기원인일자</strong>에 확인한 효력일을 YYYY-MM-DD로 입력한 뒤 <strong>등록완료</strong>를 누릅니다.</li></ol><p>내용칸은 ERP 변경 후 값입니다. 등기부의 기존 값은 증명서와 별도로 대조합니다.</p>'+actualCapitalCapture();
 else if(key==='officers'||key==='chair')entry=officerEntry();
-else entry='<p>실제 입력창 확인 후 세부 작성 순서를 안내합니다.</p>';
+else entry=observedEntry(key);
 return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장과 ERP 현재 1좌 금액을 자동으로 불러와 계산합니다.':t.erp)+'</p>'],[key==='capital'?'출자에관한사항 입력':t.label+' 입력',entry]];}
  function commonAfter(){return '<p class="rg-note">3·4단계의 입력칸은 출자 변경 경로에서 확인했습니다.</p><details class="rg-step" data-rg-stage="3" data-rg-observed-for="capital"><summary>3 등록면허세 및 수수료</summary><div class="rg-step-body"><div id="rgPayment"></div>'+fieldTable([
 ['납입지역·납세번호','발급된 등록면허세 납부서의 지역과 납세번호를 그대로 옮깁니다. 세금 신고·납부는 <a href="https://www.wetax.go.kr/" target="_blank" rel="noopener noreferrer">위택스</a> 또는 관할 지방세 부서에서 진행합니다.'],
@@ -49,7 +74,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
 ['이름','선택한 첨부서류의 이름을 확인합니다.'],
 ['통수','실제로 첨부할 통수를 입력합니다.'],
 ['원용선택','원용하는 서면이 있는 경우 선택합니다.']
-])+'<p>알림서비스는 필요한 경우에만 선택합니다. 내용을 검토한 뒤 <strong>신청서 작성완료</strong>를 누릅니다.</p><p class="rg-pending">작성완료 이후 출력 화면은 추가 확인 예정입니다.</p></div></details>';}
+])+'<p>첨부서면 목록을 확인하고 <strong>저장</strong>을 누릅니다. 알림서비스는 필요한 경우에만 선택합니다. 내용을 검토한 뒤 <strong>작성완료</strong>를 누릅니다.</p><p class="rg-pending">작성완료 이후 출력 화면은 추가 확인 예정입니다.</p></div></details>';}
  function paymentPanel({context}){
   const el=document.getElementById('rgPayment'),cache=new Map();let key='',topic='capital',year='',capital=null;
   el.innerHTML='<h3>ERP 납부액 계산</h3><p class="rg-note">전자표준양식 · 선택한 등기사항 기준 · 법령 확인 2026.11.16</p><div class="rg-payment-controls"><p>법인 구분: <output id="rgPayEntity"></output><br><output id="rgPayScope"></output><br><output id="rgPayYear"></output></p><label>중과·감면·조례 특례<select id="rgPayTreatment"><option value="">미확인</option><option value="standard">중과·감면에 해당하지 않음</option><option value="triple">출자증가 3배 중과·감면 없음</option><option value="other">감면·그 밖의 특례</option></select></label><label id="rgPayBeforeLabel">직전 등기부의 납입출자금 총액(원)<output id="rgPayBefore">자동 연결 보류</output></label></div><p id="rgPayAfter"></p>'+fieldTable([['과세표준액 · 증가액','<output id="rgPayBase"></output>'],['등록면허세','<output id="rgPayRegistration"></output>'],['지방교육세','<output id="rgPayEducation"></output>'],['신청수수료','<output id="rgPayFee"></output>']])+'<ul id="rgPayNeeds" class="rg-payment-needs" aria-live="polite"></ul><p id="rgPayFormula"></p><p class="rg-note">수수료는 면제 전 기본액입니다. 여러 변경을 묶거나 관할을 이전하면 이 단독 산식을 사용하지 않습니다.</p><details><summary>중과·감면 판단</summary><p>출자증가 3배 중과는 대도시 내 설립·전입·사업장 설치와 그 시점 등 지방세법 제28조 제2항의 조건으로 판단합니다. 주소가 수도권이라는 이유만으로 선택하지 않습니다.</p><p>사회적협동조합은 별도 세율과 조례상 감면 조건을 검토합니다. 경기도 도세감면조례 제13조 등에서 정한 설립·출자금 규모·기간·대상 등기 조건을 충족해야 하므로 사회적이라는 이유만으로 일괄 감면하지 않습니다.</p><a href="https://www.law.go.kr/LSW/ordinInfoP.do?gubun=ELIS&amp;ordinSeq=2114419" target="_blank" rel="noopener noreferrer">경기도 도세감면조례</a></details><details><summary>계산 근거</summary><ul><li><a href="https://www.law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&amp;lsJoLnkSeq=1031543199" target="_blank" rel="noopener noreferrer">지방세법 제28조 제1항 제6호</a> · 일반 협동조합 출자증가 0.4%/최저 112,500원, 기타 변경 40,200원</li><li><a href="https://www.law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1031175707" target="_blank" rel="noopener noreferrer">지방세법 제28조 제2항</a> · 대도시 등 3배 중과 적용조건</li><li><a href="https://www.law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&amp;lsJoLnkSeq=1031196225" target="_blank" rel="noopener noreferrer">지방세법 제151조 제1항 제2호</a> · 지방교육세 20%</li><li><a href="https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&amp;lspttninfSeq=113800" target="_blank" rel="noopener noreferrer">등기사항증명서 등 수수료규칙 제5조의3·제5조의5</a> · 전자표준양식 일반 변경 1목적 5,000원</li><li><a href="https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&amp;lsJoLnkSeq=1000577035" target="_blank" rel="noopener noreferrer">지방세기본법 제59조</a>·<a href="https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&amp;lsJoLnkSeq=1030471335" target="_blank" rel="noopener noreferrer">국고금 관리법 제47조</a> · 10원 미만 끝수 버림</li></ul><p>소규모 협동조합 최저세액 감면 개편안은 확정 시행 근거를 확인하기 전까지 적용하지 않습니다.</p></details>';
@@ -79,7 +104,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
   root.addEventListener('pagehide',leave);root.addEventListener('pageshow',resume);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else resume();});if(root.frameElement)new MutationObserver(records=>{if(root.frameElement.hidden||records.some(r=>r.oldValue===null))leave();if(!root.frameElement.hidden)resume();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});queueMicrotask(resume);
   return{leave,resume,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.6.0'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'1.6.1'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',formalName='',authorized=false,view=0,ui;
  const context=()=>({coop,formalName,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};
