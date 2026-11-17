@@ -1,4 +1,4 @@
-/* 0.7.0 · 일반 직인·출자자명부의 안전한 미리보기와 최종 출력 연결. */
+/* 0.7.1 · 일반 직인·출자자명부의 안전한 미리보기와 최종 출력 연결. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -68,8 +68,9 @@
    }
   }
   if(scope?.documents){if(!root.CoopRegistryDocumentsPdf)throw Error('첨부 출력 도구를 불러오지 못했습니다.');await root.CoopRegistryDocumentsPdf.append(doc,model,scope.documents,{lib,font,load,check,test:provided?.test,templates:provided?.templates});}
+  if(scope?.preview===true&&model.draft)for(const pg of doc.getPages())pg.drawText('검토용 · 작성 중',{x:445,y:pg.getHeight()-20,size:10,font,color:lib.rgb(.5,.2,.2)});
   for(const [i,pg]of doc.getPages().entries())if(i>=1)pg.drawText(String(i+1)+' / '+doc.getPageCount(),{x:500,y:30,size:11,font});
   check();doc.setTitle('시청 변경신고 작성자료');doc.setCreator('협동조합 운영시스템');const bytes=await doc.save();try{check();return bytes;}catch(e){bytes.fill(0);throw e;}
  }
- root.CoopRegistryPdf={create,wrap,tools,version:'0.7.0'};
+ root.CoopRegistryPdf={create,wrap,tools,version:'0.7.1'};
 })(typeof window==='undefined'?globalThis:window);
