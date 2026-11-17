@@ -1,0 +1,7 @@
+/* 제출 꾸러미 예시1.0.0 · 실제 문서의 픽셀·문자열·식별값을 포함하지 않는 재구성. */
+(function(root){
+ 'use strict';
+ function sheet(number,title,rows){const h=75+rows.length*62;return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 '+(h+100)+'" role="img" aria-label="'+title+' 샘플"><rect x="1" y="1" width="538" height="'+(h+98)+'" fill="white" stroke="#9aa8b5"/><text x="270" y="42" text-anchor="middle" font-size="21" fill="#182c3e">'+title+'</text>'+rows.map(([label,value],i)=>'<rect x="25" y="'+(70+i*62)+'" width="490" height="62" fill="none" stroke="#b7c1ca"/><line x1="160" y1="'+(70+i*62)+'" x2="160" y2="'+(132+i*62)+'" stroke="#b7c1ca"/><text x="36" y="'+(106+i*62)+'" font-size="15" fill="#182c3e">'+label+'</text><text x="175" y="'+(106+i*62)+'" font-size="15" fill="#526474">'+value+'</text>').join('')+'<text x="488" y="'+(h+72)+'" font-size="14" fill="#526474">'+number+'</text></svg>';}
+ function example(){return '<p class="rg-note">이미지는 샘플입니다.</p><div class="rg-paper-example">'+sheet('1 / 2','변경등기신청서',[['조합','[조합명]'],['등기의 목적','출자총좌수·납입총액 변경'],['등기의 사유','[확인한 연도와 출자총액]'],['등기할 사항','[전체 출자좌수·납입총액]']])+sheet('2 / 2','첨부서면·신청인',[['첨부서면','[이번 변경의 증빙·통수]'],['신청인','[이사장]'],['대리인','[대리 제출할 때 입력]'],['날짜·날인','[작성일·제출 인감]']])+'</div><p>신청서가 두 장 이상이면 장 사이에 신청인 또는 대리인이 간인합니다. 준비한 증빙을 신청서와 함께 묶어 접수하세요.</p>';}
+ root.CoopRegistrySubmissionExample=Object.freeze({example,version:'1.0.0'});
+})(typeof window==='undefined'?globalThis:window);
