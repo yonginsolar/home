@@ -1,4 +1,4 @@
-/* 변경등기 가이드2.0.0 · 단일 출자 경로·확인한 클릭 위치. */
+/* 변경등기 가이드2.0.1 · 단일 출자 경로·확인한 클릭 위치. */
 (function(root){
  'use strict';
  const types={
@@ -68,12 +68,12 @@ if(key==='capital')entry=root.CoopRegistryGuideScreens.capital();
 else if(key==='officers'||key==='chair')entry=officerEntry();
 else entry=observedEntry(key);
 return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장과 ERP 현재 1좌 금액을 자동으로 불러와 계산합니다.':t.erp)+'</p>'],[key==='capital'?'출자에관한사항 입력':t.label+' 입력',entry]];}
- function commonAfter(){return '<details class="rg-step" data-rg-stage="3"><summary>3 등록면허세 및 수수료</summary><div class="rg-step-body"><div id="rgPayment"></div>'+fieldTable([
+ function commonAfter(){return '<details class="rg-step" data-rg-stage="3"><summary>등록면허세 및 수수료</summary><div class="rg-step-body"><div id="rgPayment"></div>'+fieldTable([
 ['납입지역·납세번호','발급된 등록면허세 납부서의 지역과 납세번호를 그대로 옮깁니다. 세금 신고·납부는 <a href="https://www.wetax.go.kr/" target="_blank" rel="noopener noreferrer">위택스</a> 또는 관할 지방세 부서에서 진행합니다.'],
 ['스캔첨부·전자납부 조회','종이 납부서는 스캔첨부, 전자납부한 건은 전자납부 조회로 납부정보를 연결합니다.'],
 ['농어촌특별세·면제','감면을 적용하는 건은 감면 근거에 따른 농어촌특별세 과세 여부·세액이 별도로 필요합니다. 이 계산에는 포함하지 않습니다.'],
 ['신청수수료 납부정보','납부정보 추가에서 실제 이용한 전자납부·은행·무인발급기를 고르고 영수증의 납부번호·금액을 옮깁니다.']
-])+verifiedCapture('tax')+verifiedCapture('fees')+root.CoopRegistryGuideScreens.receipts()+'</div></details><details class="rg-step" data-rg-stage="4"><summary>4 행정정보 연계 및 첨부서면</summary><div class="rg-step-body">'+verifiedCapture('attachments')+'<h3>신청인/대리인 추가</h3><p><strong>신청인/대리인 추가</strong>를 누르고 실제 신청인을 확인합니다. 로그인 계정으로 나타난 사람이 조합 대표자와 같은지 확인하세요.</p>'+root.CoopRegistryGuideScreens.applicant()+'<h3>첨부서면 추가</h3><p><strong>첨부서면 추가</strong>에서 이번 변경에 필요한 서류만 선택합니다. 이 단계는 파일 업로드가 아니라 첨부서면 목록 작성입니다.</p>'+fieldTable([
+])+verifiedCapture('tax')+verifiedCapture('fees')+root.CoopRegistryGuideScreens.receipts()+'</div></details><details class="rg-step" data-rg-stage="4"><summary>행정정보 연계 및 첨부서면</summary><div class="rg-step-body">'+verifiedCapture('attachments')+'<h3>신청인/대리인 추가</h3><p><strong>신청인/대리인 추가</strong>를 누르고 실제 신청인을 확인합니다. 로그인 계정으로 나타난 사람이 조합 대표자와 같은지 확인하세요.</p>'+root.CoopRegistryGuideScreens.applicant()+'<h3>첨부서면 추가</h3><p><strong>첨부서면 추가</strong>에서 이번 변경에 필요한 서류만 선택합니다. 이 단계는 파일 업로드가 아니라 첨부서면 목록 작성입니다.</p>'+fieldTable([
 ['이름','선택한 첨부서류의 이름을 확인합니다.'],
 ['통수','실제로 첨부할 통수를 입력합니다.'],
 ['원용선택','원용하는 서면이 있는 경우 선택합니다.']
@@ -125,7 +125,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
   root.addEventListener('pagehide',leave);root.addEventListener('pageshow',resume);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else resume();});if(root.frameElement)new MutationObserver(records=>{if(root.frameElement.hidden||records.some(r=>r.oldValue===null))leave();if(!root.frameElement.hidden)resume();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});queueMicrotask(resume);
   return{leave,resume,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'2.0.0'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'2.0.1'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',formalName='',authorized=false,view=0,ui;
  const context=()=>({coop,formalName,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};
