@@ -1,4 +1,4 @@
-/* 시청 변경신고 준비 모형 0.5.0 — 원장과 신고 수정값 분리. */
+/* 시청 변경신고 준비 모형 0.6.0 — 원장과 신고 수정값 분리. */
 (function(root){
  'use strict';
  const kinds={capital:'출자금',members:'조합원 수',appointment:'임원 취임',renewal:'임원 중임',retirement:'임원 퇴임',resignation:'임원 사임',office:'주사무소 주소',purpose:'사업 목적',name:'조합 명칭',chair:'이사장 변경',chairAddress:'이사장 개인 주소',articles:'그 밖의 정관 변경'};
@@ -31,6 +31,7 @@
   const input=Object.fromEntries(Object.entries(raw).map(([k,v])=>[k,typeof v==='string'?str(v):v]));
   Object.assign(input,changeScope(input));const selected=new Set((input.kinds||[]).filter(k=>Object.hasOwn(kinds,k)));if(!selected.size)throw Error('변경 유형을 하나 이상 선택해 주세요.');
   const missing=[],warnings=[],annual=selected.has('capital')||selected.has('members'),managed=managedValues(input);
+  if(annual&&input.priorReportState&&input.priorReportState!=='ready')missing.push('직전 신고값 다시 확인');
   if(annual&&input.registryValues&&(!managed||!managed.ready))missing.push('신고 수정값 다시 확인');
   if(annual&&input.registryValues?.pending)missing.push('신고 수정값 저장 결과 확인');
   if(!input.companyName)missing.push('조합 명칭');if(!input.officeAddress)missing.push('조합 소재지');if(!input.submissionMode&&!input.applicant)missing.push('신고인');if(!input.chairName)missing.push('이사장 성명');
@@ -76,6 +77,7 @@
   if(annual&&input.reportedBaselineDirty)missing.push('과거 신고 인원 저장 결과 확인');
   if(managed)for(const[key,value]of Object.entries(managed.erp||{}))if(Object.hasOwn(erpValues,key))erpValues[key]=number(value);
   const attachments=[{group:'법정 서식',text:'별지 제7호 변경신고서'}];
+  if(annual)attachments.push({group:'출자금·인원 변경',text:'출자자 명부·출자금 변동내역 확인서'});
   if(active.articles||active.name||active.purpose)attachments.push({group:'유형별 법정 첨부',text:'변경한 정관 사본'});
   if(input.resolutionRequired||active.articles||active.name||active.purpose)attachments.push({group:'유형별 법정 첨부',text:'변경을 의결한 총회 의사록 사본'});
   if(selected.has('purpose')||input.businessAccountingChanged)attachments.push({group:'유형별 법정 첨부',text:'변경 후 사업계획서(별지 제4호)·수입지출 예산서(별지 제5호)'});

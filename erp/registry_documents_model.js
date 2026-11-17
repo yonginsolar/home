@@ -1,4 +1,4 @@
-/* 변경신고 첨부서류 0.5.0 · 직접 선택한 회의·소집 문서를 자동으로 묶는다. */
+/* 변경신고 첨부서류 0.6.0 · 직접 선택한 회의·소집 문서를 자동으로 묶는다. */
 (function(root){
  'use strict';
  const text=v=>String(v??'').trim();
@@ -19,6 +19,7 @@
   if(['appointment','renewal','retirement','resignation','chair'].some(k=>kinds.has(k)))add('officers','generate');
   if(['appointment','renewal','chair'].some(k=>kinds.has(k))||input.resolutionRequired){add('assembly');add('notice');}
   if(kinds.has('resignation'))add('resignation');
+  if(kinds.has('capital')||kinds.has('members'))add('investors','existing');
   if(kinds.has('purpose')||input.businessAccountingChanged){add('plan');add('budget');}
   if(input.unitReduced){add('balance');add('creditors');}
   if(['name','chair','office'].some(k=>kinds.has(k)))add('filingCertificate','external');
@@ -84,5 +85,5 @@
   return records.map((r,i)=>{if(r.coop_id!==coop||!r.member_id)throw Error('명부의 조합·회원 연결을 확인해 주세요.');const s=checked.get(r.member_id),corporate=r.member_type==='단체';if(!s||s.name!==r.name||s.member_type!==r.member_type)throw Error('명부 작성 중 회원정보가 바뀌었습니다.');if(kind==='officers'&&corporate)throw Error('법인 임원의 직무수행자 정보가 포함된 임원명부 PDF를 선택해 주세요.');const identity=corporate?r.corp_number:s.decrypted_rrn;if(!/^\d{6}-?\d{7}$/.test(identity||'')||!text(s.phone)||kind==='officers'&&!text(s.address))throw Error('명부의 식별번호·주소·연락처를 확인해 주세요.');return{sequence:i+1,role:r.role||'',name:s.name,identity:identity.replace(/^(\d{6})(\d{7})$/,'$1-$2'),address:s.address||'',phone:s.phone,stakeholder:'',founder:''};});
  }
  function planReadiness(row,year){const d=row?.assembly_booklet_data||{},missing=[];if(Number(row?.fiscal_year)!==Number(year))missing.push('사업연도');if(!text(d.business_plan_goal))missing.push('사업 목표');if(!text(d.business_plan_details))missing.push('해당 연도 전체 사업');for(const key of ['income_budget','expense_budget'])if(!Array.isArray(d[key])||!d[key].length||d[key].some(r=>!text(r.name)||!text(r.basis)||!Number.isSafeInteger(Number(r.amount))||Number(r.amount)<0))missing.push(key==='income_budget'?'수입 예산':'지출 예산');return{ready:false,missing,available:!missing.length,reason:'별지 제4·5호의 조직 개요·조직도·경력 등 보완 필요'};}
- root.CoopRegistryDocumentsModel=Object.freeze({requirements,isProxy,recommend,sourceTypes,chosen,officersAt,roster,planReadiness,labels,plain,version:'0.5.0'});
+ root.CoopRegistryDocumentsModel=Object.freeze({requirements,isProxy,recommend,sourceTypes,chosen,officersAt,roster,planReadiness,labels,plain,version:'0.6.0'});
 })(typeof window==='undefined'?globalThis:window);
