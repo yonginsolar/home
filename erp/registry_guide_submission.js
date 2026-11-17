@@ -1,7 +1,21 @@
-/* 제출 꾸러미 예시1.0.0 · 실제 문서의 픽셀·문자열·식별값을 포함하지 않는 재구성. */
+/* 제출 꾸러미 예시2.0.0 · 원본 픽셀·식별정보 없이 새로 작성한 실물형 13면. */
 (function(root){
  'use strict';
- function sheet(number,title,rows){const h=75+rows.length*62;return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 '+(h+100)+'" role="img" aria-label="'+title+' 샘플"><rect x="1" y="1" width="538" height="'+(h+98)+'" fill="white" stroke="#9aa8b5"/><text x="270" y="42" text-anchor="middle" font-size="21" fill="#182c3e">'+title+'</text>'+rows.map(([label,value],i)=>'<rect x="25" y="'+(70+i*62)+'" width="490" height="62" fill="none" stroke="#b7c1ca"/><line x1="160" y1="'+(70+i*62)+'" x2="160" y2="'+(132+i*62)+'" stroke="#b7c1ca"/><text x="36" y="'+(106+i*62)+'" font-size="15" fill="#182c3e">'+label+'</text><text x="175" y="'+(106+i*62)+'" font-size="15" fill="#526474">'+value+'</text>').join('')+'<text x="488" y="'+(h+72)+'" font-size="14" fill="#526474">'+number+'</text></svg>';}
- function example(){return '<p class="rg-note">이미지는 샘플입니다.</p><div class="rg-paper-example">'+sheet('1 / 2','변경등기신청서',[['조합','[조합명]'],['등기의 목적','출자총좌수·납입총액 변경'],['등기의 사유','[확인한 연도와 출자총액]'],['등기할 사항','[전체 출자좌수·납입총액]']])+sheet('2 / 2','첨부서면·신청인',[['첨부서면','[이번 변경의 증빙·통수]'],['신청인','[이사장]'],['대리인','[대리 제출할 때 입력]'],['날짜·날인','[작성일·제출 인감]']])+'</div><p>신청서가 두 장 이상이면 장 사이에 신청인 또는 대리인이 간인합니다. 준비한 증빙을 신청서와 함께 묶어 접수하세요.</p>';}
- root.CoopRegistrySubmissionExample=Object.freeze({example,version:'1.0.0'});
+ const labels=['등기신청수수료 납부서','변경등기신청서 · 첫 면','변경등기신청서 · 둘째 면','등록면허세 납부확인서','위임장','재직증명서','변경신고확인증','변경사항 별첨','총회의사록 · 첫 면','총회의사록 · 계속','총회의사록 · 의결','의사록 서명·확인','전자서명 확인 내역'];
+ const image=i=>'/erp/assets/registry-guide/sample-case-20261117-'+String(i+1).padStart(2,'0')+'.png';
+ function example(){return '<p class="rg-note">이미지는 샘플입니다.</p><ol class="rg-sample-list">'+labels.map((label,i)=>'<li><button type="button" data-rg-sample="'+i+'">'+(i+1)+'. '+label+'</button></li>').join('')+'</ol><p>신청서가 두 장 이상이면 장 사이에 신청인 또는 대리인이 간인합니다. 이번 변경에 필요한 증빙을 신청서와 함께 묶어 접수하세요.</p>';}
+ function attach({context}){
+  const d=document,subject=context().key,live=()=>context().authorized&&context().key===subject&&!d.hidden&&(!root.frameElement||!root.frameElement.hidden);let dialog,origin=null,index=0;
+  function show(i,button){if(!live()||!Number.isInteger(i)||i<0||i>=labels.length)return;
+   if(!dialog){dialog=d.createElement('dialog');dialog.className='rg-sample-dialog';dialog.setAttribute('aria-labelledby','rgSampleTitle');dialog.innerHTML='<header><h2 id="rgSampleTitle"></h2><button type="button" data-sample-close aria-label="서류 예시 닫기">닫기</button></header><div class="rg-sample-scroll"><img alt=""></div><footer><button type="button" data-sample-prev>이전</button><span aria-live="polite"></span><button type="button" data-sample-next>다음</button></footer>';d.body.append(dialog);
+    dialog.querySelector('[data-sample-close]').onclick=()=>dialog.close();dialog.querySelector('[data-sample-prev]').onclick=()=>show(index-1);dialog.querySelector('[data-sample-next]').onclick=()=>show(index+1);
+    dialog.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat&&!e.isComposing)e.preventDefault();if(e.key!=='Tab'||e.defaultPrevented)return;const items=[...dialog.querySelectorAll('button:not(:disabled)')],first=items[0],last=items.at(-1);if(e.shiftKey&&d.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&d.activeElement===last){e.preventDefault();first.focus();}});
+    dialog.addEventListener('close',()=>{if(dialog.open)return;const target=origin;origin=null;dialog.querySelector('img').removeAttribute('src');if(live()&&target?.isConnected&&target.getClientRects().length&&[d.body,dialog].includes(d.activeElement))target.focus({preventScroll:true});});
+   }
+   index=i;if(button)origin=button;dialog.querySelector('h2').textContent=labels[i];const img=dialog.querySelector('img');img.alt=labels[i]+' · 비식별 서식 예시';img.src=image(i);dialog.querySelector('span').textContent=(i+1)+' / '+labels.length;dialog.querySelector('[data-sample-prev]').disabled=i===0;dialog.querySelector('[data-sample-next]').disabled=i===labels.length-1;dialog.querySelector('.rg-sample-scroll').scrollTop=0;if(!dialog.open)dialog.showModal();
+  }
+  d.getElementById('registryGuide').addEventListener('click',e=>{const b=e.target.closest('[data-rg-sample]');if(b)show(Number(b.dataset.rgSample),b);});
+  const leave=()=>{origin=null;if(dialog?.open)dialog.close();};return{leave};
+ }
+ root.CoopRegistrySubmissionExample=Object.freeze({example,attach,labels,image,version:'2.0.0'});
 })(typeof window==='undefined'?globalThis:window);

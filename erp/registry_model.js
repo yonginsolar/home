@@ -1,4 +1,4 @@
-/* 시청 변경신고 준비 모형 0.4.0 — 원장과 신고 수정값 분리. */
+/* 시청 변경신고 준비 모형 0.5.0 — 원장과 신고 수정값 분리. */
 (function(root){
  'use strict';
  const kinds={capital:'출자금',members:'조합원 수',appointment:'임원 취임',renewal:'임원 중임',retirement:'임원 퇴임',resignation:'임원 사임',office:'주사무소 주소',purpose:'사업 목적',name:'조합 명칭',chair:'이사장 변경',chairAddress:'이사장 개인 주소',articles:'그 밖의 정관 변경'};
@@ -16,6 +16,7 @@
   if(!Number.isSafeInteger(unit)||unit<=0)throw Error('ERP의 1좌 금액을 확인해 주세요.');
   const values={...sums};if(!rows.some(r=>r.deposit_date<=p.before))values.beforeCapital=null;for(const prefix of ['before','increase','decrease','after'])values[prefix+'Shares']=values[prefix+'Capital']!==null&&sums[prefix+'Capital']%unit===0?sums[prefix+'Capital']/unit:null;return values;
  }
+ function reportedCapitalAt(rows,p,unit,coop,beforeDate){const valid=date(beforeDate)&&beforeDate<=p.end;const values=capitalAt(rows,valid?{...p,before:beforeDate}:p,unit,coop);values.beforeCapital=null;values.beforeShares=null;if(!valid)for(const key of ['increaseCapital','decreaseCapital','increaseShares','decreaseShares'])values[key]=null;return values;}
  function birthFromRrn(value,day){const s=String(value||'').replace('-', '');if(!/^\d{13}$/.test(s))throw Error('이사장 주민번호의 생년월일 형식을 확인해 주세요.');const century=({1:1900,2:1900,3:2000,4:2000,5:1900,6:1900,7:2000,8:2000,9:1800,0:1800})[s[6]],birth=String(century+Number(s.slice(0,2)))+'-'+s.slice(2,4)+'-'+s.slice(4,6),today=day||new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());if(!date(birth)||birth>today)throw Error('이사장 주민번호의 생년월일을 확인해 주세요.');return birth;}
  function originalCharter(coop,rows){return coop==='a4e65bb0-aa8e-4cef-a895-cd7865a67fef'&&rows.length===1&&rows[0].is_current===true;}
  function deadline(end){if(!date(end))return '';const [y,m,d]=end.split('-').map(Number),target=new Date(Date.UTC(y,m+2,1)),last=new Date(Date.UTC(target.getUTCFullYear(),target.getUTCMonth()+1,0)).getUTCDate();target.setUTCDate(Math.min(d,last));return target.toISOString().slice(0,10);}
@@ -66,8 +67,8 @@
   if(annual){for(const q of ['Members','Shares','Capital']){const b=values['before'+q],i=values['increase'+q],d=values['decrease'+q],a=values['after'+q];if([b,i,d,a].every(x=>x!==null)&&b+i-d!==a)warnings.push(({Members:'조합원 수',Shares:'출자좌수',Capital:'출자금'})[q]+'의 전기 + 증가 - 감소가 기말과 다릅니다.');}
    for(const p of ['before','increase','decrease','after'])for(const q of ['Members','Shares','Capital'])if(values[p+q]===null)missing.push(({before:'변경 전',increase:'당기 증가',decrease:'당기 감소',after:'기말'})[p]+' '+({Members:'조합원 수',Shares:'출자좌수',Capital:'출자금'})[q]);
    if(unit&&values.afterCapital!==null&&values.afterShares!==null&&unit*values.afterShares!==values.afterCapital)warnings.push('기말 좌수 × 1좌 금액과 기말 출자금이 다릅니다.');
-   if(!date(input.beforeDate))missing.push('변경 전 기준일');
-   let p;try{p=period(input.reportYear);}catch(_){missing.push('신고연도');}if(p&&(input.fiscalEnd!==p.end||input.beforeDate!==p.before))missing.push('신고연도에 맞는 대상연도·기준일');if(selected.has('capital')&&String(input.capitalSourceYear)!==String(input.reportYear))missing.push('대상연도의 ERP 출자금 조회');
+   if(!date(input.beforeDate))missing.push('직전 신고·설립 신고의 출자금 기준일');if(!['직전 신고','설립 신고','직접 확인'].includes(input.beforeLabel))missing.push('변경 전 금액의 기준');
+   let p;try{p=period(input.reportYear);}catch(_){missing.push('신고연도');}if(p&&(input.fiscalEnd!==p.end))missing.push('신고연도에 맞는 대상연도·기준일');if(selected.has('capital')&&String(input.capitalSourceYear)!==String(input.reportYear))missing.push('대상연도의 ERP 출자금 조회');
    const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());if(input.fiscalEnd>today)missing.push('아직 종료되지 않은 회계연도');if(date(input.beforeDate)&&input.beforeDate>input.fiscalEnd)warnings.push('변경 전 기준일이 기말 기준일보다 늦습니다.');
   }
   if(annual&&input.reportedBaselineState&&input.reportedBaselineState!=='ready')missing.push('과거 신고 인원 다시 확인');
@@ -109,5 +110,5 @@
   if(kind==='retirement')return date(row.real_end_date)&&row.real_end_date>=row.term_start_date&&!!row.end_reason&&row.end_reason!=='resignation'?{before:officialSummary(row),after:row.name+' · '+row.role+'\n퇴임일 '+row.real_end_date}:{before:officialSummary(row),after:'',error:'ERP에 처리된 퇴임일이 없습니다.'};return{before:'',after:'',error:'변경 구분을 확인해 주세요.'};
  }
  function purposeFromText(text){const value=String(text||'').replace(/\r/g,''),matches=[...value.matchAll(/(?:^|\n)\s*제\s*\d+\s*조\s*[（(]\s*목\s*적\s*[)）]/g)];if(matches.length!==1)return'';const start=matches[0].index,tail=value.slice(start+matches[0][0].length),next=tail.search(/\n\s*제\s*\d+\s*조\s*[（(]/);return value.slice(start,start+matches[0][0].length+(next<0?tail.length:next)).trim();}
- root.CoopRegistryModel={model,reportedMembershipNote,reportMemberComparison,managedValues,number,display,deadline,date,access,kinds,fieldRows,period,capitalAt,membershipAt,activityCounts,changeScope,registeredOfficer,officialOptions,officialSummary,officialChange,purposeFromText,birthFromRrn,originalCharter};
+ root.CoopRegistryModel={model,reportedMembershipNote,reportMemberComparison,managedValues,number,display,deadline,date,access,kinds,fieldRows,period,capitalAt,reportedCapitalAt,membershipAt,activityCounts,changeScope,registeredOfficer,officialOptions,officialSummary,officialChange,purposeFromText,birthFromRrn,originalCharter};
 })(typeof window==='undefined'?globalThis:window);

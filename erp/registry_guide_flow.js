@@ -1,4 +1,4 @@
-/* 변경등기 순서1.2.0 · 같은 입력을 유지하는 단독·일괄 안내. */
+/* 변경등기 순서1.3.0 · 같은 입력을 유지하는 단독·일괄 안내. */
 (function(root){
  'use strict';
  function documents(topics){
@@ -37,7 +37,7 @@
   function paint(){
    const current=list[index],topics=choices();if(!current)return;
    if(current.topic)draw(current.topic);
-   picker.hidden=!batch;button.setAttribute('aria-pressed',String(batch));
+   picker.hidden=!batch;button.setAttribute('aria-pressed',String(batch));host.dataset.rgSelectionMode=batch?'batch':'single';for(const n of $('rgTopics').querySelectorAll('[data-topic]'))n.setAttribute('aria-pressed',String(!batch&&n.dataset.topic===single));for(const n of picker.querySelectorAll('label'))n.toggleAttribute('data-selected',n.querySelector('input').checked);
    $('rgCommon').hidden=!current.common;$('rgTopicTitle').hidden=!current.topic;$('rgSteps').hidden=!current.topic;$('rgAfterFields').hidden=!current.after;preparation.hidden=current.node!==preparation;
    for(const node of $('rgCommon').children)if(node.tagName==='DETAILS'){node.hidden=current.node!==node;if(!node.hidden)node.open=true;}
    for(const node of $('rgAfterFields').children)if(node.tagName==='DETAILS'){node.hidden=current.node!==node;if(!node.hidden)node.open=true;}
@@ -57,5 +57,5 @@
   function select(topic){if(!live()||!types[topic])return;remember();batch=false;single=topic;rebuild();}
   rebuild();return{select,sync:paint,selection:choices,batch:()=>batch};
  }
- root.CoopRegistryGuideFlow=Object.freeze({attach,documents,version:'1.2.0'});
+ root.CoopRegistryGuideFlow=Object.freeze({attach,documents,version:'1.3.0'});
 })(typeof window==='undefined'?globalThis:window);

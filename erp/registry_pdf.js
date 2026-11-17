@@ -1,4 +1,4 @@
-/* 0.4.0 · 일반 직인·출자자명부의 안전한 미리보기와 최종 출력 연결. */
+/* 0.5.0 · 일반 직인·출자자명부의 안전한 미리보기와 최종 출력 연결. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -47,10 +47,10 @@
    pg.drawLine({start:{x:86.473,y:703.63},end:{x:515.483,y:703.63},thickness:.5});
    draw('출자금 변동내역 확인서',90,111,422,20,14,true);
    let fieldTop=168;for(const [label,value]of [['협동조합명',d.companyName],['법인등록번호',d.corporateNumber],['소재지',d.officeAddress],['출자금',D(model.unit)+'원']]){const height=Math.max(21,wrap(value||'',font,11,292).length*13+4);if(fieldTop+height>280)throw Error('확인서 기본정보가 입력 칸보다 깁니다.');draw(label+' :',114,fieldTop,95,18);draw(value||'',210,fieldTop,292,height);fieldTop+=height;}
-   draw('당기 ('+String(d.fiscalEnd||'').slice(0,4)+'년) 출자금 변동내역',114,287,390,18);
+   draw('출자금 변동내역 ('+D(d.beforeDate)+' 기준 ~ '+D(actualDate)+')',114,287,390,18);
    let top=309.501;const widths=[101.106,101.106,101.225,101.106];
-   const cells=[['구분','조합원수','출자좌수','출자금'],...['before','increase','decrease','after'].map((key,i)=>[i===0?(d.beforeLabel||'변경 전'):i===1?'당기증가':i===2?'당기감소':D(actualDate).replaceAll('-','.'),D(model.values[key+'Members']),D(model.values[key+'Shares']),D(model.values[key+'Capital'])])];
-   for(const row of cells){let x=99.666;const height=24;row.forEach((s,i)=>{pg.drawRectangle({x,y:841-top-height,width:widths[i],height,borderWidth:.45,borderColor:lib.rgb(0,0,0)});draw(s,x+4,top+5,widths[i]-8,height-4,11,true);x+=widths[i];});top+=height;}
+   const cells=[['구분','조합원수','출자좌수','출자금'],...['before','increase','decrease','after'].map((key,i)=>[i===0?((d.beforeLabel||'변경 전')+'\n'+(d.beforeDate||'')):i===1?'당기증가':i===2?'당기감소':D(actualDate).replaceAll('-','.'),D(model.values[key+'Members']),D(model.values[key+'Shares']),D(model.values[key+'Capital'])])];
+   for(const row of cells){let x=99.666;const height=row===cells[1]?40:24;row.forEach((s,i)=>{pg.drawRectangle({x,y:841-top-height,width:widths[i],height,borderWidth:.45,borderColor:lib.rgb(0,0,0)});draw(s,x+4,top+5,widths[i]-8,height-4,11,true);x+=widths[i];});top+=height;}
    draw('위 출자금 변동사항은 사실과 같음을 확인합니다.',104,465,400,30,11,true);
    draw(String(d.printDate||'').replaceAll('-','.'),114,521,390,22,12,true);
    draw(D(d.companyName)+' 이사장 '+D(d.chairName),104,578,340,32,12,true);
@@ -71,5 +71,5 @@
   for(const [i,pg]of doc.getPages().entries())if(i>=1)pg.drawText(String(i+1)+' / '+doc.getPageCount(),{x:500,y:30,size:11,font});
   check();doc.setTitle('시청 변경신고 작성자료');doc.setCreator('협동조합 운영시스템');const bytes=await doc.save();try{check();return bytes;}catch(e){bytes.fill(0);throw e;}
  }
- root.CoopRegistryPdf={create,wrap,tools,version:'0.4.0'};
+ root.CoopRegistryPdf={create,wrap,tools,version:'0.5.0'};
 })(typeof window==='undefined'?globalThis:window);
