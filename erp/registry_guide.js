@@ -1,4 +1,4 @@
-/* 변경등기 가이드2.4.0 · 단일 출자 경로·확인한 클릭 위치. */
+/* 변경등기 가이드2.5.0 · 단일 출자 경로·확인한 클릭 위치. */
 (function(root){
  'use strict';
  const types={
@@ -104,9 +104,9 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
    $('rgTypeNote').hidden=key!=='office';$('rgTopicTitle').textContent=types[key].label;
    const opened=drafts.get(key)||new Set([0,1]);$('rgSteps').innerHTML=steps(key).map(([title,html],i)=>`<details class="rg-step" data-step="${i}"${opened.has(i)?' open':''}><summary>${title}</summary><div class="rg-step-body">${html}</div></details>`).join('');
    for(const n of $('rgSteps').querySelectorAll('details'))n.addEventListener('toggle',()=>{if(n.isConnected&&n.parentElement===$('rgSteps'))drafts.set(key,new Set([...n.parentElement.querySelectorAll('details[open]')].map(x=>Number(x.dataset.step))));});
-   if(inputs){inputs.open(key);$('rgSteps').querySelector('[data-step="0"] .rg-step-body').append(inputs.element);}
-   $('rgSingleChoice').replaceChildren();$('rgAuthority').replaceChildren();
-   if(key==='capital'){const choice=$('rgSteps').querySelector('[data-rg-click-screen="capital"]'),authority=$('rgSteps').querySelector('[data-rg-click-screen="authority"]')?.closest('[data-rg-authority]');if(choice)$('rgSingleChoice').append(choice);if(authority)$('rgAuthority').append(authority);if(causeUi?.entryElement)$('rgCapitalEntry')?.append(causeUi.entryElement);const note=$('rgSteps').querySelector('[data-step="1"] .rg-note');if(note)note.remove();}
+   if(inputs){inputs.open(key);const body=$('rgSteps').querySelector('[data-step="1"] .rg-step-body');body.prepend(inputs.element);inputs.element.hidden=key==='capital';if(key==='capital')$('rgCausePanel').before(inputs.controls,inputs.status);else inputs.element.querySelector('h2').after(inputs.controls,inputs.status);}
+   $('rgSingleChoice').replaceChildren();
+   if(key==='capital'){const choice=$('rgSteps').querySelector('[data-rg-click-screen="capital"]');if(choice)$('rgSingleChoice').append(choice);if(causeUi?.entryElement)$('rgCapitalEntry')?.append(causeUi.entryElement);const note=$('rgSteps').querySelector('[data-step="1"] .rg-note');if(note)note.remove();}
    screens?.sync();
   }
   $('rgAfterFields').innerHTML=commonAfter();sampleUi=root.CoopRegistrySubmissionExample?.attach({context});
@@ -121,7 +121,7 @@ return [['ERP 값 확인','<p>'+(key==='capital'?'기준연도의 출자 원장�
   root.addEventListener('pagehide',leave);root.addEventListener('pageshow',resume);document.addEventListener('visibilitychange',()=>{if(document.hidden)leave();else resume();});if(root.frameElement)new MutationObserver(records=>{if(root.frameElement.hidden||records.some(r=>r.oldValue===null))leave();if(!root.frameElement.hidden)resume();}).observe(root.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});queueMicrotask(resume);
   return{leave,resume,topic:()=>topic};
  }
- root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'2.4.0'});
+ root.CoopRegistryGuide=Object.freeze({types,steps,mount,version:'2.5.0'});
  if(typeof document==='undefined'||!document.getElementById('registryGuide'))return;
  const $=id=>document.getElementById(id),client=root.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':root.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});let owner='',coop='',formalName='',authorized=false,view=0,ui;
  const context=()=>({coop,formalName,authorized,key:owner+'|'+coop}),lock=message=>{view++;authorized=false;ui?.leave();$('rgContent').hidden=true;$('rgAccessStatus').hidden=false;$('rgAccessStatus').textContent=message;};

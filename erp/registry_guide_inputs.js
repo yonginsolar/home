@@ -112,7 +112,7 @@
   year.oninput=()=>{if(state.year===year.value)return;state.year=year.value;onScope(topic,year.value);cancel();caution.textContent='';void refresh();};
   kind.onchange=()=>{state.kind=kind.value;if(data){options();render();}};officer.onchange=()=>{state.officials[kind.value]=officer.value;if(data)render();};
   loadButton.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});
-  return{element:el,open,refresh,leave:cancel};
+  return{element:el,controls,status,open,refresh,leave:cancel};
  }
- root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,officialFields,payment,taxAssessment,version:'1.7.0'});
+ root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,officialFields,payment,taxAssessment,version:'1.8.0'});
 })(typeof window==='undefined'?globalThis:window);
