@@ -1,4 +1,4 @@
-/* 변경등기 순서1.5.0 · 같은 입력을 유지하는 단독·일괄 안내. */
+/* 변경등기 순서1.6.0 · 같은 입력을 유지하는 단독·일괄 안내. */
 (function(root){
  'use strict';
  function documents(topics){
@@ -21,16 +21,21 @@
   const picker=d.createElement('fieldset');picker.id='rgBatchChoices';picker.hidden=true;picker.innerHTML='<legend>함께 변경할 항목 · 2개 이상 선택</legend>';
   for(const key of ['capital','officers','chair','name','purpose']){const label=d.createElement('label'),input=d.createElement('input');input.type='checkbox';input.value=key;input.checked=selected.includes(key);label.append(input,d.createTextNode(types[key].label));picker.append(label);input.onchange=()=>{if(!live())return;remember();selected=[...picker.querySelectorAll('input:checked')].map(n=>n.value);rebuild();};}
   $('rgTopics').after(picker);
-  const preparation=d.createElement('section');preparation.id='rgPreparation';preparation.innerHTML='<h2>준비서류</h2><div id="rgDocuments"></div>';picker.after(preparation);
+  const preparation=d.createElement('section');preparation.id='rgPreparation';preparation.innerHTML='<h2>제출 전 서류 확인</h2><label class="registry-checklist-mode">제출 방법<select id="rgChecklistProxy"><option value="chair">이사장 직접 제출</option><option value="proxy">대리 제출</option><option value="employee">조합 직원 대리 제출</option></select></label><div id="rgChecklist"></div><div id="rgDocuments"></div>';picker.after(preparation);
   const nav=d.createElement('nav');nav.className='rg-flow-nav';nav.setAttribute('aria-label','안내 단계');nav.innerHTML='<button type="button" id="rgPrevious">이전</button><h2 id="rgFlowTitle" tabindex="-1"></h2><button type="button" id="rgNext">다음</button>';$('rgContent').append(nav);
   const progress=d.createElement('ol');progress.id='rgFlowProgress';progress.className='rg-flow-progress';preparation.before(progress);
+  const checklist=root.CoopRegistryChecklist?.attach({element:$('rgChecklist'),context});
+  function checklistSync(){const source=d.createElement('div');source.innerHTML=documents(choices());const mode=$('rgChecklistProxy').value;checklist?.sync(root.CoopRegistryChecklist.guideRows(source.innerHTML,mode),JSON.stringify([choices().slice().sort(),mode,$('rgInputYear')?.value||'']));if(checklist)for(const n of source.querySelectorAll('ul,h3'))n.remove();$('rgDocuments').innerHTML=source.innerHTML;}
+  $('rgChecklistProxy').onchange=checklistSync;
+  $('rgInputYear')?.addEventListener('input',checklistSync);
   const choices=()=>batch?selected:[single],key=()=>context().key+'|'+(batch?'batch:'+selected.join(','):single);
   function remember(){if(list[index])positions.set(key(),list[index].id);}
   function rebuild(){
-   const topics=choices();onSelection(topics,batch);$('rgDocuments').innerHTML=documents(topics);
+   const topics=choices();onSelection(topics,batch);checklistSync();
    list=[{id:'prepare',label:'준비서류',node:preparation},...[...$('rgCommon').children].filter(n=>n.tagName==='DETAILS').map((node,i)=>({id:'common'+i,label:node.querySelector('summary').textContent,node,common:true}))];
    for(const topic of topics)list.push({id:topic+':entry',label:topic==='capital'?'기타사항 · 출자에관한사항':types[topic].label+' · 입력',topic,part:1});
    list.push(...[...$('rgAfterFields').children].filter(n=>n.tagName==='DETAILS').map((node,i)=>({id:'after'+i,label:node.querySelector('summary').textContent.replace(/^\d+\s*/,''),node,after:true})));
+   list.push({id:'checklist',label:'제출 전 서류 확인',node:preparation});
    const old=positions.get(key());index=Math.max(0,list.findIndex(n=>n.id===old));
    const active=list[index];draw(active.topic||topics[0]||single);paint();
   }
@@ -57,5 +62,5 @@
   function select(topic){if(!live()||!types[topic])return;remember();batch=false;single=topic;rebuild();}
   rebuild();return{select,sync:paint,selection:choices,batch:()=>batch};
  }
- root.CoopRegistryGuideFlow=Object.freeze({attach,documents,version:'1.5.0'});
+ root.CoopRegistryGuideFlow=Object.freeze({attach,documents,version:'1.6.0'});
 })(typeof window==='undefined'?globalThis:window);
