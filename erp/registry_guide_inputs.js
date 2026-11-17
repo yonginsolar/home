@@ -1,4 +1,4 @@
-/* 변경등기 입력1.6.0 · 기존 조회값의 항목별 복사. */
+/* 변경등기 입력1.7.0 · 기존 조회값의 항목별 복사. */
 (function(root){
  'use strict';
  const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());
@@ -67,6 +67,14 @@
   if(r.registration!==null){r.education=Number(BigInt(r.registration)*20n/1000n*10n);r.formula.push('지방교육세 = 등록면허세 × 20% · 10원 미만 버림');}
   return r;
  }
+ function taxAssessment({address,entity,topic='capital'}){
+  const place=String(address||'').trim(),m=place.match(/^(?:(?:경기도|경기)\s+)?(용인(?:특례)?시|화성(?:특례)?시)(?:\s|$)/);
+  if(entity!=='ordinary')return {treatment:'',text:entity==='social'?'사회적협동조합의 등기 세율·감면 적용을 확인해 주세요.':'등기할 법인의 유형을 확인해 주세요.'};
+  if(topic!=='capital')return {treatment:'',text:''};
+  if(m)return {treatment:'standard',text:'현재 ERP 주사무소는 '+m[1]+'로 과밀억제권역 밖입니다. 본점 출자금 변경은 일반세율 기준입니다.'};
+  if(!place)return {treatment:'',text:'주사무소 주소를 확인해 주세요.'};
+  return {treatment:'',text:'이 주소의 대도시 해당 여부와 설립·전입일을 확인해 세율을 선택해 주세요.'};
+ }
  function attach({client,authorize,context,onValues=()=>{},onProfile=()=>{},onScope=()=>{}}){
   const d=document,el=d.createElement('section');el.id='rgInputReference';el.className='rg-input-reference';
   const make=(tag,text,parent=el)=>{const n=d.createElement(tag);if(text)n.textContent=text;parent.append(n);return n;};
@@ -106,5 +114,5 @@
   loadButton.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});
   return{element:el,open,refresh,leave:cancel};
  }
- root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,officialFields,payment,version:'1.6.0'});
+ root.CoopRegistryGuideInputs=Object.freeze({court,load,attach,officialFields,payment,taxAssessment,version:'1.7.0'});
 })(typeof window==='undefined'?globalThis:window);

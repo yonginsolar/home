@@ -1,4 +1,4 @@
-/* 변경등기 클릭 안내1.3.0 · 원본 픽셀 좌표의 비상호작용 HTML 표시. */
+/* 변경등기 클릭 안내1.4.0 · 원본 픽셀 좌표의 비상호작용 HTML 표시. */
 (function(root){
  'use strict';
  // 좌표는 원본 픽셀의 [설명,x,y,너비,높이,해당유형]이다. 사진/입력값은 바꾸지 않는다.
@@ -9,7 +9,7 @@
   'click-04-capital.jpg':[['출자/자산사항의 변경',135,391,238,34],['선택',463,689,94,47]],
   'click-05-authority-empty.jpg':[['대표권 있는 사람의 성명 · 직접 입력',218,292,200,41],['등록번호 구분',218,353,200,39],['주민등록번호 · 등기소에서 직접 입력',218,414,406,40],['확인',744,576,93,47]],
   'click-06-capital-items.jpg':[['1. 출자에관한사항 행의 변경',876,626,49,31]],
-  'click-07-capital-change-empty.jpg':[['내용 · 이번 ERP 전체 좌수/총액으로 대체',173,237,890,154],['등기원인 · 이번 근거 선택/입력',173,413,533,40],['등기원인일자 · 이번 실제 효력일',890,413,173,41],['등록완료 · 내용을 확인한 뒤',976,516,113,45]],
+  'click-07-capital-change-empty.jpg':[['내용 · 이번 ERP 전체 좌수/총액으로 대체',173,237,890,154],['등기원인 · 이번 근거 선택/입력',173,413,533,40],['등기원인일자 · 선택한 회계연도 말',890,413,173,41],['등록완료 · 내용을 확인한 뒤',976,516,113,45]],
   'extra-01-basic-type.jpg':[['전자표준양식',507,199,191,60],['안내 확인 후 동의합니다',779,332,131,45],['등기유형 더보기',795,660,194,67]],
   'extra-02-basic-reason-court.jpg':[['등기의 사유',254,410,730,153],['저장 후 다음',864,798,135,61]],
   'extra-03-special-types.jpg':[['임원사항 변경 · 이사장 포함',140,204,318,32,['officers','chair']],['명칭/목적 등의 변경',141,244,292,32,['name','purpose']],['출자/자산사항의 변경',141,604,294,32,['capital']],['선택',463,690,94,46]],
@@ -43,12 +43,12 @@
   'final-05-tax.jpg':[['과세표준액 · 실제 납부서와 대조',182,159,199,39],['등록면허세 납입정보',96,349,910,40],['지방교육세',703,477,248,40],['농어촌특별세 · 해당할 때',703,531,248,40]],
   'final-06-fees.jpg':[['등기신청수수료 · 실제 신청 기준',182,120,200,40],['실제 전자납부가 있으면 조회',732,346,100,31],['수수료 납부정보 추가',350,557,313,47],['저장 후 다음',863,644,144,60]],
   'final-07-attachments.jpg':[['신청인/대리인 입력',350,258,313,46],['첨부서면 추가',350,580,313,47],['첨부서면 목록 저장',959,510,48,31],['알림 대상자 정보 입력 · 필요한 경우',350,859,313,46],['검토 후 신청서작성완료',836,945,171,61]],
-  'final-08-attachment-picker.jpg':[['첨부서면명 검색',150,150,465,46],['조회',629,150,127,46],['실제 준비한 서류의 체크칸',65,334,24,24],['실제 준비한 서류의 체크칸',424,334,24,24],['선택',662,647,94,46]]
+  'final-08-attachment-picker.jpg':[['첨부서면명 검색',150,150,465,46],['조회',629,150,127,46],['선택',662,647,94,46]]
  };
  points['click-03-change-neutral-20261117.png']=points['click-03-change.jpg'];
  const captures={more:['click-01-more.jpg',1014,263,'등기유형 더보기'],special:['click-02-special.jpg',598,761,'특수법인 펼치기'],change:['click-03-change-neutral-20261117.png',598,761,'변경등기 펼치기'],capital:['click-04-capital.jpg',598,761,'단일 출자/자산사항 선택'],authority:['click-05-authority-empty.jpg',878,648,'신청권한 확인 · 입력 전 화면'],items:['click-06-capital-items.jpg',1030,756,'기타사항 자동 선택·기존 항목 변경'],editor:['click-07-capital-change-empty.jpg',1130,587,'기존 출자에관한사항 변경창']};
  function figure(key){const[file,w,h,title]=captures[key]||[];if(!file)throw Error('확인한 화면이 아닙니다.');const src='/erp/assets/registry-guide/'+file,original=key==='change'?'/erp/assets/registry-guide/click-03-change.jpg':src,overlay=key==='editor'?'<output class="rg-value-overlay" data-rg-capital-value style="left:15.31%;top:40.37%;width:78.76%;height:26.24%" aria-label="내용칸에 입력할 값">ERP 값 확인 중</output>':'';return '<figure class="rg-official-capture" data-rg-click-capture="'+key+'"><figcaption>'+title+'</figcaption><div class="rg-screen-scroll" tabindex="0" aria-label="'+title+' 화면 · 좌우로 이동"><div class="rg-capture-map" style="max-width:'+w+'px"><img src="'+src+'" width="'+w+'" height="'+h+'" loading="lazy" decoding="async" alt="인터넷등기소 '+title+' 실제 화면">'+overlay+'</div></div><p class="rg-capture-source">사용자 제공 · 대한민국 법원 인터넷등기소 · <a href="'+original+'" target="_blank" rel="noopener noreferrer">원본 보기</a></p></figure>';}
  function selected(file,topic){return(points[file]||[]).filter(p=>!p[5]||p[5].includes(topic));}
  function decorate(guide,topic){for(const fig of guide.querySelectorAll('figure.rg-official-capture')){const img=fig.querySelector('img'),map=fig.querySelector('.rg-capture-map');if(!img||!map)continue;const file=img.getAttribute('src').split('/').pop();if(!points[file])continue;const key=file+'|'+topic;if(fig.dataset.rgClickKey===key)continue;const w=Number(img.getAttribute('width')),h=Number(img.getAttribute('height')),rows=selected(file,topic);let layer=map.querySelector('.rg-click-layer'),legend=fig.querySelector('.rg-click-legend');if(!layer){layer=document.createElement('span');layer.className='rg-click-layer';layer.setAttribute('aria-hidden','true');map.append(layer);}if(!legend){legend=document.createElement('ol');legend.className='rg-click-legend';legend.setAttribute('aria-label','사진의 클릭 위치');fig.append(legend);}layer.replaceChildren();legend.replaceChildren();rows.forEach(([label,x,y,bw,bh],i)=>{if(![x,y,bw,bh,w,h].every(Number.isFinite)||x<0||y<0||bw<=0||bh<=0||x+bw>w||y+bh>h)throw Error('클릭 표시 좌표를 확인해 주세요.');const mark=document.createElement('span'),number=document.createElement('b'),item=document.createElement('li');mark.className='rg-click-mark';mark.dataset.rgClick=String(i+1);mark.style.cssText='left:'+(x/w*100)+'%;top:'+(y/h*100)+'%;width:'+(bw/w*100)+'%;height:'+(bh/h*100)+'%';number.textContent=String(i+1);mark.append(number);layer.append(mark);item.textContent=label;legend.append(item);});fig.dataset.rgClickKey=key;}}
- root.CoopRegistryGuideClicks=Object.freeze({points,captures,figure,selected,decorate,version:'1.3.0'});
+ root.CoopRegistryGuideClicks=Object.freeze({points,captures,figure,selected,decorate,version:'1.4.0'});
 })(typeof window==='undefined'?globalThis:window);

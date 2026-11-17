@@ -1,8 +1,8 @@
-/* 제출 꾸러미 예시2.0.0 · 원본 픽셀·식별정보 없이 새로 작성한 실물형 13면. */
+/* 제출 꾸러미 예시2.1.0 · 개인정보를 불투명하게 가린 원본 배치 사본. */
 (function(root){
  'use strict';
- const labels=['등기신청수수료 납부서','변경등기신청서 · 첫 면','변경등기신청서 · 둘째 면','등록면허세 납부확인서','위임장','재직증명서','변경신고확인증','변경사항 별첨','총회의사록 · 첫 면','총회의사록 · 계속','총회의사록 · 의결','의사록 서명·확인','전자서명 확인 내역'];
- const image=i=>'/erp/assets/registry-guide/sample-case-20261117-'+String(i+1).padStart(2,'0')+'.png';
+ const labels=['등기신청수수료 납부서','변경등기신청서 · 첫 면','변경등기신청서 · 둘째 면','등록면허세 납부확인서','위임장','재직증명서','변경신고확인증','변경사항 별첨','총회의사록 · 첫 면','총회의사록 · 계속','총회의사록 · 의결'];
+ const image=i=>'/erp/assets/registry-guide/redacted-case-20261117-'+String(i+1).padStart(2,'0')+'.png';
  function example(){return '<p class="rg-note">이미지는 샘플입니다.</p><ol class="rg-sample-list">'+labels.map((label,i)=>'<li><button type="button" data-rg-sample="'+i+'">'+(i+1)+'. '+label+'</button></li>').join('')+'</ol><p>신청서가 두 장 이상이면 장 사이에 신청인 또는 대리인이 간인합니다. 이번 변경에 필요한 증빙을 신청서와 함께 묶어 접수하세요.</p>';}
  function attach({context}){
   const d=document,subject=context().key,live=()=>context().authorized&&context().key===subject&&!d.hidden&&(!root.frameElement||!root.frameElement.hidden);let dialog,origin=null,index=0;
@@ -17,5 +17,5 @@
   d.getElementById('registryGuide').addEventListener('click',e=>{const b=e.target.closest('[data-rg-sample]');if(b)show(Number(b.dataset.rgSample),b);});
   const leave=()=>{origin=null;if(dialog?.open)dialog.close();};return{leave};
  }
- root.CoopRegistrySubmissionExample=Object.freeze({example,attach,labels,image,version:'2.0.0'});
+ root.CoopRegistrySubmissionExample=Object.freeze({example,attach,labels,image,version:'2.1.0'});
 })(typeof window==='undefined'?globalThis:window);

@@ -1,4 +1,4 @@
-/* 변경등기 순서1.3.0 · 같은 입력을 유지하는 단독·일괄 안내. */
+/* 변경등기 순서1.4.0 · 같은 입력을 유지하는 단독·일괄 안내. */
 (function(root){
  'use strict';
  function documents(topics){
@@ -29,7 +29,7 @@
   function rebuild(){
    const topics=choices();onSelection(topics,batch);$('rgDocuments').innerHTML=documents(topics);
    list=[{id:'prepare',label:'준비서류',node:preparation},...[...$('rgCommon').children].filter(n=>n.tagName==='DETAILS').map((node,i)=>({id:'common'+i,label:node.querySelector('summary').textContent,node,common:true}))];
-   for(const topic of topics)list.push({id:topic+':erp',label:types[topic].label+' · ERP 값',topic,part:0},{id:topic+':entry',label:types[topic].label+' · 입력',topic,part:1});
+   for(const topic of topics)list.push({id:topic+':erp',label:types[topic].label+' · ERP 값',topic,part:0},{id:topic+':entry',label:topic==='capital'?'기타사항 · 출자에관한사항':types[topic].label+' · 입력',topic,part:1});
    list.push(...[...$('rgAfterFields').children].filter(n=>n.tagName==='DETAILS').map((node,i)=>({id:'after'+i,label:node.querySelector('summary').textContent.replace(/^\d+\s*/,''),node,after:true})));
    const old=positions.get(key());index=Math.max(0,list.findIndex(n=>n.id===old));
    const active=list[index];draw(active.topic||topics[0]||single);paint();
@@ -57,5 +57,5 @@
   function select(topic){if(!live()||!types[topic])return;remember();batch=false;single=topic;rebuild();}
   rebuild();return{select,sync:paint,selection:choices,batch:()=>batch};
  }
- root.CoopRegistryGuideFlow=Object.freeze({attach,documents,version:'1.3.0'});
+ root.CoopRegistryGuideFlow=Object.freeze({attach,documents,version:'1.4.0'});
 })(typeof window==='undefined'?globalThis:window);
