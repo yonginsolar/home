@@ -1,9 +1,9 @@
-/* 1.0.0 · 신고연도별 직전 신고값을 읽고 기존 수치 수정 경로에 연결한다. */
+/* 1.0.1 · 신고연도별 직전 신고값을 읽고 기존 수치 수정 경로에 연결한다. */
 (function(root){
  'use strict';
  const uuid=s=>typeof s==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(s);
  const integer=n=>Number.isSafeInteger(n)&&n>=0;
- const titles=['설립신고','설립신고확인증','설립신고확인증 발급','설립신고 완료','설립신고 수리','협동조합 설립신고확인증 발급'];
+ const titles=['설립신고','설립신고확인증','설립신고확인증 발급','설립신고 완료','설립신고 수리','협동조합 설립신고확인증 발급','협동조합 설립 신고확인증 발급'];
  const date=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
  function resolve(year,coop,response,foundations=[]){
   if(!Number.isInteger(year)||year<1901||year>9999||!coop||!response||response.coop_id!==coop||response.report_year!==year-1||!Object.hasOwn(response,'current'))throw Error('직전 신고값의 조합·연도를 확인해 주세요.');
@@ -41,5 +41,5 @@
   function snapshot(){const c=context();return state.key===key(c)?{...state,values:{...state.values}}:{ready:false,values:{},date:'',label:'직전 신고'};}
   return{refresh,leave,snapshot};
  }
- root.RegistryPriorReport=Object.freeze({resolve,attach,version:'1.0.0'});
+ root.RegistryPriorReport=Object.freeze({resolve,attach,version:'1.0.1'});
 })(typeof window==='undefined'?globalThis:window);
