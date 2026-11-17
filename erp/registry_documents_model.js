@@ -1,9 +1,11 @@
-/* 변경신고 첨부서류 0.3.2 · 직접 선택한 회의·소집 문서를 자동으로 묶는다. */
+/* 변경신고 첨부서류 0.4.0 · 직접 선택한 회의·소집 문서를 자동으로 묶는다. */
 (function(root){
  'use strict';
  const text=v=>String(v??'').trim();
  const labels=Object.freeze({articles:'변경한 정관',notice:'총회 소집공고',assembly:'총회 의사록',board:'이사회 의사록',officers:'임원명부 · 별지 제3호',members:'조합원 명부 · 별지 제6호',investors:'출자자 명부',plan:'해당 연도 전체 사업계획서 · 별지 제4호',budget:'해당 연도 전체 수입·지출 예산서 · 별지 제5호',resignation:'사임서',balance:'재무상태표',creditors:'출자감소·채권자 보호 증명서류',proxy:'위임장',sealCertificate:'법인인감증명서',filingCertificate:'신고확인증 원본',addressAbstract:'이사장 주소변경 초본'});
  function isProxy(input){
+  if(input.submissionMode==='chair')return false;
+  if(input.submissionMode==='proxy')return true;
   if(input.applicantIsChair===true)return false;
   if(input.applicantIsChair===false)return true;
   // 이름이 같은 직원만으로 이사장 본인임을 판정하지 않는다.
@@ -23,7 +25,7 @@
   if(kinds.has('capital')||kinds.has('members'))add('investors','existing');
   if(['name','chair','office'].some(k=>kinds.has(k)))add('filingCertificate','external');
   if(kinds.has('chairAddress'))add('addressAbstract','external');
-  if(text(input.applicant)&&isProxy(input)){add('proxy','generate');add('sealCertificate','external');}
+  if((text(input.applicant)||input.submissionMode==='proxy')&&isProxy(input)){add('proxy','generate');add('sealCertificate','external');}
   return [...need.values()];
  }
  const words={name:/명칭|조합명|명칭변경/,office:/주(?:된|사무소)|사무소.{0,12}(이전|소재지)|소재지.{0,10}변경/,purpose:/사업.{0,12}(목적|종류|추가|변경)|목적사업/,articles:/정관.{0,12}(개정|변경)/,appointment:/임원.{0,12}(선임|선출)|이사.{0,8}(선임|선출)|감사.{0,8}(선임|선출)/,renewal:/중임|재선임|임원.{0,8}선출/,retirement:/퇴임|임기.{0,8}만료/,resignation:/사임/,chair:/이사장.{0,12}(선임|선출|변경)/,capital:/출자.{0,12}(감소|증가|금액|좌)/};
@@ -84,5 +86,5 @@
   return records.map((r,i)=>{if(r.coop_id!==coop||!r.member_id)throw Error('명부의 조합·회원 연결을 확인해 주세요.');const s=checked.get(r.member_id),corporate=r.member_type==='단체';if(!s||s.name!==r.name||s.member_type!==r.member_type)throw Error('명부 작성 중 회원정보가 바뀌었습니다.');if(kind==='officers'&&corporate)throw Error('법인 임원의 직무수행자 정보가 포함된 임원명부 PDF를 선택해 주세요.');const identity=corporate?r.corp_number:s.decrypted_rrn;if(!/^\d{6}-?\d{7}$/.test(identity||'')||!text(s.phone)||kind==='officers'&&!text(s.address))throw Error('명부의 식별번호·주소·연락처를 확인해 주세요.');return{sequence:i+1,role:r.role||'',name:s.name,identity:identity.replace(/^(\d{6})(\d{7})$/,'$1-$2'),address:s.address||'',phone:s.phone,stakeholder:'',founder:''};});
  }
  function planReadiness(row,year){const d=row?.assembly_booklet_data||{},missing=[];if(Number(row?.fiscal_year)!==Number(year))missing.push('사업연도');if(!text(d.business_plan_goal))missing.push('사업 목표');if(!text(d.business_plan_details))missing.push('해당 연도 전체 사업');for(const key of ['income_budget','expense_budget'])if(!Array.isArray(d[key])||!d[key].length||d[key].some(r=>!text(r.name)||!text(r.basis)||!Number.isSafeInteger(Number(r.amount))||Number(r.amount)<0))missing.push(key==='income_budget'?'수입 예산':'지출 예산');return{ready:false,missing,available:!missing.length,reason:'별지 제4·5호의 조직 개요·조직도·경력 등 보완 필요'};}
- root.CoopRegistryDocumentsModel=Object.freeze({requirements,isProxy,recommend,sourceTypes,chosen,officersAt,roster,planReadiness,labels,plain,version:'0.3.2'});
+ root.CoopRegistryDocumentsModel=Object.freeze({requirements,isProxy,recommend,sourceTypes,chosen,officersAt,roster,planReadiness,labels,plain,version:'0.4.0'});
 })(typeof window==='undefined'?globalThis:window);

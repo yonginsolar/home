@@ -1,10 +1,10 @@
-/* 변경등기 순서1.0.0 · 같은 입력을 유지하는 단독·일괄 안내. */
+/* 변경등기 순서1.1.0 · 같은 입력을 유지하는 단독·일괄 안내. */
 (function(root){
  'use strict';
  function documents(topics){
   const li=rows=>'<ul>'+rows.map(s=>'<li>'+s+'</li>').join('')+'</ul>';
   const proof={
-   capital:li(['출자금 및 출자좌수 변동내역 확인서','현물출자가 있으면 현물 출자재산인계서 등','출자감소 의결에 따른 변경이면 채권자 보호절차 증빙','1좌 금액을 줄이면 감소를 의결한 총회의사록(인증)','사회적협동조합의 정관 변경이 있으면 정관변경 인가 공문']),
+   capital:li(['출자금 및 출자좌수 변동내역 확인서','현물출자가 있으면 현물 출자재산인계서 등','출자감소 의결에 따른 변경이면 채권자 보호절차 증빙','1좌 금액을 줄이면 감소를 의결한 총회의사록(인증)','사회적협동조합의 정관 변경이 있으면 정관변경 인가 공문'])+'<p>변동내역 확인서·신청서의 전체 좌수와 납입총액을 대조하세요. 신고확인증이 있으면 함께 확인하고, 경정 이력이 있으면 경정 후 등기부를 확인하세요.</p>',
    officers:li(['사임: 인감날인한 사임서·사임 임원의 인감증명서','임기만료 퇴임: 정관 사본. 사망·결격에 따른 퇴임: 해당 사실의 증명서류','해임: 해임을 증명하는 총회의사록(인증)','취임: 총회의사록(인증)·인감날인한 취임승낙서·인감증명서·주민등록등본 또는 초본','중임: 총회의사록(인증)·중임승낙서·인감증명서·주민등록등본 또는 초본','인감신고 대상이면 인감신고서·인감대지']),
    chair:li(['선임 총회의사록(인증)·취임승낙서·인감증명서·주민등록등본 또는 초본','이사장 인감신고서·인감대지','일반 협동조합은 변경신고확인증','종전 이사장이 사임하면 인감날인한 사임서·인감증명서, 임기만료면 정관 사본']),
    name:li(['정관 변경을 의결한 총회의사록(인증)·변경 정관','일반 협동조합은 변경신고확인증, 사회적협동조합은 정관변경 인가 공문']),
@@ -57,5 +57,5 @@
   function select(topic){if(!live()||!types[topic])return;remember();batch=false;single=topic;rebuild();}
   rebuild();return{select,sync:paint,selection:choices,batch:()=>batch};
  }
- root.CoopRegistryGuideFlow=Object.freeze({attach,documents,version:'1.0.0'});
+ root.CoopRegistryGuideFlow=Object.freeze({attach,documents,version:'1.1.0'});
 })(typeof window==='undefined'?globalThis:window);

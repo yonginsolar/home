@@ -1,4 +1,4 @@
-/* 시청 변경신고 준비 모형 0.3.0 — 원장과 신고 수정값 분리. */
+/* 시청 변경신고 준비 모형 0.4.0 — 원장과 신고 수정값 분리. */
 (function(root){
  'use strict';
  const kinds={capital:'출자금',members:'조합원 수',appointment:'임원 취임',renewal:'임원 중임',retirement:'임원 퇴임',resignation:'임원 사임',office:'주사무소 주소',purpose:'사업 목적',name:'조합 명칭',chair:'이사장 변경',chairAddress:'이사장 개인 주소',articles:'그 밖의 정관 변경'};
@@ -32,10 +32,15 @@
   const missing=[],warnings=[],annual=selected.has('capital')||selected.has('members'),managed=managedValues(input);
   if(annual&&input.registryValues&&(!managed||!managed.ready))missing.push('신고 수정값 다시 확인');
   if(annual&&input.registryValues?.pending)missing.push('신고 수정값 저장 결과 확인');
-  if(!input.companyName)missing.push('조합 명칭');if(!input.officeAddress)missing.push('조합 소재지');if(!input.applicant)missing.push('신고인');if(!input.chairName)missing.push('이사장 성명');
-  for(const [key,label]of [['applicantBirth',input.applicantType==='corporation'?'신고인 법인의 법인등록번호':'신고인 생년월일'],['applicantAddress','신고인 주소'],['applicantPhone','신고인 전화번호'],['chairAddress','이사장 개인 주소'],['chairPhone','이사장 전화번호']])if(!input[key])missing.push(key==='applicantBirth'&&input.applicantBirthFromSecure?'신고인 생년월일 출력 전 보안 확인':label);
-  if(input.applicantType==='person'&&input.applicantBirth&&!date(input.applicantBirth))missing.push('신고인 생년월일 형식');
-  if(input.applicantType==='corporation'&&input.applicantBirth&&!/^\d{6}-?\d{7}$/.test(input.applicantBirth))missing.push('신고인 법인등록번호 형식');
+  if(!input.companyName)missing.push('조합 명칭');if(!input.officeAddress)missing.push('조합 소재지');if(!input.submissionMode&&!input.applicant)missing.push('신고인');if(!input.chairName)missing.push('이사장 성명');
+  const separated=['chair','proxy'].includes(input.submissionMode);
+  if(input.submissionMode&&!separated)missing.push('제출 방법');
+  if(separated){if(!input.reporterName||input.reporterName!==input.chairName||!input.reporterMemberId||input.reporterMemberId!==input.chairMemberId)missing.push('ERP 이사장 신고인 확인');for(const [key,label]of [['reporterBirth',input.reporterBirthFromSecure?'신고인 생년월일 출력 전 보안 확인':'신고인 생년월일'],['reporterAddress','신고인 주소'],['reporterPhone','신고인 전화번호']])if(!input[key])missing.push(label);if(input.reporterBirth&&!date(input.reporterBirth))missing.push('신고인 생년월일 형식');if(input.submissionMode==='proxy'&&!input.applicant)missing.push('대리 제출자');}
+  if(!separated||input.submissionMode==='proxy'){
+  for(const [key,label]of [['applicantBirth',input.applicantType==='corporation'?'신고인 법인의 법인등록번호':'신고인 생년월일'],['applicantAddress','신고인 주소'],['applicantPhone','신고인 전화번호'],['chairAddress','이사장 개인 주소'],['chairPhone','이사장 전화번호']])if(!input[key])missing.push(key==='applicantBirth'&&input.applicantBirthFromSecure?'신고인 생년월일 출력 전 보안 확인':separated?label.replace(/^신고인/,'대리 제출자'):label);
+  if(input.applicantType==='person'&&input.applicantBirth&&!date(input.applicantBirth))missing.push(separated?'대리 제출자 생년월일 형식':'신고인 생년월일 형식');
+  if(input.applicantType==='corporation'&&input.applicantBirth&&!/^\d{6}-?\d{7}$/.test(input.applicantBirth))missing.push(separated?'대리 제출자 법인등록번호 형식':'신고인 법인등록번호 형식');
+  }
   if(!input.chairMemberId)missing.push('ERP 이사장 회원 연결');
   if(!date(input.printDate))missing.push('작성일');if(annual&&!date(input.fiscalEnd))missing.push('회계연도 말');
   const values={};for(const p of ['before','increase','decrease','after'])for(const q of ['Members','Shares','Capital'])values[p+q]=annual?number(input[p+q]):null;

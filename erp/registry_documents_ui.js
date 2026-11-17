@@ -1,4 +1,4 @@
-/* 0.3.4 · 변경·삭제된 자료를 표시하고 재선택을 요청. */
+/* 0.4.0 · 변경·삭제된 자료를 표시하고 재선택을 요청. */
 (function(root){
  'use strict';
  function attach(config){
@@ -53,7 +53,7 @@
    try{
     if(options.final&&checked.missing.length)throw Error('확인 필요: '+checked.missing.join(', '));
     for(const req of checked.rows){check();const s=selected.get(req.key),source=catalog.find(d=>d.key===s?.sourceKey),automatic=['assembly','board','notice'].includes(req.key),previewSource=!options.final&&source&&source.coop_id===c.coop&&source.revision===s.revision&&source.types.includes(req.key)&&source.meeting_outcome!=='NOT_HELD'&&(source.local||automatic||Number.isInteger(s.fileIndex)&&source.files[s.fileIndex]);if(req.state==='missing'&&!previewSource)continue;if(source&&(req.state==='selected'||previewSource)){const fileKey=source.key+'|'+(automatic?'document':s.fileIndex);if(seenFiles.has(fileKey))continue;seenFiles.add(fileKey);let bytes;if(source.local){const file=localFiles.get(source.key);if(!file)throw Error('선택한 PDF를 다시 확인해 주세요.');bytes=new Uint8Array(await file.arrayBuffer());owned.push(bytes);check();if(new TextDecoder().decode(bytes.slice(0,5))!=='%PDF-')throw Error('PDF 원본 파일을 선택해 주세요.');}else if(automatic){const documents=await S.documentPdfs(config.client(),source,{coop:c.coop,signal:options.signal,current,verify:config.verify});for(const item of documents){owned.push(item.bytes);bundle.pdfs.push({key:req.key,bytes:item.bytes});}continue;}else{bytes=await S.pdf(config.client(),source,s.fileIndex,{coop:c.coop,signal:options.signal,current,verify:config.verify});owned.push(bytes);}bundle.pdfs.push({key:req.key,bytes});continue;}
-     if(req.key==='proxy'){const d=raw;if(d.applicantType==='corporation')throw Error('법인 신고인의 위임장 PDF를 선택해 주세요.');bundle.proxy={companyName:d.companyName,chairName:d.chairName,chairBirth:options.chairBirth||'',chairAddress:d.chairAddress,chairPhone:d.chairPhone,applicant:d.applicant,applicantBirth:d.applicantBirth,applicantAddress:d.applicantAddress,applicantPhone:d.applicantPhone,printDate:d.printDate};}
+     if(req.key==='proxy'){const d=raw;if(d.applicantType==='corporation')throw Error('대리 제출 법인의 위임장 PDF를 선택해 주세요.');bundle.proxy={companyName:d.companyName,chairName:d.chairName,chairBirth:options.chairBirth||'',chairAddress:d.chairAddress,chairPhone:d.chairPhone,applicant:d.applicant,applicantBirth:d.applicantBirth,applicantAddress:d.applicantAddress,applicantPhone:d.applicantPhone,printDate:d.printDate};}
      if(['officers','members'].includes(req.key)){if(options.final){if(!options.secure)throw Error('명부 보안 확인이 필요합니다.');bundle[req.key]=await options.secure(req.key,data.coop_officials||[],current);}else bundle[req.key]=[];}
     }
     check();return{bundle,clean};
@@ -62,5 +62,5 @@
   function leave(clear=false){epoch++;flight?.controller.abort();flight=null;pending=false;load.disabled=!active();if(clear){for(const p of panels.values())p.root.remove();panels.clear();selections.clear();localFiles.clear();catalog=[];data={};revision++;identity='';lastNeeds='';}}
   sync();return Object.freeze({sync,snapshot,prepare,leave,clear:()=>leave(true),busy:()=>pending});
  }
- root.CoopRegistryDocumentsUi=Object.freeze({attach,version:'0.3.4'});
+ root.CoopRegistryDocumentsUi=Object.freeze({attach,version:'0.4.0'});
 })(typeof window==='undefined'?globalThis:window);

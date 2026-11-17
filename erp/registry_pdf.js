@@ -1,4 +1,4 @@
-/* 0.3.1 · 일반 직인·출자자명부의 안전한 미리보기와 최종 출력 연결. */
+/* 0.4.0 · 일반 직인·출자자명부의 안전한 미리보기와 최종 출력 연결. */
 (function(root){
  'use strict';
  let toolsPending;
@@ -21,16 +21,17 @@
   const d=model.input,provisional=model.annual&&d.asOf&&d.asOf<d.fiscalEnd,actualDate=provisional?d.asOf:d.fiscalEnd;
   const verifiedMaterials=scope?.outputVerified||scope?.preview===true&&scope?.previewVerified===true&&scope?.coop===d.coopId;
   box('V',179,82,15,15,'조합 구분');
-  box(d.applicant,115,185,250,15,'신고인 성명');box(d.applicantBirth,375,185,158,15,'신고인 생년월일·법인등록번호');
-  box('주소',113,203,32,27,'주소 제목');box(d.applicantAddress,145,203,226,27,'신고인 주소');box(d.applicantPhone,375,216,158,15,'신고인 전화');
+  const reporter=d.submissionMode?{name:d.reporterName,birth:d.reporterBirth,address:d.reporterAddress,phone:d.reporterPhone}:{name:d.applicant,birth:d.applicantBirth,address:d.applicantAddress,phone:d.applicantPhone};
+  box(reporter.name,115,185,250,15,'신고인 성명');box(reporter.birth,375,185,158,15,'신고인 생년월일·법인등록번호');
+  box('주소',113,203,32,27,'주소 제목');box(reporter.address,145,203,226,27,'신고인 주소');box(reporter.phone,375,216,158,15,'신고인 전화');
   box(d.companyName,115,248,250,14,'조합명');box(d.companyPhone,375,248,158,14,'조합 전화');box(d.officeAddress,115,275,420,14,'주사무소 소재지');
   box(d.chairName,115,302,250,14,'이사장 성명');box(d.chairIdentity,375,302,158,14,'이사장 식별정보');
   box(d.chairPhone,115,329,250,14,'이사장 전화번호');box(d.companyEmail,375,329,158,14,'이사장 전자우편주소');box(d.chairAddress,115,356,420,14,'이사장 개인 주소');
   // 공개 원본의 다른 칸은 유지하고 신고내용 내부만 한 칸으로 사용한다.
   page.drawText('첨부서류 참조',{x:(110.341+537.671-font.widthOfTextAtSize('첨부서류 참조',11))/2,y:H-frontTop(474),size:11,font});
   if(/^\d{4}-\d{2}-\d{2}$/.test(d.printDate)){const [y,m,day]=d.printDate.split('-');box(y,420,697,32,15,'작성 연도');box(String(Number(m)),466,697,18,15,'작성 월');box(String(Number(day)),498,697,18,15,'작성 일');}
-  box(d.applicant,343,733,122,16,'하단 신고인');
-  if(d.applicant)page.drawText(String(d.applicant),{x:345,y:H-704,size:11,font});
+  box(reporter.name,343,733,122,16,'하단 신고인');
+  if(reporter.name)page.drawText(String(reporter.name),{x:345,y:H-704,size:11,font});
   function stamp(pg){if(provided?.test)pg.drawText('합성 검증용',{x:60,y:pg.getHeight()-(pg===page?12:35),size:11,font,color:lib.rgb(.65,.15,.1)});}
   doc.getPages().forEach(stamp);
   let current,y;const changePages=[];
@@ -70,5 +71,5 @@
   for(const [i,pg]of doc.getPages().entries())if(i>=1)pg.drawText(String(i+1)+' / '+doc.getPageCount(),{x:500,y:30,size:11,font});
   check();doc.setTitle('시청 변경신고 작성자료');doc.setCreator('협동조합 운영시스템');const bytes=await doc.save();try{check();return bytes;}catch(e){bytes.fill(0);throw e;}
  }
- root.CoopRegistryPdf={create,wrap,tools,version:'0.3.1'};
+ root.CoopRegistryPdf={create,wrap,tools,version:'0.4.0'};
 })(typeof window==='undefined'?globalThis:window);
