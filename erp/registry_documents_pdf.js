@@ -1,4 +1,4 @@
-/* 0.3.1 · 위임장 공식 원본에 값만 넣고 별지 명부·선택 PDF를 묶는다. */
+/* 0.4.0 · 위임장 공식 원본에 값만 넣고 별지 명부·선택 PDF를 묶는다. */
 (function(root){
  'use strict';
  async function append(doc,model,bundle,tools){
@@ -11,12 +11,12 @@
   function derived(source,annex,title){const s=source.getPages()[0],p=doc.addPage([s.getWidth(),s.getHeight()]);text(p,annex,46,43,482,32);p.drawText(title,{x:(p.getWidth()-font.widthOfTextAtSize(title,18))/2,y:p.getHeight()-101,font,size:18});if(test)text(p,'합성 검증용 · 제출 금지',46,15,482,20);return p;}
   if(bundle.proxy){
    const d=bundle.proxy,source=await original('proxy-minwon-annex3-20230330.pdf'),p=await add(source);
-   // 고정 문구·선·서명 위치는 원본 그대로다. 새 법인인감 박스나 이미지는 만들지 않는다.
-   const fill=(value,x,top,width,height,label)=>{const lines=root.CoopRegistryPdf.wrap(String(value||''),font,11,width);if(lines.length*12>height)throw Error('위임장 '+label+'가 원본 입력 칸보다 깁니다.');lines.forEach((s,i)=>p.drawText(s,{x,y:p.getHeight()-top-11-i*12,font,size:11,color:black}));};
-   fill([d.companyName,'이사장',d.chairName].filter(Boolean).join(' '),116,149,237,24,'위임인 이름');fill(d.chairBirth,366,151,166,18,'위임인 생년월일');fill(d.chairAddress,116,188,237,24,'위임인 주소');fill(d.chairPhone,366,191,166,18,'위임인 전화');
+   // 원본 칸을 사용한다. 하단의 일반 서명인 라벨만 조합명·직책·성명으로 대체한다.
+   const fill=(value,x,top,width,height,label)=>{let lines=root.CoopRegistryPdf.wrap(String(value||''),font,11,width);if(label==='서명인'&&lines.length>1){lines=[];let line='';for(const word of String(value||'').split(/\s+/)){const next=line?line+' '+word:word;if(line&&font.widthOfTextAtSize(next,11)>width){lines.push(line);line=word;}else line=next;}if(line)lines.push(line);lines=lines.flatMap(s=>root.CoopRegistryPdf.wrap(s,font,11,width));}if(lines.length*12>height)throw Error('위임장 '+label+'가 원본 입력 칸보다 깁니다.');lines.forEach((s,i)=>p.drawText(s,{x,y:p.getHeight()-top-11-i*12,font,size:11,color:black}));};
+   fill(d.chairName,116,149,237,24,'위임인 이름');fill(d.chairBirth,366,151,166,18,'위임인 생년월일');fill(d.chairAddress,116,188,237,24,'위임인 주소');fill(d.chairPhone,366,191,166,18,'위임인 전화');
    fill(d.applicant,116,235,175,18,'수임인 이름');fill(d.applicantBirth,366,235,166,18,'수임인 생년월일');fill(d.relation||'조합 업무 담당 직원',116,274,237,18,'관계');fill(d.applicantPhone,366,274,166,18,'수임인 전화');fill(d.applicantAddress,116,311,418,24,'수임인 주소');
    fill('협동조합 변경신고',116,377,223,90,'민원명');fill('1부',354,377,33,90,'발급통수');fill('변경신고',399,377,134,90,'용도');
-   const [y,m,dte]=String(d.printDate||'').split('-');fill(y,346,549,30,18,'연도');fill(m?String(Number(m)):'',397,549,15,18,'월');fill(dte?String(Number(dte)):'',430,549,17,18,'일');fill('이사장 '+(d.chairName||''),305,580,132,18,'서명인');
+   const [y,m,dte]=String(d.printDate||'').split('-');fill(y,346,549,30,18,'연도');fill(m?String(Number(m)):'',397,549,15,18,'월');fill(dte?String(Number(dte)):'',430,549,17,18,'일');p.drawRectangle({x:228,y:p.getHeight()-595,width:70,height:17,color:lib.rgb(1,1,1)});fill([d.companyName,'이사장',d.chairName].filter(Boolean).join(' '),116,578,321,26,'서명인');
   }
   for(const kind of ['officers','members']){
    if(!bundle[kind])continue;if(!bundle.verified&&!bundle.preview)throw Error('명부 출력 권한을 확인해 주세요.');
@@ -26,11 +26,11 @@
    let i=0;do{const p=derived(source,'■ 협동조합 기본법 시행규칙 [별지 제'+(kind==='officers'?'3':'6')+'호서식] <개정 2020. 9. 29.>',kind==='officers'?'임 원 명 부':'명 부'),h=p.getHeight();let top=kind==='officers'?124:145;
     const drawRow=(cells,height)=>{let x=46;cells.forEach((value,j)=>{p.drawRectangle({x,y:h-top-height,width:widths[j],height,borderWidth:.45,borderColor:black});text(p,value,x+4,top+7,widths[j]-8,height-10);x+=widths[j];});top+=height;};drawRow(header,43);
     if(kind==='members')text(p,'[  ] 발기인 및 설립동의자    [V] 조합원(회원)',46,117,482,18);
-    if(bundle.preview&&!rows.length)drawRow(['','','출력 전 보안 확인','','',''],44);
+    if(bundle.preview&&!rows.length)drawRow(['','','','','',''],44);
     while(i<rows.length){const r=rows[i],cells=kind==='officers'?[r.sequence,r.role,r.name,r.identity,r.address,r.phone]:[r.sequence,r.founder,r.name,r.identity,r.phone,r.stakeholder],height=Math.max(31,...cells.map((s,j)=>root.CoopRegistryPdf.wrap(String(s??''),font,11,widths[j]-8).length*14+15));if(height>500)throw Error('명부 한 행이 용지보다 큽니다.');if(top+height>707)break;drawRow(cells,height);i++;}text(p,'작성방법',46,721,482,18);text(p,kind==='officers'?'법인이 임원인 경우 임원의 직무를 수행할 사람을 동란에 적어주시기 바랍니다.':'1. 이해관계자란은 사회적협동조합의 경우에만 적습니다.\n2. 연합회 설립 시 회원인 협동조합의 정보를 적어주시기 바랍니다.',46,745,482,42);text(p,'210㎜×297㎜[백상지 80g/㎡]',46,798,220,20);check();
    }while(i<rows.length);
   }
   let total=0;for(const item of bundle.pdfs||[]){check();if(!(item.bytes instanceof Uint8Array)||item.bytes.byteLength>20971520)throw Error('첨부 PDF 크기를 확인해 주세요.');total+=item.bytes.byteLength;if(total>52428800)throw Error('묶음 첨부는 50MB 이내로 선택해 주세요.');const source=await lib.PDFDocument.load(item.bytes);if(source.getPageCount()>150||doc.getPageCount()+source.getPageCount()>400)throw Error('묶음 PDF의 페이지 수를 확인해 주세요.');for(let i=0;i<source.getPageCount();i++)await add(source,i);}
  }
- root.CoopRegistryDocumentsPdf=Object.freeze({append,version:'0.3.1'});
+ root.CoopRegistryDocumentsPdf=Object.freeze({append,version:'0.4.0'});
 })(typeof window==='undefined'?globalThis:window);

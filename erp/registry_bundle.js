@@ -1,4 +1,4 @@
-/* 0.3.1 · 기존 시청용 명부·일반 직인을 미리보기와 최종 출력에 함께 연결. */
+/* 0.4.0 · 기존 시청용 명부·일반 직인을 미리보기와 최종 출력에 함께 연결. */
 (function(root){
  'use strict';
  async function load(client,options){
@@ -21,7 +21,7 @@
    await verify();check();return seal;
   }
   try{
-   const runtime=await verify();check();const site=runtime?.runtime_profile==='site_member';
+   const runtime=await verify();check();if(options.sealOnly===true){await registeredSeal();return {seal,sealMissing:!seal,provisional};}const site=runtime?.runtime_profile==='site_member';
    const memberQuery=()=>client.from('coop_members').select('id,coop_id,member_id,name,member_type,status,join_date,birth_date,rrn_display,corp_number,business_number,updated_at',{count:'exact'}).eq('coop_id',coop).order('name').order('id');
    const members=await pages(memberQuery,'id');if(members.some(r=>r.coop_id!==coop||!r.member_id)||new Set(members.map(r=>r.member_id)).size!==members.length)throw Error('명부의 조합·회원 연결을 확인해 주세요.');
    const proof=()=>pages(()=>client.rpc('member_export_city_membership_at_year_end',{p_year:Number(cutoff.slice(0,4))},{count:'exact'}).order('member_uid'),'member_uid');
@@ -38,5 +38,5 @@
    await registeredSeal();return {seal,roster:{coop,cutoff:rosterDate,unit,rows:result.rows,totalCapital:result.totalCapital,...(provisional?{provisional:true,targetCutoff:cutoff}:{})},sealMissing:!seal,provisional};
   }catch(e){seal?.fill(0);if(Array.isArray(e?.cityReview))throw Error('가입 이력 확인 필요 '+e.cityReview.length+'명: 시청용 명부를 확인해 주세요.');throw e;}
  }
- root.CoopRegistryBundle=Object.freeze({load,version:'0.3.1'});
+ root.CoopRegistryBundle=Object.freeze({load,version:'0.4.0'});
 })(typeof window==='undefined'?globalThis:window);

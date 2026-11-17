@@ -80,7 +80,7 @@
   if(input.resolutionRequired||active.articles||active.name||active.purpose)attachments.push({group:'유형별 법정 첨부',text:'변경을 의결한 총회 의사록 사본'});
   if(selected.has('purpose')||input.businessAccountingChanged)attachments.push({group:'유형별 법정 첨부',text:'변경 후 사업계획서(별지 제4호)·수입지출 예산서(별지 제5호)'});
   if(input.unitReduced)attachments.push({group:'유형별 법정 첨부',text:'재무상태표·출자감소 의결·채권자 공고·이의신청 처리 등 증명서류'});
-  if(selected.has('members'))attachments.push({group:'유형별 첨부',text:'시청 제출용 조합원 명부'});
+
   attachments.push({group:'담당 공무원 확인',text:'법인 등기사항증명서. 행정정보 공동이용에 동의하지 않으면 직접 제출합니다.'});
   if(input.documentBundle?.missing)missing.push(...input.documentBundle.missing);
   return{input,reportedMembershipNote:reportedMembershipNote(input),memberComparison,erpValues,selected:[...selected].map(k=>kinds[k]),rows,values,unit,annual,deadline:annual?deadline(input.fiscalEnd):'',attachments,missing:[...new Set(missing)],warnings,draft:missing.length>0||warnings.some(x=>/다릅니다|늦습니다/.test(x))};
