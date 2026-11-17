@@ -1,4 +1,4 @@
-/* 시청 변경신고 0.7.1: 이사장 신고인과 대리 제출자 분리. */
+/* 시청 변경신고 0.8.0: 이사장 신고인과 대리 제출자 분리. */
 (function(){
  'use strict';
  const M=window.CoopRegistryModel,$=id=>document.getElementById(id),form=$('registryForm');
@@ -186,6 +186,7 @@
 
  $('loadApplicant').onclick=listApplicants;$('applicantEmployee').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.repeat)e.preventDefault();});
  $('discard').onclick=async()=>{if(busy||reportedMembers?.busy())return;const sig=signature(),v=visit;if(!await window.CoopDialog.confirm('이 초안을 버릴까요?'))return;if(sig!==signature()||v!==visit||busy)return;cancelApplicantChoice();numeric?.clearDraft();restoreBaseline();reportedMembers?.resetDraft();numeric?.activate();registryDocuments?.clear();applicantDrafts.clear();selectedApplicant=null;manualMemberYear='';activityBasis=null;activityState='unloaded';activityAsOf='';basis=null;edited=0;cancelSensitive();invalidatePreview();applicantType=$('applicantType').value;applicantPresentation();syncSources(true);light();if(baseline&&registryDocuments)baseline.documentBundle=registryDocuments.snapshot();window.ErpWorkspaceResume.checkpoint(form);};
+ $('registryBack').onclick=()=>window.ErpWorkspaceResume.navigate('registry_hub.html');
  $('retryAccess').onclick=async()=>{try{await access();}catch(e){deactivate(e.message);}};$('rosterLink').onclick=e=>{e.preventDefault();window.ErpWorkspaceResume.navigate($('rosterLink').href);};
  if(window.frameElement)new MutationObserver(records=>{if(!visible()||records.some(r=>r.oldValue===null))leave();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});window.addEventListener('pagehide',leave);window.addEventListener('beforeunload',e=>{if(hasDraft()||reportedMembers?.busy()){e.preventDefault();e.returnValue='';}});document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelSensitive([...outputs].some(out=>out.isVisible()));});boot().catch(()=>deactivate('화면 준비를 확인하지 못했습니다. 새로고침해 주세요.'));
 })();
