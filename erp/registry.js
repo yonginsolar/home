@@ -1,4 +1,4 @@
-/* 시청 변경신고 0.9.0: 이사장 신고인과 대리 제출자 분리. */
+/* 시청 변경신고 0.10.0: 이사장 신고인과 대리 제출자 분리. */
 (function(){
  'use strict';
  const M=window.CoopRegistryModel,$=id=>document.getElementById(id),form=$('registryForm');
@@ -152,8 +152,8 @@
     bytes=await window.CoopRegistryPdf.create(m,undefined,{signal:controller.signal,current,outputVerified:true,coop,seal:bundle?.seal,roster:bundle?.roster,documents:documentPreparation?.bundle});if(!current())return;await access();if(!current())return;
     url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
     if(kind==='download'){const a=document.createElement('a');a.href=url;a.download='시청_변경신고_작성자료.pdf';a.click();await new Promise(resolve=>setTimeout(resolve,0));}
-    else{const ownedUrl=url,ownedBytes=bytes;let expiry;const afterPrint=()=>out.clear();const out={isVisible(){return false;},clear(){clearTimeout(expiry);window.removeEventListener('afterprint',afterPrint);URL.revokeObjectURL(ownedUrl);ownedBytes.fill(0);outputs.delete(out);if($('pdfPreview').getAttribute('src')===ownedUrl){$('pdfPreview').removeAttribute('src');$('pdfPreview').hidden=true;$('printHint').hidden=true;if(preview===p&&authorized&&visible()&&p.signature===signature()){$('pdfPreview').src=p.url;$('pdfPreview').hidden=false;}}}};outputs.add(out);$('pdfPreview').src=ownedUrl;$('pdfPreview').hidden=false;$('closePreview').hidden=false;window.addEventListener('afterprint',afterPrint,{once:true});expiry=setTimeout(()=>out.clear(),300000);url='';bytes=null;text('printHint','인쇄 미리보기');$('printHint').hidden=false;}
-    if(current())text('reviewStatus','출력용 PDF를 준비했습니다.');
+    else{if(!window.CoopRegistrySecurePreview)throw Error('PDF 창 도구를 불러오지 못했습니다. 다시 열어 주세요.');const out=window.CoopRegistrySecurePreview.attach({frame:$('pdfPreview'),button:$('printPrepared'),status:$('reviewStatus'),hint:$('printHint'),url,bytes,live:()=>authorized&&task===id&&visit===v&&preview===p&&p.owner===owner&&p.coop===coop&&p.signature===signature()&&visible(),verify:access,onClear:()=>outputs.delete(out)});outputs.add(out);$('closePreview').hidden=false;url='';bytes=null;}
+    if(kind==='download'&&current())text('reviewStatus','출력용 PDF를 준비했습니다.');
    }finally{clean();}
   }
   try{
