@@ -1,4 +1,4 @@
-/* 임원·사외이사·위원회 엑셀 등록 1.0.0 */
+/* 임원·사외이사·위원회 엑셀 등록 1.0.1 */
 ((root) => {
   'use strict';
   const specs = {
@@ -96,13 +96,22 @@
     let current, epoch=0, denyActor='', clicking=false;
     const drafts=new Map();
     const context=()=>{const c=getContext();return c?.allowed&&c.coopId&&c.actorId&&c.actorId!==denyActor?{coop:c.coopId,actor:c.actorId,owner:`${c.coopId}|${c.actorId}`}:null;};
+    const pendingKey=s=>`erp:official-workbook:pending:${s.owner}`;
+    function readPending(s){try{const id=root.sessionStorage.getItem(pendingKey(s));return /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id||'')?id:null;}catch(_){return null;}}
+    function remember(s,job){try{root.sessionStorage.setItem(pendingKey(s),job.id);}catch(_){} }
+    function clearPending(s,job){try{if(readPending(s)===job.id)root.sessionStorage.removeItem(pendingKey(s));}catch(_){} }
     const visible=()=>!root.frameElement?.hidden;
     const same=s=>s===current&&context()?.owner===s.owner&&visible();
     const shown=(s,t)=>same(s)&&modal.open&&(t===undefined||epoch===t);
     function pause(){++epoch;if(current)current.reading=false;if(modal.open)modal.close();clicking=false;}
     function sync(){button.hidden=!context(); if(modal.open&&!shown(current))pause();}
     function draft(c){
-      if(!drafts.has(c.owner))drafts.set(c.owner,{...c,file:null,rows:[],result:[],picked:new Set(),job:null,checked:false,reading:false,message:''});
+      if(!drafts.has(c.owner)){
+        const id=readPending(c);
+        drafts.set(c.owner,{...c,file:null,rows:[],result:[],picked:new Set(),
+          job:id?{id,rows:null,running:false,checking:false,ready:false}:null,checked:false,reading:false,
+          message:id?'이전 등록 결과를 먼저 확인해 주세요.':''});
+      }
       return drafts.get(c.owner);
     }
     async function rpc(s,action,rows=[],key=null,preview=null,timeout=15000) {
@@ -173,7 +182,8 @@
       finally{if(s.readTicket===t)s.reading=false;if(shown(s,t)){render(s);if(keep)list.scrollTop=y;}}
     }
     function finish(s,data){
-      const saved=new Set(s.job.rows.map(tokenFor));
+      const saved=new Set((s.job.rows||[]).map(tokenFor));
+      clearPending(s,s.job);
       s.job=null;s.checked=false;s.picked.clear();s.result=s.result.map(r=>saved.has(tokenFor(r))?{...r,state:'done',reason:'registered'}:r);s.message=`${data.count}행을 등록했습니다.`;
       if(shown(s))render(s);
       if(same(s))void Promise.resolve(refresh()).catch(()=>{});
@@ -181,15 +191,16 @@
     function write(s,job){
       if(!shown(s)||s.job!==job||job.running)return;
       job.running=true; job.ready=false;s.message='등록하고 있습니다.';render(s);
+      remember(s,job);
       const wait=root.setTimeout(()=>{if(s.job===job&&shown(s)){s.message='등록 결과가 아직 확인되지 않았습니다. 결과 확인을 눌러 주세요.';renderButtons(s);}},18000);
       void rpc(s,'save',job.rows,job.id,job.preview,0).then(data=>{
         if(s.job!==job)return;
         if(data.outcome==='saved')finish(s,data);
-        else if(data.outcome==='changed'){s.job=null;s.checked=false;s.message='검사 이후 내용이 바뀌었습니다. 다시 검사해 주세요.';}
+        else if(data.outcome==='changed'){clearPending(s,job);s.job=null;s.checked=false;s.message='검사 이후 내용이 바뀌었습니다. 다시 검사해 주세요.';}
         else s.message='등록 결과를 확인해 주세요.';
       }).catch(error=>{
         if(s.job!==job)return;
-        if(['42501','22023','23505','22007','PT409','57014'].includes(error?.code)){s.job=null;s.checked=false;s.message=error.code==='42501'?'현재 권한으로 등록할 수 없습니다.':'등록되지 않았습니다. 다시 검사해 주세요.';}
+        if(['42501','22023','23505','22007','PT409','57014'].includes(error?.code)){clearPending(s,job);s.job=null;s.checked=false;s.message=error.code==='42501'?'현재 권한으로 등록할 수 없습니다.':'등록되지 않았습니다. 다시 검사해 주세요.';}
         else s.message='등록 결과가 아직 확인되지 않았습니다. 결과 확인을 눌러 주세요.';
       }).finally(()=>{root.clearTimeout(wait);job.running=false;if(shown(s))render(s);});
     }
@@ -201,9 +212,14 @@
         if(s.job!==job)return;if(result.outcome==='saved'){finish(s,result);return;}
         if(!shown(s,t))return;
         if(result.outcome==='not_found'&&!job.running){
+          if(!job.rows){
+            if(job.ready){clearPending(s,job);s.job=null;s.message='접수 기록이 없습니다. 파일을 다시 선택해 검사해 주세요.';}
+            else {job.ready=true;s.message='접수 기록을 찾지 못했습니다. 등록 결과 확인을 한 번 더 눌러 주세요.';}
+            return;
+          }
           if(job.ready){write(s,job);return;}
           job.ready=true;s.message='등록 결과가 없습니다. 같은 요청으로 이어가려면 결과 확인을 한 번 더 눌러 주세요.';
-        }else s.message='등록 중이거나 결과를 아직 확인하지 못했습니다.';
+        }else {job.ready=false;s.message='등록 중이거나 결과를 아직 확인하지 못했습니다.';}
       }catch(error){if(shown(s,t))s.message=error?.code==='42501'?'현재 권한으로 결과를 확인할 수 없습니다.':'결과 조회가 멈췄습니다. 다시 확인해 주세요.';}
       finally{job.checking=false;if(shown(s,t))renderButtons(s);}
     }
@@ -234,5 +250,5 @@
     client.auth?.onAuthStateChange?.((event,session)=>{const changed=event==='SIGNED_OUT'||(current&&session?.user?.id!==current.actor);if(!changed)return;if(current){denyActor=current.actor;drafts.delete(current.owner);}pause();sync();});
     sync(); return {pause,sync};
   }
-  root.OfficialWorkbook=Object.freeze({version:'1.0.0',parse,create});
+  root.OfficialWorkbook=Object.freeze({version:'1.0.1',parse,create});
 })(typeof window==='undefined'?module.exports:window);
