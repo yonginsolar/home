@@ -3,7 +3,7 @@
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261118.search1';
+  const VERSION = '20261118.search2';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -211,9 +211,12 @@
 
   function localVisible(node) {
     if (!node?.isConnected || node.closest('.modal,dialog,#rptTab,#erpWorkspaceSidebar,[data-erp-home-link]')) return false;
-    for (let parent = node; parent && parent !== node.ownerDocument.body; parent = parent.parentElement) {
-      if (parent.hidden || parent.matches('.hidden,.d-none') || node.ownerDocument.defaultView.getComputedStyle(parent).display === 'none'
-        || node.ownerDocument.defaultView.getComputedStyle(parent).visibility === 'hidden') return false;
+    const doc=node.ownerDocument, view=liveView(doc);
+    if (!view) return false;
+    for (let parent = node; parent && parent !== doc.body; parent = parent.parentElement) {
+      if (parent.hidden || parent.matches('.hidden,.d-none')) return false;
+      const style=view.getComputedStyle(parent);
+      if (style.display==='none'||style.visibility==='hidden') return false;
       if (parent.matches('.tab-pane,.tab-panel,.step-panel,.sub-panel') && !parent.classList.contains('active')) return false;
     }
     return true;
@@ -252,12 +255,15 @@
     const collapsed = document.body.classList.contains('erp-workspace-collapsed') && !matchMedia('(max-width: 991.98px)').matches;
     setSubmenuOpen(collapsed || submenu.hidden); // Disclosure never navigates, confirms discard or reloads a task.
   }
+  function liveView(doc) {
+    const view=doc?.defaultView;
+    if (!view) return null;
+    if (doc===document) return view;
+    const frame=view.frameElement;
+    return frame?.isConnected && frame.contentDocument===doc && view.location.origin===location.origin ? view : null;
+  }
   function sourceAlive(source) {
-    if (!source?.isConnected) return false;
-    const doc=source.ownerDocument;
-    if (doc===taskDocument) return true;
-    const frame=doc.defaultView?.frameElement;
-    return !!frame?.isConnected && frame.contentDocument===doc && doc.defaultView.location.origin===location.origin;
+    return !!source?.isConnected && !!liveView(source.ownerDocument);
   }
   function paneFor(source) {
     const doc=source.ownerDocument;
@@ -339,8 +345,9 @@
     }
     scheduleSubmenu();
   }
-  function featureSearchMenus() {
+  function featureSearchMenus(includeEntries=true) {
     if (!state || !panel || panel.hidden) return null;
+    if (!includeEntries) return {owner:generation};
     const mobile = narrowScreen();
     const baseIds = new Set(catalog.map(item => item[0]));
     const allowedIds = new Set(allowedItems(setupMenuRuntime(state.runtime)).map(item => item[0]));
@@ -350,15 +357,19 @@
       key:'menu:'+link.dataset.menuId+':'+link.href, label:link.title,
       aliases:window.ErpWorkspaceSearch.menuAliases(link.dataset.menuId,link.title), run:() => link.click()
     }));
-    if (submenuOwner?.isConnected && canSearch(submenuOwner)) {
+    const search=window.ErpWorkspaceSearch;
+    if(entries.some(entry=>entry.key.startsWith('menu:btnGovernanceHub:'))&&search.canUseBooklet(setupMenuRuntime(state.runtime)))
+      entries.push(search.bookletEntry(()=>{const href=url(search.bookletRoute);if(!window.ErpWorkspaceShell?.navigate(href))location.href=href;}));
+    const view=liveView(taskDocument);
+    if (view && !view.frameElement?.hidden && submenuOwner?.isConnected && canSearch(submenuOwner)) {
       for (const row of submenuRows) {
         const source = row.source;
         if (source && (source.ownerDocument !== taskDocument || rowDisabled(row) || !localVisible(source)
-          || !source.matches('[role="tab"],.nav-link,[data-workspace-submenu]') || localLabel(source) !== row.label)) continue;
+          || !source.matches('[role="tab"],.nav-link,.step-tab[data-step],[data-workspace-submenu]') || localLabel(source) !== row.label)) continue;
         if (!source && !row.key?.startsWith('registry:')) continue;
         if (source && !searchSources.has(source)) searchSources.set(source,++searchSerial);
         entries.push({key:source ? `local:${searchSources.get(source)}:${row.label}` : row.key,
-          label:row.label, section:submenuOwner.title, run:() => activateRow(row.button)});
+          label:row.label, section:submenuOwner.title, aliases:search.localAliases(row.label), run:() => activateRow(row.button)});
       }
     }
     return {owner:generation, entries};
@@ -375,6 +386,7 @@
   function syncSubmenu() {
     if (submenuFrame!=null) cancelAnimationFrame(submenuFrame);
     submenuFrame = null;
+    if(!liveView(taskDocument)){clearSubmenu();return;}
     const owner = state && list?.querySelector('.erp-workspace-link.active');
     localNavigationRoots = [...taskDocument.querySelectorAll(localRoots)].filter(root => !root.closest('.modal,dialog,#rptTab,#erpWorkspaceSidebar'));
     const sources = [...new Set(localNavigationRoots.flatMap(root => root.matches('[data-workspace-submenu]') ? [root]
@@ -480,7 +492,7 @@
   }
 
   function setDocument(doc, href) {
-    if (!state || !panel || !doc?.body || doc.defaultView.location.origin !== location.origin) return false;
+    if (!state || !panel || !doc?.body || !liveView(doc)) return false;
     taskDocument = doc; pageUrl = new URL(href); params = new URLSearchParams(pageUrl.search);
     featureSearch?.bindChild(doc);
     path = pageUrl.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop();
@@ -496,13 +508,14 @@
     observeLocalNavigation(); syncSubmenu(); return true;
   }
   function detachDocument() {
-    featureSearch?.bindChild(null); featureSearch?.reset();
+    taskDocument=document;
     if (submenuFrame!=null) cancelAnimationFrame(submenuFrame);
     submenuFrame=null;
     localObserver?.disconnect();
     if (observedDocument && localClick) observedDocument.removeEventListener('click',localClick);
     clearSubmenu(); localNavigationRoots=[];
-    panel?.querySelector('.erp-workspace-footer').replaceChildren(); taskDocument=document;
+    panel?.querySelector('.erp-workspace-footer').replaceChildren();
+    featureSearch?.bindChild(null); featureSearch?.reset();
   }
 
   function fullOrder() {

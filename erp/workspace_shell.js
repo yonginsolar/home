@@ -13,7 +13,15 @@
   let accessPending = null, startupPending = null;
   let printableEntry = null, navigationPending = false;
   document.documentElement.setAttribute('data-erp-print-locked', '');
-  const view = () => routes.route(new URLSearchParams(location.search).get('view') || '');
+  function routeIntent(value){
+    let target;try{target=new URL(value,location.origin);}catch(_){return {route:null,feature:''};}
+    const booklet=target.origin===location.origin&&/^\/minutes\/meeting_workspace(?:\.html)?\/?$/.test(target.pathname)
+      && target.hash==='#assembly-booklet';
+    if(booklet)target.hash='';
+    return {route:routes.route(target.href),feature:booklet?'assembly-booklet':''};
+  }
+  const addressView=()=>routeIntent(new URLSearchParams(location.search).get('view')||'');
+  const view = () => addressView().route;
   const legalSetupLink = target => {
     const url=new URL(target,location.origin);
     return /\/admin_member(?:\.html)?\/?$/.test(url.pathname)&&url.searchParams.get('scope')==='site_admin'&&url.searchParams.get('sub')==='legal';
@@ -251,7 +259,7 @@
       status.hidden = true; error.hidden = false;
     }, 25000);
   }
-  function load(target, force = false) {
+  function load(target, force = false, feature = '') {
     const previous = activeEntry;
     // A retry of the visible prepared task must not manufacture a second context.
     const cached = force ? null : target === activeEntry.route && canRetain(activeEntry)
@@ -260,7 +268,7 @@
     park(); requested = target; loading();
     const ticket = ++transition;
     if (cached?.frame.isConnected) {
-      activeEntry = cached; frame = cached.frame; frame.id = 'erpWorkspaceFrame';
+      activeEntry = cached; activeEntry.feature=feature; frame = cached.frame; frame.id = 'erpWorkspaceFrame';
       // Never expose a held page using an old permission answer. A failed check leaves it locked.
       void (async () => {
         try {
@@ -324,7 +332,7 @@
     taskUrl.pathname = taskUrl.pathname.replace(/\.html$/, '');
     nextFrame.id = 'erpWorkspaceFrame'; nextFrame.className='erp-workspace-task';
     nextFrame.title = previous.frame.title; nextFrame.loading = 'eager';
-    activeEntry={frame:nextFrame,route:target,fields:new Map()};
+    activeEntry={frame:nextFrame,route:target,fields:new Map(),feature};
     const entry=activeEntry;
     nextFrame.addEventListener('load',()=>frameLoaded(entry));
     // Mount with the allowed destination already set, without an intermediate
@@ -338,11 +346,14 @@
     let target;
     try { target = new URL(value, location.origin); } catch (_) { return false; }
     if (target.origin !== location.origin) return false;
-    const next = routes.route(target.href);
+    const {route:next,feature} = routeIntent(target.href);
     const isHome = /^\/erp\/?$|^\/erp\/index(?:\.html)?\/?$/.test(target.pathname);
     if (!next && !isHome) return false;
-    if (next && (next === requested || (next === current && !requested))) return true;
     if (!ready) return true;
+    if (next && (next === requested || (next === current && !requested))) {
+      if(feature&&activeEntry.route===next){activeEntry.feature=feature;deliverFeature(activeEntry);}
+      return true;
+    }
     if (navigationPending) return true;
     navigationPending = true;
     const entry = activeEntry, ticket = transition;
@@ -352,7 +363,7 @@
       if (!allowed || !ready || leaving || entry !== activeEntry || ticket !== transition) return;
       if (isHome) { purge(); leaving=true; location.assign(target.href); return; }
       history.pushState({erpWorkspace:true}, '', routes.address(next));
-      load(next); window.ErpWorkspace.closeDrawer();
+      load(next,false,feature); window.ErpWorkspace.closeDrawer();
     })().catch(() => { status.textContent='화면을 이동하지 못했습니다. 작성 중인 내용은 유지됩니다.';status.hidden=false; })
       .finally(() => { navigationPending=false; });
     // Claim the link synchronously; callers must prevent native navigation before awaiting a choice.
@@ -429,8 +440,16 @@
       document.title = child.document.title;
       frame.title = child.document.title || 'ERP 업무 화면';
       window.ErpWorkspace.setDocument(child.document, href);
+      deliverFeature(activeEntry);
       status.hidden = true; error.hidden = true; cancelLoading();
     } catch (_) { lockPrint(); status.hidden = true; error.hidden = false; }
+  }
+  function deliverFeature(entry){
+    if(entry.feature!=='assembly-booklet'||!activePrintState(entry)||entry.route!=='/minutes/meeting_workspace.html')return;
+    const child=entry.frame.contentWindow;
+    if(child?.document&&child.location.origin===location.origin){
+      entry.feature='';child.document.dispatchEvent(new child.CustomEvent('erp-assembly-booklet'));
+    }
   }
   function frameLoaded(entry = activeEntry) {
     if (!ready) return;
@@ -552,7 +571,7 @@
   async function start(configuredClient) {
     if (startupPending) return startupPending;
     client = configuredClient;
-    const target = view();
+    const {route:target,feature}=addressView();
     if (!target) return home();
     const retry = document.getElementById('erpWorkspaceRetry');
     const login=document.getElementById('erpWorkspaceLegalLogin');
@@ -571,7 +590,7 @@
           ready=false; leaving=true; purge(); home(target);
         }
       });
-      load(target);
+      load(target,false,feature);
     } catch (cause) {
       const text = error.querySelector('p');
       const legal=legalSetupLink(target),needsLogin=cause?.message==='ERP_LOGIN_REQUIRED';
@@ -586,5 +605,5 @@
     try { await pending; }
     finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, version:'20261110.1'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, version:'20261118.2'};
 })();

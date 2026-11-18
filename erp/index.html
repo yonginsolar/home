@@ -132,11 +132,11 @@
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
-  <link rel="stylesheet" href="/erp/workspace_search.css?v=1.0.0" integrity="sha384-kMrBC5ogGTA+YVawFJqLB09w32kVyzX7MiVODPxgJQS1PIEQcR91SBtsWG3tskP5" crossorigin="anonymous">
+  <link rel="stylesheet" href="/erp/workspace_search.css?v=1.1.0" integrity="sha384-R1QuYviT8jsKnL3rk2jYWceSjWFb3M6z5/OycbUDkGMmq2yTxnfUGIVS/Wbj2cVd" crossorigin="anonymous">
   <link rel="stylesheet" href="/erp/erp_palette.css?v=1.0.0" integrity="sha384-Q4SLjWvt6mfxBkeAZ7tJM0NA2HVAOsGJKBHupNsyjJ943mTY5sSRiDPFS8WQSY3j" crossorigin="anonymous" data-erp-palette-style>
   <script src="/erp/erp_palette.js?v=1.0.0" integrity="sha384-eqzWMk2JERd7XhuNeGNbJ48/w3Hit4umqaZoA6gO9BLNrCkvVuoF8YKOipNIJB1y" crossorigin="anonymous"></script>
   <script src="/erp/workspace_nav.js?v=20261115-registry-menu-1" defer></script>
-  <script src="/erp/workspace_search.js?v=1.0.0" integrity="sha384-pa20XWHIsDHxIq1Z1TzLZ2EHQID/YBbgIfkxj8FSgN828Sse+yjseUfsyWfw+zXv" crossorigin="anonymous" defer></script>
+  <script src="/erp/workspace_search.js?v=1.1.0" integrity="sha384-/anB5A4+BzyC7jG5dDK4lqs31Zz5LZz5G7OeMcSFtfyB9VKcS0T3i3luIqyF7HON" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 <body class="erp-unified erp-menu-workspace erp-auth-screen" data-erp-mobile-task="menu">
@@ -2676,16 +2676,20 @@ function updateLandingFeatureSearch() {
         const area = document.getElementById('menuArea');
         const cards = document.getElementById('menuButtons');
         const documents = document.getElementById('mobileDocumentsMenu');
-        landingFeatureSearch = search.mount(() => {
+        landingFeatureSearch = search.mount((includeEntries) => {
             if (!landingFeatureSearchActor || landingFeatureSearchActor !== currentAuthUser?.id || !myInfo?.coop_id
                 || area.classList.contains('hidden')) return null;
+            const owner=JSON.stringify([landingFeatureSearchActor,myInfo.coop_id,applyMenuPermissions.checkVersion]);
+            if(!includeEntries)return {owner};
             const entries = [...cards.querySelectorAll('button.btn-menu[id]'), ...documents.querySelectorAll('button[id]')]
                 .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true' && search.visible(button))
                 .map(button => {
                     const label = (button.querySelector('strong')?.textContent || button.textContent).trim();
                     return {key:button.id+':'+label, label, aliases:search.menuAliases(button.id,label), run:() => button.click()};
                 });
-            return {owner:JSON.stringify([landingFeatureSearchActor,myInfo.coop_id,applyMenuPermissions.checkVersion]),entries};
+            if(entries.some(entry=>entry.key.startsWith('btnGovernanceHub:'))&&coopRuntime?.coop_id===myInfo.coop_id&&search.canUseBooklet(coopRuntime))
+                entries.push(search.bookletEntry(()=>{location.href=search.bookletRoute;}));
+            return {owner,entries};
         });
         landingFeatureSearch.trigger(document.getElementById('erpLandingFeatureSearch'));
         const observer = new MutationObserver(() => landingFeatureSearch.refresh());

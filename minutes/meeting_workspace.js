@@ -824,6 +824,20 @@ function renderPackages() {
   $('pastMeetingCount').textContent = String(past.length);
 }
 
+let assemblyBookletRequested=false;
+function showRequestedAssemblyBooklet(){
+  if(!assemblyBookletRequested||!meetingEntryReady||window.frameElement?.hidden)return;
+  const panel=$('assemblyBookletPanel'),hint=$('assemblyBookletJumpHint');
+  if(state.current?.meeting_type!=='GENERAL_ASSEMBLY'||state.current.assembly_kind==='EXTRAORDINARY'||panel.hidden){
+    hint.hidden=false;return;
+  }
+  assemblyBookletRequested=false;hint.hidden=true;
+  switchStep('agendas');
+  const heading=$('assemblyBookletHeading');heading.focus({preventScroll:true});
+  heading.scrollIntoView({block:'nearest'});
+}
+function clearAssemblyBookletRequest(){assemblyBookletRequested=false;$('assemblyBookletJumpHint').hidden=true;}
+
 async function loadPackages(selectId = null) {
   const { data, error } = await MeetingPackageService.listPackages();
   if (error) throw error;
@@ -2511,6 +2525,7 @@ async function openPackage(id, { internal = false } = {}) {
     renderPackages();
     renderNotHeldState();
     if (isPastPackage(state.current)) $('pastMeetings').open = true;
+    showRequestedAssemblyBooklet();
     setMeetingDetailStatus();
   } catch(error) {
     if(current())setMeetingDetailStatus(error?.code==='MEETING_READ_TIMEOUT'
@@ -3072,7 +3087,7 @@ function bindMeetingLifecycle() {
   });
   if(window.frameElement)new MutationObserver(records=>{
     if(window.frameElement.hidden || records.some(record=>record.oldValue===null)){invalidateNewPackagePreparation();invalidateMeetingDetailRead();}
-    if(window.frameElement.hidden)freezeDocumentEditing();else void refreshDocumentEditState();
+    if(window.frameElement.hidden){clearAssemblyBookletRequest();freezeDocumentEditing();}else void refreshDocumentEditState();
   }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
   window.addEventListener('pagehide',()=>{invalidateNewPackagePreparation();invalidateMeetingDetailRead();freezeDocumentEditing();});
 }
@@ -3080,10 +3095,13 @@ function bindMeetingLifecycle() {
 function bindMeetingEntry() {
   if (meetingEventsBound) return;
   meetingEventsBound = true;
+  document.addEventListener('erp-assembly-booklet',()=>{assemblyBookletRequested=true;showRequestedAssemblyBooklet();});
+  if(location.hash==='#assembly-booklet')assemblyBookletRequested=true;
   bindEvents();
   supabase.auth.onAuthStateChange((event, session) => {
     const expected = meetingEntryPending?.userId || state.session?.user?.id;
     if (event === 'SIGNED_OUT' || (session?.user?.id && expected && session.user.id !== expected)) {
+      clearAssemblyBookletRequest();
       meetingEntryRevision++; meetingEntryReady = false;
       setMeetingEntryStatus('로그인 상태가 바뀌었습니다. 다시 불러오기를 눌러 주세요.', true);
       invalidateNewPackagePreparation();
@@ -3168,6 +3186,7 @@ async function initializeMeetingPage(request) {
   bindMeetingLifecycle();
   meetingEntryReady = true;
   setMeetingEntryStatus();
+  showRequestedAssemblyBooklet();
 }
 
 init().catch(error => {
