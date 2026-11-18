@@ -3,7 +3,7 @@
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261116.registry3';
+  const VERSION = '20261118.search1';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -30,6 +30,9 @@
   let state = null, generation = 0, panel, list, brand, brandImage, brandSun, toggle, backdrop, returnFocus, orderButton, orderDialog, orderDraft, orderBusy=false;
   let connections = new WeakMap();
   const authBound = new WeakSet();
+  let featureSearch, searchSerial = 0;
+  const searchSources = new WeakMap();
+  const narrowScreen = () => matchMedia('(max-width: 991.98px)').matches;
   let setupExpiryTimer;
   const localRoots = '.erp-local-navigation .sidebar-menu,.nav-tabs,.nav-pills,[role="tablist"],.step-tabs,.doc-tabs,.tabs,.sub-tabs,[data-workspace-submenu]';
   let submenu, submenuOwner, submenuRows = [], localNavigationRoots = [], submenuFrame;
@@ -229,6 +232,7 @@
       delete submenuOwner.dataset.hasSubmenu;
     }
     submenu?.remove(); submenu = null; submenuOwner = null; submenuRows = [];
+    featureSearch?.refresh();
   }
   function setSubmenuOpen(open) {
     if (!submenu || !submenuOwner) return false;
@@ -335,6 +339,30 @@
     }
     scheduleSubmenu();
   }
+  function featureSearchMenus() {
+    if (!state || !panel || panel.hidden) return null;
+    const mobile = narrowScreen();
+    const baseIds = new Set(catalog.map(item => item[0]));
+    const allowedIds = new Set(allowedItems(setupMenuRuntime(state.runtime)).map(item => item[0]));
+    const canSearch = link => (!mobile || link.dataset.mobile === 'true')
+      && (!baseIds.has(link.dataset.menuId) || allowedIds.has(link.dataset.menuId));
+    const entries = [...list.querySelectorAll('.erp-workspace-link')].filter(canSearch).map(link => ({
+      key:'menu:'+link.dataset.menuId+':'+link.href, label:link.title,
+      aliases:window.ErpWorkspaceSearch.menuAliases(link.dataset.menuId,link.title), run:() => link.click()
+    }));
+    if (submenuOwner?.isConnected && canSearch(submenuOwner)) {
+      for (const row of submenuRows) {
+        const source = row.source;
+        if (source && (source.ownerDocument !== taskDocument || rowDisabled(row) || !localVisible(source)
+          || !source.matches('[role="tab"],.nav-link,[data-workspace-submenu]') || localLabel(source) !== row.label)) continue;
+        if (!source && !row.key?.startsWith('registry:')) continue;
+        if (source && !searchSources.has(source)) searchSources.set(source,++searchSerial);
+        entries.push({key:source ? `local:${searchSources.get(source)}:${row.label}` : row.key,
+          label:row.label, section:submenuOwner.title, run:() => activateRow(row.button)});
+      }
+    }
+    return {owner:generation, entries};
+  }
   function rowKeydown(event,button) {
     if (event.altKey||event.ctrlKey||event.metaKey||event.shiftKey) return;
     const row=rowButtons.get(button); if (!row) return;
@@ -391,6 +419,7 @@
       append(null,submenu);
       if(focusRow) { let next=rows.find(row=>equivalent(row,focusRow));if(!next)next=rows.find(row=>equivalent(row,focusRow.parent));(next?.button||owner).focus({preventScroll:true}); }
     }
+    featureSearch?.refresh();
   }
   function scheduleSubmenu() {
     if (!state || submenuFrame != null) return;
@@ -453,6 +482,7 @@
   function setDocument(doc, href) {
     if (!state || !panel || !doc?.body || doc.defaultView.location.origin !== location.origin) return false;
     taskDocument = doc; pageUrl = new URL(href); params = new URLSearchParams(pageUrl.search);
+    featureSearch?.bindChild(doc);
     path = pageUrl.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop();
     doc.body.classList.add('erp-workspace', 'erp-workspace-embedded'); doc.body.dataset.erpWorkspaceRevision = VERSION;
     doc.body.classList.toggle('erp-workspace-election', state.items.some(item => item[0] === 'btnVoteHub'));
@@ -466,6 +496,7 @@
     observeLocalNavigation(); syncSubmenu(); return true;
   }
   function detachDocument() {
+    featureSearch?.bindChild(null); featureSearch?.reset();
     if (submenuFrame!=null) cancelAnimationFrame(submenuFrame);
     submenuFrame=null;
     localObserver?.disconnect();
@@ -605,6 +636,10 @@
     toggle.setAttribute('aria-label', '업무 메뉴 열기'); toggle.setAttribute('aria-controls', panel.id); toggle.setAttribute('aria-expanded', 'false');
     const title = document.createElement('strong'); title.textContent = document.title.split('|')[0].trim();
     mobile.append(toggle, title); toggle.addEventListener('click', () => setDrawer(true));
+    if (window.ErpWorkspaceSearch && typeof HTMLDialogElement.prototype.showModal === 'function') {
+      featureSearch = window.ErpWorkspaceSearch.mount(featureSearchMenus);
+      head.after(featureSearch.trigger()); mobile.append(featureSearch.trigger());
+    }
     backdrop = document.createElement('button'); backdrop.type = 'button'; backdrop.className = 'erp-workspace-backdrop';
     backdrop.hidden = true; backdrop.setAttribute('aria-label', '업무 메뉴 닫기'); backdrop.addEventListener('click', () => setDrawer(false));
     document.body.prepend(mobile, backdrop, panel);
@@ -706,6 +741,7 @@
   function clear() {
     clearTimeout(setupExpiryTimer);
     generation += 1; state = null; connections = new WeakMap();
+    featureSearch?.bindChild(null); featureSearch?.reset();
     orderDialog?.close();orderDraft=null;
     if (list) list.replaceChildren();
     if (submenuFrame != null) cancelAnimationFrame(submenuFrame);

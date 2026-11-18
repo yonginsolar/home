@@ -132,9 +132,11 @@
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
+  <link rel="stylesheet" href="/erp/workspace_search.css?v=1.0.0" integrity="sha384-kMrBC5ogGTA+YVawFJqLB09w32kVyzX7MiVODPxgJQS1PIEQcR91SBtsWG3tskP5" crossorigin="anonymous">
   <link rel="stylesheet" href="/erp/erp_palette.css?v=1.0.0" integrity="sha384-Q4SLjWvt6mfxBkeAZ7tJM0NA2HVAOsGJKBHupNsyjJ943mTY5sSRiDPFS8WQSY3j" crossorigin="anonymous" data-erp-palette-style>
   <script src="/erp/erp_palette.js?v=1.0.0" integrity="sha384-eqzWMk2JERd7XhuNeGNbJ48/w3Hit4umqaZoA6gO9BLNrCkvVuoF8YKOipNIJB1y" crossorigin="anonymous"></script>
   <script src="/erp/workspace_nav.js?v=20261115-registry-menu-1" defer></script>
+  <script src="/erp/workspace_search.js?v=1.0.0" integrity="sha384-pa20XWHIsDHxIq1Z1TzLZ2EHQID/YBbgIfkxj8FSgN828Sse+yjseUfsyWfw+zXv" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 <body class="erp-unified erp-menu-workspace erp-auth-screen" data-erp-mobile-task="menu">
@@ -230,7 +232,10 @@
       </div>
       <div class="erp-home-all-heading">
         <h2 id="erpAllMenuTitle" class="erp-home-section-title">전체 업무</h2>
-        <button class="btn btn-outline-primary btn-sm hidden" id="btnMenuOrder" onclick="openMenuOrderModal()">↕️ 모듈 순서</button>
+        <div class="erp-home-search-actions">
+          <button type="button" id="erpLandingFeatureSearch" hidden>기능 검색</button>
+          <button class="btn btn-outline-primary btn-sm hidden" id="btnMenuOrder" onclick="openMenuOrderModal()">↕️ 모듈 순서</button>
+        </div>
       </div>
       
       <div class="d-grid gap-2" id="menuButtons" role="group" aria-labelledby="erpAllMenuTitle">
@@ -1740,13 +1745,16 @@ window.onload = async function() {
     }
 
     _supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user?.id !== currentAuthUser?.id) landingFeatureSearchActor = null;
         if (session) {
             currentAuthUser = session.user || null;
+            landingFeatureSearch?.refresh();
             loginOtpFlow?.authChanged();
             sessionStorage.removeItem(ERP_SESSION_EXPIRED_NOTICE_KEY);
             return;
         }
         currentAuthUser = null;
+        landingFeatureSearch?.refresh();
         loginOtpFlow?.authChanged();
 
         const shouldRecover =
@@ -1912,6 +1920,7 @@ async function loadUserInfo(user) {
     const [, workspaceContext] = await Promise.all([
         loadSharedMenuOrder(canCustomizeMenuOrder(data, platformContext)), readWorkspaceSwitchContext()
     ]);
+    landingFeatureSearchActor = currentAuthUser?.id === authUserId ? authUserId : null;
     applyMenuPermissions(data, platformContext, coopRuntime);
     renderWorkspaceSwitcher(workspaceContext);
     void loadSunVillageManagementEntry();
@@ -2659,6 +2668,31 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     updateMenuOrderButtonVisibility(canCustomizeMenuOrder(user, platformCtx));
 }
 
+let landingFeatureSearch, landingFeatureSearchActor;
+function updateLandingFeatureSearch() {
+    const search = window.ErpWorkspaceSearch;
+    if (!search || typeof HTMLDialogElement.prototype.showModal !== 'function') return;
+    if (!landingFeatureSearch) {
+        const area = document.getElementById('menuArea');
+        const cards = document.getElementById('menuButtons');
+        const documents = document.getElementById('mobileDocumentsMenu');
+        landingFeatureSearch = search.mount(() => {
+            if (!landingFeatureSearchActor || landingFeatureSearchActor !== currentAuthUser?.id || !myInfo?.coop_id
+                || area.classList.contains('hidden')) return null;
+            const entries = [...cards.querySelectorAll('button.btn-menu[id]'), ...documents.querySelectorAll('button[id]')]
+                .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true' && search.visible(button))
+                .map(button => {
+                    const label = (button.querySelector('strong')?.textContent || button.textContent).trim();
+                    return {key:button.id+':'+label, label, aliases:search.menuAliases(button.id,label), run:() => button.click()};
+                });
+            return {owner:JSON.stringify([landingFeatureSearchActor,myInfo.coop_id,applyMenuPermissions.checkVersion]),entries};
+        });
+        landingFeatureSearch.trigger(document.getElementById('erpLandingFeatureSearch'));
+        const observer = new MutationObserver(() => landingFeatureSearch.refresh());
+        for (const root of [cards,documents]) observer.observe(root, {childList:true,subtree:true,attributes:true,attributeFilter:['class','hidden','disabled','aria-disabled','style']});
+    }
+    landingFeatureSearch.refresh();
+}
 function showScreen(id) {
     if(id==='menuArea' && !retiredGraceAccess) window.ErpWorkOverview?.mount({client:_supabase,context:()=>myInfo&&({coop_id:myInfo.coop_id,actor:String(myInfo.id||myInfo.auth_user_id||'')}),runtime:()=>coopRuntime,onTasks:updateWorkOverviewAttention});
     else window.ErpWorkOverview?.clear();
@@ -2670,6 +2704,8 @@ function showScreen(id) {
     document.getElementById(id).classList.remove('hidden');
     document.body.classList.toggle('erp-menu-screen', id === 'menuArea');
     document.body.classList.toggle('erp-auth-screen', id !== 'menuArea');
+    if (id === 'menuArea') updateLandingFeatureSearch();
+    else { landingFeatureSearchActor = null; landingFeatureSearch?.refresh(); }
     if (id === 'loginForm') {
         loginFormOpenedAt = Date.now();
         applyMagicLinkCooldown();
@@ -2948,6 +2984,8 @@ async function startNaverLogin() {
 
 async function logout() {
     showConfirm("로그아웃 하시겠습니까?", async () => {
+        landingFeatureSearchActor = null;
+        landingFeatureSearch?.refresh();
         await signOutSilently(_supabase);
         currentAuthUser = null;
         localStorage.removeItem('erp_user');
