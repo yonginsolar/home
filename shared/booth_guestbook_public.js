@@ -10,6 +10,13 @@
   const keyPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   let version = '', request = '', payload = null, busy = false, finished = false, uncertain = false, active = false, contextReady = false;
   const dateText = value => new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'medium'}).format(new Date(value));
+  function eventDates(data) {
+    const date = /^\d{4}-\d\d-\d\d$/;
+    if (date.test(data.event_starts_on || '') && date.test(data.event_ends_on || '') && data.event_starts_on<=data.event_ends_on) {
+      return [dateText(data.event_starts_on+'T00:00:00+09:00'),dateText(data.event_ends_on+'T00:00:00+09:00')];
+    }
+    return [dateText(data.starts_at),dateText(Date.parse(data.ends_at)-1)];
+  }
   const setStatus = (message, allowRetry=false) => { status.textContent=message; retry.hidden=!allowRetry; };
   const placeFocus = source => { if (document.activeElement===source || document.activeElement===document.body) status.focus({preventScroll:true}); };
   function sync() {
@@ -48,9 +55,9 @@
       if (!contextReady) {
         const data=await call('context'); showNotice(data.notice);
         find('guestTitle').textContent=data.title;
-        const meta=find('guestMeta'); meta.textContent=`${dateText(data.starts_at)} ~ ${dateText(Date.parse(data.ends_at)-1)} · ${data.venue}`; meta.hidden=false;
+        const meta=find('guestMeta'); meta.textContent=`${eventDates(data).join(' ~ ')} · ${data.venue}`; meta.hidden=false;
         active=data.state==='open'; contextReady=true;
-        if (!active && !uncertain) { setStatus(data.state==='upcoming'?'11월 27일부터 방명록을 남길 수 있습니다.':'방명록 작성이 마감됐습니다.'); return; }
+        if (!active && !uncertain) { setStatus(data.state==='upcoming'?`${dateText(data.starts_at)}부터 방명록을 남길 수 있습니다.`:'방명록 작성이 마감됐습니다.'); return; }
       }
       if (uncertain && request) {
         if ((await call('status',{request})).received === true) { done(source); return; }

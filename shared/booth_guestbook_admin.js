@@ -16,12 +16,12 @@
     const $=id=>document.getElementById(id);
     const opener=$('boothGuestbookOpen'), dialog=$('boothGuestbookDialog'), select=$('boothGuestbookEvent'), table=$('boothGuestbookRows');
     const controls=$('boothGuestbookControls'), search=$('boothGuestbookSearch'), message=$('boothGuestbookInfo'), printPane=$('boothGuestbookPrint');
-    let view=0, requestCounter=0, owner, events=[], settings=null, offset=0, term='', busy=false, pendingChange=false, more=false, exportLib, confirming='', previewUrl='';
+    let view=0, requestCounter=0, owner, events=[], settings=null, offset=0, term='', busy=false, pendingChange=false, more=false, exportLib, confirming='', previewUrl='', pinnedEvent='';
     const show = s => { message.textContent=s; };
     const current = (v,r) => v===view && (r===undefined || r===requestCounter) && dialog.open && owner===getOwner() && !window.frameElement?.hidden;
     function render() {
       controls.hidden=!select.value || !settings;
-      select.disabled=busy;
+      select.disabled=busy || !!pinnedEvent;
       $('boothGuestbookRetry').disabled=busy;
       $('boothGuestbookIssue').textContent=settings?.url?'QR 교체':'QR 발급';
       $('boothGuestbookIssue').disabled=busy || pendingChange || !settings?.can_issue;
@@ -46,7 +46,7 @@
       previewUrl=''; printPane.hidden=true; const qr=$('boothGuestbookQr'); qr.replaceChildren(); qr.removeAttribute('title');
     }
     function clear() {
-      view++; requestCounter++; owner=null; events=[]; settings=null; offset=0; term=''; busy=false; pendingChange=false; more=false; confirming='';
+      view++; requestCounter++; owner=null; events=[]; settings=null; offset=0; term=''; busy=false; pendingChange=false; more=false; confirming=''; pinnedEvent='';
       table.replaceChildren(); select.replaceChildren(); search.value=''; resetPrint();
       $('boothGuestbookPrintTitle').textContent=''; $('boothGuestbookPrintWhere').textContent=''; $('boothGuestbookTotal').textContent='';
       dialog.classList.remove('booth-guestbook-printing'); show(''); render();
@@ -74,7 +74,7 @@
       try {
         if (!events.length) {
           const result=await rpc('events'); if(!current(v,r))return;
-          events=Array.isArray(result)?result:[];
+          events=Array.isArray(result)?result.filter(event=>!pinnedEvent || event.id===pinnedEvent):[];
           select.replaceChildren(...events.map(event=>new Option(event.title,event.id)));
           if(!events.length){show('등록된 방명록 행사가 없습니다.');return;}
         }
@@ -84,7 +84,7 @@
           const result=await rpc('settings',id); if(!current(v,r))return;
           if (previewUrl && previewUrl!==result?.url) resetPrint();
           settings=result; pendingChange=false; waitingForQr=false;
-          $('boothGuestbookTotal').textContent=`누적 방문 ${Number(result.total||0).toLocaleString('ko-KR')}명`;
+          $('boothGuestbookTotal').textContent=`누적 접수 ${Number(result.total||0).toLocaleString('ko-KR')}건`;
         }
         const result=await rpc('list',id,{search:term,offset}); if(!current(v,r))return;
         draw(result.rows || []); more=!!result.more;
@@ -130,7 +130,8 @@
     opener.hidden=false;
     opener.addEventListener('click',()=>{
       if (dialog.open || !getOwner()?.userId) return;
-      clear(); owner=getOwner();dialog.showModal(); void load();
+      const requested=opener.dataset.guestbookId || '';
+      clear(); pinnedEvent=requested; owner=getOwner();dialog.showModal(); void load();
     });
     $('boothGuestbookClose').addEventListener('click',close);
     dialog.addEventListener('cancel',event=>{event.preventDefault();close();});

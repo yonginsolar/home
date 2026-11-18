@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.3.34 | 현재 QR만 인쇄 -->
+<!-- Version: v1.4.0 | 교육과 행사 기록 분리 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.34 | participation.html');</script>
+  <script>console.log('[Version] v1.4.0 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -206,8 +206,30 @@
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
   <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
-<script src="/shared/booth_guestbook_admin.js?v=1.0.1" integrity="sha384-nGoawiNr1izA4lzmgudqO3hRkkAaYAsl1OtotW9+k06fGK8aN272FAHcj08byxhi" crossorigin="anonymous" defer></script>
+<script src="/shared/booth_guestbook_admin.js?v=1.1.0" integrity="sha384-Dd1IreRnqBoLYsvdQ0rX7G31zUOA5ub8cptR+wN3lTtyyvrivgnVncR6LIG0tBoc" crossorigin="anonymous" defer></script>
+<script src="/shared/participation_event_archive.js?v=1.0.0" integrity="sha384-EmkMIZDPueqkdwGTA/Ln1nGYk7WJBdv1OFWAolzcJrVGe3wgSdNURtV7dydT9IBt" crossorigin="anonymous" defer></script>
   <style>
+    #participationArchivePane [hidden],.archive-preview [hidden]{display:none!important}
+    .archive-tablist:not([hidden]){display:flex;gap:.45rem;margin:0 0 1rem;padding:.35rem;border:1px solid var(--line);border-radius:1rem;background:#f6f9fa}
+    .archive-tablist button{flex:1;border:1px solid transparent;border-radius:.75rem;background:transparent;color:var(--ink);padding:.65rem 1rem;font-weight:750;min-height:2.75rem}
+    .archive-tablist button[aria-selected="true"]{background:white;color:#165d46;border-color:#bdd7c9;box-shadow:0 1px 4px #113d2820}
+    .archive-layout{display:grid;grid-template-columns:minmax(14rem,1fr) minmax(0,2.5fr);gap:.85rem;align-items:start;overflow-wrap:anywhere}
+    .archive-layout .panel,.archive-layout label{min-width:0}
+    .archive-bar{display:flex;gap:.5rem;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .archive-list{display:grid;gap:.45rem;margin:.65rem 0}
+    .archive-row{border:1px solid var(--line);border-radius:.7rem;background:white;color:var(--ink);padding:.65rem;text-align:left;min-width:0}
+    .archive-row[aria-current="true"]{border-color:#65a78c;background:#eaf8ef}
+    .archive-row span{display:block;color:var(--muted);font-size:.86em;margin-top:.2rem}
+    .archive-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}
+    .archive-wide{grid-column:1/-1}
+    .archive-line,.archive-form-row{display:flex;align-items:center;flex-wrap:wrap;gap:.55rem;min-width:0}
+    .archive-line{justify-content:space-between;border-bottom:1px solid var(--line);padding:.3rem 0}
+    .archive-form-row{align-items:end}.archive-form-row label{flex:1 1 10rem}
+    .archive-layout button,.archive-preview button{white-space:normal;min-height:2.6rem;max-width:100%}
+    .archive-preview{width:min(62rem,calc(100% - 1.5rem));height:min(49rem,calc(100% - 1.5rem));max-width:none;max-height:none;overflow:auto;border:1px solid var(--line);border-radius:1rem;background:white;padding:1rem;overflow-wrap:anywhere}
+    .archive-preview::backdrop{background:#102619bb}
+    #archivePreviewBody img,#archivePreviewBody canvas{display:block;margin:.8rem auto;width:auto;max-width:100%;height:auto}
+    @media(max-width:760px){.archive-layout{grid-template-columns:minmax(0,1fr)}.archive-layout .panel{width:100%;min-width:0}}
     .booth-guestbook{box-sizing:border-box;width:min(55rem,calc(100% - 1.5rem));height:min(47rem,calc(100% - 1.5rem));max-width:none;max-height:none;overflow:auto;border:1px solid #9daea5;border-radius:1rem;padding:1rem;color:#192c24;background:#fff;overflow-wrap:anywhere}
     .booth-guestbook::backdrop{background:#0c2519aa}.booth-guestbook [hidden],#boothGuestbookOpen[hidden]{display:none!important}
     .booth-guestbook-bar,.booth-guestbook-actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
@@ -233,12 +255,16 @@
         <div class="page-subtitle" id="participationPageSubtitle">교육 등록·불러오기부터 체크인과 조합원 참가 관리까지 한 곳에서 관리합니다.</div>
       </div>
       <div class="d-flex flex-wrap justify-content-end gap-2">
-        <button type="button" class="btn btn-outline-primary" id="boothGuestbookOpen" hidden>부스 방명록</button>
         <button type="button" class="btn btn-outline-secondary" onclick="location.href='index.html'" data-erp-home-link>ERP 메인</button>
       </div>
     </div>
 
     <div id="pageAlert" class="alert d-none" role="alert"></div>
+    <div id="participationAreaTabs" class="archive-tablist" role="tablist" aria-label="교육·행사 구분" hidden>
+      <button type="button" role="tab" id="participationEducationTab" aria-selected="true" aria-controls="participationEducationPane">교육</button>
+      <button type="button" role="tab" id="participationArchiveTab" aria-selected="false" aria-controls="participationArchivePane" tabindex="-1">행사</button>
+    </div>
+    <div id="participationEducationPane">
     <div class="alert alert-info" role="note" id="participationPageGuide">
       모두의 인문학 교육을 연결한 뒤 교육 상세의 ‘참석자 불러오기’를 누르면 출석 명단을 가져옵니다. 연결되지 않은 참석자는 비조합원으로 표시되며, 이후 ‘조합원 연결’로 확인할 수 있습니다. 조합원과 회의 참석 이력의 기본 관리는 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 합니다.
     </div>
@@ -265,7 +291,53 @@
       </div>
       <div class="event-list" id="eventList"></div>
     </section>
+    </div>
+    <section id="participationArchivePane" role="tabpanel" aria-labelledby="participationArchiveTab" hidden>
+      <div class="archive-layout">
+        <section class="panel" aria-labelledby="archiveListTitle">
+          <div class="archive-bar"><h2 id="archiveListTitle" class="h5 mb-0">행사 목록</h2><button id="archiveNew" type="button" class="btn btn-primary">새 행사</button></div>
+          <div id="archiveEventList" class="archive-list"></div>
+          <button id="archiveMore" type="button" class="btn btn-outline-secondary mt-2" hidden>더 보기</button>
+        </section>
+        <section class="panel" aria-labelledby="archiveHeading">
+          <div class="archive-bar"><h2 id="archiveHeading" class="h5 mb-0">행사를 선택하세요</h2><button id="archiveReload" type="button" class="btn btn-outline-secondary">다시 확인</button></div>
+          <p id="archiveStatus" role="status" aria-live="polite"></p>
+          <form id="archiveBasics" hidden>
+            <div class="archive-form-grid">
+              <label class="archive-wide">행사명<input name="title" class="form-control" required maxlength="160"></label>
+              <label>시작일<input name="starts_on" type="date" class="form-control" required></label>
+              <label>종료일<input name="ends_on" type="date" class="form-control" required></label>
+              <label class="archive-wide">장소<input name="venue" class="form-control" required maxlength="220"></label>
+              <label class="archive-wide">다음 행사 참고<textarea name="notes" class="form-control" rows="3" maxlength="3000"></textarea></label>
+            </div>
+            <button type="submit" class="btn btn-primary mt-2">기본정보 저장</button>
+          </form>
+          <div id="archiveContents" hidden>
+            <section class="form-section"><div class="archive-bar"><h3 class="h6 mb-0">체크리스트</h3><span id="archiveCheckCount"></span></div>
+              <div id="archiveChecklist" class="archive-list"></div>
+              <form id="archiveCheckAdd" class="archive-form-row"><label>준비할 일<input name="label" class="form-control" required maxlength="240"></label><button class="btn btn-outline-primary" type="submit">항목 추가</button></form>
+            </section>
+            <section class="form-section"><h3 class="h6">행사 자료</h3>
+              <div id="archiveFiles" class="archive-list"></div>
+              <form id="archiveFileAdd" class="archive-form-row"><label>자료 구분<select name="kind" class="form-select"><option value="PROMO">홍보 이미지</option><option value="MATERIAL">제작물</option><option value="CHECKLIST">체크리스트</option></select></label>
+                <label>파일 선택<input name="file" type="file" class="form-control" accept="application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp" required></label><button class="btn btn-outline-primary" type="submit">자료 추가</button>
+              </form><p class="text-secondary small mb-0 mt-2">PDF, PNG, JPG, WebP · 10MB 이하</p>
+              <p class="small mb-0" id="archiveSelectedFile" aria-live="polite"></p>
+            </section>
+            <section class="form-section"><h3 class="h6">방명록</h3><p id="archiveReceipts"></p>
+              <button type="button" class="btn btn-outline-primary" id="boothGuestbookOpen" hidden>방명록 열기</button>
+              <form class="archive-form-row" id="archiveLink" hidden><label>기존 방명록<select class="form-select" name="book" required></select></label><button type="submit" class="btn btn-outline-primary">연결</button></form>
+            </section>
+          </div>
+        </section>
+      </div>
+    </section>
   </main>
+
+  <dialog id="archivePreview" class="archive-preview" aria-labelledby="archivePreviewTitle">
+    <div class="archive-bar"><h2 class="h5 mb-0" id="archivePreviewTitle">자료 미리보기</h2><button id="archivePreviewClose" type="button" class="btn btn-outline-secondary">닫기</button></div>
+    <div id="archivePreviewBody"></div><div id="archivePdfActions" class="archive-bar" hidden><button type="button" id="archivePdfPrev" class="btn btn-outline-secondary">이전 쪽</button><span id="archivePdfPage" role="status"></span><button type="button" id="archivePdfNext" class="btn btn-outline-secondary">다음 쪽</button></div>
+  </dialog>
 
   <dialog id="boothGuestbookDialog" class="booth-guestbook" aria-labelledby="boothGuestbookTitle">
     <div class="booth-guestbook-bar"><h2 id="boothGuestbookTitle" class="h5 mb-0">부스 방명록</h2><button type="button" class="btn btn-outline-secondary" id="boothGuestbookClose">닫기</button></div>
@@ -3744,9 +3816,13 @@
       participationReadOwner = { userId:session.user.id, coopId:guard.runtime.coop_id, revision:participationReadOwner.revision + 1 };
       const stopBoothGuestbook = PARTICIPATION_EDUCATION_VIEW && window.location.hostname === 'www.yonginsolar.kr'
         ? window.BoothGuestbookAdmin?.start(_supabase, () => participationReadOwner) : null;
+      const stopEventArchive = PARTICIPATION_EDUCATION_VIEW ? window.CoopEventArchive?.start(_supabase, () => participationReadOwner, {
+        onEducationLeave:()=>{leaveEventDraft();cancelEducationDetailRead();}
+      }) : null;
       _supabase.auth.onAuthStateChange(function(event, nextSession) {
         if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== participationReadOwner.userId)) {
           stopBoothGuestbook?.();
+          stopEventArchive?.();
           rememberEventDraft();eventDraftVisit++;
           eventModalInstance?.hide();
           participationReadOwner = { userId:null, coopId:null, revision:participationReadOwner.revision + 1 };
