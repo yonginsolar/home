@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.4.2 | 방명록 버튼과 선택칸 정렬 -->
+<!-- Version: v1.5.0 | 행사 체크리스트 인쇄와 재사용 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.4.2 | participation.html');</script>
+  <script>console.log('[Version] v1.5.0 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -207,7 +207,7 @@
   <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 <script src="/shared/booth_guestbook_admin.js?v=1.2.0" integrity="sha384-5WtMS6fw9k6+SBnRU3QejzkVFjiRgswC4vJRj3wYSn4LFamKTQYsyo1cAIKoL8Iz" crossorigin="anonymous" defer></script>
-<script src="/shared/participation_event_archive.js?v=1.0.0" integrity="sha384-EmkMIZDPueqkdwGTA/Ln1nGYk7WJBdv1OFWAolzcJrVGe3wgSdNURtV7dydT9IBt" crossorigin="anonymous" defer></script>
+<script src="/shared/participation_event_archive.js?v=1.1.0" integrity="sha384-7pPxJt8xIlsP5DuDbOpVT3P8tZKcn8wZFuO5bQYbXKxEcdfZIM4Xw6ATHkokL1TB" crossorigin="anonymous" defer></script>
   <style>
     #participationArchivePane [hidden],.archive-preview [hidden]{display:none!important}
     .archive-tablist:not([hidden]){display:flex;gap:.45rem;margin:0 0 1rem;padding:.35rem;border:1px solid var(--line);border-radius:1rem;background:#f6f9fa}
@@ -229,6 +229,24 @@
     .archive-preview{width:min(62rem,calc(100% - 1.5rem));height:min(49rem,calc(100% - 1.5rem));max-width:none;max-height:none;overflow:auto;border:1px solid var(--line);border-radius:1rem;background:white;padding:1rem;overflow-wrap:anywhere}
     .archive-preview::backdrop{background:#102619bb}
     #archivePreviewBody img,#archivePreviewBody canvas{display:block;margin:.8rem auto;width:auto;max-width:100%;height:auto}
+    .archive-section-nav{display:flex;gap:.55rem;flex-wrap:wrap;margin:.5rem 0 .85rem}
+    .archive-section-nav[hidden]{display:none}
+    .archive-section-nav .btn[aria-pressed="true"]{background:#eaf8ef;color:#165d46;border-color:#65a78c}
+    .archive-check-items{padding-inline-start:1.6rem;margin:.65rem 0}
+    .archive-check-items li{padding:.2rem .15rem;overflow-wrap:anywhere}
+    .archive-check-dialog{width:min(42rem,calc(100% - 1.5rem));height:min(44rem,calc(100% - 1.5rem))}
+    .archive-check-paper{background:white;color:#151b18;margin:.85rem auto 0;padding:clamp(.65rem,3vw,1.25rem);border:1px solid var(--line);max-width:185mm}
+    .archive-print-items{padding:0;margin:.8rem 0 0;list-style:none}
+    .archive-print-items li{display:grid;grid-template-columns:.85em minmax(0,1fr);align-items:start;gap:.55em;padding:.24em 0;overflow-wrap:anywhere}
+    .archive-print-items li::before{content:"";display:block;inline-size:.75em;block-size:.75em;border:1px solid currentColor;margin-top:.3em}
+    @media print{
+      body:has(>.archive-checklist-printing)>:not(.archive-checklist-printing){display:none!important}
+      body>.archive-checklist-printing{display:block!important;position:static;inset:auto;width:auto;height:auto;max-width:none;max-height:none;overflow:visible;margin:0;padding:0;background:#fff;border:0;box-shadow:none}
+      .archive-checklist-printing::backdrop{display:none}
+      .archive-checklist-printing>:not(.archive-check-paper){display:none!important}
+      .archive-checklist-printing .archive-check-paper{border:0;margin:0 auto;padding:0;font-size:11pt;line-height:1.35}
+      .archive-checklist-printing .archive-print-items li{break-inside:avoid;page-break-inside:avoid}
+    }
     @media(max-width:760px){.archive-layout{grid-template-columns:minmax(0,1fr)}.archive-layout .panel{width:100%;min-width:0}}
     .booth-guestbook{box-sizing:border-box;width:min(55rem,calc(100% - 1.5rem));height:min(47rem,calc(100% - 1.5rem));max-width:none;max-height:none;overflow:auto;border:1px solid #9daea5;border-radius:1rem;padding:1rem;color:#192c24;background:#fff;overflow-wrap:anywhere}
     .booth-guestbook::backdrop{background:#0c2519aa}.booth-guestbook [hidden],#boothGuestbookOpen[hidden]{display:none!important}
@@ -310,6 +328,10 @@
         <section class="panel" aria-labelledby="archiveHeading">
           <div class="archive-bar"><h2 id="archiveHeading" class="h5 mb-0">행사를 선택하세요</h2><button id="archiveReload" type="button" class="btn btn-outline-secondary">다시 확인</button></div>
           <p id="archiveStatus" role="status" aria-live="polite"></p>
+          <nav id="archiveSectionNav" class="archive-section-nav" aria-label="선택한 행사 메뉴" hidden>
+            <button id="archiveInfoMenu" type="button" class="btn btn-outline-secondary" aria-pressed="true" aria-controls="archiveBasics archiveInfoPane">행사 정보</button>
+            <button id="archiveChecklistMenu" type="button" class="btn btn-outline-secondary" aria-pressed="false" aria-controls="archiveChecklistPane">체크리스트</button>
+          </nav>
           <form id="archiveBasics" hidden>
             <div class="archive-form-grid">
               <label class="archive-wide">행사명<input name="title" class="form-control" required maxlength="160"></label>
@@ -321,10 +343,16 @@
             <button type="submit" class="btn btn-primary mt-2">기본정보 저장</button>
           </form>
           <div id="archiveContents" hidden>
-            <section class="form-section"><div class="archive-bar"><h3 class="h6 mb-0">체크리스트</h3><span id="archiveCheckCount"></span></div>
-              <div id="archiveChecklist" class="archive-list"></div>
+            <section id="archiveChecklistPane" class="form-section" aria-labelledby="archiveChecklistHeading" hidden>
+              <div class="archive-bar"><h3 id="archiveChecklistHeading" class="h6 mb-0">체크리스트</h3>
+                <div class="archive-bar"><button id="archiveChecklistReuse" type="button" class="btn btn-outline-secondary">다른 행사에서 가져오기</button><button id="archiveChecklistPrintOpen" type="button" class="btn btn-outline-primary">인쇄 미리보기</button></div>
+              </div>
+              <p id="archiveChecklistResult" class="small mb-0" role="status"></p>
+              <ol id="archiveChecklist" class="archive-check-items"></ol>
+              <p id="archiveChecklistEmpty" class="text-secondary" hidden>아직 준비물이 없습니다.</p>
               <form id="archiveCheckAdd" class="archive-form-row"><label>준비할 일<input name="label" class="form-control" required maxlength="240"></label><button class="btn btn-outline-primary" type="submit">항목 추가</button></form>
             </section>
+            <div id="archiveInfoPane">
             <section class="form-section"><h3 class="h6">행사 자료</h3>
               <div id="archiveFiles" class="archive-list"></div>
               <form id="archiveFileAdd" class="archive-form-row"><label>자료 구분<select name="kind" class="form-select"><option value="PROMO">홍보 이미지</option><option value="MATERIAL">제작물</option><option value="CHECKLIST">체크리스트</option></select></label>
@@ -336,6 +364,7 @@
               <button type="button" class="btn btn-outline-primary" id="boothGuestbookOpen" hidden>방명록 열기</button>
               <form class="archive-form-row" id="archiveLink" hidden><label>기존 방명록<select class="form-select" name="book" required></select></label><button type="submit" class="btn btn-outline-primary">연결</button></form>
             </section>
+            </div>
           </div>
         </section>
       </div>
@@ -345,6 +374,20 @@
   <dialog id="archivePreview" class="archive-preview" aria-labelledby="archivePreviewTitle">
     <div class="archive-bar"><h2 class="h5 mb-0" id="archivePreviewTitle">자료 미리보기</h2><button id="archivePreviewClose" type="button" class="btn btn-outline-secondary">닫기</button></div>
     <div id="archivePreviewBody"></div><div id="archivePdfActions" class="archive-bar" hidden><button type="button" id="archivePdfPrev" class="btn btn-outline-secondary">이전 쪽</button><span id="archivePdfPage" role="status"></span><button type="button" id="archivePdfNext" class="btn btn-outline-secondary">다음 쪽</button></div>
+  </dialog>
+
+  <dialog id="archiveChecklistCopy" class="archive-preview archive-check-dialog" aria-labelledby="archiveChecklistCopyTitle">
+    <div class="archive-bar"><h2 class="h5 mb-0" id="archiveChecklistCopyTitle">다른 행사 체크리스트 가져오기</h2><button id="archiveChecklistCopyClose" type="button" class="btn btn-outline-secondary">닫기</button></div>
+    <p id="archiveChecklistCopyInto" class="mt-2"></p>
+    <label class="d-block">가져올 행사<select id="archiveChecklistSource" class="form-select"></select></label>
+    <p id="archiveChecklistCopyStatus" role="status" class="mt-2"></p>
+    <ol id="archiveChecklistSourceItems" class="archive-check-items"></ol>
+    <div class="archive-bar"><button id="archiveChecklistCopyRetry" type="button" class="btn btn-outline-secondary" hidden>다시 확인</button><button id="archiveChecklistCopyConfirm" type="button" class="btn btn-primary" disabled>가져오기</button></div>
+  </dialog>
+
+  <dialog id="archiveChecklistPrint" class="archive-preview archive-check-dialog" aria-labelledby="archiveChecklistPrintTitle">
+    <div class="archive-bar"><h2 class="h5 mb-0" id="archiveChecklistPrintTitle">체크리스트 인쇄 미리보기</h2><div class="archive-bar"><button id="archiveChecklistPrintClose" type="button" class="btn btn-outline-secondary">닫기</button><button id="archiveChecklistPrintGo" type="button" class="btn btn-primary">인쇄</button></div></div>
+    <article class="archive-check-paper"><h3 class="h5 mb-1">준비물 체크리스트</h3><p id="archiveChecklistPrintEvent" class="fw-semibold mb-1"></p><p id="archiveChecklistPrintDates" class="mb-0"></p><ol id="archiveChecklistPrintItems" class="archive-print-items"></ol></article>
   </dialog>
 
   <dialog id="boothGuestbookDialog" class="booth-guestbook" aria-labelledby="boothGuestbookTitle">

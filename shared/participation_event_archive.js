@@ -3,8 +3,8 @@
   const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
   const versions = {pdf:'application/pdf',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp'};
   const labels = {PROMO:'홍보 이미지',MATERIAL:'제작물',CHECKLIST:'체크리스트'};
-  const messages = {EVENT_ARCHIVE_ACCESS:'행사를 관리할 권한을 확인해 주세요.',EVENT_ARCHIVE_CHANGED:'다른 곳에서 변경했습니다. 다시 확인한 뒤 저장해 주세요.',EVENT_ARCHIVE_LINK:'해당 방명록은 다른 행사에 연결됐거나 사용할 수 없습니다.',EVENT_ARCHIVE_LIMIT:'이 행사에 더 추가할 수 없습니다.',EVENT_ARCHIVE_UPLOAD_PENDING:'파일 저장을 확인하지 못했습니다. 같은 파일로 다시 시도해 주세요.',EVENT_ARCHIVE_INPUT:'입력한 내용과 파일 형식을 확인해 주세요.',TIMEOUT:'응답을 확인하지 못했습니다. 다시 확인해 주세요.'};
-  const empty = () => ({title:'',venue:'',starts_on:'',ends_on:'',notes:'',label:'',kind:'PROMO',file:null,createId:null,checkId:null,rev:0,loaded:false});
+  const messages = {EVENT_ARCHIVE_ACCESS:'행사를 관리할 권한을 확인해 주세요.',EVENT_ARCHIVE_CHANGED:'다른 곳에서 변경했습니다. 다시 확인한 뒤 저장해 주세요.',EVENT_ARCHIVE_LINK:'해당 방명록은 다른 행사에 연결됐거나 사용할 수 없습니다.',EVENT_ARCHIVE_LIMIT:'이 행사에 더 추가할 수 없습니다.',EVENT_ARCHIVE_UPLOAD_PENDING:'파일 저장을 확인하지 못했습니다. 같은 파일로 다시 시도해 주세요.',EVENT_ARCHIVE_INPUT:'입력한 내용과 파일 형식을 확인해 주세요.',EVENT_ARCHIVE_FILE_HIDDEN:'이 파일은 이미 보관되어 있습니다.',EVENT_ARCHIVE_CHECKLIST_CHANGED:'원래 체크리스트가 바뀌었습니다. 다시 확인해 주세요.',TIMEOUT:'응답을 확인하지 못했습니다. 다시 확인해 주세요.'};
+  const empty = () => ({title:'',venue:'',starts_on:'',ends_on:'',notes:'',label:'',kind:'PROMO',file:null,createId:null,checkId:null,rev:0,loaded:false,section:'info',copyResult:''});
   const fn = 'participation_event_archive';
   const bucket = 'participation-files';
   const keys = ['title','venue','starts_on','ends_on','notes'];
@@ -14,8 +14,11 @@
     const tabs=$('participationAreaTabs'), edu=$('participationEducationPane'), archive=$('participationArchivePane'), book=$('boothGuestbookOpen');
     const educationTab=$('participationEducationTab'), archiveTab=$('participationArchiveTab'), basics=$('archiveBasics'), contents=$('archiveContents');
     const checkForm=$('archiveCheckAdd'), fileForm=$('archiveFileAdd'), linkForm=$('archiveLink'), preview=$('archivePreview');
+    const copy=$('archiveChecklistCopy'), source=$('archiveChecklistSource'), copyConfirm=$('archiveChecklistCopyConfirm'), copyRetry=$('archiveChecklistCopyRetry');
+    const paper=$('archiveChecklistPrint'), printGo=$('archiveChecklistPrintGo');
     let events=[], draft=new Map(), active='', readSeq=0, busyRead=false, writing=false, more=false, mode=false, closed=false, lastDetail=null;
     let control=null, previewSeq=0, imageUrl='', pdfTask=null, pdfRender=null, pdfDoc=null, page=1, previewFrom=null;
+    let copySeq=0, copyControl=null, copying=false, copyData=null, copyRetryStep='', printEvent='', printTimer;
     function currentOwner() { const p=getOwner(); return p?.userId&&p?.coopId ? `${p.userId}:${p.coopId}:${p.revision}` : ''; }
     const owner=currentOwner(), inView=()=>!closed&&owner&&owner===currentOwner()&&mode&&!window.frameElement?.hidden;
     const focusAllowed=()=>document.activeElement===document.body||document.activeElement===preview;
@@ -36,12 +39,15 @@
     function actions(){
       $('archiveMore').hidden=!more;$('archiveMore').disabled=busyRead;
       $('archiveReload').disabled=busyRead;
-      for(const b of archive.querySelectorAll('form [type="submit"],button[data-check-write]'))b.disabled=writing || busyRead;
+      for(const b of archive.querySelectorAll('form [type="submit"]'))b.disabled=writing || busyRead;
       book.disabled=!!(active && (!lastDetail || !lastDetail.guestbook_id));
+      $('archiveChecklistReuse').disabled=writing||busyRead||!lastDetail;
+      $('archiveChecklistPrintOpen').disabled=busyRead||!lastDetail?.checklist?.length;
+      copyConfirm.disabled=writing||busyRead||!copyData?.labels?.length;
     }
     function setBasics(d){for(const key of keys){const input=basics.elements[key],value=d[key]||'';if(input.value!==value)input.value=value;}}
     function remember(){
-      if(!active||basics.hidden)return;
+      if(!active||(!lastDetail&&active!=='new'))return;
       const d=draftFor(active);
       Object.assign(d,basicsOf(Object.fromEntries(new FormData(basics))),{label:checkForm.elements.label.value,kind:fileForm.elements.kind.value});
     }
@@ -51,7 +57,7 @@
       $('archiveEventList').replaceChildren(...(rows.length?rows:[el('p','등록된 행사가 없습니다.')]));
     }
     function fields(id,detail){
-      const d=draftFor(id); basics.hidden=false;
+      const d=draftFor(id);
       if(detail&&!d.loaded){Object.assign(d,basicsOf(detail),{rev:detail.revision,loaded:true,base:basicsOf(detail)});}
       setBasics(d);if(checkForm.elements.label.value!==d.label)checkForm.elements.label.value=d.label;fileForm.elements.kind.value=d.kind;
       if((fileForm.elements.file.files[0]||null)!==d.file){
@@ -62,15 +68,26 @@
       $('archiveHeading').textContent=detail?.title||'새 행사';
       contents.hidden=!detail;lastDetail=detail||null;
       if(detail) draw(detail);else hideBook();
+      applySection();
       actions();
     }
     function hideBook(){book.hidden=true;delete book.dataset.guestbookId;}
+    function applySection(){
+      const check=!!lastDetail&&draftFor(active).section==='checklist';
+      $('archiveSectionNav').hidden=!lastDetail;
+      basics.hidden=check||(!lastDetail&&active!=='new');
+      $('archiveInfoPane').hidden=check;$('archiveChecklistPane').hidden=!check;
+      $('archiveInfoMenu').setAttribute('aria-pressed',String(!check));
+      $('archiveChecklistMenu').setAttribute('aria-pressed',String(check));
+    }
+    function chooseSection(section){if(!inView()||!lastDetail)return;remember();draftFor(active).section=section;applySection();}
+    $('archiveInfoMenu').addEventListener('click',()=>chooseSection('info'));
+    $('archiveChecklistMenu').addEventListener('click',()=>chooseSection('checklist'));
     function draw(detail){
       const checklist=Array.isArray(detail.checklist)?detail.checklist:[], files=Array.isArray(detail.files)?detail.files:[];
-      $('archiveCheckCount').textContent=`${checklist.filter(x=>x.done).length}/${checklist.length} 완료`;
-      $('archiveChecklist').replaceChildren(...checklist.map(item=>{const row=el('div','');row.className='archive-line';
-        const b=button(item.done?'완료':'미완료',()=>mutate(()=>rpc('check_set',detail.id,{id:item.id,done:!item.done,revision:item.revision})));
-        b.dataset.checkWrite='1';b.setAttribute('aria-label',`${item.label}: ${b.textContent}`);b.setAttribute('aria-pressed',String(item.done));row.append(el('span',item.label),b);return row;}));
+      $('archiveChecklist').replaceChildren(...checklist.map(item=>el('li',item.label)));
+      $('archiveChecklistEmpty').hidden=checklist.length>0;
+      $('archiveChecklistResult').textContent=draftFor(active).copyResult;
       $('archiveFiles').replaceChildren(...files.map(file=>{const row=el('div','');row.className='archive-line';const group=el('div','');group.className='archive-bar';
         const view=button('미리보기',e=>void useFile(file,true,e.currentTarget));const download=button('다운로드',e=>void useFile(file,false,e.currentTarget));
         view.setAttribute('aria-label',`${file.name} 미리보기`);download.setAttribute('aria-label',`${file.name} 다운로드`);
@@ -104,13 +121,13 @@
         }else if(!id){status('');return;}
         status('');
       } catch(e){if(usable()){
-        if(e.message==='EVENT_ARCHIVE_ACCESS'){events=[]; $('archiveEventList').replaceChildren(); basics.hidden=true;contents.hidden=true;hideBook();lastDetail=null;}
+        if(e.message==='EVENT_ARCHIVE_ACCESS'){events=[]; $('archiveEventList').replaceChildren(); contents.hidden=true;hideBook();lastDetail=null;applySection();closeChecklistDialogs();}
         status(note(e));
       }} finally {if(usable()){busyRead=false;actions();}}
     }
     function select(id){
       if(!inView() || (id!=='new'&&!uuid.test(id)) || (active===id&&busyRead))return;
-      remember();invalidate();closePreview(false);active=id;lastDetail=null;hideBook();
+      remember();invalidate();closePreview(false);closeChecklistDialogs();active=id;lastDetail=null;hideBook();applySection();
       if(id==='new'){fields(id,null);list();status('');}
       else {basics.hidden=true;contents.hidden=true;list();void read(id);}
     }
@@ -135,13 +152,88 @@
       });
     });
     checkForm.addEventListener('submit',event=>{
-      event.preventDefault(); if(!checkForm.reportValidity())return;
+      event.preventDefault(); if(!lastDetail||$('archiveChecklistPane').hidden||!checkForm.reportValidity())return;
       const d=draftFor(active), label=checkForm.elements.label.value.trim();if(!label)return;
       const tag=JSON.stringify([label]);if(tag!==d.lastCheck){d.checkId=crypto.randomUUID();d.lastCheck=tag;}
       void mutate(id=>rpc('check_add',id,{id:d.checkId,label}),()=>{
         if(checkForm.elements.label.value.trim()===label){checkForm.elements.label.value='';d.label='';d.lastCheck=null;}
       });
     });
+    function copyStatus(text,retry=''){
+      $('archiveChecklistCopyStatus').textContent=text;copyRetryStep=retry;copyRetry.hidden=!retry;
+    }
+    function invalidateCopy(){copySeq++;copyControl?.abort();copyControl=null;copyData=null;actions();}
+    function closeCopy(){invalidateCopy();source.replaceChildren();$('archiveChecklistSourceItems').replaceChildren();copyStatus('');if(copy.open)copy.close();}
+    function stopPrinting(){clearTimeout(printTimer);paper.classList.remove('archive-checklist-printing');printGo.disabled=false;}
+    function closePrint(){stopPrinting();printEvent='';$('archiveChecklistPrintItems').replaceChildren();if(paper.open)paper.close();}
+    function closeChecklistDialogs(){if(copy.open)closeCopy();if(paper.open)closePrint();}
+    async function readCopy(step){
+      if(!copy.open||!inView()||!active||copying)return;
+      invalidateCopy();const seq=copySeq,id=active,source_id=source.value;
+      const same=()=>copy.open&&inView()&&seq===copySeq&&active===id;
+      $('archiveChecklistSourceItems').replaceChildren();
+      if(step==='source'&&!uuid.test(source_id)){copyStatus('');return;}
+      copyStatus('불러오는 중입니다.');
+      if(step==='list')source.disabled=true;
+      try{
+        const ctrl=copyControl=new AbortController();
+        const data=await rpc(step==='list'?'checklist_sources':'checklist_source',id,{source_id},ctrl);
+        if(!same())return;
+        if(step==='list'){
+          const rows=Array.isArray(data)?data.filter(x=>x.id!==id&&uuid.test(x.id||'')):[];
+          source.replaceChildren(new Option('행사 선택',''),...rows.map(x=>new Option(`${x.title} · ${x.starts_on}`,x.id)));
+          copyStatus(rows.length?'':'체크리스트를 가져올 다른 행사가 없습니다.');
+        }else{
+          if(data?.id!==source_id||!Array.isArray(data.labels)||!data.labels.every(x=>typeof x==='string')||!/^[a-f0-9]{64}$/.test(data.digest||''))throw Error('INVALID_RESPONSE');
+          copyData=data;
+          $('archiveChecklistSourceItems').replaceChildren(...data.labels.map(label=>el('li',label)));
+          copyStatus(data.labels.length?'':'가져올 준비물이 없습니다.');
+        }
+      }catch(e){if(same())copyStatus(note(e),e.message==='EVENT_ARCHIVE_ACCESS'?'':step);}
+      finally{if(same()){copyControl=null;source.disabled=false;actions();}}
+    }
+    $('archiveChecklistReuse').addEventListener('click',()=>{
+      if(!inView()||!lastDetail||writing||busyRead||copy.open)return;
+      $('archiveChecklistCopyInto').textContent=`${lastDetail.title} 행사에 추가합니다.`;
+      copy.showModal();void readCopy('list');
+    });
+    source.addEventListener('change',()=>void readCopy('source'));
+    copyRetry.addEventListener('click',()=>void readCopy(copyRetryStep));
+    $('archiveChecklistCopyClose').addEventListener('click',closeCopy);
+    copy.addEventListener('cancel',e=>{e.preventDefault();closeCopy();});
+    copyConfirm.addEventListener('click',async()=>{
+      if(!copy.open||!inView()||!lastDetail||!copyData?.labels?.length||writing||busyRead)return;
+      const id=active,data=copyData,seq=copySeq;
+      const same=()=>copy.open&&inView()&&active===id&&seq===copySeq;
+      writing=copying=true;source.disabled=true;actions();copyStatus('가져오는 중입니다.');
+      try{
+        const result=await rpc('checklist_copy',id,{source_id:data.id,digest:data.digest});
+        if(!Number.isInteger(result?.added)||result.added<0)throw Error('INVALID_RESPONSE');
+        if(same()){
+          draftFor(id).copyResult=result.added?`준비물 ${result.added}개를 가져왔습니다.`:'추가할 준비물이 없습니다.';
+          closeCopy();void read(id);
+        }else if(inView()&&active===id&&lastDetail)void read(id);
+      }catch(e){if(same()){
+        if(e.message==='EVENT_ARCHIVE_CHECKLIST_CHANGED'||e.message==='EVENT_ARCHIVE_ACCESS')copyData=null;
+        copyStatus(note(e),e.message==='EVENT_ARCHIVE_CHECKLIST_CHANGED'?'source':'');
+      }}finally{writing=copying=false;if(copy.open)source.disabled=false;if(inView())actions();}
+    });
+    $('archiveChecklistPrintOpen').addEventListener('click',()=>{
+      if(!inView()||busyRead||!lastDetail?.checklist?.length||paper.open)return;
+      printEvent=active;$('archiveChecklistPrintEvent').textContent=lastDetail.title;
+      $('archiveChecklistPrintDates').textContent=lastDetail.starts_on===lastDetail.ends_on?lastDetail.starts_on:`${lastDetail.starts_on} ~ ${lastDetail.ends_on}`;
+      $('archiveChecklistPrintItems').replaceChildren(...lastDetail.checklist.map(item=>el('li',item.label)));
+      paper.showModal();
+    });
+    $('archiveChecklistPrintClose').addEventListener('click',closePrint);
+    paper.addEventListener('cancel',e=>{e.preventDefault();closePrint();});
+    printGo.addEventListener('click',()=>{
+      if(!paper.open||!inView()||busyRead||printEvent!==active||printGo.disabled)return;
+      printGo.disabled=true;paper.classList.add('archive-checklist-printing');
+      printTimer=setTimeout(stopPrinting,120000);
+      try{window.print();}catch{stopPrinting();}
+    });
+    window.addEventListener('afterprint',stopPrinting);
     fileForm.elements.file.addEventListener('change',()=>{
       if(!active)return;const d=draftFor(active);d.file=fileForm.elements.file.files[0]||null;
       $('archiveSelectedFile').textContent=d.file?.name||'';
@@ -224,7 +316,7 @@
     function toggle(next,focus=false){
       if(closed||owner!==currentOwner())return;
       if(next===mode)return;
-      remember();invalidate(); closePreview(false);if(next)onEducationLeave?.();mode=next;edu.hidden=mode;archive.hidden=!mode;
+      remember();invalidate(); closePreview(false);closeChecklistDialogs();if(next)onEducationLeave?.();mode=next;edu.hidden=mode;archive.hidden=!mode;
       for(const [tab,on] of [[educationTab,!mode],[archiveTab,mode]]){tab.setAttribute('aria-selected',String(on));tab.tabIndex=on?0:-1;}
       if(mode){if(active==='new')fields(active,null);void read();}
       if(focus)(mode?archiveTab:educationTab).focus();
@@ -233,13 +325,13 @@
     tabs.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();toggle(e.key==='Home'?false:e.key==='End'?true:!mode,true);}});
     $('archiveNew').addEventListener('click',()=>select('new'));$('archiveReload').addEventListener('click',()=>void read());
     $('archiveMore').addEventListener('click',()=>void read(active,true));
-    const leave=()=>{remember();invalidate();closePreview(false);};
+    const leave=()=>{remember();invalidate();closePreview(false);closeChecklistDialogs();};
     window.addEventListener('pagehide',leave);
     const observer=window.frameElement?new MutationObserver(()=>{if(window.frameElement.hidden)leave();else if(mode)void read();}):null;
     observer?.observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
     edu.setAttribute('role','tabpanel');edu.setAttribute('aria-labelledby',educationTab.id);tabs.hidden=false;hideBook();
-    return ()=>{closed=true;leave();observer?.disconnect();window.removeEventListener('pagehide',leave);draft.clear();lastDetail=null;events=[];tabs.hidden=true;archive.hidden=true;edu.hidden=false;hideBook();
+    return ()=>{closed=true;leave();observer?.disconnect();window.removeEventListener('pagehide',leave);window.removeEventListener('afterprint',stopPrinting);draft.clear();lastDetail=null;events=[];tabs.hidden=true;archive.hidden=true;edu.hidden=false;hideBook();
       basics.reset();checkForm.reset();fileForm.reset();for(const id of ['archiveEventList','archiveChecklist','archiveFiles','archiveSelectedFile','archiveHeading','archiveReceipts','archiveStatus'])$(id).replaceChildren();};
   }
-  window.CoopEventArchive=Object.freeze({start,version:'1.0.0'});
+  window.CoopEventArchive=Object.freeze({start,version:'1.1.0'});
 })();
