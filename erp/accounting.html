@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.210 | 지출결의 입력 수정 후 경고 갱신 -->
+<!-- Version: v1.0.211 | 지출결의 실제 결제·영수증 연동 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.210 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.211 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -52,8 +52,8 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="accounting_withholding_payment.js?v=1.0.2"></script>
   <script src="insurance_payment.js?v=1.0.1"></script>
-  <script src="accounting_expense_execution.js?v=1.0.0" integrity="sha384-cMRQd3PaQzipALums0GuBjVzoXRLP2Qdjb6SDIij6WgJkH6Ch9RdK+ggP8J6JaOn" crossorigin="anonymous"></script>
-  <script src="accounting_payment_dates.js?v=1.3.1" integrity="sha384-NjPqVyEM9/5ek5Y0OG7Wz4i7kcUQUp4DQp4fGV9SVEcY76vbtzodsDKJDc2tvRyi" crossorigin="anonymous"></script>
+  <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
+  <script src="accounting_payment_dates.js?v=1.3.2" integrity="sha384-BYK9ZB1pln/YWnFF0BeRV70P1/wgAgIJpJNB8F9EbhfNuzpO9bS+BEm8SygO7z4f" crossorigin="anonymous"></script>
 
   <style>
     .accounting-typo-dialog { box-sizing:border-box; width:min(36rem, calc(100vw - 1rem)); max-width:calc(100vw - 1rem); height:min(37rem, calc(100dvh - 1rem)); max-height:calc(100dvh - 1rem); overflow:auto; overflow-wrap:anywhere; }
@@ -5565,7 +5565,8 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
             plans.push({
                 kind: approvalKind,
                 amount: managed?effectivePayment.amount:amount,
-                ...(managed?{initialExpense:true,approvedAmount:effectivePayment.approved,execution:effectivePayment.execution}:{}),
+                ...(managed?{initialExpense:true,approvedAmount:effectivePayment.approved,execution:effectivePayment.execution,
+                    receiptFile:effectivePayment.receiptFile,receiptDocument:effectivePayment.receiptFile?{id:doc.id,coop_id:doc.coop_id}:null}:{}),
                 date: journalDate,
                 description: `${approvalPrefix} ${descBase}`,
                 transId,
@@ -5648,7 +5649,8 @@ function appendApprovalEntriesFromPlan(entries, plan) {
         const rows=[];
         if(plan.kind==='accrual')appendApprovalAccrualEntries(rows,plan);
         else appendApprovalImmediateExpenseEntries(rows,plan);
-        entries.push(...rows.map(row=>({...row,expense_execution:plan.execution})));
+        entries.push(...rows.map(row=>({...row,expense_execution:plan.execution,
+            ...(plan.expenseReceiptId?{expense_receipt_id:plan.expenseReceiptId}:{})})));
         return;
     }
     if (plan.kind === 'payout_approval') {
@@ -9400,7 +9402,8 @@ function confirmSync(type) {
                 ...previewPlanResult.plans.filter(plan=>plan.execution).flatMap(plan=>[
                     `  · ${plan.description}`,
                     ...window.CoopExpenseExecution.summary(plan.execution).map(x=>'    '+x),
-                    ...(plan.execution.receipt_index==null?[]:[`    영수증: 결재 첨부 ${plan.execution.receipt_index+1}번`])
+                    ...(plan.receiptFile?[`    새 영수증: ${plan.receiptFile.name}`]:
+                        plan.execution.receipt_index==null?[]:[`    영수증: 결재 첨부 ${plan.execution.receipt_index+1}번`])
                 ]),
                 `- 재고 입고 매입전표: ${previewPlanResult.inventoryPurchaseCount || 0}건 · 취득원가 ${(previewPlanResult.inventoryPurchaseCostTotal || 0).toLocaleString()}원 · 공제 매입세액 ${(previewPlanResult.inventoryInputVatTotal || 0).toLocaleString()}원`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
@@ -9474,8 +9477,10 @@ function confirmSync(type) {
                     return;
                 }
                 const expenseSignature=plans=>JSON.stringify(plans.filter(p=>p.initialExpense)
-                    .map(p=>[p.transId,p.kind,p.amount,p.approvedAmount,p.description,p.date,p.execution]).sort());
-                if(!runPlanResult.error&&expenseSignature(runPlanResult.plans)!==expenseSignature(previewPlanResult.plans)) {
+                    .map(p=>[p.transId,p.kind,p.amount,p.approvedAmount,p.description,p.date,p.execution,Boolean(p.receiptFile)]).sort());
+                const previewReceiptFiles=new Map(previewPlanResult.plans.map(p=>[p.transId,p.receiptFile]));
+                if(!runPlanResult.error&&(expenseSignature(runPlanResult.plans)!==expenseSignature(previewPlanResult.plans)
+                    ||runPlanResult.plans.some(p=>p.receiptFile&&p.receiptFile!==previewReceiptFiles.get(p.transId)))) {
                     await rollbackApprovalSyncWrites([],salarySupportWrite.ids,[]);
                     return notify('지출 연동 다시 확인','결재 내용·결제수단 또는 이미 연동된 전표가 바뀌었습니다.');
                 }
@@ -9504,6 +9509,25 @@ function confirmSync(type) {
                     return notify("알림", `지금 연동할 수 있는 문서가 없습니다.\n- 보류: ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
                 }
 
+                const staged = new Map();
+                const releaseStaged = () => {
+                    for (const id of staged.values()) void window.CoopExpenseExecution.dropStagedReceipt(_supabase,id).catch(()=>{});
+                };
+                try {
+                    for (const plan of runPlanResult.plans) {
+                        if (!plan.receiptFile) continue;
+                        const id=await window.CoopExpenseExecution.stageReceipt(_supabase,plan.receiptDocument,plan.receiptFile,current);
+                        staged.set(plan.transId,id);
+                        plan.expenseReceiptId=id;
+                    }
+                    if (!current()) throw Error('연동 화면을 다시 열어 주세요.');
+                } catch(error) {
+                    releaseStaged();
+                    if(paymentScope.identity===accountingReadIdentity())await rollbackApprovalSyncWrites([],salarySupportWrite.ids,[]);
+                    if(current())return notify('영수증 확인',error.message);
+                    return;
+                }
+
                 let entries = [];
                 runPlanResult.plans.forEach((plan) => appendApprovalEntriesFromPlan(entries, plan));
 
@@ -9517,6 +9541,17 @@ function confirmSync(type) {
                     let insertResult;
                     const recoveryMonths = runPlanResult.plans.filter(plan => plan.kind === 'payment' && plan.salaryMonth)
                         .map(plan => plan.salaryMonth);
+                    const expensePendingKey=accountingExpensePendingKey();
+                    const expensePendingIds=runPlanResult.plans.filter(plan=>plan.initialExpense).map(plan=>plan.transId);
+                    const holdExpense=()=>{
+                        if(!expensePendingKey) throw Error('저장 결과를 보관할 수 없습니다.');
+                        sessionStorage.setItem(expensePendingKey,JSON.stringify([...new Set([...accountingExpensePending(expensePendingKey),...expensePendingIds])]));
+                    };
+                    const clearExpense=()=>{
+                        if(!expensePendingKey)return;
+                        const remaining=accountingExpensePending(expensePendingKey).filter(id=>!expensePendingIds.includes(id));
+                        try {if(remaining.length)sessionStorage.setItem(expensePendingKey,JSON.stringify(remaining));else sessionStorage.removeItem(expensePendingKey);}catch(_) {}
+                    };
                     if (recoveryMonths.length && !window.ExpoRuntimeBridge) {
                         const recovery = accountingPayrollRecovery();
                         let attempt, taggedInsert;
@@ -9537,32 +9572,40 @@ function confirmSync(type) {
                             });
                             taggedInsert = insert.setHeader('x-coop-payroll-request', attempt.id)
                                 .setHeader('x-coop-payroll-followup', JSON.stringify(proofs)).retry(false);
+                            if(staged.size)holdExpense();
                         } catch (error) {
+                            releaseStaged();
                             if (attempt) { try { recovery.clear(attempt); } catch (_) {} }
                             await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);
                             notify('급여 지급을 저장하지 않았습니다', error.message);
                             return;
                         }
-                        const outcome = await window.CoopPayrollRecovery.submit(taggedInsert);
+                        const write=Promise.resolve(taggedInsert);
+                        const outcome = await window.CoopPayrollRecovery.submit(write);
                         if (outcome.state === 'unknown') {
+                            if(staged.size)void write.then(async result=>{
+                                if(result?.error&&(await window.CoopPayrollRecovery.submit(result)).state==='rejected'){
+                                    releaseStaged();clearExpense();if(current())renderAccountingExpenseResult();
+                                }
+                            }).catch(()=>{});
                             if (accountingReadScopeCurrent(paymentScope)) {
+                                if(staged.size&&current())renderAccountingExpenseResult();
                                 notify('급여 저장 결과 미확인', '다시 저장하지 말고 이 화면의 ‘급여 저장 결과 확인’을 이용해 주세요.');
                             }
                             return;
                         }
                         try { recovery.clear(attempt); } catch (_) { /* Server result remains available. */ }
+                        if(staged.size)clearExpense();
                         insertResult = outcome.response;
                         if (outcome.state === 'posted') payrollReceipt = attempt.id;
-                    } else if (runPlanResult.plans.every(plan=>plan.initialExpense)) {
-                        const key=accountingExpensePendingKey();
-                        const ids=runPlanResult.plans.filter(plan=>plan.initialExpense).map(plan=>plan.transId);
-                        if(!current()||!key||typeof insert.retry!=='function') {
+                    } else if (staged.size||runPlanResult.plans.every(plan=>plan.initialExpense)) {
+                        if(!current()||!expensePendingKey||typeof insert.retry!=='function') {
+                            releaseStaged();
                             await rollbackApprovalSyncWrites([],salarySupportWrite.ids,[]);
                             return notify('연동 확인','지출 전표를 저장할 수 없습니다. 연동을 다시 열어 주세요.');
                         }
-                        const pendingBefore=accountingExpensePending(key);
-                        try {sessionStorage.setItem(key,JSON.stringify([...new Set([...pendingBefore,...ids])]));}
-                        catch(_){await rollbackApprovalSyncWrites([],salarySupportWrite.ids,[]);return notify('연동 확인','저장 결과를 보관할 수 없습니다.');}
+                        try {holdExpense();}
+                        catch(_){releaseStaged();await rollbackApprovalSyncWrites([],salarySupportWrite.ids,[]);return notify('연동 확인','저장 결과를 보관할 수 없습니다.');}
                         const write=Promise.resolve(insert.retry(false));
                         const outcome=await window.CoopPayrollRecovery.submit(write);
                         if(outcome.state==='unknown') {
@@ -9571,18 +9614,18 @@ function confirmSync(type) {
                                 if(!result?.error)return;
                                 const late=await window.CoopPayrollRecovery.submit(Promise.resolve(result));
                                 if(late.state!=='rejected')return;
-                                const left=accountingExpensePending(key).filter(id=>!ids.includes(id));
-                                try {if(left.length)sessionStorage.setItem(key,JSON.stringify(left));else sessionStorage.removeItem(key);}catch(_) {}
+                                releaseStaged();
+                                clearExpense();
                                 if(current())renderAccountingExpenseResult('전표가 저장되지 않았습니다. 연동을 다시 열어 주세요.');
                             }).catch(()=>{});
                             if(current())renderAccountingExpenseResult();
                             return notify('지출 연동 결과 미확인','이 화면에서 지출 연동 결과 확인을 눌러 주세요.');
                         }
-                        const rest=accountingExpensePending(key).filter(id=>!ids.includes(id));
-                        try {if(rest.length)sessionStorage.setItem(key,JSON.stringify(rest));else sessionStorage.removeItem(key);} catch(_) {}
+                        clearExpense();
                         insertResult=outcome.response;
                     } else insertResult = await (typeof insert.retry==='function'?insert.retry(false):insert);
                     if (insertResult.error) {
+                        releaseStaged();
                         await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);
                         const error=insertResult.error;
                         const hint={
@@ -9590,6 +9633,8 @@ function confirmSync(type) {
                             EXPENSE_EXECUTION_EXISTS:'이미 연동된 지출결의가 있습니다. 연동을 다시 열어 확인해 주세요.',
                             EXPENSE_EXECUTION_METHOD:'실제 결제수단이나 등록 카드가 바뀌었습니다. 다시 선택해 주세요.',
                             EXPENSE_EXECUTION_RECEIPT:'결재 첨부가 바뀌었습니다. 영수증을 다시 선택해 주세요.',
+                            EXPENSE_RECEIPT_MISSING:'새 영수증을 확인하지 못했습니다. 파일을 다시 선택해 주세요.',
+                            EXPENSE_RECEIPT_ACCESS:'영수증을 연결할 권한이나 결재 상태가 바뀌었습니다. 연동을 다시 열어 주세요.',
                             EXPENSE_EXECUTION_CHANGED:'승인 내용이 바뀌었습니다. 연동을 다시 열어 확인해 주세요.',
                             EXPENSE_EXECUTION_REFUND_LIMIT:'원전표 실제 집행액보다 큰 금액을 감액할 수 없습니다.',
                             EXPENSE_EXECUTION_CARD_REFUND:'실제 카드 거래의 감액은 카드 환급에서 진행해 주세요.',
@@ -10684,6 +10729,7 @@ function buildDoubleEntryHistory(rows) {
             description: cleanHistoryDescription(representative.Description || ''),
             rawDescription: accountingHistoryToPlainText(representative.Description || ''),
             execution:group.rows.find(row=>row.Trans_ID===group.transId&&row.expense_execution)?.expense_execution||null,
+            hasUploadedReceipt:group.rows.some(row=>row.Trans_ID===group.transId&&row.expense_receipt_id),
             operator: String(representative.Operator || '작성자 미상'),
             debits,
             credits,
@@ -10736,8 +10782,9 @@ function renderHistoryDouble(rows, completePage = false) {
             ? `<div class="small mt-1 history-plain-description history-readable-summary">${escapeHtml(readable.explanation)}</div>` : '';
         const executionInfo=window.CoopExpenseExecution?.summary(item.execution)||[];
         const executionHtml=executionInfo.map(line=>`<div class="small mt-1 history-plain-description">${escapeHtml(line)}</div>`).join('');
-        const receiptHtml=approvalDocId&&/^[a-f0-9]{64}$/.test(item.execution?.receipt_digest||'')
-            ? `<div class="mt-1"><button class="btn btn-link btn-sm p-0" type="button" data-history-process data-doc-id="${approvalDocId}" data-receipt="${item.execution.receipt_digest}" onclick="openExpenseExecutionReceipt(this)">연결한 영수증</button> <span class="small" role="status"></span></div>`:'';
+        const receiptDigest=/^[a-f0-9]{64}$/.test(item.execution?.receipt_digest||'')?item.execution.receipt_digest:'';
+        const receiptHtml=approvalDocId&&(receiptDigest||item.hasUploadedReceipt)
+            ? `<div class="mt-1"><button class="btn btn-link btn-sm p-0" type="button" data-history-process data-doc-id="${approvalDocId}" data-receipt="${receiptDigest}" onclick="openExpenseExecutionReceipt(this)">연결한 영수증</button> <span class="small" role="status"></span></div>`:'';
         const detailHtml = (approvalDocId || readable.title) && (item.rawDescription || item.description)
             ? `<div class="small text-muted mt-1 history-plain-description">원래 적요: ${safeDesc}</div>`
             : '';
@@ -10831,17 +10878,22 @@ async function openExpenseExecutionReceipt(button) {
     const status=button.nextElementSibling;
     button.disabled=true;status.textContent='확인 중…';
     try {
-        const query=_supabase.from('ref_approval').select('id,file_links').eq('coop_id',owner.coop_id).eq('id',button.dataset.docId).maybeSingle();
-        const {data,error}=await query;
+        const execution=window.CoopExpenseExecution,docId=button.dataset.docId;
+        let path;
+        if(button.dataset.receipt) {
+            const {data,error}=await _supabase.from('ref_approval').select('id,file_links').eq('coop_id',owner.coop_id).eq('id',docId).maybeSingle();
+            if(!current())return;
+            if(error||!data)throw Error('RECEIPT_UNAVAILABLE');
+            path=(await execution.findReceipt(data,button.dataset.receipt))?.path;
+        } else {
+            const value=(await execution.readExecution(_supabase,docId))?.uploaded_receipt;
+            if(execution.uploadedReceiptPath(value,{coop_id:owner.coop_id,id:docId}))path=value;
+        }
         if(!current())return;
-        if(error||!data)throw Error('RECEIPT_UNAVAILABLE');
-        const ref=await window.CoopExpenseExecution.findReceipt(data,button.dataset.receipt);
+        if(!path)throw Error('RECEIPT_UNAVAILABLE');
+        const url=await execution.readReceiptLink(_supabase,path);
         if(!current())return;
-        if(!ref)throw Error('RECEIPT_UNAVAILABLE');
-        const {data:link,error:linkError}=await _supabase.storage.from('attachments').createSignedUrl(ref.path,90);
-        if(!current())return;
-        if(linkError||!link?.signedUrl||!/^https:\/\//.test(link.signedUrl))throw Error('RECEIPT_UNAVAILABLE');
-        const anchor=document.createElement('a');anchor.textContent='영수증 열기';anchor.href=link.signedUrl;anchor.target='_blank';anchor.rel='noopener noreferrer';
+        const anchor=document.createElement('a');anchor.textContent='영수증 열기';anchor.href=url;anchor.target='_blank';anchor.rel='noopener noreferrer';
         status.replaceChildren(anchor);
         setTimeout(()=>{if(status.contains(anchor))status.textContent='';},85000);
     } catch(_) {if(current())status.textContent='영수증을 열 수 없습니다. 결재 문서에서 첨부를 확인해 주세요.';}

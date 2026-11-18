@@ -1,4 +1,4 @@
-/* v1.3.1 — clear the current expense's stale input warning when it is edited. */
+/* v1.3.2 — keep each actual expense override scoped to its own checkbox. */
 (function () {
     'use strict';
     let active = null, activeExpenseClose = null, salaryActive = null, editing = false, draftOwner = '';
@@ -130,7 +130,8 @@
                 if (managed) {
                     const updateDateTitle = () => {
                         const x=draft.execution||{};
-                        const card = x.method==='card' || (x.method!=='bank' && window.CoopExpenseExecution.sourceMethod(doc)!=='bank');
+                        const selected=x.methodDifferent===true?x.method:'';
+                        const card = selected==='card' || (selected!=='bank' && window.CoopExpenseExecution.sourceMethod(doc)!=='bank');
                         label.textContent=card?'카드 사용일':'실제 지출(이체)일';
                     };
                     window.CoopExpenseExecution.controls({doc, cards, section, check, draft, index, el, onInput:updateDateTitle});
@@ -145,8 +146,8 @@
                 ui.body.append(section); return { doc, check, date, prepaid, draft, managed };
             });
             let result = null, submitted = false;
-            const paymentFor = ({ check, date, prepaid, draft }) => ({
-                ...draft, execution:draft.execution?{...draft.execution}:undefined,
+            const paymentFor = ({ check, date, prepaid, draft, managed }) => ({
+                ...draft, execution:managed?window.CoopExpenseExecution.selectedDraft(draft.execution):undefined,
                 confirmed: check.checked && (prepaid || Boolean(date.value)), date: date.value
             });
             const updateAction = () => {
@@ -317,5 +318,5 @@
             ui.modal.show();
         } catch (error) { editing = false; if (ui) ui.root.remove(); window.showAlert('날짜 수정 확인', error.message); }
     }
-    window.CoopPaymentDates = { version: '1.3.1', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, closeExpense, collectSalary, validateSalaryPayment, edit };
+    window.CoopPaymentDates = { version: '1.3.2', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, closeExpense, collectSalary, validateSalaryPayment, edit };
 })();
