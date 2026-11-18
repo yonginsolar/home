@@ -1,4 +1,4 @@
-/* 법인세 따라 하기 1.1.0. 국세청용 Smart A 및 위택스. */
+/* 법인세 따라 하기 1.2.0. 확인한 ERP 결산 계정을 표준재무제표 칸에 연결한다. */
 (function (host) {
     'use strict';
     const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -7,6 +7,41 @@
     const screen = (file,title,page) => `<details class="ag-screen"><summary>${title} 화면 보기</summary><figure><a href="accounting-guide/smarta-${file}.jpg" target="_blank" rel="noopener noreferrer"><img src="accounting-guide/smarta-${file}.jpg" alt="국세청 Smart A 일반법인 사용설명서의 ${title} 예시 화면" loading="lazy"></a><figcaption>국세청 2026년 일반법인 사용설명서 ${page}쪽 · 설명서의 예시이며 우리 조합의 자료가 아닙니다. 이미지를 누르면 크게 볼 수 있습니다.</figcaption></figure></details>`;
     const groups = [['assets','자산'],['liabilities','부채'],['equity','자본계정'],['revenue','매출'],['expenses','비용'],['other_revenue','영업외수익']];
     const totals = [['total_assets','자산계정 합계'],['total_liabilities','부채계정 합계'],['total_revenue','매출 합계'],['total_expenses','비용 합계'],['total_other_revenue','영업외수익 합계'],['net_income','당기순손익']];
+    const standardFields = [
+        ['재무상태표','3','현금 및 현금성자산','assets',['현금','보통예금','현금및현금성자산'],'보통예금은 요구불예금인지 확인하고 정기예금은 만기·성격에 따라 별도 분류하세요.'],
+        ['재무상태표','10','외상매출금','assets',['외상매출금'],'단기 외상매출금입니다. 대손충당금은 해당 별도 칸을 확인하세요.'],
+        ['재무상태표','69','선급비용','assets',['선급비용'],'결산일 현재 남은 선급비용입니다. 선급금과 구분하세요.'],
+        ['재무상태표','73','부가가치세대급금','assets',['부가세대급금','부가가치세대급금'],'결산일 잔액을 적습니다. 부가가치세 신고서의 공제세액으로 옮기지 마세요.'],
+        ['재무상태표','247','부가가치세예수금','liabilities',['부가세예수금','부가가치세예수금'],'결산일 잔액입니다. 부가가치세 신고서의 매출세액과는 다릅니다.'],
+        ['재무상태표','248','제세예수금','liabilities',['제세예수금'],'국세·지방세 등 원천 공제 잔액입니다. 4대보험 예수금은 따로 분류하세요.'],
+        ['손익계산서','131','이자수익','other_revenue',['이자수익'],'그 사업연도의 영업외 이자수익입니다. 은행의 세후 입금액이 아니라 장부 수익을 대조하세요.'],
+        ['손익계산서','161','자산수증이익','other_revenue',['자산수증이익'],'장부에 이 이름으로 분류한 영업외수익만 사용하세요. 기부금·보조금을 이름만 보고 합치지 않습니다.'],
+        ['손익계산서','218','법인세비용','expenses',['법인세비용'],'최종 손익계산서의 회계 비용입니다. 국세 납부액은 별도 세액조정계산서에서 확인하세요.']
+    ];
+    const standardSource='https://www.law.go.kr/LSW/flDownload.do?flSeq=168513621';
+    const incomeSource='https://www.law.go.kr/LSW/flDownload.do?bylClsCd=110202&flSeq=160257571&gubun=';
+    const readyReport=m=>m.fullYear&&m.closed&&m.balanced===true;
+    function mapStandardFields(m) {
+        if(!m||!readyReport(m))return [];
+        const normalize=name=>name.replace(/\s/g,'');
+        const rows=[];
+        for(const [form,code,label,group,names,why] of standardFields){
+            const source=m.items[group].filter(row=>names.includes(normalize(row.name)));
+            if(!source.length||new Set(source.map(r=>normalize(r.name))).size!==source.length)continue;
+            // '현금 및 현금성자산' 집계와 구성 계정을 다시 더하지 않는다.
+            if(code==='3'&&source.length>1&&source.some(r=>normalize(r.name)==='현금및현금성자산'))continue;
+            if(source.some(r=>r.amount<0))continue;
+            const n=source.reduce((total,r)=>total+BigInt(r.amount),0n);
+            if(n<=0n||n>BigInt(Number.MAX_SAFE_INTEGER))continue;
+            rows.push({form,code,label,amount:Number(n),source:source.map(r=>r.name).join(' + '),why});
+        }
+        return rows;
+    }
+    function standardHtml(m) {
+        const rows=mapStandardFields(m);
+        if(!rows.length)return '<p class="ag-notice">일반법인 표준 칸으로 바로 대조할 계정을 찾지 못했습니다. 해당 연도의 마감본, 계정의 성격과 세부명세를 확인하세요.</p>';
+        return `<section class="ag-field-review ag-standard"><h4>일반법인 표준재무제표에 넣을 계정</h4><p>아래 금액은 해당 연도 ERP 결산보고서의 장부 금액입니다. 일반법인용 양식, 실제 확정 결산본, 같은 표준 칸에 합쳐야 할 다른 계정이 없는지를 대조한 뒤 복사하세요.</p><label class="ag-review-check"><input type="checkbox" data-ag-standard-confirm> 일반법인용 양식과 확정 결산본의 분류를 대조했습니다.</label><dl class="ag-standard-fields">${rows.map(r=>`<div><dt>${r.form} · ${r.code} ${r.label}</dt><dd><strong>${r.amount.toLocaleString('ko-KR')}원</strong> <button type="button" class="ag-copy" data-ag-standard-copy data-copy="${r.amount}" aria-label="${r.label} 복사" hidden>복사</button></dd><dd class="ag-field-source">ERP 결산보고서: ${esc(r.source)}. ${r.why}</dd></div>`).join('')}</dl><p>${link(standardSource,'일반법인 표준재무상태표')} · ${link(incomeSource,'일반법인 표준손익계산서')}</p></section>`;
+    }
     function yearValue(v) {
         if (!/^\d{4}$/.test(String(v)) || Number(v)<1900 || Number(v)>2100) throw new Error('YEAR_REQUIRED');
         return Number(v);
@@ -53,10 +88,10 @@
     function copyDate(v,name) {return `<span>${name} <b>${esc(v)}</b> <button type="button" class="ag-copy" data-copy="${esc(v)}" aria-label="${name} 복사">복사</button></span>`;}
     function resultHtml(m) {
         if(!m) return '<p class="ag-notice">선택한 연도의 결산보고서를 찾지 못했습니다. 회계의 「결산 보고서 생성」에서 해당 연도와 열람 권한을 확인하세요.</p>';
-        const ready=m.fullYear&&m.closed&&m.balanced===true;
+        const ready=readyReport(m);
         const note=!m.fullYear||!m.closed?'신고에 사용할 사업연도와 최종 마감본을 확인하세요.':m.balanced===false?'자산과 부채·자본 합계가 다릅니다. 최종 결산을 확인하세요.':m.balanced===null?'자본 합계가 빠져 있습니다. 최종 결산을 확인하세요.':'';
         const table=(rows,caption)=>`<div class="ag-table-wrap"><table><caption>${caption}</caption><thead><tr><th>ERP 항목</th><th>금액</th></tr></thead><tbody>${rows.map(([name,v])=>`<tr><th scope="row">${esc(name)}</th><td>${v===null?'확인 필요':v.toLocaleString('ko-KR')+'원'}</td></tr>`).join('')}</tbody></table></div>`;
-        return `<p class="ag-result-title">${m.year}년 결산보고서 · ${esc(m.start)} ~ ${esc(m.end)}</p><p>보고서 생성일 ${esc(m.generated)||'확인 필요'} · ${m.closed?'손익마감 반영':'손익마감 전'}</p>${note?`<p class="ag-notice">${note}</p>`:''}${ready?`<div class="ag-confirmed ag-verified">${copyDate(m.start,'사업연도 시작일')}${copyDate(m.end,'사업연도 종료일')}</div>`:''}${table([...totals.slice(0,2),['total_equity','자본 합계'],...totals.slice(2)].map(([k,n])=>[n,m.values[k]]),'ERP 결산보고서 대조 금액')}${groups.map(([k,n])=>`<details class="ag-source"><summary>${n} 세부 금액</summary>${m.items[k].length?table(m.items[k].map(r=>[r.name,r.amount]),esc(n)+' 계정별 금액'):'<p>해당 보고서에 표시된 계정이 없습니다.</p>'}</details>`).join('')}<p>세무조정 전 장부 금액입니다. 표준 계정에 맞춰 대조하고, 과세표준과 기납부세액은 조정 서식과 증빙에서 확인하세요.</p>`;
+        return `<p class="ag-result-title">${m.year}년 결산보고서 · ${esc(m.start)} ~ ${esc(m.end)}</p><p>보고서 생성일 ${esc(m.generated)||'확인 필요'} · ${m.closed?'손익마감 반영':'손익마감 전'}</p>${note?`<p class="ag-notice">${note}</p>`:''}${ready?`<div class="ag-confirmed ag-verified">${copyDate(m.start,'사업연도 시작일')}${copyDate(m.end,'사업연도 종료일')}</div>${standardHtml(m)}`:''}${table([...totals.slice(0,2),['total_equity','자본 합계'],...totals.slice(2)].map(([k,n])=>[n,m.values[k]]),'ERP 결산보고서 대조 금액')}${groups.map(([k,n])=>`<details class="ag-source"><summary>${n} 세부 금액</summary>${m.items[k].length?table(m.items[k].map(r=>[r.name,r.amount]),esc(n)+' 계정별 금액'):'<p>해당 보고서에 표시된 계정이 없습니다.</p>'}</details>`).join('')}<p>과세표준·공제감면·기납부세액은 조정 서식과 증빙에서 확인하세요.</p>`;
     }
     const steps=[
         ['신고 연도와 프로그램 준비',`<p>먼저 <b>어느 사업연도의 법인세를 신고하는지</b> 확인하세요. 2025년 1~12월 결산을 2026년에 신고한다면 국세청용 Smart A 2026 버전을 사용합니다.</p><p>${link('https://www.hometax.go.kr','홈택스')} 상단 검색창에서 <b>SmartA</b>를 검색하고 자료실의 최신 「법인세 무료작성프로그램」 게시글을 엽니다. ${link(manual,'2026년 공식 사용설명서 내려받기(압축파일)')}</p><p>설치파일의 압축을 풀어 Windows PC에 설치하고, 실행할 때마다 로그인 화면의 <b>최신버전확인</b>을 누르세요. 기존 자료가 있다면 재설치 전에 백업합니다.</p><div class="ag-notice">이 안내는 2026년 국세청 배포본 기준입니다. 적용 대상은 <b>2025년 12월~2026년 11월 결산 법인</b>입니다. 2026년 12월 결산은 다음 신고용 버전을 확인해야 합니다. 무료판은 소규모 영세사업자용이며 일반법인·비영리법인의 신고 경로는 구분됩니다.</div>`],
@@ -66,10 +101,10 @@
         ['작성할 서식과 순서 확인',`<p><b>기초사항검토 → 작성순서/flow chart(2)</b>를 엽니다. 서식명을 더블클릭하면 해당 입력 화면으로 이동합니다.</p><p>먼저 표준재무제표를 입력하고, 해당하는 세무조정 서식, 세액조정계산서, 최종 신고서 순으로 진행합니다. 모든 서식을 채우는 것이 아니라 조합의 실제 거래와 신고 요건에 해당하는 서식을 확인합니다.</p>${screen('flow','작성순서',30)}`],
         ['표준재무제표에 장부 금액 입력',`<p><b>표준재무제표</b>에서 <b>표준재무상태표</b>를 열고 상단 <b>편집(F3)</b>을 누릅니다. ERP 재무상태표의 각 계정을 같은 성격의 표준 항목에 나누어 입력합니다. 세부 금액을 입력하고 <b>Enter</b>를 눌러 합계를 반영한 뒤 저장하세요.</p><p>예를 들어 보통예금은 현금·예금 항목을 확인하고, 재고·발전설비·부채는 각각의 표준 항목을 확인합니다. <b>유동자산처럼 자동 합계 칸에는 총액을 억지로 입력하지 않습니다.</b> ERP 계정코드와 신고서의 표준 코드는 같다고 가정하지 마세요.</p>${screen('statements','표준재무상태표',31)}<p><b>표준손익계산서</b>에는 매출, 비용, 영업외수익 등을 구분해 넣고 ERP 당기순손익과 대조합니다. 매출은 공급가액 기준을 확인합니다. <b>표준원가명세서</b>는 해당 원가 유형과 작성 필요 여부를 검토합니다.</p><p><b>이익잉여금처분(결손금)계산서</b>는 <b>편집(F3)</b>으로 작성하고 <b>처분일(F4)</b>에 실제 처분 확정일을 입력합니다. 보고서를 만든 날짜로 대신하지 마세요. 전기이월 금액과 적립금·배당·차기이월 금액은 실제 의결 내용에 맞춥니다.</p><p><b>끝내기 전 확인:</b> 표준재무상태표의 자산과 부채·자본, 표준손익계산서의 당기순손익이 ERP 최종 보고서와 맞는지 확인합니다. ERP CSV가 Smart A에 통째로 자동 입력되는 기능은 아닙니다.</p>`],
         ['장부 이익과 세법상 소득의 차이 검토',`<p>수입금액조정, 감가상각, 재고, 기부금, 기업업무추진비 등 해당 서식을 확인합니다. 회계 비용이라도 세법상 공제되지 않는 금액이 있고, 이월결손금·기납부세액도 별도 근거가 필요합니다.</p><div class="ag-notice"><b>여기부터는 단순 복사가 아닙니다.</b> 당기순이익에 세율만 곱해 신고하거나, 오류를 없애기 위해 모르는 항목을 0으로 넣지 마세요. 외부조정 대상 여부와 조합에 적용되는 과세 방식·공제·감면은 국세청 안내 또는 세무전문가에게 확인합니다.</div><p>표준재무제표나 조정 서식을 수정했다면 뒤의 세액 계산 화면에서 <b>새로불러오기</b>를 눌러 변경 사항을 다시 반영합니다.</p>`],
-        ['세액조정계산서와 최종 신고서 확인',`<p><b>법인세 과세표준 및 세액조정계산서</b>를 열어 작성한 재무제표·조정 자료를 불러오고, 원천납부·중간예납 등 실제 기납부세액을 근거와 대조합니다.</p>${screen('tax-adjustment','세액조정계산서',77)}<p>다음으로 <b>법인세 과세표준 및 세액신고서</b>에서 <b>새로불러오기</b>를 누릅니다. 수입금액·세액을 이 화면에 임의로 덮어쓰지 말고 원래 연결된 서식을 수정하세요. 결산 확정일은 총회 등에서 실제 결산이 확정된 날, 신고일은 실제 신고 예정일을 입력합니다.</p>${screen('return','최종 신고서',75)}<p><b>끝내기 전 확인:</b> 사업연도, 조합 정보, 과세표준, 공제·감면, 기납부세액, 최종 납부·환급액과 필요한 첨부 서식을 검토한 뒤 Smart A에서 <b>마감</b>합니다. Smart A 마감과 ERP 손익마감은 별개입니다.</p>`],
+        ['세액조정계산서와 최종 신고서 확인',`<p><b>법인세 과세표준 및 세액조정계산서</b>를 열어 작성한 재무제표·조정 자료를 불러옵니다.</p><dl class="ag-fields"><dt>신고서 수입금액</dt><dd>회계상 매출과 신고용 수입금액의 차이를 세무조정 자료에서 확인하세요.</dd><dt>과세표준</dt><dd>익금·손금 조정과 공제 가능한 이월결손금 등을 반영한 세액조정계산서의 과세표준입니다. ERP 당기순손익과 구분하세요.</dd><dt>기납부세액</dt><dd>해당 사업연도의 중간예납 신고·영수증과 은행 원천징수영수증 등의 국세 납부액을 대조합니다.</dd><dt>결산확정일</dt><dd>총회의사록 등에서 결산을 실제 확정한 날을 확인합니다.</dd></dl>${screen('tax-adjustment','세액조정계산서',77)}<p><b>법인세 과세표준 및 세액신고서</b>에서 <b>새로불러오기</b>로 위 조정 서식의 금액을 반영합니다. 최종 납부·환급액은 공제·감면·가산세·기납부가 반영된 결과와 대조한 뒤 Smart A에서 마감합니다.</p>${screen('return','최종 신고서',75)}`],
         ['전자신고 파일 만들기·오류 검사',`<p><b>전자신고/일괄출력 → 법인세전자신고</b>를 열어 직접 신고라면 <b>일반업체</b>를 선택하고 <b>제출자 등록</b>에 실제 홈택스 제출자 ID를 입력합니다. 이 인증정보나 파일 암호는 ERP 안내에 입력하지 않습니다.</p>${screen('efile','법인세전자신고',118)}<p><b>전자신고제작</b> 탭에서 저장할 드라이브·조합을 선택하고 마감된 서식 목록을 확인한 뒤 <b>제작</b>을 누릅니다. 파일 저장 위치와 파일 암호를 안전하게 보관하세요.</p><p><b>신고데이터 오류검증</b> 탭에서 제작한 자료를 검사합니다. 오류가 있으면 해당 서식의 마감을 취소하고 수정·재마감·재제작합니다. 파일 생성이나 오류검사 통과만으로 신고가 접수되지는 않습니다.</p>`],
         ['홈택스 파일변환·제출·접수증 확인',`<p>파일 생성 때 입력한 제출자 ID로 ${link('https://www.hometax.go.kr','홈택스')}에 로그인합니다. <b>세금신고 → 법인세 신고 → 법인세신고(정기,중간예납,경정청구) → 파일변환신고</b>에서 해당 신고를 선택합니다.</p><p><b>찾아보기</b>로 생성한 파일 선택 → <b>파일형식검증하기</b> → <b>검증결과확인</b> → <b>내용검증하기</b> 순서로 진행합니다. 오류가 있으면 Smart A 원서식을 수정하고 파일을 다시 제작합니다.</p>${screen('hometax-convert','홈택스 파일변환',126)}<p>정상 검증 뒤 <b>전자파일제출 이동</b>에서 내용을 최종 확인하고 직접 제출합니다. <b>신고내역</b>에서 접수번호·접수증·제출서식 목록을 확인하고 보관하세요. 별도 부속서류가 있으면 해당 제출 메뉴에서 확인합니다.</p><p>국세 납부와 법인지방소득세 신고·납부는 별도로 확인합니다. 이 안내는 홈택스 제출·납부를 자동 실행하지 않습니다.</p>`],
-        ['위택스에서 법인지방소득세 별도 신고',`<p>${link('https://www.wetax.go.kr','위택스')}에서 <b>법인지방소득세 신고</b>로 들어가 해당 사업연도의 확정신고를 선택합니다. 사업연도 종료월 말일부터 일반적으로 법인세는 3개월, 법인지방소득세는 4개월입니다. 연장 대상은 신고기한과 납부기한을 각각 확인하세요.</p><dl class="ag-fields"><dt>사업연도·결산확정일</dt><dd>제출한 법인세 신고서와 실제 결산 확정 자료를 확인합니다.</dd><dt>과세표준·납세지별 기납부세액</dt><dd>국세 신고서의 확정 과세표준과 지방세 조정 근거를 대조합니다. 납부할 국세에 일정 비율을 곱해 대신 입력하지 마세요. 여러 지자체에 사업장이 있다면 안분과 납세지별 신고를 확인합니다.</dd></dl><p>필요한 첨부, 지자체별 접수 결과, 지방세 납부 영수증을 따로 보관하세요. ${link('https://www.gg.go.kr/bbs/boardView.do?bIdx=225916193&bsIdx=570&menuId=1590','경기도 법인지방소득세 신고 안내')} · ${link('https://www.law.go.kr/법령/지방세법시행규칙','지방세법 시행규칙 별지 제43호서식')}</p>`],
+        ['위택스에서 법인지방소득세 별도 신고',`<p>${link('https://www.wetax.go.kr','위택스')}의 <b>법인지방소득세 확정신고</b>에서 같은 사업연도와 실제 결산확정일을 확인하세요. 사업연도 종료월 말일부터 일반적으로 법인세는 3개월, 법인지방소득세는 4개월입니다.</p><dl class="ag-fields"><dt>㉙ 과세표준</dt><dd>지방세 세액조정계산서(제43호의2)에서 각 사업연도 소득분의 ⑦을 사용합니다. 확정 국세 자료에서 출발하되 지방세 양식에서 필요한 조정을 확인하세요.</dd><dt>㉚ 표준산출세액</dt><dd>같은 지방세 계산서의 일반 소득분 ⑳. 납부할 국세에 10%를 곱한 금액이 아닙니다. 다른 과세 유형의 열은 해당 명세에서 확인하세요.</dd><dt>㉜ 기납부세액</dt><dd>같은 지방세 계산서의 일반 소득분 ㉜과 지방세 특별징수 등 증빙을 대조합니다. 국세 중간예납 영수증을 이 칸에 넣지 마세요.</dd><dt>㉝ 차감납부할세액</dt><dd>지방세 계산서의 일반 소득분 ㉟을 확인합니다. 사업장이 여러 지자체에 있으면 안분명세와 납세지별 신고·납부액도 대조하세요.</dd></dl><p>${link('https://www.law.go.kr/flDownload.do?bylClsCd=110202&flSeq=160800139&gubun=','법인지방소득세 신고서와 작성방법')} · ${link('https://www.gg.go.kr/bbs/boardView.do?bIdx=225916193&bsIdx=570&menuId=1590','경기도 신고 안내')}</p>`],
         ['신고자료 보관',`<p>Smart A의 <b>시스템관리 → 데이터백업</b>에서 신고자료를 백업합니다. 백업 파일과 복구 암호는 안전하게 보관하고, 신고서 PDF·접수증·납부 증빙도 함께 보관하세요.</p><p>ERP에는 최종 장부와 결산보고서, 신고·납부 증빙을 남깁니다. 신고 과정에서 장부 수정이 생겼다면 근거와 기존 마감 상태를 확인하고 결산보고서도 다시 생성합니다.</p>`]
     ];
     function mount({root,client,coopId,active,bindRead,stepHtml,generic}) {
@@ -80,7 +115,7 @@
             error:e=>e.message==='YEAR_REQUIRED'?'결산 연도를 네 자리 숫자로 입력해 주세요.':e.message==='REPORT_INVALID'?'선택한 연도의 최종 결산보고서를 확인하세요.':generic(e),
             loading:'저장한 결산보고서를 확인하고 있습니다.',changed:'선택한 연도의 결산보고서를 불러오세요.'});
     }
-    const api={version:'1.1.0',mount,load,analyze,resultHtml};
+    const api={version:'1.2.0',mount,load,analyze,resultHtml,mapStandardFields};
     if(typeof module!=='undefined'&&module.exports)module.exports=api;
     if(host)host.CoopSmartaGuide=api;
 })(typeof window!=='undefined'?window:null);
