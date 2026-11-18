@@ -1,4 +1,4 @@
-/* v1.2.0 — 휴가·출장의 일정 표시와 승인 상태를 전사 일정·구독에서 공유한다. */
+/* v1.3.0 — 휴가·출장 표시와 일반 일정의 한국 시각을 전사 일정·구독에서 공유한다. */
 (function (root) {
     'use strict';
     const pending=Object.freeze(['진행중','가승인','증빙확인중','실물결재대기']);
@@ -193,6 +193,68 @@
     }
     const load=(client,coop)=>loadRows(client,coop);
     const loadBusinessTrips=(client,coop)=>loadRows(client,coop,true);
+    const manualClock=value=>text(value).match(/^((?:[01]\d|2[0-3]):[0-5]\d)(?::([0-5]\d))?$/)?.[0]||'';
+    const dayStamp=value=>Date.parse(value+'T00:00:00Z');
+    const shiftDay=(value,days)=>{
+        const n=dayStamp(value)+days*86400000;
+        return Number.isFinite(n)?date(new Date(n).toISOString().slice(0,10)):'';
+    };
+    const fullClock=value=>value.length===5?value+':00':value;
+    function manualRecord(row){
+        const first=date(row?.start_date);
+        if(!first)return null;
+        const startTime=manualClock(row.start_time);
+        const last=date(row.end_date);
+        const finish=last>=first?last:'';
+        const endTime=manualClock(row.end_time);
+        const timedEnd=!!(startTime&&finish&&endTime&&(finish>first||fullClock(endTime)>fullClock(startTime)));
+        return {first,startTime,last:startTime?(timedEnd?finish:''):finish,endTime:timedEnd?endTime:'',recurrence:row.recurrence};
+    }
+    function manualInput({startDate,startTime,endDate,endTime},original=null){
+        const first=date(startDate),last=date(endDate),from=manualClock(startTime),to=manualClock(endTime);
+        if(!first||startTime&&!from||endDate&&!last||endTime&&!to)return {error:'날짜와 시간을 확인해 주세요.'};
+        if(to&&!from)return {error:'시작 시간을 먼저 입력해 주세요.'};
+        if(from&&!!last!==!!to)return {error:'종료 날짜와 시간을 함께 입력해 주세요.'};
+        if(last&&(last<first||from&&last===first&&fullClock(to)<=fullClock(from)))return {error:from?'종료 시각은 시작 시각보다 늦어야 해요.':'종료일은 시작일과 같거나 이후여야 해요.'};
+        if(!from&&!shiftDay(last||first,1))return {error:'종료 날짜를 확인해 주세요.'};
+        // 기존 시작/종료값은 사용자가 날짜나 시간을 직접 바꾸지 않으면 그대로 둔다.
+        if(original&&first===original.first&&fullClock(from)===fullClock(original.startTime||'')&&(last||'')===(original.last||'')&&fullClock(to)===fullClock(original.endTime||''))return {data:{}};
+        return {data:{start_date:first,start_time:from||null,end_date:last||null,end_time:to||null}};
+    }
+    function manualOccurrence(record,occurrence){
+        if(!record||!date(occurrence)||occurrence<record.first)return null;
+        const {first,startTime,last,endTime}=record;
+        const span=last?(dayStamp(last)-dayStamp(first))/86400000:0;
+        const lastDate=last?shiftDay(occurrence,span):'';
+        if(startTime){
+            const start=occurrence+'T'+fullClock(startTime);
+            const end=lastDate&&endTime?lastDate+'T'+fullClock(endTime):'';
+            return {start,end,allDay:false,first:occurrence,lastDate};
+        }
+        return {start:occurrence,end:shiftDay(lastDate||occurrence,1),allDay:true,first:occurrence,lastDate};
+    }
+    function manualOccurrenceDates(record,fromYear,toYear){
+        if(!record)return [];
+        if(!['monthly','yearly'].includes(record.recurrence))return [record.first];
+        const found=[];
+        for(let year=fromYear;year<=toYear;year++){
+            const y=String(year).padStart(4,'0');
+            for(const month of record.recurrence==='monthly'?Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')):[record.first.slice(5,7)]){
+                const value=y+'-'+month+'-'+record.first.slice(8,10);
+                if(value>=record.first&&date(value))found.push(value);
+            }
+        }
+        return found;
+    }
+    const manualIcsZone=Object.freeze(['BEGIN:VTIMEZONE','TZID:Asia/Seoul','BEGIN:STANDARD','DTSTART:19881009T030000','TZOFFSETFROM:+1000','TZOFFSETTO:+0900','END:STANDARD','END:VTIMEZONE']);
+    function manualIcsTiming(row){
+        const record=manualRecord(row),event=manualOccurrence(record,record?.first);
+        if(!event)return null;
+        const rrule=record.recurrence==='yearly'?'FREQ=YEARLY':record.recurrence==='monthly'?`FREQ=MONTHLY;BYMONTHDAY=${Number(record.first.slice(8,10))}`:'';
+        const compact=s=>s.replace(/[-:]/g,'');
+        const suffix=event.allDay?';VALUE=DATE':';TZID=Asia/Seoul';
+        return {zone:!event.allDay,lines:[`DTSTART${suffix}:${compact(event.start)}`,...(event.end?[`DTEND${suffix}:${compact(event.end)}`]:[]),...(rrule?[`RRULE:${rrule}`]:[])]};
+    }
     function fold(line) {
         let count=0,out='';
         for(const char of String(line||'')){
@@ -202,5 +264,6 @@
         }
         return out;
     }
-    root.CoopLeaveCalendar=Object.freeze({statuses,project,eventsForDoc,load,projectBusinessTrips,loadBusinessTrips,fold,workSettingKeys,version:'1.2.0'});
+    root.CoopLeaveCalendar=Object.freeze({statuses,project,eventsForDoc,load,projectBusinessTrips,loadBusinessTrips,fold,workSettingKeys,
+        manualRecord,manualInput,manualOccurrence,manualOccurrenceDates,manualIcsTiming,manualIcsZone,version:'1.3.0'});
 })(globalThis);

@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.99 | 전사 일정 자동 구독과 파일 내려받기 구분 -->
+<!-- Version: v1.1.0 | 전사 일정 시작·종료 시각 저장 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.99 | mypage.html');</script>
+<script>console.log('[Version] v1.1.0 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -43,7 +43,7 @@
 <script src="payroll_durunuri_module.js?v=20261109-mypage-1"></script>
 <script src="leave_time.js?v=20261012-2"></script>
 <script src="leave_ledger.js?v=20261012-2"></script>
-<script src="/shared/leave_calendar_projection.js?v=1.2.0" integrity="sha384-QPL70X6kDUn7gW7XODArYHw62zBPhOFzDjN7/8sVRKGGQ343UO1vR3vUlqdsiqd1" crossorigin="anonymous"></script>
+<script src="/shared/leave_calendar_projection.js?v=1.3.0" integrity="sha384-KUjQSVKrH+HxrLo9Elahdhih7ytd0YEeYlNajYylRVf9NfYUFR4cfIym4xyz92Xc" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
 <script src="ai_connection.js?v=1.3.1"></script>
   
@@ -58,6 +58,8 @@ body{background-color:#f0f2f5;padding:28px 20px 40px;font-family:'Malgun Gothic'
 #mypageCalendarGuide [hidden]{display:none!important}
 .mypage-calendar-guide-layout{display:flex;flex-direction:column;height:100%}
 .mypage-calendar-guide-body{flex:1;min-height:0;overflow:auto;overflow-wrap:anywhere}
+.mypage-event-times{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));gap:.5rem}
+.mypage-event-times input{min-width:0}
 .mypage-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:24px;padding:6px 4px 2px}
 .mypage-title{font-size:1.85rem;font-weight:800;letter-spacing:-0.04em;margin:0}
 .mypage-surface{background:rgba(255,255,255,.95);border:1px solid rgba(15,23,42,.08);border-radius:22px;padding:28px;box-shadow:0 18px 44px rgba(15,23,42,.08)}
@@ -350,12 +352,12 @@ body{padding:18px 14px 28px}
 <div class="modal fade" id="leaveDetailModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold">연차 상세 리포트</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-3"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
 <div class="modal fade" id="noticeDetailModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold" id="noticeModalTitle"></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="text-muted small mb-3"><span id="noticeModalDate"></span> | <span id="noticeModalWriter"></span></div><div id="noticeModalContent" style="white-space: pre-wrap;"></div><div id="noticeFileArea" class="mt-3 pt-2 border-top hidden"><a href="#" id="noticeFileLink" target="_blank">첨부파일 다운로드</a></div></div></div></div></div>
 <div class="modal fade" id="alertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-body text-center fw-bold py-4" id="alertBody" style="white-space: pre-wrap;"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button></div></div></div></div>
-<div class="modal fade" id="eventModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">📅 일정 관리</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">
+<div class="modal fade" id="eventModal" tabindex="-1" aria-labelledby="mypageEventTitle"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold" id="mypageEventTitle">📅 일정 관리</h6><button type="button" class="btn-close" aria-label="닫기" data-bs-dismiss="modal"></button></div><div class="modal-body">
 
   <input type="hidden" id="evtId">
 <div class="mb-2"><label class="small text-muted mb-1">일정명</label><input type="text" id="evtTitle" class="form-control" placeholder="일정 제목"></div>
 <div class="mb-2"><label class="small text-muted mb-1">공개 범위</label><select id="evtVisibility" class="form-select"><option value="company">🏢 전체 공개 (전직원)</option><option value="admin">🔒 관리자 전용 (세무/행정)</option><option value="private">👤 나만 보기 (개인 일정)</option></select></div>
-<div class="mb-2"><label class="small text-muted mb-1">일시</label><div class="d-flex gap-2"><input type="date" id="evtDate" aria-label="시작일" class="form-control"><input type="time" id="evtTime" aria-label="시작 시간" class="form-control"></div><p id="evtEndSummary" class="form-text mb-0" hidden></p></div>
+<div class="mb-2"><p id="evtOccurrence" class="small text-muted mb-1" hidden></p><div class="mypage-event-times"><div><label class="small text-muted" for="evtDate">시작일</label><input type="date" id="evtDate" class="form-control" required></div><div><label class="small text-muted" for="evtTime">시작 시간</label><input type="time" id="evtTime" class="form-control" step="1"></div></div><div id="evtEndInputs" class="mt-2" hidden><div class="mypage-event-times"><div><label class="small text-muted" for="evtEndDate">종료일</label><input type="date" id="evtEndDate" class="form-control"></div><div><label class="small text-muted" for="evtEndTime">종료 시간</label><input type="time" id="evtEndTime" class="form-control" step="1"></div></div><p class="form-text mb-0" id="evtRangeHelp">시간을 비우면 종일 일정으로 표시돼요.</p></div><p id="evtEndSummary" class="form-text mb-0" hidden></p><p id="evtRangeError" class="text-danger small mb-0" role="alert"></p></div>
 <div class="mb-2"><label class="small text-muted mb-1">반복 설정</label><select id="evtRecure" class="form-select"><option value="none">반복 없음</option><option value="yearly">매년 반복</option><option value="monthly">매월 반복</option></select></div>
 <div class="mb-3"><label class="small text-muted mb-1">메모</label><textarea id="evtMemo" class="form-control" rows="4" placeholder="상세 내용 입력..."></textarea></div>
 <div class="form-check"><input class="form-check-input" type="checkbox" id="evtIsHoliday"><label class="form-check-label small" for="evtIsHoliday">공휴일 (빨간날 표시)</label></div>
@@ -400,7 +402,6 @@ const _supabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{global:{
 const KST_TZ_MYPAGE='Asia/Seoul';
 const formatMypageKstDate=(value,fallback='')=>{if(!value) return fallback; const d=new Date(value); if(Number.isNaN(d.getTime())) return fallback; return new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d)};
 const formatMypageKstMonth=(value=new Date())=>{const d=value instanceof Date?value:new Date(value); if(Number.isNaN(d.getTime())) return ''; return new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit'}).format(d)};
-const toUtcIsoFromKstInput=(value)=>{if(!value) return null; return new Date(`${value}:00+09:00`).toISOString()};
 const MYPAGE_DAY_MS=24*60*60*1000;
 function getMypageKstMidnightMs(value){
 const dateText=formatMypageKstDate(value,'');
@@ -1545,6 +1546,7 @@ leaveDetailModal=new bootstrap.Modal(document.getElementById('leaveDetailModal')
 noticeDetailModal=new bootstrap.Modal(document.getElementById('noticeDetailModal'));
 alertModal=new bootstrap.Modal(document.getElementById('alertModal'));
 eventModal=new bootstrap.Modal(document.getElementById('eventModal'));
+document.getElementById('eventModal').addEventListener('hide.bs.modal',()=>{mypageEventDialog=null;});
 calendarSubscriptionModal=new bootstrap.Modal(document.getElementById('calendarSubscriptionModal'));
 confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
 setupLeaveDetailModalFocusGuard();
@@ -1945,6 +1947,7 @@ evts.push({title:`${p.emp_name}${dn} 🎂`,start:date,color:'#ffc107',textColor:
 if(shouldIncludeMypageCalendarSource(scope,'hire_anniversaries')&&p.hire_date){const hY=parseInt(p.hire_date.substring(0,4));yrs.forEach(y=>{const diff=y-hY;if(diff>0)evts.push({title:`${p.emp_name}${dn} 입사 ${diff}주년 🎉`,start:`${y}-${p.hire_date.slice(5,10)}`,color:'#0dcaf0',textColor:'#000',allDay:true,extendedProps:{origin:{title:`${p.emp_name} 입사 ${diff}주년 🎉`,start_date:`${y}-${p.hire_date.slice(5,10)}`,type:'event',visibility:'company',cal_memo:`${p.emp_name}님의 입사 ${diff}주년입니다.\n사번: ${displayEmpNo}\n입사일: ${p.hire_date}`}}})})}
 });
 source.calendarRows.forEach(x=>{
+if(!source.coopId||x.coop_id!==source.coopId||x.coop_id!==myInfo.coop_id)return;
 if(scope==='google_ics'){
 if(!shouldIncludeMypageCalendarSource(scope,'manual_company')) return;
 if(x.visibility!=='company') return;
@@ -1954,33 +1957,13 @@ if(x.visibility==='admin'&&!(myInfo.role==='admin' || myInfo.role==='admin_all')
 if(x.visibility==='private'&&x.created_by!==myInfo.emp_id)return;
 }
 const bg=x.visibility==='admin'?'#6610f2':(x.visibility==='private'?'#198754':(x.type==='holiday'?'#dc3545':'#0d6efd'));
-const startParts=getMypageKstDateParts(x.start_date);
-const endParts=getMypageKstDateParts(x.end_date);
-const timeSuffix=startParts.hasTime&&startParts.time?`T${startParts.time}`:'';
-if(x.recurrence==='yearly'){
-yrs.forEach(y=>{
-const md=startParts.date?startParts.date.slice(5,10):'';
-if(!md) return;
-const occurrenceDate=`${y}-${md}`;
-if(x.type==='holiday'&&officialHolidayDates.has(occurrenceDate)) return;
-evts.push({id:x.id,title:x.title,start:`${occurrenceDate}${timeSuffix}`,color:bg,extendedProps:{origin:x}});
-});
-}else if(x.recurrence==='monthly'){
-yrs.forEach(y=>{for(let m=1;m<=12;m++){
-const mm=String(m).padStart(2,'0'),dd=startParts.date?startParts.date.slice(8,10):'';
-if(!dd) return;
-const occurrenceDate=`${y}-${mm}-${dd}`;
-if(new Date(occurrenceDate).getDate()==dd){
-if(x.type==='holiday'&&officialHolidayDates.has(occurrenceDate)) continue;
-evts.push({id:x.id,title:x.title,start:`${occurrenceDate}${timeSuffix}`,color:bg,extendedProps:{origin:x}});
-}
-}});
-}else{
-const startVal=startParts.date?`${startParts.date}${timeSuffix}`:x.start_date;
-const endSuffix=endParts.hasTime&&endParts.time?`T${endParts.time}`:'';
-const endVal=endParts.date?`${endParts.date}${endSuffix}`:x.end_date;
-if(x.type==='holiday'&&startParts.date&&officialHolidayDates.has(startParts.date)) return;
-evts.push({id:x.id,title:x.title,start:startVal,end:endVal,color:bg,extendedProps:{origin:x}});
+const calendar=window.CoopLeaveCalendar,record=calendar.manualRecord(x);
+for(const date of calendar.manualOccurrenceDates(record,bY-2,bY+2)){
+if(x.type==='holiday'&&officialHolidayDates.has(date))continue;
+const event=calendar.manualOccurrence(record,date);
+if(!event)continue;
+evts.push({id:`manual-${x.id}-${date}`,title:x.title,start:event.start,end:event.end||undefined,allDay:event.allDay,color:bg,
+extendedProps:{origin:x,manualOccurrence:event}});
 }
 });
 if(shouldIncludeMypageCalendarSource(scope,'company_anniversary')&&companyInfo.estDate){const tY=new Date().getFullYear();for(let y=tY-50;y<=tY+50;y++){evts.push({title:"🎉 창립기념일",start:`${y}-${companyInfo.estDate.slice(5,10)}`,color:'#ff4081',allDay:true,extendedProps:{origin:{title:"🎉 창립기념일",start_date:`${y}-${companyInfo.estDate.slice(5,10)}`,type:'event',visibility:'company',cal_memo:`우리 회사의 창립기념일입니다.\n설립일: ${companyInfo.estDate}`}}})}}
@@ -2043,7 +2026,9 @@ const lines=['BEGIN:VEVENT',`UID:${escapeMypageIcsText(options.uid)}`,`DTSTAMP:$
 if(options.description) lines.push(`DESCRIPTION:${escapeMypageIcsText(options.description)}`);
 if(options.location) lines.push(`LOCATION:${escapeMypageIcsText(options.location)}`);
 if(typeof options.planned==='boolean')lines.push(`STATUS:${options.planned?'TENTATIVE':'CONFIRMED'}`,`SEQUENCE:${options.planned?0:1}`);
-if(options.allDay){
+if(options.timingLines){
+lines.push(...options.timingLines);
+}else if(options.allDay){
 const startDate=formatMypageIcsDateValue(options.start);
 if(!startDate) return [];
 const endDate=formatMypageIcsDateValue(options.end)||addOneDayToMypageDateValue(String(options.start||'').slice(0,10));
@@ -2056,7 +2041,7 @@ lines.push(`DTSTART:${startDateTime}`);
 const endDateTime=formatMypageIcsUtcDateTime(options.end||options.start);
 if(endDateTime) lines.push(`DTEND:${endDateTime}`);
 }
-if(options.rrule) lines.push(`RRULE:${options.rrule}`);
+if(!options.timingLines&&options.rrule) lines.push(`RRULE:${options.rrule}`);
 lines.push('END:VEVENT');
 return lines;
 }
@@ -2087,7 +2072,10 @@ if(shouldIncludeMypageCalendarSource(scope,'hire_anniversaries')&&row.hire_date)
 appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`hire-anniversary-${row.emp_id}@${uidDomain}`,title:`${row.emp_name}${deptLabel} 입사기념일 🎉`,description:`${row.emp_name}님의 입사기념일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n입사일: ${row.hire_date}`,start:row.hire_date,allDay:true,rrule:'FREQ=YEARLY'}));
 }
 });
+const componentStart=lines.length;
+let hasSeoulTimes=false;
 source.calendarRows.forEach(row=>{
+if(!source.coopId||row.coop_id!==source.coopId||row.coop_id!==myInfo.coop_id)return;
 if(scope==='google_ics'){
 if(!shouldIncludeMypageCalendarSource(scope,'manual_company')) return;
 if(row.visibility!=='company') return;
@@ -2097,19 +2085,12 @@ if(row.visibility==='admin'&&!(myInfo.role==='admin' || myInfo.role==='admin_all
 if(row.visibility==='private'&&row.created_by!==myInfo.emp_id) return;
 }
 if(row.type==='holiday'&&officialHolidayRows.length>0) return;
-const startParts=getMypageKstDateParts(row.start_date);
-const endParts=getMypageKstDateParts(row.end_date);
-const isAllDay=!startParts.hasTime;
-let rrule='';
-if(row.recurrence==='yearly') rrule='FREQ=YEARLY';
-if(row.recurrence==='monthly'){
-const day=startParts.date?String(Number(startParts.date.slice(8,10))):'';
-if(day) rrule=`FREQ=MONTHLY;BYMONTHDAY=${day}`;
-}
-const startValue=isAllDay?(startParts.date||String(row.start_date||'').slice(0,10)):(row.start_date||'');
-const endValue=isAllDay?(endParts.date||startParts.date||''):(row.end_date||'');
-appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`manual-calendar-${row.id}@${uidDomain}`,title:row.title||'일정',description:row.cal_memo||'',start:startValue,end:endValue,allDay:isAllDay,rrule}));
+const timing=window.CoopLeaveCalendar.manualIcsTiming(row);
+if(!timing)return;
+hasSeoulTimes||=timing.zone;
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`manual-calendar-${row.id}@${uidDomain}`,title:row.title||'일정',description:row.cal_memo||'',timingLines:timing.lines}));
 });
+if(hasSeoulTimes)lines.splice(componentStart,0,...window.CoopLeaveCalendar.manualIcsZone);
 if(shouldIncludeMypageCalendarSource(scope,'company_anniversary')&&companyInfo.estDate){
 appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`company-anniversary-${String(myInfo?.coop_id||'global')}@${uidDomain}`,title:'🎉 창립기념일',description:`우리 회사의 창립기념일입니다.\n설립일: ${companyInfo.estDate}`,start:companyInfo.estDate,allDay:true,rrule:'FREQ=YEARLY'}));
 }
@@ -2147,6 +2128,7 @@ invalidateMypageCalendarVisit();
 const guide=mypageCalendarGuideRun?.dialog;
 mypageCalendarGuideRun=null;
 if(guide?.open)guide.close();
+if(mypageEventDialog){mypageEventDialog=null;eventModal?.hide();}
 }
 async function renderCalendar(){
 const request=++mypageCalendarSequence, owner=myInfo;
@@ -2165,7 +2147,7 @@ const evts=buildMypageCalendarDisplayEvents(source,'erp');
 const el=document.getElementById('calendar');
 if(mypageCalendarInstance){mypageCalendarInstance.getEventSources().forEach(source=>source.remove());mypageCalendarInstance.addEventSource(evts);mypageCalendarInstance.render();return;}
 mypageCalendarInstance=new FullCalendar.Calendar(el,{initialView:'dayGridMonth',locale:'ko',height:600,headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,listMonth'},buttonText:{month:'월간',list:'일정 목록'},buttonHints:{prev:'이전 달',next:'다음 달',today:'이번 달'},viewHint:'$0 보기',navLinkHint:'$0로 이동',closeHint:'닫기',timeHint:'시간',eventHint:'일정',moreLinkHint:'일정 $0개 더 보기',dayMaxEvents:true,
-displayEventEnd:true,eventTimeFormat:{hour:'2-digit',minute:'2-digit',hour12:false},events:evts,selectable:true,dateClick:function(i){openEventModal(null,i.dateStr)},eventClick:function(i){if(i.event.extendedProps.origin){openEventModal(i.event.extendedProps.origin,null)}}});
+displayEventEnd:true,eventTimeFormat:{hour:'2-digit',minute:'2-digit',hour12:false},events:evts,selectable:true,dateClick:function(i){openEventModal(null,i.dateStr)},eventClick:function(i){const props=i.event.extendedProps;if(props.origin){openEventModal(props.origin,null,props.manualOccurrence)}}});
 mypageCalendarInstance.render();
 }catch(_){if(isCurrent())showAlert('달력을 불러오지 못했습니다. 다른 탭으로 이동한 뒤 다시 열어 주세요.');}
 }
@@ -2299,27 +2281,74 @@ const msg=escapeHtml(error?.message||'알 수 없는 오류');
 bd.innerHTML=`<div class="text-danger small">연차 상세 조회 중 오류가 발생했습니다.<br>${msg}</div>`;
 }
 } // End of showLeaveDetail
-function openEventModal(e,d){
+let mypageEventDialog=null,mypageEventWrite=null;
+function canEditMypageCalendarEvent(record){
+const {coop_id,emp_id,role}=myInfo;
+return !!(coop_id&&emp_id&&(!record||record.coop_id===coop_id&&record.id!=null
+&&(role==='admin'||role==='admin_all'||record.created_by===emp_id)));
+}
+function isMypageEventDialogCurrent(view){
+return mypageEventDialog===view&&view.owner===getMypageDataOwner()&&view.actor===myInfo&&view.visit===mypageCalendarVisit
+&&mypageDataAuthorized&&isMypageDataVisible()&&document.getElementById('tabCalendar')?.classList.contains('active');
+}
+function openEventModal(e,d,occurrence){
+if(mypageEventWrite||!mypageDataAuthorized||!isMypageDataVisible())return;
 const b=document.getElementById("btnDelEvent"),s=document.getElementById("btnSaveEvent");
-const endSummary=document.getElementById("evtEndSummary"),start=getMypageKstDateParts(e?.start_date),end=getMypageKstDateParts(e?.end_date);
-endSummary.hidden=!(start.hasTime&&end.hasTime);
-endSummary.textContent=endSummary.hidden?'':`종료: ${end.date===start.date?'':end.date+' '}${end.time}`;
+const isManual=!!occurrence&&e?.coop_id===myInfo.coop_id;
+const original=isManual?window.CoopLeaveCalendar.manualRecord(e):null;
+const canEdit=(!e||isManual)&&canEditMypageCalendarEvent(e);
+const start=getMypageKstDateParts(e?.start_date),end=getMypageKstDateParts(e?.end_date);
+const endSummary=document.getElementById('evtEndSummary');
+const endLabel=isManual?(occurrence.lastDate?(occurrence.lastDate===occurrence.first?'':occurrence.lastDate+' ')+(occurrence.allDay?'종일':occurrence.end.slice(11,16)):''):(end.date?(end.date===start.date?'':end.date+' ')+(end.time||'종일'):'');
+endSummary.hidden=canEdit||!endLabel;
+endSummary.textContent=endSummary.hidden?'':`종료: ${endLabel}`;
+const repeat=document.getElementById('evtOccurrence');
+repeat.hidden=!(canEdit&&original&&occurrence.first!==original.first);
+repeat.textContent=repeat.hidden?'':`선택한 회차: ${occurrence.first}${occurrence.allDay?'':' '+occurrence.start.slice(11,16)}${endLabel?' ~ '+endLabel:''} · 저장하면 반복 일정 전체에 적용돼요.`;
 const inputs=eventModal._element.querySelectorAll('input, select, textarea');
-const canEdit= !e || (!['leave','birthday','business_trip'].includes(e.type)&&((myInfo.role==='admin' || myInfo.role==='admin_all') || e.created_by===myInfo.emp_id));
 inputs.forEach(el=>{el.disabled=!canEdit});
-if(canEdit){s.classList.remove('hidden');if(e)b.classList.remove("hidden");else b.classList.add("hidden")}else{s.classList.add('hidden');b.classList.add("hidden")}
-if(e){document.getElementById("evtId").value=e.id??'';document.getElementById("evtTitle").value=e.title;document.getElementById("evtVisibility").value=e.visibility||'company';const dt=getMypageKstDateParts(e.start_date);document.getElementById("evtDate").value=dt.date||'';document.getElementById("evtTime").value=dt.time||"";document.getElementById("evtRecure").value=e.recurrence||'none';document.getElementById("evtIsHoliday").checked=(e.type==='holiday');document.getElementById("evtMemo").value=e.cal_memo||""}else{document.getElementById("evtId").value="";document.getElementById("evtTitle").value="";document.getElementById("evtVisibility").value='private';document.getElementById("evtDate").value=d;document.getElementById("evtTime").value="";document.getElementById("evtRecure").value="none";document.getElementById("evtIsHoliday").checked=false;document.getElementById("evtMemo").value=""}
+s.classList.toggle('hidden',!canEdit);s.disabled=false;b.classList.toggle('hidden',!(canEdit&&isManual));b.disabled=false;
+const set=(id,value)=>{document.getElementById(id).value=value??'';};
+set('evtId',isManual?e.id:'');set('evtTitle',e?.title);set('evtVisibility',e?e.visibility||'company':'private');set('evtRecure',e?.recurrence||'none');
+set('evtDate',canEdit?original?.first||d:isManual?occurrence.first:start.date);
+set('evtTime',canEdit?original?.startTime:isManual?(occurrence.allDay?'':occurrence.start.slice(11)):start.time);
+set('evtEndDate',original?.last);set('evtEndTime',original?.endTime);set('evtMemo',e?.cal_memo);
+document.getElementById('evtIsHoliday').checked=e?.type==='holiday';
+document.getElementById('evtEndInputs').hidden=!canEdit;
+document.getElementById('evtRangeError').textContent='';
+mypageEventDialog={actor:myInfo,owner:getMypageDataOwner(),visit:mypageCalendarVisit,coop:myInfo.coop_id,record:isManual?e:null,original,canEdit};
 eventModal.show();
 }
 async function saveEvent(){
-const i=document.getElementById("evtId").value,t=document.getElementById("evtTitle").value,v=document.getElementById("evtVisibility").value,d=document.getElementById("evtDate").value,tm=document.getElementById("evtTime").value,r=document.getElementById("evtRecure").value,tp=document.getElementById("evtIsHoliday").checked?'holiday':'company',mm=document.getElementById("evtMemo").value;
-if(!t||!d){showAlert("입력 확인");return}const fd=tm?toUtcIsoFromKstInput(`${d}T${tm}`):d,p={title:t,start_date:fd,type:tp,recurrence:r,visibility:v,created_by:myInfo.emp_id,cal_memo:mm};
-const{error}=i?await _supabase.from('ref_calendar').update(p).eq('id',i):await _supabase.from('ref_calendar').insert(p);
-if(error)showAlert("저장 실패: "+error.message);else{showAlert("저장되었습니다.");eventModal.hide();renderCalendar()}
+const view=mypageEventDialog;
+if(!view?.canEdit||!isMypageEventDialogCurrent(view)||!canEditMypageCalendarEvent(view.record)||mypageEventWrite)return;
+const get=id=>document.getElementById(id).value,errorEl=document.getElementById('evtRangeError');
+const title=get('evtTitle').trim();
+const range=window.CoopLeaveCalendar.manualInput({startDate:get('evtDate'),startTime:get('evtTime'),endDate:get('evtEndDate'),endTime:get('evtEndTime')},view.original);
+if(!title||range.error){errorEl.textContent=!title?'일정명을 입력해 주세요.':range.error;return;}
+errorEl.textContent='';
+const payload={...range.data,title,visibility:get('evtVisibility'),recurrence:get('evtRecure'),type:document.getElementById('evtIsHoliday').checked?'holiday':'company',cal_memo:get('evtMemo')};
+await writeMypageCalendarEvent(view,payload);
 }
-async function deleteEvent(){const i=document.getElementById("evtId").value;if(!i) return;openConfirmModal("정말 삭제하시겠습니까?\n(반복 일정은 전체 삭제됩니다)", async function() {await _supabase.from('ref_calendar').delete().eq('id',i);eventModal.hide();renderCalendar();
-showAlert("삭제되었습니다.");
-});
+async function writeMypageCalendarEvent(view,payload){
+if(!view?.canEdit||!isMypageEventDialogCurrent(view)||!canEditMypageCalendarEvent(view.record)||mypageEventWrite||(!payload&&!view.record))return;
+const s=document.getElementById('btnSaveEvent'),b=document.getElementById('btnDelEvent');
+mypageEventWrite=view;s.disabled=true;b.disabled=true;
+try{
+const table=_supabase.from('ref_calendar');
+const query=view.record?(payload?table.update(payload):table.delete()).eq('id',view.record.id).eq('coop_id',view.coop)
+:table.insert({...payload,coop_id:view.coop,created_by:view.actor.emp_id});
+const {data,error}=await query.select('id').maybeSingle();
+if(!isMypageEventDialogCurrent(view))return;
+if(error||!data?.id){document.getElementById('evtRangeError').textContent=payload?'저장하지 못했습니다.':'삭제하지 못했습니다.';return;}
+eventModal.hide();renderCalendar();showAlert(payload?'저장했습니다.':'삭제했습니다.');
+}catch(_){if(isMypageEventDialogCurrent(view))document.getElementById('evtRangeError').textContent='처리 결과를 확인하지 못했습니다. 달력에서 이 일정을 먼저 확인해 주세요.';}
+finally{if(mypageEventWrite===view)mypageEventWrite=null;if(mypageEventDialog===view){s.disabled=false;b.disabled=false;}}
+}
+function deleteEvent(){
+const view=mypageEventDialog;
+if(!view?.record||!view.canEdit||!isMypageEventDialogCurrent(view)||mypageEventWrite)return;
+openConfirmModal('정말 삭제하시겠습니까?\n(반복 일정은 전체 삭제됩니다)',()=>writeMypageCalendarEvent(view,null));
 }
 function toggleMypageSalaryTotalReveal(){
 const valueEls=Array.from(document.querySelectorAll('#salaryTotalCard .salary-total-value'));
