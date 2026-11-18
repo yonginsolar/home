@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.170 | 승인 문서와 실제 집행 정보 분리 -->
+<!-- Version: v1.2.171 | 실제 집행 영수증 바로보기와 첨부 묶음 출력 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.170 | approval.html');</script>
+  <script>console.log('[Version] v1.2.171 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -54,7 +54,7 @@
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_insurance_notice.js?v=1.1.1" integrity="sha384-HmicS2Afj/aL+WJ/EA3Btpvn1y5AZA4oMHXInN+JNegvYJQwE/wjIPSoWlGXENre" crossorigin="anonymous"></script>
   <script src="approval_permission_request.js?v=1.2.1-uimodal-20261013-1"></script>
-  <script src="workflow_assets.js?v=20261105-tax-label-1"></script>
+  <script src="workflow_assets.js?v=20261118-approval-print-1"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
@@ -656,6 +656,7 @@
     .rel-attachment-list .list-group-item:last-child {
       border-bottom: 0;
     }
+    .rel-attachment-list .list-group-item > div { flex-wrap:wrap; overflow-wrap:anywhere; }
     .approval-editor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
     .approval-editor-tabs { display: flex; gap: 8px; margin: 6px 0 10px; }
     .approval-editor-panel { display: none; }
@@ -17507,12 +17508,12 @@ function openSignedDoc(encodedUrl) {
     return openAttachment(encodedUrl);
 }
 
-async function openAttachment(encodedUrl, isCurrent = approvalAttachmentReadContext()) {
+async function openAttachment(encodedUrl, isCurrent = approvalAttachmentReadContext(), expiresSec = 60 * 60 * 6) {
     if (!encodedUrl) return;
     const current = isCurrent;
     try {
         const rawUrl = decodeURIComponent(encodedUrl);
-        const url = await boundedApprovalAttachmentRead(() => resolveStorageUrl(rawUrl, 60 * 60 * 6, {strict:true}));
+        const url = await boundedApprovalAttachmentRead(() => resolveStorageUrl(rawUrl, expiresSec, {strict:true}));
         if (!current()) return;
         const opened = window.open(url, '_blank');
         if (opened) { try { opened.opener = null; } catch (_) {} }
@@ -17577,35 +17578,82 @@ function openLocalAttachmentPreview(fileIndex) {
 
 /* APPROVAL_PRINT_LAZY: buildPhysicalPrintHtml */
 
-async function buildApprovalPrintableDoc(doc) {
-    const printableDoc = { ...(doc || {}) };
+function approvalPrintObjectKey(value) {
+    try {
+        const ref=parseStorageObjectRef(value);
+        return ref?`storage:${ref.bucket}/${ref.path}`:'';
+    } catch (_) {return '';}
+}
 
-    const fileLinks = Array.isArray(printableDoc.file_links) ? printableDoc.file_links : [];
-    if (fileLinks.length > 0) {
-        const signedLinks = [];
-        for (const link of fileLinks) {
-            const signed = await resolveStorageUrl(link, 60 * 60 * 3);
-            signedLinks.push(signed || link);
-        }
-        printableDoc._signed_file_links = signedLinks;
+async function readApprovalExecutionDetails(doc, current) {
+    const engine=window.CoopExpenseExecution;
+    if(!current() || window.ExpoRuntimeBridge || !engine?.eligible(doc) || !['완료','실물결재완료'].includes(doc.status))return null;
+    const value=await engine.readExecution(_supabase,doc.id);
+    if(!current() || !value)return null;
+    const amount=engine.won(value.actual_amount);
+    if(!amount || !Object.hasOwn(engine.methods,value.actual_method)) throw Error('APPROVAL_EXECUTION_INVALID');
+    let receipt=null;
+    if(engine.uploadedReceiptPath(value.uploaded_receipt,doc)) {
+        const ext=value.uploaded_receipt.split('.').pop();
+        receipt={rawRef:`attachments/${value.uploaded_receipt}`,displayName:`실제 결제 영수증.${ext}`};
+    } else if(value.receipt_digest) {
+        const existing=await engine.findReceipt(doc,value.receipt_digest);
+        if(!current())return null;
+        receipt=existing?{rawRef:existing.ref,displayName:existing.name}:null;
     }
+    return {amount:engine.format(amount),method:engine.methods[value.actual_method]+(value.actual_card?' · '+value.actual_card:''),
+        reason:value.reason||'',receipt,missingReceipt:!receipt&&Boolean(value.uploaded_receipt||value.receipt_digest)};
+}
+
+async function buildApprovalPrintableDoc(doc, {current,signal,onProgress}) {
+    const printableDoc = { ...(doc || {}) };
+    const check=()=>{if(!current()||signal.aborted)throw Error('PRINT_CLOSED');};
+    const assets=window.ApprovalPrintAttachments;
+    check();
+    try {printableDoc._printExecution=await readApprovalExecutionDetails(doc,current);}
+    catch (_) {printableDoc._printExecution={error:'실제 집행을 불러오지 못했습니다. 문서 출력을 다시 열어 주세요.'};}
+    check();
+    const execution=printableDoc._printExecution;
+    const approvedMethod=doc.expense_snapshot?.payment_method;
+    if(execution?.amount && ['auto','bank','check_card','credit_card'].includes(approvedMethod)) {
+        const engine=window.CoopExpenseExecution;
+        const method=engine.sourceMethod(doc);
+        printableDoc._printApprovedMethod=engine.methods[method]+(method!=='bank'&&doc.expense_snapshot?.card_alias?' · '+doc.expense_snapshot.card_alias:'');
+    }
+    const original=getApprovalReadOnlyAttachmentRefs(doc);
+    const files=assets.attachmentList(original,execution?.missingReceipt?{displayName:'연결한 실제 결제 영수증'}:execution?.receipt,
+        {keyFor:approvalPrintObjectKey,nameFor:extractDisplayFileName});
+    printableDoc._printAttachments=await assets.prepare(files,{signal,onProgress,read:async(item,readSignal)=>{
+        check();
+        if(!approvalPrintObjectKey(item.rawRef) && !(window.ExpoRuntimeBridge && item.rawRef==='expo-example:receipt.svg'))throw assets.sourceError();
+        try {
+            const url=await resolveStorageUrl(item.rawRef,90,{download:false,strict:true});
+            if(!/^https?:\/\//i.test(url)||readSignal.aborted)throw Error('APPROVAL_PRINT_FILE_READ');
+            const response=await fetch(url,{signal:readSignal,credentials:'omit',cache:'no-store'});
+            if(!response.ok)throw Error('APPROVAL_PRINT_FILE_READ');
+            return response.blob();
+        } catch (_) {throw Error('APPROVAL_PRINT_FILE_READ');}
+    }});
+    check();
 
     if (printableDoc.drafter_id) {
-        const { data: drafterEmp } = await scopeApprovalTenant(_supabase
+        const { data: drafterEmp } = await boundedApprovalAttachmentRead(readSignal=>scopeApprovalTenant(_supabase
             .from('ref_employees')
             .select('position'))
             .eq('emp_id', printableDoc.drafter_id)
-            .maybeSingle();
+            .abortSignal(readSignal).maybeSingle()).catch(()=>({}));
+        check();
         printableDoc._drafter_is_secretary = !!(drafterEmp?.position || '').includes('사무국장');
     }
 
     const relatedDocId = toPositiveDocId(printableDoc.related_doc_id);
     if (relatedDocId) {
-        const { data: relatedDoc, error: relatedErr } = await scopeApprovalTenant(_supabase
+        const { data: relatedDoc, error: relatedErr } = await boundedApprovalAttachmentRead(readSignal=>scopeApprovalTenant(_supabase
             .from('ref_approval')
             .select('*'))
             .eq('id', relatedDocId)
-            .maybeSingle();
+            .abortSignal(readSignal).maybeSingle()).catch(()=>({}));
+        check();
         if (!relatedErr && relatedDoc) {
             printableDoc._related_doc = relatedDoc;
         }
@@ -17614,83 +17662,87 @@ async function buildApprovalPrintableDoc(doc) {
     return printableDoc;
 } // End of buildApprovalPrintableDoc
 
-async function printApprovalArchiveDoc(docId) {
+function printApprovalArchiveDoc(docId) {
+    return openApprovalPrint(docId,false);
+}
+
+function printPhysicalDoc(docId) {
+    if(!canPerform('approval.physical'))return showAlert('처리 권한이 없습니다.');
+    return openApprovalPrint(docId,true);
+}
+
+let approvalPrintOpening=null;
+async function openApprovalPrint(docId, physical) {
     const safeDocId = toPositiveDocId(docId);
-    if (!safeDocId) return showAlert("문서를 찾을 수 없습니다.");
-    if (!await ensureApprovalPrintTemplates()) return;
-
-    const { data: doc, error } = await scopeApprovalTenant(_supabase
-        .from('ref_approval')
-        .select('*'))
-        .eq('id', safeDocId)
-        .maybeSingle();
-    if (error || !doc) return showAlert("문서를 찾을 수 없습니다.");
-    if (!canViewApprovalArchiveDoc(doc)) return showAlert("문서 출력 권한이 없습니다.");
-
-    const printableDoc = await buildApprovalPrintableDoc(doc);
+    if(!safeDocId)return showAlert('문서를 찾을 수 없습니다.');
+    const owner=getApprovalActionOwner(),tab=activeApprovalTab;
+    if(!owner || window.frameElement?.hidden)return;
+    if(approvalPrintOpening && !approvalPrintOpening.closed){approvalPrintOpening.focus();return;}
     const win = window.open('', '_blank');
-    if (!win) return showAlert("팝업이 차단되어 문서 출력 창을 열 수 없습니다.");
-    win.document.write(window.ApprovalPrintTemplates.buildPhysicalPrintHtml(printableDoc));
-    win.document.close();
-} // End of printApprovalArchiveDoc
-
-async function printPhysicalDoc(docId) {
-    if (!canPerform('approval.physical')) return showAlert("처리 권한이 없습니다.");
-    if (!await ensureApprovalPrintTemplates()) return;
-    const { data: doc, error } = await scopeApprovalTenant(_supabase.from('ref_approval').select('*')).eq('id', docId).single();
-    if (error || !doc) return showAlert("문서를 찾을 수 없습니다.");
-
-    const fileLinks = Array.isArray(doc.file_links) ? doc.file_links : [];
-    if (fileLinks.length > 0) {
-        const signedLinks = [];
-        for (const link of fileLinks) {
-            const signed = await resolveStorageUrl(link, 60 * 60 * 3);
-            signedLinks.push(signed || link);
+    if(!win)return showAlert('팝업이 차단되어 문서 출력 창을 열 수 없습니다.');
+    win.opener=null;
+    approvalPrintOpening=win;
+    const controller=new AbortController(), signal=controller.signal;
+    const current=()=>!win.closed && !signal.aborted && owner===getApprovalActionOwner() &&
+        tab===activeApprovalTab && !window.frameElement?.hidden && (!physical||canPerform('approval.physical'));
+    const close=()=>{controller.abort();if(!win.closed)win.close();};
+    const timer=setInterval(()=>{if(!current()){clearInterval(timer);close();}},750);
+    const stop=()=>{clearInterval(timer);close();};
+    window.addEventListener('pagehide',stop,{once:true});
+    const cleanup=()=>{clearInterval(timer);window.removeEventListener('pagehide',stop);controller.abort();};
+    const note=win.document.createElement('p');note.setAttribute('role','status');note.textContent='문서 출력을 준비하고 있습니다…';
+    win.document.title='문서 출력 준비';win.document.body.append(note);
+    try {
+        if(!await ensureApprovalPrintTemplates()||!current())throw Error('APPROVAL_PRINT_NOT_READY');
+        const {data:doc,error}=await boundedApprovalAttachmentRead(readSignal=>scopeApprovalTenant(_supabase
+            .from('ref_approval').select('*')).eq('id',safeDocId).abortSignal(readSignal).maybeSingle());
+        if(!current())return;
+        if(error||!doc||String(doc.coop_id)!==String(getApprovalScopedCoopId()))throw Error('APPROVAL_PRINT_DOCUMENT');
+        if(!physical&&!canViewApprovalArchiveDoc(doc))throw Error('APPROVAL_PRINT_PERMISSION');
+        const printableDoc=await buildApprovalPrintableDoc(doc,{current,signal,onProgress:(i,total)=>{
+            if(current())note.textContent=`첨부파일을 준비하고 있습니다… (${i}/${total})`;
+        }});
+        if(!current()||(!physical&&!canViewApprovalArchiveDoc(doc)))throw Error('APPROVAL_PRINT_PERMISSION');
+        win.document.open();
+        win.document.write(window.ApprovalPrintTemplates.buildPhysicalPrintHtml(printableDoc));
+        win.document.close();
+        win.addEventListener('pagehide',cleanup,{once:true});
+        const print=win.document.getElementById('approvalPrintNow');
+        win.document.getElementById('approvalClosePrint').addEventListener('click',()=>{cleanup();close();});
+        print.addEventListener('click',()=>{
+            if(!current()||(!physical&&!canViewApprovalArchiveDoc(doc))){cleanup();close();return;}
+            win.print();
+        });
+        const images=[...win.document.querySelectorAll('.attachment-sheet img')];
+        try {await boundedApprovalAttachmentRead(()=>Promise.all(images.map(img=>img.decode())));}
+        catch (_) {throw Error('APPROVAL_PRINT_IMAGES');}
+        if(!current())return;
+        print.disabled=false;
+        if(physical && !['실물결재대기','실물결재완료'].includes(doc.status)) {
+            await scopeApprovalTenant(_supabase.from('ref_approval')
+                .update({ status: '실물결재대기', current_approver: null })).eq('id',safeDocId);
+            await logAudit('approval.physical_print',safeDocId,'실물결재 출력',null);
+            if(current())loadHistoryList();
         }
-        doc._signed_file_links = signedLinks;
-    }
-
-    // 기안자 직급 확인 (사무국장 여부)
-    if (doc.drafter_id) {
-        const { data: drafterEmp } = await scopeApprovalTenant(_supabase
-            .from('ref_employees')
-            .select('position'))
-            .eq('emp_id', doc.drafter_id)
-            .maybeSingle();
-        doc._drafter_is_secretary = !!(drafterEmp?.position || '').includes('사무국장');
-    }
-
-    const relatedDocId = toPositiveDocId(doc.related_doc_id);
-    if (relatedDocId) {
-        const { data: relatedDoc, error: relatedErr } = await scopeApprovalTenant(_supabase
-            .from('ref_approval')
-            .select('*'))
-            .eq('id', relatedDocId)
-            .maybeSingle();
-        if (!relatedErr && relatedDoc) {
-            doc._related_doc = relatedDoc;
-        }
-    }
-
-    const win = window.open('', '_blank');
-    win.document.write(window.ApprovalPrintTemplates.buildPhysicalPrintHtml(doc));
-    win.document.close();
-
-    if (!['실물결재대기', '실물결재완료'].includes(doc.status)) {
-        await scopeApprovalTenant(_supabase.from('ref_approval')
-            .update({ status: '실물결재대기', current_approver: null }))
-            .eq('id', docId);
-        await logAudit('approval.physical_print', docId, '실물결재 출력', null);
-        loadHistoryList();
+    } catch (error) {
+        if(current())showAlert({
+            APPROVAL_PRINT_PERMISSION:'문서 출력 권한이 없습니다.',
+            APPROVAL_PRINT_DOCUMENT:'문서를 찾을 수 없습니다.',
+            APPROVAL_PRINT_IMAGES:'첨부 페이지를 표시하지 못했습니다. 문서 출력을 다시 열어 주세요.'
+        }[error.message]||'문서 출력을 준비하지 못했습니다. 다시 시도해 주세요.');
+        cleanup();close();
+    } finally {
+        if(win.closed)cleanup();
+        if(approvalPrintOpening===win)approvalPrintOpening=null;
     }
 }
 
 async function ensureApprovalPrintTemplates() {
     const coopId = getApprovalScopedCoopId(), owner = myInfo;
     try {
-        await window.ErpWorkflowAssets.load('approvalPrint');
+        await Promise.all([window.ErpWorkflowAssets.load('approvalPrint'),window.ErpWorkflowAssets.load('approvalPrintAttachments')]);
         return coopId === getApprovalScopedCoopId() && owner === myInfo && !window.frameElement?.hidden;
-    } catch (_) { showAlert('출력 도구를 불러오지 못했습니다. 다시 시도해 주세요.'); return false; }
+    } catch (_) { return false; }
 }
 
 function startPhysicalComplete(docId) {
@@ -18180,7 +18232,7 @@ async function buildRelAttachmentViewer(attachments, options = null) {
 
     const titleEl = document.createElement('div');
     titleEl.className = 'fw-bold mb-2';
-    titleEl.textContent = '첨부파일';
+    titleEl.textContent = options?.title || '첨부파일';
     wrapper.appendChild(titleEl);
 
     if (!Array.isArray(attachments) || attachments.length === 0) {
@@ -18251,7 +18303,7 @@ async function buildRelAttachmentViewer(attachments, options = null) {
         try {
             URL.revokeObjectURL(stageObjectUrl);
         } catch (_) {}
-        if (inline) options.objectUrls.delete(stageObjectUrl);
+        if (options?.objectUrls) options.objectUrls.delete(stageObjectUrl);
         else relViewObjectUrls = relViewObjectUrls.filter((url) => url !== stageObjectUrl);
         stageObjectUrl = null;
     };
@@ -18286,7 +18338,7 @@ async function buildRelAttachmentViewer(attachments, options = null) {
                 }
                 return;
             }
-            const payload = await fetchPreviewBlob(current.rawRef, 60 * 60 * 3);
+            const payload = await fetchPreviewBlob(current.rawRef, options?.expiresSec || 60 * 60 * 3);
             if (!currentRead()) { URL.revokeObjectURL(payload.url); return; }
             const previewType = getAttachmentPreviewType(currentName, payload.blob?.type || current.mimeType || '');
             if (!previewType) {
@@ -18294,13 +18346,20 @@ async function buildRelAttachmentViewer(attachments, options = null) {
                 throw new Error('unsupported-preview-type');
             }
             stageObjectUrl = payload.url;
-            if (inline) options.objectUrls.add(stageObjectUrl);
+            if (options?.objectUrls) options.objectUrls.add(stageObjectUrl);
             else relViewObjectUrls.push(stageObjectUrl);
             metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${currentName} · ${payload.typeLabel}${payload.sizeLabel ? ` · ${payload.sizeLabel}` : ''}`;
             if (previewType === 'pdf') {
                 stage.innerHTML = `<iframe src="${escapeHtml(stageObjectUrl)}#toolbar=1"></iframe>`;
             } else {
                 stage.innerHTML = `<img src="${escapeHtml(stageObjectUrl)}" alt="${escapeHtml(currentName)}">`;
+                stage.querySelector('img').addEventListener('error',()=>{
+                    if(!currentRead())return;
+                    resetStageObjectUrl();
+                    renderApprovalAttachmentFailure(stage,Error('ATTACHMENT_UNAVAILABLE'),()=>{
+                        if(currentRead())void renderCurrent(state.index);
+                    });
+                },{once:true});
             }
         } catch (error) {
             if (!currentRead()) return;
@@ -18339,7 +18398,7 @@ async function buildRelAttachmentViewer(attachments, options = null) {
         }
         const openBtn = event.target.closest('[data-open-url]');
         if (openBtn) {
-            if (inline) openAttachment(openBtn.getAttribute('data-open-url'),viewerCurrent);
+            if (inline) openAttachment(openBtn.getAttribute('data-open-url'),viewerCurrent,options?.expiresSec);
             else openAttachment(openBtn.getAttribute('data-open-url'));
         }
     });
@@ -18398,10 +18457,39 @@ async function openRelView(docId) {
     if(!isCurrentView())return;
     contentEl.appendChild(attachmentViewerEl);
     syncRelViewActionArea(data);
-    if(!window.ExpoRuntimeBridge)void window.CoopExpenseExecution?.mountSummary({
-        el:contentEl,doc:data,client:_supabase,current:isCurrentView
-    }).catch(()=>{});
+    void mountApprovalExecutionDetails(contentEl,data,isCurrentView);
     void mountApprovalTaxTaskLinks(contentEl, data);
+}
+
+async function mountApprovalExecutionDetails(content,doc,current) {
+    try {
+        const execution=await readApprovalExecutionDetails(doc,current);
+        if(!current()||!execution)return;
+        const section=document.createElement('section');section.className='mt-3 p-3 border rounded text-break';
+        const title=document.createElement('h5');title.className='h6 fw-bold mb-2';title.textContent='실제 집행';
+        section.append(title);
+        for(const line of [`결제금액: ${execution.amount}`,`결제수단: ${execution.method}`,
+            ...(execution.reason?[`차액 사유: ${execution.reason}`]:[]),
+            ...(execution.missingReceipt?['연결한 영수증을 찾을 수 없습니다.']:[])]) {
+            const row=document.createElement('p');row.className='mb-1';row.textContent=line;section.append(row);
+        }
+        if(execution.receipt) {
+            const reader=await buildRelAttachmentViewer([execution.receipt],{current,title:'연결한 영수증',expiresSec:90});
+            if(!current())return;
+            section.append(reader);
+        }
+        if(current())content.append(section);
+    } catch (_) {
+        if(!current())return;
+        const note=document.createElement('p');note.className='mt-3 small';
+        note.textContent='실제 집행을 불러오지 못했습니다. ';
+        const button=document.createElement('button');button.type='button';button.className='btn btn-link btn-sm';
+        button.textContent='다시 확인';button.addEventListener('click',()=>{
+            if(!current()||!note.isConnected)return;
+            note.remove();void mountApprovalExecutionDetails(content,doc,current);
+        });
+        note.append(button);content.append(note);
+    }
 }
 
 function renderApprovalReadOnlyDetail(contentEl, data) {

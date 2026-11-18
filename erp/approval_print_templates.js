@@ -1,4 +1,4 @@
-/* Original print templates; loaded only for a print request. */
+/* v1.1.0 — 승인 본문과 첨부별 출력 페이지. 출력 요청 시에만 로드한다. */
 (function(root){
     'use strict';
 function buildApprovalInsurancePrintSectionHtml(doc) {
@@ -89,21 +89,27 @@ function buildPhysicalPrintHtml(doc) {
     const auxInfoLabel = isNoticeDoc ? '수신/경유' : '지급정보';
     const safeAuxInfoLabel = escapeHtml(auxInfoLabel);
     const shouldShowAmount = isExpenseDoc || !!amountDisplay.showAmount;
-    const sourceAttachmentLinks = Array.isArray(doc.file_links)
-        ? doc.file_links.filter(link => typeof link === 'string' && link.trim())
-        : [];
-    const signedAttachmentLinks = Array.isArray(doc._signed_file_links) && doc._signed_file_links.length > 0
-        ? doc._signed_file_links
-        : [];
-    const attachmentLinks = sourceAttachmentLinks.map((sourceUrl, idx) => ({
-        sourceUrl,
-        href: String(signedAttachmentLinks[idx] || sourceUrl || '')
-    })).filter(item => item.href);
-    const attachmentItemsHtml = attachmentLinks.map((item, idx) => {
-        const safeUrl = escapeHtml(item.href);
-        const safeName = escapeHtml(extractDisplayFileName(item.sourceUrl, `첨부파일 ${idx + 1}`));
-        return `<li><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeName}</a></li>`;
-    }).join('');
+    const files=Array.isArray(doc._printAttachments)?doc._printAttachments:[];
+    const attachmentItemsHtml=files.map(item=>`<li><strong>${escapeHtml(item.name)}</strong>${item.receipt?' · 실제 집행 영수증':''}
+        <div class="${item.error?'attachment-error':''}">${item.error?escapeHtml(item.error):`포함 · ${item.pages.length}쪽`}</div></li>`).join('');
+    const attachmentSheets=files.flatMap((item,i)=>item.pages.map((page,j)=>`
+        <section class="attachment-sheet" data-file="${i+1}" data-page="${j+1}">
+          <header>첨부 ${i+1} · ${escapeHtml(item.name.length>150?item.name.slice(0,149)+'…':item.name)}${item.receipt?' · 실제 집행 영수증':''} · ${j+1}/${item.pages.length}쪽</header>
+          <img src="${escapeHtml(page.src)}" alt="첨부 ${i+1}, ${j+1}쪽">
+        </section>`)).join('');
+    const execution=doc._printExecution;
+    const executionSectionHtml=execution?`
+        <section class="execution-print" aria-label="실제 집행">
+          <div class="section-title">실제 집행</div>
+          <div class="attach-box">
+            ${execution.error?`<div class="attachment-error">${escapeHtml(execution.error)}</div>`:`
+            <div><strong>결제금액:</strong> ${escapeHtml(execution.amount)}</div>
+            <div><strong>결제수단:</strong> ${escapeHtml(execution.method)}</div>
+            ${execution.reason?`<div><strong>차액 사유:</strong> ${escapeHtml(execution.reason)}</div>`:''}
+            `}
+          </div>
+        </section>`:'';
+    const incomplete=files.some(item=>item.error)||Boolean(execution?.error);
 
     const attachmentSectionHtml = attachmentItemsHtml
         ? `
@@ -262,13 +268,24 @@ function buildPhysicalPrintHtml(doc) {
             .attach-box { border: 1px solid #111; padding: 10px 14px; font-size: 11pt; color: #111; }
             .attach-list { margin: 0; padding-left: 20px; }
             .attach-list li { margin: 2px 0; }
-            .attach-list a { color: #0f172a; text-decoration: none; }
+            .attach-box, .attachment-sheet header { overflow-wrap: anywhere; }
+            .attachment-error { color: #9f1239; }
+            .execution-print { break-inside: avoid; }
+            .attachment-sheet { max-width:190mm; margin:12mm auto 0; padding:0; background:#fff; }
+            .attachment-sheet header { font-size:10pt; line-height:1.3; margin-bottom:3mm; }
+            .attachment-sheet img { display:block; margin:0 auto; width:auto; height:auto; max-width:100%; max-height:247mm; object-fit:contain; }
             .text-end { text-align: right; }
             .text-center { text-align: center; }
             .fw-bold { font-weight: 700; }
             .small { font-size: 11pt !important; }
             .footer-row { margin-top: 10px; padding-top: 6px; border-top: 1px dashed #9ca3af; display: flex; justify-content: space-between; gap: 8px; font-size: 11pt; color: #6b7280; }
-            .print-actions { position: fixed; bottom: 20px; right: 20px; }
+            .print-actions { position: sticky; bottom: 0; display:flex; gap:.5rem; flex-wrap:wrap; justify-content:flex-end; padding:.5rem; background:#fff; }
+            @media screen and (max-width:620px) {
+              body { padding: 12px; }
+              .print-area { padding: 12px; }
+              .header-grid { grid-template-columns: minmax(0, 1fr); }
+              .footer-row { flex-wrap:wrap; }
+            }
             @media print {
               body {
                 padding: 0;
@@ -282,6 +299,9 @@ function buildPhysicalPrintHtml(doc) {
               }
               .header-grid { padding-right: 1pt; break-inside: avoid; page-break-inside: avoid; }
               .content-box { min-height: 0; }
+              .section-title { break-after: avoid; }
+              .attach-list li { break-inside: avoid; }
+              .attachment-sheet { break-before: page; page-break-before: always; break-inside: avoid; margin:0; }
               .footer-row { break-inside: avoid; page-break-inside: avoid; }
               .print-actions { display: none; }
             }
@@ -302,13 +322,14 @@ function buildPhysicalPrintHtml(doc) {
                   <tr><th>작성일</th><td>${safeDate || emptyText}</td></tr>
                   ${shouldShowAmount
                     ? `<tr>
-                    <th>${safeAmountLabel}</th>
+                    <th>${execution?.amount?'승인금액':safeAmountLabel}</th>
                     <td>
                       <div class="amount-main">${safeAmountMain}</div>
                       ${safeAmountSub ? `<div class="amount-sub">${safeAmountSub}</div>` : ''}
                     </td>
                   </tr>`
                     : ''}
+                  ${doc._printApprovedMethod?`<tr><th>승인 시<br>결제수단</th><td>${escapeHtml(doc._printApprovedMethod)}</td></tr>`:''}
                   ${(safeReceiver || safeVia)
                     ? `<tr><th>${safeAuxInfoLabel}</th><td>${safeReceiver || ''}${safeReceiver && safeVia ? ' / ' : ''}${safeVia || ''}</td></tr>`
                     : ''}
@@ -347,6 +368,7 @@ function buildPhysicalPrintHtml(doc) {
             <div class="content-box">${renderedContent || emptyText}</div>
             ${insuranceSectionHtml}
             ${withholdingSectionHtml}
+            ${executionSectionHtml}
             ${relatedDocSectionHtml}
             ${attachmentSectionHtml}
             <div class="footer-row">
@@ -354,13 +376,15 @@ function buildPhysicalPrintHtml(doc) {
               <span>본 문서는 전자결재 시스템에서 출력되었습니다.</span>
             </div>
           </div>
+          ${attachmentSheets}
           <div class="print-actions">
-            <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨️ 인쇄</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="window.close()">닫기</button>
+            ${incomplete?'<span role="status">빠진 항목은 본문의 목록에서 확인해 주세요.</span>':''}
+            <button type="button" class="btn btn-primary btn-sm" id="approvalPrintNow" disabled>${incomplete?'빠진 항목 제외하고 인쇄':'인쇄'}</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="approvalClosePrint">닫기</button>
           </div>
         </body>
       </html>
     `;
 }
-root.ApprovalPrintTemplates = Object.freeze({buildPhysicalPrintHtml});
+root.ApprovalPrintTemplates = Object.freeze({version:'1.1.0',buildPhysicalPrintHtml});
 })(window);
