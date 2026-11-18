@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.3.32 | Change: 2026-11-13 - Keep scoped education drafts and selected files. -->
+<!-- Version: v1.3.33 | 부스 방명록 관리 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.30 | participation.html');</script>
+  <script>console.log('[Version] v1.3.33 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -206,6 +206,24 @@
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
   <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
+<script src="/shared/booth_guestbook_admin.js?v=1.0.0" integrity="sha384-VhbjYGorIYP+EuWveLCAzW+mXhHw7HAv19ieCDh3dfyT36EB70HU1vwGav2D85QZ" crossorigin="anonymous" defer></script>
+  <style>
+    .booth-guestbook{box-sizing:border-box;width:min(55rem,calc(100% - 1.5rem));height:min(47rem,calc(100% - 1.5rem));max-width:none;max-height:none;overflow:auto;border:1px solid #9daea5;border-radius:1rem;padding:1rem;color:#192c24;background:#fff;overflow-wrap:anywhere}
+    .booth-guestbook::backdrop{background:#0c2519aa}.booth-guestbook [hidden],#boothGuestbookOpen[hidden]{display:none!important}
+    .booth-guestbook-bar,.booth-guestbook-actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+    .booth-guestbook-bar{justify-content:space-between}.booth-guestbook .btn{min-height:2.75rem;white-space:normal}
+    .booth-guestbook-search input{width:auto;flex:1 1 12rem;min-width:0}.booth-guestbook-table{overflow:auto;max-height:38vh}
+    #boothGuestbookPrint{padding:1rem;margin-top:1rem;text-align:center;border:1px solid #bccdc1;border-radius:.75rem;background:white}
+    #boothGuestbookQr{width:max-content;max-width:100%;margin:0 auto 1rem;padding:16px;background:white}
+    #boothGuestbookQr canvas,#boothGuestbookQr img{max-width:100%;height:auto}
+    @media print{
+      body:has(.booth-guestbook-printing)>*{display:none!important}
+      body:has(.booth-guestbook-printing)>.booth-guestbook-printing{display:block!important;position:static;inset:auto;border:0;border-radius:0;margin:0;padding:0;width:210mm;height:auto;overflow:visible;box-shadow:none}
+      .booth-guestbook-printing> :not(#boothGuestbookPrint),.booth-guestbook-printing #boothGuestbookPrintButton{display:none!important}
+      .booth-guestbook-printing #boothGuestbookPrint{margin:20mm auto;border:0;padding:0 16mm;font-size:16pt}
+      .booth-guestbook-printing #boothGuestbookQr{width:100mm;margin:9mm auto;padding:5mm}
+    }
+  </style>
 </head>
 <body class="erp-unified participation-white-background">
   <main class="page-shell">
@@ -215,6 +233,7 @@
         <div class="page-subtitle" id="participationPageSubtitle">교육 등록·불러오기부터 체크인과 조합원 참가 관리까지 한 곳에서 관리합니다.</div>
       </div>
       <div class="d-flex flex-wrap justify-content-end gap-2">
+        <button type="button" class="btn btn-outline-primary" id="boothGuestbookOpen" hidden>부스 방명록</button>
         <button type="button" class="btn btn-outline-secondary" onclick="location.href='index.html'" data-erp-home-link>ERP 메인</button>
       </div>
     </div>
@@ -247,6 +266,43 @@
       <div class="event-list" id="eventList"></div>
     </section>
   </main>
+
+  <dialog id="boothGuestbookDialog" class="booth-guestbook" aria-labelledby="boothGuestbookTitle">
+    <div class="booth-guestbook-bar"><h2 id="boothGuestbookTitle" class="h5 mb-0">부스 방명록</h2><button type="button" class="btn btn-outline-secondary" id="boothGuestbookClose">닫기</button></div>
+    <div class="booth-guestbook-actions my-3">
+      <label class="fw-semibold">행사<select class="form-select" id="boothGuestbookEvent"></select></label>
+      <button type="button" class="btn btn-outline-secondary" id="boothGuestbookRetry">다시 확인</button>
+      <span id="boothGuestbookTotal"></span>
+    </div>
+    <p id="boothGuestbookInfo" role="status" aria-live="polite"></p>
+    <div id="boothGuestbookControls" hidden>
+      <div class="booth-guestbook-actions mb-2">
+        <button type="button" class="btn btn-primary" id="boothGuestbookIssue">QR 발급</button>
+        <button type="button" class="btn btn-outline-primary" id="boothGuestbookCopy">주소 복사</button>
+        <button type="button" class="btn btn-outline-secondary" id="boothGuestbookPreview">QR 인쇄 보기</button>
+        <button type="button" class="btn btn-outline-danger" id="boothGuestbookRevoke">QR 사용 중지</button>
+      </div>
+      <div id="boothGuestbookConfirm" class="alert alert-warning" hidden>
+        <p id="boothGuestbookConfirmText"></p>
+        <button type="button" class="btn btn-outline-secondary" id="boothGuestbookNo">취소</button>
+        <button type="button" class="btn btn-danger" id="boothGuestbookYes">확인</button>
+      </div>
+      <form id="boothGuestbookSearchForm" class="booth-guestbook-actions booth-guestbook-search mb-2">
+        <input id="boothGuestbookSearch" type="search" class="form-control" maxlength="100" aria-label="방명록 검색" placeholder="이름·소속·연락처 검색">
+        <button class="btn btn-outline-primary" type="submit">검색</button>
+        <button type="button" class="btn btn-outline-secondary" id="boothGuestbookDownload">엑셀 다운로드</button>
+      </form>
+      <div class="booth-guestbook-table" role="region" aria-label="방명록 명단" tabindex="0">
+        <table class="table table-sm align-middle"><thead><tr><th scope="col">이름</th><th scope="col">소속</th><th scope="col">직함</th><th scope="col">전화번호</th><th scope="col">이메일</th><th scope="col">작성 시각</th><th scope="col">보관기한</th></tr></thead><tbody id="boothGuestbookRows"></tbody></table>
+      </div>
+      <div class="booth-guestbook-actions mt-2"><button type="button" class="btn btn-outline-secondary" id="boothGuestbookPrevious">이전</button><button type="button" class="btn btn-outline-secondary" id="boothGuestbookNext">다음</button></div>
+    </div>
+    <section id="boothGuestbookPrint" hidden>
+      <p class="fw-bold">용인모두의햇빛협동조합</p><h3 id="boothGuestbookPrintTitle"></h3><p id="boothGuestbookPrintWhere"></p>
+      <div id="boothGuestbookQr" aria-label="부스 방문 방명록 QR"></div><p>카메라로 QR을 비추고 부스 방문 방명록을 남겨 주세요.</p>
+      <button type="button" class="btn btn-primary" id="boothGuestbookPrintButton">인쇄</button>
+    </section>
+  </dialog>
 
   <div class="modal fade" id="educationDetailModal" tabindex="-1" aria-labelledby="educationDetailTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content">
@@ -3686,8 +3742,11 @@
       });
       if (!guard.ok) return;
       participationReadOwner = { userId:session.user.id, coopId:guard.runtime.coop_id, revision:participationReadOwner.revision + 1 };
+      const stopBoothGuestbook = PARTICIPATION_EDUCATION_VIEW && window.location.hostname === 'www.yonginsolar.kr'
+        ? window.BoothGuestbookAdmin?.start(_supabase, () => participationReadOwner) : null;
       _supabase.auth.onAuthStateChange(function(event, nextSession) {
         if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== participationReadOwner.userId)) {
+          stopBoothGuestbook?.();
           rememberEventDraft();eventDraftVisit++;
           eventModalInstance?.hide();
           participationReadOwner = { userId:null, coopId:null, revision:participationReadOwner.revision + 1 };
