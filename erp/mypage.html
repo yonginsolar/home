@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.1.4 | 맥에서 구독 주소를 복사하고 캘린더 앱만 열기 -->
+<!-- Version: v1.1.5 | 아이폰 Safari에서 애플 캘린더 구독창 바로 열기 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.1.4 | mypage.html');</script>
+<script>console.log('[Version] v1.1.5 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -383,10 +383,10 @@ body{padding:18px 14px 28px}
 <header class="mypage-calendar-guide-header"><h2 class="h5 fw-bold mb-0" id="mypageCalendarGuideTitle">캘린더 자동 구독</h2><button type="button" class="btn-close" aria-label="닫기" autofocus onclick="document.getElementById('mypageCalendarGuide').close()"></button></header>
 <div class="mypage-calendar-guide-body" tabindex="0" role="region" aria-label="구독 방법">
 <p class="mb-2">주소를 한 번 추가하면 바뀐 일정도 받아볼 수 있어요.</p>
-<div class="mypage-calendar-guide-address"><button type="button" class="btn btn-primary btn-sm" id="btnMypageCalendarGuideCopy" hidden onclick="copyMypageCalendarGuideUrl()">구독 주소 복사</button><p class="small" id="mypageCalendarGuideStatus" role="status"></p></div>
+<div class="mypage-calendar-guide-address"><button type="button" class="btn btn-primary btn-sm" id="btnMypageCalendarIphoneAdd" hidden onclick="openMypageIphoneCalendarSubscription(event)">아이폰 캘린더에 추가</button><button type="button" class="btn btn-primary btn-sm" id="btnMypageCalendarGuideCopy" hidden onclick="copyMypageCalendarGuideUrl()">구독 주소 복사</button><p class="small" id="mypageCalendarGuideStatus" role="status"></p></div>
 <div class="mypage-calendar-guide-options">
 <section class="mypage-calendar-guide-option" aria-labelledby="mypageAppleCalendarLabel"><h3 class="h6 fw-bold" id="mypageAppleCalendarLabel">애플 캘린더</h3>
-<ul class="small"><li><strong>맥:</strong> 캘린더 앱에서 <kbd>⌥⌘S</kbd> → 주소 붙여넣기 → 구독</li><li><strong>아이폰·아이패드:</strong> 캘린더 앱 → 캘린더 → 캘린더 추가 → 구독 캘린더 추가 → 주소 붙여넣기</li></ul>
+<ul class="small"><li><strong>아이폰·아이패드에서 직접 추가:</strong> 캘린더 아이콘 → 목록 맨 아래 캘린더 추가 → 구독 캘린더 추가 → 붙여넣기</li><li><strong>맥:</strong> 캘린더 앱에서 <kbd>⌥⌘S</kbd> → 주소 붙여넣기 → 구독</li></ul>
 <div class="mypage-calendar-guide-option-actions"><button type="button" class="btn btn-outline-primary btn-sm" id="btnMypageCalendarAppleOpen" hidden onclick="copyMypageCalendarGuideUrl('apple')">주소 복사하고 애플 캘린더 열기</button><a class="btn btn-outline-secondary btn-sm" href="https://support.apple.com/ko-kr/102301" target="_blank" rel="noopener noreferrer">애플 구독 방법 보기</a></div></section>
 <section class="mypage-calendar-guide-option" aria-labelledby="mypageGoogleCalendarLabel"><h3 class="h6 fw-bold" id="mypageGoogleCalendarLabel">구글 캘린더</h3>
 <p class="small">컴퓨터에서 주소 추가 화면을 열어 붙여넣고 ‘캘린더 추가’를 누르세요. 추가한 일정은 모바일 앱에서도 보여요.</p>
@@ -767,17 +767,42 @@ function canOpenMypageAppleCalendarApp(){
 const platform=String(navigator.userAgentData?.platform||navigator.platform||'');
 return /^mac/i.test(platform)&&!(navigator.maxTouchPoints>1);
 }
+function getMypageIphoneWebcalUrl(){
+const ua=String(navigator.userAgent||'');
+if(window.isSecureContext!==true||navigator.platform!=='iPhone'||!/^Mozilla\/5\.0 \(iPhone;/.test(ua)||!(/\bVersion\/[\d.]+\s+Mobile\/[^\s]+\s+Safari\/[\d.]+$/.test(ua)))return '';
+if(!mypageCalendarIcsSettings.enabled)return '';
+const original=getMypageCalendarIcsFeedUrl(mypageCalendarIcsSettings.feedToken);
+try{
+const url=new URL(original),origin=new URL(SUPABASE_URL);
+if(url.protocol!=='https:'||origin.protocol!=='https:'||url.origin!==origin.origin||url.pathname!=='/functions/v1/erp-calendar-ics-feed'||url.username||url.password||url.hash||!url.searchParams.get('token')||[...url.searchParams.keys()].join()!=='token')return '';
+return 'webcal:'+original.slice('https:'.length);
+}catch(_){return '';}
+}
 function syncMypageCalendarGuideActions(run){
 const google=document.getElementById('btnMypageCalendarGoogleOpen'),manual=document.getElementById('mypageCalendarGoogleManual');
-const copy=document.getElementById('btnMypageCalendarGuideCopy'),apple=document.getElementById('btnMypageCalendarAppleOpen');
+const copy=document.getElementById('btnMypageCalendarGuideCopy'),apple=document.getElementById('btnMypageCalendarAppleOpen'),iphone=document.getElementById('btnMypageCalendarIphoneAdd');
 const allowed=!!(run&&isMypageCalendarGuideCurrent(run)&&canManageMypageCalendarSettings());
 google.hidden=!(allowed&&run.ready);
 apple.hidden=google.hidden||!canOpenMypageAppleCalendarApp();
+iphone.hidden=google.hidden||!getMypageIphoneWebcalUrl();
+copy.classList.toggle('btn-primary',iphone.hidden);
+copy.classList.toggle('btn-outline-secondary',!iphone.hidden);
 manual.hidden=!google.hidden&&!run.googleFallback&&document.activeElement!==manual;
 if(!allowed)copy.hidden=true;
-for(const button of [copy,google,apple]){
-if(run?.loading||mypageCalendarGuideCopyJob)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+for(const button of [copy,google,apple,iphone]){
+if(run?.loading||mypageCalendarGuideCopyJob||(button===iphone&&run?.iphoneOpening))button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
 }
+}
+function openMypageIphoneCalendarSubscription(event){
+const run=mypageCalendarGuideRun;
+if(event?.isTrusted!==true||navigator.userActivation?.isActive===false||document.hidden||!run?.ready||run.loading||run.iphoneOpening||mypageCalendarGuideCopyJob||!isMypageCalendarGuideCurrent(run)||!canManageMypageCalendarSettings())return;
+const link=getMypageIphoneWebcalUrl();
+if(!link)return;
+const status=document.getElementById('mypageCalendarGuideStatus');
+run.iphoneOpening=true;syncMypageCalendarGuideActions(run);
+status.textContent='캘린더에서 구독을 확인하세요.';
+try{window.location.assign(link);}catch(_){status.textContent='창이 열리지 않았어요. 구독 주소를 복사해 주세요.';}
+finally{window.setTimeout(()=>{run.iphoneOpening=false;if(isMypageCalendarGuideCurrent(run))syncMypageCalendarGuideActions(run);},1200);}
 }
 function closeMypageCalendarGuidePopup(job){
 const popup=job?.popup;
@@ -834,7 +859,7 @@ const hide=loaded&&!run.ready;
 if(hide&&document.activeElement===button)run.dialog.querySelector('.mypage-calendar-guide-body')?.focus({preventScroll:true});
 button.hidden=hide;
 button.textContent=loaded?'구독 주소 복사':'다시 확인';
-status.textContent=run.ready?'복사한 주소를 캘린더에 붙여넣으세요.':loaded?'구독 설정에서 캘린더 구독을 켜 주세요.':'구독 주소를 확인하지 못했어요.';
+status.textContent=run.ready?(document.getElementById('btnMypageCalendarIphoneAdd').hidden?'복사한 주소를 캘린더에 붙여넣으세요.':''):loaded?'구독 설정에서 캘린더 구독을 켜 주세요.':'구독 주소를 확인하지 못했어요.';
 }
 async function copyMypageCalendarGuideUrl(destination=false){
 const forGoogle=destination===true,forApple=destination==='apple';
