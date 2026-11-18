@@ -1,10 +1,12 @@
-/* v1.0.0 — Read-only leave projection shared by the ERP calendar and ICS feeds. */
+/* v1.1.0 — 휴가 원문을 바꾸지 않고 전사 일정·구독에 같은 시각을 표시한다. */
 (function (root) {
     'use strict';
     const pending=Object.freeze(['진행중','가승인','증빙확인중','실물결재대기']);
     const final=Object.freeze(['완료','실물결재완료']);
     const statuses=Object.freeze([...pending,...final]);
     const columns='id,coop_id,doc_type,status,title,content,drafter_id,drafter_name,created_at,processed_at,leave_snapshot,related_doc_id';
+    const workSettingKeys=Object.freeze(['work_start_time','work_end_time','work_lunch_start_time','work_lunch_end_time']);
+    const yongin='a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
     const text=v=>String(v??'').trim();
     const clean=v=>text(v).replace(/\s+/g,' ').slice(0,100);
     const snapshotOf=doc=>{
@@ -23,6 +25,19 @@
         const d=new Date(iso+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+1);return d.toISOString().slice(0,10);
     };
     const clock=value=>text(value).match(/^((?:[01]\d|2[0-3]):[0-5]\d)(?::00)?$/)?.[1]||'';
+    const timeNumber=value=>{const t=clock(value);return t?Number(t.slice(0,2))*60+Number(t.slice(3)):null;};
+    const timeLabel=n=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
+    function halfDayTimes(coop,part,settings) {
+        if(part==='pm'&&text(coop)===yongin)return ['13:30','17:30'];
+        const [a,b,l,r]=workSettingKeys.map(key=>timeNumber(settings?.[key]));
+        if([a,b,l,r].some(v=>v==null)||!(a<=l&&l<r&&r<=b))return null;
+        const half=(b-a-(r-l))/2;
+        if(!Number.isInteger(half)||half<=0)return null;
+        const before=l-a, boundary=a+half+(half>=before?r-l:0);
+        const [from,to]=part==='am'?[a,half===before?l:boundary]:[boundary,b];
+        if(to<=from||from%30||to%30)return null;
+        return [timeLabel(from),timeLabel(to)];
+    }
     const docType=/^휴가\s*(?:\(([^()]+)\))?$/;
     const cancelType=/^(?:휴가\s*취소|취소\s*휴가)\s*(?:\([^()]+\))?$/;
     const id=value=>/^[1-9][0-9]{0,18}$/.test(text(value))?text(value):'';
@@ -42,7 +57,7 @@
         return [{leave_date,end_date,slot:hour?'hour':half?(part==='오전'?'am':part==='오후'?'pm':'half'):'full',
             start_time:snapshot.start_time||times?.[1],end_time:snapshot.end_time||times?.[2]}];
     }
-    function eventsForDoc(doc, employeeName='') {
+    function eventsForDoc(doc, employeeName='', workSettings=null) {
         const idValue=id(doc?.id), match=docType.exec(text(doc?.doc_type)), state=text(doc?.status);
         if(!idValue||!match||!statuses.includes(state))return [];
         const snapshot=snapshotOf(doc),kind=clean(snapshot.label||match[1]),name=clean(employeeName||doc.drafter_name)||'직원';
@@ -52,26 +67,40 @@
             const iso=date(item?.leave_date||item?.date||item?.start_date);
             if(!iso)continue;
             const rawSlot=text(item.slot||item.slot_label).toLowerCase();
-            const slot=({am:'am',pm:'pm',half:'half',hour:'hour',full:'full','오전':'am','오후':'pm',
+            const slot=({am:'am',pm:'pm',half:'half',hour:'hour',full:'full','오전':'am','오후':'pm','오전반차':'am','오후반차':'pm',
                 '오전 반차':'am','오후 반차':'pm','반차':'half','시간차':'hour','전일':'full','종일':'full'})[rawSlot]||(!rawSlot?'full':'');
             if(!slot)continue;
             const endIso=date(item.end_date)||iso;
             if(endIso<iso)continue;
-            const part=slot==='hour'?text(item.slot_label).match(/^(오전|오후)\s*반차$/)?.[0]||'':slot==='am'?'오전 반차':slot==='pm'?'오후 반차':slot==='half'?'반차':'';
-            const startTime=clock(item.start_time),endTime=clock(item.end_time);
-            const timed=slot!=='full'&&item.time_input_mode!=='hours'&&!!startTime&&!!endTime&&(endIso>iso||endTime>startTime);
-            const key=[iso,endIso,slot,timed?startTime:'',timed?endTime:''].join('|');
+            const half=slot==='am'||slot==='pm'?slot:(slot==='hour'||slot==='half')
+                ? ({오전:'am',오후:'pm'})[text(item.slot_label).match(/^(오전|오후)\s*반차$/)?.[1]]||'':'';
+            const part=half==='am'?'오전 반차':half==='pm'?'오후 반차':slot==='half'?'반차':'';
+            let startTime=clock(item.start_time),endTime=clock(item.end_time);
+            const recorded=slot!=='full'&&item.time_input_mode!=='hours'&&!!startTime&&!!endTime&&(endIso>iso||endTime>startTime);
+            // Keep the pre-projection identity/ordering even when a previously untimed item gets a range.
+            const key=[iso,endIso,slot,recorded?startTime:'',recorded?endTime:''].join('|');
             if(seen.has(key))continue;seen.add(key);
+            let timed=recorded;
+            if(!timed&&half&&endIso===iso&&(!text(item.start_time)||startTime)&&(!text(item.end_time)||endTime)){
+                const stated=raw.length===1?legacy(doc,snapshot,kind)[0]:null;
+                const statedStart=clock(stated?.start_time),statedEnd=clock(stated?.end_time);
+                const inferred=stated?.slot===half&&stated.leave_date===iso&&stated.end_date===iso&&statedEnd>statedStart&&statedStart
+                    ? [statedStart,statedEnd] : halfDayTimes(doc.coop_id,half,workSettings);
+                if(inferred&&(!startTime||startTime===inferred[0])&&(!endTime||endTime===inferred[1])){
+                    [startTime,endTime]=inferred;timed=true;
+                }
+            }
             const label=part|| (slot==='hour'?'시간차':planned||!kind||/^(연차|annual)$/i.test(kind)?'휴가':kind);
             const range=timed?`${startTime}~${endIso===iso?'':endIso+' '}${endTime}`:'';
             const noTime=!timed&&slot!=='full';
-            const title=`${name} ${label}${planned?'(예정)':''}${range?' · '+range:noTime?' · 시각 미등록':''}`;
+            const displayTitle=`${name} ${label}${planned?'(예정)':''}${noTime?' · 시각 미등록':''}`;
+            const title=displayTitle+(range?' · '+range:'');
             const localStart=timed?`${iso}T${startTime}:00`:iso;
             const localEnd=timed?`${endIso}T${endTime}:00`:tomorrow(endIso);
             const ordinal=events.length+1;
             events.push({
                 uid:`leave-${idValue}${ordinal===1?'':'-part-'+ordinal}`,
-                title,allDay:!timed,planned,slot,
+                title,displayTitle,allDay:!timed,planned,slot,
                 start:timed?localStart+'+09:00':localStart,end:timed?localEnd+'+09:00':localEnd,localStart,localEnd,
                 firstDate:iso,lastDate:endIso, updatedAt:doc.processed_at||doc.created_at||null,
                 state,description:`${planned?'결재 전 · 예정':'확정'}\n${iso}${endIso===iso?'':' ~ '+endIso}${range?' · '+range:noTime?' · 시각 미등록':''}`,
@@ -79,7 +108,7 @@
         }
         return events;
     }
-    function project(docs, employees=[], coop='') {
+    function project(docs, employees=[], coop='', workSettings=null) {
         const rows=(Array.isArray(docs)?docs:[]).filter(d=>!coop||text(d?.coop_id)===text(coop));
         const names=new Map();
         for(const e of employees||[])if(text(e?.emp_id)&&clean(e?.emp_name)&&(!e.coop_id||!coop||text(e.coop_id)===text(coop)))
@@ -91,7 +120,7 @@
             const docId=id(d.id);
             if(!docId||seen.has(docId)||canceled.has(docId+'|'+personKey(d))||!docType.test(text(d.doc_type)))continue;
             seen.add(docId);
-            for(const event of eventsForDoc(d,names.get(text(d.drafter_id))))result.push({...event,employeeKey:text(d.drafter_id)});
+            for(const event of eventsForDoc(d,names.get(text(d.drafter_id)),coop?workSettings:null))result.push({...event,employeeKey:text(d.drafter_id)});
         }
         return result;
     }
@@ -119,5 +148,5 @@
         }
         return out;
     }
-    root.CoopLeaveCalendar=Object.freeze({statuses,project,eventsForDoc,load,fold,version:'1.0.0'});
+    root.CoopLeaveCalendar=Object.freeze({statuses,project,eventsForDoc,load,fold,workSettingKeys,version:'1.1.0'});
 })(globalThis);
