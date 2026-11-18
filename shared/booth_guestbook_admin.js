@@ -16,7 +16,7 @@
     const $=id=>document.getElementById(id);
     const opener=$('boothGuestbookOpen'), dialog=$('boothGuestbookDialog'), select=$('boothGuestbookEvent'), table=$('boothGuestbookRows');
     const controls=$('boothGuestbookControls'), search=$('boothGuestbookSearch'), message=$('boothGuestbookInfo'), printPane=$('boothGuestbookPrint');
-    let view=0, requestCounter=0, owner, events=[], settings=null, offset=0, term='', busy=false, pendingChange=false, more=false, exportLib, confirming='';
+    let view=0, requestCounter=0, owner, events=[], settings=null, offset=0, term='', busy=false, pendingChange=false, more=false, exportLib, confirming='', previewUrl='';
     const show = s => { message.textContent=s; };
     const current = (v,r) => v===view && (r===undefined || r===requestCounter) && dialog.open && owner===getOwner() && !window.frameElement?.hidden;
     function render() {
@@ -30,6 +30,7 @@
       $('boothGuestbookPrevious').disabled=busy || offset===0;
       $('boothGuestbookNext').disabled=busy || !more;
       $('boothGuestbookDownload').disabled=busy || !table.children.length;
+      $('boothGuestbookPrintButton').disabled=busy || pendingChange || !previewUrl || previewUrl!==settings?.url;
       $('boothGuestbookConfirm').hidden=!confirming;
       $('boothGuestbookYes').disabled=busy || pendingChange;
     }
@@ -41,18 +42,21 @@
         return result.data;
       } finally { clearTimeout(timer); }
     }
+    function resetPrint() {
+      previewUrl=''; printPane.hidden=true; const qr=$('boothGuestbookQr'); qr.replaceChildren(); qr.removeAttribute('title');
+    }
     function clear() {
       view++; requestCounter++; owner=null; events=[]; settings=null; offset=0; term=''; busy=false; pendingChange=false; more=false; confirming='';
-      table.replaceChildren(); select.replaceChildren(); search.value=''; printPane.hidden=true;
-      $('boothGuestbookQr').replaceChildren(); $('boothGuestbookPrintTitle').textContent=''; $('boothGuestbookPrintWhere').textContent=''; $('boothGuestbookTotal').textContent='';
+      table.replaceChildren(); select.replaceChildren(); search.value=''; resetPrint();
+      $('boothGuestbookPrintTitle').textContent=''; $('boothGuestbookPrintWhere').textContent=''; $('boothGuestbookTotal').textContent='';
       dialog.classList.remove('booth-guestbook-printing'); show(''); render();
     }
     function close() { if(dialog.open)dialog.close(); clear(); }
     function protectAfterError(error) {
       if (error.message!=='ACCESS_DENIED') return false;
       settings=null;events=[];pendingChange=false;confirming='';more=false;offset=0;term='';
-      search.value='';table.replaceChildren();select.replaceChildren();printPane.hidden=true;
-      $('boothGuestbookQr').replaceChildren();$('boothGuestbookTotal').textContent='';
+      search.value='';table.replaceChildren();select.replaceChildren();resetPrint();
+      $('boothGuestbookTotal').textContent='';
       show('방명록을 볼 권한을 확인해 주세요.');return true;
     }
     function draw(rows) {
@@ -66,6 +70,7 @@
     }
     async function load(options={}) {
       const v=view, r=++requestCounter; busy=true;confirming=''; render(); show('방명록을 불러오는 중입니다.');
+      let waitingForQr=false;
       try {
         if (!events.length) {
           const result=await rpc('events'); if(!current(v,r))return;
@@ -75,22 +80,27 @@
         }
         const id=select.value;
         if (options.settings || !settings || pendingChange) {
+          waitingForQr=true;
           const result=await rpc('settings',id); if(!current(v,r))return;
-          settings=result; pendingChange=false;
+          if (previewUrl && previewUrl!==result?.url) resetPrint();
+          settings=result; pendingChange=false; waitingForQr=false;
           $('boothGuestbookTotal').textContent=`누적 방문 ${Number(result.total||0).toLocaleString('ko-KR')}명`;
         }
         const result=await rpc('list',id,{search:term,offset}); if(!current(v,r))return;
         draw(result.rows || []); more=!!result.more;
         show(table.children.length?'':settings.can_issue?'표시할 방문 기록이 없습니다.':'접수를 시작하지 않았거나 마감됐습니다.');
       } catch (error) {
-        if(current(v,r)&&!protectAfterError(error))show(pendingChange?'QR 변경 결과를 아직 확인하지 못했습니다. 다시 확인해 주세요.':'방명록을 불러오지 못했습니다. 다시 확인해 주세요.');
+        if(current(v,r)&&!protectAfterError(error)) {
+          if(waitingForQr){resetPrint();pendingChange=true;}
+          show(pendingChange?'QR 상태를 확인하지 못했습니다. 다시 확인해 주세요.':'방명록을 불러오지 못했습니다. 다시 확인해 주세요.');
+        }
       } finally { if(current(v,r)){busy=false;render();} }
     }
     async function change() {
       const action=confirming;
       if (!['issue','revoke'].includes(action)||busy||pendingChange||!settings)return;
       const v=view, r=++requestCounter, id=select.value, revision=settings.revision;
-      busy=true;pendingChange=true;confirming='';printPane.hidden=true; $('boothGuestbookQr').replaceChildren();render();show('QR 상태를 변경하는 중입니다.');
+      busy=true;pendingChange=true;confirming='';resetPrint();render();show('QR 상태를 변경하는 중입니다.');
       try {
         const result=await rpc(action,id,{revision}); if(!current(v,r))return;
         settings=result; pendingChange=false;show(action==='issue'?'QR을 발급했습니다.':'QR을 사용 중지했습니다.');
@@ -125,7 +135,7 @@
     $('boothGuestbookClose').addEventListener('click',close);
     dialog.addEventListener('cancel',event=>{event.preventDefault();close();});
     $('boothGuestbookRetry').addEventListener('click',()=>{if(!busy)void load({settings:true});});
-    select.addEventListener('change',()=>{settings=null;pendingChange=false;offset=0; more=false;draw([]);printPane.hidden=true;$('boothGuestbookQr').replaceChildren();void load({settings:true});});
+    select.addEventListener('change',()=>{settings=null;pendingChange=false;offset=0; more=false;draw([]);resetPrint();void load({settings:true});});
     $('boothGuestbookSearchForm').addEventListener('submit',event=>{event.preventDefault();if(busy)return; const next=search.value.trim();if(next!==term){term=next;offset=0;more=false;draw([]);}void load();});
     $('boothGuestbookPrevious').addEventListener('click',()=>{if(!busy && offset>0){offset-=50;void load();}});
     $('boothGuestbookNext').addEventListener('click',()=>{if(!busy && more){offset+=50;void load();}});
@@ -150,10 +160,10 @@
       new window.QRCode(target,{text:code,width:384,height:384,correctLevel:window.QRCode.CorrectLevel.M});
       $('boothGuestbookPrintTitle').textContent=event.title;
       $('boothGuestbookPrintWhere').textContent=event.venue;
-      printPane.hidden=false;printPane.scrollIntoView({block:'nearest'});
+      previewUrl=code;printPane.hidden=false;render();printPane.scrollIntoView({block:'nearest'});
     });
     $('boothGuestbookPrintButton').addEventListener('click',()=>{
-      if(printPane.hidden||!qrPattern.test(settings?.url||'')||pendingChange||!current(view))return;
+      if(printPane.hidden||busy||!qrPattern.test(previewUrl)||previewUrl!==settings?.url||pendingChange||!current(view))return;
       dialog.classList.add('booth-guestbook-printing');try{window.print();}finally{dialog.classList.remove('booth-guestbook-printing');}
     });
     window.addEventListener('pagehide',close);
