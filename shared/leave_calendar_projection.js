@@ -1,10 +1,11 @@
-/* v1.1.1 — 휴가 원문을 바꾸지 않고 전사 일정·구독에 같은 시각을 표시한다. */
+/* v1.2.0 — 휴가·출장의 일정 표시와 승인 상태를 전사 일정·구독에서 공유한다. */
 (function (root) {
     'use strict';
     const pending=Object.freeze(['진행중','가승인','증빙확인중','실물결재대기']);
     const final=Object.freeze(['완료','실물결재완료']);
     const statuses=Object.freeze([...pending,...final]);
     const columns='id,coop_id,doc_type,status,title,content,drafter_id,drafter_name,created_at,processed_at,leave_snapshot,related_doc_id';
+    const tripColumns='id,coop_id,doc_type,status,drafter_id,drafter_name,business_trip_snapshot,related_doc_id';
     const workSettingKeys=Object.freeze(['work_start_time','work_end_time','work_lunch_start_time','work_lunch_end_time']);
     const yongin='a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
     const text=v=>String(v??'').trim();
@@ -127,12 +128,60 @@
         }
         return result;
     }
-    async function load(client, coop) {
+    function tripSnapshot(doc){
+        let v=doc?.business_trip_snapshot;
+        if(typeof v==='string'){try{v=JSON.parse(v);}catch(_){return null;}}
+        return v&&typeof v==='object'&&!Array.isArray(v)?v:null;
+    }
+    function tripInstant(value){
+        const m=text(value).match(/^(\d{4}-\d{2}-\d{2})T((?:[01]\d|2[0-3]):[0-5]\d)(?::[0-5]\d(?:\.\d{1,6})?)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/);
+        if(!m||!date(m[1]))return null;
+        // 결재의 출장 날짜·시각 생성기는 한국 시각을 시차 기호 없이 저장한다.
+        const normalized=m[0]+(m[3]?'':'+09:00'),ms=Date.parse(normalized);
+        return Number.isFinite(ms)?{ms,local:new Date(ms+9*3600000).toISOString().slice(0,19),value:normalized}:null;
+    }
+    function projectBusinessTrips(docs,coop){
+        if(!coop)return [];
+        const rows=(Array.isArray(docs)?docs:[]).filter(row=>text(row?.coop_id)===text(coop));
+        const canceled=new Set(rows.filter(d=>text(d.doc_type)==='출장취소'&&final.includes(text(d.status))&&text(d.drafter_id))
+            .map(d=>id(d.related_doc_id)+'|'+personKey(d)));
+        const out=[],seen=new Set();
+        for(const row of rows){
+            const stableId=id(row.id),state=text(row.status);
+            if(!stableId||seen.has(stableId)||text(row.doc_type)!=='출장신청'||!statuses.includes(state)||canceled.has(stableId+'|'+personKey(row)))continue;
+            const s=tripSnapshot(row);
+            if(!s)continue;
+            const startDate=date(s.start_date),endDate=date(s.end_date);
+            const allDay=s.calendar_all_day===true||s.calendar_all_day==='true'||!!(s.period_label&&startDate&&endDate&&startDate!==endDate);
+            let first=startDate,last=endDate,start,end,localStart,localEnd;
+            if(allDay){
+                if(!startDate||!endDate||endDate<startDate)continue;
+                start=localStart=startDate;end=localEnd=tomorrow(endDate);
+            }else{
+                const a=tripInstant(s.start_at),b=tripInstant(s.end_at);
+                if(!a||!b||b.ms<=a.ms)continue;
+                first=a.local.slice(0,10);last=b.local.slice(0,10);
+                if((startDate&&startDate!==first)||(endDate&&endDate!==last))continue;
+                start=a.value;end=b.value;localStart=a.local;localEnd=b.local;
+            }
+            const planned=pending.includes(state),name=clean(row.drafter_name)||'직원';
+            const title=`${name} 출장${planned?'(예정)':''}`;
+            const period=allDay?(first===last?first:`${first} ~ ${last}`):
+                `${first} ${localStart.slice(11,16)} ~ ${first===last?'':last+' '}${localEnd.slice(11,16)}`;
+            const location=planned?'':clean(s.location);
+            seen.add(stableId);
+            out.push({uid:`business-trip-${stableId}`,title,start,end,localStart,localEnd,firstDate:first,lastDate:last,allDay,planned,location,
+                employeeKey:text(row.drafter_id),description:[planned?'결재 전 · 예정':'결재 완료 · 확정',period,location?'출장 장소: '+location:''].filter(Boolean).join('\n')});
+        }
+        return out;
+    }
+    async function loadRows(client, coop, trip=false) {
         if(!coop)return [];
         const result=[];let cursor='0';
         for(;;){
-            const {data,error}=await client.from('ref_approval').select(columns).eq('coop_id',coop)
-                .or('doc_type.ilike.휴가%,doc_type.ilike.취소휴가%').in('status',statuses).gt('id',cursor).order('id',{ascending:true}).limit(200);
+            let query=client.from('ref_approval').select(trip?tripColumns:columns).eq('coop_id',coop);
+            query=trip?query.in('doc_type',['출장신청','출장취소']):query.or('doc_type.ilike.휴가%,doc_type.ilike.취소휴가%');
+            const {data,error}=await query.in('status',statuses).gt('id',cursor).order('id',{ascending:true}).limit(200);
             if(error||!Array.isArray(data))throw Error('LEAVE_CALENDAR_SOURCE');
             if(data.some(row=>text(row.coop_id)!==text(coop)))throw Error('LEAVE_CALENDAR_SCOPE');
             result.push(...data);
@@ -142,6 +191,8 @@
             cursor=next;
         }
     }
+    const load=(client,coop)=>loadRows(client,coop);
+    const loadBusinessTrips=(client,coop)=>loadRows(client,coop,true);
     function fold(line) {
         let count=0,out='';
         for(const char of String(line||'')){
@@ -151,5 +202,5 @@
         }
         return out;
     }
-    root.CoopLeaveCalendar=Object.freeze({statuses,project,eventsForDoc,load,fold,workSettingKeys,version:'1.1.1'});
+    root.CoopLeaveCalendar=Object.freeze({statuses,project,eventsForDoc,load,projectBusinessTrips,loadBusinessTrips,fold,workSettingKeys,version:'1.2.0'});
 })(globalThis);
