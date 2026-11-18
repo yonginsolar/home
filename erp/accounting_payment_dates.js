@@ -1,4 +1,4 @@
-/* v1.3.0 — confirm the actual execution of ordinary expenses. */
+/* v1.3.1 — clear the current expense's stale input warning when it is edited. */
 (function () {
     'use strict';
     let active = null, activeExpenseClose = null, salaryActive = null, editing = false, draftOwner = '';
@@ -136,6 +136,12 @@
                     window.CoopExpenseExecution.controls({doc, cards, section, check, draft, index, el, onInput:updateDateTitle});
                 }
                 if (prepaid) section.append(el('p', 'small text-muted mt-2 mb-0', '선지출은 승인된 문서에 기재한 날짜를 사용합니다.'));
+                const clearWarning=()=>{
+                    if(ui.error.dataset.expenseDocument===String(doc.id)){
+                        ui.error.textContent='';delete ui.error.dataset.expenseDocument;
+                    }
+                };
+                section.addEventListener('input',clearWarning);section.addEventListener('change',clearWarning);
                 ui.body.append(section); return { doc, check, date, prepaid, draft, managed };
             });
             let result = null, submitted = false;
@@ -167,11 +173,12 @@
                     const payment = { ...paymentFor(control), signature: signature(control.doc) };
                     if (payment.confirmed) {
                         const message = window.CoopInsurancePayment.syncPaymentError(control.doc, payment, today) || validate(payment, today);
-                        if (message) { ui.error.textContent = message; return; }
+                        const warn=text=>{ui.error.dataset.expenseDocument=String(control.doc.id);ui.error.textContent=text;};
+                        if (message) { warn(message); return; }
                         try {
                             if(control.managed) window.CoopExpenseExecution.assess(control.doc,payment.execution,cards);
                             else resolvePayment(control.doc, payment, cards);
-                        } catch(error) { ui.error.textContent=error.message;return; }
+                        } catch(error) { warn(error.message);return; }
                     }
                     values.set(String(control.doc.id), payment);
                 }
@@ -310,5 +317,5 @@
             ui.modal.show();
         } catch (error) { editing = false; if (ui) ui.root.remove(); window.showAlert('날짜 수정 확인', error.message); }
     }
-    window.CoopPaymentDates = { version: '1.3.0', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, closeExpense, collectSalary, validateSalaryPayment, edit };
+    window.CoopPaymentDates = { version: '1.3.1', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, closeExpense, collectSalary, validateSalaryPayment, edit };
 })();
