@@ -1,13 +1,14 @@
-/* v1.2.3 — require a separate actual-payment confirmation for payroll. */
+/* v1.3.0 — confirm the actual execution of ordinary expenses. */
 (function () {
     'use strict';
-    let active = null, salaryActive = null, editing = false, draftOwner = '';
+    let active = null, activeExpenseClose = null, salaryActive = null, editing = false, draftOwner = '';
     const drafts = new Map();
     const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) &&
         !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime()) &&
         new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
     const signature = doc => JSON.stringify([doc.coop_id, String(doc.id), doc.status,
-        Number(doc.amount), doc.processed_at, doc.approval_line, doc.expense_snapshot, doc.doc_type]);
+        Number(doc.amount), doc.processed_at, doc.approval_line, doc.expense_snapshot, doc.doc_type,
+        window.CoopExpenseExecution?.eligible(doc) ? doc.file_links : null]);
     function eligible(doc) {
         const snapshot = doc.expense_snapshot || {};
         if (window.CoopInsurancePayment.isInsurance(doc)) return snapshot.adjustment_type !== 'decrease' && !/감액/.test(String(doc.doc_type || ''));
@@ -73,6 +74,7 @@
         cancel.addEventListener('click', () => modal.hide());
         return { root, form, body, error, cancel, submit, modal };
     }
+    const closeExpense = () => activeExpenseClose?.();
     function collect(candidates, today, options = {}) {
         candidates = candidates.filter(({doc}) => !window.CoopInsurancePayment.syncWaitReason(doc, today));
         if (!candidates.length) return Promise.resolve(new Map());
@@ -85,6 +87,7 @@
             ui.cancel.textContent = '전체 취소';
             ui.body.append(el('p', 'text-muted', '실제로 이체하거나 카드를 사용한 건을 선택해 주세요. 날짜를 비워 둔 건은 다음에 연동할 수 있습니다. 신용카드는 사용액만 기록합니다.'));
             const controls = candidates.map(({ doc, approvedDate, scheduledDate }, index) => {
+                const managed = options.executionEnabled!==false && window.CoopExpenseExecution?.eligible(doc);
                 const prepaid = doc.expense_snapshot?.execution?.prepaid === true;
                 const insurance = window.CoopInsurancePayment.isInsurance(doc);
                 const automatic = insurance && window.CoopInsurancePayment.isAuto(doc.expense_snapshot?.insurance);
@@ -93,7 +96,7 @@
                 drafts.set(String(doc.id), draft);
                 const section = el('section', 'border rounded p-3 mb-3');
                 section.append(el('h6', 'fw-bold', doc.title || '지출결의'),
-                    el('p', 'mb-2', `${Number(doc.amount).toLocaleString()}원${prepaid ? ' · 선지출' : ''}`));
+                    el('p', 'mb-2', `${managed?'승인금액 ':''}${Number(doc.amount).toLocaleString()}원${prepaid ? ' · 선지출' : ''}`));
                 const row = el('div', 'form-check mb-2'), check = el('input', 'form-check-input');
                 check.type = 'checkbox'; check.id = `expensePaidCheck${index}`; check.checked = draft.confirmed;
                 const checkLabel = el('label', 'form-check-label', automatic ? '자동이체 출금을 확인했습니다.' : insurance ? '실제 납부를 확인했습니다.' : '이체 또는 카드 사용을 확인했습니다.'); checkLabel.htmlFor = check.id;
@@ -104,7 +107,7 @@
                 date.disabled = !check.checked || prepaid;
                 const label = el('label', 'form-label', '실제 지출일'); label.htmlFor = date.id;
                 let method, card;
-                if (canChooseMethod(doc)) {
+                if (!managed && canChooseMethod(doc)) {
                     method = el('select', 'form-select mb-2'); method.id = `expensePaidMethod${index}`;
                     for (const [value,text] of [['auto','계좌 이체'],['card','조합 등록 카드']]) { const o=el('option','',text);o.value=value;method.append(o); }
                     method.value = draft.method;
@@ -124,12 +127,21 @@
                 check.addEventListener('change', () => { draft.confirmed=check.checked;date.disabled = !check.checked || prepaid; });
                 date.addEventListener('input',()=>{draft.date=date.value;});
                 section.append(row, label, date);
+                if (managed) {
+                    const updateDateTitle = () => {
+                        const x=draft.execution||{};
+                        const card = x.method==='card' || (x.method!=='bank' && window.CoopExpenseExecution.sourceMethod(doc)!=='bank');
+                        label.textContent=card?'카드 사용일':'실제 지출(이체)일';
+                    };
+                    window.CoopExpenseExecution.controls({doc, cards, section, check, draft, index, el, onInput:updateDateTitle});
+                }
                 if (prepaid) section.append(el('p', 'small text-muted mt-2 mb-0', '선지출은 승인된 문서에 기재한 날짜를 사용합니다.'));
-                ui.body.append(section); return { doc, check, date, prepaid, draft };
+                ui.body.append(section); return { doc, check, date, prepaid, draft, managed };
             });
             let result = null, submitted = false;
             const paymentFor = ({ check, date, prepaid, draft }) => ({
-                ...draft, confirmed: check.checked && (prepaid || Boolean(date.value)), date: date.value
+                ...draft, execution:draft.execution?{...draft.execution}:undefined,
+                confirmed: check.checked && (prepaid || Boolean(date.value)), date: date.value
             });
             const updateAction = () => {
                 const ready = controls.some(control => {
@@ -144,16 +156,22 @@
                 date.addEventListener('change', updateAction);
             }
             updateAction();
-            ui.root.addEventListener('hidden.bs.modal', () => { ui.modal.dispose(); ui.root.remove(); active = null; resolve(result); }, { once: true });
+            let shown=false, leaving=false;
+            activeExpenseClose=()=>{leaving=true;result=null;if(shown)ui.modal.hide();};
+            ui.root.addEventListener('shown.bs.modal',()=>{shown=true;if(leaving)ui.modal.hide();},{once:true});
+            ui.root.addEventListener('hidden.bs.modal', () => { ui.modal.dispose(); ui.root.remove(); active = null; activeExpenseClose=null; resolve(result); }, { once: true });
             ui.form.addEventListener('submit', event => {
-                event.preventDefault(); if (submitted) return;
+                event.preventDefault(); if (submitted || leaving) return;
                 const values = new Map();
                 for (const control of controls) {
                     const payment = { ...paymentFor(control), signature: signature(control.doc) };
                     if (payment.confirmed) {
                         const message = window.CoopInsurancePayment.syncPaymentError(control.doc, payment, today) || validate(payment, today);
                         if (message) { ui.error.textContent = message; return; }
-                        try { resolvePayment(control.doc, payment, cards); } catch(error) { ui.error.textContent=error.message;return; }
+                        try {
+                            if(control.managed) window.CoopExpenseExecution.assess(control.doc,payment.execution,cards);
+                            else resolvePayment(control.doc, payment, cards);
+                        } catch(error) { ui.error.textContent=error.message;return; }
                     }
                     values.set(String(control.doc.id), payment);
                 }
@@ -292,5 +310,5 @@
             ui.modal.show();
         } catch (error) { editing = false; if (ui) ui.root.remove(); window.showAlert('날짜 수정 확인', error.message); }
     }
-    window.CoopPaymentDates = { version: '1.2.3', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, collectSalary, validateSalaryPayment, edit };
+    window.CoopPaymentDates = { version: '1.3.0', validDate, eligible, canChooseMethod, resolve:resolvePayment, signature, validate, collect, closeExpense, collectSalary, validateSalaryPayment, edit };
 })();
