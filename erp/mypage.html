@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.96 | 용인 오전 반차 시각 -->
+<!-- Version: v1.0.97 | 전사 일정 생일 날짜 보완 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.0.96 | mypage.html');</script>
+<script>console.log('[Version] v1.0.97 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1903,15 +1903,15 @@ async function loadMypageCalendarSourceData(scope='erp'){
 if(!await ensureMypageSection('company'))throw new Error('회사 설정을 불러오지 못했습니다. 다시 시도해 주세요.');
 const safeScope=scope==='google_ics'?'google_ics':'erp';
 const coopId=String(myInfo?.coop_id||'').trim();
+if(!coopId)throw new Error('현재 조합을 다시 확인해 주세요.');
 const leaveQuery=shouldIncludeMypageCalendarSource(safeScope,'leave')?window.CoopLeaveCalendar.load(_supabase,coopId):Promise.resolve([]);
 const approvedTripStatuses=['완료','실물결재완료'];
 const tripSelect=mypageBusinessTripSnapshotSupported?MYPAGE_BUSINESS_TRIP_SELECT_COLUMNS_WITH_SNAPSHOT:'id,title,content,status,created_at,drafter_id,drafter_name,business_trip_snapshot';
 let tripQuery=_supabase.from('ref_approval').select(tripSelect).eq('doc_type','출장신청').in('status',approvedTripStatuses);
 if(coopId) tripQuery=tripQuery.eq('coop_id', coopId);
 const employeePromise=(() => {
-let query=_supabase.from('ref_employees').select('emp_id,display_emp_no,emp_name,department,hire_date,birth_date,resign_date');
-if(coopId) query=query.eq('coop_id', coopId);
-return query;
+const birthdays=shouldIncludeMypageCalendarSource(safeScope,'birthdays');
+return _supabase.from('ref_employees').select('coop_id,emp_id,display_emp_no,emp_name,department,hire_date,resign_date'+(birthdays?',birth_date':'')).eq('coop_id',coopId);
 })();
 let calendarQuery=_supabase.from('ref_calendar').select('*');
 if(coopId) calendarQuery=calendarQuery.eq('coop_id', coopId);
@@ -1924,9 +1924,17 @@ if(officialHolidayError) CoopSafeLog.error("official holiday load failed", offic
 const workSettings=Object.fromEntries(window.CoopLeaveCalendar.workSettingKeys.map(key=>[key,companyInfo[key]]));
 return {coopId,workSettings,leaveDocs:Array.isArray(l)?l:[],businessTripDocs:Array.isArray(bt)?bt:[],employeeRows:Array.isArray(e)?e:[],calendarRows:Array.isArray(c)?c:[],officialHolidayRows:Array.isArray(officialHolidays)?officialHolidays:[]};
 }
+function getMypageBirthdayDates(value,fromYear,toYear=fromYear){
+const raw=typeof value==='string'?value.trim():'';
+const full=raw.match(/^(\d{4})-(\d{2}-\d{2})$/),md=full?.[2]||(/^\d{2}-\d{2}$/.test(raw)?raw:'');
+const isValid=iso=>{const d=new Date(iso+'T00:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===iso;};
+if(!md||(full?.[1]==='0000')||!isValid(full?raw:'2000-'+md))return [];
+if(!Number.isInteger(fromYear)||!Number.isInteger(toYear)||fromYear<1||toYear>9999||toYear<fromYear||toYear-fromYear>8)return [];
+return Array.from({length:toYear-fromYear+1},(_,i)=>String(fromYear+i).padStart(4,'0')+'-'+md).filter(isValid);
+}
 function buildMypageCalendarDisplayEvents(source,scope='erp'){
 let evts=[];
-const bY=new Date().getFullYear();
+const bY=Number(formatMypageKstDate(new Date()).slice(0,4));
 const yrs=[bY-2,bY-1,bY,bY+1,bY+2];
 const officialHolidayDates=new Set();
 const officialHolidayRows=Array.isArray(source.officialHolidayRows)?source.officialHolidayRows:[];
@@ -1942,7 +1950,10 @@ if(shouldIncludeMypageCalendarSource(scope,'business_trip')) source.businessTrip
 source.employeeRows.forEach(p=>{
 const dn=p.department?`(${p.department})`:'';
 const displayEmpNo=getMypageEmployeeDisplayNoValue(p);
-if(shouldIncludeMypageCalendarSource(scope,'birthdays')&&p.birth_date)yrs.forEach(y=>evts.push({title:`${p.emp_name}${dn} 🎂`,start:`${y}-${p.birth_date}`,color:'#ffc107',textColor:'#000',allDay:true,extendedProps:{origin:{title:`${p.emp_name} 생일 🎂`,start_date:`${y}-${p.birth_date}`,type:'event',visibility:'company',cal_memo:`${p.emp_name}님의 생일입니다.\n사번: ${displayEmpNo}\n부서: ${p.department||'-'}`}}}));
+if(shouldIncludeMypageCalendarSource(scope,'birthdays')&&p.coop_id===source.coopId&&source.coopId&&source.coopId===myInfo.coop_id&&p.emp_id){
+for(const date of getMypageBirthdayDates(p.birth_date,bY-2,bY+2)){
+evts.push({title:`${p.emp_name}${dn} 🎂`,start:date,color:'#ffc107',textColor:'#000',allDay:true,extendedProps:{origin:{title:`${p.emp_name} 생일 🎂`,start_date:date,type:'birthday',visibility:'company',cal_memo:`${p.emp_name}님의 생일입니다.\n부서: ${p.department||'-'}`}}});
+}}
 if(shouldIncludeMypageCalendarSource(scope,'hire_anniversaries')&&p.hire_date){const hY=parseInt(p.hire_date.substring(0,4));yrs.forEach(y=>{const diff=y-hY;if(diff>0)evts.push({title:`${p.emp_name}${dn} 입사 ${diff}주년 🎉`,start:`${y}-${p.hire_date.slice(5,10)}`,color:'#0dcaf0',textColor:'#000',allDay:true,extendedProps:{origin:{title:`${p.emp_name} 입사 ${diff}주년 🎉`,start_date:`${y}-${p.hire_date.slice(5,10)}`,type:'event',visibility:'company',cal_memo:`${p.emp_name}님의 입사 ${diff}주년입니다.\n사번: ${displayEmpNo}\n입사일: ${p.hire_date}`}}})})}
 });
 source.calendarRows.forEach(x=>{
@@ -2083,8 +2094,9 @@ appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`business-trip-${doc.id
 });
 source.employeeRows.forEach(row=>{
 const deptLabel=row.department?`(${row.department})`:'';
-if(shouldIncludeMypageCalendarSource(scope,'birthdays')&&row.birth_date){
-appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`birthday-${row.emp_id}@${uidDomain}`,title:`${row.emp_name}${deptLabel} 생일 🎂`,description:`${row.emp_name}님의 생일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n부서: ${row.department||'-'}`,start:`${new Date().getFullYear()}-${String(row.birth_date).slice(5,10)}`,allDay:true,rrule:'FREQ=YEARLY'}));
+if(shouldIncludeMypageCalendarSource(scope,'birthdays')&&row.coop_id===source.coopId&&source.coopId&&source.coopId===myInfo.coop_id&&row.emp_id){
+const y=Number(formatMypageKstDate(new Date()).slice(0,4)),first=getMypageBirthdayDates(row.birth_date,y,y+8)[0];
+if(first)appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`birthday-${row.emp_id}@${uidDomain}`,title:`${row.emp_name}${deptLabel} 생일 🎂`,description:`${row.emp_name}님의 생일입니다.\n부서: ${row.department||'-'}`,start:first,allDay:true,rrule:'FREQ=YEARLY'}));
 }
 if(shouldIncludeMypageCalendarSource(scope,'hire_anniversaries')&&row.hire_date){
 appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`hire-anniversary-${row.emp_id}@${uidDomain}`,title:`${row.emp_name}${deptLabel} 입사기념일 🎉`,description:`${row.emp_name}님의 입사기념일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n입사일: ${row.hire_date}`,start:row.hire_date,allDay:true,rrule:'FREQ=YEARLY'}));
@@ -2302,10 +2314,10 @@ const endSummary=document.getElementById("evtEndSummary"),start=getMypageKstDate
 endSummary.hidden=!(start.hasTime&&end.hasTime);
 endSummary.textContent=endSummary.hidden?'':`종료: ${end.date===start.date?'':end.date+' '}${end.time}`;
 const inputs=eventModal._element.querySelectorAll('input, select, textarea');
-const canEdit= !e || (e.type!=='leave'&&((myInfo.role==='admin' || myInfo.role==='admin_all') || e.created_by===myInfo.emp_id));
+const canEdit= !e || (!['leave','birthday'].includes(e.type)&&((myInfo.role==='admin' || myInfo.role==='admin_all') || e.created_by===myInfo.emp_id));
 inputs.forEach(el=>{el.disabled=!canEdit});
 if(canEdit){s.classList.remove('hidden');if(e)b.classList.remove("hidden");else b.classList.add("hidden")}else{s.classList.add('hidden');b.classList.add("hidden")}
-if(e){document.getElementById("evtId").value=e.id;document.getElementById("evtTitle").value=e.title;document.getElementById("evtVisibility").value=e.visibility||'company';const dt=getMypageKstDateParts(e.start_date);document.getElementById("evtDate").value=dt.date||'';document.getElementById("evtTime").value=dt.time||"";document.getElementById("evtRecure").value=e.recurrence||'none';document.getElementById("evtIsHoliday").checked=(e.type==='holiday');document.getElementById("evtMemo").value=e.cal_memo||""}else{document.getElementById("evtId").value="";document.getElementById("evtTitle").value="";document.getElementById("evtVisibility").value='private';document.getElementById("evtDate").value=d;document.getElementById("evtTime").value="";document.getElementById("evtRecure").value="none";document.getElementById("evtIsHoliday").checked=false;document.getElementById("evtMemo").value=""}
+if(e){document.getElementById("evtId").value=e.id??'';document.getElementById("evtTitle").value=e.title;document.getElementById("evtVisibility").value=e.visibility||'company';const dt=getMypageKstDateParts(e.start_date);document.getElementById("evtDate").value=dt.date||'';document.getElementById("evtTime").value=dt.time||"";document.getElementById("evtRecure").value=e.recurrence||'none';document.getElementById("evtIsHoliday").checked=(e.type==='holiday');document.getElementById("evtMemo").value=e.cal_memo||""}else{document.getElementById("evtId").value="";document.getElementById("evtTitle").value="";document.getElementById("evtVisibility").value='private';document.getElementById("evtDate").value=d;document.getElementById("evtTime").value="";document.getElementById("evtRecure").value="none";document.getElementById("evtIsHoliday").checked=false;document.getElementById("evtMemo").value=""}
 eventModal.show();
 }
 async function saveEvent(){
