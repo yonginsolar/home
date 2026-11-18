@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.211 | 지출결의 실제 결제·영수증 연동 -->
+<!-- Version: v1.0.212 | 세무 신고 따라 하기 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.211 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.212 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -18,8 +18,8 @@
   <script src="accounting_bank_compare.js?v=1.1.4"></script>
   <script src="accounting_payroll_recovery_v2.js?v=1.1.0" integrity="sha384-E21YgL5nld+cPHhFryWSP/PXrO4ctgS9j0iKoYdZd8immP7qjqu9ovbuMQLeVc/9" crossorigin="anonymous"></script>
   <script src="accounting_journal_typo.js?v=1.1.0" integrity="sha384-m85gYkNm21TI8RCNtqcn9S4eqxMRG2/JuHPpDL694JYsXE4AKCCnqWV/ZQYzBr1X" crossorigin="anonymous" defer></script>
-  <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
-  <script src="workflow_assets.js?v=20261105-tax-label-1"></script>
+  <link rel="stylesheet" href="accounting_guide.css?v=1.1.0">
+  <script src="workflow_assets.js?v=20261118-filing-guide"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
   <link rel="stylesheet" href="financial_statements.css?v=1.1.1">
   <meta charset="UTF-8">
@@ -251,7 +251,7 @@
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHistory" onclick="loadHistory()">🕒 장부 찾아보기</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabStatements" onclick="openFinancialStatements()">📊 재무제표 등록·분석</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabTaxes" onclick="openAccountingTaxTasks()">🗓️ 세무 할 일</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 신고·결산 안내</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 신고·결산 따라 하기</button></li>
   </ul>
 
   <div class="tab-content no-print">
@@ -1525,7 +1525,7 @@ function bindAccountingReadLifecycle() {
     document.getElementById('reportModal').addEventListener('hidden.bs.modal',()=>accountingReportSaveUI?.leave());
     const frame=window.frameElement;
     if(frame)new MutationObserver(records=>{
-        if(frame.hidden||records.some(record=>record.oldValue===null))leaveAccountingApprovalSync();
+        if(frame.hidden||records.some(record=>record.oldValue===null)){leaveAccountingApprovalSync();accountingGuideView?.leave();}
         if(frame.hidden){closingActionRevision++;expireDiscards();}
         if(frame.hidden||records.some(record=>record.oldValue===null))cancelAccountingRead('master');
         cancelStale();
@@ -1533,6 +1533,7 @@ function bindAccountingReadLifecycle() {
     }).observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
     window.addEventListener('pagehide',event=>{invalidateAddResult(event);expireDiscards();accountingReportSaveUI?.leave();capitalLinkUI?.leave();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('pagehide',leaveAccountingApprovalSync);
+    window.addEventListener('pagehide',()=>accountingGuideView?.leave());
     window.addEventListener('beforeunload',event=>{
         if(capitalLinkUI?.isBusy()||accountingReportSaveUI?.hasUnresolved()||assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
     });
@@ -2317,7 +2318,17 @@ window.onload = async function() {
     accountingFormalName = String(accountingRuntimeGate.runtime.coop_name || '');
     accountingDataAuthorized = true;
     document.getElementById('btnClosingReport').disabled = !(canPerform('accounting.view') || canPerform('accounting.edit'));
-    document.querySelector('[data-bs-target="#tabGuide"]').addEventListener('shown.bs.tab', mountAccountingGuide);
+    const guideTab=document.querySelector('[data-bs-target="#tabGuide"]');
+    guideTab.addEventListener('shown.bs.tab',mountAccountingGuide);
+    guideTab.addEventListener('hide.bs.tab',()=>accountingGuideView?.leave());
+    let guideAuthActor=null;
+    _supabase.auth.onAuthStateChange((event,session)=>{
+        const actor=session?.user?.id||'';
+        if(event==='SIGNED_OUT'||(guideAuthActor&&actor&&guideAuthActor!==actor)){
+            accountingGuideAuthInvalid=true;accountingGuideView?.destroy();accountingGuideView=null;
+        }
+        guideAuthActor=actor;
+    });
 
     const today = new Date();
     const todayKst = formatAccountingKstDate(today);
@@ -2389,7 +2400,7 @@ window.onload = async function() {
     }});
 };
 
-let accountingGuideLoading = null;
+let accountingGuideLoading=null,accountingGuideView=null,accountingGuideScope=null,accountingGuideAuthInvalid=false;
 let accountingTaxController = null, accountingTaxLoading = null;
 async function openAccountingTaxTasks() {
     if (!accountingDataAuthorized || !myInfo?.coop_id || (!canPerform('accounting.view') && !canPerform('accounting.edit'))) return;
@@ -2433,17 +2444,24 @@ async function openFinancialStatements(options = {}) {
 
 async function mountAccountingGuide() {
     const root = document.getElementById('accountingGuide');
-    if (!root || root.dataset.mounted === '1') return;
-    if (accountingGuideLoading) return accountingGuideLoading;
-    const owner = myInfo, coopId = String(myInfo?.coop_id || '').trim();
-    const isCurrent = () => owner === myInfo && coopId === String(myInfo?.coop_id || '').trim()
-        && document.getElementById('tabGuide')?.classList.contains('active') && !window.frameElement?.hidden;
+    if(!root||accountingGuideAuthInvalid)return;
+    const scope=accountingReadScope('tabGuide'),coopId=String(scope.owner?.coop_id||'').trim();
+    const isCurrent=()=>!accountingGuideAuthInvalid&&accountingReadScopeCurrent(scope);
+    if(!isCurrent())return;
+    if(accountingGuideView&&accountingGuideScope?.owner===scope.owner&&accountingGuideScope?.identity===scope.identity)return;
+    accountingGuideView?.destroy();accountingGuideView=null;
+    if(accountingGuideLoading){
+        await accountingGuideLoading;
+        if(isCurrent()&&!accountingGuideView)return mountAccountingGuide();
+        return;
+    }
     root.textContent = '안내를 불러오는 중입니다.';
     accountingGuideLoading = (async () => {
         try {
             await Promise.all([window.ErpWorkflowAssets.load('accountingGuide'), window.ErpWorkflowAssets.load('smartaGuide')]);
             if (!isCurrent()) return;
-            window.CoopAccountingGuide.mount({root, client:_supabase, coopId});
+            accountingGuideView=window.CoopAccountingGuide.mount({root,client:_supabase,coopId,active:isCurrent});
+            accountingGuideScope=scope;
         } catch (_) {
             if (!isCurrent()) return;
             root.textContent = '안내를 불러오지 못했습니다. ';

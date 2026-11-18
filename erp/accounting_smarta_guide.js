@@ -1,4 +1,4 @@
-/* Smart A guide v1.0.0 — NTS 2026 manual; read-only closing report references. */
+/* 법인세 따라 하기 1.1.0. 국세청용 Smart A 및 위택스. */
 (function (host) {
     'use strict';
     const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -24,6 +24,8 @@
         if (!/^\d{4}-\d{2}-\d{2}$/.test(row.period_start) || !/^\d{4}-\d{2}-\d{2}$/.test(row.period_end) || row.period_start>row.period_end || !row.period_end.startsWith(String(year))) throw new Error('REPORT_INVALID');
         if (typeof s.is_closed!=='boolean') throw new Error('REPORT_INVALID');
         const values={}; for(const [k] of totals) values[k]=number(s[k]);
+        values.total_equity=s.total_equity==null?null:number(s.total_equity);
+        const balanced=values.total_equity==null?null:BigInt(values.total_assets)===BigInt(values.total_liabilities)+BigInt(values.total_equity);
         const items={}; for(const [k] of groups) {
             if (!Array.isArray(s[k]) || s[k].length>2000) throw new Error('REPORT_INVALID');
             items[k]=s[k].map(r=>{
@@ -31,29 +33,35 @@
                 return {name:r.name,amount:number(r.amount)};
             });
         }
-        return {year,start:row.period_start,end:row.period_end,closed:s.is_closed,fullYear:row.period_start===`${year}-01-01`&&row.period_end===`${year}-12-31`,generated:typeof row.generated_at==='string'?row.generated_at.slice(0,10):'',values,items};
+        return {year,start:row.period_start,end:row.period_end,closed:s.is_closed,balanced,fullYear:row.period_start===`${year}-01-01`&&row.period_end===`${year}-12-31`,generated:typeof row.generated_at==='string'?row.generated_at.slice(0,10):'',values,items};
     }
-    async function load(client,coopId,year) {
+    async function load(client,coopId,year,signal) {
         year=yearValue(year);
         if(!client || !/^[a-f0-9-]{36}$/i.test(String(coopId||''))) throw new Error('COOP_REQUIRED');
         // Existing table SELECT + RLS remains authoritative; no privileged client or write.
-        const {data,error}=await client.from('accounting_closing_report_snapshots')
+        let query=client.from('accounting_closing_report_snapshots')
             .select('coop_id,fiscal_year,period_start,period_end,generated_at,summary:report_payload->summary')
             .eq('coop_id',coopId).eq('fiscal_year',year).limit(2);
+        if(signal?.aborted)throw new Error('READ_CANCELLED');
+        if(signal&&typeof query.abortSignal==='function')query=query.abortSignal(signal);
+        const {data,error}=await query;
+        if(signal?.aborted)throw new Error('READ_CANCELLED');
         if(error || !Array.isArray(data)) throw new Error('READ_FAILED');
         if(data.length>1) throw new Error('REPORT_INVALID');
         return analyze(data[0],coopId,year);
     }
-    function copy(v,name,enabled) {return enabled?`<button type="button" class="ag-copy" data-copy="${v}" aria-label="${esc(name)} 숫자 복사">복사</button>`:'';}
+    function copyDate(v,name) {return `<span>${name} <b>${esc(v)}</b> <button type="button" class="ag-copy" data-copy="${esc(v)}" aria-label="${name} 복사">복사</button></span>`;}
     function resultHtml(m) {
-        if(!m) return '<p class="ag-notice">선택한 연도의 결산보고서를 조회하지 못했습니다. 회계의 「결산 보고서 생성」에서 해당 연도를 선택해 보고서를 생성했는지, 열람 권한이 있는지 확인하세요. 조회되지 않은 자료를 0원으로 입력하지 마세요.</p>';
-        const ready=m.fullYear&&m.closed;
-        const table=(rows,caption)=>`<div class="ag-table-wrap"><table><caption>${caption}</caption><thead><tr><th>ERP 항목</th><th>금액</th></tr></thead><tbody>${rows.map(([name,v])=>`<tr><th scope="row">${esc(name)}</th><td>${v.toLocaleString('ko-KR')}원 ${copy(v,name,ready)}</td></tr>`).join('')}</tbody></table></div>`;
-        return `<p class="ag-result-title">${m.year}년 결산보고서 · ${esc(m.start)} ~ ${esc(m.end)}</p><p>보고서 생성일 ${esc(m.generated)||'확인 필요'} · ${m.closed?'손익마감 반영':'손익마감 전'}</p>${!ready?'<p class="ag-notice">연간 결산이 마감된 보고서가 아닙니다. 금액 복사는 제공하지 않습니다. 결산 기간과 마감 상태를 확인하고 최종 보고서를 다시 생성하세요.</p>':''}${table(totals.map(([k,n])=>[n,m.values[k]]),'ERP 결산보고서에 기록된 금액')}${groups.map(([k,n])=>`<details class="ag-source"><summary>${n} 세부 금액</summary>${m.items[k].length?table(m.items[k].map(r=>[r.name,r.amount]),esc(n)+' 계정별 금액'):'<p>해당 보고서에 표시된 계정이 없습니다.</p>'}</details>`).join('')}<p class="ag-footnote">장부의 참고 금액입니다. Smart A 표준 계정에 항목별로 분류해 입력해야 하며 자동 전송되지 않습니다. 당기순손익을 과세표준에 그대로 넣지 마세요. 총회 의결·세무조정·신고 완료 여부는 별도로 확인합니다.</p>`;
+        if(!m) return '<p class="ag-notice">선택한 연도의 결산보고서를 찾지 못했습니다. 회계의 「결산 보고서 생성」에서 해당 연도와 열람 권한을 확인하세요.</p>';
+        const ready=m.fullYear&&m.closed&&m.balanced===true;
+        const note=!m.fullYear||!m.closed?'신고에 사용할 사업연도와 최종 마감본을 확인하세요.':m.balanced===false?'자산과 부채·자본 합계가 다릅니다. 최종 결산을 확인하세요.':m.balanced===null?'자본 합계가 빠져 있습니다. 최종 결산을 확인하세요.':'';
+        const table=(rows,caption)=>`<div class="ag-table-wrap"><table><caption>${caption}</caption><thead><tr><th>ERP 항목</th><th>금액</th></tr></thead><tbody>${rows.map(([name,v])=>`<tr><th scope="row">${esc(name)}</th><td>${v===null?'확인 필요':v.toLocaleString('ko-KR')+'원'}</td></tr>`).join('')}</tbody></table></div>`;
+        return `<p class="ag-result-title">${m.year}년 결산보고서 · ${esc(m.start)} ~ ${esc(m.end)}</p><p>보고서 생성일 ${esc(m.generated)||'확인 필요'} · ${m.closed?'손익마감 반영':'손익마감 전'}</p>${note?`<p class="ag-notice">${note}</p>`:''}${ready?`<div class="ag-confirmed ag-verified">${copyDate(m.start,'사업연도 시작일')}${copyDate(m.end,'사업연도 종료일')}</div>`:''}${table([...totals.slice(0,2),['total_equity','자본 합계'],...totals.slice(2)].map(([k,n])=>[n,m.values[k]]),'ERP 결산보고서 대조 금액')}${groups.map(([k,n])=>`<details class="ag-source"><summary>${n} 세부 금액</summary>${m.items[k].length?table(m.items[k].map(r=>[r.name,r.amount]),esc(n)+' 계정별 금액'):'<p>해당 보고서에 표시된 계정이 없습니다.</p>'}</details>`).join('')}<p>세무조정 전 장부 금액입니다. 표준 계정에 맞춰 대조하고, 과세표준과 기납부세액은 조정 서식과 증빙에서 확인하세요.</p>`;
     }
     const steps=[
         ['신고 연도와 프로그램 준비',`<p>먼저 <b>어느 사업연도의 법인세를 신고하는지</b> 확인하세요. 2025년 1~12월 결산을 2026년에 신고한다면 국세청용 Smart A 2026 버전을 사용합니다.</p><p>${link('https://www.hometax.go.kr','홈택스')} 상단 검색창에서 <b>SmartA</b>를 검색하고 자료실의 최신 「법인세 무료작성프로그램」 게시글을 엽니다. ${link(manual,'2026년 공식 사용설명서 내려받기(압축파일)')}</p><p>설치파일의 압축을 풀어 Windows PC에 설치하고, 실행할 때마다 로그인 화면의 <b>최신버전확인</b>을 누르세요. 기존 자료가 있다면 재설치 전에 백업합니다.</p><div class="ag-notice">이 안내는 2026년 국세청 배포본 기준입니다. 적용 대상은 <b>2025년 12월~2026년 11월 결산 법인</b>입니다. 2026년 12월 결산은 다음 신고용 버전을 확인해야 합니다. 무료판은 소규모 영세사업자용이며 일반법인·비영리법인의 신고 경로는 구분됩니다.</div>`],
         ['ERP 결산보고서 준비',`<p>회계 화면 상단의 <b>결산 보고서 생성</b>에서 결산 연도를 선택해 재무상태표·손익계산서·이익잉여금처분계산서를 준비하세요. 아래에는 이미 생성해 저장한 보고서만 불러옵니다.</p><div class="ag-loader"><label for="agClosingYear">결산 연도</label><input id="agClosingYear" type="number" min="1900" max="2100" step="1"><button type="button" id="agClosingLoad" class="btn btn-primary">결산보고서 불러오기</button></div><div id="agClosingResult" role="status" aria-live="polite">결산 연도를 선택해 보고서를 불러오세요.</div><p>전기 금액이 필요한 항목은 전년도 보고서도 준비합니다. 장부를 수정했다면 해당 연도의 보고서를 다시 생성한 뒤 불러오세요.</p>`],
+        ['법인 유형과 직접 신고 가능 여부 확인',`<p>설립·등기 자료에서 <b>일반협동조합</b>인지 <b>사회적협동조합</b>인지 먼저 확인하세요. 일반협동조합이 이름만으로 조합법인 과세특례 대상이 되는 것은 아닙니다. 사회적협동조합은 비영리법인으로 수익사업 해당 여부와 고유목적사업의 구분경리를 확인하세요. 발전·판매가 있다는 이유만으로 전부 면세 또는 전부 비과세로 처리하지 마세요.</p><p>홈택스 법인세 <b>신고도움 서비스</b>에서 대상 유형을 확인합니다. 외부조정 대상이면 결산자료와 전기 신고서, 감가상각·조정 명세, 중간예납 및 원천징수 자료를 세무대리인에게 전달하세요.</p><p>${link('https://www.law.go.kr/법령/협동조합기본법/제4조','협동조합 유형') } · ${link('https://www.law.go.kr/법령/법인세법/제113조','수익사업 구분경리')} · ${link('https://www.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7975&mi=6549','국세청 신고절차·외부조정')}</p>`],
         ['회사 기본정보 등록',`<p>Smart A 로그인 화면에서 <b>회사등록</b>을 열고 조합의 회사명·회계기간을 등록합니다. 다음에는 회사 선택 칸에서 <b>F2</b>를 눌러 등록한 조합을 선택할 수 있습니다.</p><p><b>기초사항검토 → 회사기본사항등록(회사등록)</b>에서 사업자등록번호·법인등록번호·대표자·주소·업종과 사업연도를 사업자등록증·등기 자료에 맞춥니다. <b>추가사항</b> 탭의 법인구분과 중소기업 여부도 확인하세요. 협동조합이라는 이유만으로 비영리나 감면 대상을 선택하지 마세요.</p>${screen('company','회사등록',27)}<p><b>끝내기 전 확인:</b> 조합 이름과 사업연도가 맞는지 확인하고 저장하세요. ERP의 조합 선택과 Smart A의 회사 선택은 서로 별개입니다.</p>`],
         ['작성할 서식과 순서 확인',`<p><b>기초사항검토 → 작성순서/flow chart(2)</b>를 엽니다. 서식명을 더블클릭하면 해당 입력 화면으로 이동합니다.</p><p>먼저 표준재무제표를 입력하고, 해당하는 세무조정 서식, 세액조정계산서, 최종 신고서 순으로 진행합니다. 모든 서식을 채우는 것이 아니라 조합의 실제 거래와 신고 요건에 해당하는 서식을 확인합니다.</p>${screen('flow','작성순서',30)}`],
         ['표준재무제표에 장부 금액 입력',`<p><b>표준재무제표</b>에서 <b>표준재무상태표</b>를 열고 상단 <b>편집(F3)</b>을 누릅니다. ERP 재무상태표의 각 계정을 같은 성격의 표준 항목에 나누어 입력합니다. 세부 금액을 입력하고 <b>Enter</b>를 눌러 합계를 반영한 뒤 저장하세요.</p><p>예를 들어 보통예금은 현금·예금 항목을 확인하고, 재고·발전설비·부채는 각각의 표준 항목을 확인합니다. <b>유동자산처럼 자동 합계 칸에는 총액을 억지로 입력하지 않습니다.</b> ERP 계정코드와 신고서의 표준 코드는 같다고 가정하지 마세요.</p>${screen('statements','표준재무상태표',31)}<p><b>표준손익계산서</b>에는 매출, 비용, 영업외수익 등을 구분해 넣고 ERP 당기순손익과 대조합니다. 매출은 공급가액 기준을 확인합니다. <b>표준원가명세서</b>는 해당 원가 유형과 작성 필요 여부를 검토합니다.</p><p><b>이익잉여금처분(결손금)계산서</b>는 <b>편집(F3)</b>으로 작성하고 <b>처분일(F4)</b>에 실제 처분 확정일을 입력합니다. 보고서를 만든 날짜로 대신하지 마세요. 전기이월 금액과 적립금·배당·차기이월 금액은 실제 의결 내용에 맞춥니다.</p><p><b>끝내기 전 확인:</b> 표준재무상태표의 자산과 부채·자본, 표준손익계산서의 당기순손익이 ERP 최종 보고서와 맞는지 확인합니다. ERP CSV가 Smart A에 통째로 자동 입력되는 기능은 아닙니다.</p>`],
@@ -61,22 +69,18 @@
         ['세액조정계산서와 최종 신고서 확인',`<p><b>법인세 과세표준 및 세액조정계산서</b>를 열어 작성한 재무제표·조정 자료를 불러오고, 원천납부·중간예납 등 실제 기납부세액을 근거와 대조합니다.</p>${screen('tax-adjustment','세액조정계산서',77)}<p>다음으로 <b>법인세 과세표준 및 세액신고서</b>에서 <b>새로불러오기</b>를 누릅니다. 수입금액·세액을 이 화면에 임의로 덮어쓰지 말고 원래 연결된 서식을 수정하세요. 결산 확정일은 총회 등에서 실제 결산이 확정된 날, 신고일은 실제 신고 예정일을 입력합니다.</p>${screen('return','최종 신고서',75)}<p><b>끝내기 전 확인:</b> 사업연도, 조합 정보, 과세표준, 공제·감면, 기납부세액, 최종 납부·환급액과 필요한 첨부 서식을 검토한 뒤 Smart A에서 <b>마감</b>합니다. Smart A 마감과 ERP 손익마감은 별개입니다.</p>`],
         ['전자신고 파일 만들기·오류 검사',`<p><b>전자신고/일괄출력 → 법인세전자신고</b>를 열어 직접 신고라면 <b>일반업체</b>를 선택하고 <b>제출자 등록</b>에 실제 홈택스 제출자 ID를 입력합니다. 이 인증정보나 파일 암호는 ERP 안내에 입력하지 않습니다.</p>${screen('efile','법인세전자신고',118)}<p><b>전자신고제작</b> 탭에서 저장할 드라이브·조합을 선택하고 마감된 서식 목록을 확인한 뒤 <b>제작</b>을 누릅니다. 파일 저장 위치와 파일 암호를 안전하게 보관하세요.</p><p><b>신고데이터 오류검증</b> 탭에서 제작한 자료를 검사합니다. 오류가 있으면 해당 서식의 마감을 취소하고 수정·재마감·재제작합니다. 파일 생성이나 오류검사 통과만으로 신고가 접수되지는 않습니다.</p>`],
         ['홈택스 파일변환·제출·접수증 확인',`<p>파일 생성 때 입력한 제출자 ID로 ${link('https://www.hometax.go.kr','홈택스')}에 로그인합니다. <b>세금신고 → 법인세 신고 → 법인세신고(정기,중간예납,경정청구) → 파일변환신고</b>에서 해당 신고를 선택합니다.</p><p><b>찾아보기</b>로 생성한 파일 선택 → <b>파일형식검증하기</b> → <b>검증결과확인</b> → <b>내용검증하기</b> 순서로 진행합니다. 오류가 있으면 Smart A 원서식을 수정하고 파일을 다시 제작합니다.</p>${screen('hometax-convert','홈택스 파일변환',126)}<p>정상 검증 뒤 <b>전자파일제출 이동</b>에서 내용을 최종 확인하고 직접 제출합니다. <b>신고내역</b>에서 접수번호·접수증·제출서식 목록을 확인하고 보관하세요. 별도 부속서류가 있으면 해당 제출 메뉴에서 확인합니다.</p><p>국세 납부와 법인지방소득세 신고·납부는 별도로 확인합니다. 이 안내는 홈택스 제출·납부를 자동 실행하지 않습니다.</p>`],
+        ['위택스에서 법인지방소득세 별도 신고',`<p>${link('https://www.wetax.go.kr','위택스')}에서 <b>법인지방소득세 신고</b>로 들어가 해당 사업연도의 확정신고를 선택합니다. 사업연도 종료월 말일부터 일반적으로 법인세는 3개월, 법인지방소득세는 4개월입니다. 연장 대상은 신고기한과 납부기한을 각각 확인하세요.</p><dl class="ag-fields"><dt>사업연도·결산확정일</dt><dd>제출한 법인세 신고서와 실제 결산 확정 자료를 확인합니다.</dd><dt>과세표준·납세지별 기납부세액</dt><dd>국세 신고서의 확정 과세표준과 지방세 조정 근거를 대조합니다. 납부할 국세에 일정 비율을 곱해 대신 입력하지 마세요. 여러 지자체에 사업장이 있다면 안분과 납세지별 신고를 확인합니다.</dd></dl><p>필요한 첨부, 지자체별 접수 결과, 지방세 납부 영수증을 따로 보관하세요. ${link('https://www.gg.go.kr/bbs/boardView.do?bIdx=225916193&bsIdx=570&menuId=1590','경기도 법인지방소득세 신고 안내')} · ${link('https://www.law.go.kr/법령/지방세법시행규칙','지방세법 시행규칙 별지 제43호서식')}</p>`],
         ['신고자료 보관',`<p>Smart A의 <b>시스템관리 → 데이터백업</b>에서 신고자료를 백업합니다. 백업 파일과 복구 암호는 안전하게 보관하고, 신고서 PDF·접수증·납부 증빙도 함께 보관하세요.</p><p>ERP에는 최종 장부와 결산보고서, 신고·납부 증빙을 남깁니다. 신고 과정에서 장부 수정이 생겼다면 근거와 기존 마감 상태를 확인하고 결산보고서도 다시 생성합니다.</p>`]
     ];
-    function mount({root,client,coopId}) {
-        let generation=0;
-        root.innerHTML=`<p class="ag-footnote">국세청용 Smart A · 2026년 공식 사용설명서 기준</p>`+steps.map(([title,html],i)=>`<details class="ag-step"${i===0?' open':''}><summary><span class="ag-number">${i+1}</span>${title}</summary><div class="ag-step-body">${html}</div></details>`).join('');
+    function mount({root,client,coopId,active,bindRead,stepHtml,generic}) {
+        root.innerHTML=stepHtml(steps)+`<p class="ag-sources">${link('https://douzoneon.com/page/proposal/smarta_proposal.pdf','더존 Smart A 모듈 안내')}</p>`;
         const input=root.querySelector('#agClosingYear'),button=root.querySelector('#agClosingLoad'),out=root.querySelector('#agClosingResult');
         const kst=new Date(Date.now()+9*3600000); input.value=kst.getUTCFullYear()-1;
-        input.addEventListener('input',()=>{generation++;button.disabled=false;button.textContent='결산보고서 불러오기';out.textContent='결산 연도가 변경됐습니다. 보고서를 다시 불러오세요.';});
-        button.addEventListener('click',async()=>{
-            const ticket=++generation;button.disabled=true;button.textContent='불러오는 중…';out.textContent='저장한 결산보고서를 확인하고 있습니다.';
-            try {const model=await load(client,coopId,input.value); if(ticket===generation&&out.isConnected)out.innerHTML=resultHtml(model);}
-            catch(e){if(ticket===generation&&out.isConnected)out.textContent=e.message==='YEAR_REQUIRED'?'결산 연도를 네 자리 숫자로 입력해 주세요.':'보고서를 불러오지 못했습니다. 로그인·같은 조합의 결산자료 열람 권한과 보고서 상태를 확인해 주세요.';}
-            finally {if(ticket===generation&&button.isConnected){button.disabled=false;button.textContent='결산보고서 불러오기';}}
-        });
+        return bindRead({input,button,out,active,load:(y,_,signal)=>load(client,coopId,y,signal),render:resultHtml,
+            error:e=>e.message==='YEAR_REQUIRED'?'결산 연도를 네 자리 숫자로 입력해 주세요.':e.message==='REPORT_INVALID'?'선택한 연도의 최종 결산보고서를 확인하세요.':generic(e),
+            loading:'저장한 결산보고서를 확인하고 있습니다.',changed:'선택한 연도의 결산보고서를 불러오세요.'});
     }
-    const api={mount,load,analyze,resultHtml};
+    const api={version:'1.1.0',mount,load,analyze,resultHtml};
     if(typeof module!=='undefined'&&module.exports)module.exports=api;
     if(host)host.CoopSmartaGuide=api;
 })(typeof window!=='undefined'?window:null);
