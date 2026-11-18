@@ -1,4 +1,4 @@
-/* 신고·결산 따라 하기 1.1.0. 기존 회계 열람 권한으로 대조 자료만 조회한다. */
+/* 신고·결산 따라 하기 1.1.1. 기존 회계 열람 권한으로 대조 자료만 조회한다. */
 (function (host) {
     'use strict';
     const completed = ['완료', '실물결재완료'];
@@ -111,7 +111,7 @@
         const journals = await allPages(() => client.from('ac_journal')
             .select('coop_id,Trans_ID,Date,Account,Credit').eq('coop_id',coopId)
             .eq('Account','보통예금').gt('Credit',0).gte('Date',p.start).lt('Date',p.end)
-            .order('id'),signal);
+            .order('Trans_ID').order('Date').order('Credit'),signal);
         const ids = [...new Set(journals.map(r => String(r.Trans_ID).match(/^APR-(\d+)$/)?.[1]).filter(Boolean))];
         const docs = [];
         for (let i = 0; i < ids.length; i += 100) {
@@ -134,13 +134,9 @@
     const vatAccounts=['부가세예수금','부가세대급금'];
     function analyzeVat(rows, coopId, p) {
         const values=Object.fromEntries(vatAccounts.map(k=>[k,{debit:0,credit:0,count:0}]));
-        const journalIds=new Set();
         for (const row of rows) {
             if (row.coop_id!==coopId) throw new Error('TENANT_MISMATCH');
             if (!/^\d{4}-\d{2}-\d{2}$/.test(row.Date) || row.Date<p.start || row.Date>=p.end || !Object.hasOwn(values,row.Account)) throw new Error('VAT_SCOPE');
-            const id=String(row.id??'');
-            if (!id || journalIds.has(id)) throw new Error('VAT_DUPLICATE');
-            journalIds.add(id);
             const value=values[row.Account], debit=amount(row.Debit), credit=amount(row.Credit);
             if (debit<0 || credit<0 || debit>0&&credit>0) throw new Error('AMOUNT_INVALID');
             value.debit=sum(value.debit,debit);value.credit=sum(value.credit,credit);value.count++;
@@ -150,10 +146,15 @@
     async function loadVat(client,coopId,year,key,signal) {
         if (!client || !/^[a-f0-9-]{36}$/i.test(String(coopId||''))) throw new Error('COOP_REQUIRED');
         const p=vatPeriod(year,key);
-        const rows=await allPages(()=>client.from('ac_journal')
-            .select('id,coop_id,Date,Account,Debit,Credit').eq('coop_id',coopId)
-            .in('Account',vatAccounts).gte('Date',p.start).lt('Date',p.end).order('id'),signal);
-        return analyzeVat(rows,coopId,p);
+        // 운영 장부에는 단일 행 키가 없으므로 순서가 흔들리는 여러 페이지를 합치지 않는다.
+        // 한 조회의 반환 행 수를 서버의 전체 수와 대조한다. 같은 내용의 실제 두 행은 유지한다.
+        const {data,count,error}=await withSignal(client.from('ac_journal')
+            .select('coop_id,Date,Account,Debit,Credit',{count:'exact'}).eq('coop_id',coopId)
+            .in('Account',vatAccounts).gte('Date',p.start).lt('Date',p.end).limit(1000),signal);
+        if(signal?.aborted)throw new Error('READ_CANCELLED');
+        if(error||!Array.isArray(data)||!Number.isSafeInteger(count))throw new Error('READ_FAILED');
+        if(count!==data.length)throw new Error('RESULT_TOO_LARGE');
+        return analyzeVat(data,coopId,p);
     }
     function vatResult(m) {
         const row=label=>{const v=m.values[label];return `<tr><th scope="row">${label}</th><td>${v.count?money(v.debit):'기록 없음'}</td><td>${v.count?money(v.credit):'기록 없음'}</td></tr>`;};
@@ -270,7 +271,7 @@
                     input.value=recent.slice(0,4);extra.value=Number(recent.slice(5))<=6?'h1':'h2';
                     read=bindRead({input,extra,button:q('#agVatLoad'),out:q('#agVatResult'),active:current,load:(y,p,s)=>loadVat(client,coopId,y,p,s),render:vatResult,
                         loading:'선택한 기간의 세금 계정을 확인하고 있습니다.', changed:'선택한 기간의 장부를 대조하세요.',
-                        error:e=>e.message==='VAT_PERIOD_REQUIRED'?'거래 연도와 기간을 확인하세요.':['VAT_DUPLICATE','RESULT_TOO_LARGE'].includes(e.message)?'일부 전표를 확인하지 못했습니다. 장부를 다시 대조하세요.':generic(e)});
+                        error:e=>e.message==='VAT_PERIOD_REQUIRED'?'거래 연도와 기간을 확인하세요.':e.message==='RESULT_TOO_LARGE'?'전표가 많습니다. 기간을 분기로 좁히거나 장부에서 직접 대조하세요.':generic(e)});
                 }
             }
             const values=remembered.get(topic);
@@ -294,7 +295,7 @@
         draw('withholding');
         return {leave,destroy(){leave();root.onclick=null;delete root.dataset.mounted;root.replaceChildren();}};
     }
-    const api={version:'1.1.0',mount,load,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead};
+    const api={version:'1.1.1',mount,load,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead};
     if (typeof module !== 'undefined' && module.exports) module.exports=api;
     if (host) host.CoopAccountingGuide=api;
 })(typeof window !== 'undefined' ? window : null);
