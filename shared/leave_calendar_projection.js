@@ -1,4 +1,4 @@
-/* v1.1.0 — 휴가 원문을 바꾸지 않고 전사 일정·구독에 같은 시각을 표시한다. */
+/* v1.1.1 — 휴가 원문을 바꾸지 않고 전사 일정·구독에 같은 시각을 표시한다. */
 (function (root) {
     'use strict';
     const pending=Object.freeze(['진행중','가승인','증빙확인중','실물결재대기']);
@@ -28,7 +28,10 @@
     const timeNumber=value=>{const t=clock(value);return t?Number(t.slice(0,2))*60+Number(t.slice(3)):null;};
     const timeLabel=n=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
     function halfDayTimes(coop,part,settings) {
-        if(part==='pm'&&text(coop)===yongin)return ['13:30','17:30'];
+        if(text(coop)===yongin){
+            if(part==='am')return ['08:30','12:30'];
+            if(part==='pm')return ['13:30','17:30'];
+        }
         const [a,b,l,r]=workSettingKeys.map(key=>timeNumber(settings?.[key]));
         if([a,b,l,r].some(v=>v==null)||!(a<=l&&l<r&&r<=b))return null;
         const half=(b-a-(r-l))/2;
@@ -148,5 +151,5 @@
         }
         return out;
     }
-    root.CoopLeaveCalendar=Object.freeze({statuses,project,eventsForDoc,load,fold,workSettingKeys,version:'1.1.0'});
+    root.CoopLeaveCalendar=Object.freeze({statuses,project,eventsForDoc,load,fold,workSettingKeys,version:'1.1.1'});
 })(globalThis);
