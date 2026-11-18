@@ -77,6 +77,20 @@
     find('guestEmailConsent').hidden=!needed; box.required=needed;
     if (!needed) box.checked=false;
   }
+  function formatPhone(input) {
+    const before=input.value, caret=input.selectionStart??before.length;
+    const d=before.replace(/[^0-9]/g,'').slice(0,11);
+    const area=d.startsWith('02')?2:3;
+    const middle=d.startsWith('010')||d.length>=area+8?4:3;
+    const chunks=[d.slice(0,area),d.slice(area,area+middle),d.slice(area+middle)].filter(Boolean);
+    const next=chunks.join('-'); if(before===next)return;
+    let n=before.slice(0,caret).replace(/[^0-9]/g,'').length, at=0;
+    while(at<next.length&&n>0){if(next[at]!=='-')n--;at++;}
+    if(before[caret-1]==='-'&&next[at]==='-')at++;
+    input.value=next;try{input.setSelectionRange(at,at);}catch{}
+  }
+  form.elements.phone.addEventListener('input',event=>{if(!event.isComposing)formatPhone(event.target);});
+  form.elements.phone.addEventListener('compositionend',event=>formatPhone(event.target));
   form.elements.email.addEventListener('input',emailState);
   retry.addEventListener('click',()=>void check(retry));
   form.addEventListener('submit',async event=>{
@@ -91,7 +105,7 @@
       if ((await call('submit',payload)).received!==true) throw new Error('REQUEST_UNAVAILABLE');
       done(submit);
     } catch (error) {
-      const known={INVALID_INPUT:'이름, 소속, 직함, 전화번호와 이메일을 확인해 주세요.',CONSENT_REQUIRED:'개인정보 수집·이용 안내를 다시 확인해 주세요.',TOO_MANY_REQUESTS:'잠시 뒤 다시 제출해 주세요.',GUESTBOOK_CLOSED:'방명록 작성이 마감됐습니다.',GUESTBOOK_UNAVAILABLE:'사용할 수 없는 QR입니다. 부스의 최신 QR을 확인해 주세요.'};
+      const known={INVALID_INPUT:'이름과 전화번호, 입력한 선택 항목을 확인해 주세요.',CONSENT_REQUIRED:'개인정보 수집·이용 안내를 다시 확인해 주세요.',TOO_MANY_REQUESTS:'잠시 뒤 다시 제출해 주세요.',GUESTBOOK_CLOSED:'방명록 작성이 마감됐습니다.',GUESTBOOK_UNAVAILABLE:'사용할 수 없는 QR입니다. 부스의 최신 QR을 확인해 주세요.'};
       if (Object.hasOwn(known,error.message)) {
         payload=null;
         if (error.message==='CONSENT_REQUIRED') {

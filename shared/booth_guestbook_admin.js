@@ -16,6 +16,8 @@
     const $=id=>document.getElementById(id);
     const opener=$('boothGuestbookOpen'), dialog=$('boothGuestbookDialog'), select=$('boothGuestbookEvent'), table=$('boothGuestbookRows');
     const controls=$('boothGuestbookControls'), search=$('boothGuestbookSearch'), message=$('boothGuestbookInfo'), printPane=$('boothGuestbookPrint');
+    const editor=$('boothEntryDialog'), editForm=$('boothEntryForm'), fields=$('boothEntryFields'), editMessage=$('boothEntryMessage');
+    const pendingEntries=new Map();let editIntent=0, editScope=null, editFrom=null, record=null, editing=false;
     let view=0, requestCounter=0, owner, events=[], settings=null, offset=0, term='', busy=false, pendingChange=false, more=false, exportLib, confirming='', previewUrl='', pinnedEvent='';
     const show = s => { message.textContent=s; };
     const current = (v,r) => v===view && (r===undefined || r===requestCounter) && dialog.open && owner===getOwner() && !window.frameElement?.hidden;
@@ -46,6 +48,7 @@
       previewUrl=''; printPane.hidden=true; const qr=$('boothGuestbookQr'); qr.replaceChildren(); qr.removeAttribute('title');
     }
     function clear() {
+      closeEntry(false);
       view++; requestCounter++; owner=null; events=[]; settings=null; offset=0; term=''; busy=false; pendingChange=false; more=false; confirming=''; pinnedEvent='';
       table.replaceChildren(); select.replaceChildren(); search.value=''; resetPrint();
       $('boothGuestbookPrintTitle').textContent=''; $('boothGuestbookPrintWhere').textContent=''; $('boothGuestbookTotal').textContent='';
@@ -62,8 +65,13 @@
     function draw(rows) {
       table.replaceChildren(...rows.map(row=>{
         const tr=document.createElement('tr');
-        for (const key of keys) {
-          const td=document.createElement('td'); td.textContent=value(key,row)||'—'; tr.append(td);
+        for (const key of keys.filter(k=>k!=='expires_at')) {
+          const td=document.createElement('td');
+          if(key==='name' && /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(row.entry_id||'')){
+            const button=document.createElement('button');button.type='button';button.className='btn btn-link p-0 text-start';button.textContent=value(key,row)||'이름 없음';
+            button.addEventListener('click',()=>void openEntry(row.entry_id,button));td.append(button);
+          }else td.textContent=value(key,row)||'—';
+          tr.append(td);
         }
         return tr;
       }));
@@ -88,6 +96,7 @@
         }
         const result=await rpc('list',id,{search:term,offset}); if(!current(v,r))return;
         draw(result.rows || []); more=!!result.more;
+        if(Number.isSafeInteger(result.valid_count))$('boothGuestbookTotal').textContent=`누적 접수 ${Number(settings.total||0).toLocaleString('ko-KR')}건 · 현재 보관 ${result.valid_count.toLocaleString('ko-KR')}건`;
         show(table.children.length?'':settings.can_issue?'표시할 방문 기록이 없습니다.':'접수를 시작하지 않았거나 마감됐습니다.');
       } catch (error) {
         if(current(v,r)&&!protectAfterError(error)) {
@@ -95,6 +104,60 @@
           show(pendingChange?'QR 상태를 확인하지 못했습니다. 다시 확인해 주세요.':'방명록을 불러오지 못했습니다. 다시 확인해 주세요.');
         }
       } finally { if(current(v,r)){busy=false;render();} }
+    }
+    function closeEntry(focus=true){
+      editIntent++;editScope=null;record=null;editing=false;
+      if(!editor||!editForm)return;
+      const old=editFrom;editFrom=null; if(editor.open)editor.close();editForm.reset();editForm.hidden=true;
+      $('boothEntryConfirm').hidden=true;$('boothEntryRetry').hidden=true;editMessage.textContent='';
+      if(focus&&old?.isConnected&&(document.activeElement===document.body||document.activeElement===editor))old.focus({preventScroll:true});
+    }
+    const editCurrent=(scope,intent)=>editScope===scope&&editIntent===intent&&!!editor?.open&&current(scope.view)&&select.value===scope.event;
+    const editableKeys=['name','phone','affiliation','position','email','memo'];
+    function editControls(){
+      const locked=editing||!record||pendingEntries.has(editScope?.key);
+      fields.disabled=locked; $('boothEntrySave').disabled=locked;$('boothEntryRemove').disabled=locked;$('boothEntryYes').disabled=locked;
+    }
+    async function readEntry(scope){
+      const intent=++editIntent;editing=true;editControls();$('boothEntryRetry').hidden=true;$('boothEntryConfirm').hidden=true;
+      editMessage.textContent='접수 내용을 불러오는 중입니다.';
+      try{
+        const inflight=pendingEntries.get(scope.key);if(inflight)await inflight.catch(()=>{});
+        if(!editCurrent(scope,intent))return;
+        const data=await rpc('entry_read',scope.event,{entry_id:scope.id});if(!editCurrent(scope,intent))return;
+        if(data?.id!==scope.id)throw Error('GUESTBOOK_ENTRY_UNAVAILABLE');
+        record=data;for(const key of editableKeys)editForm.elements[key].value=data[key]??'';
+        for(const key of ['talked','contacted'])editForm.elements[key].checked=data[key]===true;
+        editForm.elements.email.readOnly=!data.email_agreed;editForm.hidden=false;editMessage.textContent='';
+      }catch(e){if(editCurrent(scope,intent)){
+        editMessage.textContent=e.message==='GUESTBOOK_ENTRY_UNAVAILABLE'?'삭제됐거나 보관기한이 지난 접수입니다.':e.message==='ACCESS_DENIED'?'방명록을 볼 권한을 확인해 주세요.':'접수 내용을 읽지 못했습니다. 다시 확인해 주세요.';
+        $('boothEntryRetry').hidden=['GUESTBOOK_ENTRY_UNAVAILABLE','ACCESS_DENIED'].includes(e.message);
+        if(e.message==='ACCESS_DENIED'){record=null;editForm.reset();editForm.hidden=true;protectAfterError(e);}
+      }}finally{if(editCurrent(scope,intent)){editing=false;editControls();}}
+    }
+    async function openEntry(id,button){
+      if(!current(view)||busy||!select.value||!editor||editor.open)return;
+      const event=select.value;closeEntry(false);editScope={id,event,key:`${event}:${id}`,view};editFrom=button;
+      editor.showModal();await readEntry(editScope);
+    }
+    async function writeEntry(remove=false){
+      const scope=editScope,intent=editIntent;
+      if(!scope||!editCurrent(scope,intent)||!record||editing||pendingEntries.has(scope.key)||(!remove&&!editForm.reportValidity()))return;
+      const data={entry_id:scope.id,revision:record.revision};
+      if(!remove){for(const key of editableKeys)data[key]=editForm.elements[key].value;
+        for(const key of ['talked','contacted'])data[key]=editForm.elements[key].checked;}
+      const task=rpc(remove?'entry_remove':'entry_update',scope.event,data);pendingEntries.set(scope.key,task);editing=true;editControls();
+      editMessage.textContent=remove?'삭제하는 중입니다.':'저장하는 중입니다.';
+      try{
+        const result=await task;if(result?.ok!==true)throw Error('UNKNOWN_RESULT');
+        if(editCurrent(scope,intent)){closeEntry();offset=0;void load({settings:true});}
+      }catch(e){if(editCurrent(scope,intent)){
+        if(e.message==='ACCESS_DENIED'){record=null;editForm.reset();editForm.hidden=true;protectAfterError(e);}
+        if(e.message==='GUESTBOOK_ENTRY_UNAVAILABLE'){record=null;editForm.reset();editForm.hidden=true;}
+        $('boothEntryConfirm').hidden=true;
+        if(e.message==='GUESTBOOK_ENTRY_CHANGED'){$('boothEntryRetry').hidden=false;record=null;}
+        editMessage.textContent={GUESTBOOK_ENTRY_CHANGED:'다른 곳에서 수정했습니다. 다시 확인해 주세요.',GUESTBOOK_ENTRY_UNAVAILABLE:'삭제됐거나 보관기한이 지난 접수입니다.',ACCESS_DENIED:'방명록 관리 권한을 확인해 주세요.',INVALID_INPUT:'이름·전화번호·선택 항목을 확인해 주세요.'}[e.message]||'처리 결과를 확인하지 못했습니다. 같은 내용으로 다시 시도할 수 있습니다.';
+      }}finally{if(pendingEntries.get(scope.key)===task)pendingEntries.delete(scope.key);if(editCurrent(scope,intent)){editing=false;editControls();}}
     }
     async function change() {
       const action=confirming;
@@ -134,6 +197,14 @@
       clear(); pinnedEvent=requested; owner=getOwner();dialog.showModal(); void load();
     });
     $('boothGuestbookClose').addEventListener('click',close);
+    if(editor&&editForm){
+      $('boothEntryClose').addEventListener('click',()=>closeEntry());editor.addEventListener('cancel',e=>{e.preventDefault();closeEntry();});
+      $('boothEntryRetry').addEventListener('click',()=>{if(editScope&&!editing)void readEntry(editScope);});
+      editForm.addEventListener('submit',e=>{e.preventDefault();void writeEntry(false);});
+      $('boothEntryRemove').addEventListener('click',()=>{if(!editing&&record){$('boothEntryConfirm').hidden=false;$('boothEntryCancelRemove').focus();}});
+      $('boothEntryCancelRemove').addEventListener('click',()=>{$('boothEntryConfirm').hidden=true;$('boothEntryRemove').focus();});
+      $('boothEntryYes').addEventListener('click',()=>void writeEntry(true));
+    }
     dialog.addEventListener('cancel',event=>{event.preventDefault();close();});
     $('boothGuestbookRetry').addEventListener('click',()=>{if(!busy)void load({settings:true});});
     select.addEventListener('change',()=>{settings=null;pendingChange=false;offset=0; more=false;draw([]);resetPrint();void load({settings:true});});
