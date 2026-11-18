@@ -1,9 +1,9 @@
-/* General committees 1.0.1. Current editor and applied-query boundaries; original writer/authority unchanged. */
+/* General committees 1.0.2. The page can provide a registration chooser; original editor and writer unchanged. */
 (function(root){
  'use strict';
  const roles={chair:'위원장',secretary:'간사',member:'위원'};
  const node=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
- function create({client,container,getContext}){
+ function create({client,container,getContext,chooseRegistration}){
   let active=false,scope='',seq=0,detailSeq=0,authorized=false,reading=false,readingQuery=null,appliedQuery=null,rows=[],cursor=null,moreAvailable=false,editing=null,opener=null,epoch=0;
   const drafts=new Map(),context=()=>getContext()||{},owner=()=>JSON.stringify([context().actorId,context().coopId]);
   let authActor=context().actorId;
@@ -21,7 +21,8 @@
   const controls=node('form');controls.className='d-flex flex-wrap gap-2 mb-3';
   const search=node('input');search.type='search';search.className='form-control';search.placeholder='위원회 이름·활동 내용 검색';search.setAttribute('aria-label','위원회 검색');search.setAttribute('data-erp-query-control','');search.style.flex='1 1 15rem';
   const retry=node('button','다시 확인');retry.type='submit';retry.className='btn btn-outline-primary';
-  const add=node('button','위원회 만들기');add.type='button';add.className='btn btn-primary';
+  const add=node('button',chooseRegistration?'등록':'위원회 만들기');add.type='button';add.className='btn btn-primary';
+  if(chooseRegistration){add.setAttribute('aria-haspopup','dialog');add.setAttribute('aria-controls','officialRegistrationChoice');}
   controls.append(search,retry,add);const list=node('div'),more=node('button','더 보기');more.type='button';more.className='btn btn-outline-primary mt-3';more.hidden=true;
   const intro=node('p','위원회별 활동 기간과 위원장·간사·위원을 관리합니다. 임원·대의원·선거관리위원 위촉과 업무 권한은 기존 화면에서 별도로 관리합니다.');intro.className='helper';
   container.append(intro,controls,status,list,more);
@@ -92,12 +93,15 @@
   history.onclick=async()=>{const d=editing,e=epoch;if(!owns(d))return;historyBox.hidden=false;historyBox.textContent='이전 변경을 불러오고 있습니다.';try{const r=await rpc('history',{id:d.id},null,true,d);if(!owns(d)||epoch!==e)return;historyBox.replaceChildren();if(!r.rows?.length)historyBox.textContent='이전 변경이 없습니다.';for(const v of r.rows||[]){const block=node('details'),summary=node('summary',`${v.revision}번째 저장 · ${new Date(v.changed_at).toLocaleString('ko-KR')}`),text=node('p',`${v.snapshot.title} · ${v.snapshot.state==='ended'?'활동 종료':'활동 중'} · ${(v.snapshot.roster||[]).map(m=>`${m.name} (${roles[m.role]||'위원'})`).join(', ')} · ${v.snapshot.purpose||''}`);block.append(summary,text);historyBox.append(block);}}catch(error){if(owns(d)&&epoch===e)historyBox.textContent=explain(error);}};
   close.onclick=()=>closeEditor();overlay.addEventListener('keydown',event=>{if(overlay.hidden||event.defaultPrevented)return;if(document.querySelector('dialog.coop-dialog[open]'))return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeEditor();}if(event.key==='Tab'){const focusable=[...overlay.querySelectorAll('button,input,textarea,select,summary,[tabindex="0"]')].filter(n=>!n.disabled&&n.getClientRects().length);const i=focusable.indexOf(document.activeElement);if(!focusable.length){event.preventDefault();panel.focus();}else if(event.shiftKey&&(i<=0)){event.preventDefault();focusable.at(-1).focus();}else if(!event.shiftKey&&(i===focusable.length-1||i<0)){event.preventDefault();focusable[0].focus();}}});
   search.oninput=()=>{const query=search.value.trim();if(reading&&query!==readingQuery){seq++;reading=false;readingQuery=null;add.disabled=!authorized;}syncMore();if(query!==appliedQuery)status.textContent=queryHint;else if(!reading&&status.textContent===queryHint)status.textContent=rows.length?'':query?'검색 조건에 맞는 위원회가 없습니다.':'등록된 위원회가 없습니다.';};
-  controls.onsubmit=e=>{e.preventDefault();void refresh();};more.onclick=()=>{if(!reading)void refresh(true);};add.onclick=()=>{if(!current()||!authorized)return;const d=drafts.get(key('new'))||fresh();drafts.set(key('new'),d);show(d,add);};
+  function openNew(){if(!current()||!authorized)return;const d=drafts.get(key('new'))||fresh();drafts.set(key('new'),d);show(d,add);}
+  controls.onsubmit=e=>{e.preventDefault();void refresh();};more.onclick=()=>{if(!reading)void refresh(true);};add.onclick=()=>{
+   if(!current()||!authorized)return;if(chooseRegistration)chooseRegistration(add,openNew);else openNew();
+  };
   function pause(){capture();active=false;seq++;detailSeq++;memberSeq++;closeEditor(false);}
   new MutationObserver(()=>{if(root.frameElement?.hidden)pause();}).observe(root.frameElement||document.documentElement,{attributes:true,attributeFilter:['hidden']});
   client.auth?.onAuthStateChange?.((event,session)=>{const next=session?.user?.id||'';if(next!==authActor){pause();authorized=false;authActor=next;}});
   root.addEventListener('pagehide',pause);root.addEventListener('beforeunload',e=>{capture();if([...drafts.values()].some(dirty)){e.preventDefault();e.returnValue='';}});
-  return {activate(){if(!client.auth)authActor=context().actorId;active=true;void refresh();},pause,refresh(){if(active)return refresh();},hasDraft(){capture();return [...drafts.values()].some(dirty);},version:'1.0.1'};
+  return {activate(){if(!client.auth)authActor=context().actorId;active=true;void refresh();},pause,refresh(){if(active)return refresh();},hasDraft(){capture();return [...drafts.values()].some(dirty);},version:'1.0.2'};
  }
- root.CommitteeManagement={create,version:'1.0.1'};
+ root.CommitteeManagement={create,version:'1.0.2'};
 })(window);

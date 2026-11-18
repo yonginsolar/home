@@ -1,4 +1,4 @@
-/* 임원·사외이사·위원회 엑셀 등록 1.0.1 */
+/* 임원·사외이사·위원회 엑셀 등록 1.0.2 */
 ((root) => {
   'use strict';
   const specs = {
@@ -93,7 +93,7 @@
     const status=make('p',null,'official-workbook-status');status.setAttribute('role','status');
     const list=make('div',null,'official-workbook-rows');list.setAttribute('aria-label','행별 검사 결과');
     const footer=make('footer');const save=btn('선택한 행 등록','btn btn-primary');footer.append(save);modal.append(head,tools,status,list,footer);doc.body.append(modal);
-    let current, epoch=0, denyActor='', clicking=false;
+    let current, epoch=0, denyActor='', clicking=false, opener;
     const drafts=new Map();
     const context=()=>{const c=getContext();return c?.allowed&&c.coopId&&c.actorId&&c.actorId!==denyActor?{coop:c.coopId,actor:c.actorId,owner:`${c.coopId}|${c.actorId}`}:null;};
     const pendingKey=s=>`erp:official-workbook:pending:${s.owner}`;
@@ -103,8 +103,13 @@
     const visible=()=>!root.frameElement?.hidden;
     const same=s=>s===current&&context()?.owner===s.owner&&visible();
     const shown=(s,t)=>same(s)&&modal.open&&(t===undefined||epoch===t);
-    function pause(){++epoch;if(current)current.reading=false;if(modal.open)modal.close();clicking=false;}
-    function sync(){button.hidden=!context(); if(modal.open&&!shown(current))pause();}
+    function pause(restore=false){
+      const origin=opener, wasInside=modal.contains(doc.activeElement);opener=null;
+      ++epoch;if(current)current.reading=false;if(modal.open)modal.close();clicking=false;
+      if(restore&&wasInside&&current&&same(current)&&origin?.isConnected&&!origin.disabled&&origin.getClientRects().length
+        &&(doc.activeElement===doc.body||modal.contains(doc.activeElement)))origin.focus({preventScroll:true});
+    }
+    function sync(){if(button)button.hidden=!context(); if(modal.open&&!shown(current))pause();}
     function draft(c){
       if(!drafts.has(c.owner)){
         const id=readPending(c);
@@ -242,13 +247,15 @@
       if (f.size>2*1024*1024||!f.name.toLowerCase().endsWith('.xlsx')){file.value='';s.message='2MB 이하의 엑셀(.xlsx) 파일을 골라 주세요.';renderButtons(s);return;}
       ++epoch;s.file=f;s.rows=[];s.result=[];s.picked.clear();s.checked=false;s.reading=false;render(s);void inspect(s);};
     check.onclick=()=>{if(current)void inspect(current,!current.rows.length);};
-    button.onclick=()=>{const c=context();if(!c||!visible()||modal.open||doc.querySelector('dialog[open],.modal.show'))return;
-      current=draft(c);file.value='';++epoch;modal.showModal();render(current);file.focus({preventScroll:true});};
-    close.onclick=pause;modal.addEventListener('cancel',event=>{event.preventDefault();pause();});
-    root.addEventListener('pagehide',pause);
+    function open(trigger=button){const c=context();if(!c||!visible()||modal.open||doc.querySelector('dialog[open],.modal.show'))return false;
+      opener=trigger;trigger?.focus({preventScroll:true});current=draft(c);file.value='';++epoch;modal.showModal();render(current);
+      (file.disabled?save:file).focus({preventScroll:true});return true;}
+    if(button)button.onclick=()=>open(button);
+    close.onclick=()=>pause(true);modal.addEventListener('cancel',event=>{event.preventDefault();pause(true);});
+    root.addEventListener('pagehide',()=>pause());
     new MutationObserver(()=>{if(!visible())pause();}).observe(root.frameElement||doc.documentElement,{attributes:true,attributeFilter:['hidden']});
     client.auth?.onAuthStateChange?.((event,session)=>{const changed=event==='SIGNED_OUT'||(current&&session?.user?.id!==current.actor);if(!changed)return;if(current){denyActor=current.actor;drafts.delete(current.owner);}pause();sync();});
-    sync(); return {pause,sync};
+    sync(); return {open,pause,sync};
   }
-  root.OfficialWorkbook=Object.freeze({version:'1.0.1',parse,create});
+  root.OfficialWorkbook=Object.freeze({version:'1.0.2',parse,create});
 })(typeof window==='undefined'?module.exports:window);
