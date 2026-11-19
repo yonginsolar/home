@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.206
-Change: 2026-11-19 - 화성 발전소 상세창 사진·정보 배치 보완.
+Version: v1.0.207
+Change: 2026-11-19 - 화성 공개 운영규약이 있을 때만 카드 표시.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -1914,6 +1914,9 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   <link href="shared/theme.css?v=20261026-mobile-ui-1" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <link href="shared/public_generation_trend.css?v=20261112-2" rel="stylesheet">
+  <style>html[data-hcrec-bylaws] [data-public-bylaws]:not([data-bylaws-available]){display:none!important}</style>
+  <script>if (/^(www\.)?hcrec\.kr\.?$/i.test(location.hostname)) document.documentElement.setAttribute('data-hcrec-bylaws','');</script>
+  <script src="/shared/hwaseong_public_bylaws.js?v=1.0.0" integrity="sha384-y5DqVo8fZ56ThW34F1rpqdxI5Fm21Q2UZXYmIXTDLj3OJHjTDPdXEPQ4rYRvAAuD" crossorigin="anonymous" defer></script>
   <script src="shared/public_generation_trend_v1_2.js?v=20261119-1" integrity="sha384-ldKpDwdSzw4i4MvUw2AOeCkWJynDCIMvkKw9qTOFTxjBbgEfImbmmnwESnaa0rLS" crossorigin="anonymous" defer></script>
   <script src="shared/home_design.js?v=20261009-3"></script>
 <script src="shared/site_text_styles.js?v=20261009-17" defer></script>
@@ -2415,7 +2418,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         </div>
       </div>
 
-      <div class="col-lg-4 col-md-6 d-flex align-items-stretch mt-4 mt-md-0" data-aos="zoom-in" data-aos-delay="200">
+      <div class="col-lg-4 col-md-6 d-flex align-items-stretch mt-4 mt-md-0" data-aos="zoom-in" data-aos-delay="200" data-public-bylaws>
         <div class="icon-box w-100 text-center p-4 border rounded-3 d-flex flex-column justify-content-center">
           <div class="icon mb-3"><i class="bi bi-journal-check fs-1 text-success"></i></div>
           <h4><a href="rules.html#bylaws">운영 규약 (Bylaws)</a></h4>
@@ -5888,8 +5891,25 @@ function closeActivityDetailFallback() {
 }
 window.closeActivityDetailFallback = closeActivityDetailFallback;
 
+let hwaseongBylawsPresence;
+function refreshHwaseongBylawsCard(attempt) {
+    if (!window.HwaseongPublicBylaws?.active || publicHiddenSectionIds.has('documents')) return;
+    hwaseongBylawsPresence ||= window.HwaseongPublicBylaws.createPresence({
+        node:document.querySelector('#documents [data-public-bylaws]'),client:_client,
+        getContext:getPublicSiteContext,read:(fn,scope)=>readPublicHome(fn,scope)
+    });
+    void hwaseongBylawsPresence.refresh(attempt);
+}
+window.addEventListener('pageshow', event => {
+    if(event.persisted && hwaseongBylawsPresence) refreshHwaseongBylawsCard();
+});
+document.addEventListener('visibilitychange', () => {
+    if(!document.hidden && hwaseongBylawsPresence) refreshHwaseongBylawsCard();
+});
+
 // 1. 공지사항 데이터 가져오기 (최초 1회 실행)
 async function fetchNotices(attempt) {
+    refreshHwaseongBylawsCard(attempt);
     // 넉넉하게 50개 가져옴
     const { data: notices, error } = await readPublicHome(signal => readPublicHomeScoped(_client.from('coop_notices')
         .select('*')

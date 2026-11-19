@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.17
+Version: v1.0.18
 Change: 2026-10-18 - Distinct rule search empty states and explicit search reset.
 -->
 <html lang="ko">
@@ -8,7 +8,9 @@ Change: 2026-10-18 - Distinct rule search empty states and explicit search reset
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.17 | rules.html');</script>
+  <script>if (/^(www\.)?hcrec\.kr\.?$/i.test(location.hostname)) document.documentElement.setAttribute('data-hcrec-bylaws','');</script>
+  <style>html[data-hcrec-bylaws] [data-public-bylaws]:not([data-bylaws-available]){display:none!important}</style>
+  <script src="/shared/hwaseong_public_bylaws.js?v=1.0.0" integrity="sha384-y5DqVo8fZ56ThW34F1rpqdxI5Fm21Q2UZXYmIXTDLj3OJHjTDPdXEPQ4rYRvAAuD" crossorigin="anonymous" defer></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="shared/tenant_head.js?v=20260916-1"></script>
@@ -231,7 +233,7 @@ Change: 2026-10-18 - Distinct rule search empty states and explicit search reset
         <div class="btn-group shadow-sm" role="group" style="background:white; border-radius:30px; overflow:hidden; border:1px solid #e9ecef;">
             <button class="btn btn-lg px-4 py-2 active" id="btn-articles" onclick="switchRulesTab('articles')" 
                     style="border:none; border-radius:30px 0 0 30px; font-weight:bold; font-size:1rem;">📜 정관</button>
-            <button class="btn btn-lg px-4 py-2" id="btn-bylaws" onclick="switchRulesTab('bylaws')" 
+            <button class="btn btn-lg px-4 py-2" id="btn-bylaws" data-public-bylaws onclick="switchRulesTab('bylaws')"
                     style="background:white; color:#666; border:none; border-radius:0 30px 30px 0; font-weight:bold; font-size:1rem;">⚖️ 규약</button>
         </div>
     </div>
@@ -329,6 +331,8 @@ function toggleSearch(e) {
         // 버튼 스타일 초기화
         const btnA = document.getElementById('btn-articles');
         const btnB = document.getElementById('btn-bylaws');
+        if (target==='bylaws' && document.documentElement.hasAttribute('data-hcrec-bylaws')
+            && !btnB.hasAttribute('data-bylaws-available')) target='articles';
         
         // 컨텐츠 숨기기/보이기
         if (target === 'articles') {
@@ -430,14 +434,20 @@ function toggleSearch(e) {
         const container = document.getElementById(`${typeId}-container`);
         const version = document.getElementById(`${typeId}-version`);
         const archiveBox = document.getElementById(typeId === 'articles' ? 'accordionArticles' : 'accordionBylaws');
+        const scopedBylaws=typeId==='bylaws' && document.documentElement.hasAttribute('data-hcrec-bylaws');
+        const bylawsButton=document.getElementById('btn-bylaws');
+        if(scopedBylaws)window.HwaseongPublicBylaws?.setAvailable(bylawsButton,false);
         let data;
         try {
             const coopId = await getRulesVisibleCoopId();
             if (!coopId) throw new Error('PUBLIC_COOP_CONTEXT_UNAVAILABLE');
-            const response = await scopeRulesVisibleTenant(_supabase.from('site_documents')
-                .select('*'), coopId).eq('category', 'doc').ilike('title', `%${keyword}%`).order('event_date', {ascending: false});
+            const base=_supabase.from('site_documents').select('*');
+            const docs=scopedBylaws ? window.HwaseongPublicBylaws.restrict(base,coopId)
+                : scopeRulesVisibleTenant(base,coopId).eq('category','doc').ilike('title',`%${keyword}%`);
+            const response = await docs.order('event_date', {ascending: false});
             if (response.error) throw response.error;
             data = response.data;
+            if(scopedBylaws)window.HwaseongPublicBylaws.setAvailable(bylawsButton,Array.isArray(data)&&data.length>0);
         } catch (error) {
             version.innerText = '';
             container.innerHTML = '<div class="text-center py-5 text-muted">문서를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.</div>';
