@@ -1,8 +1,8 @@
-/* v1.0.0 — official record correction and history. */
+/* v1.0.1 — 임원 회차 정정 후보. */
 (() => {
   'use strict';
-  const fields = ['name','term_start_date','term_end_date','is_registered'];
-  const labels = {name:'등록명',term_start_date:'임기 시작일',term_end_date:'임기 종료일',is_registered:'등기 여부'};
+  const fields = ['name','term_start_date','term_end_date','is_registered','term_count'];
+  const labels = {name:'등록명',term_start_date:'임기 시작일',term_end_date:'임기 종료일',is_registered:'등기 여부',term_count:'회차'};
   const lockText = {ENDED:'종료된 직책 기록입니다.',ELECTION:'선거에서 가져온 기록입니다. 원본은 수정할 수 없습니다.',
     REFERENCED:'회의 또는 서명에서 참조한 기록입니다. 원본은 수정할 수 없습니다.',
     LEGACY_ELECTION_REVIEW:'선거와 연결됐는지 확인이 필요한 기존 기록입니다. 이 화면에서는 수정할 수 없습니다.'};
@@ -19,7 +19,8 @@
     const active=r=>view===r && r.seq===seq && dialog.open && now()===r.owner && r.id===select.value;
     const input=()=>Object.fromEntries(fields.map(f=>[f,f==='is_registered'?controls[f].checked:controls[f].value]));
     const write=values=>fields.forEach(f=>{ if(f==='is_registered')controls[f].checked=values?.[f]===true;else controls[f].value=values?.[f]??''; });
-    const baseline=data=>({name:data.name||'',term_start_date:data.term_start_date||'',term_end_date:data.term_end_date||'',is_registered:data.is_registered===true});
+    const baseline=data=>({name:data.name||'',term_start_date:data.term_start_date||'',term_end_date:data.term_end_date||'',
+      is_registered:data.is_registered===true,term_count:data.term_count==null?'':String(data.term_count)});
     const note=text=>{message.textContent=text;};
     const pending=r=>submitting.has(key(r.owner,r.id));
     function retain(){
@@ -59,7 +60,7 @@
       write(cached?.values); originals.textContent='';history([]);retry.hidden=true;note('임원 정보와 변경 기록을 확인하고 있습니다…');sync(r);
       let timer;
       try {
-        const response=await Promise.race([client.rpc('read_official_record_edit',{p_official_id:id}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('조회 지연')),12000);})]);
+        const response=await Promise.race([client.rpc('read_official_record_edit_v2',{p_official_id:id}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('조회 지연')),12000);})]);
         if(!active(r))return;
         const data=response.data;
         if(response.error||String(data?.id)!==id||!revision(data?.revision))throw Error('조회 실패');
@@ -78,19 +79,28 @@
       if(!r?.data||!active(r)||r.data.lock_reason||r.conflict||pending(r))return;
       const values=input(), name=values.name.trim();
       if(JSON.stringify(values)===JSON.stringify(r.baseline))return;
+      const count=values.term_count===''?null:Number(values.term_count);
+      if(controls.term_count.validity?.badInput||(count===null && r.baseline.term_count!=='') ||
+         (count!==null && (!/^\d+$/.test(values.term_count)||!Number.isSafeInteger(count)||count<1||count>2147483646))){
+        note('회차는 1 이상의 정수로 입력해 주세요.');return;
+      }
       if(name.length>80||/[\x00-\x1f@]/.test(name)||name.replace(/[^0-9]/g,'').length>=9 || !values.term_start_date||!values.term_end_date||values.term_end_date<values.term_start_date){note('등록명과 임기 날짜를 확인해 주세요.');return;}
       const dk=key(r.owner,r.id);retain();submitting.add(dk);sync(r);note('저장하고 있습니다…');
       let refreshAfter=false;
       try {
-        const {data,error}=await client.rpc('update_official_record',{p_official_id:r.id,p_expected_revision:r.expected,
-          p_name:name||null,p_term_start:values.term_start_date,p_term_end:values.term_end_date,p_is_registered:values.is_registered});
+        const {data,error}=await client.rpc('update_official_record_v2',{p_official_id:r.id,p_expected_revision:r.expected,
+          p_name:name||null,p_term_start:values.term_start_date,p_term_end:values.term_end_date,p_is_registered:values.is_registered,p_term_count:count});
         if(error)throw error;
         if(String(data?.id)!==r.id || !revision(data?.revision))throw Error('응답 불명');
         drafts.delete(dk);refreshAfter=now()===r.owner;
         if(active(r)){r.baseline=values;r.data=null;}
       } catch(error){
         if(!active(r))return;
-        if(error?.code==='PT409'){
+        if(error?.message==='OFFICIAL_TERM_COUNT_DUPLICATE'){
+          note('이 조합원의 같은 직책에 이미 쓰인 회차입니다. 다른 회차를 선택해 주세요.');
+        }else if(error?.message==='OFFICIAL_TERM_COUNT_INVALID'){
+          note('회차는 1 이상의 정수로 입력해 주세요.');
+        }else if(error?.code==='PT409'){
           r.conflict=true;note('다른 곳에서 수정했거나 기록이 잠겼습니다. 작성한 내용은 남겨두었습니다.');
           retry.hidden=false;retry.textContent='작성값 버리고 최신 값 보기';
         }else note('저장 결과를 확인하지 못했습니다. 작성한 내용은 유지됩니다.');
