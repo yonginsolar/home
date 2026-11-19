@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-		    Version: v1.0.80
-		    Change: 2026-11-01 - Direct library-document entry from the member portal, preserving reader permissions.
+		    Version: v1.0.81
+		    Change: 2026-11-19 - Retain the ERP sidebar for the ERP document box entry.
 -->
 <html lang="ko">
 <head>
@@ -14,7 +14,17 @@
     <link rel="canonical" href="https://www.yonginsolar.kr/minutes/minutes_view">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <meta name="description" content="용인모두의햇빛협동조합의 공개 문서와 공문, 의사록을 확인하는 동적 문서함 페이지입니다.">
-    <script>console.log('[Version] v1.0.80 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.81 | minutes_view.html');</script>
+    <script>
+        (() => {
+            const params = new URLSearchParams(location.search);
+            if (!params.has('erpWorkspace') || params.has('portalEmbed')) return;
+            window.__COOP_ROUTE_APP__ = 'erp';
+            window.__ERP_DOCUMENT_BOX_BOOT__ = import('/erp/workspace_boot.js?v=20261119-document-box-1')
+                .then(() => window.ErpWorkspaceRoute.isDocumentBox(location.href))
+                .catch(() => false);
+        })();
+    </script>
     <style>
         body {
             margin: 0;
@@ -467,7 +477,7 @@
     <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
     <script src="../shared/notice_attachments.js?v=1.0.0"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.61';
+        import { MinutesService } from './MinutesService.js?v=1.0.62';
         import { SIGNATURE_PREVIEW_BUCKET, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -1493,6 +1503,7 @@
             return html;
         }
 
+        let returnFromErpDocumentBox = null;
         function buildDocumentListHeader() {
             const header = document.createElement('div');
             header.className = 'library-header';
@@ -1503,7 +1514,7 @@
             const backBtn = document.createElement('button');
             backBtn.className = 'btn-back';
             backBtn.innerText = '← 뒤로가기';
-            backBtn.onclick = () => history.back();
+            backBtn.onclick = () => returnFromErpDocumentBox ? returnFromErpDocumentBox() : history.back();
             header.appendChild(backBtn);
 
             const textWrap = document.createElement('div');
@@ -1904,7 +1915,7 @@
             });
         }
 
-        async function renderPublishedList() {
+        async function renderPublishedList(isCurrent = () => true) {
             const requestVersion = ++detailRequestVersion;
             listPanel.style.display = 'block';
             detailPanel.classList.add('hidden');
@@ -1915,7 +1926,7 @@
                 noticeOnlyMode ? Promise.resolve({data:[]}) : MinutesService.listLibraryDocuments(),
                 MinutesService.listPublishedNotices()
             ]);
-            if (requestVersion !== detailRequestVersion) return;
+            if (!isCurrent() || requestVersion !== detailRequestVersion) return;
 
             noticesLoadFailed = !!noticesError;
             const mappedNotices = (Array.isArray(notices) ? notices : []).map(notice => ({
@@ -1935,10 +1946,34 @@
             renderDocumentListItems();
         }
 
+        async function authorizeErpDocumentBox(boot) {
+            if (!await boot || window.parent === window) return null;
+            try {
+                const scope = await window.parent.ErpWorkspaceShell?.authorizeDocumentBox(window, document);
+                if (!scope?.isCurrent()) return null;
+                // The same tenant resolver/cache is used by the actual document, notice and library queries.
+                const [session, visibleCoopId] = await Promise.all([
+                    MinutesService.getSession(), MinutesService.getVisibleCoopId()
+                ]);
+                if (!scope.isCurrent() || session?.user?.id !== scope.userId || visibleCoopId !== scope.coopId) return null;
+                return {session, isCurrent:scope.isCurrent, goBack:scope.goBack};
+            } catch (_) { return null; }
+        }
+
         async function init() {
-            cachedSession = await MinutesService.getSession();
+            const erpBoot = window.__ERP_DOCUMENT_BOX_BOOT__;
+            const erpScope = erpBoot ? await authorizeErpDocumentBox(erpBoot) : null;
+            if (erpBoot && !erpScope) {
+                if (window.document?.body && window.parent !== window) showMessage('이 조합의 ERP에서 문서함을 열어 주세요.');
+                return;
+            }
+            if (erpScope) returnFromErpDocumentBox = erpScope.goBack;
+            const isCurrent = () => !erpScope || erpScope.isCurrent();
+            cachedSession = erpScope ? erpScope.session : await MinutesService.getSession();
+            if (!isCurrent()) return;
             cachedDocumentBoxAccess = await MinutesService.getDocumentBoxAccess(cachedSession?.user?.id || null, cachedSession);
-            if (cachedSession && cachedDocumentBoxAccess?.member?.is_external_director !== true) {
+            if (!isCurrent()) return;
+            if (!erpScope && cachedSession && cachedDocumentBoxAccess?.member?.is_external_director !== true) {
                 const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
                     moduleLabel: '문서함',
                     redirectUrl: `../membermanage.html?next=${encodeURIComponent(window.location.href)}`,
@@ -1954,13 +1989,17 @@
                 }
             }
             cachedIsAdmin = cachedSession ? await MinutesService.isAdmin(cachedSession.user.id, cachedSession.user.email) : false;
+            if (!isCurrent()) return;
             currentDocumentListTab = DOCUMENT_LIST_TABS.some(tab => tab.key === requestedTab) ? requestedTab : 'ALL';
-            await renderPublishedList();
+            await renderPublishedList(isCurrent);
+            if (!isCurrent()) return;
             if (requestedNoticeId) await openPublishedNoticeById(requestedNoticeId);
+            if (!isCurrent()) return;
             if (requestedDocumentId) await openDocumentById(requestedDocumentId);
+            if (!isCurrent()) return;
             if (requestedLibraryId) await openLibraryDocumentById(requestedLibraryId);
             // Mark as seen on entry for the active profile (if logged in).
-            if (cachedSession || cachedIsAdmin) {
+            if (isCurrent() && (cachedSession || cachedIsAdmin)) {
                 let activeProfileId = null;
                 try {
                     activeProfileId = window.sessionStorage ? window.sessionStorage.getItem('lastActiveProfile') : null;

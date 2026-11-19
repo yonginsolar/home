@@ -28,7 +28,7 @@
   };
   const home = target => {
     const next = new URL('/erp/', location.origin);
-    if (target) next.searchParams.set('next', new URL(target, location.origin).href);
+    if (target) next.searchParams.set('next', routes.isDocumentBox?.(target) ? routes.address(target) : new URL(target, location.origin).href);
     location.replace(next.href);
   };
   function changed(entry = activeEntry) {
@@ -464,6 +464,23 @@
     syncFrame();
     try { attachDocument(frame.contentDocument, entry); } catch (_) {}
   }
+  async function authorizeDocumentBox(child, doc) {
+    const entry = activeEntry, ticket = transition;
+    const isCurrent = () => {
+      try {
+        return ready && !leaving && ticket === transition && entry === activeEntry && entry.frame === frame
+          && frame.isConnected && !frame.hidden && frame.contentWindow === child && frame.contentDocument === doc
+          && (requested || current) === entry.route && routes.isDocumentBox(entry.route)
+          && routes.route(child.location.href) === entry.route;
+      } catch (_) { return false; }
+    };
+    if (!isCurrent()) return null;
+    const access = await serverAccess();
+    if (!isCurrent() || !access || access.id !== userId || access.runtime.coop_id !== accessCoop
+      || !window.ErpRuntimeGuard.isModuleEnabled(access.runtime, 'documents')) return null;
+    return {userId:access.id, coopId:access.runtime.coop_id, isCurrent,
+      goBack:() => { if (isCurrent()) history.back(); }};
+  }
   function bindContractEmployee(child, employeeId) {
     const entry = activeEntry;
     try {
@@ -605,5 +622,5 @@
     try { await pending; }
     finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, version:'20261118.2'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, authorizeDocumentBox, version:'20261119.1'};
 })();

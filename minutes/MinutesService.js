@@ -1,6 +1,6 @@
 /*
-Version: v1.0.61
-Change: 2026-10-21 - Exhibition member branding, own read receipts and signature-status previews.
+Version: v1.0.62
+Change: 2026-11-19 - Share the existing visible cooperative resolver with the ERP document box access check.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -784,6 +784,7 @@ async function createSignedUrl(bucket, path, expiresIn = 3600) {
 
 export const MinutesService = {
     getSession,
+    getVisibleCoopId,
     getMemberByEmail,
     getMemberByAuthId,
     isAdmin,

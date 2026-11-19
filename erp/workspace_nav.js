@@ -3,7 +3,7 @@
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261118.search2';
+  const VERSION = '20261119.documents1';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -37,11 +37,13 @@
   const localRoots = '.erp-local-navigation .sidebar-menu,.nav-tabs,.nav-pills,[role="tablist"],.step-tabs,.doc-tabs,.tabs,.sub-tabs,[data-workspace-submenu]';
   let submenu, submenuOwner, submenuRows = [], localNavigationRoots = [], submenuFrame;
   const hubDocuments = new Map(), rowButtons = new WeakMap(), rowExpansion = new WeakMap();
+  const isDocumentBox = u => window.ErpWorkspaceRoute?.isDocumentBox?.(u) === true;
   const hubBranches = {
     btnGovernanceHub: {root:'governance',branches:[
       ['cardMinutesAdmin','회의·문서 관리',u=>/\/minutes\/admin_minutes(?:\.html)?\/?$/.test(u.pathname)],
       ['cardMeetingPackages','회의 꾸러미 만들기',u=>/\/minutes\/meeting_workspace(?:\.html)?\/?$/.test(u.pathname)],
       ['cardMeetingAttendance','회의 출석 관리',u=>/\/participation(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('view')==='meeting'],
+      ['cardDocuments','문서함',isDocumentBox],
       ['cardDocumentAdmin','규정·정관 관리',u=>/\/admin_member(?:\.html)?\/?$/.test(u.pathname)&&u.searchParams.get('scope')==='documents_admin'],
       ['cardSignatureAdmin','서명자 준비',u=>/\/officials_signature_admin(?:\.html)?\/?$/.test(u.pathname)]
     ]},
@@ -80,6 +82,7 @@
     }
     if (leaf === 'registry_hub') return ['registry_hub', 'registry', 'registry_guide'].includes(path);
     if (leaf === 'governance') return ['governance', 'meeting_workspace', 'admin_minutes', 'officials_signature_admin'].includes(path)
+      || isDocumentBox(pageUrl)
       || (path === 'admin_member' && params.get('scope') === 'documents_admin')
       || (path === 'participation' && params.get('view') === 'meeting');
     if (leaf === 'participation') return path === leaf && (params.get('view') || 'education') === 'education';
