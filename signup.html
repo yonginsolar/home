@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.91
-Change: 2026-11-19 - 화성 사무국 공개 연락처 안내 후보.
+Version: v1.0.92
+Change: 2026-11-19 - 화성 추천인 확인과 접수 검토.
 -->
 <html lang="ko" data-signup-admission="checking">
 <head>
@@ -11,10 +11,11 @@ Change: 2026-11-19 - 화성 사무국 공개 연락처 안내 후보.
 <script src="shared/signup_failure_reporter.js?v=1.1.4" integrity="sha384-RE6UIQaHPwucHYx5iRp5QKH3+671bXBuPlyhLmgS1iVDRRNJao0gxXc3qZU7W/UA" crossorigin="anonymous"></script>
 <script src="shared/signup_public_reads.js?v=1.0.2" integrity="sha384-MwfxGFicfaZkW2Gk5NiaUHDIgwU/J/gcUi3/78igSI/pjR9ko+yWH2EvkR5R2/4R" crossorigin="anonymous"></script>
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
+<script src="/shared/hcrec_member_referral.js?v=1.0.0" integrity="sha384-mLlDe5K1h1YppHBjxTlyDIfbIAQu6cq6/lK8CGI2mkZpHLA0em3tQQTmHSdVxWsO" crossorigin="anonymous"></script>
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.91">
+  <meta name="signup-screen-version" content="1.0.92">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -398,8 +399,18 @@ onblur="checkPhoneDuplicateServer()">
 </div>
 
 <div class="col-12">
-<label class="form-label fw-bold small">추천인 (선택사항)</label>
+<label class="form-label fw-bold small" for="recommender">추천인 (선택사항)</label>
 <input type="text" id="recommender" class="form-control" placeholder="추천인 이름을 입력해주세요">
+<div id="hcrec-referral-signup" class="mt-2" hidden>
+ <label class="form-label small fw-bold" for="hcrec-referral-code">공유받은 추천 코드 (선택사항)</label>
+ <div class="d-flex flex-wrap gap-2 align-items-start">
+  <input type="text" id="hcrec-referral-code" class="form-control flex-grow-1" style="flex-basis:12rem;min-width:0" maxlength="27" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="hcrec-referral-help">
+  <button id="hcrec-referral-verify" type="button" class="btn btn-outline-success">추천인 확인</button>
+ </div>
+ <p id="hcrec-referral-help" class="form-text mb-1">코드 없이 이름만 적으면 사무국에서 확인합니다.</p>
+ <p id="hcrec-referral-status" class="small mb-1" role="status"></p>
+ <button id="hcrec-referral-receipt" type="button" class="btn btn-sm btn-outline-secondary" hidden>이전 접수 확인</button>
+</div>
 </div>
 
 <div class="col-12">
@@ -2116,6 +2127,15 @@ phone:['p1','p2','p3'].map(id=>document.getElementById(id).value).filter(Boolean
 }
 let signupIdentityKey = null, signupIdentityEpoch = 0;
 const signupIdentityDrafts = new Map();
+let signupReferralController=null;
+function syncSignupReferral() {
+if(!signupReferralController&&window.CoopHcrecMemberReferral?.isPublic(signupTenant?.coop_id)){
+ signupReferralController=CoopHcrecMemberReferral.bindSignup(_supabase,()=>({actor:signupIdentityKey,coop:signupTenant?.coop_id}));
+ signupReferralController?.onReceipt(data=>openResultModal(data.referral_status==='pending_review'
+   ?'가입 신청이 이미 접수되었습니다. 추천인은 사무국 확인을 기다리고 있습니다.':'가입 신청이 이미 접수되었습니다.',false));
+}
+signupReferralController?.sync();
+}
 function signupIdentityScope() {
 return {epoch:signupIdentityEpoch,key:signupIdentityKey,coop:signupTenant?.coop_id};
 }
@@ -2140,7 +2160,7 @@ cancelPreviousSignupSubmission();
 clearSignupTransientUi();
 if(!ownEmailVerification)invalidateSignupEmailWork();
 if(signupApplicationSessionKey!==null)signupIdentityDrafts.set(signupApplicationSessionKey,{
- values:[...document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')].map(n=>[n.id,n.value,n.checked]),
+ values:[...document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')].filter(n=>n.id!=='hcrec-referral-code').map(n=>[n.id,n.value,n.checked]),
  inline:yonginInlineEmailSelected,
  consents:captureSignupConsentState(),
  errors:[...signupValidationErrors],
@@ -2149,6 +2169,7 @@ if(signupApplicationSessionKey!==null)signupIdentityDrafts.set(signupApplication
 });
 window.CoopSignupDraft?.selectOwner(next,transfer);
 signupIdentityKey=next;
+if(window.CoopHcrecMemberReferral)syncSignupReferral();
 joinSubmitInFlight=signupSubmissionTasks.has(next);
 if(!first){++signupIdentityEpoch;signupSessionResumeInFlight=null;signupSessionCheckInFlight=null;}
 if(ownEmailVerification){signupEmailWork.scope=signupIdentityScope();signupEmailWork.transitioned=true;}
@@ -2519,6 +2540,7 @@ async function openSignupFormWhenReady(session,scope){
 function showApplicationForm(session) {
 if(signupIdentityKey!==null&&signupIdentityKey!=='contact-only'&&signupIdentityKey!==String(session?.user?.id||'contact-only'))return;
 adoptSignupIdentity(session);
+if(window.CoopHcrecMemberReferral)syncSignupReferral();
 signupHasSession = Boolean(session?.user?.id) || signupHasSession;
 setSignupAuthBusy(false);
 // 1. 화면 전환 (게이트 숨김 -> 폼 표시)
@@ -2792,6 +2814,9 @@ if(signupLegalRecovery){renderSignupLegalStatus();openResultModal('신청서의 
 if(signupLegalDocuments?.ready!==true){openResultModal('가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.',true);return;}
 if(signupAuthRetryPending){showSignupAuthRetry('가입 여부를 다시 확인한 뒤 신청해 주세요.');return;}
 if(signupAuthBusy)return;
+if(signupReferralController?.hasPending()){
+ await signupReferralController.recover();return;
+}
 
 // [수정] 내부에서 정의하던 openResultModal 제거함 (전역 함수 사용)
 
@@ -3218,15 +3243,21 @@ const signupArguments = {
 };
 const submittedDraft = window.CoopSignupDraft?.snapshot();
 if(!isCurrentSignupSubmission(task))return;
+const referral=needsGuardian?null:signupReferralController?.prepare(signupArguments.p_recommender);
+if(referral?.blocked){openResultModal(referral.blocked,true);return;}
 // Final checks supersede earlier field reads; later edits start fresh checks.
 task.fieldCheckRevisions=typeof invalidateSignupFieldChecks==='function'?invalidateSignupFieldChecks():null;
 task.sent=true;
-const { data: signupResult, error, status: signupSaveStatus } = await _supabase.rpc(needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5', needsGuardian ? {
+if(referral?.route)signupReferralController.started(referral);
+const { data: signupResult, error, status: signupSaveStatus } = await _supabase.rpc(referral?.route?'hcrec_signup_with_referral':needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5', referral?.route ? {
+ p_signup: signupArguments, p_referral_proof: referral.proof, p_request_id: referral.request
+}:needsGuardian ? {
  p_signup:signupArguments,
  p_guardian_name:document.getElementById('signupGuardianName').value.trim(),
  p_guardian_phone:document.getElementById('signupGuardianPhone').value,
  p_submission_id:guardianSubmissionId
 }:signupArguments);
+if(referral?.route)signupReferralController.finished(referral,{unknown:isUnknownSignupSaveError(error,signupSaveStatus)&&!!error});
 if(!isCurrentSignupSubmission(task,false))return;
 const createdMemberUuid = signupResult?.member_id || null;
 const educationSignupResult = signupResult?.education || null;
@@ -3246,7 +3277,7 @@ const code = String(error.code || '');
 const errText = `${error.message || ''} ${error.details || ''}`.toLowerCase();
 const isUniqueConflict = code === '23505' || errText.includes('duplicate key');
 
-if (isUniqueConflict && !needsGuardian) {
+if (isUniqueConflict && !needsGuardian && !referral?.route) {
 const { data: existingMember, error: existingErr } = await _supabase.rpc('check_duplicate_signup', {
   check_field: 'email',
   check_value: insertData.email,
@@ -3286,13 +3317,13 @@ btn.innerText = '가입 신청하기 ☀️';
     if(task.fieldCheckRevisions)invalidateSignupFieldChecks(undefined,task.fieldCheckRevisions);
     window.CoopSignupDraft?.markSaved(submittedDraft);
   }
-  notifySignupRequestAdmins(createdMemberUuid).catch((notifyError) => {
+  if(!referral?.route||!signupResult?.already_received)notifySignupRequestAdmins(createdMemberUuid).catch((notifyError) => {
     CoopSafeLog.warn("[member-request-alert] signup admin telegram skipped:", notifyError?.message || notifyError);
   });
 
   // 가입자 정보는 서버에 그대로 보관하며, 알림 함수에는 방금 생성된 UUID만 보냅니다.
   // 함수가 로그인 이메일·생성 시각·협동조합을 다시 확인하고 발송 원장으로 중복을 막습니다.
-  if (createdMemberUuid && !needsGuardian) {
+  if (createdMemberUuid && !needsGuardian && (!referral?.route||!signupResult?.already_received)) {
     try {
       const { error } = await _supabase.functions.invoke('send-welcome-kakao', {
         body: { memberId: createdMemberUuid }
@@ -3319,7 +3350,9 @@ btn.innerText = '가입 신청하기 ☀️';
 
   // 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
   openResultModal(
-    needsGuardian ? '✅ 가입 신청이 접수되었습니다.\n법정대리인에게 동의 요청 알림톡을 보내드립니다. 동의와 사무국 확인 후 가입 승인이 진행됩니다.' : "✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
+    needsGuardian ? '✅ 가입 신청이 접수되었습니다.\n법정대리인에게 동의 요청 알림톡을 보내드립니다. 동의와 사무국 확인 후 가입 승인이 진행됩니다.'
+    : signupResult?.referral_status==='pending_review'?'✅ 가입 신청이 접수되었습니다.\n추천인은 사무국에서 확인한 뒤 연결합니다.'
+    : "✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
     false
   );
 }

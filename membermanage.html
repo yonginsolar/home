@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.275
+Version: v1.0.276
 Change: 2026-11-09 - Avoid displaying the fallback green before the portal palette is ready.
 -->
 <html lang="ko">
@@ -19,7 +19,8 @@ Change: 2026-11-09 - Avoid displaying the fallback green before the portal palet
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_layout.js?v=1.3.5" integrity="sha384-IcwaTuuPaMoh8p4EaYxvDbn0Ye+NrQUGy3diLEArvhVNaLjODZgpVZI/c3lJmmeh" crossorigin="anonymous" defer></script>
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.275 | membermanage.html');</script>
+<script src="/shared/hcrec_member_referral.js?v=1.0.0" integrity="sha384-mLlDe5K1h1YppHBjxTlyDIfbIAQu6cq6/lK8CGI2mkZpHLA0em3tQQTmHSdVxWsO" crossorigin="anonymous" defer></script>
+    <script>console.log('[Version] v1.0.276 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -1785,6 +1786,17 @@ gtag('config', 'G-TR217L7JN9');
 </div>
 
 <div id="portalProfileGroup">
+<section id="hcrec-referral-share" class="dashboard-card p-3 mb-3" aria-labelledby="hcrec-referral-title" hidden>
+ <h3 id="hcrec-referral-title" class="h6 mb-2 fw-bold">조합원 추천 코드</h3>
+ <p class="small text-muted mb-2">가입하려는 분에게 이름과 일회용 코드를 알려 주세요.</p>
+ <div class="d-flex gap-2 flex-wrap">
+  <button type="button" id="hcrec-referral-issue" class="btn btn-outline-success">추천 코드 만들기</button>
+  <button type="button" id="hcrec-referral-rotate" class="btn btn-outline-secondary">새 코드로 바꾸기</button>
+  <button type="button" id="hcrec-referral-copy" class="btn btn-outline-success" hidden>코드 복사</button>
+ </div>
+ <output id="hcrec-referral-own-code" class="fw-bold mt-2" style="overflow-wrap:anywhere" aria-label="내 추천 코드" hidden></output>
+ <p id="hcrec-referral-share-status" class="small mt-2 mb-0" role="status"></p>
+</section>
 <div class="d-flex justify-content-between align-items-center mb-3">
 <div class="small text-muted">
 <i class="bi bi-info-circle me-1"></i> 상태
@@ -4328,6 +4340,7 @@ await initializeEducationQrEntry();
 // 3. 인증 상태 변경 감지
 _supabase.auth.onAuthStateChange(async (event, session) => {
 if (!session || (curAuth?.id && curAuth.id !== session.user?.id)) {
+hcrecReferralProfile?.clear();
 window.ContributionCertPreview?.clear();
 window.MemberTelegramConnection?.clear();
 clearPortalProfileEdits();
@@ -5391,7 +5404,22 @@ onSaved: async () => { await reloadDashboard(); }
 return memberInformationPortal.refresh(member);
 }
 
+let hcrecReferralProfile=null;
+function syncHcrecReferralProfile() {
+const helper=window.CoopHcrecMemberReferral;
+if(!hcrecReferralProfile&&helper?.isPublic(currentMemberCoopId))hcrecReferralProfile=helper.bindProfile(_supabase,()=>({
+ actor:curAuth?.id,coop:currentMemberCoopId,profile:curMem?.id,
+ allowed:memberAccessContext?.access_mode==='current'&&memberAccessContext?.found===true
+  && String(memberAccessContext.profile_id)===String(curMem?.id)&&String(memberAccessContext.coop_id)===String(currentMemberCoopId)
+  && String(getRootMemberProfileId()||'')===String(curMem?.id)&&String(curMem?.coop_id)===String(currentMemberCoopId)
+  && ['정상','active','normal'].includes(String(curMem?.status||'').trim().toLowerCase())
+  && !!String(curMem?.member_id||'').trim() && !document.getElementById('dashboardSection')?.classList.contains('hidden')
+  && !window.frameElement?.hidden && portalDeferredViews?.owner===getFamilyRegistrationOwner()
+}));
+hcrecReferralProfile?.sync();
+}
 async function loadDashboardData(uuid, options = {}) {
+hcrecReferralProfile?.clear();
 window.PortalLoginToolRecovery?.cancel();
 portalIdentityClaim?.suspend();
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
@@ -5539,6 +5567,7 @@ if (!isSiteMemberPortalProfile() && typeof checkIncomingConnects === 'function')
 if(!window.MemberPortalPurposeController?.isDirect){void loadPortalPurposeExtras('profile');void loadPortalPurposeExtras('activity');}
 
 	showOnly('dashboardSection');
+	syncHcrecReferralProfile();
 	openHcrecCapitalShortcut(currentProfileLoad);
 	if (!isSiteMemberPortalProfile()) await handlePendingEducationQrCheckIn(uuid);
 	if (!isSiteMemberPortalProfile()) {
@@ -12098,6 +12127,7 @@ syncIncomingConnectStatus(active);
 // [수정] 화면 전환 유틸리티: style 제어 방식 폐기 -> classList 제어 방식 도입
 function showOnly(sectionId) {
 window.PortalLoginToolRecovery?.cancel();
+if(sectionId!=='dashboardSection')hcrecReferralProfile?.clear();
 if (sectionId !== 'dashboardSection') window.MemberPortalPurposeController?.suspend();
 // 제어할 대상 섹션 ID 목록 (명시적으로 지정하여 안전성 확보)
 const sections = ['loginSection', 'dashboardSection', 'formerMemberSection'];

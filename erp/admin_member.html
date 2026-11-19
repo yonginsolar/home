@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.491
+Version: v1.0.492
 Change: 2026-11-04 - Distinguish address review from missing information without altering stored member data.
 -->
 <html lang="ko">
@@ -19,7 +19,7 @@ Change: 2026-11-04 - Distinguish address review from missing information without
 <meta name="admin-contribution-certificate-revision" content="20261010.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.491';
+window.ADMIN_MEMBER_VERSION = 'v1.0.492';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -652,6 +652,13 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.491';
             <button class="btn btn-sm btn-outline-dark hidden" id="member-certificate-settings-button" onclick="openMemberCertificateSettingsModal()">🏢 조합 기본 설정</button>
             <button class="btn btn-sm btn-primary" onclick="openCreateMemberModal()">+ 조합원 등록</button>
         </div>
+    </div>
+
+    <div id="hcrec-referral-admin-actions" class="mb-3" hidden>
+      <div class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-outline-primary" id="hcrec-referral-admin-open">추천인 관리</button>
+        <button type="button" class="btn btn-outline-secondary" id="hcrec-referral-admin-points">포인트 관리</button>
+      </div>
     </div>
 
     <div class="card p-3 mb-3 border-0 bg-light">
@@ -4222,5 +4229,29 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.491';
 <script src="dividend_legacy_safety.js?v=1.0.2" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-Cc6gGADTKCTHS/hgV1vc7BaFptSY9wlIzlJHP4Lueym2Xd6Knye8o6QTH9LiXaH9" crossorigin="anonymous"></script>
 <script src="dividend_policy.js?v=1.0.0" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-5IWika7+CSj08VLzNWnCBnva1BFcnkKLVPpGoEbZij3dMuYg19Jc7na6bNrdzZ4t" crossorigin="anonymous"></script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
+<dialog id="hcrec-referral-admin-dialog" aria-labelledby="hcrec-referral-admin-title" class="border-0 rounded-3 shadow p-3" style="width:min(660px,calc(100vw - 24px));height:min(680px,calc(100dvh - 24px));overflow:auto;color:inherit">
+ <div class="d-flex align-items-start justify-content-between gap-2 flex-wrap mb-3">
+   <h2 class="h5 mb-0 fw-bold" id="hcrec-referral-admin-title">추천인 관리</h2>
+   <button type="button" class="btn btn-sm btn-outline-secondary" id="hcrec-referral-admin-close">닫기</button>
+ </div>
+ <div class="d-flex align-items-end flex-wrap gap-2 mb-2">
+  <label class="form-label mb-0">상태 <select class="form-select" id="hcrec-referral-admin-filter"><option value="pending_review">검토대기</option><option value="linked">연결 완료</option><option value="closed">연결 없이 종료</option><option value="all">전체</option></select></label>
+  <button type="button" class="btn btn-outline-secondary" id="hcrec-referral-admin-retry">다시 확인</button>
+  <button type="button" class="btn btn-outline-primary" id="hcrec-referral-admin-ledger" hidden>기존 이용실적 보상 원장</button>
+ </div>
+ <p id="hcrec-referral-admin-policy" class="small mb-2" hidden>추천 포인트 지급 기준이 아직 설정되지 않았습니다.</p>
+ <p id="hcrec-referral-admin-status" class="small mb-2" role="status"></p>
+ <div id="hcrec-referral-admin-list" class="d-grid gap-2" style="overflow-wrap:anywhere"></div>
+ <button type="button" class="btn btn-outline-secondary mt-3" id="hcrec-referral-admin-more" hidden>더 보기</button>
+</dialog>
+<script src="hcrec_referral_admin.js?v=1.0.0" integrity="sha384-wuiLPqDQOeIxftnYsOcxdN58cvDFvmVSmVOVIxm4XxTstlwd8gXshWZmNHMpiT+q" crossorigin="anonymous"></script>
+<script>
+if(window.CoopHcrecReferralAdmin&&typeof _supabase!=='undefined')CoopHcrecReferralAdmin.bind({client:_supabase,
+ context:()=>({coop:g_adminMemberRuntime?.coop_id,owner:adminCertificateAuthId?JSON.stringify([adminCertificateAuthId,g_adminMemberRuntime?.coop_id]):'',allowed:g_adminMemberRuntime?.is_active===true
+  && !isAdminMemberSiteProfile()&&canAccessAdminMemberTab('members')&&document.getElementById('tab-members')?.classList.contains('active')}),
+ canOpenLedger:()=>canUseAdminMemberDividends(),openLedger(){switchTab('funds-manage');
+  const button=document.getElementById('funds-usage-ledger-tab');if(button&&!button.closest('.hidden'))button.click();}
+});
+</script>
 </body>
 </html>
