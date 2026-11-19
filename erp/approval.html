@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.174 | 이사회 소집 공문 확정 범위 안내 -->
+<!-- Version: v1.2.175 | 전자결재 직원 목록 최신 확인 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -1826,6 +1826,7 @@ const APPROVAL_HTML2PDF_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0
 let myInfo = null;
 let allUsers = [];
 let approvalEmployeeDirectoryState = 'idle';
+let approvalEmployeeDirectoryRevision = 0;
 let approvalEmployeeDirectoryErrorMessage = '';
 let modalInstance, alertModalInstance, confirmModalInstance, promptModalInstance;
 let modalType = '';
@@ -6535,18 +6536,27 @@ async function fetchApprovalEmployeesFromServer() {
 
 async function refreshApprovalEmployees(options = {}) {
     const applyToUi = options?.applyToUi !== false;
+    const cacheKey = getApprovalEmployeeCacheKey(), actor = myAuthUserId, employee = myInfo?.emp_id;
+    if (!cacheKey || !actor || !employee) return [];
+    const revision = ++approvalEmployeeDirectoryRevision;
+    const current = () => revision === approvalEmployeeDirectoryRevision && cacheKey === getApprovalEmployeeCacheKey()
+        && actor === myAuthUserId && employee === myInfo?.emp_id;
     approvalEmployeeDirectoryState = 'loading';
     approvalEmployeeDirectoryErrorMessage = '';
     try {
         const employees = await fetchApprovalEmployeesFromServer();
+        if (!current()) return [];
         writeApprovalEmployeeCache(employees);
-        if (applyToUi) applyApprovalEmployeeData(employees);
         approvalEmployeeDirectoryState = 'ready';
+        if (applyToUi) applyApprovalEmployeeData(employees);
+        refreshVisibleApprovalUserList();
         return employees;
     } catch (error) {
+        if (!current()) return [];
         CoopSafeLog.warn("approval employee refresh failed", error);
         approvalEmployeeDirectoryState = 'error';
         approvalEmployeeDirectoryErrorMessage = String(error?.message || '직원 목록을 불러오지 못했습니다.');
+        refreshVisibleApprovalUserList();
         return [];
     }
 } // End of refreshApprovalEmployees
@@ -6558,8 +6568,17 @@ async function loadApprovalEmployees() {
         void refreshApprovalEmployees({ applyToUi: true });
         return cached;
     }
-    return await refreshApprovalEmployees({ applyToUi: false });
+    return await refreshApprovalEmployees();
 } // End of loadApprovalEmployees
+
+function refreshVisibleApprovalUserList() {
+    if (window.frameElement?.hidden || activeApprovalTab !== 'draft' || !['approver','referrer'].includes(modalType)
+        || !document.getElementById('userModal')?.classList.contains('show')) return;
+    const list = document.getElementById('userSelectList');
+    const scroll = list?.scrollTop || 0;
+    renderUserList();
+    if (list) list.scrollTop = scroll;
+}
 
 function parseApprovalOvertimePolicy(rawValue) {
     const base = { ...APPROVAL_DEFAULT_OVERTIME_POLICY };
@@ -11314,8 +11333,8 @@ window.onload = async function() {
     initApprovalInsuranceNoticeReader();
     applyApprovalRuntimeProfileUi();
 
-    const employeeData = await employeePromise;
-    applyApprovalEmployeeData(employeeData);
+    // The directory applies its own latest reply. Do not reapply the older startup cache here.
+    await employeePromise;
     await workflowContextPromise;
     updateJeongyeolUi();
     await cardPromise;
