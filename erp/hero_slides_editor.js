@@ -31,12 +31,14 @@
   const sync=()=>{const saved=read()?.mobile_image_source;choice.value=['desktop','separate'].includes(saved)?saved:hasMobile()?'separate':'desktop';if(files)files.hidden=choice.value!=='separate';};
   const apply=()=>{const selected=choice.value;if(allowed()&&['desktop','separate'].includes(selected))change(selected,hasMobile()?'separate':'desktop');sync();};choice.oninput=apply;choice.onchange=apply;sync();return {sync,choice};
  }
- function linkField(container,text,id,onChange){
+ function linkField(container,text,id,onChange,buttonPreset=false){
   const choice=select(container,text,id,targets),custom=input(container,'이동할 주소',id+'-custom','url',500);custom.placeholder='https:// 또는 /로 시작하는 주소';
   const read=()=>choice.value==='__custom__'?custom.value.trim():choice.value;
   const show=()=>custom.hidden=choice.value!=='__custom__';
   choice.addEventListener('change',()=>{show();onChange?.(read());});custom.addEventListener('input',()=>onChange?.(read()));
-  return {read,set(value){const v=String(value||'');choice.value=targets.some(x=>x[0]===v)&&v!=='__custom__'?v:'__custom__';custom.value=choice.value==='__custom__'?v:'';show();}};
+  return {read,set(value){const v=String(value||'');const shortcut=root.CoopHcrecCapitalShortcut;
+   if(buttonPreset)shortcut?.setPreset(choice,shortcut.isEditor(typeof g_adminMemberRuntime==='undefined'?null:g_adminMemberRuntime?.coop_id)&&canAccessAdminMemberTab('site'));
+   choice.value=Array.from(choice.options).some(x=>x.value===v)&&v!=='__custom__'?v:'__custom__';custom.value=choice.value==='__custom__'?v:'';show();}};
  }
  function lock(){const blocked=!loaded||saving||typeof canAccessAdminMemberTab!=='function'||!canAccessAdminMemberTab('site');panel?.querySelectorAll('input,textarea,select,button').forEach(n=>{if(n.closest('.hero-visual-ui'))return;const item=items.find(x=>x.id===n.closest('[data-slide-card]')?.dataset.slideCard),i=items.indexOf(item);n.disabled=blocked||(n.dataset.slideAction==='up'&&i===0)||(n.dataset.slideAction==='down'&&i===items.length-1);});if(singleDisplay)singleDisplay.group.hidden=mode.value!=='single';if(play)play.closest('label').hidden=mode.value!=='slides';singleImages?.sync();if(list)list.hidden=mode.value!=='slides';const add=panel?.querySelector('[data-slide-add]');if(add)add.hidden=mode.value!=='slides';if(lastBlocked!==blocked){lastBlocked=blocked;panel?.dispatchEvent(new Event('coop-banner-change'));}root.CoopHeroVisual?.refresh();}
  function row(item){
@@ -58,7 +60,7 @@
   const display=mobileDisplay(card,item.id+'-mobile-display',()=>item.presentation,(property,value)=>changeMobileDisplay(item,property,value));
   const controls={};
   for(const [field,text,type,max] of [['title','제목','text',120],['subtitle','설명','textarea',240],['button_label','버튼 문구','text',40]]){const n=input(card,text,item.id+'-'+field,type,max);controls[field]=n;n.addEventListener('input',()=>{if(!allowed())return;n.value=n.value.slice(0,max);item.value[field]=n.value;changed();});}
-  const button=linkField(card,'바로가기 설정',item.id+'-button-url',v=>{if(allowed()){item.value.button_url=v;changed();}}),click=linkField(card,'사진 클릭 바로가기',item.id+'-link-url',v=>{if(allowed()){item.value.link_url=v;changed();}});
+  const button=linkField(card,'바로가기 설정',item.id+'-button-url',v=>{if(allowed()){item.value.button_url=v;changed();}},true),click=linkField(card,'사진 클릭 바로가기',item.id+'-link-url',v=>{if(allowed()){item.value.link_url=v;changed();}});
   for(const [field,text,values] of [['image_position','사진 기준 위치',[['center','가운데'],['top','위'],['bottom','아래'],['left','왼쪽'],['right','오른쪽']]],['text_align','글자 정렬',[['center','가운데'],['left','왼쪽'],['right','오른쪽']]],['text_position','글자 높이',[['center','가운데'],['top','위'],['bottom','아래']]]]){const n=select(card,text,item.id+'-'+field,values);controls[field]=n;n.addEventListener('change',()=>{if(allowed()){item.value[field]=n.value;changed();}});}
   const overlay=input(card,'사진 어둡게 (%)',item.id+'-overlay','number');overlay.min='0';overlay.max='80';controls.overlay=overlay;overlay.addEventListener('input',()=>{if(allowed()){item.value.overlay=Number(overlay.value);changed();}});
   const actions=document.createElement('div');actions.className='d-flex gap-2 mt-3';card.append(actions);
