@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.207
-Change: 2026-11-19 - 화성 공개 운영규약이 있을 때만 카드 표시.
+Version: v1.0.208
+Change: 2026-11-19 - 화성 소개 글과 사진의 표시 편집 개선.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -1920,9 +1920,11 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   <script src="shared/public_generation_trend_v1_2.js?v=20261119-1" integrity="sha384-ldKpDwdSzw4i4MvUw2AOeCkWJynDCIMvkKw9qTOFTxjBbgEfImbmmnwESnaa0rLS" crossorigin="anonymous" defer></script>
   <script src="shared/home_design.js?v=20261009-3"></script>
 <script src="shared/site_text_styles.js?v=20261009-17" defer></script>
+<link rel="stylesheet" href="/shared/hcrec_about_presentation.css?v=1.0.0" integrity="sha384-mYD4rhQaF+pwFac/EMZua+ULIudHf7zKdG1WLubQCHdHBymmhtMZb2AmWA935uE1" crossorigin="anonymous">
+<script src="/shared/hcrec_about_presentation.js?v=1.0.0" integrity="sha384-H1V8RWh0OY0DIXo5aPVjwO7P6JV/qScmIhq8SuGGCx0aTtnELMfFPKwWf+H9xSd/" crossorigin="anonymous" defer></script>
 <script src="shared/home_display_options.js?v=1.3.1" defer></script>
-<script src="shared/site_inline_editor.js?v=20261019-shortcuts-1" defer></script>
-<script src="shared/home_preview_editor.js?v=20261109-photo-restart-1" defer></script>
+<script src="shared/site_inline_editor.js?v=20261119-about-paste-1" integrity="sha384-zyskNXnY/ck8kAFdE1rX+zEBAtRMSlR39d0gg53V8Ip85EzKWjW62iQT2I+dqRkt" crossorigin="anonymous" defer></script>
+<script src="shared/home_preview_editor.js?v=20261119-about-photo-1" integrity="sha384-d1wilBjSrJ1HYvThUdmDr7wGysBBNMV3N8kvxsEDr/QuPSupNEnHVkJAl1EwlA+F" crossorigin="anonymous" defer></script>
 <script src="shared/hero_banner.js?v=1.5.1" defer></script>
 <script src="shared/home_signup_availability_v1_2.js?v=1.2.0" integrity="sha384-kepcPvvHGgf9XhmFMFguL7Y9XLNfSOu03NymWl2tzF7+EuuB904AeNZvPP2e94Nk" crossorigin="anonymous"></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
@@ -2027,8 +2029,8 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
           <p>조합 <span>소개</span></p>
         </div>
 
-        <div class="row content">
-          <div class="col-lg-6">
+        <div class="row content" id="about-content-columns">
+          <div class="col-lg-6" data-about-text>
             <h3 id="about-title">우리는 햇빛으로 가치를 만듭니다</h3>
             <p class="fst-italic" id="about-subtitle">지속 가능한 미래를 위한 시민들의 자발적 선택</p>
 
@@ -2038,12 +2040,12 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
               <li><i class="bi bi-check2-all"></i> 지역 사회를 위한 에너지 나눔</li>
             </ul>
 
-            <p id="about-content">
+            <div id="about-content">
                 용인모두의햇빛협동조합은 기후 위기에 대응하고 에너지 전환을 실현하기 위해 시민들이 모여 만든 협동조합입니다.
-            </p>
+            </div>
           </div>
 
-          <div class="col-lg-6 pt-4 pt-lg-0">
+          <div class="col-lg-6 pt-4 pt-lg-0" data-about-photo>
              <img src="/assets/image-display/9ab212d2e86bc30e15173bdb-1600.webp" data-original-src="https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/img/about.jpg" loading="lazy" class="img-fluid" alt="협동조합 소개 이미지" id="about-img-src" style="border-radius:8px; width:100%;">
           </div>
         </div>
@@ -6831,25 +6833,36 @@ function openPlantDetail(id, trigger = document.activeElement) {
     async function fetchAbout(attempt) {
         const { data, error } = await readPublicHome(signal => readPublicHomeScoped(_client.from('site_about').select('*').limit(1), signal), attempt);
         if (error) return false;
-        const row = window.CoopSitePreview?.get('about') || (Array.isArray(data) ? data[0] : data);
+        const preview = window.CoopSitePreview?.get('about');
+        const row = preview || (Array.isArray(data) ? data[0] : data);
         if (!row) {
             if (g_public_site_context?.coop_name && g_public_site_context.coop_name !== '용인모두의햇빛협동조합') {
                 // Unconfigured cooperatives must not borrow the main cooperative's introduction or photograph.
                 ['about-title', 'about-subtitle', 'about-content', 'about-list'].forEach((id) => document.getElementById(id)?.replaceChildren());
                 const image = document.getElementById('about-img-src');
                 if (image) { image.removeAttribute('src'); image.hidden = true; }
+                const helper=window.CoopHcrecAbout, columns=document.getElementById('about-content-columns');
+                if(columns&&helper?.matches(g_public_site_context.coop_id))helper.decorate(columns,columns.querySelector('[data-about-text]'),columns.querySelector('[data-about-photo]'),image,{},'');
             }
             return;
         }
-        renderPublicAbout(row);
+        renderPublicAbout(row,{draft:!!preview});
     }
 
-    function renderPublicAbout(defaultData) {
+    function renderPublicAbout(defaultData, {draft=false} = {}) {
         if (window.CoopSiteInline?.isEditing('about')) return;
 
         // 1. 이미지
         const imgEl = document.getElementById('about-img-src');
-        if(imgEl) {
+        const helper=window.CoopHcrecAbout;
+        const columns=document.getElementById('about-content-columns');
+        if(imgEl&&columns&&helper?.matches(g_public_site_context?.coop_id)){
+            const original=helper.imageUrl(defaultData.image_url,draft);
+            const shown=original?(helper.imageUrl(window.CoopDisplayImages?.display(original),draft)||original):'';
+            if(original)imgEl.dataset.originalSrc=original;else delete imgEl.dataset.originalSrc;
+            helper.decorate(columns,columns.querySelector('[data-about-text]'),columns.querySelector('[data-about-photo]'),imgEl,defaultData.presentation,shown);
+            imgEl.style.display=shown?'block':'none';
+        } else if(imgEl) {
             if (defaultData.image_url) { imgEl.dataset.originalSrc = defaultData.image_url; imgEl.src = window.CoopDisplayImages?.display(defaultData.image_url)||defaultData.image_url; }
             else imgEl.removeAttribute('src');
             imgEl.hidden = !defaultData.image_url;

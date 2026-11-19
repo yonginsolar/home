@@ -1480,6 +1480,7 @@ list_items:document.getElementById('admin-about-list').value,
 text_styles:CoopSiteInlineHost.readStyles('about'),
 image_url:document.getElementById('admin-about-img').value
 };
+if(hcrecAboutEditorAllowed())result.about.presentation=readHcrecAboutPresentation();
 const file = document.getElementById('admin-about-img-file')?.files?.[0];
 if (includeLocalFiles && file) result.about.image_url = await readHomePreviewFile(file);
 }
@@ -1782,6 +1783,32 @@ function isAboutSettingsReadCurrent(read) {
 return aboutSettingsRead===read && !read.cancelled && siteModalScopeCurrent(read)
 && document.getElementById('sub-about')===read.body;
 }
+function hcrecAboutEditorAllowed() {
+return root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)===true && canAccessAdminMemberTab('site');
+}
+function readHcrecAboutPresentation() {
+const helper=root.CoopHcrecAbout;
+return helper.sanitize(Object.fromEntries(helper.keys.map(key=>[key,document.getElementById('hcrec-about-'+key)?.value])));
+}
+function loadHcrecAboutPresentation(value) {
+const helper=root.CoopHcrecAbout,panel=document.getElementById('hcrec-about-settings');
+if(!panel||!helper)return;
+panel.hidden=!hcrecAboutEditorAllowed();
+const clean=panel.hidden?{}:helper.sanitize(value);
+for(const key of helper.keys){const field=document.getElementById('hcrec-about-'+key);if(field)field.value=clean[key]||'';}
+}
+function bindHcrecAboutPresentation() {
+const panel=document.getElementById('hcrec-about-settings');if(!panel)return;
+panel.addEventListener('input',()=>{if(hcrecAboutEditorAllowed())queueTotalPreviewUpdate();});
+panel.addEventListener('change',()=>{if(hcrecAboutEditorAllowed())queueTotalPreviewUpdate();});
+panel.addEventListener('click',event=>{
+ const key=event.target.closest('[data-about-edit]')?.dataset.aboutEdit;
+ if(!key||!hcrecAboutEditorAllowed())return;
+ const status=document.getElementById('hcrec-about-edit-status');
+ status.hidden=root.CoopSiteInlineHost?.startAboutField?.(key)===true;
+ status.textContent=status.hidden?'':'미리보기를 먼저 연 뒤 다시 눌러 주세요.';
+});
+}
 function cancelAboutSettingsRead() {
 const read=aboutSettingsRead;
 if(!read)return Promise.resolve(false);
@@ -1833,6 +1860,7 @@ subtitleEl.value = aboutHtmlToEditableText(row.subtitle || '');
 contentEl.value = row.content || '';
 listEl.value = row.list_items || '';
 imgEl.value = row.image_url || '';
+loadHcrecAboutPresentation(row.presentation);
 g_aboutOriginalImageUrl = imgEl.value;
 setAboutImageStatus(g_aboutOriginalImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
 if (typeof updateTotalPreview === 'function') updateTotalPreview();
@@ -1894,7 +1922,18 @@ listEl.appendChild(li);
 }
 
 const imgEl = document.getElementById('prev-img');
-if(imgUrl) { imgEl.src = window.CoopDisplayImages?.display(imgUrl)||imgUrl; imgEl.style.display = 'block'; }
+const aboutHelper=root.CoopHcrecAbout;
+if(hcrecAboutEditorAllowed()){
+const preview=document.getElementById('about-settings-preview');
+const safe=aboutHelper.imageUrl(imgUrl,true);
+const shown=safe?(aboutHelper.imageUrl(root.CoopDisplayImages?.display(safe),true)||safe):'';
+aboutHelper.decorate(preview,preview.querySelector('[data-about-text]'),preview.querySelector('[data-about-photo]'),imgEl,readHcrecAboutPresentation(),shown);
+imgEl.style.display=shown?'block':'none';
+const styles=CoopSiteInlineHost.readStyles('about');
+if(styles.aboutTitle?.length)root.CoopTextStyles?.paint(document.getElementById('prev-title'),title,styles.aboutTitle);
+if(styles.aboutSubtitle?.length)root.CoopTextStyles?.paint(document.getElementById('prev-subtitle'),subtitle,styles.aboutSubtitle);
+}
+else if(imgUrl) { imgEl.src = window.CoopDisplayImages?.display(imgUrl)||imgUrl; imgEl.style.display = 'block'; }
 else { imgEl.style.display = 'none'; }
 }
 
@@ -1928,6 +1967,7 @@ const fields = [
 ['admin-about-content', 'p_content'], ['admin-about-list', 'p_list_items']
 ].map(([id, key]) => ({ id, key, input:document.getElementById(id), value:document.getElementById(id).value }));
 const imageUrl = String(imageUrlInput?.value || '');
+const enhanced=hcrecAboutEditorAllowed();
 const updates = {
 p_title: fields[0].value.replace(/\r\n/g, '\n').trim(),
 p_subtitle: fields[1].value.replace(/\r\n/g, '\n').trim(),
@@ -1936,6 +1976,7 @@ p_list_items: fields[3].value,
 p_image_url: imageUrl.trim(),
 p_text_styles: JSON.parse(JSON.stringify(CoopSiteInlineHost.readStyles('about',true)))
 };
+if(enhanced)updates.p_presentation=readHcrecAboutPresentation();
 const submitted = JSON.parse(siteEditorFormSnapshot('sub-about'));
 root.CoopHomeEditorTools?.submitted('about');
 const coopId = String(await getAdminMemberCoopId() || '').trim();
@@ -1947,7 +1988,8 @@ if (!current()) return;
 updates.p_image_url = newlyUploadedImageUrl;
 }
 
-const { error } = await _supabase.rpc('upsert_about_with_text_styles', updates);
+if(enhanced&&!hcrecAboutEditorAllowed())return;
+const { error } = await _supabase.rpc(enhanced?'upsert_hcrec_about_presentation':'upsert_about_with_text_styles', updates);
 if (error) throw error;
 aboutSaveConfirmed = true;
 if (!current()) return;
@@ -1968,6 +2010,14 @@ revokeAboutPreviewObjectUrl();
 // Accept the saved snapshot, not the current form. New text/styles, an image
 // removal or a new File remain dirty even when the first save succeeded.
 const savedValues = new Map(fields.map(field => [field.id, updates[field.key]]));
+if(enhanced){
+ for(const key of root.CoopHcrecAbout.keys){
+  const id='hcrec-about-'+key,input=document.getElementById(id),sent=submitted.find(row=>row[0]===id)?.[2];
+  const saved=updates.p_presentation[key]||'';
+  if(input&&input.value===sent)input.value=saved;
+  savedValues.set(id,saved);
+ }
+}
 savedValues.set('admin-about-img', savedImageUrl);
 savedValues.set('admin-about-img-file', []);
 draft.accept(JSON.stringify(submitted.map(row => savedValues.has(row[0]) ? [row[0], row[1], savedValues.get(row[0])] : row)));
@@ -4452,6 +4502,7 @@ function askDeleteFaq(id) {
         if (initialized) return;
 // Establish the initial lock before a delayed tab handler can allow typing.
 CoopHomeVisualEditor.mount(); // Mount before taking the initial draft snapshot.
+bindHcrecAboutPresentation();
 getSiteEditorDraft('home');
 getSiteEditorDraft('about');
 getCertificationDraftStore();
@@ -4499,5 +4550,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
     Object.assign(root,{loadHomeComparisonPlants,markHomeComparisonPhoto,confirmHomeComparisonTarget,toggleHomePhotoPreview,setHomePhotoPreview});
-    root.AdminMemberSite = Object.freeze({ version: '20261119-hcrec-capital-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
+    root.AdminMemberSite = Object.freeze({ version: '20261119-hcrec-home-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
 })(window);

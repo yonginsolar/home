@@ -28,7 +28,7 @@
   return document.getElementById('activityModal')?.classList.contains('show')&&!isSavingActivity&&!g_activityModalOpening;
  }
  function collect(){
-  const result={};for(const [key,cfg] of Object.entries(fields))if(ready(key)&&!(cfg[0]==='hero'&&root.CoopHeroSlides?.enabled())){const state=fieldState(key);result[key]={value:state.value,kind:cfg[2],maxLength:cfg[3],styles:state.runs};}const slide=root.CoopHeroVisual?.fields();if(slide)for(const [key,value]of Object.entries(slide))result[key]={...value,scope:root.CoopHeroVisual.editor().slideId};return result;
+  const result={};for(const [key,cfg] of Object.entries(fields))if(ready(key)&&!(cfg[0]==='hero'&&root.CoopHeroSlides?.enabled())){const state=fieldState(key);result[key]={value:state.value,kind:cfg[2],maxLength:cfg[3],styles:state.runs,...(cfg[0]==='about'&&root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)?{hcrecAbout:true}:{})};}const slide=root.CoopHeroVisual?.fields();if(slide)for(const [key,value]of Object.entries(slide))result[key]={...value,scope:root.CoopHeroVisual.editor().slideId};return result;
  }
  function update(key,value,restore=false,styles,scope=''){
   if(!Object.hasOwn(fields,key)||!ready(key)||typeof value!=='string')return false;
@@ -52,6 +52,13 @@
  }
  function frame(){return document.getElementById('site-home-preview-frame');}
  function send(message){const f=frame();if(f?.src)f.contentWindow?.postMessage(message,new URL(f.src).origin);}
+ function startAboutField(key){
+  const f=frame();
+  if(!root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)||!['aboutTitle','aboutSubtitle','aboutContent','aboutList'].includes(key)
+      ||!ready(key)||root.CoopHomeVisualEditor?.current()!=='about'||!f?.getAttribute('src')||!f.contentWindow
+      ||document.getElementById('site-home-preview-shell')?.hidden||root.frameElement?.hidden)return false;
+  send({type:'coop-home-about-edit',field:key});return true;
+ }
  function flush(){
   if(document.getElementById('site-home-preview-shell')?.hidden)return Promise.resolve(true);
   if(flushWait)return flushWait.promise;
@@ -210,6 +217,9 @@
   else if(data.type==='coop-home-mobile-control'){
    const scope=root.CoopHeroVisual.editor().slideId;if((data.scope||'')!==scope&&['hero','heroTitle','heroSubtitle','heroButton'].includes(data.field))return;
    const key=data.field==='hero'?'heroTitle':data.field;if(!Object.hasOwn(fields,key)||!ready(key))return;
+   if(data.property==='about-settings'&&key.startsWith('about')&&root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)){
+    root.CoopSiteInlineHost.keepSettingsOpen();document.querySelector('#hcrec-about-settings [data-about-edit]')?.focus();return;
+   }
    if(data.property==='photo'||data.property==='links')root.CoopHeroVisual.action(data.property);
    else if(data.property==='fonts')controls('홈페이지 글꼴',[['site-home-title-font','제목 글꼴'],['site-home-body-font','본문 글꼴']]);
    else root.CoopHeroVisual.config(data.field,data.property,data.value);
@@ -217,5 +227,5 @@
   else if(data.type==='coop-home-inline-section')sectionAction(data.area,data.action);
   else if(data.type==='coop-home-inline-flushed'&&flushWait){clearTimeout(flushWait.timer);flushWait.resolve(data.ok===true&&!lastRejected);flushWait=null;}
  });
- root.CoopSiteInlineHost=Object.freeze({collect,update,mount,closeDialog,flush,setStyles,readStyles,bannerLinks,bannerPhoto,keepSettingsOpen(){if(permitted())setSettingsOpen?.(true);},fieldKeys:Object.keys(fields)});
+ root.CoopSiteInlineHost=Object.freeze({collect,update,mount,closeDialog,flush,setStyles,readStyles,bannerLinks,bannerPhoto,startAboutField,keepSettingsOpen(){if(permitted())setSettingsOpen?.(true);},fieldKeys:Object.keys(fields)});
 })(window);
