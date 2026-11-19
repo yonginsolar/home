@@ -316,6 +316,10 @@
       if (!isLeaveDocType(doc && doc.doc_type)) return;
       if (!isDeductibleLeaveDoc(doc)) return;
       if (!statusIn(doc && doc.status, reservedStatuses)) return;
+      if (getLeaveSnapshotMeta(doc)?.settlement_state==='pending_schedule') {
+        (summary.settlementReviewDocs||=[]).push(doc);
+        return;
+      }
 
       getLeaveAllocationRows(doc).forEach(function (row) {
         var amount = Math.max(0, roundLeaveDays(toNumber(row && row._leave_amount, 0)));
@@ -584,10 +588,20 @@
         var createdAt = escapeHtml(formatDate(doc && doc.created_at, '-'));
         var rawAmount = doc && doc._leave_amount != null ? doc._leave_amount : (doc && doc.amount);
         var amount = Math.max(0, Number(rawAmount || 0));
+        var shownAmount;
+        if(doc?._leave_item?.settlement_pending===true){
+          var net=doc._leave_item.pending_net_minutes;
+          shownAmount=Number.isInteger(net)&&net>0
+            ?'순시간 '+(global.CoopLeaveTime?.formatMinutes(net)||net+'분')+' · 정산대기':'정산대기';
+        }else{
+          shownAmount=amountPrefix+(global.CoopLeaveTime
+            ?global.CoopLeaveTime.formatDays(amount,doc?._leave_item?.basis_day_minutes||480)+(amountSuffix==='일'?'':amountSuffix.replace(/^일/,''))
+            :amount+amountSuffix);
+        }
         html += '<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>'
           + escapeHtml(formatLeaveDocType(doc || doc && doc.doc_type || '휴가'))
           + ' ' + statusBadge + periodLabel
-          + '</span><span class="fw-bold ' + escapeHtml(amountClass) + '">' + escapeHtml(amountPrefix) + (global.CoopLeaveTime?global.CoopLeaveTime.formatDays(amount,doc?._leave_item?.basis_day_minutes||480)+escapeHtml(amountSuffix==='일'?'':amountSuffix.replace(/^일/,'')):amount+escapeHtml(amountSuffix)) + '</span></div><div class="text-muted" style="font-size:0.75rem;">'
+          + '</span><span class="fw-bold ' + escapeHtml(amountClass) + '">' + escapeHtml(shownAmount) + '</span></div><div class="text-muted" style="font-size:0.75rem;">'
           + createdAt + '</div></li>';
       });
     } else {
@@ -712,11 +726,25 @@
       yearMap[key] = summary.byYear[key];
     });
     var pendingByYear = buildPendingRowsByYear(opts.pendingDocs, currentYear);
+    var reviewByYear={},reviewSeen=new Set();
+    for(var doc of [...(summary.settlementReviewDocs||[]),...(opts.pendingDocs||[])]){
+      if(getLeaveSnapshotMeta(doc)?.settlement_state!=='pending_schedule'||reviewSeen.has(doc.id))continue;
+      reviewSeen.add(doc.id);
+      getLeaveSnapshotItems(doc).forEach(function(item,index){
+        var iso=normalizeIsoDate(item.leave_date);
+        if(!iso||item.settlement_pending!==true)return;
+        var key=iso.slice(0,4);
+        (reviewByYear[key]||=[]).push(cloneDocWithMeta(doc,iso,0,{item,index,periodLabel:getLeaveSnapshotItemPeriod(item,iso)}));
+      });
+    }
 
     var hireYear = getYearFromDateValue(opts.hireDate);
     if (hireYear) yearMap[String(hireYear)] = yearMap[String(hireYear)] || ensureLeaveYearSummary({ todayIso: summary.todayIso || getTodayKstIso(), byYear: {} }, hireYear);
     yearMap[String(currentYear)] = yearMap[String(currentYear)] || ensureLeaveYearSummary({ todayIso: summary.todayIso || getTodayKstIso(), byYear: {} }, currentYear);
     Object.keys(pendingByYear).forEach(function (key) {
+      yearMap[key] = yearMap[key] || ensureLeaveYearSummary({ todayIso: summary.todayIso || getTodayKstIso(), byYear: {} }, Number(key));
+    });
+    Object.keys(reviewByYear).forEach(function (key) {
       yearMap[key] = yearMap[key] || ensureLeaveYearSummary({ todayIso: summary.todayIso || getTodayKstIso(), byYear: {} }, Number(key));
     });
 
@@ -738,7 +766,9 @@
       var dayMinutes=global.CoopLeaveTime?global.CoopLeaveTime.basisMinutes(opts.workBasis,year===currentYear?null:String(year)+'-01-01'):480;
       var format=value=>global.CoopLeaveTime?global.CoopLeaveTime.formatDays(value,dayMinutes):Number(value||0)+'일';
       html += '<details class="leave-year-accordion"><summary><span>📅 ' + year + '년</span><span class="leave-year-summary-metrics">'
-        + escapeHtml(buildLeaveYearMetricText(yearSummary, pendingSummary,dayMinutes)) + '</span></summary><div class="leave-year-body">';
+        + escapeHtml(reviewByYear[key]?.length
+          ? [buildLeaveYearMetricText(yearSummary,pendingSummary,dayMinutes), '정산대기'].filter(x=>x!=='사용 내역 없음').join(' · ')
+          : buildLeaveYearMetricText(yearSummary,pendingSummary,dayMinutes)) + '</span></summary><div class="leave-year-body">';
       html += '<div class="leave-section"><h6>🎁 발생 내역</h6>'
         + buildLeaveGrantListHtml(opts.hireDate, { today: buildLeaveReportAsOfDate(year, today),workBasis:opts.workBasis }) + '</div>';
       html += '<div class="leave-section"><h6>⚖️ 조정 내역</h6>'
@@ -754,6 +784,12 @@
             amountPrefix: '',
             amountSuffix: '일 신청'
           }) + '</div>';
+      }
+      if(reviewByYear[key]?.length){
+        html += '<div class="leave-section"><h6>정산대기</h6>'
+          +renderLeaveDocListHtml(sortLeaveRowsByDate(reviewByYear[key]), {
+            formatDate:opts.formatDate,formatLeaveDocType:opts.formatLeaveDocType,amountClass:'text-warning'
+          })+'</div>';
       }
       html += '<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-' + format(yearSummary.reservedDays || 0) + '</span></h6>'
         + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.reservedDocs), {

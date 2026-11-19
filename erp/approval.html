@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.171 | 실제 집행 영수증 바로보기와 첨부 묶음 출력 -->
+<!-- Version: v1.2.173 | 날짜별 휴가와 화성 미등록 시간차 점심 계산 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.171 | approval.html');</script>
+  <script>console.log('[Version] v1.2.173 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -47,9 +47,9 @@
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script id="approvalLeaveTimeScript" src="leave_time.js?v=20261106-4"></script>
-  <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=20261112-duration-1"></script>
-  <script src="approval_leave_document.js?v=1.0.1"></script>
-  <script src="leave_ledger.js?v=20261106-1"></script>
+  <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=1.7.1"></script>
+  <script src="approval_leave_document.js?v=1.1.1"></script>
+  <script src="leave_ledger.js?v=20261119-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_insurance_notice.js?v=1.1.1" integrity="sha384-HmicS2Afj/aL+WJ/EA3Btpvn1y5AZA4oMHXInN+JNegvYJQwE/wjIPSoWlGXENre" crossorigin="anonymous"></script>
@@ -82,6 +82,10 @@
     #mixedDayArea :is(label,legend,button,p) { overflow-wrap:anywhere; }
     #mixedDayArea .badge { max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:start; }
     #mixedDayArea .leave-entry-pair { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr)); gap:.5rem; }
+    #approvalLeaveSelectedDatesPanel :is(input,fieldset) { min-width:0; max-width:100%; width:100%; }
+    #approvalLeaveSelectedDatesPanel .leave-entry-pair { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    #approvalLeaveSelectedDatesPanel label { min-width:0; overflow-wrap:anywhere; }
+    @media (max-width:520px) { #approvalLeaveSelectedDatesPanel .leave-entry-pair { grid-template-columns:minmax(0,1fr); } }
     :is(#approvalAnnualClock,#annualWorkCorrection) :is(input,select,fieldset) { min-width:0; width:100%; }
     #annualWorkCorrection input[type=checkbox] { width:auto; }
     #mixedDayArea .leave-date-picker{min-width:0}
@@ -4975,7 +4979,7 @@ function getApprovalAnnualLeaveUi() {
             const proxy=document.getElementById('chkProxy')?.checked===true;
             const emp=proxy?String(document.getElementById('proxyTargetSelect')?.value||''):own;
             if(!myAuthUserId||!coop||!own||!emp||!canPerform('approval.submit')||(proxy&&!canProxyApprovalForEmpId(emp)))return null;
-            return {key:JSON.stringify([myAuthUserId,coop,own,emp,proxy]),self:!proxy};
+            return {key:JSON.stringify([myAuthUserId,coop,own,emp,proxy]),coopId:coop,self:!proxy};
         },
         loadClock:retry=>loadApprovalLeaveClockSchedule({retry}),
         reloadSnapshot:()=>calculateLeave({snapshotOnly:true}),
@@ -5118,7 +5122,9 @@ function getApprovalContractSchedulePeriods(periods, rows) {
             && [row.effective_date,row.contract_start].every(CoopLeaveTime.isDate)
             && (row.effective_date>row.contract_start?row.effective_date:row.contract_start)===period.effective_date);
         const row=matches.length===1?matches[0]:null;
-        if(!row||row.schedule_type!=='fixed'||!['full_time','part_time'].includes(period.work_time_basis))return period;
+        const dated=row?.indefinite==='false'&&CoopLeaveTime.isDate(row.contract_end)
+            ?{...period,leave_clock_until:row.contract_end}:period;
+        if(!row||row.schedule_type!=='fixed'||!['full_time','part_time'].includes(period.work_time_basis))return dated;
         const text=String(row.work_days||'').replace(/\s+/g,'').replace(/^매주/,'').replace(/요일/g,'')
             .replace(/부터/g,'~').replace(/까지$/,'').replace(/[～〜–-]/g,'~');
         const week='일월화수목금토';
@@ -5130,9 +5136,9 @@ function getApprovalContractSchedulePeriods(periods, rows) {
         }else if(/^[일월화수목금토](?:[,·ㆍ/및]?[일월화수목금토])*$/.test(text)){
             days=[...text.replace(/[,·ㆍ/및]/g,'')].map(day=>week.indexOf(day));
         }
-        if(!days.length||new Set(days).size!==days.length||days.length!==Number(row.days_per_week))return period;
+        if(!days.length||new Set(days).size!==days.length||days.length!==Number(row.days_per_week))return dated;
         const work=CoopLeaveTime.breakWindow(row.work_start,row.work_end),pause=CoopLeaveTime.breakWindow(row.break_start,row.break_end);
-        if(!work||!pause||pause.a<work.a||pause.b>work.b||work.b-work.a-(pause.b-pause.a)!==Number(period.day_minutes))return period;
+        if(!work||!pause||pause.a<work.a||pause.b>work.b||work.b-work.a-(pause.b-pause.a)!==Number(period.day_minutes))return dated;
         if(row.indefinite==='false'&&!CoopLeaveTime.isDate(row.contract_end))return period;
         return {...period,schedule:{work_start:work.start,work_end:work.end,break_start:pause.start,break_end:pause.end,
             days:days.sort((a,b)=>a-b),valid_until:row.indefinite==='false'?row.contract_end:''}};
@@ -5783,6 +5789,11 @@ function getApprovalMixedLeaveSummary(options = {}) {
     if(annualMode&&!ui)return {ok:false,items:[],totalDays:0,totalHours:0,errors:[APPROVAL_ANNUAL_RUNTIME_ERROR]};
     const correctionBlock=options.requireComplete&&ui?.correctionBlock?.();
     if(correctionBlock)return {ok:false,items:[],totalDays:0,totalHours:0,errors:[correctionBlock]};
+    const exact=ui?.exactSummary?.(options);
+    if(exact) {
+        if(!approvalLeaveSnapshotSupported)return {ok:false,items:[],totalDays:0,totalHours:0,errors:['날짜별 내역을 저장할 수 있는지 확인하지 못했습니다.']};
+        return checkApprovalLeaveOverlap(exact);
+    }
     if(annualMode==='clock')return checkApprovalLeaveOverlap(ui.summary(options));
     if (options.requireComplete && !leaveSnapshotState?.workBasis) return { ok:false, items:[], totalDays:0, totalHours:0, errors:['근로시간과 사용 가능 휴가를 먼저 조회해 주세요.'] };
     if(annualMode==='annual')return checkApprovalLeaveOverlap(getApprovalMixedLeaveRangeSummary({...options,fullOnly:true,workCalendar:ui.annualCalendar(),exactDaysSupported:approvalLeaveSnapshotSupported}));
@@ -5847,6 +5858,12 @@ function collectApprovalLeaveMixedItems(options = {}) {
     return getApprovalMixedLeaveSummary(options).items;
 }
 
+function applyApprovalSelectedLeaveSnapshot(snapshot,summary,config) {
+    if(summary.inputMode==='selected_dates')snapshot.selection_version=1;
+    if(summary.settlementPending) snapshot.settlement_state='pending_schedule';
+    else if(config.deductible) snapshot.work_basis_version=2;
+}
+
 function formatApprovalMixedLeaveItemLabel(item) {
     const dateText = formatApprovalDotDate(item?.leave_date || '');
     const slotLabel = String(item?.slot_label || getApprovalMixedLeaveSlotMeta(item?.slot).label || '').trim();
@@ -5861,6 +5878,8 @@ function formatApprovalMixedLeaveItemsLabel(items, totalDays = null) {
         ? CoopLeaveTime.roundDays(normalized.reduce((sum, item) => sum + Number(item.deducted_days || 0), 0))
         : Number(totalDays || 0);
     const firstLabel = formatApprovalMixedLeaveItemLabel(normalized[0]);
+    if(normalized.some(item=>item.settlement_pending===true))
+        return `${firstLabel}${normalized.length>1?` 외 ${normalized.length-1}건`:''} · 정산대기`;
     if (normalized.length === 1) return firstLabel;
     const duration=window.CoopApprovalLeaveDocument?.duration(Math.round(total*480))||formatApprovalWorkDays(total);
     return `${firstLabel} 외 ${normalized.length - 1}건 총 ${duration}`;
@@ -5871,7 +5890,12 @@ function formatApprovalMixedLeaveDetailText(items) {
     if (normalized.length === 0) return '';
     if (window.CoopApprovalLeaveDocument) return window.CoopApprovalLeaveDocument.detailText(normalized);
     return normalized
-        .map((item) => `- ${formatApprovalMixedLeaveItemLabel(item)}${item.slot==='hour'&&item.time_input_mode!=='hours'?` ${item.start_time}~${item.end_time}`:''}: ${CoopLeaveTime.formatDays(item.deducted_days,item.basis_day_minutes||480)}`)
+        .map((item) => {
+            const when=`- ${formatApprovalMixedLeaveItemLabel(item)}${item.slot==='hour'&&item.time_input_mode!=='hours'?` ${item.start_time}~${item.end_time}`:''}`;
+            if(item.settlement_pending===true)return when+(Number.isInteger(item.pending_net_minutes)
+                ?` / 순시간 ${CoopLeaveTime.formatMinutes(item.pending_net_minutes)} / 정산대기`:' / 정산대기');
+            return when+': '+CoopLeaveTime.formatDays(item.deducted_days,item.basis_day_minutes||480);
+        })
         .join('\n');
 }
 
@@ -13143,7 +13167,7 @@ function buildApprovalGeneratedTitle(mainType) {
     if (safeType === '휴가') {
         const leaveLabel = getApprovalCurrentLeaveTypeLabel() || '휴가';
         const leaveDays = Number(document.getElementById('leaveDaysCalc')?.value || 0);
-        const leavePeriodLabel = leaveDays > 0 ? buildLeavePeriodLabelForDraft(leaveLabel, leaveDays) : '';
+        const leavePeriodLabel = leaveDays > 0 || getApprovalAnnualMode()==='clock' ? buildLeavePeriodLabelForDraft(leaveLabel, leaveDays) : '';
         return leavePeriodLabel ? `${leaveLabel} 신청 (${leavePeriodLabel})` : `${leaveLabel} 신청`;
     }
     if (isApprovalLeaveCancelCategory(safeType)) {
@@ -13816,10 +13840,10 @@ function buildApprovalSubmitPreviewData() {
             leaveSnapshotPayload.items = mixedSummary.items;
             leaveSnapshotPayload.total_days = mixedSummary.totalDays;
             leaveSnapshotPayload.total_hours = mixedSummary.totalHours;
-            if (leaveTypeConfig.deductible) leaveSnapshotPayload.work_basis_version = 2;
+            applyApprovalSelectedLeaveSnapshot(leaveSnapshotPayload,mixedSummary,leaveTypeConfig);
         }
         const days = mixedSummary ? mixedSummary.totalDays : Number(document.getElementById("leaveDaysCalc")?.value || 0);
-        if (days <= 0) throw new Error('기간을 선택하세요.');
+        if (days <= 0 && !mixedSummary?.settlementPending) throw new Error('기간을 선택하세요.');
         finalAmt = days;
         const leavePeriodLabel = buildLeavePeriodLabelForDraft(lType, days);
         if (mixedSummary && mixedSummary.items.length > 0) {
@@ -14218,7 +14242,7 @@ function captureApprovalSubmitSnapshot() {
     let annualCoverage=null;
     if(getCurrentDraftMainType()==='휴가'&&['annual','clock','legacy'].includes(draft.fields?.leave_annual_mode)&&isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig())){
         const summary=getApprovalMixedLeaveSummary({requireComplete:true});
-        annualCoverage=[summary.ok,summary.items.map(i=>[i.leave_date,i.slot,i.start_time,i.end_time,i.break_minutes,i.deducted_minutes]),
+        annualCoverage=[summary.ok,summary.inputMode,summary.settlementPending===true,summary.items.map(i=>[i.leave_date,i.slot,i.start_time,i.end_time,i.break_minutes,i.deducted_minutes,i.pending_net_minutes,i.pending_break_minutes,i.pending_break_source]),
             summary.ok && ['annual','clock'].includes(getApprovalAnnualMode())
                 ? getApprovalAnnualLeaveUi()?.calculationBasis?.(summary.items) || [] : [],
             formatApprovalLeaveWorkCorrection(getApprovalCurrentLeaveTypeConfig())];
@@ -14272,9 +14296,9 @@ function getApprovalAnnualSubmitBlock() {
     if(!approvalProxyDraftMatches())return '기안 대상자를 다시 선택해 주세요.';
     if(getCurrentDraftMainType()!=='휴가'||!isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig()))return '';
     const summary=getApprovalMixedLeaveSummary({requireComplete:true});
-    if(!summary.ok||!summary.totalDays)return summary.errors[0]||'휴가 날짜와 시간을 확인해 주세요.';
+    if(!summary.ok||!summary.totalDays&&!summary.settlementPending)return summary.errors[0]||'휴가 날짜와 시간을 확인해 주세요.';
     const validation=getApprovalLeaveValidationSummary(getApprovalCurrentLeaveTypeLabel());
-    return isApprovalLeaveValidationBlocked(validation,summary.totalDays)?getApprovalLeaveValidationMessage(validation):'';
+    return !summary.settlementPending&&isApprovalLeaveValidationBlocked(validation,summary.totalDays)?getApprovalLeaveValidationMessage(validation):'';
 }
 function syncApprovalSubmitControls() {
     const leaveBlock=getApprovalAnnualSubmitBlock() || (getApprovalDraftAttachmentRemoval()?'첨부 처리 결과를 먼저 확인해 주세요.':'');
@@ -14641,8 +14665,14 @@ function calcLeaveDays() {
             if(skipped.textContent!==text)skipped.textContent=text;
             skipped.classList.toggle('hidden',!text);
         }
-        document.getElementById("leaveDaysBadge").innerText = isApprovalAnnualConfig(leaveConfig)&&getApprovalAnnualMode()==='clock'
+        document.getElementById("leaveDaysBadge").innerText = summary.settlementPending
+            ? (summary.pendingNetMinutes?`순시간 ${CoopLeaveTime.formatMinutes(summary.pendingNetMinutes)} · 정산대기`:'정산대기')
+            : isApprovalAnnualConfig(leaveConfig)&&getApprovalAnnualMode()==='clock'
             ? window.CoopApprovalAnnualLeave.formatDeduction(Math.round(summary.totalDays*480)) : formatApprovalWorkDays(summary.totalDays);
+        if(isApprovalAnnualConfig(leaveConfig)){
+            const label=document.getElementById('approvalLeaveTotalLabel');
+            if(label)label.textContent=summary.settlementPending?'신청 상태:':getApprovalAnnualMode()==='clock'?'차감 시간:':'신청 일수:';
+        }
         document.getElementById("leaveDaysCalc").value = summary.totalDays;
         syncApprovalPendingLeaveDaysBadge(summary.totalDays);
 
@@ -14650,7 +14680,7 @@ function calcLeaveDays() {
             if (summary.errors.length > 0) {
                 msg.textContent = `⛔ ${summary.errors[0]}`;
                 msg.classList.remove("hidden");
-            } else if (requiresLeaveValidation) {
+            } else if (requiresLeaveValidation && !summary.settlementPending) {
                 const validation = getApprovalLeaveValidationSummary(lType);
                 if (isApprovalLeaveValidationBlocked(validation, summary.totalDays)) {
                     msg.textContent = getApprovalLeaveValidationMessage(validation);
@@ -15308,21 +15338,21 @@ async function handleDraftSubmit(e) {
             leaveSnapshotPayload.items = mixedSummary.items;
             leaveSnapshotPayload.total_days = mixedSummary.totalDays;
             leaveSnapshotPayload.total_hours = mixedSummary.totalHours;
-            if (leaveTypeConfig.deductible) leaveSnapshotPayload.work_basis_version = 2;
+            applyApprovalSelectedLeaveSnapshot(leaveSnapshotPayload,mixedSummary,leaveTypeConfig);
         }
 
         const days = mixedSummary ? mixedSummary.totalDays : Number(document.getElementById("leaveDaysCalc").value);
-        if(days <= 0) return showAlert("기간을 선택하세요.");
+        if(days <= 0 && !mixedSummary?.settlementPending) return showAlert("기간을 선택하세요.");
 
         const leaveValidation = getApprovalLeaveValidationSummary(lType);
-        if (isApprovalLeaveValidationBlocked(leaveValidation, days)) {
+        if (!mixedSummary?.settlementPending && isApprovalLeaveValidationBlocked(leaveValidation, days)) {
             if (leaveValidation.mode === 'next_year_advance') {
                 return showAlert(`다음 연도 예상 연차가 부족합니다.\n사용 가능: ${leaveValidation.availableDays}일 / 요청: ${days}일`);
             }
             return showAlert(String(leaveValidation.message || '휴가 신청 조건을 확인하세요.'));
         }
 
-        if (isApprovalDeductibleLeaveType(leaveTypeConfig)) {
+        if (!mixedSummary?.settlementPending && isApprovalDeductibleLeaveType(leaveTypeConfig)) {
             const validation = getApprovalLeaveValidationSummary(lType);
             if (days > validation.availableDays) {
                 if (validation.enabled) {
@@ -15722,6 +15752,13 @@ async function handleDraftSubmit(e) {
             void calculateLeave({force:true});
         } else if (errorText.includes('ANNUAL_LEAVE_PERIOD_REQUIRED')) {
             showAlert('휴가 날짜를 확인할 수 없어요. 기간을 다시 선택해 주세요.');
+        } else if (/SELECTED_LEAVE_(SCHEDULE_CHANGED|CALENDAR_UNAVAILABLE|REGISTERED_UNVERIFIED)/.test(errorText)) {
+            showAlert('근무시간이나 공휴일 정보가 바뀌었어요. 입력은 그대로 두고 다시 확인합니다.');
+            void calculateLeave({force:true});
+        } else if (errorText.includes('SELECTED_LEAVE_ZERO_NET')) {
+            showAlert('휴게시간을 빼면 신청할 시간이 없어요. 시작·종료 시각을 확인해 주세요.');
+        } else if (/SELECTED_LEAVE_(DATE_INVALID|TIME_INVALID|WORKDAY_INVALID)/.test(errorText)) {
+            showAlert('선택한 날짜와 시간을 확인해 주세요. 이미 잡힌 일정이나 공휴일, 근무시간과 맞지 않을 수 있어요.');
         } else if (noticeFailure) {
             showAlert(noticeFailure);
         } else if (expenseSubType === '원천세' && (/23505/.test(errorText) || /ref_approval_unique_withholding_payment_month/.test(errorText))) {

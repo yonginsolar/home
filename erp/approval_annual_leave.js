@@ -3,6 +3,7 @@
   const CLOCK = /^([01]\d|2[0-3]):(00|30)$/;
   const WEEK = [1, 2, 3, 4, 5];
   const RPC = 'erp_self_leave_work_schedule';
+  const HWASEONG_COOP = '4e2b5e2a-79b1-4beb-a4ec-8797ebe23028';
   const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 
   function formatDeduction(value){
@@ -45,6 +46,18 @@
     const breakStart=input('time','annualWorkBreakStart');
     const breakDescription=make('p','small text-muted mb-0');
     const scheduleDescription=make('p','small text-muted my-2');
+    const selection=make('section','mb-3 hidden'), selectionToggle=button('날짜별 선택');
+    const selectionPanel=make('div','mt-2 hidden'), selectionRows=make('div','d-grid gap-2');
+    const addSelectionRow=button('날짜 추가','btn btn-sm btn-outline-secondary mt-2');
+    const selectionHint=make('p','small text-muted mt-2 mb-0');
+    const selectionRetry=button('다시 확인','btn btn-sm btn-outline-secondary mt-2 hidden');
+    let selected={annual:{mode:null,rows:[]},clock:{mode:null,rows:[]}}, renderedSelection='';
+    selectionPanel.id='approvalLeaveSelectedDatesPanel';
+    selectionToggle.id='approvalLeaveSelectedDatesToggle';
+    selectionToggle.setAttribute('aria-controls',selectionPanel.id);
+    selectionHint.setAttribute('role','status');
+    selectionPanel.append(selectionRows,addSelectionRow,selectionHint,selectionRetry);
+    selection.append(selectionToggle,selectionPanel);area.before(selection);
     const scheduleSave=button('요청 담기','btn btn-sm btn-primary'),cancel=button('취소');
     scheduleSave.id='annualWorkCorrectionAdd';
     cancel.id='annualWorkCorrectionCancel';
@@ -317,12 +330,25 @@
     const isCorrectionMode=()=>['annual','clock','legacy'].includes(activeMode);
     const unappliedSchedule=()=>editOpen&&!same(workEditorDraft(),editorBaseline);
     const workEditorDraft=()=>({...readWork(),break_start:breakStart.value});
-    const readClockDraft=()=>({start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows,...(halfChoice?{half_day:halfChoice}:{})});
+    const readClockDraft=()=>({start_date:startDate.value,end_date:endDate.value,start_time:start.get(),end_time:end.get(),follows,
+      ...(halfChoice?{half_day:halfChoice}:{}),
+      ...(Object.values(selected).some(s=>s.mode!==null||s.rows.some(r=>r.leave_date||r.start_time||r.end_time))
+        ?{selection:JSON.parse(JSON.stringify(selected))}:{})});
     function putClockDraft(data={}){
       startDate.value=data.start_date||'';endDate.value=data.end_date||'';
       lastStart=startDate.value;lastEnd=endDate.value;
       start.put(data.start_time);end.put(data.end_time);follows=data.follows!==false;
       halfChoice=['am','pm'].includes(data.half_day)?data.half_day:'';
+      const clockDraftValue=v=>/^([01]\d|2[0-3]):[0-5]\d$/.test(v)?v:'';
+      selected=Object.fromEntries(['annual','clock'].map(key=>{
+        const state=data.selection?.[key];
+        return [key,{mode:typeof state?.mode==='boolean'?state.mode:null,
+          rows:(Array.isArray(state?.rows)?state.rows:[]).slice(0,200).map(r=>({
+            leave_date:time.isDate(r?.leave_date)?r.leave_date:'',
+            start_time:clockDraftValue(r?.start_time),end_time:clockDraftValue(r?.end_time)
+          }))}];
+      }));
+      renderedSelection='';
     }
     function syncOwner(){
       const next=ownerState();
@@ -489,7 +515,7 @@
         return model.clock?.state==='error'?'근무일과 공휴일을 확인하지 못했어요. 다시 확인해 주세요.':'근무일과 공휴일을 확인하는 중이에요.';
       return '';
     }
-    const scheduleError=()=>ticket?.error?'등록된 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':owner?.self&&!pref?'등록된 근무시간을 확인하는 중이에요.':'시간차를 신청하려면 근무·휴게시간을 먼저 등록해야 합니다. 인사 담당자에게 입력을 요청해 주세요.';
+    const scheduleError=()=>ticket?.error?'등록된 근무시간을 확인하지 못했어요. 다시 확인해 주세요.':owner?.self&&!pref?'등록된 근무시간을 확인하는 중이에요.':'근무시간이 미등록된 날짜는 날짜별 선택에서 시간차를 신청할 수 있어요.';
     function workdayStatus(date,model){
       if(model.clock?.calendar?.has(date))return {reason:`${date}은 공휴일이에요.`};
       const {schedule}=scheduleFor(date,model);
@@ -517,6 +543,173 @@
       if(issue)return {reason:issue};
       if(side==='end'&&annualStartField?.value&&date<annualStartField.value)return {reason:'종료일은 시작일보다 빠를 수 없어요.'};
       return annualDayStatus(date,model);
+    }
+    function selectionActive(model){
+      if(!['annual','clock'].includes(activeMode)||!owner)return false;
+      const state=selected[activeMode];
+      if(state.mode!==null)return state.mode;
+      return activeMode==='clock'&&!calendarError(model)&&(!owner.self||!!pref)
+        &&!fallbackSchedule()&&(!model.policy.periods.some(p=>p.schedule)
+          ||(time.inYear(startDate.value)&&!scheduleFor(startDate.value,model).schedule));
+    }
+    function selectionSummary(model,{requireComplete=false}={}){
+      const fail=(message,retry=false)=>({ok:false,items:[],totalDays:0,totalHours:0,errors:message?[message]:[],retry});
+      const problem=calendarError(model);
+      if(problem)return fail(problem,ledgerReadFailed(model)||model.clock?.state==='error');
+      const timed=activeMode==='clock', rows=selected[activeMode].rows, seen=new Set(), items=[];
+      const saved=model.snapshot?.workBasis?.registered_schedule;
+      const hwaseong=owner.coopId===HWASEONG_COOP;
+      let registered=null,pending=false;
+      try{if(saved)registered=cleanSchedule(saved,time);}catch(_){return fail('등록된 근무시간을 확인해 주세요.');}
+      for(const [i,{leave_date:date,start_time:from,end_time:to}] of rows.entries()){
+        if(!date&&(!timed||!from&&!to)&&!requireComplete)continue;
+        if(!time.inYear(date))return fail(`${i+1}번째 날짜는 올해 날짜로 골라 주세요.`);
+        if(seen.has(date))return fail(`${date} 날짜가 중복됐어요.`);
+        seen.add(date);
+        if(model.clock.calendar.has(date))return fail(`${date}은 공휴일이에요.`);
+        const day=timed?timedWorkday(date,model,registered):annualDayStatus(date,model);
+        if(!timed){
+          if(day.reason)return fail(day.reason);
+          const slot=day.slot||'full';
+          items.push({...time.dayItem({leave_date:date,slot},model.snapshot.workBasis),slot_label:slot==='full'?'전일':slot==='am'?'오전':'오후'});
+          continue;
+        }
+        if(day.skip)return fail(day.message);
+        if(!CLOCK.test(from)||!CLOCK.test(to)||from>=to)
+          return fail(requireComplete||from&&to?`${date} 시작과 종료 시각을 확인해 주세요. 종료는 같은 날 시작보다 늦어야 해요.`:'');
+        if(from.slice(3)!==to.slice(3))return fail('시간차는 1시간 단위예요. 시작과 종료의 분을 같게 골라 주세요.');
+        const a=time.breakWindow(from,to);
+        if(!day.work){
+          if(day.schedule)return fail(day.message||'등록된 근무시간을 확인해 주세요.');
+          if(owner.self&&(!pref||hwaseong&&(ticket?.loading||ticket?.error)))
+            return fail(scheduleError(),canRetryPersonal());
+          if(hwaseong&&hasUnconfirmedContractClock(model.policy,date))
+            return fail(`${date}에 등록된 계약의 근무시간을 확인해 주세요.`);
+          if(model.bookedHalves.has(date)||crosses(model.prior.get(date)||[],a.a,a.b))
+            return fail(`${date}에 이미 신청한 휴가와 겹쳐요.`);
+          const lunch=hwaseong?Math.max(0,Math.min(a.b,780)-Math.max(a.a,720)):0;
+          const net=a.b-a.a-lunch;
+          if(hwaseong&&net<=0)return fail(`${date}: 휴게시간을 빼면 신청할 시간이 없어요.`);
+          pending=true;
+          items.push({leave_date:date,slot:'hour',slot_label:'시간차',time_input_mode:'scheduled',start_time:from,end_time:to,
+            ...(hwaseong?{pending_net_minutes:net,pending_break_minutes:lunch,pending_break_source:'hwaseong_noon'}:{})});
+          continue;
+        }
+        if(crosses(day.busy,a.a,a.b))return fail(`${date}에 이미 신청한 휴가와 겹쳐요.`);
+        try{
+          const result=time.scheduledRange({leave_date:date,end_date:date,start_time:from,end_time:to,
+            fallback_schedule:registered,strict_bounds:true}, {...model.snapshot.workBasis,periods:model.policy.periods},model.clock.calendar);
+          if(result.items.length!==1||result.totalMinutes<60||result.totalMinutes%60)
+            return fail(`${date}의 휴게시간을 제외한 시간이 1시간 단위가 아니에요.`);
+          items.push(result.items[0]);
+        }catch(error){return fail(error.message);}
+      }
+      if(!items.length)return fail(requireComplete?'신청할 날짜를 입력해 주세요.':'');
+      items.sort((a,b)=>a.leave_date.localeCompare(b.leave_date));
+      if(pending&&items.some(item=>model.bookedHalves.has(item.leave_date)))return fail('이미 반차를 신청한 날짜가 있어 근무시간 확인이 필요해요.');
+      const normalized=pending?items.map(item=>{
+        const {leave_date,slot,slot_label,start_time,end_time}=item;
+        return {leave_date,slot,slot_label,time_input_mode:'scheduled',start_time,end_time,settlement_pending:true,
+          ...(hwaseong?{pending_net_minutes:item.pending_net_minutes??item.deducted_minutes,
+            pending_break_minutes:item.pending_break_minutes??item.break_minutes,
+            pending_break_source:item.pending_break_source??'registered_schedule'}:{})};
+      }):items;
+      const minutes=pending?0:items.reduce((s,i)=>s+i.deducted_minutes,0);
+      return {ok:true,inputMode:'selected_dates',items:normalized,totalDays:time.roundDays(minutes/480),totalHours:minutes/60,
+        ...(pending&&hwaseong?{pendingNetMinutes:normalized.reduce((sum,item)=>sum+item.pending_net_minutes,0)}:{}),
+        settlementPending:pending,errors:[]};
+    }
+    function hasUnconfirmedContractClock(policy,date){
+      let latest=null;
+      for(const period of policy.periods)if(period.effective_date<=date)latest=period;
+      if(!latest)return false;
+      const until=latest.schedule?.valid_until||latest.leave_clock_until;
+      return !until||date<=until;
+    }
+    function mountSelectionRows(){
+      const state=selected[activeMode];if(!state)return;
+      if(!state.rows.length)state.rows.push({leave_date:'',start_time:'',end_time:''});
+      const year=time.yearOf(),employee=owner?.key,mode=activeMode;
+      const build=(record,index)=>{
+        const row=make('fieldset','border rounded p-2');
+        row.style.minInlineSize='0';
+        row.append(make('legend','small fw-bold float-none w-auto mb-1',`${index+1}번째 날짜`));
+        const fields=make('div','leave-entry-pair');
+        const addField=(key,type,caption)=>{
+          const el=input(type,`approvalLeaveSelected-${mode}-${index}-${key}`);
+          el.dataset.approvalUiOnly='';el.style.minWidth='0';el.value=record[key];
+          if(type==='date'){el.min=`${year}-01-01`;el.max=`${year}-12-31`;}else el.step='1800';
+          const update=()=>{
+            if(ownerState()?.key!==employee||activeMode!==mode||selected[mode]!==state||!selectionActive(calendarModel()))return;
+            if(record[key]!==el.value){state.mode=true;record[key]=el.value;ctx.changed();}
+          };
+          el.addEventListener('input',update);el.addEventListener('change',update);
+          (type==='date'?row:fields).append(label(caption,el));
+        };
+        addField('leave_date','date','신청일');
+        if(mode==='clock'){
+          addField('start_time','time','시작 시각');addField('end_time','time','종료 시각');
+          const note=make('p','small text-muted mt-2 mb-0 hidden');note.dataset.leavePendingNet='';
+          row.append(fields,note);
+        }
+        const drop=button('이 날짜 빼기','btn btn-sm btn-outline-secondary mt-2');
+        drop.addEventListener('click',()=>{
+          if(ownerState()?.key!==employee||mode!==activeMode||state!==selected[mode]||root.frameElement?.hidden)return;
+          state.rows.splice(index,1);mountSelectionRows();notifySelectionChange();
+          if(doc.activeElement===doc.body||doc.activeElement===drop)
+            (selectionRows.children[Math.min(index,state.rows.length-1)]?.querySelector('input')||addSelectionRow).focus();
+        });
+        row.append(drop);return row;
+      };
+      selectionRows.replaceChildren(...state.rows.map(build));
+      addSelectionRow.disabled=state.rows.length>=200;
+    }
+    function notifySelectionChange(){
+      ctx.changed();
+      selection.dispatchEvent(new root.Event('input',{bubbles:true}));
+    }
+    selectionToggle.addEventListener('click',()=>{
+      syncOwner();if(!owner||!selected[activeMode]||root.frameElement?.hidden)return;
+      selected[activeMode].mode=!selectionActive(calendarModel());notifySelectionChange();
+    });
+    addSelectionRow.addEventListener('click',()=>{
+      syncOwner();const state=selected[activeMode];
+      if(!state||!selectionActive(calendarModel())||state.rows.length>=200||root.frameElement?.hidden)return;
+      state.mode=true;state.rows.push({leave_date:'',start_time:'',end_time:''});mountSelectionRows();notifySelectionChange();
+      if(doc.activeElement===addSelectionRow||doc.activeElement===doc.body)selectionRows.lastElementChild?.querySelector('input')?.focus();
+    });
+    selectionRetry.addEventListener('click',()=>retryCalendarRead(null,false));
+    selection.addEventListener('keydown',event=>{if(event.repeat&&!event.isComposing&&event.target.closest('button')&&['Enter',' '].includes(event.key))event.preventDefault();});
+    function refreshSelection(model=calendarModel()){
+      const visible=Boolean(owner&&selected[activeMode]), active=visible&&selectionActive(model);
+      selection.classList.toggle('hidden',!visible);
+      selectionToggle.textContent=active?'기간으로 선택':'날짜별 선택';
+      selectionToggle.setAttribute('aria-expanded',String(active));
+      selectionPanel.classList.toggle('hidden',!active);
+      if(visible){
+        area.classList.toggle('hidden',active||activeMode!=='clock');
+        doc.getElementById('mixedLeaveRangeEditor')?.classList.toggle('hidden',active||activeMode==='clock');
+      }
+      const key=active?owner.key+'|'+activeMode:'';
+      if(key!==renderedSelection){renderedSelection=key;if(active)mountSelectionRows();else selectionRows.replaceChildren();}
+      if(!active)return null;
+      const result=selectionSummary(model);
+      const byDate=new Map(result.items.map(item=>[item.leave_date,item]));
+      for(const [index,row] of [...selectionRows.children].entries()){
+        const note=row.querySelector('[data-leave-pending-net]'), item=byDate.get(selected[activeMode].rows[index].leave_date);
+        if(!note)continue;
+        const show=Number.isInteger(item?.pending_net_minutes);
+        note.classList.toggle('hidden',!show);
+        setText(note,show?`순시간 ${time.formatMinutes(item.pending_net_minutes)} · ${item.pending_break_minutes
+          ?(item.pending_break_source==='hwaseong_noon'?'12:00~13:00 중 ':'')+'휴게 '+time.formatMinutes(item.pending_break_minutes)+' 제외'
+          :'휴게 겹침 없음'}`:'');
+      }
+      setText(selectionHint,result.settlementPending?(result.pendingNetMinutes
+        ?`순시간 합계 ${time.formatMinutes(result.pendingNetMinutes)} · 정산대기(차감 전)`:'근무시간이 미등록된 날짜가 있어 정산대기로 접수해요. 지금은 차감하지 않아요.'):
+        result.errors[0]||(activeMode==='clock'?'날짜마다 시작과 종료 시각을 입력해 주세요.':'신청할 날짜만 추가해 주세요.'));
+      selectionRetry.classList.toggle('hidden',!result.retry&&!snapshotRetry);
+      selectionRetry.setAttribute('aria-disabled',String(!!snapshotRetry||model.snapshotRead==='loading'));
+      return result;
     }
     function clockDateReason(date,side,model){const menu=getClockMenu(date,side,model);return menu.values.length?'':menu.message||'선택할 수 있는 시간이 없어요.';}
     function netMinutes(from,to,pause){return Math.max(0,to-from-(pause?Math.max(0,Math.min(to,pause.b)-Math.max(from,pause.a)):0));}
@@ -562,9 +755,11 @@
       }
       setText(halfHint,messages.length===2&&messages[0].slice(4)===messages[1].slice(4)?messages[0].slice(4):messages.join(' · '));
     }
-    function timedWorkday(date,model){
-      if(model.timedDays.has(date))return model.timedDays.get(date);
-      const info=scheduleFor(date,model),{schedule}=info;
+    function timedWorkday(date,model,registered){
+      const key=(registered===undefined?'range:':'selected:')+date;
+      if(model.timedDays.has(key))return model.timedDays.get(key);
+      const contract=time.dateSchedule(model.policy,date);
+      const info=registered===undefined?scheduleFor(date,model):{schedule:contract||registered,fallback:!contract},{schedule}=info;
       let result;
       if(model.clock.calendar.has(date))result={...info,skip:true,message:`${date}은 공휴일이에요.`};
       else if(!schedule)result={...info,message:scheduleError(),retry:canRetryPersonal()};
@@ -574,7 +769,7 @@
         result=work?{...info,date,work,pause,busy:model.prior.get(date)||[],limit:time.basisMinutes(model.policy,date)}
           :{...info,message:'근무 시작·종료 시각을 확인해 주세요.'};
       }
-      model.timedDays.set(date,result);return result;
+      model.timedDays.set(key,result);return result;
     }
     function* clockEndOptions(day,from,chosen,prefix){
       if(prefix.days>=200||from<day.work.a||from>=day.work.b)return;
@@ -663,6 +858,7 @@
     }
     function refresh(){
       syncOwner();const model=calendarModel();
+      refreshSelection(model);
       startMenu=getClockMenu(startDate.value,'start',model);
       const endMenu=getClockMenu(endDate.value,'end',model);
       start.update(startMenu.values,!!startMenu.values.length,'시간 선택');
@@ -689,6 +885,10 @@
       const blocker=correctionBlock();
       const error=requireComplete&&blocker?blocker:s.complete||requireComplete?s.error:null;
       return {ok:!error&&(!requireComplete||items.length>0),inputMode:'detail',items,totalHours,totalDays:time.roundDays(totalHours/8),errors:error?[error]:[]};
+    }
+    function exactSummary(options){
+      syncOwner();const model=calendarModel();
+      return refreshSelection(model)?selectionSummary(model,options):null;
     }
     function calculationBasis(items){
       syncOwner();
@@ -744,7 +944,7 @@
       return true;
     }
     putWork(null);syncDates();setMode('annual');
-    return {summary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.6.18'};
+    return {summary,exactSummary,annualCalendar,calculationBasis,getCorrection,correctionBlock,draft,restore,restoreDeferred,refresh,refreshDates,setMode,activate(){syncOwner();if(owner){ctx.loadClock(false);void readPreference();}},version:'1.7.1'};
   }
   root.CoopApprovalAnnualLeave=Object.freeze({create,cleanSchedule,formatDeduction});
 })(window);

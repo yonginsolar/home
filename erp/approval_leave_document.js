@@ -1,4 +1,4 @@
-/* v1.0.1 — Replace only the calendar owned by this read-only renderer. */
+/* v1.1.1 — 신청 시각, 순시간과 정산대기를 같은 내역에서 표시한다. */
 (function(root){
  'use strict';
  const weekdays=['일','월','화','수','목','금','토'];
@@ -27,7 +27,9 @@
    const iso=String(item?.leave_date||''),d=date(iso),when=d?`${iso.replaceAll('-','.')}(${weekdays[d.getUTCDay()]})`:iso;
    const timed=item?.slot==='hour'&&item.time_input_mode!=='hours';
    const times=timed&&/^\d{2}:\d{2}$/.test(item.start_time||'')&&/^\d{2}:\d{2}$/.test(item.end_time||'')?`${item.start_time}~${item.end_time}`:'';
-   const parts=[times,duration(minutes(item))].filter(Boolean).join(' / ');
+   const pending=item?.settlement_pending===true, net=item?.pending_net_minutes;
+   const netText=pending&&Number.isInteger(net)&&net>0?`순시간 ${[Math.floor(net/60)?Math.floor(net/60)+'시간':'',net%60?net%60+'분':''].filter(Boolean).join(' ')}`:'';
+   const parts=[times,netText,pending?'정산대기':duration(minutes(item))].filter(Boolean).join(' / ');
    return `- ${when} ${label(item)}${parts?' ('+parts+')':''}`;
   }).join('\n');
  }
@@ -87,5 +89,5 @@
   const view=calendar(doc,container.ownerDocument);container.classList.toggle('approval-leave-document',!!view);
   if(view){container.append(view);mounted.set(container,view);}else mounted.delete(container);
  }
- root.CoopApprovalLeaveDocument=Object.freeze({detailText,duration,calendar,append,version:'1.0.1'});
+ root.CoopApprovalLeaveDocument=Object.freeze({detailText,duration,calendar,append,version:'1.1.1'});
 })(window);
