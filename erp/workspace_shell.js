@@ -15,13 +15,23 @@
   document.documentElement.setAttribute('data-erp-print-locked', '');
   function routeIntent(value){
     let target;try{target=new URL(value,location.origin);}catch(_){return {route:null,feature:''};}
+    const tab=window.ErpWorkspaceFeatureTabs?.intent(target);
+    if(tab)return {route:routes.route(tab.route),feature:'tab:'+tab.key};
     const booklet=target.origin===location.origin&&/^\/minutes\/meeting_workspace(?:\.html)?\/?$/.test(target.pathname)
       && target.hash==='#assembly-booklet';
     if(booklet)target.hash='';
     return {route:routes.route(target.href),feature:booklet?'assembly-booklet':''};
   }
   const addressView=()=>routeIntent(new URLSearchParams(location.search).get('view')||'');
-  const view = () => addressView().route;
+  function featureAddress(route,feature){
+    const tab=feature?.startsWith('tab:')&&window.ErpWorkspaceFeatureTabs?.fromKey(feature.slice(4));
+    return tab && window.ErpWorkspaceFeatureTabs.sameRoute(tab,route) ? window.ErpWorkspaceFeatureTabs.href(route,tab.key) : route;
+  }
+  function setFeature(entry,feature){
+    clearTimeout(entry.featureWait);
+    entry.feature=feature;entry.addressFeature=feature;entry.featureBusy=null;
+    entry.featureStarted=Date.now();entry.featureWait=null;
+  }
   const legalSetupLink = target => {
     const url=new URL(target,location.origin);
     return /\/admin_member(?:\.html)?\/?$/.test(url.pathname)&&url.searchParams.get('scope')==='site_admin'&&url.searchParams.get('sub')==='legal';
@@ -231,6 +241,10 @@
   function notifyTaskReady(child, doc) {
     const entry = activeEntry, ticket = transition;
     try {
+      if(!requested&&entry.feature?.startsWith('tab:')&&entry.frame.contentWindow===child
+         &&entry.frame.contentDocument===doc&&activePrintState(entry)&&task(entry)?.ready===true){
+        deliverFeature(entry);return true;
+      }
       if (!ready || leaving || !requested || entry.frame.hidden || !entry.frame.isConnected
         || entry.frame.contentWindow !== child || entry.frame.contentDocument !== doc
         || !doc.body || routes.route(child.location.href) !== requested
@@ -268,7 +282,7 @@
     park(); requested = target; loading();
     const ticket = ++transition;
     if (cached?.frame.isConnected) {
-      activeEntry = cached; activeEntry.feature=feature; frame = cached.frame; frame.id = 'erpWorkspaceFrame';
+      activeEntry = cached; setFeature(activeEntry,feature); frame = cached.frame; frame.id = 'erpWorkspaceFrame';
       // Never expose a held page using an old permission answer. A failed check leaves it locked.
       void (async () => {
         try {
@@ -291,7 +305,7 @@
               if (!ready || resetTicket!==transition) return;
               activeEntry={frame:document.createElement('iframe'),route:'',fields:new Map()};
               document.getElementById('erpWorkspaceContent').append(activeEntry.frame); frame=activeEntry.frame;
-              load(target,true); return;
+              load(target,true,feature); return;
             }
           }
           window.ErpWorkspace.updateSetupRuntime?.(client, access.runtime);
@@ -332,7 +346,8 @@
     taskUrl.pathname = taskUrl.pathname.replace(/\.html$/, '');
     nextFrame.id = 'erpWorkspaceFrame'; nextFrame.className='erp-workspace-task';
     nextFrame.title = previous.frame.title; nextFrame.loading = 'eager';
-    activeEntry={frame:nextFrame,route:target,fields:new Map(),feature};
+    activeEntry={frame:nextFrame,route:target,fields:new Map()};
+    setFeature(activeEntry,feature);
     const entry=activeEntry;
     nextFrame.addEventListener('load',()=>frameLoaded(entry));
     // Mount with the allowed destination already set, without an intermediate
@@ -351,7 +366,15 @@
     if (!next && !isHome) return false;
     if (!ready) return true;
     if (next && (next === requested || (next === current && !requested))) {
-      if(feature&&activeEntry.route===next){activeEntry.feature=feature;deliverFeature(activeEntry);}
+      if(feature&&activeEntry.route===next){
+        if(feature.startsWith('tab:')&&activeEntry.addressFeature!==feature) {
+          const previousTab=activePrintState(activeEntry)&&window.ErpWorkspaceFeatureTabs?.activeTab(activeEntry.frame.contentDocument);
+          if(previousTab)
+            history.replaceState({erpWorkspace:true}, '', routes.address(featureAddress(next,'tab:'+previousTab.key)));
+          history.pushState({erpWorkspace:true}, '', routes.address(featureAddress(next,feature)));
+        }
+        setFeature(activeEntry,feature);deliverFeature(activeEntry);
+      }
       return true;
     }
     if (navigationPending) return true;
@@ -362,7 +385,7 @@
         || await window.CoopDialog.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 전체 메뉴로 이동할까요?') : await canLeave();
       if (!allowed || !ready || leaving || entry !== activeEntry || ticket !== transition) return;
       if (isHome) { purge(); leaving=true; location.assign(target.href); return; }
-      history.pushState({erpWorkspace:true}, '', routes.address(next));
+      history.pushState({erpWorkspace:true}, '', routes.address(featureAddress(next,feature)));
       load(next,false,feature); window.ErpWorkspace.closeDrawer();
     })().catch(() => { status.textContent='화면을 이동하지 못했습니다. 작성 중인 내용은 유지됩니다.';status.hidden=false; })
       .finally(() => { navigationPending=false; });
@@ -436,7 +459,7 @@
       printableEntry = activeEntry;
       document.documentElement.removeAttribute('data-erp-print-locked');
       setPrintLock(activeEntry,false);
-      history.replaceState({erpWorkspace:true}, '', routes.address(next));
+      history.replaceState({erpWorkspace:true}, '', routes.address(featureAddress(next,activeEntry.addressFeature)));
       document.title = child.document.title;
       frame.title = child.document.title || 'ERP 업무 화면';
       window.ErpWorkspace.setDocument(child.document, href);
@@ -445,6 +468,50 @@
     } catch (_) { lockPrint(); status.hidden = true; error.hidden = false; }
   }
   function deliverFeature(entry){
+    if(entry.feature?.startsWith('tab:')){
+      const tabs=window.ErpWorkspaceFeatureTabs, tab=tabs?.fromKey(entry.feature.slice(4));
+      if(!tab||!activePrintState(entry)||!tabs.sameRoute(tab,entry.route)||entry.featureBusy)return;
+      if(task(entry)?.ready!==true||!tabs.visibleControl(tab,entry.frame.contentDocument)){
+        if(Date.now()-entry.featureStarted>=12000){
+          entry.feature='';status.textContent='이 항목을 열 수 없어요. 메뉴와 권한을 확인해 주세요.';status.hidden=false;
+        } else if(!entry.featureWait) {
+          const wait=entry.feature;
+          entry.featureWait=setTimeout(()=>{
+            entry.featureWait=null;
+            if(entry.feature===wait)deliverFeature(entry);
+          },200);
+        }
+        return;
+      }
+      clearTimeout(entry.featureWait);entry.featureWait=null;
+      const work={intent:entry.feature, ticket:transition};
+      entry.featureBusy=work;
+      const still=()=>activePrintState(entry)&&entry.featureBusy===work&&entry.feature===work.intent&&transition===work.ticket;
+      const targetDoc=entry.frame.contentDocument;
+      const finish=()=>{
+        if(!still())return false;
+        entry.feature='';entry.featureBusy=null;return true;
+      };
+      const blocked=()=>{
+        if(!finish())return;
+        status.textContent='이 항목을 열 수 없어요. 메뉴와 권한을 확인해 주세요.';
+        status.hidden=false;
+      };
+      const interrupted=event=>{if(event.isTrusted)finish();};
+      targetDoc?.addEventListener('pointerdown',interrupted,true);
+      targetDoc?.addEventListener('keydown',interrupted,true);
+      void serverAccess().then(access=>{
+        if(!still())return;
+        const allowed=access?.id===userId&&access.key===accessKey&&access.runtime.coop_id===accessCoop&&tabs.usable(tab,access.runtime);
+        const control=allowed&&tabs.visibleControl(tab,entry.frame.contentDocument);
+        if(!control){blocked();return;}
+        if(finish()&&!control.matches('.active,[aria-selected="true"]'))control.click();
+      }).catch(blocked).finally(()=>{
+        targetDoc?.removeEventListener('pointerdown',interrupted,true);
+        targetDoc?.removeEventListener('keydown',interrupted,true);
+      });
+      return;
+    }
     if(entry.feature!=='assembly-booklet'||!activePrintState(entry)||entry.route!=='/minutes/meeting_workspace.html')return;
     const child=entry.frame.contentWindow;
     if(child?.document&&child.location.origin===location.origin){
@@ -508,21 +575,25 @@
     if (navigate(anchor.href)) event.preventDefault();
   });
   window.addEventListener('popstate', async () => {
-    const next = view();
+    const {route:next,feature} = addressView();
     if (!next) {
       history.replaceState({erpWorkspace:true}, '', routes.address(current));
       navigate(new URL('index.html',location.href).href);return;
     }
     // Back may return to the visible-before-loading route. It must cancel the
     // pending destination too, and recheck the restored task before revealing it.
-    if (next === requested || (next === current && !requested)) return;
-    if (navigationPending) { history.replaceState({erpWorkspace:true}, '', routes.address(current));return; }
+    if (next === requested || (next === current && !requested)) {
+      if(activeEntry.route===next&&activeEntry.addressFeature!==feature){setFeature(activeEntry,feature);deliverFeature(activeEntry);}
+      return;
+    }
+    const restore=()=>routes.address(featureAddress(current,activeEntry.addressFeature));
+    if (navigationPending) { history.replaceState({erpWorkspace:true}, '', restore());return; }
     const entry=activeEntry,ticket=transition;navigationPending=true;
     try {
-      if (!await canLeave()) { history.pushState({erpWorkspace:true}, '', routes.address(current)); return; }
-      if (ready && !leaving && entry===activeEntry && ticket===transition) load(next);
+      if (!await canLeave()) { history.pushState({erpWorkspace:true}, '', restore()); return; }
+      if (ready && !leaving && entry===activeEntry && ticket===transition) load(next,false,feature);
     } catch (_) {
-      history.replaceState({erpWorkspace:true}, '', routes.address(current));
+      history.replaceState({erpWorkspace:true}, '', restore());
       status.textContent='화면을 이동하지 못했습니다. 작성 중인 내용은 유지됩니다.';status.hidden=false;
     } finally { navigationPending=false; }
   });
@@ -582,7 +653,7 @@
         await window.CoopDialog.alert('작성 중인 내용은 유지했습니다. 화면이 준비된 후 다시 시도해 주세요.');
         return;
       }
-      load(requested || current);
+      load(requested || current,false,activeEntry.addressFeature||'');
     } else void start(client);
   };
   async function start(configuredClient) {

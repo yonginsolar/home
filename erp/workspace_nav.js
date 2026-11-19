@@ -356,13 +356,15 @@
     const allowedIds = new Set(allowedItems(setupMenuRuntime(state.runtime)).map(item => item[0]));
     const canSearch = link => (!mobile || link.dataset.mobile === 'true')
       && (!baseIds.has(link.dataset.menuId) || allowedIds.has(link.dataset.menuId));
-    const entries = [...list.querySelectorAll('.erp-workspace-link')].filter(canSearch).map(link => ({
+    const menuLinks = [...list.querySelectorAll('.erp-workspace-link')].filter(canSearch);
+    const entries = menuLinks.map(link => ({
       key:'menu:'+link.dataset.menuId+':'+link.href, label:link.title,
       aliases:window.ErpWorkspaceSearch.menuAliases(link.dataset.menuId,link.title), run:() => link.click()
     }));
     const search=window.ErpWorkspaceSearch;
     if(entries.some(entry=>entry.key.startsWith('menu:btnGovernanceHub:'))&&search.canUseBooklet(setupMenuRuntime(state.runtime)))
       entries.push(search.bookletEntry(()=>{const href=url(search.bookletRoute);if(!window.ErpWorkspaceShell?.navigate(href))location.href=href;}));
+    const tabSearch=window.ErpWorkspaceFeatureTabs;
     const view=liveView(taskDocument);
     if (view && !view.frameElement?.hidden && submenuOwner?.isConnected && canSearch(submenuOwner)) {
       for (const row of submenuRows) {
@@ -373,6 +375,19 @@
         if (source && !searchSources.has(source)) searchSources.set(source,++searchSerial);
         entries.push({key:source ? `local:${searchSources.get(source)}:${row.label}` : row.key,
           label:row.label, section:submenuOwner.title, aliases:search.localAliases(row.label), run:() => activateRow(row.button)});
+      }
+    }
+    if(tabSearch){
+      const names=new Map(menuLinks.map(link=>[link.dataset.menuId,link.title]));
+      const local=entries.filter(item=>item.key.startsWith('local:'));
+      const indexed=tabSearch.entries(setupMenuRuntime(state.runtime),names,view&&!view.frameElement?.hidden?taskDocument:null,target=>{
+        if(!window.ErpWorkspaceShell?.navigate(target)) location.href=window.ErpWorkspaceRoute?.address(target)||target;
+      });
+      const labelKey=value=>value.replace(/[^\p{L}\p{N}]/gu,'');
+      for(const t of indexed){
+        const match=local.find(l=>l.section===t.section&&labelKey(l.label)===labelKey(t.label));
+        if(match){match.aliases=[...new Set([...match.aliases,...t.aliases])];match.run=t.run;}
+        else entries.push(t);
       }
     }
     return {owner:generation, entries};
