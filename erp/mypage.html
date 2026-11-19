@@ -38,7 +38,8 @@
   })();
 </script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
-<script src="print_service.js?v=20261022-expo-cert-1"></script>
+<script src="print_service.js?v=20261119-certificate-seal-1"></script>
+<script src="employee_certificate_print.js?v=20261119-1"></script>
 <script src="expo_employee_certificate.js?v=20261022-1"></script>
 <script src="payroll_durunuri_module.js?v=20261109-mypage-1"></script>
 <script src="leave_time.js?v=20261012-2"></script>
@@ -2795,6 +2796,108 @@ function executeConfirmAction() {
     confirmModal.hide();
 }
 // [최종 수정] 재직증명서 발급 (DB 함수 사용으로 중복 방지)
+async function runMypageEmploymentCertificate(certMeta) {
+    const account = {...myInfo}, owner = getMypageDataOwner();
+    const modal = document.getElementById('certPurposeModal'), tab = document.getElementById('tab-cert-btn');
+    const select = document.getElementById('certPurposeSelect'), custom = document.getElementById('certPurposeEtc');
+    const readPurpose = () => (select.value === '기타' ? custom.value : select.value).trim();
+    const purpose = readPurpose();
+    if (!account.emp_id || !account.coop_id || !mypageDataAuthorized || !isMypageDataVisible()
+        || window.frameElement?.hidden || !modal.classList.contains('show')) return;
+    if (!purpose) return showAlert('용도를 입력해주세요.');
+
+    const operations = runMypageEmploymentCertificate.operations ||= new Map();
+    const prior = operations.get(owner);
+    if (prior) {
+        return showAlert(prior.unknown
+            ? '발급 결과를 확인하지 못했습니다. 중복 발급을 막기 위해 다시 요청하지 않았습니다.'
+            : '발급을 준비 중입니다. 잠시 기다려 주세요.');
+    }
+    const preview = window.EmployeeCertificatePrint?.open();
+    if (!preview) return showAlert('인쇄 미리보기 창을 열지 못했습니다. 팝업을 허용한 뒤 다시 시도해 주세요.');
+
+    const entry = {dispatched:false,unknown:false};
+    operations.set(owner,entry);
+    const submit = modal.querySelector('.modal-footer button'), wasDisabled = submit.disabled;
+    submit.disabled = true;
+    let departed = false, observer;
+    const cancel = () => {departed = true; preview.discard();};
+    const isCurrent = () => !departed && preview.isOpen() && mypageDataAuthorized && account.emp_id === myInfo?.emp_id
+        && owner === getMypageDataOwner() && isMypageDataVisible() && !window.frameElement?.hidden
+        && modal.classList.contains('show') && purpose === readPurpose();
+    const frame = window.frameElement;
+    if (frame) {
+        observer = new MutationObserver(records => {
+            if (frame.hidden || records.some(record => record.oldValue === null)) cancel();
+        });
+        observer.observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+    }
+    modal.addEventListener('hide.bs.modal',cancel);
+    tab?.addEventListener('hide.bs.tab',cancel);
+    window.addEventListener('pagehide',cancel);
+    try {
+        const loaded = await ensureMypageSection('company');
+        if (!isCurrent()) return;
+        if (!loaded) throw Error('회사 설정을 불러오지 못했습니다. 다시 시도해 주세요.');
+        const profile = buildMypageCompanyPrintProfile();
+        ensureMypageCompanyPrintProfile(profile,certMeta.type);
+        await preview.loadSeal({client:_supabase,storageBase:SUPABASE_URL,coopId:String(account.coop_id),
+            previouslyRegistered:!!profile.sealUrl,isCurrent});
+        if (!isCurrent()) return;
+        const {data:birthDate,error:birthError} = await _supabase.rpc('get_emp_birthdate',{p_emp_id:account.emp_id});
+        if (!isCurrent()) return;
+        if (birthError) throw Error('직원 정보를 불러오지 못했습니다. 다시 시도해 주세요.');
+
+        entry.dispatched = true;
+        const result = await _supabase.rpc('issue_certificate',{
+            p_emp_id:account.emp_id,p_emp_name:account.emp_name,p_purpose:purpose,p_type:certMeta.type
+        });
+        if (result?.error) {
+            const status = Number(result.status ?? result.error.status);
+            if ([400,401,403,404,409,422,429].includes(status)) entry.dispatched = false;
+            throw Error('증명서를 발급하지 못했습니다. 권한과 입력 내용을 확인해 주세요.');
+        }
+        const newCert = result?.data;
+        if (!newCert?.cert_num || String(newCert.emp_id) !== String(account.emp_id)
+            || (newCert.coop_id != null && String(newCert.coop_id) !== String(account.coop_id))) throw Error();
+        entry.dispatched = false;
+        if (!isCurrent()) return;
+        const printed = PrintService.printCert(makeMypageCertificateData(account,certMeta,profile,purpose,birthDate,newCert.cert_num,''),preview);
+        if (!printed) throw Error('발급은 완료되었지만 인쇄 미리보기를 표시하지 못했습니다.');
+        purposeModal.hide();
+    } catch (error) {
+        entry.unknown = entry.dispatched;
+        if (isCurrent()) {
+            preview.discard();
+            showAlert(entry.unknown ? '발급 결과를 확인하지 못했습니다. 중복 발급을 막기 위해 다시 요청하지 않았습니다.' : error.message);
+        }
+    } finally {
+        observer?.disconnect();
+        modal.removeEventListener('hide.bs.modal',cancel);
+        tab?.removeEventListener('hide.bs.tab',cancel);
+        window.removeEventListener('pagehide',cancel);
+        if (!entry.unknown) operations.delete(owner);
+        submit.disabled = wasDisabled;
+        preview.discard();
+    }
+}
+
+function makeMypageCertificateData(account, certMeta, profile, purpose, birthDate, certNum, seal) {
+    const today = new Date();
+    let tenure = '-';
+    if (account.hire_date) {
+        const diff = (account.resign_date ? new Date(account.resign_date) : today) - new Date(account.hire_date);
+        const years = Math.floor(diff / (1000 * 60 * 60 * 24 * 365));
+        const months = Math.floor((diff % (1000 * 60 * 60 * 24 * 365)) / (1000 * 60 * 60 * 24 * 30));
+        tenure = `${account.hire_date} ~ ${account.resign_date || '현재'} (${years}년 ${months}개월)`;
+    }
+    return {docNum:certNum,logo:profile.logoUrl,name:account.emp_name,birth:birthDate || '미등록',
+        dept:account.department || '-',pos:account.position || '-',address:account.address || '-',tenure,purpose,
+        today:`${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일`,
+        certTitle:certMeta.type,employmentStatement:certMeta.statement,chairman:profile.chairmanName,
+        compName:profile.companyName,compAddr:profile.address,contact:profile.contact,seal,siteUrl:''};
+}
+
 async function runCertIssue() {
     if(window.ExpoRuntimeBridge){
         const empId=myInfo?.emp_id;
@@ -2804,6 +2907,7 @@ async function runCertIssue() {
             isCurrent:()=>myInfo?.emp_id===empId&&readPurpose()===purpose&&document.getElementById('certPurposeModal').classList.contains('show'),
             profile:buildMypageCompanyPrintProfile,printer:values=>PrintService.printCert(values),onReady:()=>purposeModal.hide(),alert:showAlert});
     }
+    if (getMypageCertificateMeta().type === '재직증명서') return runMypageEmploymentCertificate(getMypageCertificateMeta());
     if(!await ensureMypageSection('company')){showAlert('회사 설정을 불러오지 못했습니다. 다시 시도해 주세요.');return;}
     const preparedProfile=buildMypageCompanyPrintProfile();
     try{ensureMypageCompanyPrintProfile(preparedProfile,getMypageCertificateMeta().type);}catch(error){showAlert(error.message);return;}

@@ -98,11 +98,12 @@ const PrintService = {
         const safeCompanyName = this.escapeHtml(companyName);
         const safeChairmanName = this.escapeHtml(chairmanName);
         const safeSealUrl = this.safeUrl(data?.seal, true);
+        const hasSeal = safeSealUrl || cfg.preparedSeal;
         const sealWidth = Number(cfg.sealWidth || 60);
         const sealCenterOffset = Number(cfg.sealCenterOffset || 0);
         const maxWidthCss = String(cfg.maxWidth || '560px').replace(/"/g, '');
-        const chairmanRightReservePx = safeSealUrl ? Math.max(0, Math.round((sealWidth / 2) - sealCenterOffset)) : 0;
-        const chairmanMaxWidthCss = safeSealUrl ? `calc(${maxWidthCss} - ${chairmanRightReservePx}px)` : maxWidthCss;
+        const chairmanRightReservePx = hasSeal ? Math.max(0, Math.round((sealWidth / 2) - sealCenterOffset)) : 0;
+        const chairmanMaxWidthCss = hasSeal ? `calc(${maxWidthCss} - ${chairmanRightReservePx}px)` : maxWidthCss;
         const maxWidthPx = Number(cfg.maxWidthPx || 520);
         const companyFit = this.fitSignatureText(companyName, {
             initialFontSize: Number(cfg.companyFontSize || 18),
@@ -126,7 +127,7 @@ const PrintService = {
                     ${companyLine}
                     <div style="display:inline-block; position:relative; margin-top:${companyLine ? '6px' : '0'};">
                         <div style="display:inline-block; max-width:${chairmanMaxWidthCss}; text-align:center; font-size:${chairmanFit.fontSize}px; font-weight:${cfg.fontWeight || 700}; line-height:1.3; white-space:${chairmanFit.wrap ? 'normal' : 'nowrap'}; word-break:${chairmanFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${chairmanFit.wrap ? 'anywhere' : 'normal'};">이사장 ${safeChairmanName}</div>
-                        ${safeSealUrl ? `<img src="${safeSealUrl}" style="position:absolute; left:calc(100% - ${sealWidth / 2}px + ${sealCenterOffset}px); bottom:${cfg.sealBottom || '-6px'}; width:${sealWidth}px; opacity:${cfg.sealOpacity || 0.8};">` : ''}
+                        ${hasSeal ? `<img ${cfg.preparedSeal ? 'data-employee-certificate-seal' : `src="${safeSealUrl}"`} style="position:absolute; left:calc(100% - ${sealWidth / 2}px + ${sealCenterOffset}px); bottom:${cfg.sealBottom || '-6px'}; width:${sealWidth}px; opacity:${cfg.sealOpacity || 0.8};">` : ''}
                     </div>
                 </div>
             </div>`;
@@ -265,7 +266,7 @@ const PrintService = {
     },
 
     // 4. [기능] 재직/경력증명서 출력
-    printCert: function(data) {
+    printCert: function(data, preparedPreview) {
         const simulationNotice=data?.simulation===true?'<style>.print-cert td,.print-cert th{font-size:11pt!important}.print-cert{font-size:11pt}</style><div style="text-align:center;font-weight:700;color:#8a4300;font-size:11pt">DEMO · 박람회 체험용 / 실제 증명서로 사용할 수 없어요</div>':'';
         const safeLogoUrl = this.safeUrl(data?.logo, true);
         const safeSiteUrl = this.escapeHtml(String(data?.siteUrl || '').trim());
@@ -296,6 +297,7 @@ const PrintService = {
             sealCenterOffset: 0,
             sealBottom: '-10px',
             sealPadding: 22,
+            preparedSeal: preparedPreview?.hasSeal(),
             fontWeight: 'bold'
         });
         const content = `
@@ -325,6 +327,7 @@ const PrintService = {
             ${signatureBlock}
             ${footerLines.length > 0 ? `<div style="text-align:center; margin-top: 70px; font-size: 12px; color: #555;">${footerLines.join('<br>')}</div>` : ''}
         </div>`;
+        if (preparedPreview) return preparedPreview.present(content, this.styles.common + this.styles.portrait);
         this.openWindow('cert', content);
     },
 

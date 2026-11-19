@@ -55,7 +55,8 @@ Change: 2026-11-14 - 조합 법인등록번호 입력·수정.
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
   <script src="workflow_assets.js?v=20261107-postcode-1"></script>
-  <script src="print_service.js?v=20261022-expo-cert-1"></script>
+  <script src="print_service.js?v=20261119-certificate-seal-1"></script>
+  <script src="employee_certificate_print.js?v=20261119-1"></script>
   <script src="expo_employee_certificate.js?v=20261022-1"></script>
   <script src="payroll_tax_table.js?v=20260508-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
@@ -9678,12 +9679,31 @@ async function reqIssueCert() {
     const address = document.getElementById('viewAddress').innerText;
     const companyProfile = {...buildAdminEmployeeCompanyPrintProfile()};
     const certType = context.resignDate ? '경력증명서' : '재직증명서';
+    const protectedPreview = certType === '재직증명서';
+    const prior = reqIssueCert.operations?.get(context.owner + '|' + context.empId);
+    const preview = protectedPreview && (!prior || prior.state === 'rejected') ? window.EmployeeCertificatePrint?.open() : null;
+    if (protectedPreview && !preview && (!prior || prior.state === 'rejected')) {
+        context.release();
+        return showAlert('인쇄 미리보기 창을 열지 못했습니다. 팝업을 허용한 뒤 다시 시도해 주세요.');
+    }
     return runEmployeeDocumentOperation(reqIssueCert,'certificate',context,async entry => {
-        const current = () => entry.active && context.isCurrent();
+        const current = () => entry.active && context.isCurrent() && (!protectedPreview || preview?.isOpen());
         await verifyEmployeeDocumentAccess(context);
         if (!current()) return false;
         ensureAdminEmployeeCompanyPrintProfile(companyProfile,certType);
-        context.hideCertificateDialog();
+        if (protectedPreview) {
+            try {
+                await preview.loadSeal({client:_supabase,storageBase:SUPABASE_URL,coopId:context.coopId,
+                    previouslyRegistered:!!companyProfile.sealUrl,isCurrent:current});
+            } catch (error) {
+                if (current()) {
+                    preview.discard();
+                    showAlert(error.message);
+                }
+                return false;
+            }
+            if (!current()) return false;
+        } else context.hideCertificateDialog();
         const {data:birthDate,error:birthError} = await _supabase.rpc('get_emp_birthdate',{p_emp_id:context.empId});
         if (!current()) return false;
         if (birthError) throw birthError;
@@ -9709,16 +9729,22 @@ async function reqIssueCert() {
             tenure = `${hireDate}~${context.resignDate || '현재'} (${years}년 ${months}개월)`;
         }
         entry.state = 'done';
-        PrintService.printCert({
+        const printed = PrintService.printCert({
             docNum:newCert.cert_num,name:context.empName,birth:birthDate || '미등록',
             dept:employee.department || '',pos:employee.position || '',address,tenure,purpose,
             today:new Date().toLocaleDateString('ko-KR',{timeZone:KST_TZ_ADMIN_EMP,year:'numeric',month:'long',day:'numeric'}),
             certTitle:certType,employmentStatement:context.resignDate ? '위와 같이 근무하였음을 증명합니다.' : '위와 같이 재직하고 있음을 증명합니다.',
             chairman:companyProfile.chairmanName,compName:companyProfile.companyName,compAddr:companyProfile.address,
-            contact:companyProfile.contact,logo:companyProfile.logoUrl,seal:companyProfile.sealUrl,siteUrl:''
-        });
+            contact:companyProfile.contact,logo:companyProfile.logoUrl,seal:protectedPreview ? '' : companyProfile.sealUrl,siteUrl:''
+        },preview);
+        if (protectedPreview) {
+            if (!printed) {
+                preview.discard();
+                showAlert('발급은 완료되었지만 인쇄 미리보기를 표시하지 못했습니다.');
+            } else context.hideCertificateDialog();
+        }
         return true;
-    });
+    }).finally(() => preview?.discard());
 }
 
 async function printSalaryAdmin() {
