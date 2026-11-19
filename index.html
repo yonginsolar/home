@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.204
-Change: 2026-11-19 - 발전소 건립 현황과 운영 모니터를 독립 표시.
+Version: v1.0.205
+Change: 2026-11-19 - 화성 공사중 표시, 월 발전량 및 운영 발전소 상세 개선.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -1856,6 +1856,8 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 /* The Sunlit shortcut needs a real anchor even while its public read is pending. */
 :root[data-plant-shortcut-follow] { overflow-anchor: none; }
 #progress [data-progress-loading], #progress [data-progress-empty] { display: none; }
+.progress-plant-placeholder { display:grid;min-height:inherit;height:100%;width:100%;box-sizing:border-box;place-content:center;justify-items:center;gap:.55rem;padding:1rem;text-align:center;color:var(--bs-body-color,#343e44);background:var(--bs-tertiary-bg,#eff2f0);border:1px dashed var(--bs-border-color,#aebbb1);border-radius:inherit; }
+.progress-plant-placeholder i { font-size:1.6rem; }
 #progress[data-sunlit-public-progress]:not([hidden]) { display: block !important; }
 #progress[data-sunlit-public-progress]:not([data-progress-content]):not([data-home-load-state="ready"]):not([data-home-load-state="failed"]) [data-progress-loading],
 #progress[data-sunlit-public-progress][data-home-load-state="ready"]:not([data-progress-content="present"]) [data-progress-empty] { display: block; }
@@ -1897,7 +1899,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   <link href="shared/theme.css?v=20261026-mobile-ui-1" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <link href="shared/public_generation_trend.css?v=20261112-2" rel="stylesheet">
-  <script src="shared/public_generation_trend_v1_1.js?v=20261112-1" defer></script>
+  <script src="shared/public_generation_trend_v1_2.js?v=20261119-1" integrity="sha384-ldKpDwdSzw4i4MvUw2AOeCkWJynDCIMvkKw9qTOFTxjBbgEfImbmmnwESnaa0rLS" crossorigin="anonymous" defer></script>
   <script src="shared/home_design.js?v=20261009-3"></script>
 <script src="shared/site_text_styles.js?v=20261009-17" defer></script>
 <script src="shared/home_display_options.js?v=1.3.1" defer></script>
@@ -2662,7 +2664,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
   <script src="shared/route_guard.js?v=20260401-1"></script>
-  <script src="shared/public_power_monitor_v1_0_7.js?v=1.0.7" integrity="sha384-anNiaHkv9VwY9Bl+hxc6jWIJjmNKRHxyEnvxKmPKPyn5JaB9sV24A/0SONTBYk52" crossorigin="anonymous"></script>
+  <script src="shared/public_power_monitor_v1_0_8.js?v=1.0.8" integrity="sha384-haO+BVLMbR8ZEw145Hnd5ZDRL478JE/i2BqaKeieiVd21umy2Y2wR+4KhSkw4x3z" crossorigin="anonymous"></script>
  <script src="/shared/daily_patch_notes.js?v=20261019-1" integrity="sha384-M/werDU95RS3yyX4R8KvWSkengMa84XWJCZDXvvKGfYJdJ4jXKlMKXKvgi9lXPHf" crossorigin="anonymous"></script>
  <script src="home_patch_note.js?v=20261019-archive-1"></script>
   <script>
@@ -4766,9 +4768,15 @@ async function getPublicHomeMonitor() {
       if (g_public_home_monitor) return g_public_home_monitor;
       g_public_home_monitor = window.CoopPublicPowerMonitor?.create({
         context, hostname: window.location.hostname, client: _client,
-        onGenerationMonths: (plants, now, current) => getPublicGenerationTrend()?.renderMonitor(plants, now, current),
+        onGenerationMonths: (plants, now, current, history) => getPublicGenerationTrend()?.renderMonitor(plants, now, current, history),
         onGenerationMonthsIssue: retain => getPublicGenerationTrend()?.monitorIssue(retain),
-        onPlantDetails: isHomePreviewMode ? null : (plant, trigger) => openProgressPlantDetail(plant, trigger, 'monitor')
+        onPlantDetails: isHomePreviewMode ? null : (plant, trigger) => {
+          const id = typeof plant.sitePlantId === 'string' ? plant.sitePlantId : '';
+          const site = id && g_plants_list.find(p => p.id === id && p.status === '운영중');
+          openProgressPlantDetail(site ? {...plant, location:site.location || plant.location,
+            image_url:site.image_url, public_note:site.public_note, completion_date:site.completion_date, area:site.area} : plant,
+            trigger, 'monitor');
+        }
       }) || null;
       return g_public_home_monitor;
     }
@@ -6368,7 +6376,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
             [type === 'participation' ? '전체 사업 예정 용량' : '예정 용량', getProgressPlantCapacity(plant)],
             ['위치', text(plant.location) || '미정'], ['준공 예정일', text(plant.completion_date) || '미정'],
             ['면적', text(plant.area)], ['사업 유형', getPublicPlantTypeLabel(type)]
-        ] : [['위치', text(plant.location) || '—'], ...plant.metrics];
+        ] : [['위치', text(plant.location) || '—'], ['준공일', text(plant.completion_date)],
+              ['면적', text(plant.area)], ['공개 설명', text(plant.public_note)], ...plant.metrics];
         if (construction && type === 'participation') rows.push(
             ['사업 주체', text(plant.project_owner_name)], ['조합 참여분', getPublicParticipationSummary(plant)], ['공개 설명', text(plant.public_note)]
         );
@@ -6435,7 +6444,10 @@ function openPlantDetail(id, trigger = document.activeElement) {
 
     function renderProgressSection(allPlants) {
         const sourcePlants = Array.isArray(allPlants) ? allPlants : [];
-        const inProgressPlants = sourcePlants.filter(p => p.status !== '운영중');
+        const hwaseong = ['hcrec.kr','www.hcrec.kr'].includes(window.location.hostname.toLowerCase().replace(/\.$/,''));
+        const inProgressPlants = sourcePlants.filter(p => hwaseong
+            ? ['공사중','건설중'].includes(String(p.status ?? '').replace(/\s+/g,''))
+            : p.status !== '운영중');
         const section = document.getElementById('progress');
         const container = document.getElementById('progress-container');
 
@@ -6457,7 +6469,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
         inProgressPlants.forEach(p => {
             const stage = getPublicPlantProgressStage(p.progress_rate);
             const showStages = !!stage && !isPublicPlantConstructionComplete(p);
-            const img = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
+            const realImage = p.image_url ? safeUrl(p.image_url) : '';
+            const img = realImage || (hwaseong ? '' : 'https://via.placeholder.com/800x400?text=No+Image');
             const safeName = escapeHtml(p.name || '발전소');
 	            const safeStatus = escapeHtml(p.status || '');
 	            const safeLocation = escapeHtml(p.location || '미정');
@@ -6477,7 +6490,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
                   <div class="row align-items-center">
                       <div class="col-md-5 mb-3 mb-md-0">
                           <div class="progress-plant-image">
-                              <img ${buildOptimizedImageAttrs(img,{width:640,detailCard:true})} alt="${safeName}">
+                              ${img ? `<img ${buildOptimizedImageAttrs(img,{width:640,detailCard:true})} alt="${safeName}">`
+                                : '<div class="progress-plant-placeholder"><i class="bi bi-cone-striped" aria-hidden="true"></i><span>공사 중</span></div>'}
                           </div>
                       </div>
                       <div class="col-md-7">
