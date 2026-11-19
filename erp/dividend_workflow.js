@@ -4,6 +4,7 @@
     const draftIds = ['dividendBatchMeetingDate','dividendBatchPaymentDueDate','dividendBatchAgenda','dividendBatchMinutesDocId','dividendBatchResolutionResult'];
     const createIds = ['dividendBatchFiscalYear','dividendBatchTitle','dividendBatchPeriodStart','dividendBatchPeriodEnd','dividendBatchCapitalStart','dividendBatchCapitalEnd','dividendBatchUsageStart','dividendBatchUsageEnd','dividendBatchCapitalRate','dividendBatchIncomeTaxRate','dividendBatchLocalTaxRate','dividendBatchIsFirst'];
     const drafts = new Map(), attempts = new Map(), reads = new Map(), createBaselines = new Map(), failedSelections = new Map();
+    const archiveAttempts = new Map();
     let epoch = 0, displayed = null, confirmation = null, createBusy = false, paymentBusy = false, createRevision = 0;
     let paymentReady = '', exportCache = null;
     let observedActor = String(adminCertificateAuthId || ''), observedOwner = '';
@@ -19,6 +20,7 @@
     const current = c => !!c?.owner && c.owner === owner() && c.epoch === epoch && active(c.mode) && (!c.batch || c.batch === selected(c.mode));
     const values = ids => Object.fromEntries(ids.map(id => [id, el(id)?.type === 'checkbox' ? el(id).checked : el(id)?.value || '']));
     const key = (o,b) => JSON.stringify([o,b]);
+    const ownerArchiveAttempt = o => [...archiveAttempts.values()].find(a=>a.owner===o);
     function remember() {
         if (!displayed || displayed.owner !== owner()) return;
         const d = drafts.get(key(displayed.owner,displayed.batch));
@@ -32,6 +34,7 @@
         if (confirmation) window.CoopDialog?.cancelAll?.(window);
         confirmation = null; paymentReady = ''; exportCache = null;
         reads.forEach(r => r.cancel()); reads.clear();
+        status('dividendArchiveStatus','');
         for (const id of ['dividendPaymentConfirmButton','dividendPaymentCancelButton']) if (el(id)) el(id).disabled = true;
     }
     function rememberFailed() {
@@ -122,6 +125,12 @@
         for (const field of draftIds) window.ErpWorkspaceResume?.checkpoint(el(field));
         status('dividendDraftStatus','');
         if (previous && JSON.stringify(previous.value) !== JSON.stringify(previous.baseline)) status('dividendDraftStatus','저장하지 않은 입력을 이어서 작성 중입니다.');
+        const button = el('dividendBatchArchiveButton');
+        if (button) {
+            button.hidden = batch?.status !== 'DRAFT' || Boolean(batch?.item_count || batch?.minutes_doc_id || batch?.general_meeting_date || batch?.payment_due_date);
+            button.disabled = !!ownerArchiveAttempt(o);
+            button.onclick = () => changeArchive(batch,true);
+        }
     };
     window.discardDividendBatchDraft = async function() {
         remember(); const c = context('manage'), snapshot = JSON.stringify(values(draftIds)), batch = getDividendManageSelectedBatch();
@@ -157,7 +166,7 @@
     fetchDividendManageBatches = function() {
         const c = context('manage','');
         return read('batches',c,'',async () => {
-            const rows = unwrap(await scopeAdminTenant(_supabase.from('coop_dividend_batches').select('id,fiscal_year,title,period_start,period_end,is_first_dividend,capital_basis_start,capital_basis_end,usage_basis_start,usage_basis_end,capital_dividend_pool,usage_dividend_pool,total_gross_amount,income_tax_rate,local_income_tax_rate,status,minutes_doc_id,general_meeting_date,general_meeting_agenda,general_meeting_resolution_result,payment_due_date,account_change_deadline,payment_accounts_locked_at,capital_calculation_method,capital_share_unit_snapshot,created_at,updated_at')).order('fiscal_year',{ascending:false}).order('created_at',{ascending:false}).limit(100));
+            const rows = unwrap(await scopeAdminTenant(_supabase.from('coop_dividend_batches').select('id,fiscal_year,title,period_start,period_end,is_first_dividend,capital_basis_start,capital_basis_end,usage_basis_start,usage_basis_end,capital_dividend_pool,usage_dividend_pool,total_gross_amount,income_tax_rate,local_income_tax_rate,status,minutes_doc_id,general_meeting_date,general_meeting_agenda,general_meeting_resolution_result,payment_due_date,account_change_deadline,payment_accounts_locked_at,capital_calculation_method,capital_share_unit_snapshot,created_at,updated_at')).is('draft_archived_at',null).order('fiscal_year',{ascending:false}).order('created_at',{ascending:false}).limit(100));
             if (!rows.length) return rows;
             const items = unwrap(await scopeAdminTenant(_supabase.from('coop_dividend_batch_items').select('batch_id,gross_amount,net_amount')).in('batch_id',rows.map(r => r.id)));
             return rows.map(row => { const own = items.filter(i => String(i.batch_id) === String(row.id)); return {...row,item_count:own.length,item_gross_total:own.reduce((s,i) => s + normalizeDividendExportNumber(i.gross_amount),0),item_net_total:own.reduce((s,i) => s + normalizeDividendExportNumber(i.net_amount),0)}; });
@@ -168,14 +177,93 @@
             status('dividendManageReadStatus',data.length ? '목록을 확인했습니다.' : '등록된 배당 회차가 없습니다.');
         }, () => retry('dividendManageReadStatus','회차 목록을 확인하지 못했습니다. 이전 목록과 입력은 유지됩니다.',() => fetchDividendManageBatches()));
     };
+    const renderArchiveAttempt = (attempt, c) => {
+        if (!current(c)) return;
+        const target = el('dividendArchiveStatus'); if (!target) return;
+        target.replaceChildren();
+        if (!attempt) return;
+        if (attempt.state === 'unknown') retry('dividendArchiveStatus',`${attempt.title}: 처리 결과를 아직 확인하지 못했습니다.`,() => checkArchive(attempt));
+        else status('dividendArchiveStatus',`${attempt.title}: 처리 중입니다.`);
+    };
+    function refreshArchivedBatches() {
+        const c = context('manage','');
+        return read('archived-batches',c,'',async () => unwrap(await scopeAdminTenant(_supabase.from('coop_dividend_batches')
+            .select('id,title,fiscal_year,updated_at,draft_archived_at').not('draft_archived_at','is',null).order('draft_archived_at',{ascending:false}).limit(100))), rows => {
+            const target = el('dividendArchivedRows'); if (!target) return;
+            target.replaceChildren();
+            if (!rows.length) target.textContent = '삭제한 초안 회차가 없습니다.';
+            for (const row of rows) {
+                const box = document.createElement('div'), text = document.createElement('span'), button = document.createElement('button');
+                box.className = 'd-flex flex-wrap align-items-center gap-2 border rounded p-2';
+                text.className = 'text-break me-auto'; text.textContent = `${row.fiscal_year} · ${row.title}`;
+                button.type = 'button'; button.className = 'btn btn-sm btn-outline-primary'; button.textContent = '복구';
+                button.disabled = !!ownerArchiveAttempt(c.owner); button.onclick = () => changeArchive(row,false);
+                box.append(text,button); target.append(box);
+            }
+        },() => retry('dividendArchivedRows','삭제한 회차를 확인하지 못했습니다.',refreshArchivedBatches));
+    }
+    function archiveComplete(attempt,c) {
+        if (archiveAttempts.get(attempt.key) !== attempt) return;
+        archiveAttempts.delete(attempt.key);
+        if (c.owner !== owner() || !active('manage')) return;
+        if (current(c)) status('dividendArchiveStatus',attempt.archive ? '초안 회차를 목록에서 삭제했습니다.' : '초안 회차를 복구했습니다.');
+        else status('dividendArchiveStatus','');
+        void fetchDividendManageBatches(); if (el('dividendArchivedDetails')?.open) void refreshArchivedBatches();
+    }
+    function checkArchive(attempt) {
+        const c = context('manage','');
+        if (attempt.owner !== c.owner || archiveAttempts.get(attempt.key) !== attempt) return;
+        return read('archive-result',c,attempt.key,async () => {
+            const result = await scopeAdminTenant(_supabase.from('coop_dividend_batches').select('id,draft_archived_at')).eq('id',attempt.id).maybeSingle();
+            if (result.error) throw result.error; return result.data;
+        },row => {
+            if (archiveAttempts.get(attempt.key) !== attempt) return;
+            if (row?.id === attempt.id && Boolean(row.draft_archived_at) === attempt.archive) archiveComplete(attempt,c);
+            else renderArchiveAttempt(attempt,c);
+        },() => renderArchiveAttempt(attempt,c));
+    }
+    async function changeArchive(batch, archive) {
+        const c = context('manage',archive ? String(batch?.id || '') : ''), id = String(batch?.id || ''), actionKey = key(c.owner,id);
+        if (!id || !batch.updated_at || !current(c) || ownerArchiveAttempt(c.owner)) return;
+        remember();
+        const dirty = () => { const d=drafts.get(actionKey); return d && JSON.stringify(d.value)!==JSON.stringify(d.baseline); };
+        if (archive && dirty()) return myAlert('이 회차에 저장하지 않은 입력이 있습니다. 계속 작성하거나 입력을 버린 뒤 삭제해 주세요.','warning');
+        if (!await confirmOnce(`${batch.title} 회차를 ${archive ? '목록에서 삭제할까요? 삭제한 초안 목록에서 복구할 수 있습니다.' : '복구할까요?'}`,c,
+            () => !ownerArchiveAttempt(c.owner) && (!archive || (getDividendManageSelectedBatch()?.updated_at === batch.updated_at && !dirty())))) return;
+        const attempt = {key:actionKey,id,owner:c.owner,title:batch.title,archive,state:'sending'};
+        archiveAttempts.set(actionKey,attempt); renderArchiveAttempt(attempt,c);
+        const btn=el('dividendBatchArchiveButton'); if (archive && btn) btn.disabled=true;
+        let timer; const deadline=new Promise(resolve => { timer=setTimeout(()=>resolve(null),15000); });
+        const result=Promise.resolve().then(()=>_supabase.rpc('set_dividend_draft_archived',{p_batch_id:id,p_archive:archive,p_expected_updated_at:batch.updated_at})).catch(()=>null);
+        const finish = value => {
+            if (archiveAttempts.get(actionKey)!==attempt) return;
+            if (value?.data?.id === id && value.data.archived === archive) { archiveComplete(attempt,c); return; }
+            const error=value?.error;
+            if (['PT409','42501','22023'].includes(error?.code)) {
+                archiveAttempts.delete(actionKey);
+                if (current(c)) {
+                    status('dividendArchiveStatus',error.message==='DIVIDEND_DRAFT_ALREADY_USED' ? '사용된 회차는 삭제할 수 없습니다.' : '회차 상태나 권한이 바뀌었습니다. 목록에서 다시 확인해 주세요.');
+                    void fetchDividendManageBatches(); if (el('dividendArchivedDetails')?.open) void refreshArchivedBatches();
+                }
+                return;
+            }
+            attempt.state='unknown'; renderArchiveAttempt(attempt,c);
+        };
+        const first=await Promise.race([result,deadline]); clearTimeout(timer); finish(first);
+        if (first===null) void result.then(finish);
+    }
+    el('dividendArchivedDetails')?.addEventListener('toggle',event => { if (event.currentTarget.open) void refreshArchivedBatches(); });
     initializeDividendBatchTab = async function() {
         await Promise.resolve(); if (!active('manage')) return;
         if (!g_dividend_batch_state.initialized) { g_dividend_batch_state.initialized = true; resetDividendBatchCreateForm(); }
         if (!createBaselines.has(owner())) createBaselines.set(owner(),values(createIds));
         const c = context('manage','');
+        const unresolved=ownerArchiveAttempt(c.owner);
+        if (unresolved) renderArchiveAttempt(unresolved,c);
         if (!g_dividend_calculation_settings) await loadDividendCalculationSettings();
         if (!current(c)) return;
         await Promise.all([fetchDividendGeneralAssemblyMinutes(),fetchDividendManageBatches()]);
+        if (current(c) && el('dividendArchivedDetails')?.open) void refreshArchivedBatches();
     };
     function resetPayment() {
         paymentReady = ''; g_dividend_export_state.paymentRuns = []; g_dividend_export_state.selectedPaymentRunId = '';
