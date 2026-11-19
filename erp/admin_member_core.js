@@ -1192,6 +1192,11 @@ docs_url: 'https://support.huawei.com/enterprise/en/doc/EDOC1100440661/356f0ec1/
 
 let g_badges = []; // DB에서 불러온 뱃지 목록을 기억해둠
 const ADMIN_AUTO_MANAGED_BADGE_CODES = new Set(['educator', 'edu_steady', 'edu_master']);
+const isCapitalConditionBadge = b => b?.progress_track === 'paid_capital_condition';
+function isAdminAutoManagedBadge(code) {
+    return ADMIN_AUTO_MANAGED_BADGE_CODES.has(code) || String(code).startsWith('CAPITAL_CONDITION_')
+        && g_badges.some(b => b.code === code && isCapitalConditionBadge(b));
+}
 let g_siteActivities = [];
 let g_externalNewsAdmin = [];
 let isSavingActivity = false;
@@ -6200,7 +6205,7 @@ async function fetchBadges() {
         const colorBadge = '<span class="badge bg-' + badgeColor + ' text-white">' + escapeHtml(b.color || badgeColor) + '</span>';
         tbody.innerHTML += '<tr><td>' + escapeHtml(b.display_order ?? '') + '</td><td class="fs-4">' + escapeHtml(b.icon || '') +
             '</td><td class="text-start"><div class="fw-bold">' + escapeHtml(b.name || '') + '</div><div class="small text-muted">' +
-            escapeHtml(b.description || '-') + '</div></td><td class="small font-monospace">' + escapeHtml(b.code || '') +
+            escapeHtml(b.description || '-') + '</div>' + (isCapitalConditionBadge(b) ? '<div class="small text-muted">출자금 ' + escapeHtml(Number(b.progress_target).toLocaleString('ko-KR')) + '원 이상 · 비공개</div>' : '') + '</td><td class="small font-monospace">' + escapeHtml(b.code || '') +
             '</td><td>' + colorBadge + '</td><td><button class="btn btn-sm btn-light" onclick="openBadgeModal(\'' + badgeIdArg +
             '\')">수정</button><button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteBadge(\'' + badgeIdArg + '\')">삭제</button></td></tr>';
     });
@@ -6213,6 +6218,54 @@ async function fetchBadges() {
 }
 
 let g_badgeSaving = false;
+let badgeConditionPreview = null, badgeConditionRevision = 0, badgeConditionPreviewRequest = 0;
+const pendingCapitalBadgeSaves = new Map();
+const badgeControl = id => document.getElementById(id);
+function badgeConditionOwner() {
+    return adminCertificateAuthId && g_adminMemberRuntime?.coop_id && g_adminMemberRuntime.is_active !== false && !window.frameElement?.hidden
+        ? JSON.stringify([String(adminCertificateAuthId),String(g_adminMemberRuntime.coop_id)]) : '';
+}
+function paidCapitalBadgeAmount(input) {
+    const text = String(input || '').trim();
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(text)) return null;
+    const amount = Number(text.replaceAll(',',''));
+    return Number.isSafeInteger(amount) && amount > 0 && amount <= 1000000000000 ? amount : null;
+}
+function resetPaidCapitalBadgePreview() {
+    badgeConditionPreview = null;
+    ++badgeConditionPreviewRequest;
+    badgeControl('bg-capital-status').textContent = '';
+    badgeControl('bg-capital-preview').disabled = false;
+}
+function showPaidCapitalBadgeMode(badge) {
+    const active = badgeControl('bg-distribution').value === 'paid_capital_condition';
+    badgeControl('bg-capital-condition').hidden = !active;
+    badgeControl('bg-capital-min').readOnly = !!badge;
+    badgeControl('bg-capital-preview').hidden = !!badge;
+    resetPaidCapitalBadgePreview();
+}
+async function previewPaidCapitalBadge() {
+    const owner = badgeConditionOwner(), modal = badgeControl('badgeModal'), revision = badgeConditionRevision;
+    const amount = paidCapitalBadgeAmount(badgeControl('bg-capital-min').value);
+    if (!owner || !modal.classList.contains('show') || badgeControl('bg-id').value || badgeControl('bg-distribution').value !== 'paid_capital_condition' || g_badgeSaving) return;
+    const target = badgeControl('bg-capital-status'), button = badgeControl('bg-capital-preview');
+    if (!amount) { target.textContent='1원 이상인 정수 금액을 입력해 주세요.'; return; }
+    if (button.disabled) return;
+    const request = ++badgeConditionPreviewRequest;
+    badgeConditionPreview = null;
+    const current = () => request === badgeConditionPreviewRequest && revision === badgeConditionRevision && owner === badgeConditionOwner()
+        && modal.classList.contains('show') && badgeControl('bg-distribution').value === 'paid_capital_condition' && paidCapitalBadgeAmount(badgeControl('bg-capital-min').value) === amount;
+    button.disabled = true; target.textContent = '대상 인원을 확인하고 있습니다…';
+    let timer;
+    try {
+        const result = await Promise.race([_supabase.rpc('preview_paid_capital_badge',{p_min_won:amount}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('timeout')),12000);})]);
+        if (result.error || !Number.isInteger(result.data) || result.data<0) throw Error('preview unavailable');
+        if (!current()) return;
+        badgeConditionPreview={owner,revision,amount,count:result.data};
+        target.textContent=`지금 조건을 충족한 조합원 ${result.data.toLocaleString('ko-KR')}명`;
+    } catch { if (current()) { badgeConditionPreview=null; target.textContent='대상 인원을 확인하지 못했습니다. 다시 눌러 주세요.'; } }
+    finally { clearTimeout(timer); if(request===badgeConditionPreviewRequest && revision===badgeConditionRevision)button.disabled=false; }
+}
 async function openBadgeModal(id) {
     const modal = document.getElementById('badgeModal');
     if (g_badgeSaving || modal.classList.contains('show')) return;
@@ -6226,6 +6279,23 @@ async function openBadgeModal(id) {
     document.getElementById('bg-desc').value = b?.description || '';
     document.getElementById('bg-color').value = b?.color || 'primary';
     document.getElementById('bg-order').value = b?.display_order ?? g_badges.length + 1;
+    const distribution = badgeControl('bg-distribution'), minimum = badgeControl('bg-capital-min');
+    if (distribution && minimum) {
+        ++badgeConditionRevision;
+        if (!modal.dataset.capitalBadgeBound) {
+            modal.addEventListener('hidden.bs.modal',()=>{++badgeConditionRevision;resetPaidCapitalBadgePreview();});
+            modal.dataset.capitalBadgeBound='1';
+            distribution.addEventListener('change',()=>showPaidCapitalBadgeMode(null));
+            minimum.addEventListener('input',resetPaidCapitalBadgePreview);
+            minimum.addEventListener('blur',()=>{const value=paidCapitalBadgeAmount(minimum.value);if(value)minimum.value=value.toLocaleString('ko-KR');});
+            badgeControl('bg-capital-preview').addEventListener('click',previewPaidCapitalBadge);
+        }
+        distribution.value = isCapitalConditionBadge(b) ? 'paid_capital_condition' : 'manual';
+        distribution.disabled = !!b;
+        badgeControl('bg-code').readOnly = isCapitalConditionBadge(b);
+        minimum.value = isCapitalConditionBadge(b) ? Number(b.progress_target).toLocaleString('ko-KR') : '';
+        showPaidCapitalBadgeMode(b);
+    }
     bootstrap.Modal.getOrCreateInstance(modal).show();
 }
 
@@ -6242,15 +6312,39 @@ async function saveBadge() {
     };
     if (!updates.p_name.trim() || !updates.p_code.trim() || !Number.isFinite(updates.p_order))
         return myAlert('뱃지 이름과 코드, 순서를 확인해주세요.', 'warning');
+    const conditional = !updates.p_id && badgeControl('bg-distribution')?.value === 'paid_capital_condition';
+    const owner = badgeConditionOwner(), revision = badgeConditionRevision;
+    const visible = () => owner && owner===badgeConditionOwner() && revision===badgeConditionRevision && badgeControl('badgeModal').classList.contains('show');
+    let intentKey, conditionPayload;
+    if (conditional) {
+        const min = paidCapitalBadgeAmount(badgeControl('bg-capital-min').value);
+        if (!min || badgeConditionPreview?.revision!==revision || badgeConditionPreview.amount!==min || badgeConditionPreview.owner!==owner || !visible())
+            return myAlert('납입 출자금 기준과 대상 인원을 먼저 확인해 주세요.','warning');
+        if (!/^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$/.test(updates.p_code.trim()) || updates.p_name.trim().length>100 || updates.p_icon.length>40 || updates.p_desc.length>500 || !Number.isInteger(updates.p_order) || updates.p_order<0 || updates.p_order>999999)
+            return myAlert('이름, 고유 코드, 순서와 입력 길이를 확인해 주세요.','warning');
+        const {p_id,...args} = updates;
+        conditionPayload={...args,p_code:args.p_code.trim(),p_name:args.p_name.trim(),p_min_won:min};
+        intentKey=JSON.stringify([owner,conditionPayload]);
+        const request=pendingCapitalBadgeSaves.get(intentKey) || globalThis.crypto?.randomUUID?.();
+        if (!request) return myAlert('안전한 연결에서 다시 시도해 주세요.','warning');
+        pendingCapitalBadgeSaves.set(intentKey,request);
+        conditionPayload.p_request_id=request;
+    }
     g_badgeSaving = true;
     const unlock = lockSiteMutationModal('badgeModal', 'btn-save-badge', '저장 중…');
     showLoading(true);
     let confirmed = false;
+    let timer;
     try {
-        const {error} = await _supabase.rpc('upsert_badge_secure', updates);
+        const response = conditional ? await Promise.race([_supabase.rpc('create_paid_capital_badge',conditionPayload),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('timeout')),18000);})])
+            : await _supabase.rpc('upsert_badge_secure',updates);
+        const {data,error}=response;
         if (error) throw error;
+        if (conditional && (!data?.badge_id || !Number.isInteger(data.granted_count))) throw Error('receipt unavailable');
         confirmed = true;
         Badges._allBadgesCache = null;
+        if (conditional && !visible()) return;
+        if (conditional) pendingCapitalBadgeSaves.delete(intentKey);
         await closeSiteMutationModal('badgeModal');
         try {
             if (await fetchBadges() === false) throw new Error('BADGE_LIST_REFRESH_FAILED');
@@ -6258,11 +6352,19 @@ async function saveBadge() {
             CoopSafeLog.error('Badge saved; refresh failed:', error);
             myAlert('뱃지는 저장되었습니다. 목록을 다시 열어 확인해주세요. 다시 저장할 필요는 없습니다.', 'warning');
         }
+        if (conditional && owner===badgeConditionOwner()) myAlert(`조건 뱃지를 저장했습니다. ${data.granted_count.toLocaleString('ko-KR')}명에게 지급했습니다.`);
     } catch (error) {
         CoopSafeLog.error('Badge save result unavailable:', error);
+        if (conditional) {
+            if (visible()) badgeControl('bg-capital-status').textContent = error?.code === '23505' ? '이미 사용 중인 고유 코드입니다. 다른 코드를 입력해 주세요.'
+                : error?.code==='42501' ? '조건 뱃지를 관리할 권한을 확인해 주세요.'
+                : '저장 결과를 확인하지 못했습니다. 같은 입력으로 다시 누르면 중복 등록 없이 이어서 확인합니다.';
+            return;
+        }
         myAlert(confirmed ? '뱃지는 저장되었습니다. 목록을 다시 열어 확인해주세요.' :
             '저장 결과를 확인하지 못했습니다. 입력 내용은 유지됩니다. 중복 등록을 피하려면 목록에서 저장 여부를 먼저 확인해주세요.', 'warning');
     } finally {
+        clearTimeout(timer);
         showLoading(false);
         unlock();
         g_badgeSaving = false;
@@ -8352,7 +8454,7 @@ function discardMemberBasicDraft() {
 for (const event of ['input','change']) document.getElementById('md-tab-basic')?.addEventListener(event, event => {
     if (!memberDetailFields().includes(event.target)) return;
     if (memberDetailEditState && event.target.closest('#member-badge-checkboxes')
-        && !ADMIN_AUTO_MANAGED_BADGE_CODES.has(event.target.value)) memberDetailEditState.badgeTouched = true;
+        && !isAdminAutoManagedBadge(event.target.value)) memberDetailEditState.badgeTouched = true;
     if (memberDetailEditState) ++memberDetailEditState.actionRevision;
     retainMemberDetailEdit();
 });
@@ -8418,7 +8520,7 @@ function memberBasicPatch(state, updates) {
 
 function memberManualBadgeSelection() {
     return Array.from(document.querySelectorAll('#member-badge-checkboxes input[type="checkbox"]:checked'))
-        .filter(node => !ADMIN_AUTO_MANAGED_BADGE_CODES.has(node.value))
+        .filter(node => !isAdminAutoManagedBadge(node.value))
         .map(node => String(g_badges.find(b => b.code === node.value)?.id || '')).filter(Boolean).sort();
 }
 
@@ -8464,7 +8566,7 @@ function showMemberBasicResult(message, state, action, conflict = null) {
                 const nodes = new Map(Array.from(document.querySelectorAll('#member-badge-checkboxes input')).map(n=>[n.id||'badge:'+n.value,n]));
                 state.baseline = state.baseline.map(([key,value])=>{
                     const node=nodes.get(key), badge=node && g_badges.find(b=>b.code===node.value);
-                    return [key,badge&&!ADMIN_AUTO_MANAGED_BADGE_CODES.has(badge.code)?ids.has(String(badge.id)):value];
+                    return [key,badge&&!isAdminAutoManagedBadge(badge.code)?ids.has(String(badge.id)):value];
                 });
                 state.badgeExpected = Array.from(ids).sort();
                 ++state.actionRevision;retainMemberDetailEdit();return;
@@ -9734,7 +9836,7 @@ async function submitIssueDoc() {
 function markAutoManagedBadgeControls() {
     const badgeChecks = document.querySelectorAll('#member-badge-checkboxes input[type="checkbox"]');
     badgeChecks.forEach(chk => {
-        const isAutoManaged = ADMIN_AUTO_MANAGED_BADGE_CODES.has(chk.value);
+        const isAutoManaged = isAdminAutoManagedBadge(chk.value);
         chk.dataset.autoManaged = isAutoManaged ? 'true' : 'false';
         if (!isAutoManaged) return;
 
@@ -9773,7 +9875,7 @@ function toggleEditMode(isEdit) {
     // 수정 모드일 때만 체크박스 클릭 가능하게 설정
     const badgeChecks = document.querySelectorAll('#member-badge-checkboxes input[type="checkbox"]');
     badgeChecks.forEach(chk => {
-        const isAutoManaged = chk.dataset.autoManaged === 'true' || ADMIN_AUTO_MANAGED_BADGE_CODES.has(chk.value);
+        const isAutoManaged = chk.dataset.autoManaged === 'true' || isAdminAutoManagedBadge(chk.value);
         chk.disabled = !isEdit || isAutoManaged || !canManageAdminMemberIndividualBadges()
             || document.getElementById('member-badge-checkboxes')?.dataset.readReady !== '1';
     });
