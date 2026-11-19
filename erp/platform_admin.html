@@ -586,6 +586,19 @@
                   <button class="btn btn-outline-primary w-100" type="button" id="btnSaveCoopActive" onclick="saveCoopActive()">상태 저장</button>
                   <a class="btn btn-outline-secondary w-100 mt-2" href="service_contracts.html">이용계약과 청구서 확인</a>
                 </div>
+                <section class="panel-card mt-3 mb-0" aria-labelledby="villageOnboardingHeading">
+                  <h3 class="section-title" id="villageOnboardingHeading">첫 햇빛소득마을 등록 준비</h3>
+                  <p class="form-hint">운영 준비를 허용한 뒤, 해당 조합의 직원 관리에서 전체 관리자를 따로 지정합니다.</p>
+                  <label class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="villageOnboardingEnabled" disabled>
+                    <span class="form-check-label">첫 마을 등록 준비 허용</span>
+                  </label>
+                  <p id="villageOnboardingStatus" class="form-hint mb-2" role="status"></p>
+                  <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-outline-primary" type="button" id="villageOnboardingSave" disabled>준비 설정 저장</button>
+                    <button class="btn btn-outline-secondary" type="button" id="villageOnboardingRetry" hidden>다시 확인</button>
+                  </div>
+                </section>
               </div>
 
               <div class="col-lg-8">
@@ -771,6 +784,8 @@
     let platformContext = null;
     let coopManageModal = null;
     let selectedCoop = null;
+    let villageOnboardingOwner = null, villageOnboardingValue = null, villageOnboardingReading = null;
+    const villageOnboardingWrites = new Map();
     let selectedCoopDomainRoutes = [];
     let selectedCoopModuleAdminOptions = [];
     let selectedCoopNotificationSettings = { categories: [], employees: [] };
@@ -1423,6 +1438,87 @@
       }
     }
 
+    function paintVillageOnboarding(message) {
+      const input = document.getElementById('villageOnboardingEnabled');
+      const save = document.getElementById('villageOnboardingSave');
+      const retry = document.getElementById('villageOnboardingRetry');
+      const busy = villageOnboardingWrites.has(villageOnboardingOwner?.coop_id);
+      input.disabled = !villageOnboardingValue?.can_configure || busy || !!villageOnboardingReading;
+      save.disabled = input.disabled || input.checked === villageOnboardingValue?.enabled;
+      if (message !== undefined) {
+        document.getElementById('villageOnboardingStatus').textContent = message;
+        retry.hidden = !!villageOnboardingValue || busy || !!villageOnboardingReading || !villageOnboardingOwner;
+      }
+    }
+
+    function currentVillageOnboarding(owner, revision) {
+      return !!owner && owner === villageOnboardingOwner && owner === selectedCoop &&
+        revision === platformReadRevision && platformContext?.is_platform_admin === true && !window.frameElement?.hidden;
+    }
+
+    async function loadVillageOnboarding() {
+      const owner = villageOnboardingOwner, revision = platformReadRevision;
+      if (!currentVillageOnboarding(owner, revision) || villageOnboardingReading || villageOnboardingWrites.has(owner.coop_id)) return;
+      const request = {}; villageOnboardingReading = request; villageOnboardingValue = null;
+      paintVillageOnboarding('운영 준비 설정을 확인하는 중입니다.');
+      let timer, message = '';
+      try {
+        const controller = new AbortController();
+        const query = _supabase.rpc('platform_sun_village_onboarding', {p_coop_id:owner.coop_id});
+        const {data,error} = await Promise.race([query.abortSignal ? query.abortSignal(controller.signal) : query,
+          new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('timeout'));},12000);})]);
+        if (!currentVillageOnboarding(owner,revision) || villageOnboardingReading !== request) return;
+        if (error || typeof data?.can_configure !== 'boolean' || typeof data?.enabled !== 'boolean') throw error || new Error('missing');
+        villageOnboardingValue = data;
+        document.getElementById('villageOnboardingEnabled').checked = data.enabled;
+        message = data.has_villages ? '이미 마을을 운영하고 있습니다.' : !data.can_configure ? '이 조합은 첫 마을 등록 준비를 설정할 수 없습니다.'
+          : data.contract_closed ? '현재 조합 이용계약이 종료되어 마을 등록을 진행할 수 없습니다.'
+          : data.enabled ? '운영 준비가 허용되었습니다. 해당 조합의 직원 관리에서 전체 관리자를 지정하세요.' : '운영 준비가 아직 허용되지 않았습니다.';
+      } catch (_) {
+        message = '운영 준비 설정을 확인하지 못했습니다. 다시 확인해 주세요.';
+      } finally {
+        clearTimeout(timer);
+        if (villageOnboardingReading === request) {
+          villageOnboardingReading = null;
+          if (currentVillageOnboarding(owner,revision)) paintVillageOnboarding(message);
+        }
+      }
+    }
+
+    async function saveVillageOnboarding() {
+      const owner = villageOnboardingOwner, revision = platformReadRevision, original = villageOnboardingValue;
+      if (!currentVillageOnboarding(owner,revision) || !original?.can_configure || villageOnboardingWrites.has(owner.coop_id)) return;
+      const input = document.getElementById('villageOnboardingEnabled'), enabled = input.checked;
+      if (enabled === original.enabled) return;
+      villageOnboardingWrites.set(owner.coop_id,owner);
+      paintVillageOnboarding();
+      let timer, sent = false, resultMessage = '';
+      try {
+        if (!await window.CoopDialog.confirm(owner.coop_name + '의 첫 마을 등록 준비를 ' + (enabled ? '허용' : '해제') + '할까요?')
+            || !currentVillageOnboarding(owner,revision) || villageOnboardingValue !== original) return;
+        sent = true;
+        const controller = new AbortController();
+        const query = _supabase.rpc('platform_sun_village_onboarding',{p_coop_id:owner.coop_id,p_enabled:enabled,p_revision:original.revision ?? null});
+        const {data,error} = await Promise.race([query.abortSignal ? query.abortSignal(controller.signal) : query,
+          new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('timeout'));},15000);})]);
+        if (!currentVillageOnboarding(owner,revision)) return;
+        if (error || data?.enabled !== enabled) throw error || new Error('missing');
+        villageOnboardingValue = data;
+        resultMessage = enabled ? '운영 준비를 허용했습니다. 해당 조합의 직원 관리에서 전체 관리자를 따로 지정하세요.'
+          : '운영 준비를 해제했습니다. 다시 허용해도 전체 관리자는 새로 지정해야 합니다.';
+      } catch (_) {
+        if (sent && currentVillageOnboarding(owner,revision)) {
+          villageOnboardingValue = null;
+          resultMessage = '현재 설정을 다시 확인해 주세요.';
+        }
+      } finally {
+        clearTimeout(timer);
+        villageOnboardingWrites.delete(owner.coop_id);
+        if (currentVillageOnboarding(owner,revision)) paintVillageOnboarding(resultMessage || undefined);
+        else if (villageOnboardingOwner?.coop_id === owner.coop_id) void loadVillageOnboarding();
+      }
+    }
+
     function openManageModal(coopId) {
       const row = coopRows.find((item) => String(item.coop_id) === String(coopId));
       selectedCoop = {
@@ -1451,6 +1547,10 @@
       setManageStatus('', '');
       if (!coopManageModal) coopManageModal = new bootstrap.Modal(document.getElementById('coopManageModal'));
       coopManageModal.show();
+      villageOnboardingOwner = selectedCoop; villageOnboardingReading = villageOnboardingValue = null;
+      document.getElementById('villageOnboardingEnabled').checked = false;
+      paintVillageOnboarding('운영 준비 설정을 확인하는 중입니다.');
+      void loadVillageOnboarding();
       loadManageModalData(false);
     }
 
@@ -2227,6 +2327,12 @@
       });
       const modalEl = document.getElementById('coopManageModal');
       if (modalEl) coopManageModal = new bootstrap.Modal(modalEl);
+      modalEl?.addEventListener('hide.bs.modal', () => {
+        villageOnboardingOwner = villageOnboardingValue = villageOnboardingReading = null;
+      });
+      document.getElementById('villageOnboardingEnabled').addEventListener('change',() => paintVillageOnboarding());
+      document.getElementById('villageOnboardingRetry').addEventListener('click',loadVillageOnboarding);
+      document.getElementById('villageOnboardingSave').addEventListener('click',saveVillageOnboarding);
       renderPricingPanel();
       const activeToggle = document.getElementById('manageCoopActiveToggle');
       if (activeToggle) {

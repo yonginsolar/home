@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: 1.0.5 | 2026-11-09. Scope designation to its nested access tab. */
+/* Version: 1.0.6 | 2026-11-19. Support explicitly approved first-village operators. */
 (() => {
   'use strict';
 
@@ -136,7 +136,10 @@
         ? '재직 중인 직원만 지정할 수 있습니다.'
         : !data.target_login_linked
           ? '이 직원의 ERP 로그인이 연결되면 지정할 수 있습니다.'
-          : savedValue ? '현재 전체 관리자로 지정되어 있습니다.' : '현재 전체 관리자로 지정되지 않았습니다.';
+          : data.starting_without_villages === true
+            ? (savedValue ? '전체 관리자로 지정되어 있습니다. 햇빛소득마을 운영관리에서 첫 마을을 등록할 수 있습니다.'
+              : '첫 마을 등록 준비가 허용되었습니다. 운영을 시작할 전체 관리자를 지정해 주세요.')
+            : savedValue ? '현재 전체 관리자로 지정되어 있습니다.' : '현재 전체 관리자로 지정되지 않았습니다.';
       updateSaveState();
       if(grouped())checkpointEmployeeDetailDraft(checkbox);
       clearReadNotice(options.retry);
@@ -178,7 +181,9 @@
       if(checkbox.checked===enabled)checkbox.checked = savedValue;
       if(grouped())checkpointSavedEmployeeDetailTab('tabSunVillageTotalManager',new Map([[checkbox.id,savedValue]]));
       status.textContent = savedValue
-        ? '전체 관리자로 지정했습니다. 햇빛소득마을 운영관리에서 마을별 관리자를 지정할 수 있습니다.'
+        ? data?.starting_without_villages === true
+          ? '전체 관리자로 지정했습니다. 해당 직원이 ERP에 다시 들어오면 햇빛소득마을 운영관리에서 첫 마을을 등록할 수 있습니다.'
+          : '전체 관리자로 지정했습니다. 햇빛소득마을 운영관리에서 마을별 관리자를 지정할 수 있습니다.'
         : '전체 관리자 지정을 해제했습니다.';
     } catch (error) {
       if(target===readyRead&&sameSelection(target))status.textContent = messageFor(error);
