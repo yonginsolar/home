@@ -28,7 +28,7 @@
     ['accounting','accounting-journal','장부 찾아보기','#accTab button[data-bs-target="#tabHistory"]',['전표 검색','장부 검색']],
     ['accounting','accounting-statements','재무제표 등록·분석','#accTab button[data-bs-target="#tabStatements"]',['재무제표','재무상태표','손익']],
     ['accounting','accounting-tax','세무 할 일','#accTab button[data-bs-target="#tabTaxes"]',['원천세','부가세']],
-    ['accounting','accounting-guide','신고·결산 따라 하기','#accTab button[data-bs-target="#tabGuide"]',['신고·결산 매뉴얼','결산 안내','Smart A']],
+    ['accounting','accounting-guide','신고·결산 매뉴얼','#accTab button[data-bs-target="#tabGuide"]',['신고·결산 따라 하기','결산 안내','Smart A']],
     ['members','member-roster','조합원 명부','#nav-members',['회원 명부','회원 찾기','엑셀 명부']],
     ['members','member-applications','업무 신청 관리','#nav-applications',['가입 승인','가입 신청','출자 신청']],
     ['members','member-funds','자금 및 이용고 배당 관리','#nav-funds-manage',['출자금','배당','이용실적 보상']],
