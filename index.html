@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.205
-Change: 2026-11-19 - 화성 공사중 표시, 월 발전량 및 운영 발전소 상세 개선.
+Version: v1.0.206
+Change: 2026-11-19 - 화성 발전소 상세창 사진·정보 배치 보완.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -1859,6 +1859,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 .progress-plant-placeholder { display:grid;min-height:inherit;height:100%;width:100%;box-sizing:border-box;place-content:center;justify-items:center;gap:.55rem;padding:1rem;text-align:center;color:var(--bs-body-color,#343e44);background:var(--bs-tertiary-bg,#eff2f0);border:1px dashed var(--bs-border-color,#aebbb1);border-radius:inherit; }
 .progress-plant-placeholder i { font-size:1.6rem; }
 #progress[data-sunlit-public-progress]:not([hidden]) { display: block !important; }
+#progress[data-hcrec-public-progress][data-progress-content="empty"] { display:none!important; }
 #progress[data-sunlit-public-progress]:not([data-progress-content]):not([data-home-load-state="ready"]):not([data-home-load-state="failed"]) [data-progress-loading],
 #progress[data-sunlit-public-progress][data-home-load-state="ready"]:not([data-progress-content="present"]) [data-progress-empty] { display: block; }
 .public-plant-card { position:relative; }
@@ -1882,6 +1883,20 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 #progressPlantDetailModal dl > div { padding:.5rem 0; border-bottom:1px solid var(--bs-border-color,#d5dfda); }
 #progressPlantDetailModal dt { color:var(--bs-secondary-color,#46545b); font-size:.9em; }
 #progressPlantDetailModal dd { margin:0; }
+#progressPlantDetailModal[data-plant-design="hcrec"] { --bs-modal-width:46rem; }
+#progressPlantDetailModal[data-plant-design="hcrec"] .modal-content { height:42rem; }
+#progressPlantDetailModal[data-plant-design="hcrec"] .modal-body { padding:clamp(.8rem,3vw,1.4rem); }
+#progressPlantDetailModal[data-plant-design="hcrec"] .plant-detail-identity { display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem;flex-wrap:wrap;margin-bottom:.9rem; }
+#progressPlantDetailModal[data-plant-design="hcrec"] #progress-plant-modal-name { font-size:clamp(1.12em,3.7vw,1.6em);margin:0;line-height:1.25; }
+#progressPlantDetailModal[data-plant-design="hcrec"] .plant-detail-state { color:#14532d;background:#e3f4e9;border:1px solid #9dc9aa;border-radius:999px;padding:.25rem .65rem;font-weight:700; }
+#progressPlantDetailModal[data-plant-design="hcrec"][data-plant-construction="true"] .plant-detail-state { color:#6b4a0f;background:#fff0cb;border-color:#dfc471; }
+#progressPlantDetailModal[data-plant-design="hcrec"] figure { margin:0 0 1rem;border-radius:12px;background:var(--bs-tertiary-bg,#edf2ef);overflow:hidden; }
+#progressPlantDetailModal[data-plant-design="hcrec"] figure img { display:block;width:100%;height:min(32vh,310px);aspect-ratio:16/9;object-fit:contain; }
+#progressPlantDetailModal[data-plant-design="hcrec"] figure .progress-plant-placeholder { height:clamp(5rem,22vw,9rem); }
+#progressPlantDetailModal[data-plant-design="hcrec"] dl { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));gap:.55rem;margin-top:.65rem; }
+#progressPlantDetailModal[data-plant-design="hcrec"] dl > div { min-width:0;padding:.6rem;border:1px solid var(--bs-border-color,#d5dfda);border-radius:9px; }
+#progressPlantDetailModal[data-plant-design="hcrec"] dl > [data-plant-wide] { grid-column:1/-1; }
+#progressPlantDetailModal[data-plant-design="hcrec"] dd { font-weight:620; }
 #progressPlantDetailModal figure { margin:1rem 0 0; }
 #progressPlantDetailModal figure img { width:100%; max-height:12rem; object-fit:contain; border-radius:10px; }
   </style>
@@ -2615,7 +2630,9 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="발전소 상세 닫기"></button>
       </div>
       <div class="modal-body" tabindex="0" role="region" aria-labelledby="progress-plant-modal-name">
-        <h3 class="h5 fw-bold" id="progress-plant-modal-name"></h3>
+        <div class="plant-detail-identity"><h3 class="h5 fw-bold" id="progress-plant-modal-name"></h3>
+          <span class="plant-detail-state" id="progress-plant-modal-state" hidden></span>
+        </div>
         <section class="plant-detail-group" id="progress-plant-modal-stages" hidden>
           <h4 class="fw-bold">건립 진행 단계</h4>
           <ol class="plant-detail-steps"></ol>
@@ -6357,6 +6374,21 @@ function openPlantDetail(id, trigger = document.activeElement) {
             || section.hidden || publicHiddenSectionIds.has(sectionId) || document.querySelector('.modal.show, dialog[open]')) return;
 
         const name = String(plant.name || '발전소');
+        const hwaseong = ['hcrec.kr','www.hcrec.kr'].includes(window.location.hostname.toLowerCase().replace(/\.$/,''));
+        const status = document.getElementById('progress-plant-modal-state');
+        const actualConstruction = construction && ['공사중','건설중'].includes(String(plant.status ?? '').replace(/\s+/g,''));
+        if (hwaseong) {
+            modal.dataset.plantDesign = 'hcrec';
+            modal.dataset.plantConstruction = String(actualConstruction);
+            modal.setAttribute('aria-labelledby','progress-plant-modal-name');
+            status.textContent = actualConstruction ? '공사 중' : construction ? '' : '운영 중';
+        } else {
+            delete modal.dataset.plantDesign;
+            delete modal.dataset.plantConstruction;
+            modal.setAttribute('aria-labelledby','progress-plant-modal-title');
+            status.textContent = '';
+        }
+        status.hidden = !status.textContent;
         const type = normalizePublicPlantProjectType(plant.project_type);
         const text = value => String(value ?? '').trim();
         const stages = document.getElementById('progress-plant-modal-stages');
@@ -6393,19 +6425,31 @@ function openPlantDetail(id, trigger = document.activeElement) {
             const description = document.createElement('dd');
             term.textContent = label;
             description.textContent = value;
+            if (hwaseong && ['위치','공개 설명','자료 기준'].includes(label)) row.dataset.plantWide = '';
             row.append(term, description);
             details.append(row);
         }
 
         const photo = document.getElementById('progress-plant-modal-photo');
+        if (hwaseong) modal.querySelector('.plant-detail-identity').after(photo);
         photo.hidden = true;
         photo.replaceChildren();
+        const placeholder = () => {
+            if (!hwaseong || !actualConstruction || !modal.classList.contains('show')) return;
+            const box = document.createElement('div');
+            box.className = 'progress-plant-placeholder';
+            const icon = document.createElement('i');
+            icon.className = 'bi bi-cone-striped'; icon.setAttribute('aria-hidden','true');
+            const label = document.createElement('span'); label.textContent = '공사 중';
+            box.append(icon,label); photo.replaceChildren(box); photo.hidden = false;
+        };
         const instance = Modal.getOrCreateInstance(modal);
         instance.show(trigger);
         if (!modal.classList.contains('show')) return;
         modal.querySelector('.modal-body').scrollTop = 0;
         const first = modal.querySelector('.modal-header button');
         const last = modal.querySelector('.modal-footer button');
+        if (hwaseong) first.focus({preventScroll:true});
         const cycleTab = event => {
             if (event.defaultPrevented || event.isComposing || event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
             const active = document.activeElement;
@@ -6429,15 +6473,15 @@ function openPlantDetail(id, trigger = document.activeElement) {
         // The detail photo is independent of the card image and only shows on successful load.
         const rawImage = text(plant.image_url);
         const imageUrl = rawImage && safeUrl(rawImage);
-        if (!imageUrl) return;
+        if (!imageUrl) { placeholder(); return; }
         const url = new URL(imageUrl);
-        if (url.username || url.password || url.hostname === 'via.placeholder.com') return;
+        if (url.username || url.password || url.hostname === 'via.placeholder.com') { placeholder(); return; }
         const image = document.createElement('img');
         image.alt = `${name} 사진`;
         image.dataset.originalSrc = imageUrl;
         image.decoding = 'async';
         image.addEventListener('load', () => { if (photo.contains(image)) photo.hidden = false; }, {once:true});
-        image.addEventListener('error', () => { if (photo.contains(image)) photo.replaceChildren(); }, {once:true});
+        image.addEventListener('error', () => { if (photo.contains(image)) { photo.replaceChildren(); placeholder(); } }, {once:true});
         photo.append(image);
         image.src = window.CoopDisplayImages?.display(imageUrl) || imageUrl;
     }
@@ -6453,6 +6497,7 @@ function openPlantDetail(id, trigger = document.activeElement) {
 
         if (!section || !container) return;
 
+        section.toggleAttribute('data-hcrec-public-progress',hwaseong);
         section.dataset.progressContent = inProgressPlants.length ? 'present' : 'empty';
         if (inProgressPlants.length === 0) {
             clearProgressRevealObserver();
