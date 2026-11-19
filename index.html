@@ -2,12 +2,14 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.209
-Change: 2026-11-19 - 화성의 운영규약이 없을 때 문서 카드 배치 개선.
+Version: v1.0.210
+Change: 2026-11-19 - 화성 메인 배너의 가입 연결만 회원 상태에 맞춤.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
 <head>
+<script>if (window===window.top&&location.protocol==='https:'&&!location.port&&['hcrec.kr','www.hcrec.kr'].includes(location.hostname)&&new URLSearchParams(location.search).get('home_preview')!=='1') document.documentElement.setAttribute('data-hcrec-hero-boot','');</script>
+<style>html[data-hcrec-hero-boot] #public-hero-cta{visibility:hidden}</style>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
   <script src="/shared/coop_dialog.js?v=20261112-caret-1" integrity="sha384-dtSAC1/LrXrXqO9RVxDSzlj1VBHozxdBNK/3cNkJhkB2M2iA/zbF2Z+M2J4oyHGN" crossorigin="anonymous"></script>
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
@@ -1932,7 +1934,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 <script src="shared/home_display_options.js?v=1.3.1" defer></script>
 <script src="shared/site_inline_editor.js?v=20261119-about-paste-1" integrity="sha384-zyskNXnY/ck8kAFdE1rX+zEBAtRMSlR39d0gg53V8Ip85EzKWjW62iQT2I+dqRkt" crossorigin="anonymous" defer></script>
 <script src="shared/home_preview_editor.js?v=20261119-about-photo-1" integrity="sha384-d1wilBjSrJ1HYvThUdmDr7wGysBBNMV3N8kvxsEDr/QuPSupNEnHVkJAl1EwlA+F" crossorigin="anonymous" defer></script>
-<script src="shared/hero_banner.js?v=1.5.1" defer></script>
+<script src="shared/hero_banner.js?v=1.5.2" integrity="sha384-Mmb5kE9qC0Jg0O0Cxtwjn6KdDBfIaC4dyyCurHevBT5hsWGaRbF85HXhaW5PVRC7" crossorigin="anonymous" defer></script>
 <script src="shared/home_signup_availability_v1_2.js?v=1.2.0" integrity="sha384-kepcPvvHGgf9XhmFMFguL7Y9XLNfSOu03NymWl2tzF7+EuuB904AeNZvPP2e94Nk" crossorigin="anonymous"></script>
 <script src="shared/hero_layout.js?v=1.1.1" defer></script>
 <script src="shared/home_progressive.js?v=20261109-plant-focus-1" integrity="sha384-9Dlkt6OyyiAA6Bwc4dORwzgnVXL0eyySkmm1tlC+k9yYpm1L6Rp3jc8yeEdAMrJk" crossorigin="anonymous" defer></script>
@@ -2875,6 +2877,10 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
     let g_public_site_context = null;
     let g_public_site_context_promise = null;
     let g_public_home_settings = null;
+    let g_hcrecBannerMemberAction = 'checking';
+    function syncHcrecBannerMemberAction() {
+        window.CoopHeroBanner?.setMemberAction?.(g_public_site_context?.coop_code,g_hcrecBannerMemberAction);
+    }
     let g_publicSectionsForLayout = null;
     window.__PUBLIC_SITE_COOP_NAME__ = window.CoopTenantHead?.coopName || '용인모두의햇빛협동조합';
     const PUBLIC_READ_RETRY_DELAYS_MS = Object.freeze([0, 350, 1000]);
@@ -2928,6 +2934,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         }
         try {
             g_public_site_context = await g_public_site_context_promise;
+            syncHcrecBannerMemberAction();
             return g_public_site_context;
         } catch (error) {
             g_public_site_context_promise = null;
@@ -3007,6 +3014,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         }
         if(window.CoopHeroBanner)window.CoopHeroBanner.apply(settings);
         else window.__COOP_HERO_PENDING__=settings;
+        syncHcrecBannerMemberAction();
         // The carousel owns the currently selected photo and its presentation.
         // Repainting photo 0 here would mix its caption into another photo.
         if (!(settings.hero_slides_enabled === true && settings.hero_slides?.length)) window.CoopHomeDisplay?.apply(settings);
@@ -4053,6 +4061,13 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
         void bootPublicHome();
         printConsoleSignature();
     }, {once:true});
+    if(window===window.top&&['hcrec.kr','www.hcrec.kr'].includes(location.hostname)&&!isHomePreviewMode) {
+        window.addEventListener('pageshow',event=>{
+            if(!event.persisted)return;
+            ++homeAuthUiRevision;
+            void refreshHomeAuthUi();
+        });
+    }
 
     // ★ [핵심 추가] 사진까지 다 뜨고 나서 "최종 재측량"
     // (이걸 넣어야 인터넷 느린 곳에서도 정확하게 작동합니다)
@@ -7189,6 +7204,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
     }
 
     function setHomeAuthUiState(isLoggedIn, membershipState = 'none') {
+        g_hcrecBannerMemberAction = isLoggedIn && membershipState === 'active' ? 'active' : 'original';
+        syncHcrecBannerMemberAction();
         const authLink = document.getElementById('homeAuthLink');
         const signupLink = document.getElementById('homeSignupLink');
         const memberUrl = getHomeMembermanageUrl();
@@ -7218,6 +7235,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
     let homeAuthRequest = null;
     let homeAuthTimer = null;
     function setHomeAuthPending(failed = false) {
+        g_hcrecBannerMemberAction = 'checking';
+        syncHcrecBannerMemberAction();
         document.documentElement.dataset.homeAuthState = failed ? 'failed' : 'loading';
         const authLink = document.getElementById('homeAuthLink');
         if (authLink) {
@@ -7233,6 +7252,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
     }
     async function refreshHomeAuthUi() {
         if (homeAuthRequest?.revision === homeAuthUiRevision) return homeAuthRequest.promise;
+        g_hcrecBannerMemberAction = 'checking';
+        syncHcrecBannerMemberAction();
         const revision = ++homeAuthUiRevision;
         const request = {revision,promise:null};
         homeAuthRequest = request;
