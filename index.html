@@ -2,7 +2,7 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.210
+Version: v1.0.211
 Change: 2026-11-19 - 화성 메인 배너의 가입 연결만 회원 상태에 맞춤.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
@@ -2706,6 +2706,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
 
     let g_partners_list = []; // 파트너 데이터 기억용
     let g_badge_def = [];     // 뱃지 정의(이름, 아이콘 등) 기억용
+    let hwaseongPartnerBadges = { rows:null, pending:null, detail:null };
 
     let g_total_amount = 0;
     const VILLAGE_REGION_CONFIG = Object.freeze([
@@ -3977,6 +3978,7 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
     }
     function preparePublicSectionLoads() {
         publicHomeLoader?.dispose();
+        hwaseongPartnerBadges = { rows:null, pending:null, detail:null };
         const jobs = [
             {key:'about',targets:['about'],run:fetchAbout},
             {key:'stats',targets:['impact','calculator'],run:fetchStats},
@@ -3999,6 +4001,12 @@ html[data-theme="dark"][data-theme-page="index"] #about .content {
             onSettled:()=>{ window.AOS?.refresh(); }
         });
         publicHomeLoader.start();
+        // Keep any direct section link first. Reserve only one existing slot for this public list.
+        const partnersSection = document.getElementById('partners');
+        if (useHwaseongPartnerPriority() && partnersSection && !partnersSection.hidden
+            && !publicHiddenSectionIds.has('partners') && getComputedStyle(partnersSection).display !== 'none') {
+            void publicHomeLoader.load('partners',true);
+        }
         const selected = document.querySelector('.home-news-tab[aria-selected="true"]')?.id;
         if (selected === 'home-news-tab-regional' || selected === 'home-news-tab-national') void publicHomeLoader.load(`external-${selected.split('-').pop()}`,true);
     }
@@ -6965,6 +6973,27 @@ function openPlantDetail(id, trigger = document.activeElement) {
     // =================================================================
 
 
+    function useHwaseongPartnerPriority() {
+       return !isHomePreviewMode && ['hcrec.kr','www.hcrec.kr'].includes(location.hostname)
+           && document.documentElement.dataset.homeNavState === 'ready';
+    }
+
+    function readPublicPartnerBadges(attempt) {
+       return readPublicHome(signal => readPublicHomeScoped(_client.from('site_badges').select('*'), signal), attempt);
+    }
+
+    function loadHwaseongPartnerBadges(owner) {
+       if (owner.rows) return Promise.resolve(owner.rows);
+       if (owner.pending) return owner.pending;
+       owner.pending = readPublicPartnerBadges().then(({data,error}) => {
+           if (error || owner !== hwaseongPartnerBadges || !useHwaseongPartnerPriority()
+               || window.__PUBLIC_SHOW_PARTNER_BADGES__ === false) return null;
+           owner.rows = data || [];
+           return owner.rows;
+       }).catch(() => null).finally(() => { owner.pending = null; });
+       return owner.pending;
+    }
+
     async function fetchPartners(attempt) {
        const container = document.getElementById('partners-container');
        if(!container) return;
@@ -6972,8 +7001,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
        // 1. 이 운영 구성에서 뱃지를 쓰는 경우에만 정의를 불러옵니다.
        if (window.__PUBLIC_SHOW_PARTNER_BADGES__ === false) {
            g_badge_def = [];
-       } else {
-           const { data: badges, error: badgeError } = await readPublicHome(signal => readPublicHomeScoped(_client.from('site_badges').select('*'), signal), attempt);
+       } else if (!useHwaseongPartnerPriority()) {
+           const { data: badges, error: badgeError } = await readPublicPartnerBadges(attempt);
            if (badgeError) return false;
            g_badge_def = badges || [];
        }
@@ -6988,6 +7017,7 @@ function openPlantDetail(id, trigger = document.activeElement) {
 
        if (error) return false;
        if (!partners || partners.length === 0) {
+           g_partners_list = [];
            container.innerHTML = '<div class="col-12 text-center py-5 text-muted">등록된 협력 단체가 없습니다.</div>';
            return;
        }
@@ -7057,7 +7087,36 @@ function openPlantDetail(id, trigger = document.activeElement) {
         badgeContainer.innerHTML = '';
         badgeContainer.hidden = window.__PUBLIC_SHOW_PARTNER_BADGES__ === false;
 
-        if(window.__PUBLIC_SHOW_PARTNER_BADGES__ !== false && p.badges && p.badges.length > 0) {
+        const modal = document.getElementById('partnerDetailModal');
+        const fast = useHwaseongPartnerPriority();
+        if(fast && !badgeContainer.hidden && Array.isArray(p.badges) && p.badges.length > 0) {
+            const owner = hwaseongPartnerBadges;
+            const detail = {};
+            owner.detail = detail;
+            modal.addEventListener('hide.bs.modal', () => {
+                if (owner.detail === detail) owner.detail = null;
+            }, {once:true});
+            void loadHwaseongPartnerBadges(owner).then(definitions => {
+                if (!definitions || owner !== hwaseongPartnerBadges || owner.detail !== detail
+                    || !useHwaseongPartnerPriority() || window.__PUBLIC_SHOW_PARTNER_BADGES__ === false) return;
+                for (const code of p.badges) {
+                    const def = definitions.find(item => item.code === code);
+                    if (!def) continue;
+                    const badge = document.createElement('span');
+                    badge.className = 'badge rounded-pill border px-3 py-2 d-flex align-items-center gap-1';
+                    const color = typeof def.color === 'string' && /^[a-z-]+$/.test(def.color) ? def.color : 'secondary';
+                    badge.style.setProperty('background-color',`var(--bs-${color}-bg-subtle)`);
+                    badge.style.setProperty('color',`var(--bs-${color}-text-emphasis)`);
+                    badge.style.setProperty('border-color',`var(--bs-${color}-border-subtle)`,'important');
+                    const icon = document.createElement('span');
+                    icon.style.fontSize = '1.1em'; icon.textContent = def.icon || '';
+                    badge.append(icon,document.createTextNode(def.name || ''));
+                    badgeContainer.append(badge);
+                }
+            });
+        } else if (fast) {
+            hwaseongPartnerBadges.detail = null;
+        } else if(!badgeContainer.hidden && p.badges && p.badges.length > 0) {
             p.badges.forEach(bCode => {
                 const bDef = g_badge_def.find(def => def.code === bCode);
                 if(bDef) {
@@ -7082,7 +7141,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
             linkBtn.style.display = 'none';
         }
 
-        new bootstrap.Modal(document.getElementById('partnerDetailModal')).show();
+        if (fast) bootstrap.Modal.getOrCreateInstance(modal).show();
+        else new bootstrap.Modal(modal).show();
     }
     // =================================================================
     // [기능] FAQ 데이터 로드 (카드형 아코디언)
