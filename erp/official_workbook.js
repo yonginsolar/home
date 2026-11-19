@@ -87,7 +87,7 @@
     const modal=make('dialog',null,'official-workbook');modal.id='officialWorkbook';modal.setAttribute('aria-labelledby','officialWorkbookTitle');
     const head=make('header'), title=make('h2','엑셀로 임원·위원회 등록');title.id='officialWorkbookTitle';const close=btn('닫기');head.append(title,close);
     const tools=make('div',null,'official-workbook-tools'), template=make('a','양식 다운로드','btn btn-outline-secondary');
-    template.href='/erp/assets/official-workbook-template.xlsx?v=1.0.0'; template.download='임원·위원회_등록_양식.xlsx';
+    template.href='/erp/assets/official-workbook-template.xlsx?v=1.0.1'; template.download='임원·위원회_등록_양식.xlsx';
     const fileLabel=make('label','엑셀 파일');const file=make('input',null,'form-control');file.id='officialWorkbookFile';file.type='file';file.accept='.xlsx';fileLabel.htmlFor=file.id;
     const check=btn('다시 검사','btn btn-outline-primary');tools.append(template,fileLabel,file,check);
     const status=make('p',null,'official-workbook-status');status.setAttribute('role','status');
