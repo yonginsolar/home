@@ -1,19 +1,21 @@
-/* v1.1.0 — Announced metadata/titles only; proposal prose and independent scripts stay editable. */
+/* v1.2.0 — Keep past notices separate from editable board plans. */
 export const AGENDA_LOCK_REASON = '소집 공문 결재가 완료되어 기본정보와 안건 제목·구성이 확정되었습니다. 안건 설명·시나리오·메모·결과는 계속 작성할 수 있습니다.';
+export const BOARD_AGENDA_LOCK_REASON = '결재된 안건의 제목·목록은 바꿀 수 없습니다. 제목이나 목록을 바꾸려면 변경 소집 공문을 다시 결재받아 주세요.';
 export function materialAgendaNodes(container) {
   const nodes = [...container.querySelectorAll('.source-agenda-row > strong,.source-agenda-row > span,.chapter-bill > h1,.chapter-bill > h2,.board-one-paper > h1,.board-one-paper > .meeting-meta,.board-one-paper > h2,.assembly-cover > h1,.assembly-cover > dl')]
     .filter(n => !n.matches('.board-one-paper > h2') || /^[1-4]\.\s*/.test(n.textContent.trim()));
   if (container.classList.contains('chapter-bill')) nodes.push(...[...container.children].filter(n => ['H1','H2'].includes(n.tagName)));
   return [...new Set(nodes)];
 }
-export function protectMaterialAgendas(container, locked) {
+export function protectMaterialAgendas(container, locked, titlesOnly = false) {
   clearMaterialAgendaUi(container);
   if (!locked) return;
-  for (const node of materialAgendaNodes(container)) {
+  const nodes = titlesOnly ? container.querySelectorAll('.source-agenda-row > span') : materialAgendaNodes(container);
+  for (const node of nodes) {
     node.dataset.agendaUiLock = 'true';
     node.contentEditable = 'false';
     node.setAttribute('aria-readonly','true');
-    node.title = '소집 공문 결재가 완료된 기본정보·안건 제목';
+    node.title = titlesOnly ? '결재를 마친 안건 제목' : '소집 공문 결재가 완료된 기본정보·안건 제목';
   }
 }
 export function clearMaterialAgendaUi(container) {

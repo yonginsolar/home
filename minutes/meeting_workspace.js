@@ -1,14 +1,14 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.18.4
-Change: 2026-10-29 - Bound and recover current meeting detail reads while preserving drafts.
+Version: v1.18.7
+Change: 2026-11-19 - Protect approved board agenda titles while keeping the separate meeting plan editable.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.9.1';
 import { createMeetingNotHeld } from './meeting_not_held.js?v=1.2.2';
 import { listMeetingAnnexes, appendMeetingTextAnnexes, orderMeetingAnnexes, setMeetingAnnexLink, moveMeetingAnnex } from './meeting_annex_import.js?v=1.1.2';
-import { AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.1.0';
+import { AGENDA_LOCK_REASON, BOARD_AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.2.0';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.10';
 import { labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
@@ -1025,19 +1025,27 @@ function renderAgendaList() {
 
 function renderAgendaLock() {
   const known = !!state.agendaLock, locked = !known || state.agendaLock.locked;
+  const boardReview = locked && state.current?.meeting_type === 'BOARD' && state.agendaLock?.board_plan_review;
+  const boardEditable = boardReview && !['FINAL','CANCELLED'].includes(state.current.status) && !state.current.published_minute_id;
   if (!$('agendaLockStatus')) return;
-  $('agendaLockStatus').textContent = !known ? '잠금 상태를 불러오지 못했습니다.' : locked ? '결재 완료 · 잠금' : '결재 완료 전';
-  $('agendaLockStatus').title=known&&locked?AGENDA_LOCK_REASON:'';
+  $('agendaLockStatus').textContent = boardReview
+    ? (boardReview === 'changed' ? '현재 준비안 변경 · 결재한 공문은 그대로입니다.'
+      : boardReview === 'compare' ? '현재 준비안 · 결재한 공문과 대조해 주세요.'
+        : '현재 준비안 · 수정해도 결재한 공문은 바뀌지 않습니다.')
+    : !known ? '잠금 상태를 불러오지 못했습니다.' : locked ? '결재 완료 · 잠금' : '결재 완료 전';
+  $('agendaLockStatus').title=known&&locked?(boardReview?BOARD_AGENDA_LOCK_REASON:AGENDA_LOCK_REASON):'';
   $('refreshAgendaLockButton').hidden=known;
   for (const id of ['meetingType','assemblyKind','fiscalYear','meetingNumber','meetingTitle','noticeDate','meetingDate','meetingLocation','startTime','endTime','facilitatorName','chairOfficial','eligibleCount']) {
-    $(id).disabled = state.loading || locked;
+    $(id).disabled = state.loading || (locked && (!boardEditable || id === 'meetingType'));
   }
   $('addAgendaButton').disabled = state.loading || locked;
   $('deletePackageButton').disabled = state.loading || locked;
   for (const node of document.querySelectorAll('#agendaList [data-agenda-action],#agendaList [data-field]')) {
-    if (node.dataset.agendaAction || ['agenda_kind','title'].includes(node.dataset.field)) node.disabled = state.loading || locked;
+    if (node.dataset.agendaAction || ['agenda_kind','title'].includes(node.dataset.field)) {
+      node.disabled = state.loading || (locked && (!boardEditable || node.dataset.agendaAction === 'delete' || node.dataset.field === 'title'));
+    }
   }
-  if (state.activeDocument === 'MATERIALS' && !chapterMode()) protectMaterialAgendas($('documentEditor'), locked);
+  if (state.activeDocument === 'MATERIALS' && !chapterMode()) protectMaterialAgendas($('documentEditor'), locked, !!boardEditable);
 }
 
 async function refreshAgendaLock() {
@@ -1051,6 +1059,18 @@ async function refreshAgendaLock() {
   if (chapterMode()) renderChapterEditState();
 }
 
+function refreshSavedBoardPlan() {
+  if (state.current?.meeting_type !== 'BOARD' || !state.agendaLock?.board_plan_review) return;
+  const owner = pdfActionOwner(), pending = {...state.agendaLock,board_plan_review:'compare'};
+  state.agendaLock = pending;
+  renderAgendaLock();
+  void MeetingPackageService.getAgendaState(owner.packageId).then(result => {
+    if (!pdfActionStillCurrent(owner) || state.agendaLock !== pending || result.error || !result.data?.board_plan_review) return;
+    state.agendaLock = result.data;
+    renderAgendaLock();
+  }).catch(() => {});
+}
+
 function collectAgendasFromDom() {
   return [...document.querySelectorAll('.agenda-card')].map((card, index) => {
     const row = state.agendas[index] || {};
@@ -1058,7 +1078,7 @@ function collectAgendasFromDom() {
     return {
       ...(row.id ? { id: row.id } : {}),
       agenda_kind: value('agenda_kind') || 'DECISION',
-      title: value('title'),
+      title: state.agendaLock?.locked && state.agendaLock?.board_plan_review ? String(row.title ?? '') : value('title'),
       summary: value('summary'),
       background: value('background'),
       proposal_text: value('proposal_text'),
@@ -1966,6 +1986,7 @@ async function saveInfo({ quiet = false } = {}) {
   if (index >= 0) state.packages[index] = { ...state.packages[index], ...data };
   renderPackages();
   renderEditorHeader();
+  if (state.agendaLock?.board_plan_review) refreshSavedBoardPlan();
   await loadAssemblySources();
   refreshAutoDrafts({ render: state.currentStep === 'documents' });
   if (!quiet) showToast('기본정보를 저장했습니다.');
@@ -2150,6 +2171,7 @@ async function saveAgendas({ quiet = false } = {}) {
     state.current = update.data;
   }
   renderAgendaList();
+  if (state.agendaLock?.board_plan_review) refreshSavedBoardPlan();
   if (!quiet) showToast(state.current.meeting_type === 'GENERAL_ASSEMBLY' && state.current.assembly_kind !== 'EXTRAORDINARY' ? '안건과 자료집 입력을 저장했습니다.' : '안건을 저장했습니다.');
   state.agendaDirty = false;
   return true;
@@ -2657,7 +2679,7 @@ function switchStep(step) {
 }
 
 function addAgenda() {
-  if (!state.agendaLock || state.agendaLock.locked) return showToast(AGENDA_LOCK_REASON);
+  if (!state.agendaLock || state.agendaLock.locked) return showToast(state.agendaLock?.board_plan_review?BOARD_AGENDA_LOCK_REASON:AGENDA_LOCK_REASON);
   state.agendas = collectAgendasFromDom();
   state.agendas.push({ agenda_kind:'DECISION', title:'', summary:'', background:'', proposal_text:'', office_report:'', scenario_notes:'', decision_draft:'', decision_result:'', discussion_notes:'', document_notes:'', private_notes:'', requires_article_comparison:false });
   renderAgendaList();
@@ -2688,12 +2710,16 @@ function removeBudgetRow(button) {
 }
 
 async function handleAgendaAction(button) {
-  if (!state.agendaLock || state.agendaLock.locked) return showToast(AGENDA_LOCK_REASON);
+  const action = button.dataset.agendaAction, boardReview = state.agendaLock?.board_plan_review;
+  const boardEditable = boardReview && state.current?.meeting_type === 'BOARD'
+    && !['FINAL','CANCELLED'].includes(state.current.status) && !state.current.published_minute_id;
+  if (!state.agendaLock || (state.agendaLock.locked && (!boardEditable || !['up','down'].includes(action)))) {
+    return showToast(boardReview?BOARD_AGENDA_LOCK_REASON:AGENDA_LOCK_REASON);
+  }
   const card = button.closest('.agenda-card');
   if (!card) return;
   state.agendas = collectAgendasFromDom();
   const index = Number(card.dataset.agendaIndex);
-  const action = button.dataset.agendaAction;
   if (action === 'delete') {
     if (!(await window.CoopDialog.confirm('이 안건을 목록에서 뺄까요? 저장을 누르면 삭제가 확정됩니다.'))) return;
     state.agendas.splice(index, 1);
@@ -2855,6 +2881,8 @@ async function runAction(action) {
       : code.includes('MEETING_AUDIT_CONFLICT') ? '저장된 감사보고서가 바뀌었습니다. 작성한 초안과 최신 문서를 확인한 뒤 다시 저장해 주세요.'
       : code.includes('MEETING_REQUEST_MISMATCH') ? '이전 요청과 대상이나 내용이 다릅니다. 원래 작업의 결과를 먼저 확인해 주세요.'
       : code.includes('MEETING_PDF_SOURCE_RETAINED') ? '무산된 회의나 다음 회의에서 참조하는 원본 PDF는 삭제할 수 없습니다.'
+      : code.includes('MEETING_AGENDA_MATERIALS_MISMATCH') ? '회의자료의 안건 제목이 일치하지 않습니다. 작성한 설명·별첨을 보관한 뒤 기존 안건 제목을 확인해 주세요.'
+      : code.includes('MEETING_AGENDA_LOCKED') && state.agendaLock?.board_plan_review ? BOARD_AGENDA_LOCK_REASON
       : code.includes('MEETING_AGENDA_LOCKED') ? '소집 공문 결재가 완료되어 기본정보와 안건 제목·구성이 잠겼습니다. 입력은 보관했습니다. 잠금 상태를 다시 확인해 주세요.'
       : code.includes('MEETING_DOCUMENT_EDIT_REQUIRED') ? '편집권이 없거나 만료되었습니다. 작성한 내용을 확인하고 편집권을 다시 확인해 주세요.'
       : code.includes('MEETING_DOCUMENT_EDIT_IN_PROGRESS') ? '편집 중인 문서가 있습니다. 편집을 마친 뒤 다시 확인해 주세요.'
