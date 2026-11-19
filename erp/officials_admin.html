@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.37 | 등록 방법 선택 -->
+<!-- Version: v1.0.38 | 임원 등록 권한과 수정 기록 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.37 | officials_admin.html');</script>
+  <script>console.log('[Version] v1.0.38 | officials_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -55,6 +55,9 @@
     .official-register-options { display:grid; grid-template-columns:minmax(0,1fr); gap:.55em; }
     .official-register-choice button { min-height:40px; max-width:100%; white-space:normal; overflow-wrap:anywhere; }
     .official-register-choice button[hidden] { display:none !important; }
+    .official-edit-dialog { box-sizing:border-box; width:min(620px,calc(100% - 24px)); height:min(38rem,calc(100dvh - 24px)); max-width:none; max-height:none; inset:0; margin:auto; padding:clamp(12px,4vw,24px); border:1px solid var(--erp-border-strong,#cad3dc); border-radius:14px; background:var(--erp-card-bg,#fff); color:var(--erp-text,#172638); overflow:auto; overscroll-behavior:contain; overflow-wrap:anywhere; }
+    .official-edit-dialog::backdrop { background:#0f172a99; }
+    .official-edit-dialog button { white-space:normal; max-width:100%; overflow-wrap:anywhere; }
     .overlay-panel table th,
     .overlay-panel table td { vertical-align:middle; }
     .import-status-ok { color:#166534; font-weight:700; }
@@ -113,6 +116,7 @@
   <link rel="stylesheet" href="/erp/official_workbook.css?v=1.0.0" integrity="sha384-uJh6mMHkeBKCKiEWOWyr70TVLtzZlrTdYbHDAB6F+oQLGcC/25LHTQ5yLEh8Db1q" crossorigin="anonymous">
   <script src="/erp/official_workbook.js?v=1.0.3" integrity="sha384-BmF4DbGBcNDsa6GAEApjULIwXtjjlgKFn4f+by0DCQ06BUwZShFPbWvrsrzNyRir" crossorigin="anonymous" defer></script>
   <script src="/erp/official_registration_choice.js?v=1.0.0" integrity="sha384-N8L1FCUP4CrHrjVJEhIs9IILpWgZoS6hwvwEFi8y8FT9eyEjoXKzpRDGStWSOpR+" crossorigin="anonymous" defer></script>
+  <script src="/erp/official_record_edit.js?v=1.0.0" integrity="sha384-/SBgYRwJLRO01T82zb8SYDag3X8+K0Av+WZYSAc5/c8zsrAidiChEYHOfWeGpWpC" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 <body class="erp-unified erp-pc-workspace erp-page-officials">
@@ -174,13 +178,15 @@
             <div class="card-body">
               <h2 class="h6 mb-3">작업</h2>
               <div class="d-grid gap-2">
-                <button class="btn btn-primary" type="button" id="officialRegistrationButton" aria-haspopup="dialog" aria-controls="officialRegistrationChoice" onclick="openOfficialRegistrationChoice(this,'official',()=>openIndividualFromRegistration(this))">등록</button>
-                <button class="btn btn-outline-primary" id="externalDirectorButton" type="button" onclick="openExternalDirectorModal()">비조합원 이사 등록</button>
-                <button class="btn btn-outline-secondary" type="button" id="openMemberSearchBtn" onclick="openMemberSearchModal()">조합원 찾기</button>
-                <button class="btn btn-outline-secondary" type="button" onclick="openOfficialRoleCatalogModal()">직책 설정</button>
+                <button class="btn btn-primary" type="button" id="officialRegistrationButton" aria-haspopup="dialog" aria-controls="officialRegistrationChoice" onclick="openOfficialRegistrationChoice(this,'official',()=>openIndividualFromRegistration(this))" disabled>등록</button>
+                <button class="btn btn-outline-primary d-none" id="externalDirectorButton" type="button" onclick="openExternalDirectorModal()">비조합원 이사 등록</button>
+                <button class="btn btn-outline-secondary d-none" type="button" id="openMemberSearchBtn" onclick="openMemberSearchModal()">조합원 찾기</button>
+                <button class="btn btn-outline-secondary d-none" type="button" id="officialRoleCatalogButton" onclick="openOfficialRoleCatalogModal()">직책 설정</button>
                 <button class="btn btn-outline-success d-none" type="button" id="importElectionWinnersBtn" onclick="openElectionImportModal()">당선자 가져오기</button>
                 <button class="btn btn-outline-primary d-none" type="button" id="loadElectionResultsBtn" onclick="openElectionManagement()">선거 관리 열기</button>
               </div>
+              <div id="officialWriteAccessStatus" class="small text-muted mt-2" role="status"></div>
+              <button type="button" id="officialWriteRetry" class="btn btn-sm btn-outline-primary mt-2" hidden>등록·수정 권한 다시 확인</button>
               <div class="helper mt-3" id="officialEntryHelper">주민등록번호는 기본 수집값으로 두지 않고, 법정 신고가 필요한 경우 별도 절차로 처리합니다.</div>
             </div>
           </div>
@@ -244,6 +250,30 @@
       </div>
     </div>
   </div>
+
+  <dialog id="officialEditDialog" class="official-edit-dialog" aria-labelledby="officialEditTitle">
+    <header class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+      <h2 id="officialEditTitle" class="h5 mb-0">임원 정보 및 변경 기록</h2>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-official-edit="close">닫기</button>
+    </header>
+    <label for="officialEditRecord" class="form-label">직책 기록</label>
+    <select id="officialEditRecord" class="form-select mb-2" data-official-edit="record"></select>
+    <p class="small text-muted mb-2" data-official-edit="source"></p>
+    <form data-official-edit="form" class="row g-2">
+      <div class="col-12"><label for="officialEditName" class="form-label">등록명</label><input id="officialEditName" class="form-control" type="text" maxlength="80" data-official-edit="name" disabled></div>
+      <div class="col-12 col-sm-6"><label for="officialEditStart" class="form-label">임기 시작일</label><input id="officialEditStart" class="form-control" type="date" data-official-edit="term_start_date" disabled></div>
+      <div class="col-12 col-sm-6"><label for="officialEditEnd" class="form-label">임기 종료일</label><input id="officialEditEnd" class="form-control" type="date" data-official-edit="term_end_date" disabled></div>
+      <div class="col-12"><label><input type="checkbox" data-official-edit="is_registered" disabled> 등기 임원</label></div>
+      <div class="col-12"><button type="submit" class="btn btn-primary" data-official-edit="save" disabled>저장</button></div>
+    </form>
+    <div class="small mt-2" data-official-edit="status" role="status" aria-live="polite"></div>
+    <button type="button" class="btn btn-sm btn-outline-primary mt-1" data-official-edit="retry" hidden>다시 확인</button>
+    <section class="border-top pt-3 mt-3" aria-labelledby="officialEditHistoryTitle">
+      <h3 id="officialEditHistoryTitle" class="h6">변경 기록</h3>
+      <p data-official-edit="history_empty" class="small text-muted">기록된 변경이 없습니다.</p>
+      <ol data-official-edit="history" class="small ps-4 mb-0"></ol>
+    </section>
+  </dialog>
 
   <dialog id="officialRegistrationChoice" class="official-register-choice" aria-labelledby="officialRegistrationChoiceTitle">
     <header>
@@ -371,7 +401,7 @@
       <div class="helper mt-2">종료일이 비어 있으면 2년 뒤 같은 날짜의 전날로 자동 계산합니다. 해당 날짜가 없으면 그 달 말일을 적용합니다.</div>
       <div class="modal-footer px-0 pb-0 mt-3">
         <button class="btn btn-outline-secondary" type="button" onclick="resetOfficialForm()">초기화</button>
-        <button class="btn btn-primary" type="button" onclick="saveOfficial()">등록</button>
+        <button class="btn btn-primary" id="saveIndividualOfficialBtn" type="button" onclick="saveOfficial()">등록</button>
       </div>
     </div>
   </div>
@@ -494,12 +524,48 @@
     let voteImportEnabled = false;
     let currentUser = null;
     let officialDataAuthorized = false;
+    let officialWriteAuthorized = false, officialExternalWriteAuthorized = false, officialWriteAccessFailure = false, officialWriteRevision = 0, officialRecordEditor = null;
+    let individualOfficialSaving = false;
     let committeeController=null,committeeLoading=null,committeeActive=false,committeeTabRevision=0,committeeAuthId='';
     let officialWorkbook, officialRegistrationChooser, individualRegistrationOpener;
+    function officialWriteAllowed(){return officialDataAuthorized && officialWriteAuthorized && !!currentCoopId && !!committeeAuthId && !window.frameElement?.hidden;}
+    function officialRecordContext(){return {allowed:officialWriteAllowed()&&!committeeActive,key:JSON.stringify([committeeAuthId,currentCoopId,committeeTabRevision])};}
+    function openOfficialRecordEditor(ids,trigger){
+      if(!officialRecordContext().allowed || !window.OfficialRecordEdit)return;
+      const dialog=document.getElementById('officialEditDialog');
+      if(!officialRecordEditor && typeof dialog?.showModal==='function') officialRecordEditor=window.OfficialRecordEdit.create({client:_supabase,dialog,getContext:officialRecordContext,refresh:loadOfficials,
+        findReturnFocus:ids=>Array.from(document.querySelectorAll('#officialListBody [data-edit-ids]')).find(btn=>btn.dataset.editIds.split(',').some(id=>ids.includes(id)))});
+      officialRecordEditor?.open(officialRowsCache.filter(row=>ids.includes(String(row.id))),trigger);
+    }
+    function syncOfficialWriteControls(){
+      const allowed=officialWriteAllowed();
+      document.getElementById('officialRegistrationButton').disabled=!allowed;
+      for(const [id,visible] of [['externalDirectorButton',allowed&&officialExternalWriteAuthorized],['openMemberSearchBtn',allowed&&memberSearchEnabled],['importElectionWinnersBtn',allowed&&voteImportEnabled],['officialRoleCatalogButton',allowed]])
+        document.getElementById(id)?.classList.toggle('d-none',!visible);
+      document.getElementById('officialWriteAccessStatus').textContent=allowed?'':officialWriteAccessFailure?'등록·수정 권한을 확인하지 못했습니다.':'등록·수정 권한이 없는 계정입니다.';
+      document.getElementById('officialWriteRetry').hidden=!officialWriteAccessFailure;
+    }
+    async function readOfficialWriteAccess(){
+      const scope=JSON.stringify([committeeAuthId,currentCoopId]), seq=++officialWriteRevision;
+      officialWriteAuthorized=false;officialExternalWriteAuthorized=false;officialWriteAccessFailure=false;
+      let timer;
+      try{
+        const {data,error}=await Promise.race([_supabase.rpc('get_official_record_manage_access'),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('timeout')),12000);})]);
+        if(seq!==officialWriteRevision || scope!==JSON.stringify([committeeAuthId,currentCoopId]))return;
+        if(error || typeof data?.manage!=='boolean' || typeof data?.external!=='boolean')throw new Error('permission check');
+        officialWriteAuthorized=data.manage===true;officialExternalWriteAuthorized=data.external===true;
+      }catch(_){if(seq===officialWriteRevision)officialWriteAccessFailure=true;}
+      finally{clearTimeout(timer);}
+    }
+    document.getElementById('officialWriteRetry')?.addEventListener('click',async event=>{
+      const btn=event.currentTarget;if(btn.disabled||!officialDataAuthorized)return;btn.disabled=true;
+      try{await readOfficialWriteAccess();syncOfficialWriteControls();renderOfficialList();}finally{btn.disabled=false;}
+    });
+    window.addEventListener('pagehide',()=>{++officialWriteRevision;officialRecordEditor?.pause();});
     function committeeAllowed(){return !!committeeAuthId && officialDataAuthorized && isMemberAdminConnected() &&
       (hasPermission(permissionSet,'member.admin')===true || currentUser?.role==='admin' || currentUser?.role==='admin_all');}
     function officialRegistrationContext(area){
-      if(!officialDataAuthorized||area!==(committeeActive?'committee':'official')||(committeeActive&&!committeeAllowed()))return null;
+      if(!officialDataAuthorized||area!==(committeeActive?'committee':'official')||(committeeActive?!committeeAllowed():!officialWriteAllowed()))return null;
       return {key:JSON.stringify([committeeAuthId,currentCoopId,committeeTabRevision,area]),excel:!!officialWorkbook&&committeeAllowed()};
     }
     function mountOfficialRegistration(){
@@ -524,6 +590,7 @@
     async function selectOfficialArea(useCommittee){
       const ticket=++committeeTabRevision;
       if(useCommittee && !committeeAllowed())return;
+      officialRecordEditor?.pause();
       officialRegistrationChooser?.pause();
       if(committeeActive!==useCommittee)officialWorkbook?.pause();
       committeeActive=useCommittee;
@@ -556,6 +623,7 @@
     let memberSearchRequest = null;
     let importableElections = [];
     let currentElectionImportPreview = null;
+    let electionImportPreviewRevision = 0;
     let importRoleWasManuallyEdited = false;
     let officialRowsCache = [];
     let activeOfficialCategoryFilter = 'all';
@@ -926,6 +994,7 @@
     }
 
     function resetElectionImportUi() {
+      ++electionImportPreviewRevision;
       currentElectionImportPreview = null;
       const noticeEl = document.getElementById('electionImportNotice');
       const errorEl = document.getElementById('electionImportError');
@@ -1045,7 +1114,7 @@
     }
 
     async function openElectionImportModal() {
-      if (!voteImportEnabled) {
+      if (!voteImportEnabled || !officialWriteAllowed()) {
         showAlert('현재 조합에서는 선거 결과 가져오기를 사용할 수 없습니다.', 'warning');
         return;
       }
@@ -1296,6 +1365,7 @@
       }
 
       const role = String(document.getElementById('importOfficialRole')?.value || '').trim();
+      const ticket=currentElectionImportPreview, revision=electionImportPreviewRevision;
       const termStartDate = String(document.getElementById('importOfficialTermStart')?.value || '').trim();
       let termEndDate = String(document.getElementById('importOfficialTermEnd')?.value || '').trim();
       if (!termEndDate && termStartDate) {
@@ -1317,6 +1387,7 @@
           .eq('role', role)
           .in('member_id', memberIds));
         if (error) throw error;
+        if(ticket!==currentElectionImportPreview || revision!==electionImportPreviewRevision)return currentElectionImportPreview;
         const rows = Array.isArray(data) ? data : [];
         activeMemberIds = new Set(
           rows
@@ -1378,17 +1449,25 @@
       const previewEl = document.getElementById('electionImportPreview');
       const saveBtn = document.getElementById('saveElectionImportBtn');
       const electionId = String(document.getElementById('importElectionSelect')?.value || '').trim();
+      const revision=++electionImportPreviewRevision, owner=officialRecordContext().key;
+      const valid=()=>revision===electionImportPreviewRevision && officialWriteAllowed() && owner===officialRecordContext().key
+        && String(document.getElementById('importElectionSelect')?.value||'')===electionId
+        && !document.getElementById('electionImportModal').classList.contains('d-none');
       if (errorEl) errorEl.innerHTML = '';
       if (previewEl) previewEl.innerHTML = '당선자 목록을 불러오는 중입니다...';
       if (saveBtn) saveBtn.disabled = true;
       try {
-        currentElectionImportPreview = await buildElectionImportPreviewData(electionId);
+        const preview=await buildElectionImportPreviewData(electionId);
+        if(!valid())return;
+        currentElectionImportPreview = {...preview,sourceElectionId:electionId};
         applyElectionRoleRecommendation({ previewRows: currentElectionImportPreview.rows || [] });
         await refreshElectionImportPreviewStatus();
+        if(!valid())return;
         if (noticeEl) noticeEl.textContent = '아래 미리보기 기준으로 현재 조합 임원·대의원 관리에 저장합니다.';
         if (previewEl) previewEl.innerHTML = renderElectionImportPreviewHtml(currentElectionImportPreview);
         if (saveBtn) saveBtn.disabled = !(currentElectionImportPreview.rows || []).length || (currentElectionImportPreview.missingMemberRows || []).length > 0 || !Number(currentElectionImportPreview.saveableCount || 0);
       } catch (error) {
+        if(!valid())return;
         currentElectionImportPreview = null;
         if (previewEl) previewEl.innerHTML = '불러오기에 실패했습니다.';
         if (errorEl) {
@@ -1417,6 +1496,7 @@
     }
 
     async function saveElectionImport() {
+      if (!officialWriteAllowed() || document.getElementById('saveElectionImportBtn')?.disabled) return;
       clearAlert();
       const errorEl = document.getElementById('electionImportError');
       const saveBtn = document.getElementById('saveElectionImportBtn');
@@ -1470,6 +1550,8 @@
           saveBtn.textContent = '저장중...';
         }
         const category = categoryFromRole(role);
+        const sourceElection = getSelectedImportElection()?.id, startCoop=currentCoopId, startActor=committeeAuthId;
+        if(!sourceElection || String(sourceElection)!==currentElectionImportPreview.sourceElectionId)throw new Error('당선자를 불러온 선거를 다시 확인해 주세요.');
         const isRegistered = category === 'executive' && !!document.getElementById('importIsRegistered')?.checked;
         const [historyMap, existingRes] = await Promise.all([
           getNextTermCountMap(memberIds, role),
@@ -1480,6 +1562,7 @@
             .in('member_id', memberIds))
         ]);
         if (existingRes.error) throw existingRes.error;
+        if (!officialWriteAllowed() || currentCoopId!==startCoop || committeeAuthId!==startActor || getSelectedImportElection()?.id!==sourceElection || document.getElementById('electionImportModal').classList.contains('d-none')) return;
 
         const existingRows = existingRes.data || [];
         const activeMemberIds = new Set(existingRows.filter((row) => String(row.status || '').toLowerCase() === 'active').map((row) => String(row.member_id || '')));
@@ -1516,6 +1599,8 @@
             official_identity_code: snapshot.official_identity_code,
             official_identity_kind: snapshot.official_identity_kind,
             is_registered: isRegistered,
+            record_origin: 'election',
+            record_election_id: sourceElection,
             status: 'active'
           });
         });
@@ -1627,6 +1712,7 @@
     }
 
     function openMemberSearchModal() {
+      if(!officialWriteAllowed())return;
       if (!memberSearchEnabled) {
         showAlert('조합원 관리 모듈이 연결되지 않아 검색을 사용할 수 없습니다.', 'warning');
         return;
@@ -1669,6 +1755,7 @@
     }
 
     function openExternalDirectorModal() {
+      if(!officialWriteAllowed() || !officialExternalWriteAuthorized)return;
       closeOfficialFormModal();
       closeMemberSearchModal();
       document.getElementById('externalDirectorError')?.classList.add('d-none');
@@ -1682,6 +1769,7 @@
 
     document.getElementById('externalDirectorForm')?.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if(!officialWriteAllowed() || !officialExternalWriteAuthorized)return;
       const button = document.getElementById('externalDirectorSave');
       if (button.disabled) return;
       const name = String(document.getElementById('externalDirectorName').value || '').trim();
@@ -1744,6 +1832,7 @@
     }
 
     function openOfficialEndModal(id) {
+      if(!officialWriteAllowed())return;
       const target = (Array.isArray(officialRowsCache) ? officialRowsCache : []).find((row) => String(row.id || '') === String(id || ''));
       if (!target || String(target.status || 'active') !== 'active') {
         showAlert('종료 처리할 활성 직책 정보를 찾지 못했습니다.', 'warning');
@@ -2051,6 +2140,7 @@
     }
 
     async function ensureAccess() {
+      officialWriteAuthorized=false;officialExternalWriteAuthorized=false;
       const userGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
         alertFn: function(message) { showAlert(message, 'warning'); },
         redirectUrl: 'index.html'
@@ -2075,7 +2165,6 @@
       const hasAdminFallback = user.role === 'admin' || user.role === 'admin_all';
       const canMemberAdmin = hasPermission(permissionSet, 'member.admin');
       const canSignatureManage = hasPermission(permissionSet, 'signature.manage');
-      document.getElementById('externalDirectorButton')?.classList.toggle('d-none', !(hasAdminFallback || canMemberAdmin === true));
 
       const moduleEnabled =
         isModuleEnabled(currentRuntime, 'member_admin') ||
@@ -2089,6 +2178,7 @@
         }, 900);
         return false;
       }
+      await readOfficialWriteAccess();
       return true;
     }
 
@@ -2183,6 +2273,16 @@
     }
 
     async function saveOfficial() {
+      if(!officialWriteAllowed() || individualOfficialSaving)return;
+      const original=selectedMember?.member_id, actor=committeeAuthId, coop=currentCoopId, revision=committeeTabRevision;
+      const valid=()=>officialWriteAllowed() && actor===committeeAuthId && coop===currentCoopId && revision===committeeTabRevision
+        && selectedMember?.member_id===original && !document.getElementById('officialFormModal').classList.contains('d-none');
+      const button=document.getElementById('saveIndividualOfficialBtn');
+      individualOfficialSaving=true;button.disabled=true;
+      try{await registerIndividualOfficial(valid);}finally{individualOfficialSaving=false;button.disabled=false;}
+    }
+
+    async function registerIndividualOfficial(valid) {
       clearAlert();
       if (!selectedMember || !selectedMember.member_id) {
         showAlert('먼저 등록할 조합원을 선택해주세요.', 'warning');
@@ -2213,6 +2313,9 @@
       const category = categoryFromRole(role);
       const isRegistered = category === 'executive' && !!document.getElementById('officialIsRegistered')?.checked;
       document.getElementById('officialCategory').value = categoryLabel(category);
+      const canSubmit=()=>valid() && String(document.getElementById('officialRole')?.value||'').trim()===role
+        && document.getElementById('officialTermStart').value===termStartDate && document.getElementById('officialTermEnd').value===termEndDate
+        && (category!=='executive'||document.getElementById('officialIsRegistered').checked===isRegistered);
 
       const { data: existing, error: existingError } = await scopeByTenant(_supabase
         .from('coop_officials')
@@ -2220,6 +2323,7 @@
         .eq('member_id', selectedMember.member_id)
         .eq('role', role)
         .eq('status', 'active'));
+      if(!canSubmit())return;
       if (existingError) {
         showAlert('기존 임원 정보 확인 실패: ' + existingError.message, 'danger');
         return;
@@ -2232,12 +2336,14 @@
       let targetMember;
       let nextTermCount;
       try {
-        targetMember = await ensureSelectedMemberRecord();
+        targetMember = await ensureSelectedMemberRecord(canSubmit);
+        if(!canSubmit())return;
         nextTermCount = await getNextTermCount(targetMember.member_id, role);
       } catch (error) {
-        showAlert('조합원 정보 준비 실패: ' + (error?.message || 'Unknown error'), 'danger');
+        if(valid())showAlert('조합원 정보 준비 실패: ' + (error?.message || 'Unknown error'), 'danger');
         return;
       }
+      if(!canSubmit())return;
       const snapshot = buildOfficialIdentitySnapshot(targetMember);
       const payload = {
         coop_id: currentCoopId,
@@ -2252,12 +2358,14 @@
         official_identity_code: snapshot.official_identity_code,
         official_identity_kind: snapshot.official_identity_kind,
         is_registered: isRegistered,
+        record_origin: 'manual',
         status: 'active'
       };
 
       const { error } = await _supabase.from('coop_officials').insert(payload);
+      if(!valid())return;
       if (error) {
-        showAlert('등록 실패: ' + error.message, 'danger');
+        showAlert(error.code==='42501'?'현재 조합에서 임원을 등록할 권한을 확인해 주세요.':error.code==='23505'?'같은 조합원과 직책의 활성 기록 또는 동일 임기가 이미 있습니다.':'임원 등록 결과를 확인하지 못했습니다. 목록에서 먼저 확인해 주세요.', 'danger');
         return;
       }
 
@@ -2268,22 +2376,24 @@
       if (memberSearchEnabled) await searchMembers(true);
     }
 
-    async function ensureSelectedMemberRecord() {
-      if (selectedMember && selectedMember.id) return selectedMember;
-      if (!selectedMember || !selectedMember.member_id) {
+    async function ensureSelectedMemberRecord(current=()=>true) {
+      const entry=selectedMember;
+      if (entry?.id) return entry;
+      if (!entry?.member_id) {
         throw new Error('선택된 조합원 정보가 없습니다.');
       }
 
       const { data: existing, error: existingError } = await scopeByTenant(_supabase
         .from('coop_members')
         .select('id, member_id, name, member_type, status, phone, email, address, birth_date, corp_number, business_number')
-        .eq('member_id', selectedMember.member_id)
+        .eq('member_id', entry.member_id)
         .limit(1)
         .maybeSingle());
 
       if (existingError && existingError.code !== 'PGRST116') {
         throw existingError;
       }
+      if(!current())return null;
 
       if (existing) {
         selectedMember = existing;
@@ -2292,23 +2402,24 @@
       }
 
       const { data: createdId, error: createError } = await _supabase.rpc('create_member_secure', {
-        p_name: selectedMember.name,
-        p_email: selectedMember.email,
-        p_phone: selectedMember.phone || null,
-        p_birth_date: selectedMember.birth_date || null,
-        p_member_type: normalizeMemberType(selectedMember.member_type),
+        p_name: entry.name,
+        p_email: entry.email,
+        p_phone: entry.phone || null,
+        p_birth_date: entry.birth_date || null,
+        p_member_type: normalizeMemberType(entry.member_type),
         p_status: '정상',
-        p_address: selectedMember.address || null,
-        p_member_id: selectedMember.member_id,
+        p_address: entry.address || null,
+        p_member_id: entry.member_id,
         p_join_category: '임원/대의원/선관위원',
         p_admin_memo: null
       });
 
       if (createError) throw createError;
-      if (createdId && isOrganizationMemberType(selectedMember.member_type)) {
+      if(!current())return null;
+      if (createdId && isOrganizationMemberType(entry.member_type)) {
         const extraPayload = {
-          corp_number: selectedMember.corp_number || null,
-          business_number: selectedMember.business_number || null
+          corp_number: entry.corp_number || null,
+          business_number: entry.business_number || null
         };
         const { error: updateIdentityError } = await scopeByTenant(_supabase
           .from('coop_members')
@@ -2316,12 +2427,14 @@
           .eq('id', createdId));
         if (updateIdentityError) throw updateIdentityError;
       }
+      if(!current())return null;
       const { data: created, error: createdFetchError } = await scopeByTenant(_supabase
         .from('coop_members')
         .select('id, member_id, name, member_type, status, phone, email, address, birth_date, corp_number, business_number')
         .eq('id', createdId)
         .single());
       if (createdFetchError) throw createdFetchError;
+      if(!current())return null;
       selectedMember = created;
       updateSelectedMemberBox();
       return selectedMember;
@@ -2448,7 +2561,7 @@
           ? '<span class="badge text-bg-primary ms-1">등기</span>'
           : '';
         const endButtonLabel = String(row.category || '') === 'executive' ? '사임' : '중도 종료';
-        const actionHtml = active
+        const actionHtml = active && officialWriteAllowed()
           ? `<button class="btn btn-sm btn-outline-danger" type="button" data-end-id="${escapeHtml(row.id)}">${escapeHtml(endButtonLabel)}</button>`
           : (row.resignation_document_path
             ? `<button class="btn btn-sm btn-outline-primary" type="button" data-document-id="${escapeHtml(row.id)}">사임서 보기</button>`
@@ -2460,7 +2573,7 @@
           .join(' · ');
         const memberCell = rowIndex === 0
           ? `<td class="official-member-cell" rowspan="${group.rows.length}">
-              <div class="fw-bold">${escapeHtml(group.displayName)}</div>
+              ${officialWriteAllowed() ? `<button type="button" class="btn btn-link p-0 fw-bold text-start text-break" data-edit-ids="${escapeHtml(group.rows.map(r=>String(r.id)).join(','))}" aria-haspopup="dialog">${escapeHtml(group.displayName)}</button>` : `<div class="fw-bold">${escapeHtml(group.displayName)}</div>`}
               ${String(group.memberId || '').startsWith('external:') ? '' : `<div class="text-muted small">조합원 번호: ${escapeHtml(group.memberId || '-')}</div>`}
               ${identityLine ? `<div class="text-muted small">${escapeHtml(identityLine)}</div>` : ''}
             </td>`
@@ -2487,6 +2600,7 @@
       body.querySelectorAll('button[data-end-id]').forEach((btn) => {
         btn.addEventListener('click', () => openOfficialEndModal(btn.getAttribute('data-end-id')));
       });
+      body.querySelectorAll('button[data-edit-ids]').forEach(btn=>btn.addEventListener('click',()=>openOfficialRecordEditor(btn.dataset.editIds.split(','),btn)));
       body.querySelectorAll('button[data-document-id]').forEach((btn) => {
         btn.addEventListener('click', () => openResignationDocument(btn.getAttribute('data-document-id')));
       });
@@ -2499,7 +2613,7 @@
 
       const { data: officials, error } = await scopeByTenant(_supabase
         .from('coop_officials')
-        .select('id, member_id, category, role, term_start_date, term_end_date, real_end_date, term_count, is_registered, status, seal_url, name, official_member_type, official_identity_code, official_identity_kind, end_reason, resignation_document_path')
+        .select('id, member_id, category, role, term_start_date, term_end_date, real_end_date, term_count, is_registered, status, seal_url, name, official_member_type, official_identity_code, official_identity_kind, end_reason, resignation_document_path,record_name_overridden')
         .in('category', ['delegate', 'executive', 'election_comm'])
         .order('status', { ascending: true })
         .order('term_start_date', { ascending: false }));
@@ -2528,7 +2642,7 @@
 
       officialRowsCache = safeOfficials.map((row) => ({
         ...row,
-        display_name: nameMap[row.member_id] || row.name || row.member_id || '-'
+        display_name: (row.record_name_overridden ? row.name : nameMap[row.member_id]) || row.name || row.member_id || '-'
       }));
       updateOfficialSummary(officialRowsCache);
       updateOfficialCategoryTabs(officialRowsCache);
@@ -2617,6 +2731,7 @@
       const ok = await ensureAccess();
       if (!ok) return;
       officialDataAuthorized = true;
+      syncOfficialWriteControls();
       document.getElementById('committeeRecordsTab').disabled=!committeeAllowed();
       await loadOfficialRoleCatalog();
       resetOfficialForm();
@@ -2624,11 +2739,14 @@
       if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mountOfficialRegistration,{once:true});else mountOfficialRegistration();
       window.ErpWorkspaceResume.register({modules:['member_admin','signature'],authorize:async()=>{
         officialDataAuthorized = false;
+        officialRecordEditor?.pause();
+        syncOfficialWriteControls();
         officialRegistrationChooser?.pause();
         officialWorkbook?.pause();officialWorkbook?.sync();
         ++committeeTabRevision;committeeController?.pause();document.getElementById('committeeRecordsTab').disabled=true;
         const allowed = await ensureAccess();
         officialDataAuthorized = allowed === true;
+        syncOfficialWriteControls();
         document.getElementById('committeeRecordsTab').disabled=!committeeAllowed();
         officialWorkbook?.sync();
         return allowed;
