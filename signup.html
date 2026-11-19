@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.90
-Change: 2026-11-10 - Keep the existing-member entry available while checking signup.
+Version: v1.0.91
+Change: 2026-11-19 - 화성 사무국 공개 연락처 안내 후보.
 -->
 <html lang="ko" data-signup-admission="checking">
 <head>
@@ -14,7 +14,7 @@ Change: 2026-11-10 - Keep the existing-member entry available while checking sig
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.90">
+  <meta name="signup-screen-version" content="1.0.91">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -209,6 +209,9 @@ gtag('config', 'G-TR217L7JN9');
 <div class="d-flex flex-wrap justify-content-center mt-3">
 <a id="signup-existing-member-entry" href="/membermanage" class="btn btn-sm btn-outline-secondary text-wrap">기존 조합원 로그인·계정 연결</a>
 </div>
+<p id="signup-hcrec-office" class="small text-center mt-2 mb-0" style="overflow-wrap:anywhere" hidden>
+가입이 어려우시면 사무국으로 연락해 주세요. <a id="signup-hcrec-office-phone" class="d-inline-block fw-semibold"></a>
+</p>
 <div id="signup-entry-readiness" class="alert alert-light border mt-3" hidden>
 <p id="signup-entry-readiness-message" class="mb-2" role="status"></p>
 <div class="d-flex flex-wrap gap-2"><button id="signup-entry-readiness-retry" type="button" class="btn btn-sm btn-outline-primary" onclick="retrySignupEntryReadiness()">가입 가능 여부 다시 확인</button>
@@ -1270,13 +1273,52 @@ mailStatus.className = 'small mt-2';
 hideSignupRetryActions();
 }
 
+let signupOfficeRead = null;
+function signupOfficePhone(raw) {
+ if(typeof raw!=='string'||raw.length>24)return null;
+ const normalized=raw.trim().replace(/^\((02|0[3-6][1-5]|070)\)[ \t]*/,'$1 ');
+ const parts=/^(02|0[3-6][1-5]|070)([0-9]{3,4})([0-9]{4})$/.exec(normalized)
+  ||/^(02|0[3-6][1-5]|070)[ \t-]+([0-9]{3,4})[ \t-]+([0-9]{4})$/.exec(normalized);
+ return parts ? {digits:parts.slice(1).join(''),label:parts.slice(1).join('-')} : null;
+}
+function clearSignupOfficeHelp() {
+ signupOfficeRead=null;
+ document.getElementById('signup-hcrec-office').hidden=true;
+ const link=document.getElementById('signup-hcrec-office-phone');
+ link.removeAttribute('href');link.textContent='';
+}
+function refreshSignupOfficeHelp(scope) {
+ const host=String(window.location.hostname||'').toLowerCase().replace(/\.$/,'');
+ const same=()=>['hcrec.kr','www.hcrec.kr'].includes(host)
+   && scope===signupTenant && scope?.coop_id==='4e2b5e2a-79b1-4beb-a4ec-8797ebe23028';
+ if(!same()){clearSignupOfficeHelp();return;}
+ if(signupOfficeRead?.scope===scope)return signupOfficeRead.promise;
+ clearSignupOfficeHelp();
+ const request={scope,promise:null};signupOfficeRead=request;
+ request.promise=Promise.resolve().then(()=>loadSignupPublicSettings()).then(settings=>{
+  if(signupOfficeRead!==request||!same()||!settings||settings.coop_name!==scope.coop_name)return false;
+  const phone=signupOfficePhone(settings.contact_phone);
+  if(!phone)return false;
+  const link=document.getElementById('signup-hcrec-office-phone');
+  link.href='tel:'+phone.digits;link.textContent=phone.label;
+  document.getElementById('signup-hcrec-office').hidden=false;
+  return true;
+ },()=>false).then(ok=>{
+  if(!ok&&signupOfficeRead===request)clearSignupOfficeHelp();
+  return ok;
+ });
+ return request.promise;
+}
+
 async function ensureSignupTenant({contextOnly=false,entryOnly=false}={}) {
 let resolved;
 try {
 resolved = await signupTenantLoader.run();
 clearSignupTenantRetryState();
+void refreshSignupOfficeHelp(resolved);
 } catch (error) {
 signupTenant = null;
+clearSignupOfficeHelp();
 window.CoopSignupFailure?.report('tenant',error);
 signupPublicSettings = null;
 signupPublicSettingsPromise = null;
