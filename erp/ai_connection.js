@@ -1,9 +1,9 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* v1.3.2 — share HR termination-result reads across dialog reopens. */
+/* v1.3.3 — personal opt-in for the selected connection. */
 (function () {
   'use strict';
   const LABELS = { help: '사용 안내', accounting: '회계', approvals: '전자결재', documents: '문서함', inventory: '재고', events: '행사 매출', member_stats: '조합원 통계' };
-  const TOOLS = { erp_help: '사용 안내', erp_summary: '현황 조회', erp_search: '검색', erp_fetch: '본문 조회' };
+  const TOOLS = { erp_help: '사용 안내', erp_summary: '현황 조회', erp_search: '검색', erp_fetch: '본문 조회', erp_find_missing_member_fields: '조합원 이름 조회' };
   const date = (v) => v ? new Date(v).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '아직 없음';
   const element = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
   const labels = (scopes) => (scopes || []).filter((s) => s !== 'help').map((s) => LABELS[s] || s).join(' · ') || '사용 안내';
@@ -131,7 +131,7 @@
     })();
   }
   window.ErpAiConnections = {
-    version: '1.3.2',
+    version: '1.3.3',
     mount(client, root) {
       if (!root || root.dataset.aiMounted) return;
       root.dataset.aiMounted = '1'; root.classList.add('ai-panel');
@@ -209,15 +209,15 @@
       };
       renderGuide();
       let loading = false; let invalidated = false; let changedView = 0; let firstList = true; let listReady = false;
-      let mutation = null; let checkingId = null; let hasLogs = false;
+      let mutation = null; let checkingId = null; let hasLogs = false; let memberDetail = null;
       const revokeButtons = new Set();
       const syncButtons = () => {
         refresh.setAttribute('aria-disabled', String(loading || !!mutation));
         revokeButtons.forEach(b => { b.setAttribute('aria-disabled', String(loading || !!mutation || !listReady || !!checkingId)); });
       };
       const current = () => !invalidated && !window.frameElement?.hidden;
-      root.aiPause = () => { changedView++; };
-      root.aiInvalidate = () => { invalidated = true; changedView++; root.replaceChildren(); };
+      root.aiPause = () => { changedView++; memberDetail?.close(); memberDetail = null; };
+      root.aiInvalidate = () => { invalidated = true; root.aiPause(); root.replaceChildren(); };
       const load = async () => {
         if (loading || invalidated) return;
         loading = true; syncButtons(); listStatus.textContent = '연결 정보를 확인하고 있습니다.';
@@ -238,6 +238,7 @@
           if (firstList && !count) connections.box.open = true;
           firstList = false; listReady = true;
           const restore = current() && list.contains?.(document.activeElement);
+          memberDetail?.close(); memberDetail = null;
           list.replaceChildren(); revokeButtons.clear();
           if (!d.connections.length) list.append(element('p', '아직 연결된 AI가 없습니다.', 'ai-muted'));
           for (const c of d.connections) {
@@ -248,6 +249,18 @@
             if (state === 'active' && !c.last_used_at) info.append(element('p', '아직 AI에서 조회한 기록이 없습니다.', 'ai-muted'));
             info.append(element('p', (state === 'revoked' ? '종료: ' : '유효기간: ') + date(c.revoked_at || c.expires_at), 'ai-muted')); row.append(info);
             if (state === 'active') {
+              if (Array.isArray(d.scopes) && d.scopes.includes('member_stats') &&
+                  Array.isArray(c.scopes) && c.scopes.includes('member_stats') && window.ErpAiMemberDetailsSettings) {
+                const settings = button('조합원 이름 조회 설정', 'primary');
+                settings.setAttribute('aria-label', c.name + ' 조합원 이름 조회 설정');
+                settings.addEventListener('click', () => {
+                  if (!current() || loading || !listReady || mutation || checkingId) return;
+                  const view = changedView;
+                  memberDetail = window.ErpAiMemberDetailsSettings.open(client, { id:c.id, opener:settings,
+                    current:()=>current() && listReady && !mutation && row.isConnected && view===changedView }) || memberDetail;
+                });
+                info.append(settings);
+              }
               const revoke = button('연결 종료', 'danger'); revokeButtons.add(revoke);
               revoke.setAttribute('aria-label', c.name + ' 연결 종료');
               revoke.addEventListener('click', async () => {
@@ -295,7 +308,9 @@
           if (!data.length) { logBody.append(element('p', '아직 조회 기록이 없습니다.')); return; }
           const table = element('table', undefined, 'ai-log-table'); const head = element('tr');
           for (const h of ['일시', 'AI · 작업', '결과']) head.append(element('th', h)); table.append(head);
-          for (const r of data) { const row = element('tr'); row.append(element('td', date(r.used_at)), element('td', r.name + ' · ' + (TOOLS[r.tool] || '조회')), element('td', r.result === 'OK' ? (r.tool === 'erp_help' ? '안내 확인' : r.row_count + '건 조회') : '접근 또는 요청 차단')); table.append(row); }
+          for (const r of data) { const row = element('tr');
+            const detailAction = r.result === 'AI_DETAIL_ENABLED' ? '이름 조회 허용' : r.result === 'AI_DETAIL_REVOKED' ? '이름 조회 철회' : '';
+            row.append(element('td', date(r.used_at)), element('td', r.name + ' · ' + (TOOLS[r.tool] || '조회')), element('td', detailAction || (r.result === 'OK' ? (r.tool === 'erp_help' ? '안내 확인' : r.row_count + '건 조회') : '접근 또는 요청 차단'))); table.append(row); }
           logBody.append(table);
         } catch (e) { if (!invalidated) logBody.replaceChildren(element('p', '조회 기록을 확인하지 못했습니다. 접었다 다시 열어 주세요.')); }
         finally { hasLogs = false; }
