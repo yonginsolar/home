@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.18.7
-Change: 2026-11-19 - Protect approved board agenda titles while keeping the separate meeting plan editable.
+Version: v1.18.8
+Change: 2026-11-19 - 회의 업무 가이드를 준비된 화면에서 엽니다.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
@@ -3213,6 +3213,8 @@ async function initializeMeetingPage(request) {
   renderPackages();
   bindMeetingLifecycle();
   meetingEntryReady = true;
+  window.ErpMeetingManual?.mount({button:$('meetingWorkflowGuide'),client:supabase,runtime,
+    active:()=>meetingEntryReady&&state.runtime?.coop_id===runtime.coop_id&&state.session?.user?.id===request.userId});
   setMeetingEntryStatus();
   showRequestedAssemblyBooklet();
 }
