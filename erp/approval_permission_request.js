@@ -22,16 +22,26 @@
         rows.forEach(row => select.add(new Option(personLabel(row), row.emp_id)));
         select.value = rows.some(row => row.emp_id === previous) ? previous : '';
     }
-    async function load(client) {
-        context = { enabled: false };
+    async function read(client, signal) {
         try {
-            const result = await client.rpc('erp_permission_request_context');
-            if (!result.error && result.data?.enabled === true && Array.isArray(result.data.permissions)) context = result.data;
-        } catch (_) { /* Fail closed; ordinary approval remains available. */ }
+            const request = client.rpc('erp_permission_request_context');
+            const result = await (signal && typeof request.abortSignal === 'function' ? request.abortSignal(signal) : request);
+            if (result.error || typeof result.data?.enabled !== 'boolean'
+                || (result.data.enabled && !Array.isArray(result.data.permissions))) return { enabled: false, unavailable: true };
+            return result.data;
+        } catch (_) { return { enabled: false, unavailable: true }; }
+    }
+    function adopt(result) {
+        context = result?.enabled === true ? result : { enabled: false };
         return context;
+    }
+    async function load(client) {
+        adopt(null);
+        return adopt(await read(client));
     }
     function render() {
         if (!el('permissionRequestTarget')) return;
+        if (el('permissionRequestFields')) el('permissionRequestFields').hidden = context.enabled !== true;
         options(el('permissionRequestTarget'), context.targets || [], '권한 받을 사람을 선택하세요');
         const list = el('permissionRequestRights');
         list.replaceChildren();
@@ -80,8 +90,10 @@
         el('permissionRequestProxy')?.classList.toggle('hidden', active);
         el('permissionRequestPanel')?.classList.toggle('hidden', !active);
         if (active) { el('divAmount')?.classList.add('hidden'); el('divProposalSubject')?.classList.remove('hidden'); }
-        if (active && !el('permissionRequestRights')?.children.length) render();
-        if (active) syncLine();
+        if (active && context.enabled === true) {
+            if (!el('permissionRequestRights')?.children.length) render();
+            syncLine();
+        }
     }
     function collect() {
         if (context.enabled !== true) throw new Error('권한 부여 요청을 사용할 권한이 없습니다.');
@@ -163,6 +175,6 @@
         }
         return { ok: true, notice: (pending ? '승인했습니다. 다음 결재자에게 전달되며, 아직 업무 권한은 바뀌지 않습니다.' : action === '승인' ? '승인된 업무 권한을 적용했습니다.' : '반려되었습니다.') + (notificationFailed ? '\n결재 처리는 완료했으나 알림 전송을 확인하지 못했습니다.' : '') };
     }
-    root.CoopPermissionRequest = { TYPE, load, render, setCategory, preview, submit, process, allowsApprover, lineChanged: update,
+    root.CoopPermissionRequest = { TYPE, load, read, adopt, render, setCategory, preview, submit, process, allowsApprover, lineChanged: update,
         bindLine: (adapter) => { lineUi = adapter; }, bindDocument: (adapter) => { documentUi = adapter; }, enabled: () => context.enabled === true };
 })(window);

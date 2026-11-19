@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.210
-Change: 2026-11-14 - 조합 법인등록번호 입력·수정.
+Version: v1.0.211
+Change: 2026-11-20 - 조합 설정 기본정보 병렬 조회.
 -->
 <html>
 <head>
@@ -15,7 +15,7 @@ Change: 2026-11-14 - 조합 법인등록번호 입력·수정.
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.210 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.211 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
   <meta charset="UTF-8">
@@ -3796,8 +3796,11 @@ window.onload = async function() {
         };
     }
     if (!window.ERPEmployeeSettingsView.isPage) void window.ERPInitialSetupEmployee.attach(_supabase);
-    await Promise.all([window.ERPEmployeeSettingsView.isPage ? loadCoopSettingsEmployees() : loadList(), loadCompanyInfo({throwOnError:true})]);
-    await loadSettings({ loadAuxiliary: false, throwOnError: true });
+    if (window.ERPEmployeeSettingsView.isPage) await loadCoopSettingsMainReads({ refreshUi: true });
+    else {
+        await Promise.all([loadList(), loadCompanyInfo({throwOnError:true})]);
+        await loadSettings({ loadAuxiliary: false, throwOnError: true });
+    }
     applyHrRuntimeProfileUi();
     syncHrProfileCompanySettingsUi();
     syncHrStructureSettingsUi();
@@ -5189,9 +5192,7 @@ async function loadList() {
         hrSettingsResumeReadOwner = owner;
         try {
             const isCurrent = () => isHrSettingsReadContextCurrent(owner);
-            await Promise.all([loadCoopSettingsEmployees(), loadCompanyInfo({throwOnError:true, refreshUi:false})]);
-            if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
-            await loadSettings({throwOnError:true, loadAuxiliary:false, isCurrent});
+            await loadCoopSettingsMainReads({isCurrent});
             hrSettingsAuxLoaded.clear();
             await loadHrSettingsTab(document.querySelector('#settingTab .nav-link.active')?.getAttribute('href'), {isCurrent});
             hrSettingsReadyOwner = owner;
@@ -5785,8 +5786,7 @@ async function retryHrSettingsRead() {
             // Run the original live runtime gate, not a cached browser permission flag.
             const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'hr',moduleLabel:'조합 설정',alertFn:showAlert,redirectUrl:'index.html'});
             if (!gate.ok || !isHrSettingsContextCurrent(owner)) return;
-            await Promise.all([loadCoopSettingsEmployees(),loadCompanyInfo({throwOnError:true,refreshUi:false})]);
-            await loadSettings({throwOnError:true,loadAuxiliary:false,isCurrent:() => isHrSettingsContextCurrent(owner)});
+            await loadCoopSettingsMainReads({isCurrent:() => isHrSettingsContextCurrent(owner)});
             if (!isHrSettingsContextCurrent(owner)) return;
             hrSettingsReadyOwner = owner;
             hrSettingsReadRetryRequired = false;
@@ -5953,7 +5953,28 @@ function ensureCoopDepositSettings() {
             return isHrSettingsContextCurrent(owner)&&runtime?.coop_id===myInfo?.coop_id&&runtime.is_active!==false&&runtime.effective_permissions?.includes('hr.admin');
         },checkpoint:node=>window.ERPEmployeeSettingsView.checkpointSection('#'+node.closest('#coopDepositSetup').id)});
 }
-async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null, preserveProfile = false } = {}) {
+async function loadCoopSettingsMainReads({refreshUi = false, isCurrent = () => true} = {}) {
+    const owner = getHrSettingsOwner();
+    const current = () => isCurrent() && isHrSettingsReadContextCurrent(owner);
+    if (!current() || coopProfileAuthInvalidated) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+    const profileRead = beginCoopSettingsProfileRead(current);
+    await Promise.all([loadCoopSettingsEmployees(), loadCompanyInfo({throwOnError:true, refreshUi})]);
+    if (!current()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+    await loadSettings({throwOnError:true, loadAuxiliary:false, isCurrent:current, profileRead});
+}
+function beginCoopSettingsProfileRead(isCurrent) {
+    const owner = getHrSettingsOwner();
+    const state = companyProfileState;
+    const current = () => isCurrent() && isHrSettingsReadContextCurrent(owner) && !coopProfileAuthInvalidated
+        && companyProfileState === state && !coopProfileOperation && !coopProfilePendingWrite;
+    if (!current() || state?.review || coopProfileDraftDirty()) return null;
+    // Catch immediately: another independent read can fail before this one is awaited.
+    const result = Promise.resolve().then(() => current()
+        ? window.ERPInitialSetupAccess.read(_supabase,'erp_coop_profile',{p_action:'get'}) : null)
+        .then(data => ({data}), () => ({failed:true}));
+    return { owner, state, current, result };
+}
+async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null, preserveProfile = false, profileRead } = {}) {
     ensureCoopProfileFields();
     ensureCoopPermissionLaunchers();
     ensureCoopDepositSettings();
@@ -5965,13 +5986,13 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCur
         await loadCalendarIcsSettings({ throwOnError, isCurrent });
     }
     if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
-    if (!preserveProfile && !coopProfileOperation && !coopProfilePendingWrite && !companyProfileState?.review && !coopProfileDraftDirty()) {
-        const profileOwner = getHrSettingsOwner();
-        const state=companyProfileState;
-        const current=()=>isCurrent()&&isHrSettingsReadContextCurrent(profileOwner)&&!coopProfileAuthInvalidated&&companyProfileState===state&&!coopProfileOperation;
+    const pendingProfile = !preserveProfile && (profileRead === undefined ? beginCoopSettingsProfileRead(isCurrent) : profileRead);
+    if (pendingProfile) {
+        const {owner:profileOwner, state, current} = pendingProfile;
         try {
-            const result = await window.ERPInitialSetupAccess.read(_supabase,'erp_coop_profile',{p_action:'get'});
-            if (current() && (state?.owner!==profileOwner||!coopProfileDraftDirty())) {
+            const {data:result, failed} = await pendingProfile.result;
+            if (failed) throw new Error('COOP_PROFILE_READ_FAILED');
+            if (current() && result && (state?.owner!==profileOwner||!coopProfileDraftDirty())) {
                 const values=mergeCoopProfileBeforeBaseline(profileOwner,state,result.data);
                 commitCoopProfileRead(profileOwner,result,values,{checkpoint:true});
                 coopProfileNotice(coopProfileDraftDirty()?'기본정보를 확인했습니다. 작성 중인 내용은 미저장 상태로 남아 있습니다.':'');
@@ -5980,9 +6001,9 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCur
             if (current()) coopProfileNotice('기본정보를 불러오지 못했습니다. 입력은 유지됩니다. 다시 확인해 주세요.',true);
         }
     }
+    if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     document.getElementById("set_workLunchStartTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_START_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.start);
     document.getElementById("set_workLunchEndTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_END_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.end);
-    if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     syncCompanySealSettingsUi();
     applyHrRuntimeProfileUi();
     window.CoopLogoSettings?.sync(companyInfo);

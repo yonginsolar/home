@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.175 | 전자결재 직원 목록 최신 확인 -->
+<!-- Version: v1.2.176 | 전자결재 지출·권한 요청 양식별 조회 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.173 | approval.html');</script>
+  <script>console.log('[Version] v1.2.176 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -53,7 +53,7 @@
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_insurance_notice.js?v=1.1.1" integrity="sha384-HmicS2Afj/aL+WJ/EA3Btpvn1y5AZA4oMHXInN+JNegvYJQwE/wjIPSoWlGXENre" crossorigin="anonymous"></script>
-  <script src="approval_permission_request.js?v=1.2.1-uimodal-20261013-1"></script>
+  <script src="approval_permission_request.js?v=1.2.2"></script>
   <script src="workflow_assets.js?v=20261119-meeting-agenda-1"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
@@ -1085,6 +1085,10 @@
                   <option value="출자금반환">출자금 반환 (확정액 불러오기)</option>
                   <option value="배당금">배당금 (확정 회차 불러오기)</option>
                 </select>
+                <div id="approvalExpenseReadStatus" class="small mt-1" hidden>
+                  <span role="status"></span>
+                  <button type="button" class="btn btn-link btn-sm p-0 text-wrap" onclick="refreshApprovalExpenseForm()" hidden>다시 확인</button>
+                </div>
               </div>
               <div class="col-sm-4 hidden" id="divPayrollMonth">
                 <label class="small text-muted fw-bold mb-1" for="payrollMonth">급여 귀속월</label>
@@ -1587,9 +1591,15 @@
       </div>
 
       <section id="permissionRequestPanel" class="hidden mb-3">
-        <div class="mb-3"><label for="permissionRequestTarget" class="small text-muted fw-bold">권한 받을 사람</label><select id="permissionRequestTarget" class="form-select"></select></div>
-        <fieldset class="mb-3"><legend class="small text-muted fw-bold">추가할 업무 권한</legend><div id="permissionRequestRights" class="permission-request-rights"></div></fieldset>
-        <p id="permissionRequestHelp" class="mb-0 text-primary" role="status"></p>
+        <div id="approvalPermissionReadStatus" class="small mb-2" hidden>
+          <span role="status"></span>
+          <button type="button" class="btn btn-link btn-sm p-0 text-wrap" onclick="refreshApprovalPermissionForm()" hidden>다시 확인</button>
+        </div>
+        <div id="permissionRequestFields" hidden>
+          <div class="mb-3"><label for="permissionRequestTarget" class="small text-muted fw-bold">권한 받을 사람</label><select id="permissionRequestTarget" class="form-select"></select></div>
+          <fieldset class="mb-3"><legend class="small text-muted fw-bold">추가할 업무 권한</legend><div id="permissionRequestRights" class="permission-request-rights"></div></fieldset>
+          <p id="permissionRequestHelp" class="mb-0 text-primary" role="status"></p>
+        </div>
       </section>
 
       <details class="workflow-disclosure hidden" id="secretaryJeongyeolPanel">
@@ -1871,6 +1881,8 @@ let approvalRichEditorLoaderPromise = null;
 let approvalHtml2PdfLoaderPromise = null;
 let permissionSet = new Set();
 let approvalExpenseServerAccess = { privileged: false, coopAdmin: false, dividend: false };
+const approvalFormReads = new Map();
+let approvalPermissionRequestBase = null, approvalFormReadInvalidated = false;
 let pendingPhysicalDocId = null;
 let physicalCompleteIntent = null;
 const physicalCompleteRequests = new Map();
@@ -3903,6 +3915,28 @@ async function loadApprovalDraftFromServer(draftId) {
         }
     }
 
+    let restoredExpenseCards = null;
+    const storedForm = draftRow?.form_payload || {};
+    if ((storedForm.category || draftRow?.doc_type) === '지출결의') {
+        const subtype = String(storedForm.fields?.expense_sub_type || '일반').trim();
+        const needsAccess = !['일반','4대보험'].includes(subtype);
+        const needsCards = !!String(storedForm.fields?.expense_card_alias || '').trim();
+        const access = needsAccess ? readApprovalFormResource('expense', loadApprovalExpenseServerAccess) : null;
+        const cards = needsCards ? readApprovalFormResource('cards', loadApprovalCards) : null;
+        await Promise.all([access?.promise, cards?.promise]);
+        if (!isApprovalDraftLoadCurrent(intent)) return;
+        if ((needsAccess && access?.state !== 'ready') || (needsCards && cards?.state !== 'ready')) {
+            showAlert('지출 항목이나 등록 카드를 확인하지 못했습니다. 현재 기안과 저장된 초안은 그대로입니다. 초안을 다시 열어 주세요.');
+            return;
+        }
+        if (access) approvalExpenseServerAccess = access.data;
+        if (!canUseApprovalExpenseSubType(subtype)) {
+            showAlert('저장된 초안의 지출 항목을 사용할 권한이 없습니다.');
+            return;
+        }
+        restoredExpenseCards = cards;
+    }
+
     if (wasDraftModalOpen && !draftModalClosedBeforeRestore) {
         closeApprovalDraftModal();
         await waitForModalHidden(draftModalEl);
@@ -3912,6 +3946,11 @@ async function loadApprovalDraftFromServer(draftId) {
         if(!isApprovalDraftLoadCurrent(intent))return;
         resetApprovalComposerForm({ keepDraftIdentity: true });
         intent.restoring=true;
+        if (restoredExpenseCards) {
+            restoredExpenseCards.applied = true;
+            approvalCardData = restoredExpenseCards.data;
+            populateApprovalCardSelect();
+        }
 
         const payload = draftRow?.form_payload && typeof draftRow.form_payload === 'object' ? draftRow.form_payload : {};
         const fields = payload?.fields && typeof payload.fields === 'object' ? payload.fields : {};
@@ -5952,7 +5991,7 @@ function getFirstAvailableWorkforceLiteApprovalDocType() {
 function isApprovalDocEnabledForCurrentProfile(docType) {
     const safeDocType = String(docType || '').trim();
     if (!safeDocType) return false;
-    if (safeDocType === CoopPermissionRequest.TYPE) return CoopPermissionRequest.enabled();
+    if (safeDocType === CoopPermissionRequest.TYPE) return canOfferApprovalPermissionRequest();
     if (safeDocType === '휴가취소' && approvalLeaveCancelCandidates.length === 0) return false;
     if (safeDocType === '출장취소') {
         const hasLinkedCancelTarget = !!String(document.getElementById('relDocId')?.value || '').trim();
@@ -5993,7 +6032,7 @@ function renderApprovalCategoryOptions() {
         categoryEl.appendChild(optGroup);
     });
 
-    if (CoopPermissionRequest.enabled()) {
+    if (canOfferApprovalPermissionRequest()) {
         const group = document.createElement('optgroup'); group.label = '업무 권한';
         group.appendChild(new Option('🔑 권한 부여 요청', CoopPermissionRequest.TYPE));
         categoryEl.appendChild(group); enabledValues.push(CoopPermissionRequest.TYPE);
@@ -11275,13 +11314,11 @@ window.onload = async function() {
     applyChairmanApprovalTabLayout();
     const cachedApprovalSummary = readApprovalSummaryCache();
     applyApprovalSummaryCacheToUi(cachedApprovalSummary);
-    const optimisticInitialTab = getApprovalEntryDefaultTab(null);
+    const optimisticInitialTab = getApprovalEntryDefaultTab();
     switchTab(optimisticInitialTab, { skipLoad: true, skipCacheWrite: true });
     approvalBootstrapReady = false;
 
     const permissionsPromise = loadPermissions(myInfo);
-    const expenseAccessPromise = loadApprovalExpenseServerAccess();
-    const permissionRequestPromise = CoopPermissionRequest.load(_supabase);
     const runtimeGatePromise = window.ErpRuntimeGuard.enforce(_supabase, {
         moduleKey: 'approval',
         moduleLabel: '전자결재',
@@ -11290,16 +11327,12 @@ window.onload = async function() {
     });
     const bootstrapSummaryPromise = fetchApprovalBootstrapSummary(cachedApprovalSummary);
 
-    const [loadedPermissionSet, approvalRuntimeGate, bootstrapSummary, expenseServerAccess] = await Promise.all([
+    const [loadedPermissionSet, approvalRuntimeGate, bootstrapSummary] = await Promise.all([
         permissionsPromise,
         runtimeGatePromise,
-        bootstrapSummaryPromise,
-        expenseAccessPromise,
-        permissionRequestPromise
+        bootstrapSummaryPromise
     ]);
     permissionSet = loadedPermissionSet;
-    approvalExpenseServerAccess = expenseServerAccess;
-    syncApprovalExpenseSubTypeOptions();
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
     const hasApprovalView = permissionSet.size > 0
         ? permissionSet.has('approval.view')
@@ -11310,7 +11343,26 @@ window.onload = async function() {
         return;
     }
     if (!approvalRuntimeGate.ok) return;
-    document.getElementById('approvalRetentionLink').hidden = !approvalExpenseServerAccess.privileged;
+    approvalPermissionRequestBase = Array.isArray(approvalRuntimeGate.runtime?.base_effective_permissions)
+        ? new Set(approvalRuntimeGate.runtime.base_effective_permissions) : permissionSet;
+    _supabase.auth.onAuthStateChange?.((event, session) => {
+        if (event !== 'SIGNED_OUT' && (!session?.user?.id || session.user.id === myAuthUserId)) return;
+        approvalFormReadInvalidated = true;
+        approvalFormReads.clear();
+        approvalExpenseServerAccess = {privileged:false, coopAdmin:false, dividend:false};
+        approvalCardData = [];
+        CoopPermissionRequest.adopt(null);
+        document.getElementById('approvalRetentionLink').hidden = true;
+        document.getElementById('permissionRequestFields').hidden = true;
+        syncApprovalExpenseSubTypeOptions();
+        syncApprovalSubmitControls();
+    });
+    if (window.frameElement) new MutationObserver(() => {
+        if (window.frameElement?.hidden) return;
+        refreshApprovalExpenseForm();
+        refreshApprovalPermissionForm();
+        refreshApprovalRetentionLink();
+    }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
     approvalRuntimeProfile = String(approvalRuntimeGate.runtime?.runtime_profile || 'legacy_full');
     approvalBootstrapReady = true;
     applyApprovalBootstrapSummary(bootstrapSummary);
@@ -11319,12 +11371,8 @@ window.onload = async function() {
     const companyInfoPromise = loadApprovalCompanyInfo();
     const workflowContextPromise = loadApprovalWorkflowContext();
     const employeePromise = loadApprovalEmployees();
-    const cardPromise = loadApprovalCards();
 
-    const resolvedInitialTab = getApprovalEntryDefaultTab({
-        ...normalizeApprovalBootstrapSummary(cachedApprovalSummary),
-        ...normalizeApprovalBootstrapSummary(bootstrapSummary)
-    });
+    const resolvedInitialTab = getApprovalEntryDefaultTab();
     const initialTab = getApprovalInitialTab(resolvedInitialTab);
     switchTab(initialTab, { skipLoad: true });
     await loadApprovalTabData(initialTab, { render: true });
@@ -11337,7 +11385,6 @@ window.onload = async function() {
     await employeePromise;
     await workflowContextPromise;
     updateJeongyeolUi();
-    await cardPromise;
     if (finalApprovers.length === 0 || isSunVillageApproval()) {
         applyDefaultApprovalLineTemplate(true);
     } else {
@@ -11618,11 +11665,8 @@ function applyApprovalSummaryCacheToUi(summary = null) {
     setApprovalTabBootMaskVisible(true);
 } // End of applyApprovalSummaryCacheToUi
 
-function getApprovalEntryDefaultTab(summary = null) {
+function getApprovalEntryDefaultTab() {
     if (new URLSearchParams(window.location.search).get('tab') === 'todo' && canProcessApprovals()) return 'todo';
-    const safeSummary = normalizeApprovalBootstrapSummary(summary);
-    const hasTodo = Number(safeSummary?.todo_count || 0) > 0;
-    if (isChairmanApprovalUser() && canPerform('approval.process') && hasTodo) return 'todo';
     return 'draft';
 } // End of getApprovalEntryDefaultTab
 
@@ -11781,18 +11825,151 @@ function scheduleApprovalBackgroundRefresh(initialTab) {
     });
 } // End of scheduleApprovalBackgroundRefresh
 
-async function loadApprovalExpenseServerAccess() {
-    // These existing helpers return only booleans, never payroll or payout records.
-    const names = ['is_erp_privileged', 'is_admin', 'is_dividend_admin'];
-    const checks = await Promise.all(names.map(async (name) => {
-        try {
-            const { data, error } = await _supabase.rpc(name);
-            if (error) return false;
-            return data === true;
-        } catch (_) { return false; }
-    }));
-    return { privileged: checks[0], coopAdmin: checks[1], dividend: checks[2] };
-} // End of loadApprovalExpenseServerAccess
+function approvalFormReadOwner() {
+    const coop = String(myInfo?.coop_id || '').trim();
+    if (!approvalBootstrapReady || approvalFormReadInvalidated || !myAuthUserId || !coop) return '';
+    return JSON.stringify([myAuthUserId, coop]);
+}
+
+function canOfferApprovalPermissionRequest() {
+    if (approvalFormReadInvalidated) return false;
+    if (CoopPermissionRequest.enabled()) return true;
+    const permissions = approvalPermissionRequestBase;
+    if (!permissions?.has('approval.submit') || !canPerform('approval.submit')) return false;
+    // Navigation hint only; the original server check still controls the actual form and submission.
+    return ['accounting.view','accounting.edit','member.admin','site.admin','education.manage','minutes.manage',
+        'documents.manage','signature.manage','vote.manage'].some(key => permissions.has(key));
+}
+
+function approvalFormReadEntry(kind) {
+    const owner = approvalFormReadOwner();
+    const entry = approvalFormReads.get(kind);
+    return owner && entry?.owner === owner ? entry : null;
+}
+
+function readApprovalFormResource(kind, work) {
+    const owner = approvalFormReadOwner();
+    if (!owner) return null;
+    const existing = approvalFormReadEntry(kind);
+    if (existing && existing.state !== 'error') return existing;
+    const entry = {owner, state:'loading', data:null};
+    approvalFormReads.set(kind, entry);
+    entry.promise = boundedApprovalAttachmentRead(work).then(data => {
+        if (approvalFormReadEntry(kind) !== entry) return;
+        entry.state = 'ready';
+        entry.data = data;
+    }, () => {
+        if (approvalFormReadEntry(kind) === entry) entry.state = 'error';
+    });
+    return entry;
+}
+
+function approvalFormReadVisible(type) {
+    return !!approvalFormReadOwner() && activeApprovalTab === 'draft' && !window.frameElement?.hidden
+        && getCurrentDraftMainType() === type;
+}
+
+async function readApprovalFormFlag(name, signal) {
+    const request = _supabase.rpc(name);
+    const {data,error} = await (typeof request.abortSignal === 'function' ? request.abortSignal(signal) : request);
+    if (error || typeof data !== 'boolean') throw new Error('APPROVAL_FORM_READ_UNAVAILABLE');
+    return data;
+}
+
+async function loadApprovalExpenseServerAccess(signal) {
+    const [privileged, coopAdmin, dividend] = await Promise.all([
+        readApprovalFormFlag('is_erp_privileged', signal),
+        readApprovalFormFlag('is_admin', signal),
+        readApprovalFormFlag('is_dividend_admin', signal)
+    ]);
+    return {privileged, coopAdmin, dividend};
+}
+
+function renderApprovalFormReadStatus(id, message, retry) {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.hidden = !message;
+    node.querySelector('span').textContent = message;
+    node.querySelector('button').hidden = !retry;
+}
+
+function applyApprovalExpenseFormReads() {
+    if (!approvalFormReadVisible('지출결의')) return;
+    const access = approvalFormReadEntry('expense'), cards = approvalFormReadEntry('cards');
+    if (access?.state === 'ready') {
+        approvalExpenseServerAccess = access.data;
+        document.getElementById('approvalRetentionLink').hidden = !access.data.privileged;
+    }
+    if (cards?.state === 'ready' && !cards.applied) {
+        cards.applied = true;
+        approvalCardData = cards.data;
+        populateApprovalCardSelect();
+        handleExpensePaymentMethodChange();
+    }
+    syncApprovalExpenseSubTypeOptions();
+    const failed = access?.state === 'error' || cards?.state === 'error';
+    const loading = access?.state === 'loading' || cards?.state === 'loading';
+    renderApprovalFormReadStatus('approvalExpenseReadStatus', failed ? '지출 항목 또는 등록 카드를 확인하지 못했습니다.'
+        : loading ? '지출 항목과 등록 카드를 확인하고 있습니다.' : '', failed && !loading);
+    syncApprovalSubmitControls();
+}
+
+function refreshApprovalExpenseForm() {
+    if (!approvalFormReadVisible('지출결의')) return;
+    const reads = [readApprovalFormResource('expense', loadApprovalExpenseServerAccess), readApprovalFormResource('cards', loadApprovalCards)];
+    applyApprovalExpenseFormReads();
+    for (const entry of reads) {
+        if (entry && !entry.listens) {
+            entry.listens = true;
+            void entry.promise.then(applyApprovalExpenseFormReads);
+        }
+    }
+}
+
+function applyApprovalPermissionFormRead() {
+    if (!approvalFormReadVisible(CoopPermissionRequest.TYPE)) return;
+    const entry = approvalFormReadEntry('permission');
+    if (!entry) return;
+    const enabled = entry.state === 'ready' && entry.data.enabled;
+    document.getElementById('permissionRequestFields').hidden = !enabled;
+    if (enabled && !entry.applied) {
+        entry.applied = true;
+        CoopPermissionRequest.adopt(entry.data);
+        CoopPermissionRequest.render();
+    }
+    renderApprovalFormReadStatus('approvalPermissionReadStatus', enabled ? '' : entry.state === 'ready'
+        ? '권한 부여를 요청할 수 없습니다.' : entry.state === 'error'
+            ? '요청할 수 있는 업무 권한을 확인하지 못했습니다.' : '요청할 수 있는 업무 권한을 확인하고 있습니다.', entry.state === 'error');
+    syncApprovalSubmitControls();
+}
+
+function refreshApprovalPermissionForm() {
+    if (!approvalFormReadVisible(CoopPermissionRequest.TYPE) || !canOfferApprovalPermissionRequest()) return;
+    const entry = readApprovalFormResource('permission', async signal => {
+        const result = await CoopPermissionRequest.read(_supabase, signal);
+        if (result.unavailable) throw new Error('APPROVAL_FORM_READ_UNAVAILABLE');
+        return result;
+    });
+    applyApprovalPermissionFormRead();
+    if (entry && !entry.listens) {
+        entry.listens = true;
+        void entry.promise.then(applyApprovalPermissionFormRead);
+    }
+}
+
+function refreshApprovalRetentionLink() {
+    if (activeApprovalTab !== 'history' || window.frameElement?.hidden || !approvalFormReadOwner()) return;
+    const expense = approvalFormReadEntry('expense');
+    const entry = expense?.state === 'ready' ? expense : readApprovalFormResource('retention', signal => readApprovalFormFlag('is_erp_privileged', signal));
+    if (!entry) return;
+    const apply = () => {
+        if (activeApprovalTab !== 'history' || window.frameElement?.hidden || entry !== approvalFormReadEntry(entry === expense ? 'expense' : 'retention')) return;
+        document.getElementById('approvalRetentionLink').hidden = !(entry.state === 'ready'
+            && (entry === expense ? entry.data.privileged : entry.data));
+    };
+    if (entry.state === 'loading') void entry.promise.then(apply);
+    else apply();
+}
 
 function canUseApprovalExpenseSubType(value) {
     const type = String(value || '일반').trim();
@@ -11813,35 +11990,25 @@ function canUseApprovalExpenseSubType(value) {
 function syncApprovalExpenseSubTypeOptions() {
     const select = document.getElementById('expenseSubType');
     if (!select) return;
-    const current = String(select.value || '일반');
     Array.from(select.options).forEach((option) => {
         const allowed = canUseApprovalExpenseSubType(option.value);
         option.hidden = !allowed;
         option.disabled = !allowed;
     });
-    if (!canUseApprovalExpenseSubType(current)) select.value = '일반';
+    // Never replace a selected draft value just because its authority is still loading.
 } // End of syncApprovalExpenseSubTypeOptions
 
 function canUseSalaryExpense() {
     return canUseApprovalExpenseSubType('급여');
 } // End of canUseSalaryExpense
 
-async function loadApprovalCards() {
-    try {
-        const query = scopeApprovalTenant(
-            _supabase
-                .from('ref_cards')
-                .select('card_alias, card_company, card_type, payment_day')
-        ).order('card_alias', { ascending: true });
-        const { data, error } = await query;
-        if (error) throw error;
-        approvalCardData = Array.isArray(data) ? data : [];
-    } catch (error) {
-        CoopSafeLog.warn("approval card load failed", error);
-        approvalCardData = [];
-    }
-    populateApprovalCardSelect();
-    handleExpensePaymentMethodChange();
+async function loadApprovalCards(signal) {
+    const query = scopeApprovalTenant(
+        _supabase.from('ref_cards').select('card_alias, card_company, card_type, payment_day')
+    ).order('card_alias', { ascending: true });
+    const {data,error} = await (typeof query.abortSignal === 'function' ? query.abortSignal(signal) : query);
+    if (error || !Array.isArray(data)) throw new Error('APPROVAL_CARDS_UNAVAILABLE');
+    return data;
 } // End of loadApprovalCards
 
 function normalizeApprovalCardTypeValue(value) {
@@ -13108,7 +13275,11 @@ function switchTab(tab, options = {}) {
     document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
     const shouldLoad = options?.skipLoad !== true;
     const shouldWriteCache = options?.skipCacheWrite !== true;
-    if(tab==='draft') { document.getElementById('view-draft').classList.remove('hidden'); document.getElementById('tab1').classList.add('active'); }
+    if(tab==='draft') {
+        document.getElementById('view-draft').classList.remove('hidden'); document.getElementById('tab1').classList.add('active');
+        refreshApprovalExpenseForm();
+        refreshApprovalPermissionForm();
+    }
     else if(tab==='todo') {
         if (!canProcessApprovals()) { showAlert("접근 권한이 없습니다."); switchTab('draft'); return; }
         document.getElementById('view-todo').classList.remove('hidden');
@@ -13123,6 +13294,7 @@ function switchTab(tab, options = {}) {
     else {
         document.getElementById('view-history').classList.remove('hidden');
         document.getElementById('tab4').classList.add('active');
+        refreshApprovalRetentionLink();
         if (shouldLoad) void ensureHistoryListLoaded();
     }
     if (shouldWriteCache) {
@@ -13684,6 +13856,8 @@ function handleCategoryChange() {
     approvalLastCategory = type;
     syncApprovalExpenseDateUi();
     CoopPermissionRequest.setCategory(type);
+    refreshApprovalExpenseForm();
+    refreshApprovalPermissionForm();
     syncApprovalSubmitControls();
 }
 
@@ -14149,7 +14323,7 @@ async function openApprovalSubmitPreview() {
             await waitForModalHidden(modalEl,modalEl.dataset.submitPreviewExit==='1'?1500:undefined);
             if(modalEl.dataset.submitPreviewClosing==='1' || waitOwner!==approvalSubmitOwner() || waitRevision!==approvalComposerInputRevision||window.frameElement?.hidden)return;
         }
-        const leaveBlock=getApprovalAnnualSubmitBlock();
+        const leaveBlock=getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock();
         if(leaveBlock){showAlert(leaveBlock);return;}
         const previewDoc = buildApprovalSubmitPreviewData();
         currentViewingDocId = null;
@@ -14320,8 +14494,18 @@ function getApprovalAnnualSubmitBlock() {
     const validation=getApprovalLeaveValidationSummary(getApprovalCurrentLeaveTypeLabel());
     return !summary.settlementPending&&isApprovalLeaveValidationBlocked(validation,summary.totalDays)?getApprovalLeaveValidationMessage(validation):'';
 }
+function getApprovalFormReadSubmitBlock() {
+    const type = getCurrentDraftMainType();
+    if (type === CoopPermissionRequest.TYPE && !CoopPermissionRequest.enabled()) return '요청할 수 있는 업무 권한을 먼저 확인해 주세요.';
+    if (type === '지출결의') {
+        const subtype = document.getElementById('expenseSubType')?.value || '일반';
+        if (!canUseApprovalExpenseSubType(subtype)) return '선택한 지출 항목의 권한을 확인해 주세요.';
+        if (document.getElementById('expensePaymentMethod')?.value === 'card' && approvalFormReadEntry('cards')?.state !== 'ready') return '등록 카드를 먼저 확인해 주세요.';
+    }
+    return '';
+}
 function syncApprovalSubmitControls() {
-    const leaveBlock=getApprovalAnnualSubmitBlock() || (getApprovalDraftAttachmentRemoval()?'첨부 처리 결과를 먼저 확인해 주세요.':'');
+    const leaveBlock=getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock() || (getApprovalDraftAttachmentRemoval()?'첨부 처리 결과를 먼저 확인해 주세요.':'');
     const button=document.getElementById('btnSubmit');
     if(button){
         button.disabled=!!approvalSubmitAttempt || !canPerform('approval.submit') || !!leaveBlock;
@@ -14353,7 +14537,7 @@ function renderApprovalSubmitPreviewActions(preview) {
 }
 function submitApprovalFromPreview() {
     const preview=approvalSubmitPreviewState;
-    if(approvalSubmitAttempt || getApprovalAnnualSubmitBlock() || !preview?.ready || !isApprovalSubmitSnapshotCurrent(preview.snapshot)
+    if(approvalSubmitAttempt || getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock() || !preview?.ready || !isApprovalSubmitSnapshotCurrent(preview.snapshot)
         || !document.getElementById('relViewModal')?.classList.contains('show'))return;
     const form=preview.snapshot.form,button=document.getElementById('btnSubmit');
     if(!button || button.disabled)return;
@@ -15278,7 +15462,7 @@ async function handleDraftSubmit(e) {
     if (!canPerform('approval.submit')) return showAlert("상신 권한이 없습니다.");
     if (!approvalProxyDraftMatches()) return showAlert('기안 대상자를 다시 선택해 주세요.');
     if(approvalSubmitAttempt)return;
-    const leaveBlock=getApprovalAnnualSubmitBlock();
+    const leaveBlock=getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock();
     if(leaveBlock){syncApprovalSubmitControls();return showAlert(leaveBlock);}
     const submitAttempt={owner:approvalSubmitOwner(),actor:approvalSubmitActor(),preview:approvalSubmitPreviewState,
         focusTarget:approvalSubmitPreviewState?document.getElementById('btnSubmitFromPreview'):e.submitter};
