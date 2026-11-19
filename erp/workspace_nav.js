@@ -712,7 +712,7 @@
     const narrow = runtime.runtime_profile === 'site_member';
     const full = runtime.runtime_profile === 'legacy_full';
     const set = permissions(runtime);
-    const [order, platform, service, festival, monitor, villages, election, workspace] = await Promise.all([
+    const [order, platform, service, festival, monitor, villages, election, workspace, coopPlant] = await Promise.all([
       read(client, 'erp_get_menu_order',undefined,true),
       !narrow ? read(client, 'platform_get_context') : null,
       !narrow ? read(client, 'erp_service_contract', { p_action: 'context' }) : null,
@@ -720,7 +720,9 @@
       full ? read(client, 'get_my_power_monitor_entry') : null,
       !narrow ? read(client, 'sun_village_total_manager_context') : null,
       !narrow && enabled(runtime, 'vote') ? read(client, 'is_election_admin') : null,
-      state.items.some(item => item[0] === 'btnAdmin') ? read(client, 'sun_village_workspace_context') : null
+      state.items.some(item => item[0] === 'btnAdmin') ? read(client, 'sun_village_workspace_context') : null,
+      full && runtime.coop_id==='4e2b5e2a-79b1-4beb-a4ec-8797ebe23028' && set.has('site.admin')
+        ? read(client,'coop_power_plants',{p_action:'access'}) : null
     ]);
     if (ticket !== generation) return;
     const currentVillage = workspace?.current_coop_id === runtime.coop_id
@@ -744,6 +746,8 @@
     if (platform?.is_platform_admin === true) {
       state.items.push(['btnPowerMonitorAdmin', '발전소 관리', 'power_monitor_admin.html', '', [], '☀', true]);
       state.items.push(['btnPlatform', '조합 생성·운영 제어', 'platform_admin.html', '', [], '⚒']);
+    } else if (coopPlant?.allowed === true) {
+      state.items.push(['btnPowerMonitorAdmin', '발전소 관리', 'coop_power_plants.html', '', [], '☀', true]);
     } else if (monitor?.allowed === true && safeMonitor(monitor.url)) {
       state.items.push(['btnPowerMonitorAdmin', '발전소 모니터링', safeMonitor(monitor.url), '', [], '☀', true]);
     }
