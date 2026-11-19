@@ -1,4 +1,4 @@
-/* v1.2.0 — Per-employee all-on/off drafts; existing authority and save contract. */
+/* v1.2.1 — A permission read locks controls without counting as an unsaved edit. */
 (function(root){
  'use strict';
  const controllers=new Set(),catalog=[['approval.view','전자결재 조회'],['approval.submit','전자결재 기안'],['approval.process','전자결재 승인'],['approval.physical','실물결재 처리'],['mypage.view','마이페이지'],['accounting.view','회계 조회'],['accounting.edit','회계 등록·수정'],['hr.admin','직원·급여 관리'],['member.admin','조합원 관리'],['education.manage','교육·행사 관리'],['site.admin','홈페이지 관리'],['audit.view','감사 로그 조회'],['permission.manage','업무 권한 관리'],['minutes.manage','회의 관리'],['documents.manage','문서함 관리'],['signature.manage','전자서명 관리'],['vote.manage','선거·투표 관리']];
@@ -78,11 +78,12 @@
    catch(e){if(current(ticket))status.textContent=e?.code==='PT409'?'다른 담당자가 권한을 변경했습니다. 입력 내용은 유지됩니다. 최신 권한 확인 후 다시 검토하세요.':'저장 결과를 확인하지 못했습니다. 입력 내용은 유지됩니다. 최신 권한 확인으로 상태를 확인해 주세요.';}
    finally{if(current(ticket)){busy=false;lock();}}
   }
-  const controller={read,dirty,writing:()=>busy||reading,busy:()=>busy||reading||dirty(),invalidate(){epoch++;known=false;reading=false;busy=false;data=null;pending={};employeeDrafts=Object.create(null);employeeId='';chosen.clear();body.replaceChildren();body.hidden=true;status.textContent='현재 계정의 권한을 다시 확인해 주세요.';lock();}};container.permissionController=controller;controllers.add(controller);return controller;
+  const controller={read,dirty,writing:()=>busy||reading,busy:()=>busy||reading||dirty(),needsLeaveProtection:()=>busy||dirty(),invalidate(){epoch++;known=false;reading=false;busy=false;data=null;pending={};employeeDrafts=Object.create(null);employeeId='';chosen.clear();body.replaceChildren();body.hidden=true;status.textContent='현재 계정의 권한을 다시 확인해 주세요.';lock();}};container.permissionController=controller;controllers.add(controller);return controller;
  }
  function dialog(client,kind,owner){if(!['defaults','bulk','admins'].includes(kind))return;const title={defaults:'조합 기본 업무 권한',bulk:'직원별 업무 권한',admins:'전체 관리자 일괄 지정'}[kind];let modal=document.querySelector('dialog[data-permission-editor="'+kind+'"]');if(!modal){modal=node('dialog','permission-settings-dialog');modal.dataset.permissionEditor=kind;modal.setAttribute('aria-label',title);const heading=node('div','d-flex align-items-center justify-content-between mb-3');heading.append(node('h2','h4 mb-0',title));heading.append(button('닫기',()=>{if(modal.permissionController?.writing())return;modal.close();}));modal.append(heading);document.body.append(modal);mount(client,modal,{kind,owner});modal.addEventListener('cancel',e=>{if(modal.permissionController.writing())e.preventDefault();});}
   modal.showModal();void modal.permissionController.read(true);return modal.permissionController;
  }
- root.addEventListener('beforeunload',e=>{if([...controllers].some(c=>c.busy())){e.preventDefault();e.returnValue='';}});
- root.ERPPermissionSettings=Object.freeze({mount,dialog,busy:()=>[...controllers].some(c=>c.busy()),invalidate:()=>controllers.forEach(c=>c.invalidate()),catalog,permissionModule,version:'1.2.0'});
+ // Resume and dialog controls still wait for reads. Only drafts and saves protect leaving.
+ root.addEventListener('beforeunload',e=>{if([...controllers].some(c=>c.needsLeaveProtection())){e.preventDefault();e.returnValue='';}});
+ root.ERPPermissionSettings=Object.freeze({mount,dialog,busy:()=>[...controllers].some(c=>c.busy()),invalidate:()=>controllers.forEach(c=>c.invalidate()),catalog,permissionModule,version:'1.2.1'});
 })(window);
