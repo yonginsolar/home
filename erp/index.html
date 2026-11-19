@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.132 | Change: 2026-11-15 - Add the independent registry task menu. -->
+<!-- Version: v1.0.133 | Change: 2026-11-19 - Scope the Hwaseong to Mapaji workspace handoff. -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261119-coop-plant-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.132 | index.html');</script>
+  <script>console.log('[Version] v1.0.133 | index.html');</script>
 <script src="work_overview.js?v=1.2.7"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -610,6 +610,13 @@ function normalizeWorkspaceOrigin(raw) {
     }
 } // End of normalizeWorkspaceOrigin
 
+function isHwaseongMapajiOpenHandoff(raw, params, target = window.location) {
+    return raw === 'https://erp.hcrec.kr' && target.origin === 'https://sv-c9527d362f77.coopco.kr'
+        && target.pathname === '/erp/' && params.get(ERP_WORKSPACE_MODE_PARAM) === 'open'
+        && [ERP_WORKSPACE_MODE_PARAM, ERP_WORKSPACE_SOURCE_PARAM, ERP_WORKSPACE_HANDOFF_PARAM]
+            .every(key => params.getAll(key).length === 1);
+}
+
 function clearWorkspaceHandoffParams() {
     try {
         const cleanUrl = new URL(window.location.href);
@@ -626,18 +633,23 @@ function clearWorkspaceHandoffParams() {
 function installWorkspaceHandoffReceiver() {
     const params = new URLSearchParams(window.location.search || '');
     const nonce = String(params.get(ERP_WORKSPACE_HANDOFF_PARAM) || '').trim();
-    const sourceOrigin = normalizeWorkspaceOrigin(params.get(ERP_WORKSPACE_SOURCE_PARAM));
+    const rawSource = params.get(ERP_WORKSPACE_SOURCE_PARAM);
+    const villageOpen = isHwaseongMapajiOpenHandoff(rawSource, params);
+    const sourceOrigin = villageOpen ? 'https://erp.hcrec.kr' : normalizeWorkspaceOrigin(rawSource);
     const handoffMode = params.get(ERP_WORKSPACE_MODE_PARAM) === 'open' ? 'open' : 'switch';
     if (!nonce && !sourceOrigin) return false;
 
     const nonceValid = /^[A-Za-z0-9_-]{24,96}$/.test(nonce);
-    if (!nonceValid || !sourceOrigin || !window.opener) {
+    const opener = window.opener;
+    if (!nonceValid || !sourceOrigin || !opener || opener === window) {
         clearWorkspaceHandoffParams();
         return false;
     }
 
     workspaceHandoffReceiverActive = true;
     let settled = false;
+    let acceptingVillageSession = false;
+    const villageDeadline = villageOpen ? Date.now() + 15000 : 0;
     const timeoutId = window.setTimeout(() => {
         if (settled) return;
         settled = true;
@@ -647,24 +659,27 @@ function installWorkspaceHandoffReceiver() {
     }, 15000);
 
     async function receiveSession(event) {
-        if (settled || event.source !== window.opener || event.origin !== sourceOrigin) return;
+        if (settled || event.source !== opener || window.opener !== opener || event.origin !== sourceOrigin) return;
+        if (villageOpen && (acceptingVillageSession || Date.now() >= villageDeadline)) return;
         const payload = event.data && typeof event.data === 'object' ? event.data : {};
         if (payload.type !== 'erp-workspace-session' || payload.nonce !== nonce) return;
         const accessToken = String(payload.accessToken || '').trim();
         const refreshToken = String(payload.refreshToken || '').trim();
         if (!accessToken || !refreshToken) return;
+        if (villageOpen) acceptingVillageSession = true;
 
         try {
             const { data, error } = await _supabase.auth.setSession({
                 access_token: accessToken,
                 refresh_token: refreshToken
             });
+            if (villageOpen && (settled || Date.now() >= villageDeadline || window.opener !== opener)) return;
             if (error || !data?.session?.user) throw error || new Error('WORKSPACE_SESSION_NOT_CREATED');
             settled = true;
             window.clearTimeout(timeoutId);
             window.removeEventListener('message', receiveSession);
             const cleanUrl = clearWorkspaceHandoffParams();
-            window.opener.postMessage({
+            opener.postMessage({
                 type: 'erp-workspace-session-ready',
                 nonce,
                 accessToken: data.session.access_token,
@@ -676,6 +691,7 @@ function installWorkspaceHandoffReceiver() {
                 window.setTimeout(() => window.close(), 180);
             }
         } catch (error) {
+            if (villageOpen && settled) return;
             console.error('Workspace session handoff failed:', error);
             settled = true;
             window.clearTimeout(timeoutId);
@@ -686,7 +702,7 @@ function installWorkspaceHandoffReceiver() {
     }
 
     window.addEventListener('message', receiveSession);
-    window.opener.postMessage({
+    opener.postMessage({
         type: 'erp-workspace-session-request',
         nonce,
         targetOrigin: window.location.origin
