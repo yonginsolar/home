@@ -17,7 +17,7 @@
         financialStatements: {src:local('financial_statements.js?v=20261022-help-1'),integrity:'sha384-197uk3V7iE6wQHZ3ym5FaJlxM+YFII3EvoqIWWJ4nmSpSe+ZwGrMvoKi4/p1frPq',ready:()=>root.FinancialStatements?.version==='1.1.5'},
         accountingTax: {src:local('accounting_tax_tasks_v1_2_1.js'),integrity:'sha384-DXDn0tpbEVnbON6KY6pqacJPNpejJSPYV4T/4E64SO9gFZfOPm8/mGOSODz8ug9d',ready:()=>root.AccountingTaxTasks?.version==='1.2.1'},
         // The existing provider serves a rolling script, just as in member management.
-        postcode: {src:'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js',ready:()=>typeof root.daum?.Postcode==='function'}
+        postcode: {src:'https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js',ready:()=>typeof root.daum?.Postcode==='function'}
     });
     const pending = new Map();
     function load(key) {

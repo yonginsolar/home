@@ -62,7 +62,7 @@ Object.freeze({src: new URL('site_inline_editor.js?v=20261109-editor-continuity-
         Object.freeze({src:new URL("../shared/contribution_cert_preview.js?v=20261101-preparation-1",document.baseURI).href,integrity:"sha384-ehWdqSzooljCvYYnl+zx5t1vnkyhtrCY4zEQJJhKyhn4LpSFJwiXuH121x5D/sVl",ready:()=>typeof root.ContributionCertPreview?.start==='function'}),
         Object.freeze({src:new URL("../shared/member_confirmation.js?v=20261101-preparation-1",document.baseURI).href,integrity:"sha384-nJXE/bM/+Wzg3jFb0o9Y9fu2+Zu72iBYh2AdNuARSCUD0VvQVpT4OSzEUMVKXK3D",ready:()=>typeof root.MemberConfirmation?.open==='function'})
     ]);
-    const address = Object.freeze({src:'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js'});
+    const address = Object.freeze({src:'https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js'});
     const pending = new Map();
     function ready() { return root.XLSX?.version === '0.20.3' && typeof root.XLSX?.read === 'function' && typeof root.XLSX?.writeFile === 'function'; }
     function ensureAsset(key, asset, isReady) {
