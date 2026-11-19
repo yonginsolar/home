@@ -2,8 +2,8 @@
 <!-- Mobile presentation revision: 20261026.1 — shared banner geometry, compact controls. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.203
-Change: 2026-11-17 - 모바일 상단에는 조합원 로그인 또는 내정보 바로가기만 표시.
+Version: v1.0.204
+Change: 2026-11-19 - 발전소 건립 현황과 운영 모니터를 독립 표시.
 -->
 <html lang="ko" data-home-nav-state="loading" data-home-auth-state="loading">
 
@@ -13,7 +13,7 @@ Change: 2026-11-17 - 모바일 상단에는 조합원 로그인 또는 내정보
   <script>console.log('[Version] ui.20261013.1 | index.html');</script>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.203 | index.html');</script>
+<script>console.log('[Version] v1.0.204 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -5986,8 +5986,12 @@ function openNoticeDetail(id) {
 
 	// 1. 발전소 데이터 로드 및 분배
 	async function fetchPlants(attempt) {
-    const monitor = await readPublicHome(() => getPublicHomeMonitor(), attempt);
-    if (monitor) { await monitor.refresh(); return; }
+    // Monitor owns only the operating cards and live generation. Public
+    // construction records use their own read and do not wait for live data.
+    const monitorChoice = readPublicHome(() => getPublicHomeMonitor(), attempt).then(monitor => {
+        if (monitor) void Promise.resolve().then(() => monitor.refresh()).catch(() => {});
+        return { known: true, monitor };
+    }, () => ({ known: false, monitor: null }));
     let data = null;
     try {
         const response = await executePublicReadWithRetry(async function () {
@@ -6000,10 +6004,15 @@ function openNoticeDetail(id) {
         return false;
     }
 
-    if(!data) return false;
+    if(!Array.isArray(data) || (attempt && !attempt.isCurrent())) return false;
 
     // 전역 변수에 저장 (모달에서 쓰기 위함)
     g_plants_list = data;
+    renderProgressSection(data);
+
+    const {known, monitor} = await monitorChoice;
+    // Never replace cards a monitor owns, including while it is fetching.
+    if (!known || monitor || (attempt && !attempt.isCurrent())) return;
 
     // 1) [Portfolio 섹션] - '운영중'인 발전소만 카드 형태로 표시
     // HTML ID가 'power-plants-container' 인지 'portfolio-container' 인지 확인 필요.
@@ -6049,12 +6058,6 @@ function openNoticeDetail(id) {
         }
     }
 
-    // 2) [Progress 섹션] - '건립 추진 중' 등 나머지 발전소 표시 (기존 함수 재사용)
-    // renderProgressSection 함수는 기존에 만드신 것을 그대로 둡니다.
-    // 단, 데이터가 g_plants_list에 있으므로 그대로 넘겨줍니다.
-    if(typeof renderProgressSection === 'function') {
-        renderProgressSection(data);
-    }
 }
 
 // 2. [상세 모달] 발전소 상세 정보 팝업
@@ -6155,8 +6158,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
     } else {
         // 공사 중 등 다른 상태
         statusBox.className = "alert alert-warning text-center";
-        const progressRate = p.progress_rate || 0;
-        statusBox.innerHTML = `<i class="bi bi-tools"></i> 현재 진행률 <strong>${progressRate}%</strong> 입니다.`;
+        const rate = publicPlantProgressRate(p.progress_rate);
+        statusBox.innerHTML = rate === null ? '<i class="bi bi-tools"></i> 공사 진행 중' : `<i class="bi bi-tools"></i> 현재 진행률 <strong>${rate}%</strong> 입니다.`;
 
         linkBtn.style.display = 'none'; // 공사 중엔 모니터링 없음
     }
@@ -6283,9 +6286,15 @@ function openPlantDetail(id, trigger = document.activeElement) {
         Object.freeze({ value: 100, title: '완공·상업운전' })
     ]);
 
+    function publicPlantProgressRate(value) {
+        if (value == null || !['number','string'].includes(typeof value) || String(value).trim() === '') return null;
+        const rate = Number(value);
+        return Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : null;
+    }
+
     function getPublicPlantProgressStage(progressRate) {
-        const numericRate = Number(progressRate);
-        const safeRate = Math.max(0, Math.min(100, Number.isFinite(numericRate) ? numericRate : 0));
+        const safeRate = publicPlantProgressRate(progressRate);
+        if (safeRate === null) return null;
         const stageRate = safeRate === 30 ? 0 : safeRate;
         let stageIndex = 0;
 
@@ -6330,7 +6339,8 @@ function openPlantDetail(id, trigger = document.activeElement) {
 
     function openProgressPlantDetail(plant, trigger, source = 'construction') {
         const construction = source === 'construction';
-        const showStages = construction && !isPublicPlantConstructionComplete(plant);
+        const stage = getPublicPlantProgressStage(plant.progress_rate);
+        const showStages = construction && !!stage && !isPublicPlantConstructionComplete(plant);
         const sectionId = construction ? 'progress' : 'portfolio';
         const section = document.getElementById(sectionId);
         const modal = document.getElementById('progressPlantDetailModal');
@@ -6339,7 +6349,6 @@ function openPlantDetail(id, trigger = document.activeElement) {
             || section.hidden || publicHiddenSectionIds.has(sectionId) || document.querySelector('.modal.show, dialog[open]')) return;
 
         const name = String(plant.name || '발전소');
-        const stage = getPublicPlantProgressStage(plant.progress_rate);
         const type = normalizePublicPlantProjectType(plant.project_type);
         const text = value => String(value ?? '').trim();
         const stages = document.getElementById('progress-plant-modal-stages');
@@ -6447,7 +6456,7 @@ function openPlantDetail(id, trigger = document.activeElement) {
         let cardHtml = '';
         inProgressPlants.forEach(p => {
             const stage = getPublicPlantProgressStage(p.progress_rate);
-            const showStages = !isPublicPlantConstructionComplete(p);
+            const showStages = !!stage && !isPublicPlantConstructionComplete(p);
             const img = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
             const safeName = escapeHtml(p.name || '발전소');
 	            const safeStatus = escapeHtml(p.status || '');
