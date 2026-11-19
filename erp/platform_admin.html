@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.1.27 | Change: 2026-10-11 - Keep the coop list independent of Telegram settings. -->
+<!-- Version: v1.1.28 | 보관된 박람회 체험조합만 목록에서 제외 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,7 +11,8 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.1.27 | platform_admin.html');</script>
+  <script>console.log('[Version] v1.1.28 | platform_admin.html');</script>
+  <script src="platform_expo_list_visibility.js?v=1.0.0" integrity="sha384-jQfX74BjJ0bQC4PpPyaBxDVW4rttEgTzmEVSK8aTj3FM5kVJiOotLX2deehG3X1X" crossorigin="anonymous"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1346,11 +1347,16 @@
     }
 
     async function loadCoopList() {
+      const owner = currentUser?.id;
+      const revision = platformReadRevision;
       const wrap = document.getElementById('coopTableWrap');
       wrap.innerHTML = '<div class="empty-box">조합 목록을 불러오는 중입니다.</div>';
       const { data, error } = await _supabase.rpc('platform_list_coops');
       if (error) throw error;
-      renderCoopTable(Array.isArray(data) ? data : []);
+      const rows = Array.isArray(data) ? data : [];
+      const visible = await (window.CoopPlatformExpoVisibility?.visible(rows) ?? rows);
+      if (owner !== currentUser?.id || revision !== platformReadRevision) return;
+      renderCoopTable(visible);
     }
 
     async function claimPlatformAdmin() {

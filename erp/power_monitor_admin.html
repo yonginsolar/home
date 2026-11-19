@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.4.2 | 모니터 목록 가져오기와 기본정보 보호 -->
+<!-- Version: v1.4.3 | 보관된 박람회 체험조합만 선택 목록에서 제외 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[버전] v1.4.2 | 발전소 관리');</script>
+  <script>console.log('[버전] v1.4.3 | 발전소 관리');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -485,6 +485,7 @@
 
   <script src="plant_work_history.js?v=1.0.1" integrity="sha384-49Szd1om+yVHAsZO7Qlk0LRyik91d3zLn4OT+vJmU/XQI4KkXKMc9oNUW9T/PuiR" crossorigin="anonymous"></script>
   <script src="power_monitor_import.js?v=1.0.0" integrity="sha384-/chJd9cvrGCVsSLQnEHYSmZmtmfiFOgQtYOc9dJgLNBx1wgP5rOU8Qq0dQVMkDuJ" crossorigin="anonymous"></script>
+  <script src="platform_expo_list_visibility.js?v=1.0.0" integrity="sha384-jQfX74BjJ0bQC4PpPyaBxDVW4rttEgTzmEVSK8aTj3FM5kVJiOotLX2deehG3X1X" crossorigin="anonymous"></script>
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
@@ -1377,6 +1378,11 @@
         if (!isCurrent()) return;
         if (error) throw error;
         const next = data || {};
+        if (!silent && Array.isArray(next.scopes) && window.CoopPlatformExpoVisibility) {
+          const scopes = await window.CoopPlatformExpoVisibility.visible(next.scopes, true);
+          if (!isCurrent()) return;
+          next.scopes = scopes;
+        }
         const contacts = silent ? null : await readVendorContacts(String(next.dashboard?.id || ''));
         if (!isCurrent()) return;
         if (!await monitorReadAuthorized(owner)) {
