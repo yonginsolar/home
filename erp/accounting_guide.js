@@ -1,4 +1,4 @@
-/* 신고·결산 매뉴얼 1.4.4. 현재 가이드 칸에서 확인한 값만 복사한다. */
+/* 신고·결산 매뉴얼 1.4.5. 현재 가이드 칸에서 확인한 값만 복사한다. */
 (function (host) {
     'use strict';
     const completed = ['완료', '실물결재완료'];
@@ -283,6 +283,7 @@
     ];
     const a01ReviewPrompt='승인 급여와 지급 전표를 불러와 확인해 주세요.';
     const checkPay= '<button type="button" class="ag-screen-action" data-ag-flow-go="0">ERP 값 확인 단계로 이동</button>';
+    const inlinePayMarkup='<button type="button" class="ag-screen-action" data-ag-pay-inline aria-expanded="false" aria-controls="agInlinePay">ERP 값 확인</button><div id="agInlinePay" class="ag-inline-pay" data-ag-pay-inline-host hidden></div>';
     function withholdingContext(step,title,actions,intro='',note='',after='') {
         const [file,width,height,slot,points]=withholdingShots[step-1];
         const x=px=>`${(100*px/width).toFixed(4)}%`, y=px=>`${(100*px/height).toFixed(4)}%`;
@@ -292,13 +293,13 @@
     }
     const steps = {
         withholding: [
-            ['ERP에서 지급월과 신고 입력값 확인', `<p>정산·환급이 없는 일반 급여 정기신고 예시입니다. 다른 소득, 정산·환급, 별도 부표의 절차는 이 예시에서 확인하지 않았습니다.</p><div class="ag-loader"><label for="agPaymentMonth">급여 지급월</label><input type="month" id="agPaymentMonth"><button type="button" id="agLoad" class="btn btn-primary">ERP 금액 불러오기</button></div><div id="agResult" aria-live="polite">지급월을 선택하고 승인된 급여와 지급 전표를 대조하세요.</div><div id="agA01Review" aria-live="polite">${a01ReviewPrompt}</div><p>${link('https://www.law.go.kr/법령/소득세법시행령/제214조','신고서 제외 근거')}</p>`],
+            ['ERP에서 지급월과 신고 입력값 확인', `<p>정산·환급이 없는 일반 급여 정기신고 예시입니다. 다른 소득, 정산·환급, 별도 부표의 절차는 이 예시에서 확인하지 않았습니다.</p><div data-ag-pay-home><div data-ag-pay-panel><div class="ag-loader"><label for="agPaymentMonth">급여 지급월</label><input type="month" id="agPaymentMonth"><button type="button" id="agLoad" class="btn btn-primary">ERP 금액 불러오기</button></div><div id="agResult" aria-live="polite">지급월을 선택하고 승인된 급여와 지급 전표를 대조하세요.</div><div id="agA01Review" aria-live="polite">${a01ReviewPrompt}</div></div></div><p>${link('https://www.law.go.kr/법령/소득세법시행령/제214조','신고서 제외 근거')}</p>`],
             withholdingContext(1,"정기신고 열기",[`<b>정기신고</b> 카드를 누릅니다. 이 안내는 일반 월별 근로소득 신고 기준입니다.`],`<p>홈택스 → 세금신고 → 원천세 신고 → 일반신고</p>`),
             withholdingContext(2,"지급분 안내 확인",[`안내에 나온 지급월이 이번에 신고할 급여 지급월과 같으면 <b>확인</b>을 누릅니다.`],``,"이미지의 2026년 11월 지급분은 촬영 예시입니다."),
             withholdingContext(3,"기본정보 확인과 사업자 조회",[`<b>제출연월</b>이 현재 신고 화면과 맞는지 봅니다. 지급연월과는 다른 항목입니다.`,`<b>귀속연월</b>을 승인 급여대장과 대조합니다.${fieldSlots([payPeriodSlots[0]],'귀속연월 ERP 확인값')}`,`<b>지급연월</b>을 실제 지급 전표와 대조합니다.${fieldSlots([payPeriodSlots[1]],'지급연월 ERP 확인값')}`,`현재 신고할 조합의 사업자등록번호가 맞는지 확인하고 옆의 <b>확인</b>을 누릅니다.`],``,"이미지의 날짜는 촬영 예시입니다.",`${checkPay}`),
             withholdingContext(4,"사업자 조회 완료 확인",[`<b>조회가 완료되었습니다</b>가 보이면 <b>확인</b>을 누른 뒤 불러온 조합 정보가 맞는지 봅니다.`],``,"이미지의 날짜는 촬영 예시입니다."),
             withholdingContext(5,"근로소득 선택과 기본정보 이동",[`이 일반 급여 신고는 <b>근로소득</b>을 선택합니다.`,`조합·귀속연월·지급연월·소득 구분을 확인하고 <b>저장 후 다음이동</b>을 누릅니다.`],``,"",`<p>이동할지 묻는 안내가 나오면 기본정보가 맞을 때 <b>예</b>를 누릅니다.</p>`),
-            withholdingContext(6,"간이세액 A01 입력",[`<b>④ 인원수</b> · 확인한 근로자 수를 옮깁니다.${fieldSlots([a01Slots[0]],'A01 인원수 ERP 확인값')}`,`<b>⑤ 총지급금액</b> · 확인한 신고 대상 지급합계를 옮깁니다.${fieldSlots([a01Slots[1]],'A01 총지급금액 ERP 확인값')}`,`<b>⑥ 소득세 등</b> · 지방소득세가 아닌 국세 원천징수액을 옮깁니다.${fieldSlots([a01Slots[2]],'A01 소득세 ERP 확인값')}`,`<b>⑦ 농어촌특별세</b> · 해당 근거가 있는 경우만 확인합니다.`,`<b>⑧ 가산세</b> · 해당 근거가 있는 경우만 확인합니다.`],`<p><b>근로소득 → 간이세액 A01</b> 행인지 먼저 확인하세요.</p>`,"",`${checkPay}<p>${link('https://www.law.go.kr/LSW/flDownload.do?flSeq=164443683','2026년 원천징수이행상황신고서')}</p>`),
+            withholdingContext(6,"간이세액 A01 입력",[`<b>④ 인원수</b> · 확인한 근로자 수를 옮깁니다.${fieldSlots([a01Slots[0]],'A01 인원수 ERP 확인값')}`,`<b>⑤ 총지급금액</b> · 확인한 신고 대상 지급합계를 옮깁니다.${fieldSlots([a01Slots[1]],'A01 총지급금액 ERP 확인값')}`,`<b>⑥ 소득세 등</b> · 지방소득세가 아닌 국세 원천징수액을 옮깁니다.${fieldSlots([a01Slots[2]],'A01 소득세 ERP 확인값')}`,`<b>⑦ 농어촌특별세</b> · 해당 근거가 있는 경우만 확인합니다.`,`<b>⑧ 가산세</b> · 해당 근거가 있는 경우만 확인합니다.`],`<p><b>근로소득 → 간이세액 A01</b> 행인지 먼저 확인하세요.</p>${inlinePayMarkup}`,"",`<p>${link('https://www.law.go.kr/LSW/flDownload.do?flSeq=164443683','2026년 원천징수이행상황신고서')}</p>`),
             withholdingContext(7,"A99 자동 합계 대조와 이동",[`합계가 입력한 신고 내용과 맞으면 <b>저장 후 다음이동</b>을 누릅니다.`],`<p>상단 <b>총합계(코드 A99)</b>는 자동 집계입니다. 직접 입력하지 말고 인원·금액·세액을 대조하세요.</p>`,"",`<p>환급이 없는 이 예시는 아래 환급 조정과 차월이월환급세액 승계명세서를 작성하지 않습니다.</p>`),
             withholdingContext(8,"변경 내용 확인과 이동",[`<b>변동된 내용이 존재합니다</b>가 뜨면 대조를 마친 뒤 <b>예</b>, 더 확인할 것이 있으면 <b>아니오</b>를 누릅니다.`]),
             withholdingContext(9,"부표에 해당하는 소득 확인",[`화면의 소득 종류를 읽고 작성할 부표가 있는지 확인합니다. 해당하는 부표가 없을 때만 아무것도 선택하지 않고 <b>저장 후 다음이동</b>을 누릅니다.`]),
@@ -355,7 +356,7 @@
     function withholdingFlowHtml(list) {
         return `<section class="ag-withholding-flow" aria-label="원천세 정기신고 순서"><header class="ag-flow-head"><div><p class="ag-flow-position" id="agWithholdingPosition">${withholdingPosition(0,list)}</p><h4 id="agWithholdingTitle" tabindex="-1">${esc(list[0][0])}</h4></div><label class="ag-flow-picker" for="agWithholdingSelect">단계 바로가기<select id="agWithholdingSelect">${list.map(([title],i)=>`<option value="${i}">${withholdingPosition(i,list)} · ${esc(title)}</option>`).join('')}</select></label></header><div class="ag-flow-body">${list.map(([,html],i)=>`<div data-ag-flow-panel${i?' hidden':''}>${html}</div>`).join('')}</div><nav class="ag-flow-nav" aria-label="원천세 단계 이동"><button type="button" data-ag-flow-move="-1" disabled>이전</button><button type="button" data-ag-flow-move="1">다음</button></nav></section>`;
     }
-    function bindWithholdingFlow(container,list,active) {
+    function bindWithholdingFlow(container,list,active,onMove) {
         const doc=container.ownerDocument;
         for(const img of container.querySelectorAll('.ag-withholding-shot img')){
             img.addEventListener('error',()=>{
@@ -372,7 +373,7 @@
             if(!active()||!container.isConnected||!Number.isInteger(target)||target===index||!panels[target])return;
             const focused=doc.activeElement===origin;
             const inOldPanel=panels[index].contains(doc.activeElement);
-            panels[index].hidden=true;index=target;panels[index].hidden=false;
+            panels[index].hidden=true;index=target;onMove(index);panels[index].hidden=false;
             position.textContent=withholdingPosition(index,list);title.textContent=list[index][0];select.value=String(index);
             prev.disabled=index===0;next.disabled=index===list.length-1;
             if(inOldPanel||heading&&(focused||doc.activeElement===doc.body)){
@@ -381,7 +382,7 @@
         }
         select.addEventListener('change',()=>move(Number(select.value),select,false));
         container.addEventListener('keydown',event=>{
-            if(event.key==='Enter'&&event.repeat&&!event.isComposing&&event.target.closest('[data-ag-flow-move],[data-ag-flow-go]'))event.preventDefault();
+            if(event.key==='Enter'&&event.repeat&&!event.isComposing&&event.target.closest('[data-ag-flow-move],[data-ag-flow-go],[data-ag-pay-inline]'))event.preventDefault();
         });
         container.addEventListener('click',event=>{
             const button=event.target.closest('[data-ag-flow-move],[data-ag-flow-go]');
@@ -425,7 +426,7 @@
         if (!root || root.dataset.mounted === '1') return null;
         root.dataset.mounted='1';
         root.innerHTML = `<div class="ag-heading"><h3>신고·결산 매뉴얼</h3><p class="ag-field-source">공식 서식 확인: 2026. 11. 19.</p></div><div class="ag-topics" role="group" aria-label="회계 안내 선택"><button type="button" data-topic="withholding" aria-pressed="true">원천세</button><button type="button" data-topic="vat" aria-pressed="false">부가가치세</button><button type="button" data-topic="closing" aria-pressed="false">연말결산</button><button type="button" data-topic="smarta" aria-pressed="false">법인세</button></div><div id="agSteps"></div>`;
-        let selected='', read=null, payroll=null;
+        let selected='', read=null, payroll=null, payInline=null;
         const choices=root.querySelector('#agSteps'), remembered=new Map();
         const liveCopies=new WeakMap();
         function putValues(ids,values={},current=()=>false) {
@@ -491,7 +492,7 @@
         const draw = topic => {
             if (topic===selected || !active()) return;
             if(selected)remembered.set(selected,[...choices.querySelectorAll('.ag-loader input,.ag-loader select')].map(el=>el.value));
-            leave();read=null;selected=topic;
+            leave();read=null;payInline=null;selected=topic;
             root.querySelectorAll('[data-topic]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.topic===topic)));
             const current=()=>selected===topic&&active()&&root.isConnected;
             if (topic==='smarta') {
@@ -501,10 +502,38 @@
                 choices.innerHTML = topic==='withholding'?withholdingFlowHtml(steps.withholding):stepHtml(steps[topic]);
                 const q=s=>choices.querySelector(s);
                 if (topic==='withholding') {
-                    bindWithholdingFlow(q('.ag-withholding-flow'),steps.withholding,current);
                     const input=q('#agPaymentMonth');
+                    const loadButton=q('#agLoad'), home=q('[data-ag-pay-home]'), panel=q('[data-ag-pay-panel]');
+                    const inPlace=q('[data-ag-pay-inline-host]'), toggle=q('[data-ag-pay-inline]');
+                    const setOpen=open=>{
+                        if(open&&panel.parentNode!==inPlace)inPlace.append(panel);
+                        inPlace.hidden=!open;
+                        toggle.setAttribute('aria-expanded',String(open));toggle.textContent=open?'ERP 값 확인 닫기':'ERP 값 확인';
+                    };
+                    payInline={
+                        confirm(box,button){
+                            if(!inPlace.contains(box)||inPlace.hidden)return;
+                            const focused=box.ownerDocument.activeElement===button;
+                            setOpen(false);
+                            if(focused){
+                                const field=q('#ag-slot-people');
+                                field.focus({preventScroll:true});field.scrollIntoView?.({block:'nearest'});
+                            }
+                        }
+                    };
+                    toggle.addEventListener('click',()=>{
+                        if(!current()||toggle.closest('[data-ag-flow-panel]').hidden)return;
+                        const open=inPlace.hidden;setOpen(open);
+                        if(open&&!payroll&&input.value&&!loadButton.disabled)loadButton.click();
+                    });
+                    bindWithholdingFlow(q('.ag-withholding-flow'),steps.withholding,current,index=>{
+                        if(index===0){
+                            if(panel.parentNode!==home)home.append(panel);
+                            setOpen(false);
+                        }
+                    });
                     input.value=previousMonth();
-                    read=bindRead({input,button:q('#agLoad'),out:q('#agResult'),active:current,load:(m,_,s)=>loadA01(client,coopId,m,s),render:resultHtml,onReset:resetPayroll,
+                    read=bindRead({input,button:loadButton,out:q('#agResult'),active:current,load:(m,_,s)=>loadA01(client,coopId,m,s),render:resultHtml,onReset:resetPayroll,
                         onResult:model=>{payroll=model;const box=q('#agA01Review');box.innerHTML=payrollReviewHtml(model)||'<p class="ag-notice">이 지급월의 A01 값은 급여·지급 증빙을 더 확인해야 합니다.</p>';},
                         loading:'승인 급여와 지급 전표를 확인하고 있습니다.', changed:'선택한 지급월의 ERP 금액을 불러오세요.',
                         error:e=>e.message==='MONTH_REQUIRED'?'급여 지급월을 선택해 주세요.':e.message==='RESULT_TOO_LARGE'?'전체 범위를 읽지 못했습니다. 전표와 급여대장을 직접 대조하세요.':generic(e)});
@@ -552,7 +581,7 @@
             const verify=event.target.closest('[data-ag-confirm]');
             if(verify&&choices.contains(verify)){
                 const box=verify.closest('[data-ag-review]'),out=box.querySelector('[data-ag-output]');
-                if(box.closest('.ag-step')?.open===false||box.closest('[data-ag-flow-panel]')?.hidden)return;
+                if(box.closest('.ag-step')?.open===false||box.closest('[data-ag-flow-panel]')?.hidden||box.closest('[data-ag-pay-inline-host]')?.hidden)return;
                 if(!reviewInput(box,'checked').checked){out.textContent='증빙을 대조한 뒤 확인란에 체크해 주세요.';return;}
                 if(box.dataset.agReview==='pay'){
                     const model=payroll,excluded=reviewInput(box,'excluded').value,local=reviewInput(box,'localScope').checked;
@@ -561,7 +590,8 @@
                     const rows=current()?buildWithholdingFields(model,excluded):null;
                     if(!rows){putValues(payrollIds);out.textContent='확인한 제외액을 급여대장 지급계보다 작은 원 단위 금액으로 입력하세요.';return;}
                     putValues(payrollIds,Object.fromEntries(payrollIds.slice(0,local?8:5).map((k,i)=>[k,rows[i][1]])),current);
-                    out.textContent=local?'지급연월·A01·위택스 단계에서 확인값을 복사할 수 있습니다.':'지급연월·A01 단계에서 확인값을 복사할 수 있습니다.';return;
+                    out.textContent=local?'지급연월·A01·위택스 단계에서 확인값을 복사할 수 있습니다.':'지급연월·A01 단계에서 확인값을 복사할 수 있습니다.';
+                    payInline?.confirm(box,verify);return;
                 }
                 const boxNo=reviewInput(box,'box').value;
                 const f=buildVatFields(boxNo,reviewInput(box,'supply').value,reviewInput(box,'tax').value);
@@ -582,7 +612,7 @@
         draw('withholding');
         return {leave,destroy(){leave();root.onclick=null;choices.removeEventListener('input',changedReview);root.ownerDocument.removeEventListener('visibilitychange',shown);delete root.dataset.mounted;root.replaceChildren();}};
     }
-    const api={version:'1.4.4',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
+    const api={version:'1.4.5',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
     if (typeof module !== 'undefined' && module.exports) module.exports=api;
     if (host) host.CoopAccountingGuide=api;
 })(typeof window !== 'undefined' ? window : null);
