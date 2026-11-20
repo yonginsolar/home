@@ -1,4 +1,4 @@
-/* 신고·결산 매뉴얼 1.4.9. 현재 가이드 칸에서 확인한 값만 복사한다. */
+/* 신고·결산 매뉴얼 1.4.11. 현재 가이드 칸에서 확인한 값만 복사한다. */
 (function (host) {
     'use strict';
     const completed = ['완료', '실물결재완료'];
@@ -238,8 +238,8 @@
     function sourceGuide(rows) {
         return `<div class="ag-input-guide" role="group" aria-label="입력칸과 값의 출처"><div class="ag-input-legend" aria-hidden="true"><strong>입력칸</strong><span>가져올 값</span><small>출처</small></div>${rows.map(([field,value,source])=>`<div><strong>${esc(field)}</strong><span>${esc(value)}</span><small>${esc(source)}</small></div>`).join('')}</div>`;
     }
-    function vatReviewHtml() {
-        return `<section class="ag-field-review" data-ag-review="vat"><h4>부가가치세 신고 칸 확인</h4><label for="agVatBox">신고서 칸</label><select id="agVatBox" data-ag-input="box"><option value="">선택하세요</option>${Object.entries(vatFields).map(([k,[name]])=>`<option value="${k}">${esc(name)}</option>`).join('')}</select><p class="ag-field-source" data-ag-source>칸을 고르면 확인할 증빙을 보여줍니다.</p><div class="ag-amount-inputs"><label>공급가액 (원)<input type="text" inputmode="numeric" data-ag-input="supply" autocomplete="off"></label><label>세액 (원)<input type="text" inputmode="numeric" data-ag-input="tax" autocomplete="off"></label></div><label class="ag-review-check"><input type="checkbox" data-ag-input="checked"> 선택한 기간의 증빙, 중복·취소와 공제 여부를 확인했습니다.</label><button type="button" data-ag-confirm class="btn btn-outline-primary">이 칸 확인</button><div data-ag-output aria-live="polite"></div></section>`;
+    function vatReviewHtml(fieldId='agVatBox') {
+        return `<section class="ag-field-review" data-ag-review="vat"><h4>부가가치세 신고 칸 확인</h4><label for="${esc(fieldId)}">신고서 칸</label><select id="${esc(fieldId)}" data-ag-input="box"><option value="">선택하세요</option>${Object.entries(vatFields).map(([k,[name]])=>`<option value="${k}">${esc(name)}</option>`).join('')}</select><p class="ag-field-source" data-ag-source>칸을 고르면 확인할 증빙을 보여줍니다.</p><div class="ag-amount-inputs"><label>공급가액 (원)<input type="text" inputmode="numeric" data-ag-input="supply" autocomplete="off"></label><label>세액 (원)<input type="text" inputmode="numeric" data-ag-input="tax" autocomplete="off"></label></div><label class="ag-review-check"><input type="checkbox" data-ag-input="checked"> 선택한 기간의 증빙, 중복·취소와 공제 여부를 확인했습니다.</label><button type="button" data-ag-confirm class="btn btn-outline-primary">이 칸 확인</button><div data-ag-output aria-live="polite"></div></section>`;
     }
     function buildVatFields(box,supply,tax) {
         if(!Object.hasOwn(vatFields,box))return null;
@@ -313,7 +313,7 @@
             ['카드 매입세액 공제 여부 확인', `${vatGuideShot('hometax-card-vat.jpg','홈택스 매입세액 공제 확인 검색 결과',1300,450,'홈택스 공개 메뉴 · 2026. 10. 8.')}<p>홈택스의 <b>계산서·영수증·카드 → 신용카드 매입 → 사업용신용카드 사용내역 → 매입세액 공제 확인/변경</b>을 엽니다. 상단 검색창에 <b>매입세액 공제 확인</b>을 입력해도 됩니다.</p><p>조회 기간을 선택하고 각 건의 공제·불공제를 확인합니다. 업무와 무관한 지출, 기업업무추진비, 비영업용 소형승용차 관련 등 공제 제한 거래는 제외합니다. 면세 거래에는 공제할 부가세가 없습니다.</p><p>취소분을 반영하고 같은 거래를 세금계산서와 카드로 중복 공제하지 마세요. 법인 명의 카드는 통상 별도 등록 없이 조회됩니다. 누락된 카드는 원자료를 확인합니다.</p>`],
             ['홈택스 부가가치세 정기신고 열기', `<p>${link('https://www.hometax.go.kr','홈택스')}의 <b>세금신고 → 부가가치세 신고 → 일반과세자 신고 → 정기신고</b>로 이동하세요. 조합의 사업자등록번호와 예정·확정 신고 기간을 확인합니다.</p><p>${link(nts+'/nts/na/ntt/selectNttInfo.do?mi=2409&nttSn=1353101','국세청 2026년 전자신고 화면 안내')}</p>`],
             ['과세표준 및 매출세액 작성', `${sourceGuide([['(1) 세금계산서 발급분','공급가액·세액','매출처별 세금계산서합계표'],['(3) 카드·현금영수증 발행분','취소·(1) 중복 제외 후 공급가액·세액','신용카드매출전표 등 발행금액 집계표'],['(4) 기타','위 칸에 포함하지 않은 과세 공급','공급일과 과세 여부가 확인된 원거래 증빙']])}<p>${link('https://www.law.go.kr/LSW/flDownload.do?flSeq=162624807','2026년 일반과세자 부가가치세 신고서·작성방법')}</p>`],
-            ['매입세액과 불공제 반영', `<div class="ag-context-layout"><div>${vatGuideShot('nts-vat-20261005-references.png','현금영수증 매입세액 공제 확인 바로가기',752,153,vaultTitle+' · 현금영수증 바로가기')}${vatGuideShot('nts-vat-20261005-card-link.png','화물운전자 복지카드 매입세액 공제 확인 바로가기',752,73,vaultTitle+' · 복지카드 해당 시')}${vatGuideShot('nts-vat-20261005-popup.png','현금영수증 매입세액 공제 확인·변경',734,486,vaultTitle+' · 현금영수증 확인 창 예시')}<p>${link(vatEvidence,'국세청 원본')}</p></div><section id="agVatMap" tabindex="-1"><p>수령명세서에서 <b>매입세액 공제 확인</b>을 열고 신고 기간의 공제 여부를 확인합니다.</p>${sourceGuide([['(10) 일반매입 · (12) 고정자산매입','해당 공급가액·세액을 구분','매입처별 세금계산서합계표·취득명세'],['(44) 일반매입 · (45) 고정자산매입','공제 대상 카드 등 수령명세의 금액·세액','신용카드매출전표 등 수령명세서 · (15) 세부명세'],['(53) 공제받지 못할 매입세액','불공제 공급가액·세액','별지 제22호 불공제 명세 · (17) 세부명세']])}<p>같은 매입을 세금계산서와 카드에 두 번 넣지 마세요.</p>${vatReviewHtml()}</section></div>`],
+            ['매입세액과 불공제 반영', `<div class="ag-context-layout"><div>${vatGuideShot('nts-vat-20261005-references.png','현금영수증 매입세액 공제 확인 바로가기',752,153,vaultTitle+' · 현금영수증 바로가기')}${vatGuideShot('nts-vat-20261005-card-link.png','화물운전자 복지카드 매입세액 공제 확인 바로가기',752,73,vaultTitle+' · 복지카드 해당 시')}${vatGuideShot('nts-vat-20261005-popup.png','현금영수증 매입세액 공제 확인·변경',734,486,vaultTitle+' · 현금영수증 확인 창 예시')}<p>${link(vatEvidence,'국세청 원본')}</p></div><section id="agVatMap" tabindex="-1"><p>수령명세서에서 <b>매입세액 공제 확인</b>을 열고 신고 기간의 공제 여부를 확인합니다.</p>${sourceGuide([['(10) 일반매입 · (12) 고정자산매입','해당 공급가액·세액을 구분','매입처별 세금계산서합계표·취득명세'],['(44) 일반매입 · (45) 고정자산매입','공제 대상 카드 등 수령명세의 금액·세액','신용카드매출전표 등 수령명세서 · (15) 세부명세'],['(53) 공제받지 못할 매입세액','불공제 공급가액·세액','별지 제22호 불공제 명세 · (17) 세부명세']])}<p>같은 매입을 세금계산서와 카드에 두 번 넣지 마세요.</p>${vatReviewHtml('agVatPurchaseBox')}</section></div>`],
             ['제출·접수·납부 대조', '<p>예정고지·기납부·가산세와 최종 납부/환급액을 검토한 뒤 제출합니다. 홈택스의 신고내역에서 실제 접수번호를 확인하고 신고서와 부속명세를 보관하세요. 납부내역과 통장 출금을 대조한 뒤 ERP 전표에 실제 거래일과 증빙을 연결합니다.</p>']
         ],
         closing: [
@@ -506,6 +506,26 @@
         dismiss.addEventListener('click',()=>viewer.close());
         viewer.addEventListener('close',()=>{if(!viewer.open){photo.removeAttribute('src');photo.alt='';contextPreview.hidden=true;contextPreview.replaceChildren();photo.hidden=false;}});
         const reviewInput=(box,id)=>box.querySelector(`[data-ag-input="${id}"]`);
+        function bindVatPurchaseDraft(box,year,period) {
+            if(!box)return;
+            const fields=['box','supply','tax'].map(id=>reviewInput(box,id));
+            const drafts=new Map();
+            const getScope=()=>/^20\d{2}$/.test(year.value)&&Object.hasOwn(vatPeriods,period.value)?`${year.value}:${period.value}`:'';
+            let scope=getScope();
+            function changeScope(){
+                const next=getScope();
+                if(next===scope)return;
+                if(scope)drafts.set(scope,fields.map(field=>field.value));
+                scope=next;
+                const saved=drafts.get(scope)||['','',''];
+                fields[0].value=saved[0];
+                // Invalidate confirmation and keep the evidence label in sync.
+                fields[0].dispatchEvent(new host.Event('input',{bubbles:true}));
+                fields.slice(1).forEach((field,index)=>{field.value=saved[index+1];});
+            }
+            year.addEventListener('input',changeScope);
+            period.addEventListener('change',changeScope);
+        }
         const changedReview=event=>{
             const input=event.target;
             if(input.matches('[data-ag-standard-confirm]')){
@@ -598,6 +618,8 @@
                 }
             }
             rememberInputs(topic,true);
+            if(topic==='vat')bindVatPurchaseDraft(choices.querySelector('#agVatMap [data-ag-review="vat"]'),
+                choices.querySelector('#agVatYear'),choices.querySelector('#agVatPeriod'));
         };
         root.onclick=async event=>{
             if (!active()) {if(selected==='withholding')leave();return;}
@@ -653,7 +675,7 @@
         draw('withholding');
         return {leave,resume(){loadSmarta?.();},destroy(){leave();root.onclick=null;choices.removeEventListener('input',changedReview);root.ownerDocument.removeEventListener('visibilitychange',shown);delete root.dataset.mounted;root.replaceChildren();}};
     }
-    const api={version:'1.4.9',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
+    const api={version:'1.4.11',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
     if (typeof module !== 'undefined' && module.exports) module.exports=api;
     if (host) host.CoopAccountingGuide=api;
 })(typeof window !== 'undefined' ? window : null);
