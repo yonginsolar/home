@@ -1,4 +1,4 @@
-/* 신고·결산 매뉴얼 1.4.7. 현재 가이드 칸에서 확인한 값만 복사한다. */
+/* 신고·결산 매뉴얼 1.4.8. 현재 가이드 칸에서 확인한 값만 복사한다. */
 (function (host) {
     'use strict';
     const completed = ['완료', '실물결재완료'];
@@ -285,6 +285,9 @@
         const capture=`<div data-ag-capture-slot="${slot}"><figure class="ag-screen ag-screen-inline ag-withholding-shot"><div class="ag-context-map" style="--ag-context-width:${width}px"><img data-ag-src="accounting-guide/withholding-context/${file}" width="${width}" height="${height}" alt="홈택스 · ${esc(title)}" loading="lazy" decoding="async"><svg class="ag-context-annotations" viewBox="0 0 ${width} ${height}" aria-hidden="true" focusable="false">${marks}${amounts}</svg></div><figcaption><span>홈택스 화면 예시${note?' · '+esc(note):''}</span><button type="button" class="ag-screen-action" data-ag-screen-open aria-haspopup="dialog" aria-label="${esc(title)} 화면 크게 보기">크게 보기</button></figcaption></figure><p class="ag-screen-pending" data-ag-capture-fallback hidden>화면을 불러오지 못했습니다. 옆의 안내를 확인해 주세요.</p></div>`;
         return [title,`<div class="ag-context-layout">${capture}<div class="ag-context-instructions">${intro}<ol>${actions.map((text,i)=>`<li><span class="ag-context-number" aria-hidden="true">${i+1}</span><div>${text}</div></li>`).join('')}</ol>${after}</div></div>`];
     }
+    const vatEvidence='https://www.nts.go.kr/nts/na/ntt/selectNttInfo.do?mi=2201&nttSn=1355405';
+    const vaultTitle='국세청 2026. 10. 5. 참고 2 · 7쪽';
+    const vatGuideShot=(file,title,width,height,source)=>`<figure class="ag-screen ag-screen-inline"><img data-ag-src="accounting-guide/${file}" width="${width}" height="${height}" alt="${esc(title)}" loading="lazy" decoding="async"><figcaption><span>${esc(source)}</span><button type="button" class="ag-screen-action" data-ag-screen-open aria-haspopup="dialog">크게 보기</button></figcaption></figure>`;
     const steps = {
         withholding: [
             withholdingContext(1,"정기신고 열기",[`<b>정기신고</b> 카드를 누릅니다. 이 안내는 일반 월별 근로소득 신고 기준입니다.`],`<p>홈택스 → 세금신고 → 원천세 신고 → 일반신고</p>`),
@@ -307,10 +310,10 @@
         ],
         vat: [
             ['홈택스 신고 대상 확인·장부 대조', `<p>홈택스 <b>부가가치세 신고 → 신고도움자료조회 → 예정고지 세액 조회</b>에서 예정신고·예정고지 여부를 먼저 확인합니다. 확정신고는 화면이 표시하는 거래 기간을 확인하고 이미 신고한 예정분을 다시 넣지 마세요.</p><p>공급일 기준 세금계산서·카드·현금영수증·기타 과세매출과 매입 증빙을 준비합니다. 아래 장부 기간은 홈택스와 같게 선택하세요.</p><div class="ag-loader"><label for="agVatYear">거래 연도</label><input id="agVatYear" type="number" min="2000" max="2099" step="1"><label for="agVatPeriod">거래 기간</label><select id="agVatPeriod"><option value="q1">1~3월</option><option value="q2">4~6월</option><option value="q3">7~9월</option><option value="q4">10~12월</option><option value="h1">1~6월</option><option value="h2">7~12월</option></select><button type="button" id="agVatLoad" class="btn btn-primary">장부 대조</button></div><div id="agVatResult" role="status">신고 대상 거래 기간을 선택하고 장부 대조를 누르세요.</div><p>${link(nts+'/nts/cm/cntnts/cntntsView.do?cntntsId=7693&mi=2225','국세청 부가가치세 신고·납부기한')}</p>`],
-            ['카드 매입세액 공제 여부 확인', `<p>홈택스의 <b>계산서·영수증·카드 → 신용카드 매입 → 사업용신용카드 사용내역 → 매입세액 공제 확인/변경</b>을 엽니다. 상단 검색창에 <b>매입세액 공제 확인</b>을 입력해도 됩니다.</p><p>조회 기간을 선택하고 각 건의 공제·불공제를 확인합니다. 업무와 무관한 지출, 기업업무추진비, 비영업용 소형승용차 관련 등 공제 제한 거래는 제외합니다. 면세 거래에는 공제할 부가세가 없습니다.</p><p>취소분을 반영하고 같은 거래를 세금계산서와 카드로 중복 공제하지 마세요. 법인 명의 카드는 통상 별도 등록 없이 조회됩니다. 누락된 카드는 원자료를 확인합니다.</p><details class="ag-screen"><summary>홈택스 카드 매입 메뉴 화면 보기</summary><figure><img src="accounting-guide/hometax-card-vat.jpg" alt="홈택스 매입세액 공제 확인 검색 결과" loading="lazy"><figcaption>국세청 홈택스 공개 메뉴 · 2026-10-08 확인.</figcaption></figure></details>`],
-            ['홈택스 부가가치세 정기신고 열기', `<p>${link('https://www.hometax.go.kr','홈택스')}의 <b>세금신고 → 부가가치세 신고 → 일반과세자 신고 → 정기신고</b>로 이동하세요. 조합의 사업자등록번호와 예정·확정 신고 기간을 확인합니다.</p>${screenPending('홈택스 일반과세자 부가가치세 신고의 매출·매입 입력칸')}<p>${link(nts+'/nts/na/ntt/selectNttInfo.do?mi=2409&nttSn=1353101','국세청 2026년 전자신고 화면 안내')}</p>`],
+            ['카드 매입세액 공제 여부 확인', `${vatGuideShot('hometax-card-vat.jpg','홈택스 매입세액 공제 확인 검색 결과',1300,450,'홈택스 공개 메뉴 · 2026. 10. 8.')}<p>홈택스의 <b>계산서·영수증·카드 → 신용카드 매입 → 사업용신용카드 사용내역 → 매입세액 공제 확인/변경</b>을 엽니다. 상단 검색창에 <b>매입세액 공제 확인</b>을 입력해도 됩니다.</p><p>조회 기간을 선택하고 각 건의 공제·불공제를 확인합니다. 업무와 무관한 지출, 기업업무추진비, 비영업용 소형승용차 관련 등 공제 제한 거래는 제외합니다. 면세 거래에는 공제할 부가세가 없습니다.</p><p>취소분을 반영하고 같은 거래를 세금계산서와 카드로 중복 공제하지 마세요. 법인 명의 카드는 통상 별도 등록 없이 조회됩니다. 누락된 카드는 원자료를 확인합니다.</p>`],
+            ['홈택스 부가가치세 정기신고 열기', `<p>${link('https://www.hometax.go.kr','홈택스')}의 <b>세금신고 → 부가가치세 신고 → 일반과세자 신고 → 정기신고</b>로 이동하세요. 조합의 사업자등록번호와 예정·확정 신고 기간을 확인합니다.</p><p>${link(nts+'/nts/na/ntt/selectNttInfo.do?mi=2409&nttSn=1353101','국세청 2026년 전자신고 화면 안내')}</p>`],
             ['과세표준 및 매출세액 작성', `${sourceGuide([['(1) 세금계산서 발급분','공급가액·세액','매출처별 세금계산서합계표'],['(3) 카드·현금영수증 발행분','취소·(1) 중복 제외 후 공급가액·세액','신용카드매출전표 등 발행금액 집계표'],['(4) 기타','위 칸에 포함하지 않은 과세 공급','공급일과 과세 여부가 확인된 원거래 증빙']])}<p>${link('https://www.law.go.kr/LSW/flDownload.do?flSeq=162624807','2026년 일반과세자 부가가치세 신고서·작성방법')}</p>`],
-            ['매입세액과 불공제 반영', `${sourceGuide([['(10) 일반매입 · (12) 고정자산매입','해당 공급가액·세액을 구분','매입처별 세금계산서합계표·취득명세'],['(44) 일반매입 · (45) 고정자산매입','공제 대상 카드 등 수령명세의 금액·세액','신용카드매출전표 등 수령명세서 · (15) 세부명세'],['(53) 공제받지 못할 매입세액','불공제 공급가액·세액','별지 제22호 불공제 명세 · (17) 세부명세']])}<p>같은 매입을 세금계산서와 카드에 두 번 넣지 마세요.</p>${vatReviewHtml()}`],
+            ['매입세액과 불공제 반영', `<div class="ag-context-layout"><div>${vatGuideShot('nts-vat-20261005-references.png','현금영수증 매입세액 공제 확인 바로가기',752,153,vaultTitle+' · 현금영수증 바로가기')}${vatGuideShot('nts-vat-20261005-card-link.png','화물운전자 복지카드 매입세액 공제 확인 바로가기',752,73,vaultTitle+' · 복지카드 해당 시')}${vatGuideShot('nts-vat-20261005-popup.png','현금영수증 매입세액 공제 확인·변경',734,486,vaultTitle+' · 현금영수증 확인 창 예시')}<p>${link(vatEvidence,'국세청 원본')}</p></div><section id="agVatMap" tabindex="-1"><p>수령명세서에서 <b>매입세액 공제 확인</b>을 열고 신고 기간의 공제 여부를 확인합니다.</p>${sourceGuide([['(10) 일반매입 · (12) 고정자산매입','해당 공급가액·세액을 구분','매입처별 세금계산서합계표·취득명세'],['(44) 일반매입 · (45) 고정자산매입','공제 대상 카드 등 수령명세의 금액·세액','신용카드매출전표 등 수령명세서 · (15) 세부명세'],['(53) 공제받지 못할 매입세액','불공제 공급가액·세액','별지 제22호 불공제 명세 · (17) 세부명세']])}<p>같은 매입을 세금계산서와 카드에 두 번 넣지 마세요.</p>${vatReviewHtml()}</section></div>`],
             ['제출·접수·납부 대조', '<p>예정고지·기납부·가산세와 최종 납부/환급액을 검토한 뒤 제출합니다. 홈택스의 신고내역에서 실제 접수번호를 확인하고 신고서와 부속명세를 보관하세요. 납부내역과 통장 출금을 대조한 뒤 ERP 전표에 실제 거래일과 증빙을 연결합니다.</p>']
         ],
         closing: [
@@ -327,56 +330,81 @@
         const confirmed=model.confirmed.length?`<div class="ag-confirmed"><strong>원천세 완료 결재 · 참고</strong>${model.confirmed.map(t=>`<p>${model.confirmed.length>1?esc(t.title)+' · ':''}국세 <b>${money(t.national)}</b> · 지방세 <b>${money(t.local)}</b></p>`).join('')}</div>`:'';
         return (problem?`<p class="ag-notice">${esc(problem)}</p>`:'')+confirmed;
     }
-    function stepHtml(list) {
-        return list.map(([title,html],i)=>`<details class="ag-step"${i===0?' open':''}><summary><span class="ag-number">${i+1}</span>${title}</summary><div class="ag-step-body">${html}<div class="ag-step-nav"><span>${i+1} / ${list.length}</span>${i?`<button type="button" data-step="${i-1}">이전</button>`:''}${i<list.length-1?`<button type="button" data-step="${i+1}">다음</button>`:''}</div></div></details>`).join('');
-    }
     const withholdingPosition=(i,list)=>i<withholdingShots.length
         ?`홈택스 화면 ${i+1} / ${withholdingShots.length}`
         :`신고 후 ${i-withholdingShots.length+1} / ${list.length-withholdingShots.length}`;
-    function withholdingFlowHtml(list) {
-        return `<section class="ag-withholding-flow" aria-label="원천세 정기신고 순서"><header class="ag-flow-head"><div><p class="ag-flow-position" id="agWithholdingPosition">${withholdingPosition(0,list)}</p><h4 id="agWithholdingTitle" tabindex="-1">${esc(list[0][0])}</h4></div><label class="ag-flow-picker" for="agWithholdingSelect">단계 바로가기<select id="agWithholdingSelect">${list.map(([title],i)=>`<option value="${i}">${withholdingPosition(i,list)} · ${esc(title)}</option>`).join('')}</select></label></header><div class="ag-flow-body">${list.map(([,html],i)=>`<div data-ag-flow-panel${i?' hidden':''}>${html}</div>`).join('')}</div><nav class="ag-flow-nav" aria-label="원천세 단계 이동"><button type="button" data-ag-flow-move="-1" disabled>이전</button><button type="button" data-ag-flow-move="1">다음</button></nav></section>`;
+    const flowLabels={withholding:'원천세 정기신고',vat:'부가가치세',closing:'연말결산',smarta:'법인세'};
+    const flowPosition=(topic,i,list)=>topic==='withholding'?withholdingPosition(i,list):`${i+1} / ${list.length}`;
+    function stepHtml(list,topic) {
+        const base=topic==='withholding'?'agWithholding':'agGuide';
+        const position=i=>flowPosition(topic,i,list);
+        return `<section class="ag-guide-flow${topic==='withholding'?' ag-withholding-flow':''}" aria-label="${flowLabels[topic]} 순서"><header class="ag-flow-head"><div><p class="ag-flow-position" id="${base}Position">${position(0)}</p><h4 class="ag-flow-title" id="${base}Title" tabindex="-1">${esc(list[0][0])}</h4></div><label class="ag-flow-picker" for="${base}Select">단계 바로가기<select id="${base}Select">${list.map(([title],i)=>`<option value="${i}">${position(i)} · ${esc(title)}</option>`).join('')}</select></label></header><div class="ag-flow-body">${list.map(([title,html],i)=>`<div data-ag-flow-panel data-ag-flow-heading="${esc(title)}"${i?' hidden':''}>${html}</div>`).join('')}</div><nav class="ag-flow-nav" aria-label="${flowLabels[topic]} 단계 이동"><button type="button" data-ag-flow-move="-1" disabled>이전</button><button type="button" data-ag-flow-move="1">다음</button></nav></section>`;
     }
-    function bindWithholdingFlow(container,list,active) {
+    function bindStepFlow(container,topic,active) {
         const doc=container.ownerDocument;
-        for(const img of container.querySelectorAll('.ag-withholding-shot img')){
+        const panels=[...container.querySelectorAll('[data-ag-flow-panel]')];
+        for(const panel of panels){
+            if(topic==='withholding')continue;
+            const figures=[...panel.children].filter(el=>el.matches('figure.ag-screen-inline'));
+            if(!figures.length)continue;
+            const layout=doc.createElement('div'),media=doc.createElement('div'),copy=doc.createElement('div');
+            layout.className='ag-context-layout';
+            media.append(...figures);copy.append(...panel.childNodes);
+            layout.append(media,copy);panel.append(layout);
+        }
+        for(const img of container.querySelectorAll('img[data-ag-src]')){
             img.addEventListener('error',()=>{
-                const shot=img.closest('figure');shot.hidden=true;
-                shot.nextElementSibling.hidden=false;
+                const shot=img.closest('figure'),fallback=shot.nextElementSibling;
+                if(fallback?.matches('[data-ag-capture-fallback]')){shot.hidden=true;fallback.hidden=false;}
+                else{
+                    img.hidden=true;
+                    const button=shot.querySelector('[data-ag-screen-open]');if(button)button.hidden=true;
+                    const text=doc.createElement('span');text.textContent='화면을 불러오지 못했습니다.';
+                    shot.querySelector('figcaption')?.append(' · ',text);
+                }
             },{once:true});
         }
-        const panels=[...container.querySelectorAll('[data-ag-flow-panel]')];
         const body=container.querySelector('.ag-flow-body');
-        const title=container.querySelector('#agWithholdingTitle'), position=container.querySelector('#agWithholdingPosition');
-        const select=container.querySelector('#agWithholdingSelect');
+        const title=container.querySelector('.ag-flow-title'), position=container.querySelector('.ag-flow-position');
+        const select=container.querySelector('.ag-flow-picker select');
+        const list=panels.map(panel=>panel.dataset.agFlowHeading);
         const prev=container.querySelector('[data-ag-flow-move="-1"]'), next=container.querySelector('[data-ag-flow-move="1"]');
         let index=0;
-        function showImage(panel) {
-            const image=panel.querySelector('img[data-ag-src]');
-            if(image){image.src=image.dataset.agSrc;image.removeAttribute('data-ag-src');}
+        function showImages(panel) {
+            for(const image of panel.querySelectorAll('img[data-ag-src]')){
+                image.src=image.dataset.agSrc;image.removeAttribute('data-ag-src');
+            }
         }
-        showImage(panels[0]);
+        showImages(panels[0]);
         function move(target,origin,heading) {
             if(!active()||!container.isConnected||!Number.isInteger(target)||target===index||!panels[target])return;
             const focused=doc.activeElement===origin;
             const inOldPanel=panels[index].contains(doc.activeElement);
             panels[index].hidden=true;index=target;panels[index].hidden=false;
             body.scrollTop=0;
-            showImage(panels[index]);
-            position.textContent=withholdingPosition(index,list);title.textContent=list[index][0];select.value=String(index);
+            showImages(panels[index]);
+            position.textContent=flowPosition(topic,index,list);title.textContent=list[index];select.value=String(index);
             prev.disabled=index===0;next.disabled=index===list.length-1;
-            if(inOldPanel||heading&&(focused||doc.activeElement===doc.body)){
+            if(origin&&(inOldPanel||heading&&(focused||doc.activeElement===doc.body))){
                 title.focus({preventScroll:true});title.scrollIntoView?.({block:'nearest'});
             }
         }
         select.addEventListener('change',()=>move(Number(select.value),select,false));
         container.addEventListener('keydown',event=>{
-            if(event.key==='Enter'&&event.repeat&&!event.isComposing&&event.target.closest('[data-ag-flow-move],[data-ag-flow-go],[data-ag-pay-inline]'))event.preventDefault();
+            if(event.key==='Enter'&&event.repeat&&!event.isComposing&&event.target.closest('[data-ag-flow-move],[data-ag-jump],[data-ag-pay-inline]'))event.preventDefault();
         });
         container.addEventListener('click',event=>{
-            const button=event.target.closest('[data-ag-flow-move],[data-ag-flow-go]');
-            if(!button||button.disabled||button.closest('[data-ag-flow-panel]')?.hidden)return;
-            move(button.hasAttribute('data-ag-flow-go')?Number(button.dataset.agFlowGo):index+Number(button.dataset.agFlowMove),button,true);
+            const button=event.target.closest('[data-ag-flow-move]');
+            if(!button||button.disabled)return;
+            move(index+Number(button.dataset.agFlowMove),button,true);
         });
+        return target=>{
+            if(!active()||!container.isConnected)return false;
+            const to=panels.indexOf(target.closest('[data-ag-flow-panel]'));
+            if(to<0)return false;
+            move(to,null,false);
+            return index===to;
+        };
     }
     function bindRead({input,extra,button,out,active,load,render,error,loading,changed,timeout=12000,onReset=()=>{},onResult}) {
         let pending=null;
@@ -414,7 +442,7 @@
         if (!root || root.dataset.mounted === '1') return null;
         root.dataset.mounted='1';
         root.innerHTML = `<div class="ag-heading"><h3>신고·결산 매뉴얼</h3><p class="ag-field-source">공식 서식 확인: 2026. 11. 19.</p></div><div class="ag-topics" role="group" aria-label="회계 안내 선택"><button type="button" data-topic="withholding" aria-pressed="true">원천세</button><button type="button" data-topic="vat" aria-pressed="false">부가가치세</button><button type="button" data-topic="closing" aria-pressed="false">연말결산</button><button type="button" data-topic="smarta" aria-pressed="false">법인세</button></div><div id="agSteps"></div>`;
-        let selected='', read=null, payroll=null, loadSmarta=null, visit=0;
+        let selected='', read=null, payroll=null, loadSmarta=null, visit=0, revealStep=null;
         const choices=root.querySelector('#agSteps'), remembered=new Map();
         const liveCopies=new WeakMap();
         function putValues(ids,values={},current=()=>false) {
@@ -505,7 +533,7 @@
         const draw = topic => {
             if (topic===selected || !active()) return;
             if(selected)rememberInputs(selected);
-            leave();read=null;loadSmarta=null;selected=topic;
+            leave();read=null;loadSmarta=null;revealStep=null;selected=topic;
             const turn=++visit;
             root.querySelectorAll('[data-topic]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.topic===topic)));
             const current=()=>visit===turn&&selected===topic&&active()&&root.isConnected;
@@ -513,7 +541,8 @@
                 let pending=false;
                 const render=()=>{
                     if(!current()||read)return;
-                    read=host.CoopSmartaGuide.mount({root:choices,client,coopId,active:current,bindRead,stepHtml,generic});
+                    read=host.CoopSmartaGuide.mount({root:choices,client,coopId,active:current,bindRead,stepHtml:list=>stepHtml(list,topic),generic});
+                    revealStep=bindStepFlow(choices.querySelector('.ag-guide-flow'),topic,current);
                     rememberInputs(topic,true);
                 };
                 loadSmarta=async()=>{
@@ -535,7 +564,8 @@
                 };
                 loadSmarta();
             } else {
-                choices.innerHTML = topic==='withholding'?withholdingFlowHtml(steps.withholding):stepHtml(steps[topic]);
+                choices.innerHTML=stepHtml(steps[topic],topic);
+                revealStep=bindStepFlow(choices.querySelector('.ag-guide-flow'),topic,current);
                 const q=s=>choices.querySelector(s);
                 if (topic==='withholding') {
                     const input=q('#agPaymentMonth');
@@ -550,7 +580,6 @@
                         const open=inPlace.hidden;setOpen(open);
                         if(open&&!payroll&&input.value&&!loadButton.disabled)loadButton.click();
                     });
-                    bindWithholdingFlow(q('.ag-withholding-flow'),steps.withholding,current);
                     input.value=previousMonth();
                     read=bindRead({input,button:loadButton,out:q('#agResult'),active:current,load:(m,_,s)=>loadA01(client,coopId,m,s),render:resultHtml,onReset:resetPayroll,
                         onResult:model=>{payroll=model;showPayValues(model);if(inPlace.hidden)setOpen(false);},
@@ -569,10 +598,10 @@
         root.onclick=async event=>{
             if (!active()) {if(selected==='withholding')leave();return;}
             const enlarge=event.target.closest('[data-ag-screen-open]');
-            if(enlarge&&(selected==='smarta'||selected==='withholding')&&choices.contains(enlarge)&&!viewer.open&&!enlarge.closest('[data-ag-flow-panel]')?.hidden){
+            if(enlarge&&choices.contains(enlarge)&&!viewer.open&&!enlarge.closest('[data-ag-flow-panel]')?.hidden){
                 const figure=enlarge.closest('figure');
                 const picture=figure&&!figure.hidden?figure.querySelector('img'):null;
-                if(picture){
+                if(picture?.getAttribute('src')&&!picture.hidden){
                     const map=figure.querySelector('.ag-context-map');
                     contextPreview.replaceChildren();
                     contextPreview.hidden=!map;photo.hidden=Boolean(map);
@@ -589,13 +618,6 @@
             }
             const tab=event.target.closest('[data-topic]');
             if(tab&&root.contains(tab)){draw(tab.dataset.topic);return;}
-            const move=event.target.closest('[data-step]');
-            if(move&&choices.contains(move)){
-                const list=[...choices.children].filter(el=>el.classList.contains('ag-step'));
-                const next=list[Number(move.dataset.step)];
-                if(next){for(const el of list)el.open=el===next;next.querySelector('summary').focus();}
-                return;
-            }
             const localButton=event.target.closest('[data-ag-local-pay]');
             if(localButton&&choices.contains(localButton)&&!localButton.closest('[data-ag-flow-panel]')?.hidden){
                 if(payrollCurrent(payroll)&&buildWithholdingFields(payroll)){
@@ -606,7 +628,7 @@
             const verify=event.target.closest('[data-ag-confirm]');
             if(verify&&choices.contains(verify)){
                 const box=verify.closest('[data-ag-review]'),out=box.querySelector('[data-ag-output]');
-                if(box.closest('.ag-step')?.open===false||box.closest('[data-ag-flow-panel]')?.hidden||box.closest('[data-ag-pay-inline-host]')?.hidden)return;
+                if(box.closest('[data-ag-flow-panel]')?.hidden||box.closest('[data-ag-pay-inline-host]')?.hidden)return;
                 if(!reviewInput(box,'checked').checked){out.textContent='증빙을 대조한 뒤 확인란에 체크해 주세요.';return;}
                 const boxNo=reviewInput(box,'box').value;
                 const f=buildVatFields(boxNo,reviewInput(box,'supply').value,reviewInput(box,'tax').value);
@@ -615,11 +637,11 @@
                 }else out.textContent='신고 칸을 고르고 증빙의 0 이상 원 단위 금액 두 개를 입력해 주세요. 차감·환급 등 음수 신고는 공식 명세에서 직접 확인하세요.';
                 return;
             }
-            const b=event.target.closest('[data-copy],[data-ag-live-copy]');if(!b||b.hidden||b.disabled||!choices.contains(b)||b.dataset.copying||b.closest('.ag-step')?.open===false||b.closest('[data-ag-flow-panel]')?.hidden)return;
+            const b=event.target.closest('[data-copy],[data-ag-live-copy]');if(!b||b.hidden||b.disabled||!choices.contains(b)||b.dataset.copying||b.closest('[data-ag-flow-panel]')?.hidden)return;
             const entry=liveCopies.get(b);
             if(b.hasAttribute('data-ag-live-copy')&&(!entry||!entry.current()))return;
             const topic=selected;b.dataset.copying='1';
-            const current=()=>active()&&selected===topic&&!b.hidden&&b.isConnected&&choices.contains(b)&&b.closest('.ag-step')?.open!==false&&!b.closest('[data-ag-flow-panel]')?.hidden&&(!entry||liveCopies.get(b)===entry&&entry.current());
+            const current=()=>active()&&selected===topic&&!b.hidden&&b.isConnected&&choices.contains(b)&&!b.closest('[data-ag-flow-panel]')?.hidden&&(!entry||liveCopies.get(b)===entry&&entry.current());
             try {await host.navigator.clipboard.writeText(entry?entry.value:b.dataset.copy);if(current())b.textContent='복사됨';}
             catch(_){if(current())b.textContent='복사 실패';}
             finally{delete b.dataset.copying;}
@@ -627,7 +649,7 @@
         draw('withholding');
         return {leave,resume(){loadSmarta?.();},destroy(){leave();root.onclick=null;choices.removeEventListener('input',changedReview);root.ownerDocument.removeEventListener('visibilitychange',shown);delete root.dataset.mounted;root.replaceChildren();}};
     }
-    const api={version:'1.4.7',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
+    const api={version:'1.4.8',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
     if (typeof module !== 'undefined' && module.exports) module.exports=api;
     if (host) host.CoopAccountingGuide=api;
 })(typeof window !== 'undefined' ? window : null);

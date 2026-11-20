@@ -1,10 +1,10 @@
-/* 법인세 따라 하기 1.4.0. 확인한 ERP 결산 계정을 표준재무제표 칸에 연결한다. */
+/* 법인세 따라 하기 1.4.1. 확인한 ERP 결산 계정을 표준재무제표 칸에 연결한다. */
 (function (host) {
     'use strict';
     const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const manual = 'https://hometax.speedycdn.net/dn_dir/webdown/1.20260227_%EB%B2%95%EC%9D%B8%EC%84%B8%20%EB%AC%B4%EB%A3%8C%EC%9E%91%EC%84%B1%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8(SMART-A)%EC%82%AC%EC%9A%A9%EB%B2%95_2026.zip';
     const link = (u,t) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t} ↗</a>`;
-    const screen = (file,title,page,{kind='일반법인 사용설명서',ext='jpg',note=''}={}) => `<figure class="ag-screen ag-screen-inline"><img src="accounting-guide/smarta-${file}.${ext}" alt="국세청 Smart A ${esc(kind)}의 ${esc(title)} 예시 화면" loading="lazy" decoding="async"><figcaption><span>국세청 2026년 배포본 · ${esc(kind)} ${page}쪽 · ${esc(title)}${note?' · '+esc(note):''}</span><button type="button" data-ag-screen-open class="ag-screen-action" aria-haspopup="dialog">크게 보기</button></figcaption></figure>`;
+    const screen = (file,title,page,{kind='일반법인 사용설명서',ext='jpg',note=''}={}) => `<figure class="ag-screen ag-screen-inline"><img data-ag-src="accounting-guide/smarta-${file}.${ext}" alt="국세청 Smart A ${esc(kind)}의 ${esc(title)} 예시 화면" loading="lazy" decoding="async"><figcaption><span>국세청 2026년 배포본 · ${esc(kind)} ${page}쪽 · ${esc(title)}${note?' · '+esc(note):''}</span><button type="button" data-ag-screen-open class="ag-screen-action" aria-haspopup="dialog">크게 보기</button></figcaption></figure>`;
     const groups = [['assets','자산'],['liabilities','부채'],['equity','자본계정'],['revenue','매출'],['expenses','비용'],['other_revenue','영업외수익']];
     const totals = [['total_assets','자산계정 합계'],['total_liabilities','부채계정 합계'],['total_revenue','매출 합계'],['total_expenses','비용 합계'],['total_other_revenue','영업외수익 합계'],['net_income','당기순손익']];
     const standardFields = [
@@ -115,7 +115,7 @@
             error:e=>e.message==='YEAR_REQUIRED'?'결산 연도를 네 자리 숫자로 입력해 주세요.':e.message==='REPORT_INVALID'?'선택한 연도의 최종 결산보고서를 확인하세요.':generic(e),
             loading:'저장한 결산보고서를 확인하고 있습니다.',changed:'선택한 연도의 결산보고서를 불러오세요.'});
     }
-    const api={version:'1.4.0',mount,load,analyze,resultHtml,mapStandardFields};
+    const api={version:'1.4.1',mount,load,analyze,resultHtml,mapStandardFields};
     if(typeof module!=='undefined'&&module.exports)module.exports=api;
     if(host)host.CoopSmartaGuide=api;
 })(typeof window!=='undefined'?window:null);
