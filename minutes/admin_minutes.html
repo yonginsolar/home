@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.91
-Change: 2026-10-26 - Open separate document retention review without leaving the editor.
+Version: v1.2.92
+Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 불러오기.
 -->
 <html lang="ko">
 <head>
@@ -16,7 +16,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.91 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.92 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -341,6 +341,20 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
             </div>
             <div id="structured-minute-fields" class="structured-minute-fields">
                 <p class="structured-minute-note" id="structured-minute-note"><strong>새 이사회 의사록 전용</strong> · 아래 정보와 참석 이사를 기준으로 문서 머리말·끝 날짜·조합명·전자서명란을 자동으로 만듭니다. 기존 문서는 바뀌지 않습니다.</p>
+                <section id="minute-notice-import" hidden style="margin-bottom:12px">
+                    <button type="button" class="btn btn-gray" id="minute-notice-open" aria-controls="minute-notice-panel" aria-expanded="false">승인 소집 공문 불러오기</button>
+                    <div id="minute-notice-panel" hidden style="padding:10px 0 0;overflow-wrap:anywhere">
+                        <div class="input-group">
+                            <label for="minute-notice-select">승인된 소집 공문</label>
+                            <select class="form-control" style="min-width:0;max-width:100%" id="minute-notice-select" data-erp-query-control disabled></select>
+                        </div>
+                        <div style="display:flex;flex-wrap:wrap;gap:8px">
+                            <button type="button" class="btn btn-gray" id="minute-notice-apply" disabled>선택한 공문 불러오기</button>
+                            <button type="button" class="btn btn-gray" id="minute-notice-close">닫기</button>
+                        </div>
+                        <p id="minute-notice-status" role="status" class="text-muted"></p>
+                    </div>
+                </section>
                 <div class="structured-minute-grid">
                     <div class="input-group">
                         <label for="in-notice-date">공고일</label>
@@ -657,6 +671,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
     <script src="/minutes/print_templates.js?v=1.0.0" integrity="sha384-0Dv/+nsMEE2YYei/8w61byahJg70q7qweSwpU9j7SEJKf4xdQPFjB8p8b5Y18gcO" crossorigin="anonymous" defer></script>
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.61';
+        import { bindMinuteNoticeImport } from './minute_notice_import.js?v=1.0.0';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -726,6 +741,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
         let minutesEditorReady = false;
         let minutesEditorPending = null;
         let minutesSubTabRevision = 0;
+        let minuteNoticeImporter = null;
 
         function boundedMinutesRead(work, controller = new AbortController()) {
             let timer;
@@ -841,6 +857,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
                 if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== currentUserId)) {
                     clearNoticeEditDrafts();
                     invalidateMinutesList();
+                    minuteNoticeImporter?.reset();
                     currentUserId = null;
                     isAdminUser = false;
                     minutesListOwner = { userId:null, coopId:null, revision:minutesListOwner.revision + 1 };
@@ -1937,8 +1954,9 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
             const noticeInput = document.getElementById('in-notice-date');
             const meetingInput = document.getElementById('in-meeting-date');
             if (noticeInput && (force || !noticeInput.value)) noticeInput.value = currentKstDate;
-            if (meetingInput && (force || !meetingInput.value)) {
+            if (meetingInput && (force || (!meetingInput.value && !minuteNoticeImporter?.hasExplicitDate()))) {
                 meetingInput.value = addMinuteCalendarDays(noticeInput?.value || currentKstDate, 7);
+                minuteNoticeImporter?.noteAutomaticDate(meetingInput.value);
             }
             syncBoardMinuteScheduleConstraints();
         }
@@ -3642,6 +3660,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
             const isNotices = safeName === 'notices';
             const isMaterials = safeName === 'materials';
             if (!isMinutes) invalidateMinutesList();
+            if (!isMinutes) minuteNoticeImporter?.reset();
             minutesBtn.classList.toggle('active', isMinutes);
             noticesBtn.classList.toggle('active', isNotices);
             materialsBtn.classList.toggle('active', isMaterials);
@@ -3681,6 +3700,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
             const btnEditor = document.getElementById('sub-tab-editor');
             const btnManage = document.getElementById('sub-tab-manage');
             if (tab === 'manage') {
+                minuteNoticeImporter?.reset();
                 editor?.classList.remove('active');
                 manage?.classList.add('active');
                 btnEditor?.classList.remove('active');
@@ -3707,6 +3727,27 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
                 if (!current()) return false;
                 allOfficials = officials;
                 renderSignerOptions(allOfficials, document.getElementById('in-doc-type')?.value || 'MINUTES');
+                minuteNoticeImporter = bindMinuteNoticeImport({
+                    getScope: () => isAdminUser && currentUserId && minutesListOwner.coopId && !document.hidden && !window.frameElement?.hidden
+                        && document.getElementById('tab-minutes')?.classList.contains('active')
+                        && document.getElementById('sub-panel-editor')?.classList.contains('active')
+                        ? JSON.stringify([currentUserId,minutesListOwner.coopId,minutesListOwner.revision]) : '',
+                    read: (kind,id,controller) => boundedMinutesRead(async signal => {
+                        const args = {p_kind:kind};
+                        if (id) args.p_approval_id = id;
+                        const {data,error} = await supabase.rpc('get_minute_approved_call_notices',args).abortSignal(signal);
+                        if (error) throw error;
+                        return data;
+                    },controller),
+                    confirmChange: message => window.CoopDialog.confirm(message),
+                    syncSchedule: syncBoardMinuteScheduleConstraints
+                });
+                window.addEventListener('pagehide',()=>minuteNoticeImporter?.reset());
+                document.addEventListener('visibilitychange',()=>{if(document.hidden)minuteNoticeImporter?.reset();});
+                const frame = window.frameElement;
+                if (frame) new MutationObserver(records=>{
+                    if (frame.hidden || records.some(record=>record.oldValue===null)) minuteNoticeImporter?.reset();
+                }).observe(frame,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
                 setStructuredMinuteDateDefaults();
                 ['in-notice-date','in-meeting-date','in-start-time','in-end-time'].forEach(id => {
                     document.getElementById(id)?.addEventListener('input', syncBoardMinuteScheduleConstraints);
@@ -3808,6 +3849,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
             const docTypeEl = document.getElementById('in-doc-type');
             if (docTypeEl) {
                 docTypeEl.addEventListener('change', () => {
+                    minuteNoticeImporter?.reset();
                     renderSignerOptions(allOfficials, docTypeEl.value);
                     setStructuredMinuteDateDefaults();
                 });
@@ -3825,6 +3867,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
             switchTab(ADMIN_MINUTES_SCOPE || 'minutes');
             window.ErpWorkspaceResume.register({modules:['minutes'],authorize:async runtime=>{
                 invalidateMinutesList();
+                minuteNoticeImporter?.reset();
                 if (minutesListOwner.coopId && minutesListOwner.coopId !== runtime.coop_id) clearNoticeEditDrafts();
                 minutesListOwner = { userId:currentUserId, coopId:runtime.coop_id, revision:minutesListOwner.revision + 1 };
                 return runtime.effective_permissions.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
@@ -4155,6 +4198,7 @@ Change: 2026-10-26 - Open separate document retention review without leaving the
             if(error) showToast(error.message);
             else {
                 showToast("등록되었습니다.");
+                minuteNoticeImporter?.reset();
                 document.getElementById('in-title').value = '';
                 setMinuteEditorContent('');
                 ['in-start-time', 'in-end-time', 'in-location', 'in-observers'].forEach((id) => {
