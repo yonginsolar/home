@@ -1,4 +1,4 @@
-/* 작업 이력1.0.1 · 새 검색 실패의 기존 목록 보존·동일 진행 검색 공유. */
+/* 작업 이력1.0.2 · 비용 표시는 천 단위, 초안과 저장 요청은 기존 원 단위 정수. */
 (function (root) {
   "use strict";
   const kinds = {
@@ -80,8 +80,10 @@
     let plantSelect, search, retry, more, add, list, status;
     function capture() {
       if (!editing || !form) return;
-      for (const name of fields)
-        editing.values[name] = form.elements[name].value;
+      for (const name of fields) {
+        const value = form.elements[name].value;
+        editing.values[name] = name === "cost" ? (root.ERPNumberInput?.raw(value) ?? value) : value;
+      }
     }
     function dirty(d) {
       return (
@@ -366,6 +368,15 @@
           n.min = "0";
           n.step = "1";
           n.max = "9000000000000";
+          n.dataset.numberGroup = "";
+          root.ERPNumberInput?.refresh(n);
+          n.addEventListener("paste", (event) => {
+            const text = event.clipboardData?.getData("text/plain")?.trim();
+            if (text?.includes(",") && !/^[0-9]{1,3}(,[0-9]{3})+$/.test(text)) {
+              event.preventDefault();
+              if (editing && owns(editing)) result(editing, "비용의 천 단위 쉼표를 확인해 주세요.");
+            }
+          });
         }
         col.append(l, n);
         form.append(col);
@@ -882,7 +893,7 @@
         d.values.title.length > 200 ||
         d.values.body.length > 10000 ||
         d.values.vendor.length > 200 ||
-        (d.values.cost && !/^\\d{1,13}$/.test(d.values.cost)) ||
+        (d.values.cost && !/^[0-9]{1,13}$/.test(d.values.cost)) ||
         Number(d.values.cost) > 9000000000000
       ) {
         result(d, "작업일·종류·제목·내용과 비용을 확인해 주세요.");

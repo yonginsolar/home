@@ -1,6 +1,7 @@
-/* v1.1.1 — recover explicit retry after a tab-interrupted PDF read or attachment preparation. */
+/* v1.1.2 — group won review fields without changing counts or application values. */
 (function(root){'use strict';
  const make=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
+ const wonFields=new Set(['insuranceHealth','insuranceCare','insurancePension','insuranceDurunuriPension','insurancePensionOffsetReceipts','insuranceEmployment','insuranceEmploymentStability','insuranceDurunuriEmployment','insuranceDurunuriStability','insuranceIndustrial']);
  function create({button,getContext,getFingerprint,apply,onDirty=()=>{}}){
  const drafts=new Map();let modal,body,status,fileInput,fileMeta,password,readButton,review,canvas,pageSelect,attachmentPageSelect,ack,applyButton,current=null,session=null,controller=null,epoch=0,busy=false,activeTask='',pdfModule=null,baseline='',renderEpoch=0,focusTarget=null,opened=false;
   const scope=()=>{const c=getContext();return c?.allowed&&c.visible!==false?c.owner+'|'+c.draft:'';};
@@ -56,8 +57,12 @@
    for(const w of s.result.warnings)review.append(make('p','small text-warning','⚠ 검토 필요 · '+w));
    const label=make('label','form-label','귀속월'),month=make('input','form-control mb-3');label.htmlFor='insuranceReadMonth';month.id=label.htmlFor;month.type='month';month.value=s.month||'';month.oninput=()=>{s.month=month.value;s.ack=false;s.dirty=true;sync();onDirty();};review.append(label,month);
    for(const[id,name,optional]of pdfModule.fields){const wrap=make('div','mb-2'),l=make('label','form-label small mb-1',name+(optional?' (선택)':''));l.htmlFor='notice_'+id;const n=make('input','form-control form-control-sm text-end');n.id=l.htmlFor;n.inputMode='numeric';n.value=s.values[id]??'';
+    const won=wonFields.has(id);if(won){n.dataset.numberGroup='';root.ERPNumberInput?.refresh(n);}
     const hint=make('small',s.result.evidence[id]?'text-muted':'text-warning d-block',s.result.evidence[id]?s.result.evidence[id].page+'쪽 · '+s.result.evidence[id].label:'⚠ 검토 필요 · 원본에서 확인해 입력해 주세요.');
-    n.oninput=()=>{s.values[id]=n.value.replace(/,/g,'').trim();s.ack=false;s.dirty=true;updateTotal();sync();onDirty();};wrap.append(l,n,hint);review.append(wrap);}
+    const updateValue=event=>{s.ack=false;s.dirty=true;if(!won||!event.isComposing){
+     s.values[id]=(won&&root.ERPNumberInput?root.ERPNumberInput.raw(n.value):n.value.replace(/,/g,'')).trim();updateTotal();
+    }sync();onDirty();};
+    n.oninput=updateValue;if(won)n.addEventListener('compositionend',updateValue);wrap.append(l,n,hint);review.append(wrap);}
    const total=make('p','fw-bold mt-3');total.id='insuranceReadTotal';review.append(total);ack.checked=!!s.ack;updateTotal();sync();
   }
   function updateTotal(){const el=review.querySelector('#insuranceReadTotal');if(!el)return;try{const n=pdfModule.calculate(current.values),expected=current.result.totals?.total;el.textContent='결재 반영 금액 '+n.total.toLocaleString('ko-KR')+'원'+(expected!==undefined&&expected!==n.total?' · ⚠ 원본 납부금액과 차이가 있습니다.':'');}catch{el.textContent='⚠ 금액과 차감액을 확인해 주세요.';}}
@@ -102,5 +107,5 @@
   button.addEventListener('click',open);
   return Object.freeze({open,hasDraft:()=>[...drafts.values()].some(d=>d.dirty),hasCurrentDraft:()=>!!drafts.get(scope())?.dirty,close:()=>{opened=false;stop();if(modal)root.bootstrap.Modal.getInstance(modal)?.hide();}});
  }
- root.CoopInsuranceNotice=Object.freeze({version:'1.1.1',create});
+ root.CoopInsuranceNotice=Object.freeze({version:'1.1.2',create});
 })(window);

@@ -296,8 +296,10 @@
                 phase = 'unknown'; note('앞서 보낸 정정 요청이 있어요. 먼저 결과를 확인해 주세요.'); render();
             } else void inspect();
         }
-        const parsedAmount = () => /^([1-9]\d*|[1-9]\d{0,2}(,\d{3})+)$/.test(amount.value.trim())
-            ? Number(amount.value.replaceAll(',', '')) : NaN;
+        const cleanAmount = value => /^([1-9]\d*|[1-9]\d{0,2}(,\d{3})+)$/.test(value.trim());
+        const parsedAmount = () => cleanAmount(amount.value)
+            ? Number(root.ERPNumberInput?.raw(amount.value) ?? amount.value.replaceAll(',', '')) : NaN;
+        const displayAmount = value => cleanAmount(value) && root.ERPNumberInput ? root.ERPNumberInput.format(value.trim()) : value;
         function render() {
             const unknown = !!draft.request;
             const ready = phase === 'ready' && info && !info.locked_reason;
@@ -346,7 +348,7 @@
                 if (!item || item.trans_id !== transId) throw new Error('UNCONFIRMED');
                 info = item; check.checked = false;
                 summary.textContent = `${item.date || ''} · ${transId} · 장부 ${item.before_amount == null ? '금액 확인 필요' : won(item.before_amount)} · 원결재 ${won(item.approved_amount)}`;
-                if (!draft.amount && item.before_amount != null) amount.value = String(item.before_amount);
+                if (!draft.amount && item.before_amount != null) amount.value = displayAmount(String(item.before_amount));
                 showHistory();
                 phase = 'ready';
                 note(item.locked_reason || (item.row_count === 4 ? '원전표와 연결된 재분류 전표의 금액을 함께 정정합니다.' : '차변과 대변의 금액을 함께 정정합니다.'));
@@ -400,9 +402,14 @@
                 else if (active && active.key === key) active.reconcile();
             }
         }
-        amount.value = draft.amount; reason.value = draft.reason;
+        amount.value = displayAmount(draft.amount); reason.value = draft.reason;
         for (const field of [amount, reason]) field.addEventListener('input', () => {
             draft.amount = amount.value; draft.reason = reason.value; check.checked = false; render();
+        });
+        // Check the original text first; do not turn a malformed paste into a valid amount.
+        amount.addEventListener('blur', () => {
+            const formatted = displayAmount(amount.value);
+            if (formatted !== amount.value) { amount.value = formatted; if (draft.amount) draft.amount = formatted; }
         });
         check.addEventListener('change', render);
         form.addEventListener('submit', event => {
