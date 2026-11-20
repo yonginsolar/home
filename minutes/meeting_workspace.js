@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.18.8
-Change: 2026-11-19 - 회의 업무 가이드를 준비된 화면에서 엽니다.
+Version: v1.18.9
+Change: 2026-11-20 - 이사회 안건 잠금과 총회 잠금 안내 구분.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
@@ -2883,6 +2883,7 @@ async function runAction(action) {
       : code.includes('MEETING_PDF_SOURCE_RETAINED') ? '무산된 회의나 다음 회의에서 참조하는 원본 PDF는 삭제할 수 없습니다.'
       : code.includes('MEETING_AGENDA_MATERIALS_MISMATCH') ? '회의자료의 안건 제목이 일치하지 않습니다. 작성한 설명·별첨을 보관한 뒤 기존 안건 제목을 확인해 주세요.'
       : code.includes('MEETING_AGENDA_LOCKED') && state.agendaLock?.board_plan_review ? BOARD_AGENDA_LOCK_REASON
+      : code.includes('MEETING_AGENDA_LOCKED') && state.current?.meeting_type === 'BOARD' ? '결재로 확정된 이사회 안건 제목·목록은 바꿀 수 없습니다. 입력은 보관했습니다.'
       : code.includes('MEETING_AGENDA_LOCKED') ? '소집 공문 결재가 완료되어 기본정보와 안건 제목·구성이 잠겼습니다. 입력은 보관했습니다. 잠금 상태를 다시 확인해 주세요.'
       : code.includes('MEETING_DOCUMENT_EDIT_REQUIRED') ? '편집권이 없거나 만료되었습니다. 작성한 내용을 확인하고 편집권을 다시 확인해 주세요.'
       : code.includes('MEETING_DOCUMENT_EDIT_IN_PROGRESS') ? '편집 중인 문서가 있습니다. 편집을 마친 뒤 다시 확인해 주세요.'
