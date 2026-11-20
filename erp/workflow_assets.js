@@ -11,7 +11,7 @@
         approvalPrint: {src:local('approval_print_templates.js?v=1.1.0'), integrity:'sha384-0xAd/FTQcKzkMv/Yttqr3tvwL40wfrPUmmr3x7WIfNOfNDNx8hY2YxWrUoktoizI', ready:() => root.ApprovalPrintTemplates?.version === '1.1.0'},
         approvalPrintAttachments: {src:local('approval_print_attachments.js?v=1.0.0'), integrity:'sha384-SfC3sFiucH/VFTbvTn/FMXQpncg/G8PxLHQyP+3ORDNcfWugR11ueVaoIzPoaABe', ready:() => root.ApprovalPrintAttachments?.version === '1.0.0'},
         pdfCreate: {src:local('assets/vendor/pdf-lib-1.17.1.min.js'), integrity:'sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI', ready:() => typeof root.PDFLib?.PDFDocument?.create === 'function'},
-        accountingGuide: {src:local('accounting_guide.js?v=1.4.3'), integrity:'sha384-71TY6FjhAxzmqyV7AWmUtBx3ZO0OZFgZK2hpnwTpNbdyYxsG/zYLS3cafqthezQ7', ready:() => root.CoopAccountingGuide?.version === '1.4.3'},
+        accountingGuide: {src:local('accounting_guide.js?v=1.4.4'), integrity:'sha384-In5HepGllo0ijhOMNE41sGu5uOnYeSN09HvszExeSr6SGI5NMnCAB9UVQ1IX4X3G', ready:() => root.CoopAccountingGuide?.version === '1.4.4'},
         smartaGuide: {src:local('accounting_smarta_guide.js?v=1.4.0'), integrity:'sha384-XuAl6EXYMGSg3IJGy9lEvC5so+XWbZA6JDL10qHG3GNny6BpEd0YFnNffjYkUV9J', ready:() => root.CoopSmartaGuide?.version === '1.4.0'},
         financialEngine: {src:local('financial_statements_engine.js?v=1.1.0'),integrity:'sha384-tHgs9MvyMyqTqO0xgb085190rccIQa+mRTNiZDpLTrpvvs5qMnZ+MZhqgVRV9H/s',ready:()=>root.FinancialStatementsEngine?.version==='1.1.0'},
         financialStatements: {src:local('financial_statements.js?v=20261022-help-1'),integrity:'sha384-197uk3V7iE6wQHZ3ym5FaJlxM+YFII3EvoqIWWJ4nmSpSe+ZwGrMvoKi4/p1frPq',ready:()=>root.FinancialStatements?.version==='1.1.5'},
