@@ -2,10 +2,17 @@
 (function(root){
  'use strict';
  const hcrec='4e2b5e2a-79b1-4beb-a4ec-8797ebe23028';
+ const presentationHosts=Object.freeze({
+  [hcrec]:['hcrec.kr','www.hcrec.kr','erp.hcrec.kr'],
+  'a4e65bb0-aa8e-4cef-a895-cd7865a67fef':['yonginsolar.kr','www.yonginsolar.kr','erp.yonginsolar.kr'],
+  '180d85a8-9c72-4556-9cf1-256e00a5c944':['yonginsun.kr','www.yonginsun.kr','erp.yonginsun.kr']
+ });
  const choices={title_size:['small','normal','large'],title_align:['left','center','right'],body_size:['small','normal','large'],body_align:['left','center','right'],photo:['left','right','top']};
  const keys=[...Object.keys(choices),'alt'];
  const isCoop=id=>String(id||'')===hcrec;
  const matches=(id,where=root.location)=>isCoop(id)&&where.protocol==='https:'&&!where.port&&['hcrec.kr','www.hcrec.kr','erp.hcrec.kr'].includes(where.hostname.toLowerCase().replace(/\.$/,''));
+ const supportsPresentation=(id,where=root.location)=>where.protocol==='https:'&&!where.port&&
+   Object.hasOwn(presentationHosts,id)&&presentationHosts[id].includes(where.hostname.toLowerCase());
  function sanitize(value){
   const clean={};
   for(const [key,values]of Object.entries(choices))if(values.includes(value?.[key]))clean[key]=value[key];
@@ -79,5 +86,5 @@
   if(photo){image.alt=p.alt||'협동조합 소개 사진';if(image.getAttribute('src')!==url)image.src=url;}
   else{image.removeAttribute('src');image.alt='';}
  }
- root.CoopHcrecAbout=Object.freeze({matches,sanitize,keys,imageUrl,aboutHref,pasteFragment,decorate});
+ root.CoopHcrecAbout=Object.freeze({matches,supportsPresentation,sanitize,keys,imageUrl,aboutHref,pasteFragment,decorate});
 })(window);

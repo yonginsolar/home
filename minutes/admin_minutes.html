@@ -427,6 +427,7 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
                 <button id="load-minute-template-btn" onclick="loadLastMinuteTemplate()" class="btn btn-gray">지난 양식 불러오기</button>
+                <button id="aiMinuteDraftButton" type="button" class="btn btn-gray" title="승인 소집 공문을 먼저 불러와 주세요." hidden disabled>AI 의사록 초안</button>
                 <button onclick="previewDraftMinute()" class="btn btn-gray">저장 전 미리보기</button>
                 <button onclick="createMinute()" class="btn btn-submit">저장하기</button>
             </div>
@@ -669,10 +670,12 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
     </div>
 
     <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
+    <script src="/erp/ai_edit_panel.js?v=1.0.1" integrity="sha384-leWoqwjTMuT641o/ZzKvVH21xY/QRoONCRscJkXRdOnayuVpVqcsWUqzgthJ/BaY" crossorigin="anonymous" defer></script>
+    <script src="/erp/meeting_ai_editor.js?v=1.0.1" integrity="sha384-fl4kvvOp3hxxDlu8q2n/GgRCR1geD0PElimGzvHGIqNxV7ecN5zGNM2M0YKRPG71" crossorigin="anonymous" defer></script>
     <script src="/minutes/print_templates.js?v=1.0.0" integrity="sha384-0Dv/+nsMEE2YYei/8w61byahJg70q7qweSwpU9j7SEJKf4xdQPFjB8p8b5Y18gcO" crossorigin="anonymous" defer></script>
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.61';
-        import { bindMinuteNoticeImport } from './minute_notice_import.js?v=1.0.0';
+        import { bindMinuteNoticeImport } from './minute_notice_import.js?v=1.1.0';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -742,7 +745,7 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
         let minutesEditorReady = false;
         let minutesEditorPending = null;
         let minutesSubTabRevision = 0;
-        let minuteNoticeImporter = null;
+        let minuteNoticeImporter = null, inlineMinuteAi = null;
 
         function boundedMinutesRead(work, controller = new AbortController()) {
             let timer;
@@ -3718,6 +3721,35 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
         }
         window.switchMinutesSubTab = switchMinutesSubTab;
 
+        function bindInlineMinuteAi() {
+            if (inlineMinuteAi || !window.CoopMeetingAiEditor || !['erp.hcrec.kr','erp.yonginsolar.kr','www.yonginsolar.kr','yonginsolar.kr','erp.yonginsun.kr'].includes(location.hostname)) return;
+            const el = id => document.getElementById(id);
+            const capture = () => {
+                const reference = minuteNoticeImporter?.getAppliedNotice();
+                if (!reference || !minutesEditorReady || !isAdminUser || document.hidden || window.frameElement?.hidden ||
+                    !el('tab-minutes')?.classList.contains('active') || !el('sub-panel-editor')?.classList.contains('active')) return null;
+                return {reference, actor:currentUserId, coop:minutesListOwner.coopId, epoch:minutesListOwner.revision,
+                    editor:el('in-content'), body:getMinuteEditorContent(), heading:el('in-title').value,
+                    mode:minuteEditorMode, schedule:['in-doc-type','in-notice-date','in-meeting-date','in-start-time','in-end-time','in-location'].map(id=>el(id).value).join('\u0000')};
+            };
+            const same = old => { const now=capture();return !!now&&Object.keys(now).every(k=>now[k]===old[k]); };
+            inlineMinuteAi = window.CoopMeetingAiEditor.mount({
+                button:el('aiMinuteDraftButton'), kind:'meeting_minutes', capture, same, invoke:window.CoopMeetingAiEditor.invoke(supabase),
+                append(nodes,old){
+                    if(!same(old))return false;
+                    const tmp=document.createElement('div');tmp.append(nodes);
+                    setMinuteEditorContent(old.body+tmp.innerHTML);return true;
+                }
+            });
+            if(!inlineMinuteAi)return;
+            document.addEventListener('minute-notice-applied',()=>{inlineMinuteAi.close();inlineMinuteAi.sync();});
+            document.addEventListener('change',e=>{if(e.target?.id==='in-doc-type')queueMicrotask(()=>inlineMinuteAi.sync());});
+            for(const name of ['tab-minutes','sub-panel-editor']){
+                const pane=el(name);
+                if(pane)new MutationObserver(()=>{inlineMinuteAi.close();inlineMinuteAi.sync();}).observe(pane,{attributes:true,attributeFilter:['class','hidden']});
+            }
+        }
+
         function ensureMinutesEditor() {
             if (minutesEditorReady) return Promise.resolve(true);
             if (minutesEditorPending) return minutesEditorPending;
@@ -3744,6 +3776,7 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
                     confirmChange: message => window.CoopDialog.confirm(message),
                     syncSchedule: syncBoardMinuteScheduleConstraints
                 });
+                bindInlineMinuteAi();
                 window.addEventListener('pagehide',()=>minuteNoticeImporter?.reset());
                 document.addEventListener('visibilitychange',()=>{if(document.hidden)minuteNoticeImporter?.reset();});
                 const frame = window.frameElement;

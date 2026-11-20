@@ -1784,7 +1784,9 @@ return aboutSettingsRead===read && !read.cancelled && siteModalScopeCurrent(read
 && document.getElementById('sub-about')===read.body;
 }
 function hcrecAboutEditorAllowed() {
-return root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)===true && canAccessAdminMemberTab('site');
+const helper=root.CoopHcrecAbout,coop=g_adminMemberRuntime?.coop_id;
+return canAccessAdminMemberTab('site')&&(helper?.matches(coop)===true||
+ (root.CoopAiEditPanel?.canProbe()===true&&helper?.supportsPresentation(coop)===true));
 }
 function readHcrecAboutPresentation() {
 const helper=root.CoopHcrecAbout;
@@ -1807,6 +1809,30 @@ panel.addEventListener('click',event=>{
  const status=document.getElementById('hcrec-about-edit-status');
  status.hidden=root.CoopSiteInlineHost?.startAboutField?.(key)===true;
  status.textContent=status.hidden?'':'미리보기를 먼저 연 뒤 다시 눌러 주세요.';
+});
+}
+function bindAboutInlineAi() {
+const snapshot=()=>{
+const phase=document.getElementById('site-about-save-status')?.dataset.siteEditorPhase;
+const form=document.getElementById('sub-about'),scope={owner:siteModalOwner(),runtime:g_adminMemberRuntime,area:'about'};
+if(document.hidden||!hcrecAboutEditorAllowed()||!siteModalScopeCurrent(scope)||!form?.classList.contains('active')||!['idle','dirty'].includes(phase))return null;
+return {scope,ownerKey:scope.owner,form,exact:siteEditorFormSnapshot('sub-about'),file:document.getElementById('admin-about-img-file')?.files?.[0]||null,
+styles:JSON.stringify(CoopSiteInlineHost.readStyles('about',true))};
+};
+const isCurrent=key=>{
+const now=snapshot();
+return !!now&&now.scope.owner===key.scope.owner&&now.scope.runtime===key.scope.runtime&&now.form===key.form&&now.exact===key.exact&&now.file===key.file&&now.styles===key.styles;
+};
+root.CoopAboutAiEditor?.mount({capture:snapshot,current:isCurrent,sanitize:sanitizeAboutHtml,
+ async send(body,signal){
+  const {data,error}=await _supabase.functions.invoke('erp-inline-ai',{body,signal});
+  if(!error)return data;
+  const failure=await error.context?.json?.().catch(()=>null);
+  return {error:failure?.error||'unavailable'};
+ },
+ loadPresentation:next=>loadHcrecAboutPresentation({...readHcrecAboutPresentation(),...next}),
+ readStyles:()=>CoopSiteInlineHost.readStyles('about'),writeStyles:next=>CoopSiteInlineHost.setStyles('about',next),
+ refresh:()=>{getSiteEditorDraft('about').refresh();queueTotalPreviewUpdate();}
 });
 }
 function cancelAboutSettingsRead() {
@@ -1989,7 +2015,8 @@ updates.p_image_url = newlyUploadedImageUrl;
 }
 
 if(enhanced&&!hcrecAboutEditorAllowed())return;
-const { error } = await _supabase.rpc(enhanced?'upsert_hcrec_about_presentation':'upsert_about_with_text_styles', updates);
+const legacyAbout=root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)===true;
+const { error } = await _supabase.rpc(enhanced?(legacyAbout?'upsert_hcrec_about_presentation':'save_site_about_presentation'):'upsert_about_with_text_styles', updates);
 if (error) throw error;
 aboutSaveConfirmed = true;
 if (!current()) return;
@@ -4505,6 +4532,7 @@ CoopHomeVisualEditor.mount(); // Mount before taking the initial draft snapshot.
 bindHcrecAboutPresentation();
 getSiteEditorDraft('home');
 getSiteEditorDraft('about');
+bindAboutInlineAi();
 getCertificationDraftStore();
 window.addEventListener('pagehide',() => {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();cancelExternalNewsRead();});
 for (const eventName of ['hidden.bs.tab','shown.bs.tab']) document.getElementById('site-content-tabs')?.addEventListener(eventName,() => {
@@ -4550,5 +4578,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
     Object.assign(root,{loadHomeComparisonPlants,markHomeComparisonPhoto,confirmHomeComparisonTarget,toggleHomePhotoPreview,setHomePhotoPreview});
-    root.AdminMemberSite = Object.freeze({ version: '20261119-hcrec-home-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
+    root.AdminMemberSite = Object.freeze({ version: '20261120-inline-ai-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
 })(window);

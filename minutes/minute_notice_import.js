@@ -17,7 +17,7 @@ export function bindMinuteNoticeImport({doc = document, getScope, read, confirmC
     const fields = FIELDS.map(([key,id,label,valid]) => ({key,node:doc.getElementById(id),label,valid}));
     const values = () => fields.map(({node})=>node.value);
     const option = (text,value) => new doc.defaultView.Option(text,value);
-    let epoch = 0, fieldRevision = 0, request = null, rows = new Map(), automaticDate = null, explicitDate = false;
+    let epoch = 0, fieldRevision = 0, request = null, rows = new Map(), automaticDate = null, explicitDate = false, appliedNotice = null;
     const kind = () => TYPES[doc.getElementById('in-doc-type')?.value] || '';
     const owner = () => getScope();
     const current = (job) => request === job && epoch === job.epoch && !!job.owner && owner() === job.owner
@@ -35,12 +35,14 @@ export function bindMinuteNoticeImport({doc = document, getScope, read, confirmC
     }
     function reset() {
         stop();
+        appliedNotice = null;
         rows = new Map();
         list.replaceChildren(option('소집 공문 선택',''));
         panel.hidden = true;
         open.setAttribute('aria-expanded','false');
         section.hidden = !kind();
         state();
+        section.dispatchEvent(new doc.defaultView.Event('minute-notice-applied',{bubbles:true}));
     }
     function begin(id) {
         const job = {epoch:++epoch, owner:owner(), kind:kind(), controller:new AbortController(),
@@ -106,6 +108,8 @@ export function bindMinuteNoticeImport({doc = document, getScope, read, confirmC
                 node.value = proposed[index]; count++;
             });
             if (count) syncSchedule();
+            appliedNotice = {id:job.id,kind:job.kind,owner:job.owner};
+            section.dispatchEvent(new doc.defaultView.Event('minute-notice-applied',{bubbles:true}));
             const missing = fields.filter((_,index)=>!known[index]).map(x=>x.label);
             state(missing.length ? '승인 원본에서 확인할 수 없는 항목: '+missing.join('·')+'. 직접 확인해 주세요.'
                 : count ? '공문에서 기본정보를 불러왔습니다.' : '이미 같은 값이 입력되어 있습니다.');
@@ -128,5 +132,6 @@ export function bindMinuteNoticeImport({doc = document, getScope, read, confirmC
         if (event.repeat && !event.isComposing && (event.key === 'Enter' || event.key === ' ')) event.preventDefault();
     }));
     reset();
-    return { reset, hasExplicitDate:()=>explicitDate, noteAutomaticDate(value){automaticDate=value;explicitDate=false;} };
+    return { reset, hasExplicitDate:()=>explicitDate, noteAutomaticDate(value){automaticDate=value;explicitDate=false;},
+        getAppliedNotice:()=>appliedNotice&&appliedNotice.owner===owner()&&appliedNotice.kind===kind()?appliedNotice.id:null };
 }

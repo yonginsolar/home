@@ -54,7 +54,9 @@
  function send(message){const f=frame();if(f?.src)f.contentWindow?.postMessage(message,new URL(f.src).origin);}
  function startAboutField(key){
   const f=frame();
-  if(!root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)||!['aboutTitle','aboutSubtitle','aboutContent','aboutList'].includes(key)
+  if(!(root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)||
+      root.CoopAiEditPanel?.canProbe()&&root.CoopHcrecAbout?.supportsPresentation(g_adminMemberRuntime?.coop_id))
+      ||!['aboutTitle','aboutSubtitle','aboutContent','aboutList'].includes(key)
       ||!ready(key)||root.CoopHomeVisualEditor?.current()!=='about'||!f?.getAttribute('src')||!f.contentWindow
       ||document.getElementById('site-home-preview-shell')?.hidden||root.frameElement?.hidden)return false;
   send({type:'coop-home-about-edit',field:key});return true;
@@ -217,7 +219,9 @@
   else if(data.type==='coop-home-mobile-control'){
    const scope=root.CoopHeroVisual.editor().slideId;if((data.scope||'')!==scope&&['hero','heroTitle','heroSubtitle','heroButton'].includes(data.field))return;
    const key=data.field==='hero'?'heroTitle':data.field;if(!Object.hasOwn(fields,key)||!ready(key))return;
-   if(data.property==='about-settings'&&key.startsWith('about')&&root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)){
+   if(data.property==='about-settings'&&key.startsWith('about')&&
+      (root.CoopHcrecAbout?.matches(g_adminMemberRuntime?.coop_id)||
+       root.CoopAiEditPanel?.canProbe()&&root.CoopHcrecAbout?.supportsPresentation(g_adminMemberRuntime?.coop_id))){
     root.CoopSiteInlineHost.keepSettingsOpen();document.querySelector('#hcrec-about-settings [data-about-edit]')?.focus();return;
    }
    if(data.property==='photo'||data.property==='links')root.CoopHeroVisual.action(data.property);
