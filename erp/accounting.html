@@ -18,8 +18,8 @@
   <script src="accounting_bank_compare.js?v=1.1.4"></script>
   <script src="accounting_payroll_recovery_v2.js?v=1.1.0" integrity="sha384-E21YgL5nld+cPHhFryWSP/PXrO4ctgS9j0iKoYdZd8immP7qjqu9ovbuMQLeVc/9" crossorigin="anonymous"></script>
   <script src="accounting_journal_typo.js?v=1.1.1" integrity="sha384-doIdycMuLRG8oxw5/ieVw8ij7JBthcg2jyqcg2RvEd0RUwE52IeizXx2N/WCPbRi" crossorigin="anonymous" defer></script>
-  <link rel="stylesheet" href="accounting_guide.css?v=1.4.5" integrity="sha384-hcG4p1wGIZ2hqO8qgMCiBG6+7hzM9PAMZ+ZfYXwoPtBV+oxut0prE7T+ADQye9Za" crossorigin="anonymous">
-  <script src="workflow_assets.js?v=20261120-withholding-inline-2" integrity="sha384-KNSEaqN9AzPWEzneXXd6LYbV7w6WtohrnES0Vl2vireBpEMZtPKxHn/S4S+xFnKW" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="accounting_guide.css?v=1.4.6" integrity="sha384-WfcDtgrk4+xsQ1ArFtE521FC8newqG+nTPr/HJmorBJPGi6tuhKu6O/QkMtrAnv4" crossorigin="anonymous">
+  <script src="workflow_assets.js?v=20261120-withholding-direct-2" integrity="sha384-ynVx6RfsJSkUGbKH18qsbuWCrE4WPqTGL2PZ1HPkGpD+XFGAtvNrbrm0CDKhta6k" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
   <link rel="stylesheet" href="financial_statements.css?v=1.1.1">
   <meta charset="UTF-8">
@@ -2287,15 +2287,6 @@ window.onload = async function() {
     accountingReportActorUid = String(accountingUserGate.authUser?.id || '');
     permissionSet = await loadPermissions(myInfo);
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
-    try {
-        const { data: festivalAccess, error: festivalAccessError } = await _supabase.rpc('festival_receipts_admin', { p_action: 'access', p_data: {} });
-        if (!festivalAccessError && festivalAccess?.allowed) {
-            document.getElementById('festivalCashSalesLink')?.classList.remove('hidden');
-            document.getElementById('assetInventoryManageLink')?.classList.remove('hidden');
-        }
-    } catch (_) {
-        // This workflow is only enabled for the cooperative that operates the festival sales page.
-    }
     const durunuriExceptionTool = document.getElementById('durunuriExceptionTool');
     if (durunuriExceptionTool) {
         durunuriExceptionTool.classList.toggle('hidden', !canPerform('accounting.edit'));
@@ -2329,6 +2320,17 @@ window.onload = async function() {
         }
         guideAuthActor=actor;
     });
+    if (document.getElementById('tabGuide')?.classList.contains('active')) void mountAccountingGuide();
+    const festivalOwner=accountingReadIdentity();
+    void (async()=>{
+        try{
+            const {data,error}=await _supabase.rpc('festival_receipts_admin',{p_action:'access',p_data:{}});
+            if(!error&&data?.allowed&&accountingDataAuthorized&&festivalOwner===accountingReadIdentity()){
+                document.getElementById('festivalCashSalesLink')?.classList.remove('hidden');
+                document.getElementById('assetInventoryManageLink')?.classList.remove('hidden');
+            }
+        }catch(_){}
+    })();
 
     const today = new Date();
     const todayKst = formatAccountingKstDate(today);
@@ -2383,7 +2385,6 @@ window.onload = async function() {
         if (event.key === null || event.key.startsWith('coop.accounting.payroll.result.v1:')) renderAccountingPayrollResult();
     });
     if (document.getElementById('tabSync')?.classList.contains('active')) await loadApprovalUnclassifiedQueue();
-    if (document.getElementById('tabGuide')?.classList.contains('active')) await mountAccountingGuide();
     if (new URLSearchParams(location.search).get('work') === 'taxes') {
         bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#tabTaxes"]')).show();
         await openAccountingTaxTasks();
@@ -2448,7 +2449,7 @@ async function mountAccountingGuide() {
     const scope=accountingReadScope('tabGuide'),coopId=String(scope.owner?.coop_id||'').trim();
     const isCurrent=()=>!accountingGuideAuthInvalid&&accountingReadScopeCurrent(scope);
     if(!isCurrent())return;
-    if(accountingGuideView&&accountingGuideScope?.owner===scope.owner&&accountingGuideScope?.identity===scope.identity)return;
+    if(accountingGuideView&&accountingGuideScope?.owner===scope.owner&&accountingGuideScope?.identity===scope.identity){accountingGuideView.resume?.();return;}
     accountingGuideView?.destroy();accountingGuideView=null;
     if(accountingGuideLoading){
         await accountingGuideLoading;
@@ -2458,7 +2459,7 @@ async function mountAccountingGuide() {
     root.textContent = '안내를 불러오는 중입니다.';
     accountingGuideLoading = (async () => {
         try {
-            await Promise.all([window.ErpWorkflowAssets.load('accountingGuide'), window.ErpWorkflowAssets.load('smartaGuide')]);
+            await window.ErpWorkflowAssets.load('accountingGuide');
             if (!isCurrent()) return;
             accountingGuideView=window.CoopAccountingGuide.mount({root,client:_supabase,coopId,active:isCurrent});
             accountingGuideScope=scope;
