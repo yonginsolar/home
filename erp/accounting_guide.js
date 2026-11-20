@@ -1,4 +1,4 @@
-/* 신고·결산 매뉴얼 1.4.2. 현재 가이드 칸에서 확인한 값만 복사한다. */
+/* 신고·결산 매뉴얼 1.4.3. 현재 가이드 칸에서 확인한 값만 복사한다. */
 (function (host) {
     'use strict';
     const completed = ['완료', '실물결재완료'];
@@ -266,7 +266,32 @@
     function fieldSlots(rows,label='신고 입력칸과 ERP 확인값') {
         return `<div class="ag-slots" role="group" aria-label="${esc(label)}">${rows.map(([id,title,source])=>`<div class="ag-slot" id="ag-slot-${esc(id)}" data-ag-slot="${esc(id)}" tabindex="-1"><strong>${esc(title)}</strong><div class="ag-slot-value"><output aria-label="${esc(title)} 확인값"></output><span data-ag-empty>확인 필요</span><button type="button" class="ag-copy" data-ag-live-copy aria-label="${esc(title)} 복사" hidden disabled>복사</button></div><small>${esc(source)}</small></div>`).join('')}</div>`;
     }
-    const withholdingShot=(id,title)=>`<div class="ag-proof-place" data-ag-capture-slot="withholding-${id}"><h4>${esc(title)}</h4><small>화면 준비 중</small></div>`;
+    const withholdingShots={
+        'tax-menu':['tax-filing-menu.jpg',71,33],
+        'withholding-menu':['withholding-menu.jpg',103,36],
+        'general-menu':['withholding-general-menu.jpg',151,100],
+        'regular-menu':['regular-filing.jpg',258,77],
+        period:['payment-month-confirmation.jpg',344,92,'캡처의 2026년 11월은 예시입니다.'],
+        'business-check':['business-number-confirm-button.png',234,58,'사업자등록번호 칸의 이름과 확인 버튼입니다.'],
+        'income-type':['employment-income-checkbox.jpg',113,28],
+        'intro-next':['basic-information-save-next.jpg',132,26],
+        'a01-current':['a01-guide-full.png',743,138,'A01 ④~⑧의 제목과 빈 입력칸입니다.'],
+        a99:['a99-guide.png',525,91,'자동 합계의 제목과 항목 일부입니다.'],
+        'a01-next':['a01-save-next.jpg',136,25],
+        'a01-confirm':['a01-save-dialog.jpg',266,19,'변경 확인창의 둘째 줄입니다.'],
+        'annex-type':['annex-income-select.jpg',198,35],
+        'annex-warning':['annex-warning.jpg',239,22,'선택하지 않은 내용은 삭제된다는 안내입니다.'],
+        'annex-empty':['annex-empty.jpg',180,27],
+        'annex-confirm':['annex-next-dialog.jpg',286,21]
+    };
+    function withholdingShot(id,title) {
+        const slot=`withholding-${id}`;
+        const pending=`<div class="ag-proof-place"><h4>${esc(title)}</h4><small>화면 준비 중</small></div>`;
+        const capture=Object.hasOwn(withholdingShots,id)?withholdingShots[id]:null;
+        if(!capture)return `<div data-ag-capture-slot="${slot}">${pending}</div>`;
+        const [file,width,height,note]=capture;
+        return `<div data-ag-capture-slot="${slot}"><figure class="ag-screen ag-screen-inline ag-withholding-shot"><img src="accounting-guide/hometax-${file}" width="${width}" height="${height}" alt="${esc(title)}" loading="lazy" decoding="async"><figcaption><span>홈택스 화면 일부${note?' · '+esc(note):''}</span><button type="button" class="ag-screen-action" data-ag-screen-open aria-haspopup="dialog" aria-label="${esc(title)} 화면 크게 보기">크게 보기</button></figcaption></figure><div data-ag-capture-fallback hidden>${pending}</div></div>`;
+    }
     const withholdingStep=(id,title,body)=>[title,`<p>${body}</p>${withholdingShot(id,title)}`];
     const a01ReviewPrompt='승인 급여와 지급 전표를 불러와 확인해 주세요.';
     const checkPay= '<button type="button" class="ag-screen-action" data-ag-flow-go="0">ERP 값 확인 단계로 이동</button>';
@@ -278,7 +303,7 @@
             withholdingStep('withholding-menu','원천세 신고','<b>원천세 신고</b>를 선택합니다.'),
             withholdingStep('general-menu','일반신고','<b>일반신고</b>를 선택합니다.'),
             withholdingStep('regular-menu','정기신고','<b>정기신고</b>를 엽니다.'),
-            ['신고할 지급연월 확인',`<p>‘… 지급분을 신고하는 작성화면 입니다.’에 표시된 월이 이번에 신고할 지급월인지 확인하세요. ② 귀속연월과 ③ 지급연월은 확인한 ERP 값과 각각 대조합니다.</p><div class="ag-walk-grid">${withholdingShot('period','지급분 안내와 귀속·지급연월')}<div>${fieldSlots(payPeriodSlots,'귀속·지급연월과 ERP 확인값')}${checkPay}</div></div>`],
+            ['신고할 지급연월 확인',`<p>‘… 지급분을 신고하는 작성화면 입니다.’에 표시된 월이 이번 신고의 지급월과 같으면 <b>확인</b>을 누릅니다. ② 귀속연월과 ③ 지급연월은 확인한 ERP 값과 각각 대조합니다.</p><div class="ag-walk-grid">${withholdingShot('period','신고할 지급연월 안내와 확인 버튼')}<div>${fieldSlots(payPeriodSlots,'귀속·지급연월과 ERP 확인값')}${checkPay}</div></div>`],
             withholdingStep('business-check','사업자등록번호 옆 확인','신고할 조합의 사업자등록번호가 맞는지 보고 번호 옆 <b>확인</b>을 누릅니다.'),
             withholdingStep('business-result','조회가 완료되었습니다','조회가 완료되면 신고할 조합의 정보가 맞는지 확인합니다.'),
             withholdingStep('income-type','근로소득 선택','일반 급여 신고 예시에서는 <b>근로소득</b>을 선택합니다.'),
@@ -287,9 +312,9 @@
             ['간이세액 A01 입력칸 확인',a01Walk],
             withholdingStep('a99','A99 총합계 대조','<b>A99 총합계</b>는 홈택스의 자동 집계입니다. 직접 입력하지 말고 입력한 신고 내용과 맞는지 비교하세요.'),
             withholdingStep('a01-next','원천징수이행상황신고서 저장 후 다음이동','A01 입력 내용과 A99 총합계를 대조한 뒤 <b>저장 후 다음이동</b>을 누릅니다.'),
-            withholdingStep('a01-confirm','변경내용 확인','이동 전 변경내용을 확인합니다.'),
+            withholdingStep('a01-confirm','변경내용 확인','‘변동된 내용이 존재합니다.’가 표시되면 입력한 내용을 확인한 뒤 <b>예</b>를 누릅니다. 다시 확인하려면 <b>아니오</b>를 누르세요.'),
             withholdingStep('annex-type','신고서 소득 종류 선택','이 일반 급여 예시는 해당 부표를 선택하지 않습니다. 제출할 별도 부표가 있는 신고에는 이 예시를 그대로 적용하지 마세요.'),
-            withholdingStep('annex-warning','작성 중인 부표 삭제 안내','빈 예시에서는 작성 중인 부표가 없음을 확인합니다. 작업 중인 내용이나 별도 부표가 있거나 있는지 모르면 진행하지 말고 먼저 내용을 확인하세요.'),
+            withholdingStep('annex-warning','작성 중인 부표 삭제 안내','선택하지 않은 기존 부표 내용은 삭제될 수 있습니다. 실제로 작성할 부표가 없을 때만 아무것도 선택하지 않고 이동하세요. 기존 부표가 있거나 확실하지 않으면 진행하지 말고 내용을 확인하세요.'),
             withholdingStep('annex-empty','신고서 부표 작성','빈 예시에서는 <b>작성할 내역 없음</b>으로 표시됩니다.'),
             withholdingStep('annex-next','부표 화면에서 저장 후 다음이동','작성할 내역이 없는 이 예시에서는 <b>저장 후 다음이동</b>을 누릅니다.'),
             withholdingStep('annex-confirm','부표 화면 이동 안내','별도 작성 내용이 없음을 확인했으면 이동 안내에서 <b>예</b>를 누릅니다.'),
@@ -345,6 +370,12 @@
     }
     function bindWithholdingFlow(container,list,active) {
         const doc=container.ownerDocument;
+        for(const img of container.querySelectorAll('.ag-withholding-shot img')){
+            img.addEventListener('error',()=>{
+                const shot=img.closest('figure');shot.hidden=true;
+                shot.nextElementSibling.hidden=false;
+            },{once:true});
+        }
         const panels=[...container.querySelectorAll('[data-ag-flow-panel]')];
         const title=container.querySelector('#agWithholdingTitle'), position=container.querySelector('#agWithholdingPosition');
         const select=container.querySelector('#agWithholdingSelect');
@@ -428,7 +459,7 @@
         root.append(viewer);
         const photo=viewer.querySelector('img'),scroll=viewer.querySelector('.ag-screen-viewport');
         const size=viewer.querySelector('[data-ag-screen-size]'),dismiss=viewer.querySelector('[data-ag-screen-close]');
-        const zoom=inFullSize=>{size.setAttribute('aria-pressed',String(inFullSize));size.textContent=inFullSize?'창에 맞추기':'원래 크기';scroll.classList.toggle('ag-screen-actual',inFullSize);scroll.scrollTop=0;scroll.scrollLeft=0;};
+        const zoom=inFullSize=>{size.setAttribute('aria-pressed',String(inFullSize));size.textContent=inFullSize?'창에 맞추기':viewer.classList.contains('ag-withholding-image')?'더 확대':'원래 크기';scroll.classList.toggle('ag-screen-actual',inFullSize);scroll.scrollTop=0;scroll.scrollLeft=0;};
         size.addEventListener('click',()=>zoom(size.getAttribute('aria-pressed')!=='true'));
         dismiss.addEventListener('click',()=>viewer.close());
         viewer.addEventListener('close',()=>{if(!viewer.open){photo.removeAttribute('src');photo.alt='';}});
@@ -491,9 +522,13 @@
         root.onclick=async event=>{
             if (!active()) {if(selected==='withholding')leave();return;}
             const enlarge=event.target.closest('[data-ag-screen-open]');
-            if(enlarge&&selected==='smarta'&&choices.contains(enlarge)&&!viewer.open){
-                const picture=enlarge.closest('figure')?.querySelector('img');
+            if(enlarge&&(selected==='smarta'||selected==='withholding')&&choices.contains(enlarge)&&!viewer.open&&!enlarge.closest('[data-ag-flow-panel]')?.hidden){
+                const figure=enlarge.closest('figure');
+                const picture=figure&&!figure.hidden?figure.querySelector('img'):null;
                 if(picture){
+                    const withholding=figure.classList.contains('ag-withholding-shot');
+                    viewer.classList.toggle('ag-withholding-image',withholding);
+                    if(withholding)photo.style.setProperty('--ag-zoom-width',String(2*Number(picture.getAttribute('width')))+'px');
                     viewer.querySelector('#agScreenTitle').textContent=picture.alt;
                     photo.src=picture.src;photo.alt=picture.alt;zoom(false);
                     viewer.showModal();dismiss.focus({preventScroll:true});
@@ -542,7 +577,7 @@
         draw('withholding');
         return {leave,destroy(){leave();root.onclick=null;choices.removeEventListener('input',changedReview);root.ownerDocument.removeEventListener('visibilitychange',shown);delete root.dataset.mounted;root.replaceChildren();}};
     }
-    const api={version:'1.4.2',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
+    const api={version:'1.4.3',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
     if (typeof module !== 'undefined' && module.exports) module.exports=api;
     if (host) host.CoopAccountingGuide=api;
 })(typeof window !== 'undefined' ? window : null);
