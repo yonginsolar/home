@@ -1,7 +1,7 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
 /*
-Version: v1.19.0
-Change: 2026-11-20 - 편집권을 가진 회의자료에 사용자 확인형 AI 초안 버튼 추가.
+Version: v1.19.1
+Change: 2026-11-20 - 회의자료에서 본인 ChatGPT를 여는 초안 안내.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.61';
@@ -13,7 +13,6 @@ import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, g
 import { labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
-let inlineMeetingAi = null;
 let pdfRendererRequest = null;
 let pdfRendererAttempt = 0;
 let pdfIdentityRevision = 0;
@@ -139,7 +138,8 @@ function renderDocumentEditState() {
   $('refreshDocumentEditButton').disabled=busy;
   $('refreshDocumentEditButton').hidden=allowed || !(entry?.failed || entry?.busy || entry?.closed || documentConflicts.has(documentEditKey()));
   $('saveCurrentDocumentButton').disabled=busy || !allowed;
-  inlineMeetingAi?.sync();
+  const guide=$('materials-chatgpt-guide');
+  window.CoopChatGptEditGuide?.setVisible(guide,!busy&&allowed&&state.activeDocument==='MATERIALS'&&!(chapterMode()&&activeChapterLock().locked));
   $('documentTitle').readOnly=!allowed;
   if(chapterMode()) renderChapterEditState();
   else { $('documentEditor').contentEditable=allowed?'true':'false';$('documentEditor').setAttribute('aria-readonly',String(!allowed)); }
@@ -156,31 +156,6 @@ function renderDocumentEditState() {
   // Viewing, printing and existing File selection are independent of body editing.
 }
 
-function bindMeetingMaterialsAi(){
-  if(inlineMeetingAi)return;
-  const capture=()=>{
-    if(document.hidden||window.frameElement?.hidden||!['erp.hcrec.kr','erp.yonginsolar.kr','www.yonginsolar.kr','yonginsolar.kr','erp.yonginsun.kr'].includes(location.hostname)
-      ||state.loading||state.activeDocument!=='MATERIALS'||!documentEditingAllowed()||!['DRAFT','READY'].includes(state.current?.status)
-      ||state.current?.published_minute_id||(chapterMode()&&activeChapterLock().locked))return null;
-    const editor=$(chapterMode()?'chapterEditor':'documentEditor');
-    return editor&&!editor.hidden?{reference:state.current.id,editor,body:editor.innerHTML,
-      chapter:state.activeChapterId,epoch:documentEditEpoch,step:state.currentStep,
-      agendas:JSON.stringify(state.agendas),title:$('documentTitle').value}:null;
-  };
-  const same=s=>{
-    const t=capture();
-    return !!t&&Object.keys(t).every(k=>t[k]===s[k]);
-  };
-  inlineMeetingAi=window.CoopMeetingAiEditor?.mount({
-    button:$('aiMeetingMaterialsButton'),kind:'meeting_materials',capture,same,invoke:window.CoopMeetingAiEditor.invoke(supabase),
-    append(nodes,s){
-      if(!same(s)||s.editor.contentEditable!=='true')return false;
-      s.editor.append(nodes);
-      s.editor.dispatchEvent(new Event('input',{bubbles:true}));return true;
-    }
-  });
-}
-bindMeetingMaterialsAi();
 async function refreshDocumentEditState() {
   if(!state.current || document.hidden || window.frameElement?.hidden)return;
   const owner=pdfActionOwner(),epoch=documentEditEpoch,active=state.activeDocument;
