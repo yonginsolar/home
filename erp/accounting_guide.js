@@ -1,4 +1,4 @@
-/* 신고·결산 매뉴얼 1.4.8. 현재 가이드 칸에서 확인한 값만 복사한다. */
+/* 신고·결산 매뉴얼 1.4.9. 현재 가이드 칸에서 확인한 값만 복사한다. */
 (function (host) {
     'use strict';
     const completed = ['완료', '실물결재완료'];
@@ -494,7 +494,11 @@
             if(first){
                 hint.hidden=scroll.scrollWidth<=scroll.clientWidth&&scroll.scrollHeight<=scroll.clientHeight;
                 const view=scroll.getBoundingClientRect(), mark=first.getBoundingClientRect();
-                scroll.scrollLeft=mark.left-view.left-(scroll.clientWidth-mark.width)/2;
+                const annotatedAmounts=contextPreview.querySelectorAll('[data-ag-shot-value]').length;
+                const last=annotatedAmounts?contextPreview.querySelectorAll('.ag-context-annotations rect')[annotatedAmounts-1]:first;
+                const groupWidth=last.getBoundingClientRect().right-mark.left;
+                const focusWidth=groupWidth<=scroll.clientWidth?groupWidth:mark.width;
+                scroll.scrollLeft=mark.left-view.left-(scroll.clientWidth-focusWidth)/2;
                 scroll.scrollTop=mark.top-view.top-(scroll.clientHeight-mark.height)/2;
             }
         };
@@ -649,7 +653,7 @@
         draw('withholding');
         return {leave,resume(){loadSmarta?.();},destroy(){leave();root.onclick=null;choices.removeEventListener('input',changedReview);root.ownerDocument.removeEventListener('visibilitychange',shown);delete root.dataset.mounted;root.replaceChildren();}};
     }
-    const api={version:'1.4.8',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
+    const api={version:'1.4.9',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
     if (typeof module !== 'undefined' && module.exports) module.exports=api;
     if (host) host.CoopAccountingGuide=api;
 })(typeof window !== 'undefined' ? window : null);
