@@ -127,7 +127,12 @@
         if (previous && JSON.stringify(previous.value) !== JSON.stringify(previous.baseline)) status('dividendDraftStatus','저장하지 않은 입력을 이어서 작성 중입니다.');
         const button = el('dividendBatchArchiveButton');
         if (button) {
-            button.hidden = batch?.status !== 'DRAFT' || Boolean(batch?.item_count || batch?.minutes_doc_id || batch?.general_meeting_date || batch?.payment_due_date);
+            const emptyDraft = batch?.status === 'DRAFT' && !batch.item_count;
+            const hwaseongCalculation = g_adminMemberRuntime?.coop_id === '4e2b5e2a-79b1-4beb-a4ec-8797ebe23028'
+                && batch?.status === 'CALCULATED' && Number(batch.item_count) > 0;
+            button.hidden = (!emptyDraft && !hwaseongCalculation) || Boolean(batch?.minutes_doc_id || batch?.general_meeting_date
+                || batch?.general_meeting_agenda?.trim() || batch?.general_meeting_resolution_result?.trim()
+                || batch?.payment_due_date || batch?.account_change_deadline || batch?.payment_accounts_locked_at);
             button.disabled = !!ownerArchiveAttempt(o);
             button.onclick = () => changeArchive(batch,true);
         }
@@ -191,7 +196,7 @@
             .select('id,title,fiscal_year,updated_at,draft_archived_at').not('draft_archived_at','is',null).order('draft_archived_at',{ascending:false}).limit(100))), rows => {
             const target = el('dividendArchivedRows'); if (!target) return;
             target.replaceChildren();
-            if (!rows.length) target.textContent = '삭제한 초안 회차가 없습니다.';
+            if (!rows.length) target.textContent = '삭제한 회차가 없습니다.';
             for (const row of rows) {
                 const box = document.createElement('div'), text = document.createElement('span'), button = document.createElement('button');
                 box.className = 'd-flex flex-wrap align-items-center gap-2 border rounded p-2';
@@ -206,7 +211,7 @@
         if (archiveAttempts.get(attempt.key) !== attempt) return;
         archiveAttempts.delete(attempt.key);
         if (c.owner !== owner() || !active('manage')) return;
-        if (current(c)) status('dividendArchiveStatus',attempt.archive ? '초안 회차를 목록에서 삭제했습니다.' : '초안 회차를 복구했습니다.');
+        if (current(c)) status('dividendArchiveStatus',attempt.archive ? '회차를 목록에서 삭제했습니다.' : '회차를 복구했습니다.');
         else status('dividendArchiveStatus','');
         void fetchDividendManageBatches(); if (el('dividendArchivedDetails')?.open) void refreshArchivedBatches();
     }
@@ -228,7 +233,7 @@
         remember();
         const dirty = () => { const d=drafts.get(actionKey); return d && JSON.stringify(d.value)!==JSON.stringify(d.baseline); };
         if (archive && dirty()) return myAlert('이 회차에 저장하지 않은 입력이 있습니다. 계속 작성하거나 입력을 버린 뒤 삭제해 주세요.','warning');
-        if (!await confirmOnce(`${batch.title} 회차를 ${archive ? '목록에서 삭제할까요? 삭제한 초안 목록에서 복구할 수 있습니다.' : '복구할까요?'}`,c,
+        if (!await confirmOnce(`${batch.title} 회차를 ${archive ? '목록에서 삭제할까요? 삭제한 회차 목록에서 복구할 수 있습니다.' : '복구할까요?'}`,c,
             () => !ownerArchiveAttempt(c.owner) && (!archive || (getDividendManageSelectedBatch()?.updated_at === batch.updated_at && !dirty())))) return;
         const attempt = {key:actionKey,id,owner:c.owner,title:batch.title,archive,state:'sending'};
         archiveAttempts.set(actionKey,attempt); renderArchiveAttempt(attempt,c);
@@ -242,7 +247,9 @@
             if (['PT409','42501','22023'].includes(error?.code)) {
                 archiveAttempts.delete(actionKey);
                 if (current(c)) {
-                    status('dividendArchiveStatus',error.message==='DIVIDEND_DRAFT_ALREADY_USED' ? '사용된 회차는 삭제할 수 없습니다.' : '회차 상태나 권한이 바뀌었습니다. 목록에서 다시 확인해 주세요.');
+                    status('dividendArchiveStatus',error.message==='DIVIDEND_DRAFT_ALREADY_USED'
+                        ? '확정·통지·지급·회계 처리 또는 연결 기록이 있는 회차는 삭제할 수 없습니다.'
+                        : '회차 상태나 권한이 바뀌었습니다. 목록에서 다시 확인해 주세요.');
                     void fetchDividendManageBatches(); if (el('dividendArchivedDetails')?.open) void refreshArchivedBatches();
                 }
                 return;
