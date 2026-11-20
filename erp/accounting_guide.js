@@ -1,4 +1,4 @@
-/* 신고·결산 매뉴얼 1.4.1. 현재 가이드 칸에서 확인한 값만 복사한다. */
+/* 신고·결산 매뉴얼 1.4.2. 현재 가이드 칸에서 확인한 값만 복사한다. */
 (function (host) {
     'use strict';
     const completed = ['완료', '실물결재완료'];
@@ -269,7 +269,8 @@
     const withholdingShot=(id,title)=>`<div class="ag-proof-place" data-ag-capture-slot="withholding-${id}"><h4>${esc(title)}</h4><small>화면 준비 중</small></div>`;
     const withholdingStep=(id,title,body)=>[title,`<p>${body}</p>${withholdingShot(id,title)}`];
     const a01ReviewPrompt='승인 급여와 지급 전표를 불러와 확인해 주세요.';
-    const a01Walk=`<p>원천징수이행상황신고서의 <b>근로소득 · 간이세액 A01</b> 행과 ERP 확인값을 대조하세요. 값이 비어 있으면 1번의 급여·지급 증빙부터 확인하세요.</p><div class="ag-walk-grid">${withholdingShot('a01-current','간이세액 A01 · ④ 인원수, ⑤ 총지급금액, ⑥ 소득세 등')}${fieldSlots(a01Slots,'간이세액 A01 입력칸과 ERP 확인값')}</div><p>⑦ 농어촌특별세·⑧ 가산세는 해당 근거가 있을 때만 확인하세요. 이 일반 급여 예시는 환급이 없어 <b>승계명세서</b>와 <b>환급 조정</b>을 열지 않습니다.</p><p>${link('https://www.law.go.kr/LSW/flDownload.do?flSeq=164443683','2026년 원천징수이행상황신고서')}</p>`;
+    const checkPay= '<button type="button" class="ag-screen-action" data-ag-flow-go="0">ERP 값 확인 단계로 이동</button>';
+    const a01Walk=`<p>원천징수이행상황신고서의 <b>근로소득 · 간이세액 A01</b> 행과 ERP 확인값을 대조하세요.</p><div class="ag-walk-grid">${withholdingShot('a01-current','간이세액 A01 · ④ 인원수, ⑤ 총지급금액, ⑥ 소득세 등')}<div>${fieldSlots(a01Slots,'간이세액 A01 입력칸과 ERP 확인값')}${checkPay}</div></div><p>⑦ 농어촌특별세·⑧ 가산세는 해당 근거가 있을 때만 확인하세요. 이 일반 급여 예시는 환급이 없어 <b>승계명세서</b>와 <b>환급 조정</b>을 열지 않습니다.</p><p>${link('https://www.law.go.kr/LSW/flDownload.do?flSeq=164443683','2026년 원천징수이행상황신고서')}</p>`;
     const steps = {
         withholding: [
             ['ERP에서 지급월과 신고 입력값 확인', `<p>정산·환급이 없는 일반 급여 정기신고 예시입니다. 다른 소득, 정산·환급, 별도 부표의 절차는 이 예시에서 확인하지 않았습니다.</p><div class="ag-loader"><label for="agPaymentMonth">급여 지급월</label><input type="month" id="agPaymentMonth"><button type="button" id="agLoad" class="btn btn-primary">ERP 금액 불러오기</button></div><div id="agResult" aria-live="polite">지급월을 선택하고 승인된 급여와 지급 전표를 대조하세요.</div><div id="agA01Review" aria-live="polite">${a01ReviewPrompt}</div><p>${link('https://www.law.go.kr/법령/소득세법시행령/제214조','신고서 제외 근거')}</p>`],
@@ -277,7 +278,7 @@
             withholdingStep('withholding-menu','원천세 신고','<b>원천세 신고</b>를 선택합니다.'),
             withholdingStep('general-menu','일반신고','<b>일반신고</b>를 선택합니다.'),
             withholdingStep('regular-menu','정기신고','<b>정기신고</b>를 엽니다.'),
-            ['신고할 지급연월 확인',`<p>‘… 지급분을 신고하는 작성화면 입니다.’에 표시된 월이 이번에 신고할 지급월인지 확인하세요. ② 귀속연월과 ③ 지급연월은 각각 1번에서 확인한 ERP 값과 대조합니다.</p><div class="ag-walk-grid">${withholdingShot('period','지급분 안내와 귀속·지급연월')}${fieldSlots(payPeriodSlots,'귀속·지급연월과 ERP 확인값')}</div>`],
+            ['신고할 지급연월 확인',`<p>‘… 지급분을 신고하는 작성화면 입니다.’에 표시된 월이 이번에 신고할 지급월인지 확인하세요. ② 귀속연월과 ③ 지급연월은 확인한 ERP 값과 각각 대조합니다.</p><div class="ag-walk-grid">${withholdingShot('period','지급분 안내와 귀속·지급연월')}<div>${fieldSlots(payPeriodSlots,'귀속·지급연월과 ERP 확인값')}${checkPay}</div></div>`],
             withholdingStep('business-check','사업자등록번호 옆 확인','신고할 조합의 사업자등록번호가 맞는지 보고 번호 옆 <b>확인</b>을 누릅니다.'),
             withholdingStep('business-result','조회가 완료되었습니다','조회가 완료되면 신고할 조합의 정보가 맞는지 확인합니다.'),
             withholdingStep('income-type','근로소득 선택','일반 급여 신고 예시에서는 <b>근로소득</b>을 선택합니다.'),
@@ -338,6 +339,37 @@
     }
     function stepHtml(list) {
         return list.map(([title,html],i)=>`<details class="ag-step"${i===0?' open':''}><summary><span class="ag-number">${i+1}</span>${title}</summary><div class="ag-step-body">${html}<div class="ag-step-nav"><span>${i+1} / ${list.length}</span>${i?`<button type="button" data-step="${i-1}">이전</button>`:''}${i<list.length-1?`<button type="button" data-step="${i+1}">다음</button>`:''}</div></div></details>`).join('');
+    }
+    function withholdingFlowHtml(list) {
+        return `<section class="ag-withholding-flow" aria-label="원천세 정기신고 순서"><header class="ag-flow-head"><div><p class="ag-flow-position" id="agWithholdingPosition">1 / ${list.length}</p><h4 id="agWithholdingTitle" tabindex="-1">${esc(list[0][0])}</h4></div><label class="ag-flow-picker" for="agWithholdingSelect">단계 바로가기<select id="agWithholdingSelect">${list.map(([title],i)=>`<option value="${i}">${i+1}. ${esc(title)}</option>`).join('')}</select></label></header><div class="ag-flow-body">${list.map(([,html],i)=>`<div data-ag-flow-panel${i?' hidden':''}>${html}</div>`).join('')}</div><nav class="ag-flow-nav" aria-label="원천세 단계 이동"><button type="button" data-ag-flow-move="-1" disabled>이전</button><button type="button" data-ag-flow-move="1">다음</button></nav></section>`;
+    }
+    function bindWithholdingFlow(container,list,active) {
+        const doc=container.ownerDocument;
+        const panels=[...container.querySelectorAll('[data-ag-flow-panel]')];
+        const title=container.querySelector('#agWithholdingTitle'), position=container.querySelector('#agWithholdingPosition');
+        const select=container.querySelector('#agWithholdingSelect');
+        const prev=container.querySelector('[data-ag-flow-move="-1"]'), next=container.querySelector('[data-ag-flow-move="1"]');
+        let index=0;
+        function move(target,origin,heading) {
+            if(!active()||!container.isConnected||!Number.isInteger(target)||target===index||!panels[target])return;
+            const focused=doc.activeElement===origin;
+            const inOldPanel=panels[index].contains(doc.activeElement);
+            panels[index].hidden=true;index=target;panels[index].hidden=false;
+            position.textContent=`${index+1} / ${list.length}`;title.textContent=list[index][0];select.value=String(index);
+            prev.disabled=index===0;next.disabled=index===list.length-1;
+            if(inOldPanel||heading&&(focused||doc.activeElement===doc.body)){
+                title.focus({preventScroll:true});title.scrollIntoView?.({block:'nearest'});
+            }
+        }
+        select.addEventListener('change',()=>move(Number(select.value),select,false));
+        container.addEventListener('keydown',event=>{
+            if(event.key==='Enter'&&event.repeat&&!event.isComposing&&event.target.closest('[data-ag-flow-move],[data-ag-flow-go]'))event.preventDefault();
+        });
+        container.addEventListener('click',event=>{
+            const button=event.target.closest('[data-ag-flow-move],[data-ag-flow-go]');
+            if(!button||button.disabled||button.closest('[data-ag-flow-panel]')?.hidden)return;
+            move(button.hasAttribute('data-ag-flow-go')?Number(button.dataset.agFlowGo):index+Number(button.dataset.agFlowMove),button,true);
+        });
     }
     function bindRead({input,extra,button,out,active,load,render,error,loading,changed,timeout=12000,onReset=()=>{},onResult}) {
         let pending=null;
@@ -435,9 +467,10 @@
                 if(host.CoopSmartaGuide)read=host.CoopSmartaGuide.mount({root:choices,client,coopId,active:current,bindRead,stepHtml,generic});
                 else choices.textContent='신고 안내를 불러오지 못했습니다. 회계 메뉴를 다시 열어 주세요.';
             } else {
-                choices.innerHTML = stepHtml(steps[topic]);
+                choices.innerHTML = topic==='withholding'?withholdingFlowHtml(steps.withholding):stepHtml(steps[topic]);
                 const q=s=>choices.querySelector(s);
                 if (topic==='withholding') {
+                    bindWithholdingFlow(q('.ag-withholding-flow'),steps.withholding,current);
                     const input=q('#agPaymentMonth');
                     input.value=previousMonth();
                     read=bindRead({input,button:q('#agLoad'),out:q('#agResult'),active:current,load:(m,_,s)=>loadA01(client,coopId,m,s),render:resultHtml,onReset:resetPayroll,
@@ -479,7 +512,7 @@
             const verify=event.target.closest('[data-ag-confirm]');
             if(verify&&choices.contains(verify)){
                 const box=verify.closest('[data-ag-review]'),out=box.querySelector('[data-ag-output]');
-                if(box.closest('.ag-step')?.open===false)return;
+                if(box.closest('.ag-step')?.open===false||box.closest('[data-ag-flow-panel]')?.hidden)return;
                 if(!reviewInput(box,'checked').checked){out.textContent='증빙을 대조한 뒤 확인란에 체크해 주세요.';return;}
                 if(box.dataset.agReview==='pay'){
                     const model=payroll,excluded=reviewInput(box,'excluded').value,local=reviewInput(box,'localScope').checked;
@@ -497,11 +530,11 @@
                 }else out.textContent='신고 칸을 고르고 증빙의 0 이상 원 단위 금액 두 개를 입력해 주세요. 차감·환급 등 음수 신고는 공식 명세에서 직접 확인하세요.';
                 return;
             }
-            const b=event.target.closest('[data-copy],[data-ag-live-copy]');if(!b||b.hidden||b.disabled||!choices.contains(b)||b.dataset.copying||b.closest('.ag-step')?.open===false)return;
+            const b=event.target.closest('[data-copy],[data-ag-live-copy]');if(!b||b.hidden||b.disabled||!choices.contains(b)||b.dataset.copying||b.closest('.ag-step')?.open===false||b.closest('[data-ag-flow-panel]')?.hidden)return;
             const entry=liveCopies.get(b);
             if(b.hasAttribute('data-ag-live-copy')&&(!entry||!entry.current()))return;
             const topic=selected;b.dataset.copying='1';
-            const current=()=>active()&&selected===topic&&!b.hidden&&b.isConnected&&choices.contains(b)&&b.closest('.ag-step')?.open!==false&&(!entry||liveCopies.get(b)===entry&&entry.current());
+            const current=()=>active()&&selected===topic&&!b.hidden&&b.isConnected&&choices.contains(b)&&b.closest('.ag-step')?.open!==false&&!b.closest('[data-ag-flow-panel]')?.hidden&&(!entry||liveCopies.get(b)===entry&&entry.current());
             try {await host.navigator.clipboard.writeText(entry?entry.value:b.dataset.copy);if(current())b.textContent='복사됨';}
             catch(_){if(current())b.textContent='복사 실패';}
             finally{delete b.dataset.copying;}
@@ -509,7 +542,7 @@
         draw('withholding');
         return {leave,destroy(){leave();root.onclick=null;choices.removeEventListener('input',changedReview);root.ownerDocument.removeEventListener('visibilitychange',shown);delete root.dataset.mounted;root.replaceChildren();}};
     }
-    const api={version:'1.4.1',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
+    const api={version:'1.4.2',mount,load,loadA01,analyze,period,previousMonth,resultHtml,vatPeriod,analyzeVat,loadVat,vatResult,bindRead,buildWithholdingFields,buildVatFields,enteredWon};
     if (typeof module !== 'undefined' && module.exports) module.exports=api;
     if (host) host.CoopAccountingGuide=api;
 })(typeof window !== 'undefined' ? window : null);
