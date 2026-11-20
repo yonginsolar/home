@@ -70,7 +70,7 @@ const styles=document.getElementById('site-text-styles-activities');if(styles)st
 updateActivitySaveLabel();
 });
 }
-let aboutSettingsRead=null,aboutSettingsReadMessage='';
+let aboutSettingsRead=null,aboutSettingsReadMessage='',aboutDesignEditor=null;
 let activityPhotoRenderRevision=0;
 let activitySourceRead=null;
 let activityModalRead=null;
@@ -796,7 +796,7 @@ function siteEditorFormSnapshot(rootId) {
 const root = document.getElementById(rootId);
 const loaned = Array.from(document.querySelectorAll(`[data-inline-original-root="${rootId}"]`)).flatMap(el=>el.matches('input,textarea,select')?[el]:Array.from(el.querySelectorAll('input,textarea,select')));
 return JSON.stringify(Array.from(new Set([...Array.from(root?.querySelectorAll('input, textarea, select') || []), ...loaned]))
-.filter(el => !el.closest('.about-editor-toolbar'))
+.filter(el => !el.closest('.about-editor-toolbar, #about-chatgpt-guide'))
 .sort((a, b) => String(a.id || a.name || '').localeCompare(String(b.id || b.name || '')))
 .map(el => [el.id || el.name || '', el.type || el.tagName, el.type === 'file'
 ? Array.from(el.files || []).map(file => [file.name, file.size, file.lastModified, file.type])
@@ -812,8 +812,11 @@ window.CoopHomeEditorTools?.observe(kind,state);
 const status = document.getElementById(`site-${kind}-save-status`);
 if(kind==='about'){
 const guide=document.getElementById('about-chatgpt-guide');
-// The fixed prompt reads no settings or document data; authorization is sufficient.
-root.CoopChatGptEditGuide?.setVisible(guide,canAccessAdminMemberTab('site'));
+if(guide){
+guide.hidden=!canAccessAdminMemberTab('site');
+if(guide.hidden)guide.open=false;
+}
+aboutDesignEditor?.sync(!guide?.hidden && state.loaded && !state.loading && !state.busy);
 }
 if (status) {
 // The About action bar reads the draft state, not the wording of its guidance.
@@ -1480,7 +1483,7 @@ if (getSiteEditorDraft('about').refresh().loaded) {
 result.about = {
 title:document.getElementById('admin-about-title').value,
 subtitle:document.getElementById('admin-about-subtitle').value,
-content:sanitizeAboutHtml(document.getElementById('admin-about-content').value),
+content:root.CoopAboutDesign.pack(sanitizeAboutHtml(document.getElementById('admin-about-content').value),document.getElementById('admin-about-design').value),
 list_items:document.getElementById('admin-about-list').value,
 text_styles:CoopSiteInlineHost.readStyles('about'),
 image_url:document.getElementById('admin-about-img').value
@@ -1814,6 +1817,25 @@ panel.addEventListener('click',event=>{
  status.textContent=status.hidden?'':'미리보기를 먼저 연 뒤 다시 눌러 주세요.';
 });
 }
+function bindAboutDesignEditor() {
+const panel=document.getElementById('about-chatgpt-guide'),setting=document.getElementById('admin-about-design');
+if(!panel||!setting||!root.CoopAboutDesignEditor)return;
+const read=id=>document.getElementById('admin-about-'+id)?.value||'';
+aboutDesignEditor=root.CoopAboutDesignEditor.mount(panel,{
+ context:()=>({owner:siteModalOwner(),runtime:g_adminMemberRuntime,area:'about'}),
+ current:siteModalScopeCurrent,
+ flush:()=>root.CoopSiteInlineHost.flush(),
+ read:()=>{
+  const photo=document.getElementById('admin-about-img-file')?.files?.[0]||null;
+  return {title:read('title'),subtitle:read('subtitle'),content:read('content'),list:read('list'),
+    design:setting.value,hasPhoto:!!photo||!!read('img'),photo,snapshot:siteEditorFormSnapshot('sub-about'),
+    defaultPhoto:hcrecAboutEditorAllowed()?readHcrecAboutPresentation().photo:'right'};
+ },
+ sample:()=>document.getElementById('about-settings-preview'),
+ refreshSample:updateTotalPreview,
+ apply:value=>{setting.value=value;getSiteEditorDraft('about').refresh();updateTotalPreview();queueHomePreviewUpdate();}
+});
+}
 function cancelAboutSettingsRead() {
 const read=aboutSettingsRead;
 if(!read)return Promise.resolve(false);
@@ -1862,7 +1884,9 @@ window.CoopHeroSlides?.resetPhotoSelection(fileEl);
 titleEl.value = aboutHtmlToEditableText(row.title || '');
 CoopSiteInlineHost.setStyles('about',row.text_styles || {});
 subtitleEl.value = aboutHtmlToEditableText(row.subtitle || '');
-contentEl.value = row.content || '';
+const unpacked=root.CoopAboutDesign.unpack(row.content);
+contentEl.value = unpacked.content;
+document.getElementById('admin-about-design').value=unpacked.design;
 listEl.value = row.list_items || '';
 imgEl.value = row.image_url || '';
 loadHcrecAboutPresentation(row.presentation);
@@ -1940,6 +1964,8 @@ if(styles.aboutSubtitle?.length)root.CoopTextStyles?.paint(document.getElementBy
 }
 else if(imgUrl) { imgEl.src = window.CoopDisplayImages?.display(imgUrl)||imgUrl; imgEl.style.display = 'block'; }
 else { imgEl.style.display = 'none'; }
+root.CoopAboutDesign.paint(document.getElementById('about-settings-preview'),document.getElementById('prev-content'),listEl,
+ document.getElementById('admin-about-design').value,!!imgUrl,hcrecAboutEditorAllowed()?readHcrecAboutPresentation().photo:'right');
 }
 
 async function saveAboutSettings() {
@@ -1973,10 +1999,11 @@ const fields = [
 ].map(([id, key]) => ({ id, key, input:document.getElementById(id), value:document.getElementById(id).value }));
 const imageUrl = String(imageUrlInput?.value || '');
 const enhanced=hcrecAboutEditorAllowed();
+const cleanAboutBody=sanitizeAboutHtml(fields[2].value);
 const updates = {
 p_title: fields[0].value.replace(/\r\n/g, '\n').trim(),
 p_subtitle: fields[1].value.replace(/\r\n/g, '\n').trim(),
-p_content: sanitizeAboutHtml(fields[2].value),
+p_content: root.CoopAboutDesign.pack(cleanAboutBody,document.getElementById('admin-about-design').value),
 p_list_items: fields[3].value,
 p_image_url: imageUrl.trim(),
 p_text_styles: JSON.parse(JSON.stringify(CoopSiteInlineHost.readStyles('about',true)))
@@ -2002,7 +2029,7 @@ if (!current()) return;
 const savedImageUrl = updates.p_image_url;
 g_aboutOriginalImageUrl = savedImageUrl;
 for (const field of fields) {
-if (document.getElementById(field.id) === field.input && field.input.value === field.value) field.input.value = updates[field.key];
+if (document.getElementById(field.id) === field.input && field.input.value === field.value) field.input.value = field.key==='p_content'?cleanAboutBody:updates[field.key];
 }
 const samePhoto = (fileInput?.files?.[0] || null) === file
 && String(imageUrlInput?.value || '') === imageUrl && g_aboutPreviewObjectUrl === previewObjectUrl;
@@ -2015,6 +2042,7 @@ revokeAboutPreviewObjectUrl();
 // Accept the saved snapshot, not the current form. New text/styles, an image
 // removal or a new File remain dirty even when the first save succeeded.
 const savedValues = new Map(fields.map(field => [field.id, updates[field.key]]));
+savedValues.set('admin-about-content',cleanAboutBody);
 if(enhanced){
  for(const key of root.CoopHcrecAbout.keys){
   const id='hcrec-about-'+key,input=document.getElementById(id),sent=submitted.find(row=>row[0]===id)?.[2];
@@ -4508,11 +4536,13 @@ function askDeleteFaq(id) {
 // Establish the initial lock before a delayed tab handler can allow typing.
 CoopHomeVisualEditor.mount(); // Mount before taking the initial draft snapshot.
 bindHcrecAboutPresentation();
+bindAboutDesignEditor();
 getSiteEditorDraft('home');
 getSiteEditorDraft('about');
 getCertificationDraftStore();
 window.addEventListener('pagehide',() => {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();cancelExternalNewsRead();});
 for (const eventName of ['hidden.bs.tab','shown.bs.tab']) document.getElementById('site-content-tabs')?.addEventListener(eventName,() => {
+if(root.CoopHomeVisualEditor?.current()!=='about')aboutDesignEditor?.invalidate();
 if(aboutSettingsRead&&!isAboutSettingsReadCurrent(aboutSettingsRead))void cancelAboutSettingsRead();
 if(activityListRead&&!isActivityListReadCurrent(activityListRead))cancelActivityListRead();
 if(externalNewsRead&&!externalNewsReadCurrent(externalNewsRead))cancelExternalNewsRead();
@@ -4523,7 +4553,7 @@ for(const eventName of ['hidden.bs.tab','shown.bs.tab'])document.addEventListene
 if(externalNewsRead&&!externalNewsReadCurrent(externalNewsRead))cancelExternalNewsRead();
 });
 if (root.frameElement) new MutationObserver(() => {
-if (root.frameElement?.hidden) {void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();cancelExternalNewsRead();}
+if (root.frameElement?.hidden) {aboutDesignEditor?.invalidate();void cancelAboutSettingsRead();cancelActivityListRead();cancelActivityModalRead();cancelActivitySourceRead();cancelExternalNewsRead();}
 }).observe(root.frameElement,{attributes:true,attributeFilter:['hidden']});
 
 window.addEventListener('beforeunload', (event) => {
@@ -4555,5 +4585,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
     Object.assign(root,{loadHomeComparisonPlants,markHomeComparisonPhoto,confirmHomeComparisonTarget,toggleHomePhotoPreview,setHomePhotoPreview});
-    root.AdminMemberSite = Object.freeze({ version: '20261120-chatgpt-guide-2', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
+    root.AdminMemberSite = Object.freeze({ version: '20261120-about-design-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
 })(window);
