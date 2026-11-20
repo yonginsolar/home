@@ -806,13 +806,14 @@ return JSON.stringify(Array.from(new Set([...Array.from(root?.querySelectorAll('
 function getSiteEditorDraft(kind) {
 if (g_siteEditorDrafts.has(kind)) return g_siteEditorDrafts.get(kind);
 const rootId = kind === 'home' ? 'sub-home-settings' : 'sub-about';
-const root = document.getElementById(rootId);
+const formPane = document.getElementById(rootId);
 const controller = SiteEditorDrafts.create(() => siteEditorFormSnapshot(rootId), (state) => {
 window.CoopHomeEditorTools?.observe(kind,state);
 const status = document.getElementById(`site-${kind}-save-status`);
 if(kind==='about'){
 const guide=document.getElementById('about-chatgpt-guide');
-root.CoopChatGptEditGuide?.setVisible(guide,state.loaded&&!state.loading&&canAccessAdminMemberTab('site'));
+// The fixed prompt reads no settings or document data; authorization is sufficient.
+root.CoopChatGptEditGuide?.setVisible(guide,canAccessAdminMemberTab('site'));
 }
 if (status) {
 // The About action bar reads the draft state, not the wording of its guidance.
@@ -834,8 +835,8 @@ if (retry) { retry.hidden = state.loaded || state.loading; retry.disabled = stat
 // Keep the first-read lock after an error too. Editing an unknown blank baseline
 // would otherwise make retries unsafe and leave the form unable to save.
 if (!state.loaded && !g_siteEditorFieldLocks.has(kind)) {
-const fields = Array.from(root?.querySelectorAll('input,textarea,select,button') || [])
-.filter(el => !el.closest('.site-editor-actionbar')).map(el => [el, el.disabled]);
+const fields = Array.from(formPane?.querySelectorAll('input,textarea,select,button') || [])
+.filter(el => !el.closest('.site-editor-actionbar, #about-chatgpt-guide')).map(el => [el, el.disabled]);
 g_siteEditorFieldLocks.set(kind, fields);
 fields.forEach(([el]) => { el.disabled = true; });
 } else if (state.loaded && g_siteEditorFieldLocks.has(kind)) {
@@ -846,7 +847,7 @@ if (kind === 'home' && state.loaded) window.CoopHeroSlides?.refresh();
 });
 const acceptedController=Object.freeze({...controller,accept(snapshot){const state=controller.accept(snapshot);window.CoopHomeEditorTools?.accepted(kind,snapshot);return state;}});
 g_siteEditorDrafts.set(kind, acceptedController);
-['input','change','click'].forEach(type => root?.addEventListener(type, () => Promise.resolve().then(() => controller.refresh())));
+['input','change','click'].forEach(type => formPane?.addEventListener(type, () => Promise.resolve().then(() => controller.refresh())));
 controller.refresh();
 return acceptedController;
 }
@@ -4554,5 +4555,5 @@ window.setTimeout(sendHomePreviewSettings, 0);
     Object.assign(root, { normalizeHistoryContentForCompare, isHistoryRowMatched, updateSiteHistoryContentCounter, openSiteHistoryModal, saveSiteHistory, openSectionSettings, loadInitialSiteSections, getSectionDisplayOrder, createSectionSnapshot, createSectionExpectedSnapshot, hasPendingSectionChanges, updateSectionSaveButton, getSortedSectionDrafts, renderSectionRows, renderSectionSeedHint, renderSectionSeedButton, fetchSections, loadSectionRows, applySectionRows, reloadSectionSettings, showSectionSaveError, seedRequiredSections, moveSectionOrder, toggleSection, saveSectionChanges, askDeleteHistory, confirmDeleteHistory, getSiteSectionEditorTarget, openSiteSectionEditor, siteEditorFormSnapshot, getSiteEditorDraft, setHomeImagePreview, previewHomeImage, clearHomeImage, updateHomeOverlayLabel, setHomeCtaValue, toggleHomeCtaCustom, readHomeCtaValue, normalizeHomeImpactRegions, renderHomeImpactRegions, addHomeImpactRegion, readHomeImpactRegions, updateHomeImpactModeUi, setHomeSettingsMode, handleHomeSettingsModeKey, initializeHomeFontOptions, updateHomeFontSelection, selectHomeFontPair, recommendHomeFonts, selectHomeTemplate, setHomeSettingsForm, fetchHomeSettings, validateHomeCtaUrl, collectHomeSettingsPayload, saveHomeSettings, readHomePreviewFile, collectSitePreviewDraft, collectHomePreviewSettings, getHomePreviewUrl, sendHomePreviewSettings, queueHomePreviewUpdate, bindHomePreviewInputs, setHomePreviewDevice, openHomePreview, aboutHtmlToEditableText, parseAboutListItems, revokeAboutPreviewObjectUrl, setAboutImageStatus, previewAboutImageFile, clearAboutImage, isManagedAboutImageUrl, deleteManagedAboutImage, fetchAboutSettings, queueTotalPreviewUpdate, updateTotalPreview, saveAboutSettings, formatCertificationDate, resetSiteCertificationForm, clearSiteCertificationImage, editSiteCertification, renderSiteCertifications, fetchSiteCertifications, isManagedCertificationImageUrl, deleteManagedCertificationImage, saveSiteCertification, askDeleteSiteCertification, normalizeActivityGalleryUrls, parseActivityContentWithGallery, buildActivityContentWithGallery, normalizeActivityContentForEditor, releaseActivityCoverPreviewObjectUrl, getActivityGalleryUrlsFromState, syncActivityCoverHiddenFields, renderActivityCoverPreview, setActivityGalleryItemsFromUrls, setActivityCoverState, addActivityGalleryFiles, previewActivityCover, handleActivityGalleryDrag, handleActivityGalleryDrop, setActivityGalleryCover, removeActivityGalleryImage, clearActivityCover, getActivitySourceEventId, setActivitySourceEventId, formatActivitySourceEventDate, activitySourceTypeLabel, loadActivityParticipationEvents, getActivityParticipationPhotoPreview, buildActivitySourceSummary, applyActivitySourceEvent, loadSelectedActivitySourceEvent, activityPublishedPhotoExtension, publishActivityParticipationPhoto, deleteActivityPhotoIfUnreferenced, fetchActivities, getActivityDraftSnapshot, hasUnsavedActivityChanges, bindActivityDraftGuard, closeActivityAfterSave, ensureActivityRichEditor, updateActivitySaveLabel, openActivityModal, syncActivityHistoryMilestoneUi, saveActivity, askDeleteActivity, getExternalNewsAdminScopeLabel, normalizeExternalNewsAdminUrl, renderExternalNewsSyncStatus, fetchExternalNewsAdmin, syncExternalNewsAdmin, hasPartnerPendingChanges, resolvePartnerPendingPreview, renderPartnerSyncedBadgePreview, fetchPartnerMemberBadgeCodes, refreshPartnerBadgeSyncPreview, bindPartnerBadgeSyncInput, parsePartnerRequestSnapshot, getPartnerRequestKindLabel, getPartnerRequestStageLabel, getPartnerRequestOutcomeBadge, renderPartnerRequestLogs, fetchPartnerRequestLogs, fetchPartners, openPartnerModal, savePartner, askDeletePartner, handleImagePreview, previewPartnerImage, clearPartnerImage, fetchFaqs, closeFaqAfterSave, openFaqModal, saveFaq, askDeleteFaq });
     Object.assign(root,{isActivityContextCurrent,isActivityModalReadCurrent,cancelActivityModalRead,discardActivityDraft,openNewSiteCertificationDraft});
     Object.assign(root,{loadHomeComparisonPlants,markHomeComparisonPhoto,confirmHomeComparisonTarget,toggleHomePhotoPreview,setHomePhotoPreview});
-    root.AdminMemberSite = Object.freeze({ version: '20261120-chatgpt-guide-1', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
+    root.AdminMemberSite = Object.freeze({ version: '20261120-chatgpt-guide-2', initialize, isInitialized: () => initialized, captureFaqDelete, completeFaqDelete, captureActivitySaveIntent, captureCertificationSaveIntent });
 })(window);
