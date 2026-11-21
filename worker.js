@@ -7,6 +7,52 @@ const SECURITY_VERSION='20261004-1';
 const BRAND_API='https://ifdqlwxgqgsvnawmhlfc.supabase.co/rest/v1/rpc/get_public_coop_branding';
 const BRAND_KEY='sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 const BRAND_PREFIX='https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/';
+const REFERRAL_SEARCH_API='https://ifdqlwxgqgsvnawmhlfc.supabase.co/rest/v1/rpc/signup_referral_search';
+const REFERRAL_SEARCH_HOSTS=new Set(['yonginsolar.kr','www.yonginsolar.kr','hcrec.kr','www.hcrec.kr']);
+const referralReply=(status,body)=>new Response(JSON.stringify(body),{status,headers:{
+ 'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',
+ 'X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer'
+}});
+async function signupReferralSearch(request,env,url,hostname){
+ if(url.protocol!=='https:'||url.port||!REFERRAL_SEARCH_HOSTS.has(hostname)||url.search)
+   return referralReply(404,{status:'unavailable'});
+ if(request.method!=='POST')return referralReply(405,{status:'unavailable'});
+ if(request.headers.get('Origin')!==url.origin||!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type')||''))
+   return referralReply(403,{status:'unavailable'});
+ const bearer=request.headers.get('Authorization')||'', secret=env.SIGNUP_REFERRAL_GATEWAY_KEY||'';
+ const ip=request.headers.get('CF-Connecting-IP')||'';
+ if(bearer.length>8192||!/^Bearer [\w.-]+$/.test(bearer))return referralReply(401,{status:'unavailable'});
+ if(!/^[a-f0-9]{64}$/.test(secret)||!/^[:.a-fA-F0-9]{3,45}$/.test(ip))
+   return referralReply(503,{status:'unavailable'});
+ try{
+   const reader=request.body?.getReader();if(!reader)return referralReply(400,{status:'unavailable'});
+   const chunks=[];let length=0;
+   while(true){
+     const {done,value}=await reader.read();if(done)break;length+=value.byteLength;
+     if(length>1024){void reader.cancel().catch(()=>{});return referralReply(413,{status:'unavailable'});}
+     chunks.push(value);
+   }
+   const input=JSON.parse(await new Response(new Blob(chunks)).text());
+   const name=typeof input?.name==='string'?input.name.trim():'';
+   if(!input||Object.keys(input).length!==1||!name||Array.from(name).length>80||/[\u0000-\u001f\u007f]/.test(name))
+     return referralReply(400,{status:'unavailable'});
+   const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret+'|rate|'+ip));
+   const rate=Array.from(new Uint8Array(digest),x=>x.toString(16).padStart(2,'0')).join('');
+   const upstream=await fetch(REFERRAL_SEARCH_API,{method:'POST',redirect:'error',signal:AbortSignal.timeout(6500),
+     headers:{'Content-Type':'application/json',apikey:BRAND_KEY,Authorization:bearer,
+       'x-public-host':hostname,'x-signup-referral-gateway':secret,'x-signup-referral-rate':rate},
+     body:JSON.stringify({p_name:name})});
+   if(!upstream.ok)return referralReply(upstream.status===401||upstream.status===403?403:503,{status:'unavailable'});
+   const result=await upstream.json();
+   if(result?.status==='found'&&Array.isArray(result.choices)&&result.choices.length>=1&&result.choices.length<=5&&
+      typeof result.valid_until==='string'&&result.choices.every(c=>typeof c?.name==='string'&&/^[0-9]{4}$/.test(c.phone_last4)&&
+        /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(c.selection))){
+      return referralReply(200,{status:'found',valid_until:result.valid_until,
+        choices:result.choices.map(({name,phone_last4,selection})=>({name,phone_last4,selection}))});
+   }
+   return referralReply(200,{status:result?.status==='rate_limited'?'rate_limited':'unavailable'});
+ }catch(_){return referralReply(503,{status:'unavailable'});}
+}
 function brandAsset(value){try{const u=new URL(value);return u.href.startsWith(BRAND_PREFIX)&&!u.search&&!u.hash&&!u.username&&!u.password&&/\.(png|jpg|webp)$/.test(u.pathname)?u.href:'';}catch(_){return '';}}
 async function publicBrand(request,env){
  const u=new URL(request.url),p=getProfile(u.hostname);
@@ -241,6 +287,7 @@ async function routeRequest(request,env){
     const target=new URL(request.url);target.hostname='hcrec.kr';target.protocol='https:';
     return Response.redirect(target.href,308);
   }
+  if(url.pathname==='/api/signup/referral-search')return signupReferralSearch(request,env,url,hostname);
   if(hostname==='erp.hcrec.kr'&&['/','/index','/index.html'].includes(url.pathname)){
     const target=new URL(request.url);target.pathname='/erp/';target.protocol='https:';
     return Response.redirect(target.href,307);
