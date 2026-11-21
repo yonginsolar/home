@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.93
-Change: 2026-11-21 - 화성·용인 추천인 이름 검색.
+Version: v1.0.94
+Change: 2026-11-21 - 용인 추천인 여러 명 선택.
 -->
 <html lang="ko" data-signup-admission="checking">
 <head>
@@ -11,11 +11,11 @@ Change: 2026-11-21 - 화성·용인 추천인 이름 검색.
 <script src="shared/signup_failure_reporter.js?v=1.1.4" integrity="sha384-RE6UIQaHPwucHYx5iRp5QKH3+671bXBuPlyhLmgS1iVDRRNJao0gxXc3qZU7W/UA" crossorigin="anonymous"></script>
 <script src="shared/signup_public_reads.js?v=1.0.2" integrity="sha384-MwfxGFicfaZkW2Gk5NiaUHDIgwU/J/gcUi3/78igSI/pjR9ko+yWH2EvkR5R2/4R" crossorigin="anonymous"></script>
 <script src="shared/signup_draft_guard.js?v=1.0.1"></script>
-<script src="/shared/signup_referral_name.js?v=1.0.0" integrity="sha384-nS+k+Vk70077Ikh8Bgdycl78EYoqeKgppi+nOLrCK5CGGzlqlwYtYx1TrOksG90Y" crossorigin="anonymous" defer></script>
+<script src="/shared/signup_referral_name_v11.js?v=1.1.0" integrity="sha384-QWijHqLNMZursSXDbD2lHAF2rrP0Vsz/0OSs9OWlQAxqGPkhfXcT+4tnon7KMBaa" crossorigin="anonymous" defer></script>
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/capital_deposit_guide.js?v=1.0.0"></script>
 <script src="shared/application_retention_notice.js?v=1.1.1"></script>
-  <meta name="signup-screen-version" content="1.0.93">
+  <meta name="signup-screen-version" content="1.0.94">
   <script>console.log('[Version] v'+document.querySelector('meta[name="signup-screen-version"]').content+' | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
@@ -399,15 +399,17 @@ onblur="checkPhoneDuplicateServer()">
 </div>
 
 <div class="col-12">
-<label class="form-label fw-bold small" for="recommender">추천인 (선택사항)</label>
-<div class="d-flex flex-wrap align-items-start gap-2">
+<label class="form-label fw-bold small" for="recommender" id="signup-referral-label">추천인 (선택사항)</label>
+<div class="flex-wrap align-items-start gap-2" id="signup-referral-entry">
  <input type="text" id="recommender" class="form-control" style="flex:1 1 10rem;min-width:0;width:auto" placeholder="추천인 이름을 입력해주세요">
  <div id="signup-referral-search" hidden>
   <button id="signup-referral-check" type="button" class="btn btn-outline-success" aria-controls="signup-referral-options">검색</button>
  </div>
 </div>
+<div class="flex-wrap gap-2 mt-2" id="signup-referral-chips" hidden aria-label="선택한 추천인"></div>
+<button id="signup-referral-add" type="button" class="btn btn-sm btn-outline-success mt-2" hidden>+ 추천인 추가</button>
 <div id="signup-referral-options" class="mt-2 gap-2" style="grid-template-columns:minmax(0,1fr)" hidden aria-label="추천인 검색 결과"></div>
-<style>#signup-referral-options:not([hidden]){display:grid}#signup-referral-options [aria-pressed="true"]{box-shadow:inset 0 0 0 2px currentColor;font-weight:700}</style>
+<style>#signup-referral-entry:not([hidden]),#signup-referral-chips:not([hidden]){display:flex}#signup-referral-options:not([hidden]){display:grid}#signup-referral-options [aria-pressed="true"]{box-shadow:inset 0 0 0 2px currentColor;font-weight:700}</style>
 <p id="signup-referral-status" class="form-text my-1" role="status"></p>
 <button id="signup-referral-receipt" type="button" class="btn btn-sm btn-outline-secondary mt-1" hidden>이전 접수 확인</button>
 </div>
@@ -2772,9 +2774,10 @@ openResultModal('신청 처리 결과를 확인하지 못했습니다.\n입력�
 let signupSubmissionEditRevision=0;
 for(const event of ['input','change'])document.getElementById('joinForm').addEventListener(event,()=>{++signupSubmissionEditRevision;});
 function signupSubmissionFingerprint() {
-return JSON.stringify([...document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')]
+const fields=[...document.querySelectorAll('#joinForm input,#joinForm select,#joinForm textarea')]
  .filter(n=>!['orgNo','finalCorpNo','deferred-signup-otp-input'].includes(n.id))
- .map(n=>[n.id,n.value,['checkbox','radio'].includes(n.type)?n.checked:null]));
+ .map(n=>[n.id,n.value,['checkbox','radio'].includes(n.type)?n.checked:null]);
+return JSON.stringify([fields,signupReferralController?.selectionKey?.()||'']);
 }
 function isCurrentSignupSubmission(task,inputs=!task.sent) {
 return signupSubmissionTasks.get(task.owner)===task&&isCurrentSignupIdentity(task.scope)
@@ -3245,6 +3248,7 @@ const submittedDraft = window.CoopSignupDraft?.snapshot();
 if(!isCurrentSignupSubmission(task))return;
 const referral=signupReferralController?.prepare(signupArguments.p_recommender);
 if(referral?.blocked){openResultModal(referral.blocked,true);return;}
+if(referral?.kind==='joint')signupArguments.p_recommender=referral.names;
 // Final checks supersede earlier field reads; later edits start fresh checks.
 task.fieldCheckRevisions=typeof invalidateSignupFieldChecks==='function'?invalidateSignupFieldChecks():null;
 task.sent=true;
@@ -3255,15 +3259,19 @@ const guardianArgs=needsGuardian?{
  p_guardian_phone:document.getElementById('signupGuardianPhone').value,
  p_submission_id:guardianSubmissionId
 }:null;
-const referralRpc=referral?.kind==='name'?'signup_referral_submit':referral?.kind==='legacy'?'hcrec_signup_with_referral':null;
-const referralArgs=referral?.kind==='name'?{
- p_signup:signupArguments,p_referral_selection:referral.proof,p_request_id:referral.id,
+const referralRpc=referral?.kind==='joint'?'signup_joint_referral_submit':referral?.kind==='name'?'signup_referral_submit':referral?.kind==='legacy'?'hcrec_signup_with_referral':null;
+const referralArgs=referral?.kind==='name'||referral?.kind==='joint'?{
+ p_signup:signupArguments,...(referral.kind==='joint'?{p_referral_selections:referral.proofs}:{p_referral_selection:referral.proof}),p_request_id:referral.id,
  p_guardian_name:guardianArgs?.p_guardian_name??null,p_guardian_phone:guardianArgs?.p_guardian_phone??null,
  p_guardian_submission_id:guardianArgs?.p_submission_id??null
 }:referral?.kind==='legacy'?{p_signup:signupArguments,p_referral_proof:null,p_request_id:referral.id}:null;
 const { data: signupResult, error, status: signupSaveStatus } = await _supabase.rpc(referralRpc||(needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5'), referralArgs||guardianArgs||signupArguments);
 if(referral?.route)signupReferralController.finished(referral,{unknown:isUnknownSignupSaveError(error,signupSaveStatus)&&!!error});
 if(!isCurrentSignupSubmission(task,false))return;
+if(referral?.kind==='joint'&&error?.message==='REFERRAL_SELECTION_CHANGED'){
+openResultModal('추천인을 확인하지 못했어요. 선택을 빼고 다시 검색하거나, 추천인 없이 신청할 수 있어요.',true);
+return;
+}
 const createdMemberUuid = signupResult?.member_id || null;
 const educationSignupResult = signupResult?.education || null;
 let finalInsertError = error;
