@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.1.12
-Change: 2026-11-21 - Match exports to the applied filter and include the full KST end date.
+Version: v1.2.0
+Change: 2026-11-21 - 간단히 보기와 자세히 보기.
 -->
 <html lang="ko">
 <head>
@@ -16,7 +16,7 @@ Change: 2026-11-21 - Match exports to the applied filter and include the full KS
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.1.12 | audit_logs.html');</script>
+  <script>console.log('[Version] v1.2.0 | audit_logs.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -43,10 +43,27 @@ Change: 2026-11-21 - Match exports to the applied filter and include the full KS
 </script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <style>
-    body.erp-page-audit { --erp-page-max-width: 1280px; }
+    body.erp-page-audit { --erp-page-max-width: 1280px; overflow-anchor: none; }
     body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
     .main-container { max-width: 1280px; width: min(100%, 1280px); margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 25px; }
     .hidden { display: none !important; }
+    body.erp-unified.erp-page-audit .main-container { width: min(100%, 1280px); }
+    [data-audit-view="simple"] .audit-detail-only,
+    [data-audit-view="detail"] .audit-simple-only { display: none !important; }
+    .audit-toolbar { position: sticky; top: 0; z-index: 2; padding-block: .45rem; background: var(--erp-surface-soft, #f8fbff); }
+    .audit-view-button[aria-pressed="true"] { background: var(--bs-primary); color: #fff; }
+    [data-audit-view="detail"] #auditResults > table { min-width: 960px; }
+    [data-audit-view="simple"] #auditResults > table { table-layout: fixed; width: 100%; }
+    [data-audit-view="simple"] #auditResults :is(th,td) { vertical-align: top; padding: .65rem .5rem; overflow-wrap: anywhere; }
+    .audit-simple-date { width: 26%; }
+    .audit-simple-actor { width: 23%; }
+    .audit-when span { display: block; }
+    .audit-action-note { display: block; white-space: pre-line; margin-top: .2rem; font-size: .875em; }
+    @media (max-width: 575px) {
+      body.erp-page-audit { padding: 8px; }
+      body.erp-unified.erp-page-audit .main-container { padding: 12px !important; }
+      [data-audit-view="simple"] #auditResults :is(th,td) { padding-inline: .35rem; }
+    }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <meta name="erp-workspace-revision" content="20261010.9">
@@ -54,7 +71,7 @@ Change: 2026-11-21 - Match exports to the applied filter and include the full KS
   <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
-<body class="erp-unified erp-pc-workspace erp-page-audit">
+<body class="erp-unified erp-hybrid-workspace erp-page-audit" data-audit-view="simple">
   <div class="main-container">
     <div class="d-flex justify-content-between align-items-center mb-3">
       <h4 class="fw-bold m-0">🧾 감사 로그</h4>
@@ -79,7 +96,7 @@ Change: 2026-11-21 - Match exports to the applied filter and include the full KS
           <label for="filterEnd" class="small text-muted">종료일</label>
           <input data-erp-query-control type="date" class="form-control" id="filterEnd">
         </div>
-        <div class="col-12 col-md-2">
+        <div class="col-12 col-md-2 audit-detail-only" id="auditActionFilter">
           <label for="filterAction" class="small text-muted">작업 코드</label>
           <input data-erp-query-control type="text" class="form-control" id="filterAction" placeholder="approval.submit">
         </div>
@@ -91,26 +108,33 @@ Change: 2026-11-21 - Match exports to the applied filter and include the full KS
       <div class="d-flex flex-wrap justify-content-end gap-2 mt-3">
         <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">검색 조건 비우기</button>
         <button type="submit" class="btn btn-primary btn-sm">검색</button>
-        <button type="button" class="btn btn-outline-success btn-sm" id="auditExportButton" onclick="exportCsv()" disabled>CSV 다운로드</button>
+        <button type="button" class="btn btn-outline-success btn-sm audit-detail-only" id="auditExportButton" onclick="exportCsv()" disabled>CSV 다운로드</button>
       </div>
       <div class="small text-muted mt-2" id="sourceHint"></div>
     </form>
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <div class="audit-toolbar d-flex flex-wrap align-items-center gap-2 mb-2" id="auditToolbar">
+      <div class="d-flex flex-wrap gap-1 me-auto" role="group" aria-label="감사 로그 보기">
+        <button type="button" class="btn btn-outline-primary btn-sm audit-view-button" id="auditSimpleView" aria-pressed="true">간단히 보기</button>
+        <button type="button" class="btn btn-outline-primary btn-sm audit-view-button" id="auditDetailView" aria-pressed="false">자세히 보기</button>
+      </div>
       <span id="auditReadStatus" class="small text-muted" role="status" aria-live="polite">로그를 준비하고 있습니다…</span>
       <button id="auditRetryButton" type="button" class="btn btn-outline-primary btn-sm hidden">다시 확인</button>
     </div>
 
-    <div class="table-responsive erp-desktop-scroll hidden" id="auditResults">
+    <div class="table-responsive hidden" id="auditResults">
       <table class="table table-sm align-middle">
         <thead class="table-light">
           <tr>
-            <th>로그 구분</th>
-            <th>일시</th>
-            <th>실행자</th>
-            <th>작업 코드</th>
-            <th>요약</th>
-            <th>대상</th>
-            <th>대상 ID</th>
+            <th scope="col" class="audit-simple-only audit-simple-date">언제</th>
+            <th scope="col" class="audit-simple-only audit-simple-actor">누가</th>
+            <th scope="col" class="audit-simple-only">무슨 작업</th>
+            <th scope="col" class="audit-detail-only">로그 구분</th>
+            <th scope="col" class="audit-detail-only">일시</th>
+            <th scope="col" class="audit-detail-only">실행자</th>
+            <th scope="col" class="audit-detail-only">작업 코드</th>
+            <th scope="col" class="audit-detail-only">요약</th>
+            <th scope="col" class="audit-detail-only">대상</th>
+            <th scope="col" class="audit-detail-only">대상 ID</th>
           </tr>
         </thead>
         <tbody id="logBody"></tbody>
@@ -180,6 +204,33 @@ let auditBootReady = false;
 let auditBootPending = null;
 let auditAuthBound = false;
 let auditBootSequence = 0;
+let auditDetailScrollLeft = 0;
+
+function setAuditView(view) {
+  const layout = document.body;
+  if (layout.dataset.auditView === view) return;
+  const results = document.getElementById('auditResults');
+  const toolbar = document.getElementById('auditToolbar');
+  const floor = Math.max(0, toolbar.getBoundingClientRect().bottom);
+  const anchor = Array.from(document.getElementById('logBody').rows).find(row => {
+    const box = row.getBoundingClientRect();
+    return box.bottom > floor && box.top < window.innerHeight;
+  });
+  const before = anchor?.getBoundingClientRect();
+  if (layout.dataset.auditView === 'detail') auditDetailScrollLeft = results.scrollLeft;
+  layout.dataset.auditView = view;
+  document.getElementById('auditSimpleView').setAttribute('aria-pressed', String(view === 'simple'));
+  document.getElementById('auditDetailView').setAttribute('aria-pressed', String(view === 'detail'));
+  if (view === 'detail') results.scrollLeft = auditDetailScrollLeft;
+  if (before) {
+    const after = anchor.getBoundingClientRect();
+    const target = Math.max(before.top, floor - Math.max(0, after.height - 1));
+    if (after.top !== target) window.scrollBy({top: after.top - target, behavior:'instant'});
+  }
+}
+
+document.getElementById('auditSimpleView')?.addEventListener('click', () => setAuditView('simple'));
+document.getElementById('auditDetailView')?.addEventListener('click', () => setAuditView('detail'));
 
 function auditReadState(text, retry = false) {
   document.getElementById('auditReadStatus').textContent = text;
@@ -337,6 +388,7 @@ document.getElementById('auditSearchForm').addEventListener('keydown', event => 
 auditInputFilter = JSON.stringify(auditFilterValues());
 function auditFiltersChanged() {
   const key = JSON.stringify(auditFilterValues());
+  document.getElementById('auditActionFilter')?.classList.toggle('audit-detail-only', !document.getElementById('filterAction').value.trim());
   if (key === auditInputFilter) return;
   auditInputFilter = key;interruptAuditRead();auditReadRefreshNeeded = true;auditRetryReset = true;
   auditReadState('조회 조건이 바뀌었습니다. 검색을 눌러 확인해 주세요.');
@@ -506,7 +558,7 @@ function renderLogs(list, reset) {
   const body = document.getElementById('logBody');
   if (reset) body.innerHTML = '';
   if (!list || list.length === 0) {
-    if (reset) body.innerHTML = '<tr><td colspan="7" class="text-center text-muted p-4">데이터가 없습니다.</td></tr>';
+    if (reset) body.innerHTML = '<tr><td colspan="3" class="audit-simple-only text-center text-muted p-4">데이터가 없습니다.</td><td colspan="7" class="audit-detail-only text-center text-muted p-4">데이터가 없습니다.</td></tr>';
     return;
   }
   list.forEach(log => {
@@ -522,6 +574,7 @@ function renderLogs(list, reset) {
     const summary = String(log.summary || '').trim();
     const entityType = String(log.entity_type || '').trim();
     const entityId = String(log.entity_id || '').trim();
+    appendAuditSimpleCells(tr, created, actor, action, summary, sourceRaw);
     const cells = [
       sourceLabel,
       created,
@@ -533,6 +586,7 @@ function renderLogs(list, reset) {
     ];
     cells.forEach((value, idx) => {
       const td = document.createElement('td');
+      td.className = 'audit-detail-only';
       if (idx === 0) td.innerHTML = sourceBadge;
       else td.textContent = value;
       tr.appendChild(td);
@@ -541,8 +595,62 @@ function renderLogs(list, reset) {
   });
 }
 
+// Translate only actions confirmed in existing log writers. Other rows keep their recorded description.
+const auditActionLabels = new Map([
+  ['approval.submit', '결재 문서를 올렸어요'],
+  ['approval.submit_blocked', '결재 제출을 차단했어요'],
+  ['approval.process', '결재 문서를 처리했어요'],
+  ['approval.cancel', '결재 취소를 처리했어요'],
+  ['approval.delete', '취소된 결재 문서를 삭제했어요'],
+  ['approval.evidence', '결재 증빙을 제출했어요'],
+  ['approval.physical_print', '실물결재 문서를 출력했어요'],
+  ['approval.physical_complete', '실물결재를 완료했어요'],
+  ['approval.physical_reject', '실물결재를 반려했어요'],
+  ['accounting.submit', '전표를 저장했어요'],
+  ['accounting.delete', '전표를 삭제했어요'],
+  ['accounting.bank_interest.submit', '은행 이자수익 전표를 저장했어요'],
+  ['accounting.card_cashback', '체크카드 캐시백을 저장했어요'],
+  ['accounting.insurance_pending_settle', '대기 중인 4대보험 정산을 처리했어요'],
+  ['hr.durunuri.eligibility_update', '두루누리 지원 설정을 변경했어요'],
+  ['hr.employee.delete_permanent', '직원 정보를 영구 삭제했어요'],
+  ['coop.certificate.setup', '출자금 납입 안내와 직인 설정을 변경했어요']
+]);
+const auditActionsWithNote = new Set(['approval.submit','approval.process','approval.cancel','accounting.delete',
+  'hr.durunuri.eligibility_update','hr.employee.delete_permanent']);
+
+function appendAuditSimpleCells(row, created, actor, action, summary, source) {
+  const cell = () => {
+    const td = document.createElement('td');
+    td.className = 'audit-simple-only';
+    row.appendChild(td);
+    return td;
+  };
+  const when = cell();
+  when.classList.add('audit-when');
+  const parsed = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(created);
+  if (parsed) {
+    const [, year, month, day, hh, mm] = parsed;
+    const hour = Number(hh);
+    when.textContent = `${year}년 ${Number(month)}월 ${Number(day)}일`;
+    const clock = document.createElement('span');
+    clock.textContent = `${hour < 12 ? '오전' : '오후'} ${hour % 12 || 12}:${mm}`;
+    when.appendChild(clock);
+  } else when.textContent = created || '일시 미기록';
+  const person = source === 'ERP' ? actor.replace(/(?:^|\s+)\(\d+\)$/, '') : actor;
+  cell().textContent = person || '실행자 미기록';
+  const work = cell();
+  const label = auditActionLabels.get(action);
+  work.textContent = label || summary || action || '작업 내용 미기록';
+  if (label && summary && auditActionsWithNote.has(action)) {
+    const note = document.createElement('span');
+    note.className = 'audit-action-note text-muted';
+    note.textContent = action === 'approval.submit' ? summary.replace(/\s+상신$/, '') : summary;
+    work.appendChild(note);
+  }
+}
+
 function exportCsv() {
-  if (!auditResultsMatchFilter()) return;
+  if (document.body.dataset.auditView !== 'detail' || !auditResultsMatchFilter()) return;
   if (!cachedLogs || cachedLogs.length === 0) return showAlert("내보낼 데이터가 없습니다.");
   const headers = ['source','created_at','actor','action','summary','entity_type','entity_id','ip_address'];
   const protectCsvCell = (value) => {
