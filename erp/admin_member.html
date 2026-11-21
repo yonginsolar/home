@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.508
-Change: 2026-11-21 - 배지 조건 추천 예시 바꾸기와 초안 초기화.
+Version: v1.0.509
+Change: 2026-11-21 - 단계형 배지 묶음 관리와 중복 없는 조건 예시.
 -->
 <html lang="ko">
 <head>
@@ -19,7 +19,7 @@ Change: 2026-11-21 - 배지 조건 추천 예시 바꾸기와 초안 초기화.
 <meta name="admin-contribution-certificate-revision" content="20261010.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.508';
+window.ADMIN_MEMBER_VERSION = 'v1.0.509';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -75,7 +75,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.508';
 <script src="/badges.js?v=20260331_01"></script>
 
 
-<link rel="preload" href="admin_member_core_v1507.js?v=20261121-badge-series-1" as="script" fetchpriority="high" integrity="sha384-akjXDu2zXdoFeEy9bmvuAuOGldEQKBZt+RIdbH8G11S1UCoiDsdSd1IxsBTL8sDG" crossorigin="anonymous">
+<link rel="preload" href="admin_member_core_v1509.js?v=20261121-badge-groups-1" as="script" fetchpriority="high" integrity="sha384-eZSRAQJ9AcqLkeZdOxLC38CfGUmSp4/eXm3Dwgw6U3zca9dM1MPojSqjDoviFyqj" crossorigin="anonymous">
 <script src="member_admission_policy.js?v=1.1.2" defer></script>
 <script src="member_application_manage.js?v=1.3.0" defer></script>
 <script src="member_admission_admin.js?v=1.3.0" defer></script>
@@ -1709,7 +1709,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.508';
 <div class="tab-pane fade" id="tab-badges">
 <h3 class="fw-bold mb-4">🏅 뱃지 관리</h3>
 <div class="d-flex flex-wrap gap-2 justify-content-end mb-2">
-<button type="button" class="btn btn-sm btn-outline-primary text-wrap" onclick="void openBadgeSeriesEditor(this)">단계형 배지</button>
+<button id="badge-series-create" type="button" class="btn btn-sm btn-outline-primary text-wrap" onclick="void openBadgeSeriesEditor(this)">단계형 배지 만들기</button>
 <button type="button" class="btn btn-sm btn-outline-secondary text-wrap" onclick="void openBadgeWorkbench('drafts',this)">초안 보기</button>
 <button type="button" class="btn btn-sm btn-outline-primary text-wrap" onclick="void openBadgeWorkbench('catalog',this)">뱃지 불러오기</button>
 <button type="button" class="btn btn-sm btn-primary text-wrap" onclick="void openBadgeRuleEditor(this)">새 뱃지 만들기</button>
@@ -3543,8 +3543,11 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.508';
 #badge-series-editor .bsx-scroller{max-block-size:18rem;overflow:auto;overscroll-behavior:contain}
 #badge-series-editor table{table-layout:fixed}
 #badge-series-editor th,#badge-series-editor td{white-space:normal;overflow-wrap:anywhere}
+#badge-series-editor .bsx-stage{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,.7fr) minmax(0,1.05fr) auto;gap:.5rem;align-items:end;border-bottom:1px solid #e1e8e4;padding:.55rem 0}
+#badge-series-editor .bsx-stage label{min-width:0}
+#badge-series-editor .bsx-stage button{align-self:end}
 @media(max-width:700px){#badge-series-editor .bsx-grid{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:440px){#badge-series-editor .bsx-fields{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:590px){#badge-series-editor .bsx-stage{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 </style>
 <dialog id="badge-series-editor" aria-labelledby="badge-series-title">
   <div class="bsx-shell">
@@ -3555,35 +3558,28 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.508';
     <div class="bsx-body">
       <div class="bsx-grid">
         <section class="bsx-panel" aria-label="단계 목록">
-          <label for="badge-series-track" class="fw-bold">배지 묶음</label>
-          <select id="badge-series-track" class="form-select mb-2" data-bsx="track"></select>
-          <p data-bsx="basis" class="small text-secondary"></p>
-          <div class="bsx-scroller mb-3" tabindex="0" aria-label="저장된 단계">
-            <table class="table table-sm mb-0">
-              <colgroup><col style="width:12%"><col style="width:40%"><col style="width:26%"><col style="width:22%"></colgroup>
-              <thead><tr><th scope="col">아이콘</th><th scope="col">단계 이름</th><th scope="col">기준</th><th scope="col"><span class="visually-hidden">상태</span></th></tr></thead>
-              <tbody data-bsx="steps"></tbody>
-            </table>
-          </div>
-          <button type="button" data-bsx="add" class="btn btn-outline-primary" hidden>+ 단계 추가</button>
-          <fieldset data-bsx="new" class="bsx-fields" hidden>
-            <legend class="h6">새 단계</legend>
-            <label>단계 이름<input class="form-control" data-bsx="name" maxlength="100"></label>
-            <label>아이콘<input class="form-control" data-bsx="icon" maxlength="40"></label>
-            <label>기준 <span data-bsx="unit"></span><input class="form-control" data-bsx="target" inputmode="numeric" autocomplete="off"></label>
-          </fieldset>
+          <label for="badge-series-title-input" class="fw-bold">묶음 이름</label>
+          <input id="badge-series-title-input" class="form-control mb-2" data-bsx="name" maxlength="100">
+          <label for="badge-series-track" class="fw-bold">공통 기준</label>
+          <select id="badge-series-track" class="form-select mb-2" data-bsx="track">
+            <option value="anniversary">가입 기간 (년)</option><option value="capital">현재 납입 출자금 (원)</option>
+          </select>
+          <div class="bsx-scroller mb-3" tabindex="0" aria-label="배지 단계" data-bsx="steps"></div>
+          <button type="button" data-bsx="add" class="btn btn-outline-primary">+ 단계 추가</button>
         </section>
         <section class="bsx-panel" aria-label="저장 전 미리보기">
           <h3 class="h6 fw-bold">저장 전 미리보기</h3>
           <dl class="mb-1"><dt>새로 받는 인원</dt><dd data-bsx="eligible">—</dd><dt>대표 배지가 바뀌는 인원</dt><dd data-bsx="changes">—</dd></dl>
-          <p class="small text-secondary mb-0">기존 배지는 그대로 남아요.</p>
+          <p class="small text-secondary mb-0" data-bsx="review-note"></p>
         </section>
       </div>
       <div class="mt-3"><span data-bsx="status" role="status"></span> <button type="button" data-bsx="retry" class="btn btn-sm btn-outline-secondary" hidden>다시 확인</button></div>
     </div>
     <footer class="bsx-actions">
       <button type="button" data-bsx="check" class="btn btn-outline-primary" hidden>저장 결과 확인</button>
-      <button type="button" data-bsx="submit" class="btn btn-primary" disabled>단계 추가 및 지급</button>
+      <button type="button" data-bsx="remove" class="btn btn-outline-secondary me-auto" hidden>보관</button>
+      <button type="button" data-bsx="submit" class="btn btn-primary" disabled>초안 저장</button>
+      <button type="button" data-bsx="activate" class="btn btn-primary" hidden disabled>활성화하고 지급</button>
     </footer>
   </div>
 </dialog>
@@ -3696,7 +3692,9 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.508';
 #badge-rule-editor .bre-prompt-row :is(input,button){min-height:46px}
 #badge-rule-editor .bre-prompt-go{background:#195e44;border-color:#195e44;color:#fff;padding-inline:14px;font-weight:650}
 #badge-rule-editor .bre-prompt-go:not(:disabled):hover{background:#134734;border-color:#134734}
-#badge-rule-editor .bre-examples{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:10px}
+#badge-rule-editor .bre-examples{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:4px}
+#badge-rule-editor .bre-examples-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:2rem;margin-top:10px}
+#badge-rule-editor .bre-examples-head button{flex:none}
 #badge-rule-editor .bre-idea-feedback{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:6px}
 #badge-rule-editor .bre-idea-feedback:has([data-bre="idea-status"]:empty){display:none}
 #badge-rule-editor .bre-grid{grid-template-columns:minmax(0,1.74fr) minmax(0,1fr);align-items:stretch}
@@ -3740,14 +3738,16 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.508';
    <section class="bre-prompt">
     <label for="badge-rule-idea">어떤 조합원에게 배지를 주고 싶어요?</label>
     <div class="bre-prompt-row">
-     <input id="badge-rule-idea" type="text" class="form-control" data-bre="idea" maxlength="240" autocomplete="off" placeholder="예: 납입 출자금 10만 원 이상">
+     <input id="badge-rule-idea" type="text" class="form-control" data-bre="idea" maxlength="240" autocomplete="off" placeholder="조건을 문장으로 적어 주세요">
      <button type="button" class="btn bre-prompt-go" data-bre="idea-make">조건 초안 만들기</button>
     </div>
-    <div class="bre-examples" id="badge-idea-examples">
+    <div class="bre-examples-head">
      <span class="small text-body-secondary">아이디어가 필요할 때</span>
+     <button type="button" class="btn btn-sm btn-outline-secondary" data-bre="idea-refresh" aria-controls="badge-idea-examples">다른 예시</button>
+    </div>
+    <div class="bre-examples" id="badge-idea-examples">
      <button type="button" class="btn btn-sm btn-outline-secondary" data-idea-example="올해 햇빛 퀴즈 완료 3일 이상">올해 햇빛 퀴즈 완료 3일 이상</button>
      <button type="button" class="btn btn-sm btn-outline-secondary" data-idea-example="대의원총회 참석 1회 이상">대의원총회 참석 1회 이상</button>
-     <button type="button" class="btn btn-sm btn-outline-secondary" data-bre="idea-refresh" aria-controls="badge-idea-examples">다른 예시</button>
      <span class="visually-hidden" role="status" data-bre="idea-announce"></span>
     </div>
     <div class="bre-idea-feedback"><span data-bre="idea-status" class="small" role="status"></span><button type="button" class="btn btn-sm btn-outline-secondary" data-bre="idea-manual" hidden>조건 직접 만들기</button></div>
@@ -4670,14 +4670,14 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.508';
 
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-<script src="admin_member_assets_v1508.js?v=20261121-badge-idea-refresh-1"></script>
+<script src="admin_member_assets_v1509.js?v=20261121-badge-groups-1"></script>
 <link rel="stylesheet" href="/shared/about_design_layout.css?v=1.0.0" integrity="sha384-6ZZ+35oWol9YYZKM6RumSU6bHwMkSVaki+ea4T4cARRvfflHTgFGFuNFApG48KEl" crossorigin="anonymous">
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/shared/hcrec_about_presentation.css?v=1.1.0" integrity="sha384-XPDw6+DuBSgWanDT8U6y7oWM0lfi8+K/Y9no1dtCghWdkPON3mH9PrFP1FLWA7oV" crossorigin="anonymous">
 <script src="/shared/hcrec_about_presentation.js?v=1.1.0" integrity="sha384-FqmOZt29+jqQv0Zg6Hv0SxsHOxDnjV2S50Otuq6RerH4MYIxYOwah29rPwyEMsDQ" crossorigin="anonymous"></script>
 <script src="member_sms_export.js?v=1.0.0"></script>
 <script src="/shared/cooperative_rules.js?v=1.0.0" integrity="sha384-CNofpCsGT79mVM66AV3CQF70jY7BgpDxeT0jL1BAEx0675brG6fVT0wfhFXtF9Bn" crossorigin="anonymous"></script>
-<script src="admin_member_core_v1507.js?v=20261121-badge-series-1" fetchpriority="high" integrity="sha384-akjXDu2zXdoFeEy9bmvuAuOGldEQKBZt+RIdbH8G11S1UCoiDsdSd1IxsBTL8sDG" crossorigin="anonymous" onerror="AdminMemberAssets.showBootFailure()"></script>
+<script src="admin_member_core_v1509.js?v=20261121-badge-groups-1" fetchpriority="high" integrity="sha384-eZSRAQJ9AcqLkeZdOxLC38CfGUmSp4/eXm3Dwgw6U3zca9dM1MPojSqjDoviFyqj" crossorigin="anonymous" onerror="AdminMemberAssets.showBootFailure()"></script>
 <script src="dividend_workflow.js?v=20261120-calculated-archive-1" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-VQ42+wl8r7M7QCcYb8NBZE9mP9vLHsPHr1vF9pK4s85Ye2/3eNRpk45JjkSdp130" crossorigin="anonymous"></script>
 <script src="dividend_legacy_safety.js?v=1.0.2" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-Cc6gGADTKCTHS/hgV1vc7BaFptSY9wlIzlJHP4Lueym2Xd6Knye8o6QTH9LiXaH9" crossorigin="anonymous"></script>
 <script src="dividend_policy.js?v=1.0.0" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-5IWika7+CSj08VLzNWnCBnva1BFcnkKLVPpGoEbZij3dMuYg19Jc7na6bNrdzZ4t" crossorigin="anonymous"></script>
