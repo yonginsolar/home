@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.497
+Version: v1.0.498
 Change: 2026-11-04 - Distinguish address review from missing information without altering stored member data.
 -->
 <html lang="ko">
@@ -19,7 +19,7 @@ Change: 2026-11-04 - Distinguish address review from missing information without
 <meta name="admin-contribution-certificate-revision" content="20261010.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.495';
+window.ADMIN_MEMBER_VERSION = 'v1.0.498';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -81,7 +81,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.495';
 <script src="member_admission_admin.js?v=1.3.0" defer></script>
 <link rel="stylesheet" href="member_notification_admin.css?v=20261019-provider-1">
 <script src="member_notification_admin.js?v=1.2.0" integrity="sha384-yFaSdzUYo2fdqoVRUFkDVZKewcORjrGc/LRuc78qfIbWKCNPNm6CYxbs3bnV6QJM" crossorigin="anonymous" defer></script>
-<link rel="stylesheet" href="admin_member.css?v=20261105-email-wrap-1">
+<link rel="stylesheet" href="admin_member.css?v=20261121-referral-nav-1">
 <link rel="stylesheet" href="../shared/home_sunlit.css?v=1.0.0" integrity="sha384-DLU1uCWeCDeFCHjkCPd4MxOsD07CtGSxMXkyZa3xHYeDCpiMCXK4XOAyB5olTrlN" crossorigin="anonymous">
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <link rel="stylesheet" href="./tab_workspace.css?v=1.0.0">
@@ -132,7 +132,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.495';
 <small class="text-white-50" id="adminProfile">접속중...</small>
 </div>
 
-<div class="sidebar-menu">
+<div class="sidebar-menu" id="member-local-menu">
 <a class="nav-link active" onclick="switchTab('dashboard')" id="nav-dashboard" style="cursor:pointer;">
 <i class="bi bi-grid-fill"></i> 대시보드
 </a>
@@ -142,7 +142,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.495';
 <a class="nav-link" onclick="switchTab('members')" id="nav-members" style="cursor:pointer;">
 <i class="bi bi-people-fill"></i> 조합원 명부
 </a>
-<button type="button" class="nav-link w-100 text-start hidden" onclick="switchTab('referrals')" id="nav-referrals">
+<button type="button" class="nav-link text-start hidden" onclick="switchTab('referrals')" id="nav-referrals">
 <i class="bi bi-person-check"></i> 추천인 관리
 </button>
 <a class="nav-link hidden" onclick="switchTab('badges')" id="nav-badges" style="cursor:pointer;">
@@ -200,7 +200,46 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.495';
 </button>
 </div>
 </div>
+<div class="member-nav-paging" id="member-nav-paging-controls" hidden>
+<button type="button" id="member-nav-prev" class="btn btn-outline-secondary" aria-controls="member-local-menu" aria-label="이전 메뉴">이전</button>
+<button type="button" id="member-nav-next" class="btn btn-outline-secondary" aria-controls="member-local-menu" aria-label="다음 메뉴">다음</button>
 </div>
+</div>
+
+<script id="member-nav-paging">
+(() => {
+ const rail=document.getElementById('member-local-menu'),controls=document.getElementById('member-nav-paging-controls');
+ if(!rail||!controls)return;
+ const sidebar=rail.closest('.sidebar'),prev=document.getElementById('member-nav-prev'),next=document.getElementById('member-nav-next');
+ let frame=0;
+ function update(){
+  frame=0;
+  const enabled=sidebar.classList.contains('erp-local-navigation')&&sidebar.clientWidth>0;
+  // Measure against the full track first so the buttons themselves cannot keep overflow active.
+  const paged=enabled&&rail.scrollWidth>sidebar.clientWidth+1;
+  if(controls.hidden===paged)controls.hidden=!paged;
+  sidebar.classList.toggle('member-nav-paged',paged);
+  const max=rail.scrollWidth-rail.clientWidth,x=rail.scrollLeft;
+  prev.setAttribute('aria-disabled',String(!paged||x<2));
+  next.setAttribute('aria-disabled',String(!paged||x>=max-1));
+ }
+ function schedule(){if(!frame)frame=requestAnimationFrame(update);}
+ function page(delta,button){
+  if(controls.hidden||button.getAttribute('aria-disabled')==='true')return;
+  const behavior=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth';
+  rail.scrollBy({left:delta*Math.max(1,rail.clientWidth-28),behavior});
+ }
+ prev.addEventListener('click',()=>page(-1,prev));next.addEventListener('click',()=>page(1,next));
+ rail.addEventListener('scroll',schedule,{passive:true});
+ window.addEventListener('resize',schedule,{passive:true});
+ if(window.ResizeObserver){const observer=new ResizeObserver(schedule);observer.observe(sidebar);observer.observe(rail);}
+ const changes=new MutationObserver(schedule);
+ changes.observe(sidebar,{attributes:true,attributeFilter:['class']});
+ changes.observe(rail,{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden','style']});
+ document.fonts?.ready.then(schedule);
+ schedule();
+})();
+</script>
 
 <div class="main-content">
     <div class="tab-pane fade" id="tab-notifications" style="display:none;"></div>
@@ -4338,7 +4377,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.495';
 
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-<script src="admin_member_assets_v1497.js?v=20261121-shared-referrals-1"></script>
+<script src="admin_member_assets_v1498.js?v=20261121-referral-nav-1"></script>
 <link rel="stylesheet" href="/shared/about_design_layout.css?v=1.0.0" integrity="sha384-6ZZ+35oWol9YYZKM6RumSU6bHwMkSVaki+ea4T4cARRvfflHTgFGFuNFApG48KEl" crossorigin="anonymous">
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/shared/hcrec_about_presentation.css?v=1.1.0" integrity="sha384-XPDw6+DuBSgWanDT8U6y7oWM0lfi8+K/Y9no1dtCghWdkPON3mH9PrFP1FLWA7oV" crossorigin="anonymous">

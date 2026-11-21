@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.276
+Version: v1.0.277
 Change: 2026-11-09 - Avoid displaying the fallback green before the portal palette is ready.
 -->
 <html lang="ko">
@@ -20,7 +20,7 @@ Change: 2026-11-09 - Avoid displaying the fallback green before the portal palet
 <script src="shared/member_portal_layout.js?v=1.3.5" integrity="sha384-IcwaTuuPaMoh8p4EaYxvDbn0Ye+NrQUGy3diLEArvhVNaLjODZgpVZI/c3lJmmeh" crossorigin="anonymous" defer></script>
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous" defer></script>
 <script src="/shared/hcrec_member_referral.js?v=1.0.0" integrity="sha384-mLlDe5K1h1YppHBjxTlyDIfbIAQu6cq6/lK8CGI2mkZpHLA0em3tQQTmHSdVxWsO" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.276 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.277 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -1786,6 +1786,13 @@ gtag('config', 'G-TR217L7JN9');
 </div>
 
 <div id="portalProfileGroup">
+<section id="my-referral-count" class="dashboard-card p-3 mb-3" aria-labelledby="my-referral-count-label" hidden>
+ <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+  <h3 id="my-referral-count-label" class="h6 fw-bold mb-0">내 추천으로 가입한 조합원</h3>
+  <output id="my-referral-count-value" class="fw-bold" aria-live="polite"></output>
+  <button type="button" id="my-referral-count-retry" class="btn btn-sm btn-outline-secondary" hidden>다시 확인</button>
+ </div>
+</section>
 <section id="hcrec-referral-share" class="dashboard-card p-3 mb-3" aria-labelledby="hcrec-referral-title" hidden>
  <h3 id="hcrec-referral-title" class="h6 mb-2 fw-bold">조합원 추천 코드</h3>
  <p class="small text-muted mb-2">가입하려는 분에게 이름과 일회용 코드를 알려 주세요.</p>
@@ -2725,6 +2732,7 @@ async function preparePortalDirectSections(key,settings={}) {
 const owner=getFamilyRegistrationOwner(),revision=++portalDirectRevision;
 const current=()=>owner&&owner===getFamilyRegistrationOwner()&&revision===portalDirectRevision&&window.MemberPortalPurposeController?.getSelected()===key;
 void loadPortalPurposeExtras(key);
+syncMyReferralCount(key);
 if(key==='funds') {
 syncWithdrawRefundAccountUi();
 if(settings.reason==='extra-capital-link')await Promise.resolve();
@@ -4341,6 +4349,7 @@ await initializeEducationQrEntry();
 _supabase.auth.onAuthStateChange(async (event, session) => {
 if (!session || (curAuth?.id && curAuth.id !== session.user?.id)) {
 hcrecReferralProfile?.clear();
+clearMyReferralCount();
 window.ContributionCertPreview?.clear();
 window.MemberTelegramConnection?.clear();
 clearPortalProfileEdits();
@@ -5404,6 +5413,66 @@ onSaved: async () => { await reloadDashboard(); }
 return memberInformationPortal.refresh(member);
 }
 
+const myReferralCount=(()=>{
+let active='',pending=null;
+const card=()=>document.getElementById('my-referral-count');
+const value=()=>document.getElementById('my-referral-count-value');
+const retry=()=>document.getElementById('my-referral-count-retry');
+const owner=()=> {
+ const actor=curAuth?.id,coop=currentMemberCoopId,profile=curMem?.id,access=memberAccessContext;
+ if (!actor||!coop||!profile||!_supabase||document.hidden||window.frameElement?.hidden
+     || document.getElementById('dashboardSection')?.classList.contains('hidden')
+     || access?.access_mode!=='current'||access?.found!==true
+     || String(access.profile_id)!==String(profile)||String(access.coop_id)!==String(coop)
+     || String(getRootMemberProfileId()||'')!==String(profile)||String(curMem.coop_id)!==String(coop)
+     || !['정상','active','normal'].includes(String(curMem.status||'').trim().toLowerCase())
+     || !String(curMem.member_id||'').trim()) return '';
+ return JSON.stringify([actor,coop,profile]);
+};
+const onProfile=()=>!window.MemberPortalPurposeController||window.MemberPortalPurposeController.getSelected()==='profile';
+function clear(){
+ const last=pending;pending=null;active='';last?.abort.abort();
+ const panel=card();if(panel){panel.hidden=true;value().textContent='';retry().hidden=true;}
+}
+function sync(key,force=false){
+ if(key!=='profile'||!onProfile()){clear();return;}
+ const id=owner(),panel=card();
+ if(!id||!panel){clear();return;}
+ if(pending?.owner===id||(!force&&active===id))return;
+ clear();
+ active=id;panel.hidden=false;value().textContent='—';retry().hidden=true;
+ const run={owner:id,abort:new AbortController()};pending=run;
+ const isCurrent=()=>pending===run&&owner()===id&&onProfile();
+ let timer;
+ const timeout=new Promise((_,reject)=>{
+  timer=setTimeout(()=>{run.abort.abort();reject(Error('REFERRAL_COUNT_TIMEOUT'));},10000);
+ });
+ void Promise.race([(async()=>{
+  const call=_supabase.rpc('my_member_referral_count');
+  const {data,error,status}=await (typeof call?.abortSignal==='function'?call.abortSignal(run.abort.signal):call);
+  if(error)throw {...error,status};
+  if(!Number.isInteger(data)||data<0)throw Error('INVALID_REFERRAL_COUNT');
+  return data;
+ })(),timeout]).then(total=>{
+  if(isCurrent())value().textContent=total.toLocaleString('ko-KR')+'명';
+ }).catch(e=>{
+  if(!isCurrent())return;
+  if(e?.code==='42501'||Number(e?.status)===401||Number(e?.status)===403){clear();return;}
+  retry().hidden=false;
+ }).finally(()=>{
+  clearTimeout(timer);
+  if(pending===run){if(!isCurrent())clear();else pending=null;}
+ });
+}
+retry()?.addEventListener('click',()=>sync('profile',true));
+window.addEventListener('pagehide',clear);
+window.addEventListener('pageshow',event=>{if(event.persisted&&onProfile())sync('profile');});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)clear();else if(onProfile())sync('profile');});
+return Object.freeze({sync,clear});
+})();
+function syncMyReferralCount(key){myReferralCount.sync(key);}
+function clearMyReferralCount(){myReferralCount.clear();}
+
 let hcrecReferralProfile=null;
 function syncHcrecReferralProfile() {
 const helper=window.CoopHcrecMemberReferral;
@@ -5420,6 +5489,7 @@ hcrecReferralProfile?.sync();
 }
 async function loadDashboardData(uuid, options = {}) {
 hcrecReferralProfile?.clear();
+clearMyReferralCount();
 window.PortalLoginToolRecovery?.cancel();
 portalIdentityClaim?.suspend();
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
@@ -5568,6 +5638,7 @@ if(!window.MemberPortalPurposeController?.isDirect){void loadPortalPurposeExtras
 
 	showOnly('dashboardSection');
 	syncHcrecReferralProfile();
+	syncMyReferralCount(window.MemberPortalPurposeController?.getSelected() ?? 'profile');
 	openHcrecCapitalShortcut(currentProfileLoad);
 	if (!isSiteMemberPortalProfile()) await handlePendingEducationQrCheckIn(uuid);
 	if (!isSiteMemberPortalProfile()) {
@@ -12127,7 +12198,7 @@ syncIncomingConnectStatus(active);
 // [수정] 화면 전환 유틸리티: style 제어 방식 폐기 -> classList 제어 방식 도입
 function showOnly(sectionId) {
 window.PortalLoginToolRecovery?.cancel();
-if(sectionId!=='dashboardSection')hcrecReferralProfile?.clear();
+if(sectionId!=='dashboardSection'){hcrecReferralProfile?.clear();clearMyReferralCount();}
 if (sectionId !== 'dashboardSection') window.MemberPortalPurposeController?.suspend();
 // 제어할 대상 섹션 ID 목록 (명시적으로 지정하여 안전성 확보)
 const sections = ['loginSection', 'dashboardSection', 'formerMemberSection'];
