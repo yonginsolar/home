@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.498
+Version: v1.0.499
 Change: 2026-11-04 - Distinguish address review from missing information without altering stored member data.
 -->
 <html lang="ko">
@@ -19,7 +19,7 @@ Change: 2026-11-04 - Distinguish address review from missing information without
 <meta name="admin-contribution-certificate-revision" content="20261010.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.498';
+window.ADMIN_MEMBER_VERSION = 'v1.0.499';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -75,7 +75,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.498';
 <script src="/badges.js?v=20260331_01"></script>
 
 
-<link rel="preload" href="admin_member_core_v1497.js?v=20261121-shared-referrals-1" as="script" fetchpriority="high" integrity="sha384-FqS1peBfxQfgwrjOCk5BTtPJSn4PvcENIN9x/EDjYD2lUBdIGFTtKsZNsCyvnagL" crossorigin="anonymous">
+<link rel="preload" href="admin_member_core_v1499.js?v=20261121-pc-badge-editor-1" as="script" fetchpriority="high" integrity="sha384-BXyTIovBl7RrAg1v1lUs3iqUld4/A+4UEXebGGmQQv+c56ONyipp/G/HFjtfLDzQ" crossorigin="anonymous">
 <script src="member_admission_policy.js?v=1.1.2" defer></script>
 <script src="member_application_manage.js?v=1.3.0" defer></script>
 <script src="member_admission_admin.js?v=1.3.0" defer></script>
@@ -1701,7 +1701,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.498';
 <div class="d-flex flex-wrap gap-2 justify-content-end mb-2">
 <button type="button" class="btn btn-sm btn-outline-secondary text-wrap" onclick="void openBadgeWorkbench('drafts',this)">초안 보기</button>
 <button type="button" class="btn btn-sm btn-outline-primary text-wrap" onclick="void openBadgeWorkbench('catalog',this)">뱃지 불러오기</button>
-<button type="button" class="btn btn-sm btn-primary text-wrap" onclick="void openBadgeWorkbench('new',this)">새 뱃지 만들기</button>
+<button type="button" class="btn btn-sm btn-primary text-wrap" onclick="void openBadgeRuleEditor(this)">새 뱃지 만들기</button>
 </div>
 <div id="badge-workbench-launch-status" class="small mb-2" role="status"></div>
 <div id="badge-list-status" class="small text-warning mb-2" role="status"></div>
@@ -3576,6 +3576,83 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.498';
 </div>
 </dialog>
 
+<style>
+#badge-rule-editor{box-sizing:border-box;width:min(1100px,calc(100% - 24px));max-width:calc(100% - 24px);height:min(780px,calc(100dvh - 24px));max-height:calc(100dvh - 24px);padding:0;border:1px solid var(--bs-border-color);border-radius:16px;color:var(--bs-body-color);background:var(--bs-body-bg);overflow:hidden;overflow-wrap:anywhere}
+#badge-rule-editor::backdrop{background:#0f172a88}
+#badge-rule-editor .bre-shell{display:grid;grid-template-rows:auto minmax(0,1fr);height:100%;min-width:0}
+#badge-rule-editor .bre-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;padding:12px 18px;gap:8px;border-bottom:1px solid var(--bs-border-color)}
+#badge-rule-editor .bre-body{min-width:0;overflow:auto;overscroll-behavior:contain;padding:16px 20px}
+#badge-rule-editor .bre-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.85fr);gap:14px;align-items:start}
+#badge-rule-editor .bre-box{min-width:0;border:1px solid var(--bs-border-color);border-radius:12px;padding:12px}
+#badge-rule-editor .bre-actions,#badge-rule-editor .bre-add{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+#badge-rule-editor .bre-add input{flex:1 1 12rem}
+#badge-rule-editor :is(button,input,textarea,select){max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere}
+#badge-rule-editor .bre-results{max-height:12rem;overflow:auto;overscroll-behavior:contain}
+#badge-rule-editor .bre-option{display:block;text-align:start;width:100%;margin-bottom:4px}
+#badge-rule-editor .bre-rule{display:flex;flex-wrap:wrap;align-items:end;gap:6px;margin-block:8px;padding:8px;border:1px solid var(--bs-border-color);border-radius:8px}
+#badge-rule-editor .bre-rule label{flex:1 1 11rem;min-width:0}
+#badge-rule-editor .bre-people{max-height:19rem;overflow:auto;overscroll-behavior:contain;margin:8px 0}
+#badge-rule-editor .bre-people li{margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--bs-border-color)}
+#badge-rule-editor [hidden]{display:none!important}
+@media(max-width:780px){#badge-rule-editor .bre-grid{grid-template-columns:minmax(0,1fr)}#badge-rule-editor .bre-head,#badge-rule-editor .bre-body{padding:10px}}
+</style>
+<dialog id="badge-rule-editor" aria-labelledby="badge-rule-title">
+ <div class="bre-shell">
+  <header class="bre-head"><h2 class="h5 mb-0" id="badge-rule-title" tabindex="-1">새 뱃지 만들기</h2>
+   <div class="bre-actions">
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-bre="drafts">저장한 초안 열기</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-bre="close">닫기</button>
+   </div>
+  </header>
+  <div class="bre-body">
+   <div class="small mb-2" data-bre="status" aria-live="polite"></div>
+   <div class="bre-actions mb-2" data-bre="recover" hidden><button type="button" class="btn btn-sm btn-outline-primary" data-bre="check">결과 확인</button>
+     <button type="button" class="btn btn-sm btn-outline-secondary" data-bre="repeat">같은 요청 다시 보내기</button></div>
+   <section class="bre-box mb-3" data-bre="draft-list" hidden aria-label="저장한 초안">
+    <div data-bre="draft-items" class="d-grid gap-1"></div>
+    <button type="button" class="btn btn-sm btn-outline-secondary mt-1" data-bre="draft-more" hidden>초안 더 보기</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary mt-1" data-bre="new">새 초안으로 돌아가기</button>
+   </section>
+   <form data-bre="form">
+   <div class="bre-grid">
+    <div class="bre-box">
+     <h3 class="h6 fw-bold">디자인</h3>
+     <label class="form-label d-block">뱃지 이름<input class="form-control" name="name" maxlength="100" required></label>
+     <label class="form-label d-block">아이콘 또는 이모지<input class="form-control" name="icon" maxlength="40" placeholder="🏅"></label>
+     <label class="form-label d-block">설명<textarea class="form-control" name="description" rows="2" maxlength="500"></textarea></label>
+     <div class="bre-actions align-items-end">
+      <label class="form-label">색상<select class="form-select" name="color"><option value="primary">파랑</option><option value="success">초록</option><option value="warning">노랑</option><option value="danger">빨강</option><option value="info">하늘</option><option value="dark">검정</option><option value="secondary">회색</option><option value="light">밝은색</option></select></label>
+      <label class="form-label">표시 순서<input type="number" class="form-control" name="order" min="0" max="999999" value="0"></label>
+     </div>
+    </div>
+    <div class="bre-box">
+     <h3 class="h6 fw-bold">지급 조건</h3>
+     <div class="bre-add">
+      <button type="button" class="btn btn-outline-primary" aria-expanded="false" aria-controls="badge-rule-results" data-bre="add">조건 추가</button>
+      <input type="search" class="form-control" aria-label="조건 검색" aria-controls="badge-rule-results" data-bre="search" placeholder="가입일, 가입 기간, 출자금">
+     </div>
+     <div class="bre-results my-2" id="badge-rule-results" data-bre="options" hidden aria-label="검색 결과"></div>
+     <div data-bre="rules"></div>
+     <label class="form-label" data-bre="combine-wrapper" hidden>어떤 조건을 충족해야 하나요?
+      <select class="form-select" name="combine"><option value="all">모든 조건</option><option value="any">하나 이상</option></select>
+     </label>
+     <p class="small mb-0 text-secondary" data-bre="mode"></p>
+    </div>
+   </div>
+   <div class="bre-actions my-3">
+    <button type="button" class="btn btn-outline-primary" data-bre="preview">대상 미리보기</button>
+    <button type="button" class="btn btn-outline-primary" data-bre="save">초안 저장</button>
+    <button type="button" class="btn btn-primary" data-bre="activate" hidden>활성화</button>
+   </div>
+   <section class="bre-box" data-bre="review-box" hidden aria-label="지급 대상 확인">
+    <div class="fw-bold" data-bre="summary"></div><ol class="bre-people" data-bre="people"></ol>
+    <div class="bre-actions"><button type="button" class="btn btn-sm btn-outline-secondary" data-bre="review-prev" hidden>이전 대상</button><button type="button" class="btn btn-sm btn-outline-secondary" data-bre="review-next" hidden>다음 대상</button></div>
+   </section>
+   </form>
+  </div>
+ </div>
+</dialog>
+
 <div class="modal fade" id="faqModal" tabindex="-1" aria-labelledby="faqModalTitle" aria-hidden="true">
 <div class="modal-dialog modal-lg">
 <div class="modal-content">
@@ -4377,14 +4454,14 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.498';
 
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-<script src="admin_member_assets_v1498.js?v=20261121-referral-nav-1"></script>
+<script src="admin_member_assets_v1499.js?v=20261121-pc-badge-editor-1"></script>
 <link rel="stylesheet" href="/shared/about_design_layout.css?v=1.0.0" integrity="sha384-6ZZ+35oWol9YYZKM6RumSU6bHwMkSVaki+ea4T4cARRvfflHTgFGFuNFApG48KEl" crossorigin="anonymous">
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/shared/hcrec_about_presentation.css?v=1.1.0" integrity="sha384-XPDw6+DuBSgWanDT8U6y7oWM0lfi8+K/Y9no1dtCghWdkPON3mH9PrFP1FLWA7oV" crossorigin="anonymous">
 <script src="/shared/hcrec_about_presentation.js?v=1.1.0" integrity="sha384-FqmOZt29+jqQv0Zg6Hv0SxsHOxDnjV2S50Otuq6RerH4MYIxYOwah29rPwyEMsDQ" crossorigin="anonymous"></script>
 <script src="member_sms_export.js?v=1.0.0"></script>
 <script src="/shared/cooperative_rules.js?v=1.0.0" integrity="sha384-CNofpCsGT79mVM66AV3CQF70jY7BgpDxeT0jL1BAEx0675brG6fVT0wfhFXtF9Bn" crossorigin="anonymous"></script>
-<script src="admin_member_core_v1497.js?v=20261121-shared-referrals-1" fetchpriority="high" integrity="sha384-FqS1peBfxQfgwrjOCk5BTtPJSn4PvcENIN9x/EDjYD2lUBdIGFTtKsZNsCyvnagL" crossorigin="anonymous" onerror="AdminMemberAssets.showBootFailure()"></script>
+<script src="admin_member_core_v1499.js?v=20261121-pc-badge-editor-1" fetchpriority="high" integrity="sha384-BXyTIovBl7RrAg1v1lUs3iqUld4/A+4UEXebGGmQQv+c56ONyipp/G/HFjtfLDzQ" crossorigin="anonymous" onerror="AdminMemberAssets.showBootFailure()"></script>
 <script src="dividend_workflow.js?v=20261120-calculated-archive-1" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-VQ42+wl8r7M7QCcYb8NBZE9mP9vLHsPHr1vF9pK4s85Ye2/3eNRpk45JjkSdp130" crossorigin="anonymous"></script>
 <script src="dividend_legacy_safety.js?v=1.0.2" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-Cc6gGADTKCTHS/hgV1vc7BaFptSY9wlIzlJHP4Lueym2Xd6Knye8o6QTH9LiXaH9" crossorigin="anonymous"></script>
 <script src="dividend_policy.js?v=1.0.0" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-5IWika7+CSj08VLzNWnCBnva1BFcnkKLVPpGoEbZij3dMuYg19Jc7na6bNrdzZ4t" crossorigin="anonymous"></script>
