@@ -109,6 +109,10 @@
   }
 
   function getLeaveSnapshotItemAmount(item) {
+    var minutes = item?.deducted_minutes;
+    if (minutes != null && minutes !== '' && Number.isSafeInteger(Number(minutes)) && Number(minutes) >= 0) {
+      return roundLeaveDays(Number(minutes) / 480);
+    }
     var rawDays = Number(item && (item.deducted_days != null ? item.deducted_days : item.days));
     if (Number.isFinite(rawDays) && rawDays > 0) return roundLeaveDays(rawDays);
 
@@ -501,7 +505,18 @@
       pendingStatuses: pendingStatuses
     });
 
-    var effectiveRemainDays = Math.max(0, roundLeaveDays(baseRemainDays - pendingSummary.holdDays));
+    // A current server allocation already accounts for pending and scheduled
+    // leave on their actual dates. Do not deduct the client-side history again.
+    var effectiveRemainDays;
+    if (basis.data.allocation_version === 1 || basis.data.allocation_version === 2) {
+      var effectiveUnits = basis.data.effective_balance_units;
+      if (effectiveUnits == null || effectiveUnits === '' || !Number.isFinite(Number(effectiveUnits)) || Number(effectiveUnits) < 0) {
+        throw new Error('휴가 잔액을 확인하지 못했습니다. 다시 조회해 주세요.');
+      }
+      effectiveRemainDays = roundLeaveDays(Number(effectiveUnits));
+    } else {
+      effectiveRemainDays = Math.max(0, roundLeaveDays(baseRemainDays - pendingSummary.holdDays));
+    }
 
     return {
       baseRemainDays: baseRemainDays,
@@ -516,6 +531,52 @@
       reservedStatuses: reservedStatuses,
       pendingStatuses: pendingStatuses
     };
+  }
+
+  // Keep one exact employee/dates/minutes request per draft. A browser-side
+  // preview neither saves nor replaces the locked server check at submission.
+  function createDatedLeavePreview(supabase, options) {
+    var current = null;
+    var delay = options.delayMs == null ? 140 : options.delayMs;
+    var limit = options.timeoutMs == null ? 15000 : options.timeoutMs;
+    function reset() {
+      if (!current) return;
+      var old = current;
+      current = null;
+      clearTimeout(old.start);
+      clearTimeout(old.deadline);
+      old.controller.abort();
+    }
+    function check(plan) {
+      if (!plan) { reset(); return null; }
+      var key = JSON.stringify([plan.owner,plan.empId,plan.items]);
+      if (current && current.key === key) return current.state;
+      reset();
+      var job = {key:key,state:'loading',controller:new AbortController()};
+      current = job;
+      job.start = setTimeout(async function () {
+        if (current !== job || !options.isCurrent(plan)) { if (current===job) reset(); return; }
+        var outcome = 'error';
+        try {
+          var request = supabase.rpc('erp_leave_fifo_preview',{p_emp_id:plan.empId,p_items:plan.items});
+          var data = await Promise.race([
+            request.abortSignal ? request.abortSignal(job.controller.signal) : request,
+            new Promise(function (_,reject) {
+              job.deadline = setTimeout(function () { reject(Error('DATED_LEAVE_TIMEOUT'));job.controller.abort(); },limit);
+              job.controller.signal.addEventListener('abort',function () { reject(Error('DATED_LEAVE_CANCELLED')); },{once:true});
+            })
+          ]);
+          if (!data.error && typeof data.data?.allowed === 'boolean') outcome=data.data.allowed?'allowed':'insufficient';
+        } catch (_) {}
+        finally { clearTimeout(job.deadline); }
+        if (current !== job) return;
+        if (!options.isCurrent(plan)) { reset(); return; }
+        job.state=outcome;
+        options.onChange();
+      },delay);
+      return job.state;
+    }
+    return {check:check,reset:reset};
   }
 
   function formatDotDate(isoDate) {
@@ -857,6 +918,7 @@
     summarizeLeaveDocs: summarizeLeaveDocs,
     summarizePendingLeaveHolds: summarizePendingLeaveHolds,
     fetchLeaveApprovals: fetchLeaveApprovals,
-    getLeaveSnapshot: getLeaveSnapshot
+    getLeaveSnapshot: getLeaveSnapshot,
+    createDatedLeavePreview: createDatedLeavePreview
   };
 })(window);

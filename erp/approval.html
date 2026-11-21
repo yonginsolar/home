@@ -49,7 +49,7 @@
   <script id="approvalLeaveTimeScript" src="leave_time.js?v=20261106-4"></script>
   <script id="approvalAnnualRuntimeScript" src="approval_annual_leave.js?v=1.7.1"></script>
   <script src="approval_leave_document.js?v=1.1.1"></script>
-  <script src="leave_ledger.js?v=20261119-2"></script>
+  <script src="leave_ledger.js?v=20261122-fifo-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_insurance_notice.js?v=1.1.2" integrity="sha384-Z8vzUhvGeHVYL+SRkQ1El4RZEdpeoApq+UsAilxqnRLWaECj6/cTAkyFRfsIEeTh" crossorigin="anonymous"></script>
@@ -1426,7 +1426,7 @@
             <div id="dateRangeArea">
                 <div class="d-flex justify-content-between mb-2">
                   <span class="fw-bold" id="dateRangeAreaTitle">📅 기간 선택</span>
-                  <span class="badge bg-primary">사용 가능 휴가: <span id="remainDaysBadge">조회중...</span></span>
+                  <span class="badge bg-primary">오늘 사용 가능: <span id="remainDaysBadge">조회중...</span></span>
                 </div>
                 <div class="input-group mb-2">
                   <input type="date" class="form-control" id="leaveStart" onchange="handleApprovalLeaveDateRangeChange()">
@@ -1438,7 +1438,7 @@
             <div id="mixedDayArea" class="hidden">
                 <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-2">
                     <span class="fw-bold" id="mixedDayAreaTitle">📅 연차 사용 내역</span>
-                    <span class="badge bg-primary">사용 가능 휴가: <span id="remainDaysBadgeMixed">0일 0시간</span></span>
+                    <span class="badge bg-primary">오늘 사용 가능: <span id="remainDaysBadgeMixed">0일 0시간</span></span>
                 </div>
                 <div class="small text-muted mb-2">올해 날짜를 선택하세요. 이미 지난 날짜도 신청할 수 있어요.</div>
                 <fieldset id="approvalAnnualModes" class="mb-3 hidden">
@@ -1507,7 +1507,7 @@
             <div id="singleDayArea" class="hidden">
                 <div class="d-flex justify-content-between mb-2">
                     <span class="fw-bold" id="singleDayAreaTitle">📅 날짜 선택</span>
-                    <span class="badge bg-primary">사용 가능 휴가: <span id="remainDaysBadgeSingle">0일 0시간</span></span>
+                    <span class="badge bg-primary">오늘 사용 가능: <span id="remainDaysBadgeSingle">0일 0시간</span></span>
                 </div>
                 <div class="input-group mb-2">
                     <input type="date" class="form-control" id="singleLeaveDate" onchange="calcLeaveDays()">
@@ -1517,7 +1517,7 @@
             <div id="halfDayArea" class="hidden">
                 <div class="d-flex justify-content-between mb-2">
                     <span class="fw-bold" id="halfDayAreaTitle">📅 날짜 선택</span>
-                    <span class="badge bg-primary">사용 가능 휴가: <span id="remainDaysBadgeHalf">0일 0시간</span></span>
+                    <span class="badge bg-primary">오늘 사용 가능: <span id="remainDaysBadgeHalf">0일 0시간</span></span>
                 </div>
                 <div class="input-group mb-2">
                     <input type="date" class="form-control" id="halfDate" onchange="calcLeaveDays()">
@@ -1534,7 +1534,9 @@
               <span id="approvalLeaveTotalLabel">신청 일수:</span> <span id="leaveDaysBadge" class="fw-bold text-dark">0일</span>
               <input type="hidden" id="leaveDaysCalc" value="0">
             </div>
-            <div class="text-danger small mt-1 hidden" id="leaveOverMsg">⛔ 사용 가능한 연차가 부족합니다!</div>
+            <div class="text-danger small mt-1 hidden" id="leaveOverMsg" role="status"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="approvalDatedLeaveRetry" hidden
+              onclick="retryApprovalDatedLeave()">선택한 날짜 다시 확인</button>
           </div>
         </div>
 
@@ -14488,11 +14490,18 @@ function leaveApprovalSubmitPreview() {
 }
 function getApprovalAnnualSubmitBlock() {
     if(!approvalProxyDraftMatches())return '기안 대상자를 다시 선택해 주세요.';
-    if(getCurrentDraftMainType()!=='휴가'||!isApprovalAnnualConfig(getApprovalCurrentLeaveTypeConfig()))return '';
-    const summary=getApprovalMixedLeaveSummary({requireComplete:true});
+    if(getCurrentDraftMainType()!=='휴가')return '';
+    const config=getApprovalCurrentLeaveTypeConfig();
+    if(!(isApprovalAnnualConfig(config)||usesApprovalDatedLeave(config)))return '';
+    const dated=usesApprovalDatedLeave(config);
+    const summary=dated?getApprovalPreparedLeaveSummary(config,{requireComplete:true})
+        :getApprovalMixedLeaveSummary({requireComplete:true});
+    if(dated&&(!summary?.ok||summary.settlementPending))approvalDatedLeavePreview?.reset();
+    if(!summary)return '휴가 날짜와 시간을 확인해 주세요.';
     if(!summary.ok||!summary.totalDays&&!summary.settlementPending)return summary.errors[0]||'휴가 날짜와 시간을 확인해 주세요.';
-    const validation=getApprovalLeaveValidationSummary(getApprovalCurrentLeaveTypeLabel());
-    return !summary.settlementPending&&isApprovalLeaveValidationBlocked(validation,summary.totalDays)?getApprovalLeaveValidationMessage(validation):'';
+    if(summary.settlementPending)return '';
+    const validation=getApprovalLeaveValidationSummary(getApprovalCurrentLeaveTypeLabel(),summary);
+    return isApprovalLeaveValidationBlocked(validation,summary.totalDays)?getApprovalLeaveValidationMessage(validation):'';
 }
 function getApprovalFormReadSubmitBlock() {
     const type = getCurrentDraftMainType();
@@ -14800,9 +14809,52 @@ function getApprovalAdvanceLeaveSummary(leaveType) {
     };
 }
 
-function getApprovalLeaveValidationSummary(leaveType) {
+let approvalDatedLeavePreview=null;
+function usesApprovalDatedLeave(config) {
+    return leaveSnapshotState?.workBasis?.allocation_version===2 && config?.deductible===true;
+}
+function getApprovalDatedLeaveOwner() {
+    return JSON.stringify([approvalSubmitOwner(),getApprovalLeaveTargetEmpInfo()?.emp_id,calculateLeave.revision]);
+}
+function retryApprovalDatedLeave() {
+    approvalDatedLeavePreview?.reset();
+    calcLeaveDays();
+    syncApprovalSubmitControls();
+}
+function readApprovalDatedLeaveValidation(summary) {
+    const dates=summary?.items?.map(item=>({
+        d:String(item.leave_date||''),minutes:Number(item.deducted_minutes ?? Math.round(Number(item.deducted_days)*480))
+    }))||[];
+    const empId=String(getApprovalLeaveTargetEmpInfo()?.emp_id||'');
+    const valid=summary?.ok && !summary.settlementPending && empId && dates.length
+        && dates.every(item=>/^\d{4}-\d{2}-\d{2}$/.test(item.d)&&Number.isInteger(item.minutes)&&item.minutes>0&&item.minutes<=1440);
+    if(!valid){
+        approvalDatedLeavePreview?.reset();
+        const retry=document.getElementById('approvalDatedLeaveRetry');if(retry)retry.hidden=true;
+        return {mode:'dated',blocked:!summary?.settlementPending,message:'선택한 날짜와 차감 시간을 확인해 주세요.'};
+    }
+    if(!approvalDatedLeavePreview&&window.LeaveLedger?.createDatedLeavePreview){
+        approvalDatedLeavePreview=window.LeaveLedger.createDatedLeavePreview(_supabase,{
+            isCurrent:plan=>!window.frameElement?.hidden && getCurrentDraftMainType()==='휴가'
+                && usesApprovalDatedLeave(getApprovalCurrentLeaveTypeConfig()) && plan.owner===getApprovalDatedLeaveOwner(),
+            onChange:()=>{calcLeaveDays();syncApprovalSubmitControls();}
+        });
+    }
+    dates.sort((a,b)=>a.d.localeCompare(b.d)||a.minutes-b.minutes);
+    const state=approvalDatedLeavePreview?.check({owner:getApprovalDatedLeaveOwner(),empId,items:dates})||'error';
+    const retry=document.getElementById('approvalDatedLeaveRetry');if(retry)retry.hidden=state!=='error';
+    return {mode:'dated',blocked:state!=='allowed',message:
+      state==='loading'?'선택한 날짜의 연차를 확인하고 있습니다.'
+      :state==='error'?'선택한 날짜의 연차를 확인하지 못했습니다. 다시 확인해 주세요.'
+      :state==='insufficient'?'선택한 날짜에 사용할 수 있는 연차가 부족합니다.':''};
+}
+function getApprovalLeaveValidationSummary(leaveType,summary) {
     const birthday = getApprovalBirthdayHalfUsageSummary(leaveType);
     if (birthday.enabled) return birthday;
+    const config=getApprovalCurrentLeaveTypeConfig();
+    if(usesApprovalDatedLeave(config)){
+        return readApprovalDatedLeaveValidation(summary||getApprovalPreparedLeaveSummary(config,{requireComplete:true}));
+    }
     const advance = getApprovalAdvanceLeaveSummary(leaveType);
     if (advance.enabled) return advance;
     return {
@@ -14843,6 +14895,9 @@ function calcLeaveDays() {
     const lType = getApprovalCurrentLeaveTypeLabel();
     const msg = document.getElementById("leaveOverMsg");
     const requiresLeaveValidation = isApprovalDeductibleLeaveType(leaveConfig) || isApprovalBirthdayHalfLeaveType(leaveConfig);
+    const retry=document.getElementById('approvalDatedLeaveRetry');
+    if(retry)retry.hidden=true;
+    if(!usesApprovalDatedLeave(leaveConfig))approvalDatedLeavePreview?.reset();
     if (msg) msg.textContent = '⛔ 사용 가능한 연차가 부족합니다!';
     if (!leaveConfig) {
         document.getElementById("leaveDaysBadge").innerText = "0일";
@@ -14857,7 +14912,7 @@ function calcLeaveDays() {
         document.getElementById('leaveDaysBadge').textContent=formatApprovalWorkDays(summary.totalDays);
         document.getElementById('leaveDaysCalc').value=summary.totalDays;
         syncApprovalPendingLeaveDaysBadge(summary.totalDays);
-        if(msg){const validation=getApprovalLeaveValidationSummary(lType);msg.classList.toggle('hidden',!isApprovalLeaveValidationBlocked(validation,summary.totalDays));}
+        if(msg){const validation=getApprovalLeaveValidationSummary(lType,summary);msg.textContent=getApprovalLeaveValidationMessage(validation);msg.classList.toggle('hidden',!isApprovalLeaveValidationBlocked(validation,summary.totalDays));}
         return;
     }
     if (isApprovalMixedDayLeaveType(leaveConfig)) {
@@ -14890,7 +14945,8 @@ function calcLeaveDays() {
                 msg.textContent = `⛔ ${summary.errors[0]}`;
                 msg.classList.remove("hidden");
             } else if (requiresLeaveValidation && !summary.settlementPending) {
-                const validation = getApprovalLeaveValidationSummary(lType);
+                const complete=usesApprovalDatedLeave(leaveConfig)?getApprovalPreparedLeaveSummary(leaveConfig,{requireComplete:true}):summary;
+                const validation=complete?.ok&&!complete.settlementPending?getApprovalLeaveValidationSummary(lType,complete):null;
                 if (isApprovalLeaveValidationBlocked(validation, summary.totalDays)) {
                     msg.textContent = getApprovalLeaveValidationMessage(validation);
                     msg.classList.remove("hidden");
@@ -15553,7 +15609,7 @@ async function handleDraftSubmit(e) {
         const days = mixedSummary ? mixedSummary.totalDays : Number(document.getElementById("leaveDaysCalc").value);
         if(days <= 0 && !mixedSummary?.settlementPending) return showAlert("기간을 선택하세요.");
 
-        const leaveValidation = getApprovalLeaveValidationSummary(lType);
+        const leaveValidation = mixedSummary?.settlementPending?null:getApprovalLeaveValidationSummary(lType,mixedSummary);
         if (!mixedSummary?.settlementPending && isApprovalLeaveValidationBlocked(leaveValidation, days)) {
             if (leaveValidation.mode === 'next_year_advance') {
                 return showAlert(`다음 연도 예상 연차가 부족합니다.\n사용 가능: ${leaveValidation.availableDays}일 / 요청: ${days}일`);
@@ -15561,8 +15617,8 @@ async function handleDraftSubmit(e) {
             return showAlert(String(leaveValidation.message || '휴가 신청 조건을 확인하세요.'));
         }
 
-        if (!mixedSummary?.settlementPending && isApprovalDeductibleLeaveType(leaveTypeConfig)) {
-            const validation = getApprovalLeaveValidationSummary(lType);
+        if (!mixedSummary?.settlementPending && isApprovalDeductibleLeaveType(leaveTypeConfig) && leaveValidation.mode!=='dated') {
+            const validation = leaveValidation;
             if (days > validation.availableDays) {
                 if (validation.enabled) {
                     return showAlert(`다음 연도 예상 연차가 부족합니다.\n사용 가능: ${validation.availableDays}일 / 요청: ${days}일`);
@@ -15959,6 +16015,12 @@ async function handleDraftSubmit(e) {
         if (errorText.includes('ANNUAL_LEAVE_PERIOD_ALREADY_REQUESTED')) {
             showAlert('이미 신청한 휴가와 날짜·시간이 겹쳐요. 결재 대기 중인 휴가도 포함되니 기존 신청을 확인해 주세요.');
             void calculateLeave({force:true});
+        } else if (errorText.includes('ANNUAL_LEAVE_BALANCE_EXCEEDED')) {
+            showAlert('선택한 날짜에 사용할 수 있는 연차가 부족합니다. 휴가 잔액을 다시 확인합니다.');
+            approvalDatedLeavePreview?.reset();
+            void calculateLeave({force:true});
+        } else if (errorText.includes('ANNUAL_LEAVE_BALANCE_UNAVAILABLE')) {
+            showAlert('선택한 날짜와 차감 시간을 다시 확인해 주세요.');
         } else if (errorText.includes('ANNUAL_LEAVE_PERIOD_REQUIRED')) {
             showAlert('휴가 날짜를 확인할 수 없어요. 기간을 다시 선택해 주세요.');
         } else if (/SELECTED_LEAVE_(SCHEDULE_CHANGED|CALENDAR_UNAVAILABLE|REGISTERED_UNVERIFIED)/.test(errorText)) {
