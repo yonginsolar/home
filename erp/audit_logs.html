@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.1
-Change: 2026-11-21 - 간단히 보기에서 내부 번호만 남은 실행자의 이름 미기록 표시.
+Version: v1.2.2
+Change: 2026-11-21 - 같은 조합 직원 명부의 정확한 일치로 간단히 보기 이름 보완.
 -->
 <html lang="ko">
 <head>
@@ -16,7 +16,7 @@ Change: 2026-11-21 - 간단히 보기에서 내부 번호만 남은 실행자의
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.2.1 | audit_logs.html');</script>
+  <script>console.log('[Version] v1.2.2 | audit_logs.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -489,8 +489,13 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
     p_offset: offset,
     p_limit: pageSize
   };
-  const { data, error } = await auditReadResult(_supabase.rpc('erp_get_audit_logs_unified', params), request);
+  let result = await auditReadResult(_supabase.rpc('erp_get_audit_logs_named_v1', params), request);
   if (!isCurrent()) return;
+  if (result.error?.code === 'PGRST202') {
+    result = await auditReadResult(_supabase.rpc('erp_get_audit_logs_unified', params), request);
+  }
+  if (!isCurrent()) return;
+  const { data, error } = result;
   let list = Array.isArray(data) ? data : [];
   if (error) {
     if (error.code === '42501') throw error;
@@ -574,7 +579,7 @@ function renderLogs(list, reset) {
     const summary = String(log.summary || '').trim();
     const entityType = String(log.entity_type || '').trim();
     const entityId = String(log.entity_id || '').trim();
-    appendAuditSimpleCells(tr, created, actor, action, summary, sourceRaw);
+    appendAuditSimpleCells(tr, created, actor, action, summary, sourceRaw, log.display_actor_name);
     const cells = [
       sourceLabel,
       created,
@@ -618,7 +623,7 @@ const auditActionLabels = new Map([
 const auditActionsWithNote = new Set(['approval.submit','approval.process','approval.cancel','accounting.delete',
   'hr.durunuri.eligibility_update','hr.employee.delete_permanent']);
 
-function appendAuditSimpleCells(row, created, actor, action, summary, source) {
+function appendAuditSimpleCells(row, created, actor, action, summary, source, displayActorName) {
   const cell = () => {
     const td = document.createElement('td');
     td.className = 'audit-simple-only';
@@ -636,7 +641,9 @@ function appendAuditSimpleCells(row, created, actor, action, summary, source) {
     clock.textContent = `${hour < 12 ? '오전' : '오후'} ${hour % 12 || 12}:${mm}`;
     when.appendChild(clock);
   } else when.textContent = created || '일시 미기록';
-  const person = source === 'ERP' ? actor.replace(/(?:^|\s+)\(\d+\)$/, '') : actor;
+  const person = source === 'ERP'
+    ? (String(displayActorName ?? '').trim() || actor.replace(/(?:^|\s+)\(\d+\)$/, ''))
+    : actor;
   cell().textContent = person || (actor ? '이름 미기록' : '실행자 미기록');
   const work = cell();
   const label = auditActionLabels.get(action);
