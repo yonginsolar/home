@@ -360,6 +360,7 @@ h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; color: var(--text-dark); }
   <script src="/shared/coop_dialog.js?v=20261112-caret-1" integrity="sha384-dtSAC1/LrXrXqO9RVxDSzlj1VBHozxdBNK/3cNkJhkB2M2iA/zbF2Z+M2J4oyHGN" crossorigin="anonymous"></script>
   <meta name="election-ui-version" content="1.0.5">
   <link rel="stylesheet" href="/vote/election_ui.css?v=1.0.5" integrity="sha384-f7bJl9SdjwdViy9a3J70yIcLlQVhDd+jJJJYwwMiH7FiLErvARUr6YH1QAaeWGuD" crossorigin="anonymous">
+  <link rel="stylesheet" href="/vote/election_sunlit.css?v=1.0.0" integrity="sha384-EM+2KVmCuEtXJmDiFNZpkn91GaDeODCjha+sxsn+Z4sJBYfepT6TxPTCEm2EjYvr" crossorigin="anonymous">
   <script src="/vote/election_ui.js?v=1.0.5" integrity="sha384-QmHOErzf0uBhPtmOeFzwef0+j21aVtVDEaPgmYbiHnQf8M4Bz32U3AsNxF76E2Oh" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
@@ -449,7 +450,7 @@ function safeUrl(value, options = {}) {
         return '';
     }
 }
-    import { ElectionService, supabase, DISTRICT_VOTE_STATE } from './ElectionService.js?v=20261005-1';
+    import { ElectionService, supabase, DISTRICT_VOTE_STATE } from './ElectionService.js?v=20261121-1';
     // [신규] 기본 프로필 이미지 상수 (회색 사람 실루엣)
     const DEFAULT_PROFILE_IMG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzk5OTk5OSI+PHBhdGggZD0iTTEyIDEyYzIuMjEgMCA0LTEuNzkgNC00cy0xLjc5LTQtNC00LTQgMS43OS00IDQgMS43OSA0IDQgNHptMCAyYy0yLjY3IDAtOCAxLjM0LTggNHYyaDE2di0yYzAtMi42Ni01LjMzLTQtOC00eiIvPjwvc3ZnPg==";
 
@@ -514,16 +515,34 @@ function safeUrl(value, options = {}) {
 
             document.getElementById('voter-info').innerText = `${user.name} 조합원님 (${user.member_id})`;
 
-            const elections = await service.getActiveElections();
-            if (!elections || elections.length === 0) {
-                alertAndClose('현재 진행 중인 선거가 없습니다.');
+            let elections;
+            try {
+                const now = Date.now();
+                elections = (await service.getActiveElections() || []).filter(election => isBallotOpen(election, now));
+            } catch (_) {
+                loadingScreen.style.display = 'none';
+                voteContainer.classList.add('active');
+                renderVoteEntryUnavailable('선거 목록을 불러오지 못했습니다.', true);
                 return;
             }
+            const requestedId = new URLSearchParams(window.location.search).get('id');
 
             loadingScreen.style.display = 'none';
             voteContainer.classList.add('active');
 
-            // 무조건 선거 목록 먼저 보여주기
+            if (requestedId !== null) {
+                const requested = elections.find(election => String(election.id) === requestedId);
+                if (!requested) {
+                    renderVoteEntryUnavailable('선택한 선거는 지금 투표할 수 없습니다.');
+                    return;
+                }
+                await loadElection(requested);
+                return;
+            }
+            if (elections.length === 0) {
+                renderVoteEntryUnavailable('현재 투표할 수 있는 선거가 없습니다.');
+                return;
+            }
             renderElectionList(elections);
 
         } catch (error) {
@@ -531,7 +550,34 @@ function safeUrl(value, options = {}) {
         }
     }
 
-    // 선거 목록 렌더링 (기존과 동일)
+    function isBallotOpen(election, now = Date.now()) {
+        const start = new Date(election?.vote_start_at ?? election?.start_at ?? '').getTime();
+        const end = new Date(election?.vote_end_at ?? election?.end_at ?? '').getTime();
+        return election?.status === 'OPEN' && start <= now && now < end;
+    }
+
+    function renderVoteEntryUnavailable(message, retry = false) {
+        const note = document.createElement('p');
+        note.className = 'vote-entry-status';
+        note.setAttribute('role', 'status');
+        note.textContent = message;
+        const back = document.createElement('a');
+        back.className = 'btn btn-back';
+        back.href = '/vote/';
+        back.textContent = '선거 목록으로';
+        document.getElementById('district-name').style.display = 'none';
+        voteBtn.style.display = 'none';
+        ballotArea.replaceChildren(note, back);
+        if (retry) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-back';
+            button.textContent = '다시 확인';
+            button.onclick = () => { button.disabled = true; void initPage(); };
+            ballotArea.append(button);
+        }
+    }
+
     function renderElectionList(elections) {
         document.title = '참여할 선거 선택';
         titleElem.innerText = "참여할 선거를 선택해주세요";
@@ -552,9 +598,7 @@ function safeUrl(value, options = {}) {
             const safeElectionTitle = escapeHtml(election.title || '선거');
 
             // 상태 뱃지
-            const statusBadge = election.status === 'NOMINATION'
-                ? '<span class="ballot-status nomination" style="color:orange;">[후보등록기간]</span>'
-                : '<span class="ballot-status open" style="color:green;">[투표진행중]</span>';
+            const statusBadge = '<span class="ballot-status open">투표 진행 중</span>';
 
             btn.innerHTML = `
                 <h3 style="margin:0;">${safeElectionTitle}</h3>
@@ -567,6 +611,10 @@ function safeUrl(value, options = {}) {
     }
 
 async function loadElection(election) {
+        if (!isBallotOpen(election)) {
+            renderVoteEntryUnavailable('선택한 선거는 지금 투표할 수 없습니다.');
+            return;
+        }
         currentElection = election;
         document.title = String(election?.title || '조합원 투표소').trim() || '조합원 투표소';
         titleElem.innerText = election.title;

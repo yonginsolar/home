@@ -111,6 +111,7 @@
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <meta name="erp-workspace-revision" content="20261010.9">
+  <meta name="election-results-version" content="1.0.0">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
   <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
   <link rel="stylesheet" href="/erp/official_workbook.css?v=1.0.0" integrity="sha384-uJh6mMHkeBKCKiEWOWyr70TVLtzZlrTdYbHDAB6F+oQLGcC/25LHTQ5yLEh8Db1q" crossorigin="anonymous">
@@ -460,26 +461,21 @@
       <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
         <div>
           <h2 id="electionImportTitle" class="h5 mb-1">선거 당선자 가져오기</h2>
-          <div class="helper">현재 조합의 종료/공포된 선거를 기준으로 당선자를 읽어와 임원·대의원 등록 후보로 저장합니다.</div>
+          <div class="helper">당선자를 확인하고 선거구별 직책과 임기를 등록하세요.</div>
         </div>
         <button type="button" class="btn btn-outline-secondary btn-sm" onclick="closeElectionImportModal()">닫기</button>
       </div>
 
       <div class="row g-3 mb-3">
-        <div class="col-md-5">
+        <div class="col-md-6">
           <label for="importElectionSelect" class="form-label small fw-bold">대상 선거</label>
           <select id="importElectionSelect" class="form-select"></select>
         </div>
         <div class="col-md-3">
-          <label for="importOfficialRole" class="form-label small fw-bold">저장 직책</label>
-          <select id="importOfficialRole" class="form-select"></select>
-          <div id="importRoleHint" class="helper mt-1">선거 제목과 선거구명을 보고 저장 직책을 추천합니다.</div>
-        </div>
-        <div class="col-md-2">
           <label for="importOfficialTermStart" class="form-label small fw-bold">임기 시작일</label>
           <input type="date" id="importOfficialTermStart" class="form-control">
         </div>
-        <div class="col-md-2">
+        <div class="col-md-3">
           <label for="importOfficialTermEnd" class="form-label small fw-bold">임기 종료일</label>
           <input type="date" id="importOfficialTermEnd" class="form-control">
         </div>
@@ -487,13 +483,7 @@
 
       <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
         <button type="button" class="btn btn-outline-primary btn-sm" id="previewElectionImportBtn" onclick="previewElectionImport()">미리보기</button>
-        <button type="button" class="btn btn-primary btn-sm" id="saveElectionImportBtn" onclick="saveElectionImport()" disabled>불러와 저장</button>
-        <div class="helper">저장 직책은 한 번에 하나로 적용됩니다. 임기 종료일이 비어 있으면 2년 뒤 같은 날짜의 전날로 자동 계산합니다. 해당 날짜가 없으면 그 달 말일을 적용합니다.</div>
-      </div>
-      <div class="form-check mb-3 d-none" id="importRegisteredWrap">
-        <input class="form-check-input" type="checkbox" id="importIsRegistered">
-        <label class="form-check-label small fw-bold" for="importIsRegistered">등기 임원으로 등록</label>
-        <div class="helper">등기 임원은 사임 처리 시 사임서 첨부가 필수입니다.</div>
+        <button type="button" class="btn btn-primary btn-sm" id="saveElectionImportBtn" onclick="saveElectionImport()" disabled>당선자 등록</button>
       </div>
       <div class="form-check mb-3 d-none" id="saveAndOpenSignatureWrap">
         <input class="form-check-input" type="checkbox" id="saveAndOpenSignature">
@@ -501,7 +491,7 @@
       </div>
 
       <div id="electionImportNotice" class="helper mb-2">선거를 선택하고 미리보기를 누르면 당선자 목록을 확인할 수 있습니다.</div>
-      <div id="electionImportError" class="mb-2"></div>
+      <div id="electionImportError" class="mb-2 text-danger" role="status"></div>
       <div id="electionImportPreview" class="border rounded p-3 bg-light text-muted small">아직 불러온 선거가 없습니다.</div>
     </div>
   </div>
@@ -625,7 +615,7 @@
     let importableElections = [];
     let currentElectionImportPreview = null;
     let electionImportPreviewRevision = 0;
-    let importRoleWasManuallyEdited = false;
+    let electionImportPending = false;
     let officialRowsCache = [];
     let activeOfficialCategoryFilter = 'all';
     let pendingEndOfficial = null;
@@ -732,20 +722,6 @@
       const category = role ? categoryFromRole(role) : '';
       const wrapEl = document.getElementById('officialRegisteredWrap');
       const checkEl = document.getElementById('officialIsRegistered');
-      const show = category === 'executive';
-      if (wrapEl) wrapEl.classList.toggle('d-none', !show);
-      if (!checkEl) return;
-      if (!show) {
-        checkEl.checked = false;
-      } else if (resetValue === true) {
-        checkEl.checked = isDefaultRegisteredExecutiveRole(role);
-      }
-    }
-
-    function syncImportRegisteredField(role, resetValue) {
-      const category = role ? categoryFromRole(role) : '';
-      const wrapEl = document.getElementById('importRegisteredWrap');
-      const checkEl = document.getElementById('importIsRegistered');
       const show = category === 'executive';
       if (wrapEl) wrapEl.classList.toggle('d-none', !show);
       if (!checkEl) return;
@@ -1012,73 +988,15 @@
       resetElectionImportUi();
     }
 
-    function renderElectionImportRoleOptions(selectedValue = '') {
-      const selectEl = document.getElementById('importOfficialRole');
-      if (!selectEl) return;
-      const safeSelected = String(selectedValue || '').trim();
-      const enabledRoles = getEnabledOfficialRoles();
-      const defaultRole = safeSelected || (enabledRoles.find((item) => item.name === '대의원')?.name || enabledRoles[0]?.name || '');
-      selectEl.innerHTML = enabledRoles.map((item) => {
-        const selected = item.name === defaultRole ? ' selected' : '';
-        return `<option value="${escapeHtml(item.name)}"${selected}>${escapeHtml(item.name)} (${escapeHtml(categoryLabel(item.category))})</option>`;
-      }).join('');
-    }
-
-    function getSelectedImportElection() {
-      const electionId = String(document.getElementById('importElectionSelect')?.value || '').trim();
-      return importableElections.find((row) => String(row.id || '') === electionId) || null;
-    }
-
-    function getElectionRoleRecommendation(election, previewRows = []) {
-      const enabledRoles = getEnabledOfficialRoles();
-      const roleExists = (name) => enabledRoles.some((item) => item.name === name);
-      const title = String(election?.title || '').trim();
-      const districtNames = (previewRows || []).map((row) => String(row?.districtName || '').trim()).filter(Boolean);
-      const combined = `${title} ${districtNames.join(' ')}`.toLowerCase();
-
-      if ((combined.includes('선관위원장') || combined.includes('선거관리위원장')) && roleExists('선관위원장')) {
-        return { role: '선관위원장', reason: '선거 제목/선거구명에 선관위원장 관련 문구가 있어 자동 추천했습니다.' };
-      }
-      if ((combined.includes('선관위원') || combined.includes('선거관리위원') || combined.includes('선거관리')) && roleExists('선관위원')) {
-        return { role: '선관위원', reason: '선거 제목/선거구명에 선거관리 관련 문구가 있어 자동 추천했습니다.' };
-      }
-      if (combined.includes('감사') && roleExists('감사')) {
-        return { role: '감사', reason: '선거 제목에 감사 선출 문구가 있어 자동 추천했습니다.' };
-      }
-      if (combined.includes('이사장') && roleExists('이사장')) {
-        return { role: '이사장', reason: '선거 제목에 이사장 선출 문구가 있어 자동 추천했습니다.' };
-      }
-      if ((combined.includes('이사') || combined.includes('임원')) && roleExists('이사')) {
-        return { role: '이사', reason: '선거 제목에 이사/임원 선출 문구가 있어 자동 추천했습니다.' };
-      }
-      if ((combined.includes('대의원') || combined.includes('선거구')) && roleExists('대의원')) {
-        return { role: '대의원', reason: '선거구 기반 선출 흐름으로 보여 대의원으로 자동 추천했습니다.' };
-      }
-
-      const fallbackRole = roleExists('대의원')
-        ? '대의원'
-        : (enabledRoles[0]?.name || '');
-      return {
-        role: fallbackRole,
-        reason: fallbackRole
-          ? `${fallbackRole}을(를) 기본 추천값으로 적용했습니다. 필요하면 직접 바꿔 저장하면 됩니다.`
-          : '사용 가능한 직책이 없어 자동 추천을 건너뜁니다.'
-      };
-    }
-
-    function applyElectionRoleRecommendation({ force = false, previewRows = [] } = {}) {
-      const hintEl = document.getElementById('importRoleHint');
-      const selectEl = document.getElementById('importOfficialRole');
-      if (!selectEl) return;
-      const election = getSelectedImportElection();
-      const recommendation = getElectionRoleRecommendation(election, previewRows);
-      if (force || !importRoleWasManuallyEdited || !String(selectEl.value || '').trim()) {
-        renderElectionImportRoleOptions(recommendation.role || '');
-      }
-      if (hintEl) {
-        hintEl.textContent = recommendation.reason;
-      }
-      syncImportRegisteredField(selectEl.value, true);
+    function electionImportError(error) {
+      const key = String(error?.message || '');
+      if (key.includes('ELECTION_RESULT_TIE')) return (error.details ? error.details + ': ' : '') + '마지막 당선 자리가 동점입니다. 선거 규정을 확인하고 결과를 확정한 뒤 다시 시도해 주세요.';
+      if (key.includes('ELECTION_RESULT_CHANGED')) return '선거 결과가 바뀌었습니다. 미리보기를 다시 열어 주세요.';
+      if (key.includes('ELECTION_OFFICIAL_ROLE_REQUIRED')) return '선거구별 선출 직책을 확인해 주세요.';
+      if (key.includes('ELECTION_OFFICIAL_TERM_INVALID')) return '선거에서 정한 임기와 일치하는지 확인해 주세요.';
+      if (key.includes('ELECTION_RESULT_ACCESS_DENIED')) return '현재 조합의 선거 당선자 등록 권한을 확인해 주세요.';
+      if (key.includes('ELECTION_RESULT_NOT_CLOSED')) return '투표 종료 또는 결과 공포 상태의 선거를 선택해 주세요.';
+      return key || '선거 결과를 확인하지 못했습니다.';
     }
 
     function updateElectionImportFollowupOptions() {
@@ -1089,548 +1007,168 @@
       if (checkEl && !canOpenSignature) checkEl.checked = false;
     }
 
-    async function loadImportableElections() {
-      const selectEl = document.getElementById('importElectionSelect');
-      if (!selectEl) return;
-      selectEl.innerHTML = '<option value="">선거를 불러오는 중...</option>';
-      const { data, error } = await scopeByTenant(_supabase
-        .from('elections')
-        .select('id, title, status, created_at, actual_closed_at')
-        .in('status', ['CLOSED', 'PUBLISHED'])
-        .order('actual_closed_at', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(20));
-      if (error) throw error;
-      importableElections = Array.isArray(data) ? data : [];
-      if (importableElections.length === 0) {
-        selectEl.innerHTML = '<option value="">불러올 선거가 없습니다.</option>';
-        return;
-      }
-      selectEl.innerHTML = importableElections.map((row, index) => {
-        const closedAt = String(row.actual_closed_at || row.created_at || '').slice(0, 10);
-        const statusLabel = row.status === 'PUBLISHED' ? '결과 공포' : '투표 종료';
-        const selected = index === 0 ? ' selected' : '';
-        return `<option value="${escapeHtml(row.id)}"${selected}>${escapeHtml(row.title || '제목 없음')} · ${escapeHtml(statusLabel)} · ${escapeHtml(closedAt || '-')}</option>`;
-      }).join('');
+    function electionImportMatches(owner, id, revision) {
+      return revision === electionImportPreviewRevision && officialRecordContext().allowed
+        && owner === officialRecordContext().key
+        && document.getElementById('importElectionSelect')?.value === id
+        && !document.getElementById('electionImportModal')?.classList.contains('d-none');
     }
 
-    async function openElectionImportModal() {
-      if (!voteImportEnabled || !officialWriteAllowed()) {
+    async function openElectionImportModal(requestedId = '') {
+      if (!voteImportEnabled || !officialRecordContext().allowed) {
         showAlert('현재 조합에서는 선거 결과 가져오기를 사용할 수 없습니다.', 'warning');
         return;
       }
+      if (typeof requestedId !== 'string') requestedId='';
+      const revision = ++electionImportPreviewRevision, owner = officialRecordContext().key;
       try {
-        importRoleWasManuallyEdited = false;
-        renderElectionImportRoleOptions();
-        const startEl = document.getElementById('importOfficialTermStart');
-        const endEl = document.getElementById('importOfficialTermEnd');
-        if (startEl && !startEl.value) startEl.value = getLocalDateInputValue(new Date());
-        if (endEl && !endEl.value && startEl?.value) endEl.value = computeAutoTermEndDate(startEl.value);
-        await loadImportableElections();
-        updateElectionImportFollowupOptions();
-        resetElectionImportUi();
-        applyElectionRoleRecommendation({ force: true });
-        document.getElementById('electionImportModal')?.classList.remove('d-none');
-      } catch (error) {
-        showAlert('선거 목록 로드 실패: ' + (error?.message || 'Unknown error'), 'danger');
-      }
-    }
-
-    const DISTRICT_VOTE_STATE = Object.freeze({
-      NO_CANDIDATE: 'NO_CANDIDATE',
-      UNCONTESTED: 'UNCONTESTED',
-      CONTESTED: 'CONTESTED',
-      BINARY: 'BINARY'
-    });
-
-    function classifyDistrictVoteState({ voteType, quota, candidateCount }) {
-      if (String(voteType || '').toUpperCase() === 'BINARY') return DISTRICT_VOTE_STATE.BINARY;
-      const safeQuota = Math.max(1, Number(quota) || 1);
-      const safeCandidateCount = Math.max(0, Number(candidateCount) || 0);
-      if (safeCandidateCount <= 0) return DISTRICT_VOTE_STATE.NO_CANDIDATE;
-      if (safeCandidateCount <= safeQuota) return DISTRICT_VOTE_STATE.UNCONTESTED;
-      return DISTRICT_VOTE_STATE.CONTESTED;
-    }
-
-    function buildElectionVoteSummary(districts = [], candidates = []) {
-      const candidateCountMap = new Map();
-      (candidates || []).forEach((candidate) => {
-        const districtId = String(candidate?.district_id || '');
-        if (!districtId) return;
-        candidateCountMap.set(districtId, (candidateCountMap.get(districtId) || 0) + 1);
-      });
-      const states = (districts || []).map((district) => {
-        const districtId = String(district?.id || '');
-        const candidateCount = candidateCountMap.get(districtId) || 0;
-        return {
-          districtId,
-          candidateCount,
-          state: classifyDistrictVoteState({
-            voteType: district?.vote_type,
-            quota: district?.quota,
-            candidateCount
-          })
-        };
-      });
-      return { states };
-    }
-
-    async function buildElectionImportPreviewData(electionId) {
-      const safeElectionId = String(electionId || '').trim();
-      if (!safeElectionId) throw new Error('대상 선거를 선택해주세요.');
-
-      const [districtRes, candidateRes, ballotRes] = await Promise.all([
-        scopeByTenant(_supabase
-          .from('districts')
-          .select('id, name, vote_type, quota')
-          .eq('election_id', safeElectionId)),
-        scopeByTenant(_supabase
-          .from('candidates')
-          .select('id, district_id, member_uuid, name, symbol, birth_date, address, representative_name')
-          .eq('election_id', safeElectionId)
-          .eq('status', 'APPROVED')),
-        scopeByTenant(_supabase
-          .from('ballots')
-          .select('district_id, candidate_id')
-          .eq('election_id', safeElectionId))
-      ]);
-
-      if (districtRes.error) throw districtRes.error;
-      if (candidateRes.error) throw candidateRes.error;
-      if (ballotRes.error) throw ballotRes.error;
-
-      const districts = districtRes.data || [];
-      const candidates = candidateRes.data || [];
-      const ballots = ballotRes.data || [];
-      const summary = buildElectionVoteSummary(districts, candidates);
-      const districtStateMap = new Map((summary.states || []).map((row) => [String(row.districtId), row.state]));
-      const winnerRows = [];
-
-      districts.forEach((district) => {
-        const districtId = String(district.id || '');
-        if (!districtId) return;
-        const districtCandidates = candidates.filter((candidate) => String(candidate.district_id || '') === districtId);
-        const districtState = districtStateMap.get(districtId) || DISTRICT_VOTE_STATE.NO_CANDIDATE;
-        const quota = Math.max(1, Number(district.quota) || 1);
-
-        if (districtState === DISTRICT_VOTE_STATE.BINARY || districtState === DISTRICT_VOTE_STATE.NO_CANDIDATE) {
-          return;
-        }
-
-        if (districtState === DISTRICT_VOTE_STATE.UNCONTESTED) {
-          districtCandidates.forEach((candidate) => {
-            winnerRows.push({
-              districtId,
-              districtName: district.name || '-',
-              candidateId: candidate.id,
-              candidateName: candidate.name || '-',
-              memberUuid: candidate.member_uuid || '',
-              winnerType: 'UNCONTESTED',
-              voteCount: null
-            });
-          });
-          return;
-        }
-
-        const voteCountMap = new Map();
-        districtCandidates.forEach((candidate) => {
-          voteCountMap.set(String(candidate.id), 0);
-        });
-        ballots.forEach((ballot) => {
-          if (String(ballot.district_id || '') !== districtId) return;
-          const candidateId = String(ballot.candidate_id || '');
-          if (!candidateId || !voteCountMap.has(candidateId)) return;
-          voteCountMap.set(candidateId, (voteCountMap.get(candidateId) || 0) + 1);
-        });
-
-        districtCandidates
-          .map((candidate) => ({ ...candidate, voteCount: voteCountMap.get(String(candidate.id)) || 0 }))
-          .sort((a, b) => b.voteCount - a.voteCount)
-          .forEach((candidate, idx) => {
-            if (idx >= quota || candidate.voteCount <= 0) return;
-            winnerRows.push({
-              districtId,
-              districtName: district.name || '-',
-              candidateId: candidate.id,
-              candidateName: candidate.name || '-',
-              memberUuid: candidate.member_uuid || '',
-              winnerType: 'CONTESTED',
-              voteCount: candidate.voteCount
-            });
-          });
-      });
-
-      const uniqueMemberUuids = [...new Set(winnerRows.map((row) => String(row.memberUuid || '').trim()).filter(Boolean))];
-      const memberMap = new Map();
-      if (uniqueMemberUuids.length > 0) {
-        const { data: memberRows, error: memberErr } = await scopeByTenant(_supabase
-          .from('coop_members')
-          .select('id, member_id, name, member_type, status, birth_date, phone, email, address, corp_number, business_number')
-          .in('id', uniqueMemberUuids));
-        if (memberErr) throw memberErr;
-        (memberRows || []).forEach((row) => memberMap.set(String(row.id), row));
-      }
-
-      const rows = winnerRows.map((row) => {
-        const matchedMember = memberMap.get(String(row.memberUuid || ''));
-        return {
-          ...row,
-          memberId: matchedMember?.member_id || '',
-          memberName: matchedMember?.name || row.candidateName || '',
-          memberRecord: matchedMember || null,
-          hasMemberId: !!(matchedMember && matchedMember.member_id)
-        };
-      });
-
-      return {
-        rows,
-        missingMemberRows: rows.filter((row) => !row.hasMemberId)
-      };
-    }
-
-    function renderElectionImportPreviewHtml(preview) {
-      const rows = Array.isArray(preview?.rows) ? preview.rows : [];
-      const missing = Array.isArray(preview?.missingMemberRows) ? preview.missingMemberRows : [];
-      const activeDuplicateCount = Number(preview?.activeDuplicateCount || 0);
-      const sameTermDuplicateCount = Number(preview?.sameTermDuplicateCount || 0);
-      const saveableCount = Number(preview?.saveableCount || 0);
-      const missingNames = missing.map((row) => row.memberName || row.candidateName || '-').filter(Boolean);
-      const activeDuplicateNames = rows
-        .filter((row) => row.importStatusLabel === '활성 직책 존재')
-        .map((row) => row.memberName || row.candidateName || '-')
-        .filter(Boolean);
-      const sameTermDuplicateNames = rows
-        .filter((row) => row.importStatusLabel === '동일 임기 존재')
-        .map((row) => row.memberName || row.candidateName || '-')
-        .filter(Boolean);
-      const tableRows = rows.map((row, idx) => {
-        const electedTypeLabel = row.winnerType === 'UNCONTESTED' ? '무투표' : `득표 ${row.voteCount || 0}표`;
-        const statusLabel = row.importStatusLabel || (row.hasMemberId ? '저장 가능' : '조합원 매핑 필요');
-        const statusClass = row.importStatusClass || (row.hasMemberId ? 'import-status-ok' : 'import-status-danger');
-        return `
-          <tr>
-            <td class="text-center">${idx + 1}</td>
-            <td>${escapeHtml(row.districtName || '-')}</td>
-            <td>${escapeHtml(row.candidateName || '-')}</td>
-            <td>${escapeHtml(row.memberId || '-')}</td>
-            <td class="text-center">${escapeHtml(electedTypeLabel)}</td>
-            <td class="${statusClass}">${statusLabel}</td>
-          </tr>
-        `;
-      }).join('');
-
-      const summaryParts = [];
-      const issueChips = [];
-      if (missing.length > 0) {
-        summaryParts.push(`조합원 매핑 필요 ${missing.length}명`);
-        issueChips.push(`<div class="import-issue-chip danger">조합원 매핑 필요: ${escapeHtml(missingNames.join(', '))}</div>`);
-      }
-      if (activeDuplicateCount > 0) {
-        summaryParts.push(`활성 직책 중복 ${activeDuplicateCount}명`);
-        issueChips.push(`<div class="import-issue-chip warn">활성 직책 존재: ${escapeHtml(activeDuplicateNames.join(', '))}</div>`);
-      }
-      if (sameTermDuplicateCount > 0) {
-        summaryParts.push(`동일 임기 중복 ${sameTermDuplicateCount}명`);
-        issueChips.push(`<div class="import-issue-chip warn">동일 임기 존재: ${escapeHtml(sameTermDuplicateNames.join(', '))}</div>`);
-      }
-
-      const summaryBox = summaryParts.length > 0
-        ? `<div class="mb-2 p-2 rounded border border-warning-subtle bg-warning-subtle text-warning-emphasis">${summaryParts.join(' / ')}. 저장 가능한 당선자는 ${saveableCount}명입니다.${issueChips.length ? `<div class="import-issue-list">${issueChips.join('')}</div>` : ''}</div>`
-        : `<div class="mb-2 p-2 rounded border border-success-subtle bg-success-subtle text-success-emphasis">당선자 ${rows.length}명 중 ${saveableCount}명을 현재 조합 직책으로 저장할 준비가 되었습니다.</div>`;
-
-      return `
-        ${summaryBox}
-        <div class="table-responsive border rounded bg-white">
-          <table class="table table-sm mb-0">
-            <thead class="table-light">
-              <tr>
-                <th class="text-center" style="width:56px;">No</th>
-                <th>선거구</th>
-                <th>당선자</th>
-                <th>조합원 번호</th>
-                <th class="text-center" style="width:120px;">선출 방식</th>
-                <th style="width:160px;">상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${tableRows || '<tr><td colspan="6" class="text-center text-muted py-3">불러온 당선자가 없습니다.</td></tr>'}
-            </tbody>
-          </table>
-        </div>
-      `;
-    }
-
-    async function refreshElectionImportPreviewStatus() {
-      if (!currentElectionImportPreview || !Array.isArray(currentElectionImportPreview.rows) || currentElectionImportPreview.rows.length === 0) {
-        return currentElectionImportPreview;
-      }
-
-      const role = String(document.getElementById('importOfficialRole')?.value || '').trim();
-      const ticket=currentElectionImportPreview, revision=electionImportPreviewRevision;
-      const termStartDate = String(document.getElementById('importOfficialTermStart')?.value || '').trim();
-      let termEndDate = String(document.getElementById('importOfficialTermEnd')?.value || '').trim();
-      if (!termEndDate && termStartDate) {
-        termEndDate = computeAutoTermEndDate(termStartDate);
-      }
-
-      const memberIds = [...new Set(
-        (currentElectionImportPreview.rows || [])
-          .map((row) => String(row.memberId || '').trim())
-          .filter(Boolean)
-      )];
-
-      let activeMemberIds = new Set();
-      let sameTermMemberIds = new Set();
-      if (role && memberIds.length > 0) {
-        const { data, error } = await scopeByTenant(_supabase
-          .from('coop_officials')
-          .select('member_id, status, term_start_date, term_end_date')
-          .eq('role', role)
-          .in('member_id', memberIds));
+        let query = scopeByTenant(_supabase.from('elections').select('id,title,status,created_at,actual_closed_at'))
+          .in('status', ['CLOSED', 'PUBLISHED']);
+        if (requestedId) query = query.eq('id', requestedId);
+        const { data, error } = await query.order('actual_closed_at', {ascending:false,nullsFirst:false})
+          .order('created_at',{ascending:false}).limit(20);
+        if (revision!==electionImportPreviewRevision || !officialRecordContext().allowed || owner!==officialRecordContext().key) return;
         if (error) throw error;
-        if(ticket!==currentElectionImportPreview || revision!==electionImportPreviewRevision)return currentElectionImportPreview;
-        const rows = Array.isArray(data) ? data : [];
-        activeMemberIds = new Set(
-          rows
-            .filter((row) => String(row.status || '').toLowerCase() === 'active')
-            .map((row) => String(row.member_id || '').trim())
-            .filter(Boolean)
-        );
-        if (termStartDate && termEndDate) {
-          sameTermMemberIds = new Set(
-            rows
-              .filter((row) => String(row.term_start_date || '') === termStartDate && String(row.term_end_date || '') === termEndDate)
-              .map((row) => String(row.member_id || '').trim())
-              .filter(Boolean)
-          );
+        const select = document.getElementById('importElectionSelect');
+        const options = (data || []).map(row => new Option(row.title + ' · ' + (row.status === 'PUBLISHED' ? '결과 공포' : '투표 종료'),row.id));
+        select.replaceChildren(...(options.length?options:[new Option('불러올 선거가 없습니다.','')]));
+        for (const id of ['importOfficialTermStart','importOfficialTermEnd']) {
+          const input=document.getElementById(id);input.value='';input.readOnly=false;
         }
+        resetElectionImportUi();
+        updateElectionImportFollowupOptions();
+        document.getElementById('electionImportModal')?.classList.remove('d-none');
+        if (requestedId && select.value === requestedId) await previewElectionImport();
+      } catch (error) {
+        if (revision===electionImportPreviewRevision) showAlert(electionImportError(error),'danger');
       }
+    }
 
-      let activeDuplicateCount = 0;
-      let sameTermDuplicateCount = 0;
-      let saveableCount = 0;
-      const enrichedRows = (currentElectionImportPreview.rows || []).map((row) => {
-        const memberId = String(row.memberId || '').trim();
-        let importStatusLabel = '저장 가능';
-        let importStatusClass = 'import-status-ok';
-        if (!row.hasMemberId || !memberId) {
-          importStatusLabel = '조합원 매핑 필요';
-          importStatusClass = 'import-status-danger';
-        } else if (activeMemberIds.has(memberId)) {
-          importStatusLabel = '활성 직책 존재';
-          importStatusClass = 'import-status-warn';
-          activeDuplicateCount += 1;
-        } else if (sameTermMemberIds.has(memberId)) {
-          importStatusLabel = '동일 임기 존재';
-          importStatusClass = 'import-status-warn';
-          sameTermDuplicateCount += 1;
-        } else {
-          saveableCount += 1;
+    function paintElectionImportPreview(data) {
+      const root=document.getElementById('electionImportPreview');
+      root.replaceChildren();
+      root.classList.toggle('text-muted',!data.rows.length);
+      if (!data.rows.length) { root.textContent='등록할 당선자가 없습니다.'; return; }
+      for (const district of data.districts) {
+        const card=document.createElement('section');
+        card.className='border rounded p-3 mb-2';
+        const title=document.createElement('h3');
+        title.className='h6';
+        title.textContent=district.name;
+        card.append(title);
+        const items=document.createElement('ul');
+        items.className='mb-2 ps-3';
+        for (const row of district.rows) {
+          const person=document.createElement('li');
+          person.textContent=(row.member_name || row.candidate_name || '-') + (row.member_id ? ' · '+row.member_id : ' · 조합원 번호 확인 필요')
+            + (row.winner_type==='UNCONTESTED' ? ' · 무투표 당선' : ' · '+row.vote_count+'표');
+          items.append(person);
         }
-        return {
-          ...row,
-          importStatusLabel,
-          importStatusClass
+        card.append(items);
+        const label=document.createElement('label');
+        label.className='form-label fw-bold d-block';
+        label.append('선출 직책');
+        const role=document.createElement('select');
+        role.className='form-select mt-1';
+        role.setAttribute('aria-label',district.name+' 선출 직책');
+        role.add(new Option('직책 선택',''));
+        for (const item of district.roles) role.add(new Option(item,item));
+        if (district.roles.length===1) role.value=district.roles[0];
+        role.disabled=district.roles.length<2;
+        label.append(role);
+        card.append(label);
+        if (!district.roles.length) {
+          const hint=document.createElement('p');
+          hint.className='small text-danger mb-2';
+          hint.textContent='등록할 수 있는 직책이 없습니다. 선거와 임원 직책 설정을 확인해 주세요.';
+          card.append(hint);
+        }
+        const registration=document.createElement('label');
+        registration.className='form-check d-flex gap-2 mt-2';
+        const checked=document.createElement('input');
+        checked.type='checkbox';
+        checked.className='form-check-input';
+        registration.append(checked,'등기 임원');
+        card.append(registration);
+        district.role=role;district.registered=checked;
+        const sync=()=>{
+          registration.hidden=data.roles[role.value]!=='executive';
+          registration.classList.toggle('d-none',registration.hidden);
+          if (registration.hidden) checked.checked=false;
+          syncElectionImportSubmit();
         };
-      });
+        role.addEventListener('change',sync);
+        checked.addEventListener('change',syncElectionImportSubmit);
+        root.append(card);sync();
+      }
+    }
 
-      currentElectionImportPreview = {
-        ...currentElectionImportPreview,
-        rows: enrichedRows,
-        activeDuplicateCount,
-        sameTermDuplicateCount,
-        saveableCount
-      };
-      return currentElectionImportPreview;
+    function syncElectionImportSubmit() {
+      const button=document.getElementById('saveElectionImportBtn');
+      const data=currentElectionImportPreview;
+      const a=document.getElementById('importOfficialTermStart').value,b=document.getElementById('importOfficialTermEnd').value;
+      button.disabled=!!electionImportPending || !data?.rows?.length || !a || !b || a>b || data.rows.some(row=>!row.member_id)
+        || data.districts.some(d=>!d.role?.value) || !electionImportMatches(data.owner,data.id,data.generation);
     }
 
     async function previewElectionImport() {
-      const noticeEl = document.getElementById('electionImportNotice');
-      const errorEl = document.getElementById('electionImportError');
-      const previewEl = document.getElementById('electionImportPreview');
-      const saveBtn = document.getElementById('saveElectionImportBtn');
-      const electionId = String(document.getElementById('importElectionSelect')?.value || '').trim();
+      const select=document.getElementById('importElectionSelect'), id=select?.value;
+      if (!id || !officialRecordContext().allowed || electionImportPending) return;
       const revision=++electionImportPreviewRevision, owner=officialRecordContext().key;
-      const valid=()=>revision===electionImportPreviewRevision && officialWriteAllowed() && owner===officialRecordContext().key
-        && String(document.getElementById('importElectionSelect')?.value||'')===electionId
-        && !document.getElementById('electionImportModal').classList.contains('d-none');
-      if (errorEl) errorEl.innerHTML = '';
-      if (previewEl) previewEl.innerHTML = '당선자 목록을 불러오는 중입니다...';
-      if (saveBtn) saveBtn.disabled = true;
+      const root=document.getElementById('electionImportPreview'), errors=document.getElementById('electionImportError');
+      const start=document.getElementById('importOfficialTermStart'), end=document.getElementById('importOfficialTermEnd');
+      currentElectionImportPreview=null;syncElectionImportSubmit();
+      errors.textContent='';root.textContent='당선자를 불러오는 중입니다…';
       try {
-        const preview=await buildElectionImportPreviewData(electionId);
-        if(!valid())return;
-        currentElectionImportPreview = {...preview,sourceElectionId:electionId};
-        applyElectionRoleRecommendation({ previewRows: currentElectionImportPreview.rows || [] });
-        await refreshElectionImportPreviewStatus();
-        if(!valid())return;
-        if (noticeEl) noticeEl.textContent = '아래 미리보기 기준으로 현재 조합 임원·대의원 관리에 저장합니다.';
-        if (previewEl) previewEl.innerHTML = renderElectionImportPreviewHtml(currentElectionImportPreview);
-        if (saveBtn) saveBtn.disabled = !(currentElectionImportPreview.rows || []).length || (currentElectionImportPreview.missingMemberRows || []).length > 0 || !Number(currentElectionImportPreview.saveableCount || 0);
-      } catch (error) {
-        if(!valid())return;
-        currentElectionImportPreview = null;
-        if (previewEl) previewEl.innerHTML = '불러오기에 실패했습니다.';
-        if (errorEl) {
-          errorEl.innerHTML = `<div class="p-2 rounded border border-danger-subtle bg-danger-subtle text-danger-emphasis">${escapeHtml(error?.message || 'Unknown error')}</div>`;
+        const {data,error}=await _supabase.rpc('get_election_result_for_workflow',{p_election:id,p_official:true});
+        if (!electionImportMatches(owner,id,revision)) return;
+        if (error) throw error;
+        if (!Array.isArray(data?.rows) || !data.revision) throw new Error('선거 결과를 확인하지 못했습니다.');
+        const roles=data.roles || {};
+        const districts=new Map();
+        for (const row of data.rows) {
+          if (!districts.has(row.district_id)) {
+            const choices=Object.keys(roles).filter(role=>(!data.office || roles[role]===data.office) && (!row.expected_role || row.expected_role===role));
+            districts.set(row.district_id,{id:row.district_id,name:row.district_name,rows:[],roles:choices});
+          }
+          districts.get(row.district_id).rows.push(row);
         }
+        start.readOnly=end.readOnly=!!(data.start && data.end);
+        if (start.readOnly) {start.value=data.start;end.value=data.end;}
+        currentElectionImportPreview={...data,roles,districts:[...districts.values()],id,owner,generation:revision};
+        paintElectionImportPreview(currentElectionImportPreview);syncElectionImportSubmit();
+      } catch (error) {
+        if (!electionImportMatches(owner,id,revision)) return;
+        root.textContent='당선자를 불러오지 못했습니다.';
+        errors.textContent=electionImportError(error);
       }
-    }
-
-    async function getNextTermCountMap(memberIds, role) {
-      const { data, error } = await scopeByTenant(_supabase
-        .from('coop_officials')
-        .select('member_id, term_count')
-        .eq('role', role)
-        .in('member_id', memberIds));
-      if (error) throw error;
-      const map = new Map();
-      (data || []).forEach((row) => {
-        const memberId = String(row.member_id || '').trim();
-        if (!memberId) return;
-        const termCount = Number(row.term_count || 0);
-        const safeTermCount = Number.isFinite(termCount) && termCount > 0 ? Math.floor(termCount) : 0;
-        const prev = map.get(memberId) || 0;
-        if (safeTermCount > prev) map.set(memberId, safeTermCount);
-      });
-      return map;
     }
 
     async function saveElectionImport() {
-      if (!officialWriteAllowed() || document.getElementById('saveElectionImportBtn')?.disabled) return;
-      clearAlert();
-      const errorEl = document.getElementById('electionImportError');
-      const saveBtn = document.getElementById('saveElectionImportBtn');
-      if (errorEl) errorEl.innerHTML = '';
-      if (!currentElectionImportPreview || !Array.isArray(currentElectionImportPreview.rows) || currentElectionImportPreview.rows.length === 0) {
-        if (errorEl) errorEl.innerHTML = '<div class="p-2 rounded border border-warning-subtle bg-warning-subtle text-warning-emphasis">먼저 선거 결과를 미리보기 해주세요.</div>';
-        return;
-      }
-
-      const role = String(document.getElementById('importOfficialRole')?.value || '').trim();
-      const termStartDate = String(document.getElementById('importOfficialTermStart')?.value || '').trim();
-      let termEndDate = String(document.getElementById('importOfficialTermEnd')?.value || '').trim();
-      const shouldOpenSignatureAfterSave = !!document.getElementById('saveAndOpenSignature')?.checked;
-      if (!role) {
-        if (errorEl) errorEl.innerHTML = '<div class="p-2 rounded border border-warning-subtle bg-warning-subtle text-warning-emphasis">저장 직책을 선택해주세요.</div>';
-        return;
-      }
-      if (!termStartDate) {
-        if (errorEl) errorEl.innerHTML = '<div class="p-2 rounded border border-warning-subtle bg-warning-subtle text-warning-emphasis">임기 시작일을 입력해주세요.</div>';
-        return;
-      }
-      if (!termEndDate) {
-        termEndDate = computeAutoTermEndDate(termStartDate);
-        const endEl = document.getElementById('importOfficialTermEnd');
-        if (endEl) endEl.value = termEndDate;
-      }
-      if (!termEndDate || termStartDate > termEndDate) {
-        if (errorEl) errorEl.innerHTML = '<div class="p-2 rounded border border-warning-subtle bg-warning-subtle text-warning-emphasis">임기 종료일을 확인해주세요.</div>';
-        return;
-      }
-      if ((currentElectionImportPreview.missingMemberRows || []).length > 0) {
-        if (errorEl) errorEl.innerHTML = '<div class="p-2 rounded border border-warning-subtle bg-warning-subtle text-warning-emphasis">조합원 번호가 없는 당선자가 있어 저장할 수 없습니다.</div>';
-        return;
-      }
-
-      const uniqueByMemberId = new Map();
-      (currentElectionImportPreview.rows || []).forEach((row) => {
-        const memberId = String(row.memberId || '').trim();
-        if (!memberId || uniqueByMemberId.has(memberId)) return;
-        uniqueByMemberId.set(memberId, row);
-      });
-      const memberIds = [...uniqueByMemberId.keys()];
-      if (memberIds.length === 0) {
-        if (errorEl) errorEl.innerHTML = '<div class="p-2 rounded border border-warning-subtle bg-warning-subtle text-warning-emphasis">저장할 당선자가 없습니다.</div>';
-        return;
-      }
-
+      const button=document.getElementById('saveElectionImportBtn');
+      const data=currentElectionImportPreview;
+      if (!data || button.disabled || electionImportPending || !electionImportMatches(data.owner,data.id,data.generation)) return;
+      const p_start=document.getElementById('importOfficialTermStart').value, p_end=document.getElementById('importOfficialTermEnd').value;
+      const p_assignments=Object.fromEntries(data.districts.map(d=>[d.id,{role:d.role.value,registered:d.registered.checked}]));
+      const followup=document.getElementById('saveAndOpenSignature')?.checked;
+      const errors=document.getElementById('electionImportError');
+      electionImportPending=true;syncElectionImportSubmit();
+      button.textContent='저장 중…';errors.textContent='';
       try {
-        if (saveBtn) {
-          saveBtn.disabled = true;
-          saveBtn.textContent = '저장중...';
-        }
-        const category = categoryFromRole(role);
-        const sourceElection = getSelectedImportElection()?.id, startCoop=currentCoopId, startActor=committeeAuthId;
-        if(!sourceElection || String(sourceElection)!==currentElectionImportPreview.sourceElectionId)throw new Error('당선자를 불러온 선거를 다시 확인해 주세요.');
-        const isRegistered = category === 'executive' && !!document.getElementById('importIsRegistered')?.checked;
-        const [historyMap, existingRes] = await Promise.all([
-          getNextTermCountMap(memberIds, role),
-          scopeByTenant(_supabase
-            .from('coop_officials')
-            .select('member_id, status, term_start_date, term_end_date')
-            .eq('role', role)
-            .in('member_id', memberIds))
-        ]);
-        if (existingRes.error) throw existingRes.error;
-        if (!officialWriteAllowed() || currentCoopId!==startCoop || committeeAuthId!==startActor || getSelectedImportElection()?.id!==sourceElection || document.getElementById('electionImportModal').classList.contains('d-none')) return;
-
-        const existingRows = existingRes.data || [];
-        const activeMemberIds = new Set(existingRows.filter((row) => String(row.status || '').toLowerCase() === 'active').map((row) => String(row.member_id || '')));
-        const sameTermMemberIds = new Set(existingRows
-          .filter((row) => String(row.term_start_date || '') === termStartDate && String(row.term_end_date || '') === termEndDate)
-          .map((row) => String(row.member_id || '')));
-
-        const insertPayload = [];
-        let skippedActive = 0;
-        let skippedSameTerm = 0;
-        memberIds.forEach((memberId) => {
-          if (activeMemberIds.has(memberId)) {
-            skippedActive += 1;
-            return;
-          }
-          if (sameTermMemberIds.has(memberId)) {
-            skippedSameTerm += 1;
-            return;
-          }
-          const source = uniqueByMemberId.get(memberId);
-          const memberRecord = source?.memberRecord || null;
-          if (!memberRecord) return;
-          const snapshot = buildOfficialIdentitySnapshot(memberRecord);
-          insertPayload.push({
-            coop_id: currentCoopId,
-            member_id: memberId,
-            category,
-            role,
-            term_start_date: termStartDate,
-            term_end_date: termEndDate,
-            term_count: (historyMap.get(memberId) || 0) + 1,
-            name: memberRecord.name || source?.candidateName || null,
-            official_member_type: snapshot.official_member_type,
-            official_identity_code: snapshot.official_identity_code,
-            official_identity_kind: snapshot.official_identity_kind,
-            is_registered: isRegistered,
-            record_origin: 'election',
-            record_election_id: sourceElection,
-            status: 'active'
-          });
+        const {data:receipt,error}=await _supabase.rpc('register_checked_election_winners',{
+          p_election:data.id,p_revision:data.revision,p_assignments,p_start,p_end
         });
-
-        if (insertPayload.length > 0) {
-          const { error: insertError } = await _supabase.from('coop_officials').insert(insertPayload);
-          if (insertError) throw insertError;
-        }
-
+        if (!electionImportMatches(data.owner,data.id,data.generation)) return;
+        if (error) throw error;
+        if (!Number.isInteger(receipt?.added) || !Number.isInteger(receipt?.skipped)) throw new Error('등록 결과를 다시 확인해 주세요.');
         closeElectionImportModal();
-        showAlert(
-          `${role} 당선자 저장이 완료되었습니다. ` +
-          `(대상 ${memberIds.length}명 / 신규 ${insertPayload.length}명 / 활성 중복 ${skippedActive}명 / 동일 임기 중복 ${skippedSameTerm}명)`,
-          'success'
-        );
+        showAlert('당선자 등록: 신규 '+receipt.added+'명, 기존 '+receipt.skipped+'명','success');
         await loadOfficials();
-        if (memberSearchEnabled) await searchMembers(true);
-        if (shouldOpenSignatureAfterSave && canUseStandaloneSignatureAdmin()) {
-          setTimeout(() => openSignatureManagement(), 180);
-        }
+        if (followup && canUseStandaloneSignatureAdmin() && data.owner===officialRecordContext().key) openSignatureManagement();
       } catch (error) {
-        if (errorEl) {
-          errorEl.innerHTML = `<div class="p-2 rounded border border-danger-subtle bg-danger-subtle text-danger-emphasis">저장 실패: ${escapeHtml(error?.message || 'Unknown error')}</div>`;
-        }
+        if (electionImportMatches(data.owner,data.id,data.generation)) errors.textContent=electionImportError(error);
       } finally {
-        if (saveBtn) {
-          saveBtn.disabled = false;
-          saveBtn.textContent = '불러와 저장';
-        }
+        electionImportPending=false;button.textContent='당선자 등록';syncElectionImportSubmit();
       }
     }
 
@@ -2664,65 +2202,15 @@
       if (!endEl.value) endEl.value = computeAutoTermEndDate(start);
     });
 
-    document.getElementById('importOfficialTermStart')?.addEventListener('change', (event) => {
-      const start = String(event.target.value || '').trim();
-      const endEl = document.getElementById('importOfficialTermEnd');
-      if (!endEl) return;
-      if (!endEl.value) endEl.value = computeAutoTermEndDate(start);
-    });
-
     document.getElementById('importElectionSelect')?.addEventListener('change', () => {
-      currentElectionImportPreview = null;
-      applyElectionRoleRecommendation({ force: true });
+      for (const id of ['importOfficialTermStart','importOfficialTermEnd']) {
+        const node=document.getElementById(id);node.value='';node.readOnly=false;
+      }
       resetElectionImportUi();
     });
-
-    document.getElementById('importOfficialRole')?.addEventListener('change', async () => {
-      importRoleWasManuallyEdited = true;
-      syncImportRegisteredField(document.getElementById('importOfficialRole')?.value || '', true);
-      if (!currentElectionImportPreview) return;
-      const errorEl = document.getElementById('electionImportError');
-      const previewEl = document.getElementById('electionImportPreview');
-      const saveBtn = document.getElementById('saveElectionImportBtn');
-      if (errorEl) errorEl.innerHTML = '';
-      try {
-        await refreshElectionImportPreviewStatus();
-        if (previewEl) previewEl.innerHTML = renderElectionImportPreviewHtml(currentElectionImportPreview);
-        if (saveBtn) saveBtn.disabled = !(currentElectionImportPreview.rows || []).length || (currentElectionImportPreview.missingMemberRows || []).length > 0 || !Number(currentElectionImportPreview.saveableCount || 0);
-      } catch (error) {
-        if (errorEl) errorEl.innerHTML = `<div class="p-2 rounded border border-danger-subtle bg-danger-subtle text-danger-emphasis">${escapeHtml(error?.message || 'Unknown error')}</div>`;
-      }
-    });
-
-    document.getElementById('importOfficialTermStart')?.addEventListener('change', async () => {
-      if (!currentElectionImportPreview) return;
-      const errorEl = document.getElementById('electionImportError');
-      const previewEl = document.getElementById('electionImportPreview');
-      const saveBtn = document.getElementById('saveElectionImportBtn');
-      if (errorEl) errorEl.innerHTML = '';
-      try {
-        await refreshElectionImportPreviewStatus();
-        if (previewEl) previewEl.innerHTML = renderElectionImportPreviewHtml(currentElectionImportPreview);
-        if (saveBtn) saveBtn.disabled = !(currentElectionImportPreview.rows || []).length || (currentElectionImportPreview.missingMemberRows || []).length > 0 || !Number(currentElectionImportPreview.saveableCount || 0);
-      } catch (error) {
-        if (errorEl) errorEl.innerHTML = `<div class="p-2 rounded border border-danger-subtle bg-danger-subtle text-danger-emphasis">${escapeHtml(error?.message || 'Unknown error')}</div>`;
-      }
-    });
-
-    document.getElementById('importOfficialTermEnd')?.addEventListener('change', async () => {
-      if (!currentElectionImportPreview) return;
-      const errorEl = document.getElementById('electionImportError');
-      const previewEl = document.getElementById('electionImportPreview');
-      const saveBtn = document.getElementById('saveElectionImportBtn');
-      if (errorEl) errorEl.innerHTML = '';
-      try {
-        await refreshElectionImportPreviewStatus();
-        if (previewEl) previewEl.innerHTML = renderElectionImportPreviewHtml(currentElectionImportPreview);
-        if (saveBtn) saveBtn.disabled = !(currentElectionImportPreview.rows || []).length || (currentElectionImportPreview.missingMemberRows || []).length > 0 || !Number(currentElectionImportPreview.saveableCount || 0);
-      } catch (error) {
-        if (errorEl) errorEl.innerHTML = `<div class="p-2 rounded border border-danger-subtle bg-danger-subtle text-danger-emphasis">${escapeHtml(error?.message || 'Unknown error')}</div>`;
-      }
-    });
+    for (const id of ['importOfficialTermStart','importOfficialTermEnd']) {
+      document.getElementById(id)?.addEventListener('input',syncElectionImportSubmit);
+    }
 
     document.getElementById('manualOfficialMemberType')?.addEventListener('change', () => {
       toggleManualOfficialIdentityFields();
@@ -2737,6 +2225,10 @@
       await loadOfficialRoleCatalog();
       resetOfficialForm();
       await loadOfficials();
+      const requestedElection = new URLSearchParams(window.location.search).get('election_id') || '';
+      if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(requestedElection)) {
+        await openElectionImportModal(requestedElection);
+      }
       if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mountOfficialRegistration,{once:true});else mountOfficialRegistration();
       window.ErpWorkspaceResume.register({modules:['member_admin','signature'],authorize:async()=>{
         officialDataAuthorized = false;

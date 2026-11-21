@@ -204,7 +204,7 @@ export class ElectionService {
 
         if (error) {
             console.error('선거 목록 조회 실패:', error);
-            return [];
+            throw new Error('선거 목록을 불러오지 못했습니다.');
         }
         return data || [];
     }
@@ -226,7 +226,8 @@ export class ElectionService {
             .eq('election_id', electionId)
             .eq('member_uuid', this.memberProfile.id);
 
-        if (voterError || !voterList || voterList.length === 0) {
+        if (voterError) throw new Error('선거인 명부를 확인하지 못했습니다. 다시 시도해 주세요.');
+        if (!voterList || voterList.length === 0) {
             throw new Error('귀하는 이번 선거의 선거구에 배정되지 않았습니다.');
         }
 
