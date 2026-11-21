@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.1.11
-Change: 2026-10-26 - Recover interrupted reads and share keyboard/button searches.
+Version: v1.1.12
+Change: 2026-11-21 - Match exports to the applied filter and include the full KST end date.
 -->
 <html lang="ko">
 <head>
@@ -16,7 +16,7 @@ Change: 2026-10-26 - Recover interrupted reads and share keyboard/button searche
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.1.11 | audit_logs.html');</script>
+  <script>console.log('[Version] v1.1.12 | audit_logs.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -91,7 +91,7 @@ Change: 2026-10-26 - Recover interrupted reads and share keyboard/button searche
       <div class="d-flex flex-wrap justify-content-end gap-2 mt-3">
         <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">검색 조건 비우기</button>
         <button type="submit" class="btn btn-primary btn-sm">검색</button>
-        <button type="button" class="btn btn-outline-success btn-sm" onclick="exportCsv()">CSV 다운로드</button>
+        <button type="button" class="btn btn-outline-success btn-sm" id="auditExportButton" onclick="exportCsv()" disabled>CSV 다운로드</button>
       </div>
       <div class="small text-muted mt-2" id="sourceHint"></div>
     </form>
@@ -100,7 +100,7 @@ Change: 2026-10-26 - Recover interrupted reads and share keyboard/button searche
       <button id="auditRetryButton" type="button" class="btn btn-outline-primary btn-sm hidden">다시 확인</button>
     </div>
 
-    <div class="table-responsive erp-desktop-scroll">
+    <div class="table-responsive erp-desktop-scroll hidden" id="auditResults">
       <table class="table table-sm align-middle">
         <thead class="table-light">
           <tr>
@@ -172,6 +172,7 @@ let auditReadOwner = { userId:null, coopId:null, permissions:'', revision:0 };
 let auditReadSequence = 0;
 let auditReadPending = null;
 let auditAppliedFilter = '';
+let auditHasMore = false;
 let auditReadRefreshNeeded = true;
 let auditRetryReset = true;
 let auditInputFilter = '';
@@ -183,6 +184,11 @@ let auditBootSequence = 0;
 function auditReadState(text, retry = false) {
   document.getElementById('auditReadStatus').textContent = text;
   document.getElementById('auditRetryButton').classList.toggle('hidden', !retry);
+  const current = auditResultsMatchFilter();
+  document.getElementById('auditResults')?.classList.toggle('hidden', !current);
+  document.getElementById('btnMore').classList.toggle('hidden', !current || !auditHasMore);
+  const exportButton = document.getElementById('auditExportButton');
+  if (exportButton) exportButton.disabled = !current || !cachedLogs.length;
 }
 
 function interruptAuditRead() {
@@ -212,6 +218,11 @@ async function auditReadResult(query, request) {
 function auditFilterValues() {
   return ['filterSource','filterStart','filterEnd','filterAction','filterActor']
     .map(id => document.getElementById(id).value);
+}
+
+function auditResultsMatchFilter() {
+  return !!(auditBootReady && auditReadOwner.userId && auditAppliedFilter
+    && auditAppliedFilter === JSON.stringify(auditFilterValues()));
 }
 
 function auditReadCurrent(owner, sequence, filterKey, allowHidden = false) {
@@ -408,6 +419,10 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
   const source = String(document.getElementById('filterSource').value || 'all').toLowerCase();
   const start = document.getElementById('filterStart').value;
   const end = document.getElementById('filterEnd').value;
+  if (start && end && start > end) {
+    auditReadState('종료일은 시작일과 같거나 이후여야 합니다.');
+    return;
+  }
   const action = document.getElementById('filterAction').value.trim();
   const actor = document.getElementById('filterActor').value.trim();
 
@@ -415,7 +430,7 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
   const safeActor = sanitizeOrKeyword(actor);
   const params = {
     p_start: start ? `${start}T00:00:00+09:00` : null,
-    p_end: end ? `${end}T23:59:59+09:00` : null,
+    p_end: end ? `${end}T23:59:59.999999+09:00` : null,
     p_action: safeAction || null,
     p_actor: safeActor || null,
     p_source: source || 'all',
@@ -436,8 +451,8 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
     if (!await auditReadAuthorized(owner, request)) throw {code:'42501'};
     if (!isCurrent()) return;
     let legacyQuery = _supabase.from('erp_audit_logs').select('*').eq('coop_id', owner.coopId).order('created_at', { ascending: false });
-    if (start) legacyQuery = legacyQuery.gte('created_at', `${start}T00:00:00`);
-    if (end) legacyQuery = legacyQuery.lte('created_at', `${end}T23:59:59`);
+    if (params.p_start) legacyQuery = legacyQuery.gte('created_at', params.p_start);
+    if (params.p_end) legacyQuery = legacyQuery.lte('created_at', params.p_end);
     if (safeAction) legacyQuery = legacyQuery.ilike('action', `%${safeAction}%`);
     if (safeActor) legacyQuery = legacyQuery.or(`actor_name.ilike.%${safeActor}%,actor_emp_id.ilike.%${safeActor}%`);
     const { data: legacyRows, error: legacyError } = await auditReadResult(legacyQuery.range(offset, offset + pageSize - 1), request);
@@ -471,9 +486,8 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
   renderLogs(list, reset);
   currentPage = offset / pageSize + 1;
   auditReadRefreshNeeded = false;
+  auditHasMore = list.length >= pageSize;
   auditReadState(`${cachedLogs.length}건 표시`);
-
-  document.getElementById('btnMore').classList.toggle('hidden', list.length < pageSize);
   } catch (error) {
     if (!isCurrent()) return;
     if (error?.code === '42501') {
@@ -528,6 +542,7 @@ function renderLogs(list, reset) {
 }
 
 function exportCsv() {
+  if (!auditResultsMatchFilter()) return;
   if (!cachedLogs || cachedLogs.length === 0) return showAlert("내보낼 데이터가 없습니다.");
   const headers = ['source','created_at','actor','action','summary','entity_type','entity_id','ip_address'];
   const protectCsvCell = (value) => {
@@ -546,7 +561,7 @@ function exportCsv() {
   ]);
   const csvEscape = (val) => {
     const str = String(val ?? '');
-    if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+    if (/[",\r\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
     return str;
   };
   const csv = [headers.join(',')]

@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.7 | participation_analytics.html');</script>
+  <script>console.log('[Version] v1.0.8 | participation_analytics.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -104,7 +104,7 @@
     .fact-label { color:#78716c; font-size:.72rem; font-weight:800; }
     .fact-value { font-weight:900; font-size:1.25rem; margin-top:4px; }
     .empty { color:#64748b; text-align:center; padding:26px 10px; font-size:.82rem; }
-    .loading-cover { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(241,245,249,.76); backdrop-filter:blur(2px); z-index:1000; }
+    .loading-cover { margin-top:.75rem; display:flex; justify-content:center; }
     .loading-box { background:#fff; border:1px solid #e2e8f0; border-radius:16px; padding:18px 24px; box-shadow:0 18px 50px rgba(15,23,42,.13); font-weight:800; }
     @media (max-width:1180px) {
       .summary-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
@@ -169,10 +169,11 @@
         <button type="button" class="btn btn-outline-secondary btn-sm" data-period="12M">최근 12개월</button>
         <span class="small text-muted ms-auto align-self-center" id="generatedAt"></span>
       </div>
+      <div class="loading-cover" id="loadingCover" role="status"><div class="loading-box"><span class="spinner-border spinner-border-sm text-primary me-2" aria-hidden="true"></span><span id="loadingText">참여 현황을 불러오는 중...</span></div></div>
       <div class="alert alert-danger mt-3 mb-0 d-none" id="pageAlert" role="alert"></div>
     </section>
 
-    <section class="summary-grid" aria-label="참여 요약">
+    <section class="summary-grid d-none" data-analytics-results aria-label="참여 요약">
       <div class="summary-card"><div class="summary-label">현재 정조합원 기준</div><div class="summary-value" id="sumEligible">-</div><div class="summary-help">선택 기간 종료일까지 가입한 현재 정조합원</div></div>
       <div class="summary-card accent"><div class="summary-label">실제 참여 조합원</div><div class="summary-value" id="sumParticipants">-</div><div class="summary-help">기간 중 한 번 이상 실제 기록이 있는 조합원</div></div>
       <div class="summary-card"><div class="summary-label">실제 참여율</div><div class="summary-value" id="sumRate">-</div><div class="summary-help">무투표 참여 인정으로 부풀리지 않은 비율</div></div>
@@ -181,7 +182,7 @@
       <div class="summary-card"><div class="summary-label">비조합원 교육 참석</div><div class="summary-value" id="sumGuests">-</div><div class="summary-help">수기·QR로 확인된 교육 참가 기록</div></div>
     </section>
 
-    <section class="dashboard-grid">
+    <section class="dashboard-grid d-none" data-analytics-results>
       <div class="panel">
         <div class="panel-title-row"><div><h2 class="panel-title">활동 종류별 흐름</h2><div class="panel-desc">서로 성격이 다른 활동은 섞지 않고 같은 종류끼리 봅니다.</div></div></div>
         <div class="category-grid" id="categoryGrid"></div>
@@ -195,7 +196,7 @@
       </div>
     </section>
 
-    <section class="dashboard-grid">
+    <section class="dashboard-grid d-none" data-analytics-results>
       <div class="panel">
         <div class="panel-title-row"><div><h2 class="panel-title">월별 참여 기록</h2><div class="panel-desc">해당 월에 열린 활동의 참석·완료·실제 투표 건수를 합산합니다.</div></div></div>
         <div class="monthly-list" id="monthlyList"></div>
@@ -206,7 +207,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel d-none" data-analytics-results>
       <div class="panel-title-row">
         <div><h2 class="panel-title">활동별 조회</h2><div class="panel-desc" id="activityCountText">활동을 불러오는 중입니다.</div></div>
       </div>
@@ -218,7 +219,7 @@
       </div>
     </section>
 
-    <section class="panel dividend-panel">
+    <section class="panel dividend-panel d-none" data-analytics-results>
       <div class="panel-title-row"><div><h2 class="panel-title">🌱 향후 이용고 기준 연결 준비</h2><div class="panel-desc">현재는 활동 사실만 종류별로 집계합니다. 이사회·총회에서 기준이 확정되기 전에는 가중치나 배당액을 계산하지 않습니다.</div></div></div>
       <div class="fact-grid">
         <div class="fact-card"><div class="fact-label">회의·교육 참석</div><div class="fact-value" id="factEvents">-</div></div>
@@ -229,8 +230,6 @@
       </div>
     </section>
   </main>
-
-  <div class="loading-cover" id="loadingCover"><div class="loading-box"><span class="spinner-border spinner-border-sm text-primary me-2"></span><span id="loadingText">참여 현황을 불러오는 중...</span></div></div>
 
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -244,6 +243,22 @@
     let analyticsReadOwner = { userId:null, coopId:null, permissions:'', revision:0 };
     let analyticsReadSequence = 0;
     let analyticsReadPending = null;
+    let analyticsSelectedPeriod = '';
+    let analyticsDisplayedPeriod = '';
+
+    function analyticsPeriodKey() {
+      return [document.getElementById('dateFrom').value, document.getElementById('dateTo').value].join('/');
+    }
+
+    function analyticsPeriodChanged() {
+      const key = analyticsPeriodKey();
+      if (key === analyticsSelectedPeriod) return;
+      analyticsSelectedPeriod = key;
+      pauseAnalyticsRead();
+      if (key !== analyticsDisplayedPeriod) clearAnalyticsResults();
+      showError('');
+      document.getElementById('generatedAt').textContent = '조회해서 새 기간을 확인해 주세요.';
+    }
 
     function pauseAnalyticsRead() {
       analyticsReadSequence++;
@@ -254,7 +269,10 @@
 
     function clearAnalyticsResults() {
       state.data = null; state.activities = [];
-      document.querySelectorAll('.summary-grid,.dashboard-grid,.dividend-panel').forEach(el => { el.classList.add('d-none'); });
+      analyticsDisplayedPeriod = '';
+      document.querySelectorAll('[data-analytics-results]').forEach(el => el.classList.add('d-none'));
+      document.getElementById('activityRows').replaceChildren();
+      document.getElementById('generatedAt').textContent = '';
     }
 
     function analyticsReadCurrent(owner, sequence, from, to, allowHidden = false) {
@@ -476,6 +494,7 @@
       const allowHidden = options.allowHidden === true;
       if (document.hidden || (!allowHidden && window.frameElement?.hidden)) { showLoading(false); return Promise.resolve(); }
       if (!analyticsReadOwner.userId) return Promise.resolve();
+      analyticsPeriodChanged();
       const from = document.getElementById('dateFrom').value;
       const to = document.getElementById('dateTo').value;
       if (!from || !to || from > to) {
@@ -505,6 +524,7 @@
 
     async function loadAnalyticsPeriod(owner, sequence, from, to, allowHidden, controller = new AbortController()) {
       const isCurrent = () => analyticsReadCurrent(owner, sequence, from, to, allowHidden);
+      if (!analyticsDisplayedPeriod) document.getElementById('generatedAt').textContent = '';
       showError(''); showLoading(true);
       let timer;
       try {
@@ -530,10 +550,12 @@
         }
         if (!isCurrent()) return;
         const data = result.data;
-        state.data = data || {};
-        state.activities = classifyResponses(Array.isArray(data?.activities) ? data.activities : []);
-        document.querySelectorAll('.summary-grid,.dashboard-grid,.dividend-panel').forEach(el => { el.classList.remove('d-none'); });
+        if (!data?.summary || !Array.isArray(data.activities)) throw new Error('ANALYTICS_DATA_UNAVAILABLE');
+        state.data = data;
+        state.activities = classifyResponses(data.activities);
         renderAll();
+        analyticsDisplayedPeriod = `${from}/${to}`;
+        document.querySelectorAll('[data-analytics-results]').forEach(el => el.classList.remove('d-none'));
       } catch (error) {
         if (!isCurrent()) return;
         if (error?.code === '42501') clearAnalyticsResults();
@@ -545,6 +567,12 @@
 
     async function init() {
       setInitialPeriod();
+      analyticsSelectedPeriod = analyticsPeriodKey();
+      for (const id of ['dateFrom','dateTo']) {
+        const input = document.getElementById(id);
+        input.addEventListener('input', analyticsPeriodChanged);
+        input.addEventListener('change', analyticsPeriodChanged);
+      }
       document.getElementById('loadBtn').addEventListener('click', loadAnalytics);
       document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => applyQuickPeriod(button.dataset.period)));
       ['typeFilter','responseFilter'].forEach(id => document.getElementById(id).addEventListener('change', renderActivityTable));
@@ -557,15 +585,15 @@
       window.addEventListener('pagehide', pauseAnalyticsRead);
 
       const userGate = await window.ErpRuntimeGuard.requireUser(_supabase,{ redirectUrl:'index.html' });
-      if (!userGate.ok) return;
+      if (!userGate.ok) { showLoading(false); return; }
       const runtimeGate = await window.ErpRuntimeGuard.enforce(_supabase,{ moduleKeysAny:['member_admin'], moduleLabel:'조합원 참여 관리', redirectUrl:'index.html' });
-      if (!runtimeGate.ok) return;
+      if (!runtimeGate.ok) { showLoading(false); return; }
       analyticsReadOwner = { userId:userGate.authUser.id, coopId:runtimeGate.runtime.coop_id,
         permissions:JSON.stringify(runtimeGate.runtime.effective_permissions.slice().sort()), revision:analyticsReadOwner.revision + 1 };
       _supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== analyticsReadOwner.userId)) {
           analyticsReadOwner = { userId:null, coopId:null, permissions:'', revision:analyticsReadOwner.revision + 1 };
-          analyticsReadSequence++;
+          pauseAnalyticsRead();
           clearAnalyticsResults();
           showError('로그인 상태를 확인한 뒤 다시 열어 주세요.');
         }
