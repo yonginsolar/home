@@ -1,15 +1,16 @@
-/* ERP workspace navigation v1.6.4 — keep the three registry destinations available. */
+/* ERP workspace navigation v1.6.5 — connect existing settings scopes through one menu. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261119.documents1';
+  const VERSION = '20261121.coop-settings2';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
     ['btnAccounting', '회계 관리', 'accounting.html', 'accounting', ['accounting.view'], '▤'],
     ['btnAdmin', '직원 관리', 'admin_employee.html', 'hr', ['hr.admin'], '♙', true],
-    ['btnCoopSettings', '조합 설정', 'admin_employee.html?section=settings', 'hr', ['hr.admin'], '⚙'],
+    ['btnCoopSettings', '조합 기본 설정', 'admin_employee.html?section=settings', '', [], '⚙', true],
+    ['btnInitialSetup', '초기 설정', 'initial_setup.html', '', [], '⚙', true],
     ['btnMemberAdmin', '조합원 관리', 'admin_member.html?scope=member_admin&tab=dashboard', 'member_admin', ['member.admin'], '♧', true],
     ['btnParticipationAnalytics', '조합원 참여 현황', 'participation_analytics.html', 'member_admin', ['member.admin'], '▥'],
     ['btnEducationParticipants', '교육·행사 관리', 'participation.html?view=education', 'education', ['member.admin', 'education.manage'], '▣'],
@@ -68,12 +69,44 @@
   const permissions = runtime => new Set(Array.isArray(runtime.effective_permissions) ? runtime.effective_permissions : []);
   const any = (set, keys) => keys.some(key => set.has(key));
 
+  function activeInitialSetup(runtime) {
+    const setup = runtime?.initial_setup;
+    const expires = Date.parse(setup?.expires_at || '');
+    return runtime?.coop_id && runtime.is_active !== false && Array.isArray(runtime.effective_permissions)
+      && setup?.active === true && (!Number.isFinite(expires) || expires > Date.now()) ? setup : null;
+  }
+
+  // Keep the existing destinations and guard them independently. Temporary
+  // setup rights never turn into a permanent HR or member/site entry.
+  function coopSettingsRoute(runtime) {
+    if (!runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return null;
+    const baseRights = new Set(Array.isArray(runtime.base_effective_permissions)
+      ? runtime.base_effective_permissions : runtime.effective_permissions);
+    if (runtime.runtime_profile === 'site_member') {
+      const assigned = key => enabled(runtime, key) && runtime.module_access?.[key] === true;
+      const member = baseRights.has('member.admin');
+      const scope = member && assigned('member_admin') ? 'member_admin'
+        : ((member || baseRights.has('site.admin')) && assigned('site_admin') ? 'site_admin' : '');
+      if (scope) return `admin_member.html?scope=${scope}&sub=certificate-settings&entry=coop-basic`;
+    } else if (enabled(runtime, 'hr') && baseRights.has('hr.admin')) {
+      return 'admin_employee.html?section=settings';
+    }
+    return activeInitialSetup(runtime)?.areas?.basic === true ? 'initial_setup.html' : null;
+  }
+
+  function initialSetupRoute(runtime) {
+    const areas = activeInitialSetup(runtime)?.areas;
+    return (areas?.site === true || areas?.capital === true) && coopSettingsRoute(runtime) !== 'initial_setup.html'
+      ? 'initial_setup.html' : null;
+  }
+
   function active(route) {
     const target = new URL(route, new URL(base, location.origin));
     const leaf = target.pathname.replace(/\.html$/, '').split('/').pop();
     if (leaf === 'admin_member') {
       const scope = params.get('scope') || 'member_admin';
-      return path === leaf && scope === target.searchParams.get('scope');
+      return path === leaf && scope === target.searchParams.get('scope')
+        && (params.get('entry') === 'coop-basic') === (target.searchParams.get('entry') === 'coop-basic');
     }
     if (leaf === 'admin_employee') {
       const settings = target.searchParams.get('section') === 'settings';
@@ -99,8 +132,11 @@
     const set = permissions(runtime);
     const narrow = runtime.runtime_profile === 'site_member';
     const baseSet = new Set(runtime.base_effective_permissions || [...set]);
+    const settingsRoute = coopSettingsRoute(runtime);
     const items = catalog.filter(item => {
       const [id, , , key, rights] = item;
+      if (id === 'btnCoopSettings') return !!settingsRoute;
+      if (id === 'btnInitialSetup') return !!initialSetupRoute(runtime);
       if (!enabled(runtime, key) || !any(set, rights)) return false;
       if (id === 'btnRegistryHub' && !canOpenRegistryHub(runtime)) return false;
       if (runtime.initial_setup?.active && !any(baseSet, rights) && id !== 'btnSiteAdmin') return false;
@@ -112,9 +148,8 @@
         if (['member_admin', 'site_admin'].includes(key) && runtime.module_access?.[key] !== true) return false;
       }
       return true;
-    });
+    }).map(item => item[0] === 'btnCoopSettings' ? [item[0], item[1], settingsRoute, ...item.slice(3)] : item);
     if (!narrow && runtime.initial_setup?.can_manage && !items.some(item=>item[0]==='btnAdmin')) items.push(['btnAdmin','직원 관리','admin_employee.html?section=initial_setup','',[],'♙']);
-    if (!narrow && runtime.initial_setup?.active && !items.some(item=>item[0]==='btnCoopSettings')) items.push(['btnCoopSettings','조합 설정','initial_setup.html','',[],'⚙']);
     return items;
   }
 
@@ -150,9 +185,13 @@
     const signature=JSON.stringify([runtime.initial_setup,runtime.effective_permissions]);
     if (state.setupMenuSignature !== signature) {
       const allowed=new Map(allowedItems(runtime).map(item=>[item[0],item]));
-      if (state.villageWorkspace) allowed.delete('btnCoopSettings');
+      if (state.villageWorkspace) {
+        allowed.delete('btnCoopSettings');
+        allowed.delete('btnInitialSetup');
+      }
       const catalogIds=new Set(catalog.map(item=>item[0]));
-      state.items=state.items.filter(item=>!catalogIds.has(item[0]) || allowed.has(item[0]));
+      state.items=state.items.filter(item=>!catalogIds.has(item[0]) || allowed.has(item[0]))
+        .map(item=>item[0]==='btnCoopSettings' ? allowed.get(item[0]) : item);
       for (const [id,item] of allowed) if (!state.items.some(existing=>existing[0]===id)) state.items.push(item);
       const couldOrder=state.canOrder,rights=permissions(runtime);
       state.canOrder=runtime.runtime_profile!=='site_member'
@@ -746,7 +785,7 @@
     state.villageWorkspace=!!currentVillage;
     if (currentVillage) {
       // Only relabel the already-authorized HR entry. Do not add staff or settings rights.
-      state.items = state.items.filter(item => item[0] !== 'btnCoopSettings').map(item =>
+      state.items = state.items.filter(item => !['btnCoopSettings', 'btnInitialSetup'].includes(item[0])).map(item =>
         item[0] === 'btnAdmin' ? [item[0], '마을 기본정보', 'village_company_info.html', ...item.slice(3)] : item);
     }
     state.orderLoaded=order.ok;state.order=cleanOrder(order.data);
@@ -810,7 +849,7 @@
     return promise;
   }
 
-  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, updateSetupRuntime, showMenu, refreshBrand:()=>state?refreshBrand(state.client,generation,state.runtime.coop_id):Promise.resolve(), closeDrawer:()=>setDrawer(false) };
+  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, updateSetupRuntime, showMenu, coopSettingsRoute, initialSetupRoute, refreshBrand:()=>state?refreshBrand(state.client,generation,state.runtime.coop_id):Promise.resolve(), closeDrawer:()=>setDrawer(false) };
   window.addEventListener('focus', refreshSetupMenus);
   window.addEventListener('erp-workspace-runtime', event => { void connect(event.detail.client, event.detail.runtime); });
   // Used only by classic-script ERP pages with an already configured tenant-aware client.
