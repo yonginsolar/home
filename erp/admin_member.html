@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.506
-Change: 2026-11-21 - 확인된 퀴즈 완료일·대의원총회 참석·설문 참여 조건 추가.
+Version: v1.0.507
+Change: 2026-11-21 - 기존 단계형 배지에 새 단계 추가, 대표 배지와 다음 목표 표시.
 -->
 <html lang="ko">
 <head>
@@ -19,7 +19,7 @@ Change: 2026-11-21 - 확인된 퀴즈 완료일·대의원총회 참석·설문 
 <meta name="admin-contribution-certificate-revision" content="20261010.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.506';
+window.ADMIN_MEMBER_VERSION = 'v1.0.507';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -75,7 +75,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.506';
 <script src="/badges.js?v=20260331_01"></script>
 
 
-<link rel="preload" href="admin_member_core_v1500.js?v=20261121-referral-detail-1" as="script" fetchpriority="high" integrity="sha384-50xV/CnK3PVLy0nlvt99tPe0A0iaGYTBHD8oC6ZGwWjLdBrt+6eWYwTmlFsT5PBO" crossorigin="anonymous">
+<link rel="preload" href="admin_member_core_v1507.js?v=20261121-badge-series-1" as="script" fetchpriority="high" integrity="sha384-akjXDu2zXdoFeEy9bmvuAuOGldEQKBZt+RIdbH8G11S1UCoiDsdSd1IxsBTL8sDG" crossorigin="anonymous">
 <script src="member_admission_policy.js?v=1.1.2" defer></script>
 <script src="member_application_manage.js?v=1.3.0" defer></script>
 <script src="member_admission_admin.js?v=1.3.0" defer></script>
@@ -1709,6 +1709,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.506';
 <div class="tab-pane fade" id="tab-badges">
 <h3 class="fw-bold mb-4">🏅 뱃지 관리</h3>
 <div class="d-flex flex-wrap gap-2 justify-content-end mb-2">
+<button type="button" class="btn btn-sm btn-outline-primary text-wrap" onclick="void openBadgeSeriesEditor(this)">단계형 배지</button>
 <button type="button" class="btn btn-sm btn-outline-secondary text-wrap" onclick="void openBadgeWorkbench('drafts',this)">초안 보기</button>
 <button type="button" class="btn btn-sm btn-outline-primary text-wrap" onclick="void openBadgeWorkbench('catalog',this)">뱃지 불러오기</button>
 <button type="button" class="btn btn-sm btn-primary text-wrap" onclick="void openBadgeRuleEditor(this)">새 뱃지 만들기</button>
@@ -3525,6 +3526,68 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.506';
 </div>
 
 <style>
+#badge-series-editor{box-sizing:border-box;inline-size:min(1104px,calc(100% - 24px));max-inline-size:calc(100% - 24px);block-size:min(740px,calc(100dvh - 24px));max-block-size:calc(100dvh - 24px);padding:0;border:1px solid #dce3e5;border-radius:16px;color:#24382e;background:#fff;overflow:hidden;overflow-wrap:anywhere}
+#badge-series-editor::backdrop{background:#0f172a88}
+#badge-series-editor [hidden]{display:none!important}
+#badge-series-editor .bsx-shell{display:grid;grid-template-rows:auto minmax(0,1fr) auto;height:100%;min-width:0}
+#badge-series-editor .bsx-head,#badge-series-editor .bsx-actions{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.65rem;padding:clamp(.65rem,2vw,1.15rem);background:#fff}
+#badge-series-editor .bsx-head{border-bottom:1px solid #e0e8e3}
+#badge-series-editor .bsx-actions{justify-content:flex-end;border-top:1px solid #e0e8e3}
+#badge-series-editor .bsx-body{padding:clamp(.65rem,2vw,1.15rem);overflow:auto;min-width:0;overscroll-behavior:contain;background:#f5f7f6}
+#badge-series-editor .bsx-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:1rem;align-items:start}
+#badge-series-editor .bsx-panel{min-width:0;padding:1rem;border:1px solid #dee8e1;border-radius:12px;background:#fff}
+#badge-series-editor .bsx-panel:last-child{background:#eaf5ee}
+#badge-series-editor .bsx-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.2fr);gap:.65rem}
+#badge-series-editor .bsx-fields>legend{float:none;grid-column:1/-1;margin:0}
+#badge-series-editor .bsx-fields label,#badge-series-editor :is(button,input,select){min-width:0;max-width:100%}
+#badge-series-editor .bsx-scroller{max-block-size:18rem;overflow:auto;overscroll-behavior:contain}
+#badge-series-editor table{table-layout:fixed}
+#badge-series-editor th,#badge-series-editor td{white-space:normal;overflow-wrap:anywhere}
+@media(max-width:700px){#badge-series-editor .bsx-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:440px){#badge-series-editor .bsx-fields{grid-template-columns:minmax(0,1fr)}}
+</style>
+<dialog id="badge-series-editor" aria-labelledby="badge-series-title">
+  <div class="bsx-shell">
+    <header class="bsx-head">
+      <div><div class="small text-secondary">조합원 관리 / 배지</div><h2 id="badge-series-title" data-bsx="heading" tabindex="-1" class="h4 mb-0">단계형 배지</h2></div>
+      <button type="button" data-bsx="close" class="btn btn-outline-secondary">닫기</button>
+    </header>
+    <div class="bsx-body">
+      <div class="bsx-grid">
+        <section class="bsx-panel" aria-label="단계 목록">
+          <label for="badge-series-track" class="fw-bold">배지 묶음</label>
+          <select id="badge-series-track" class="form-select mb-2" data-bsx="track"></select>
+          <p data-bsx="basis" class="small text-secondary"></p>
+          <div class="bsx-scroller mb-3" tabindex="0" aria-label="저장된 단계">
+            <table class="table table-sm mb-0">
+              <colgroup><col style="width:12%"><col style="width:40%"><col style="width:26%"><col style="width:22%"></colgroup>
+              <thead><tr><th scope="col">아이콘</th><th scope="col">단계 이름</th><th scope="col">기준</th><th scope="col"><span class="visually-hidden">상태</span></th></tr></thead>
+              <tbody data-bsx="steps"></tbody>
+            </table>
+          </div>
+          <button type="button" data-bsx="add" class="btn btn-outline-primary" hidden>+ 단계 추가</button>
+          <fieldset data-bsx="new" class="bsx-fields" hidden>
+            <legend class="h6">새 단계</legend>
+            <label>단계 이름<input class="form-control" data-bsx="name" maxlength="100"></label>
+            <label>아이콘<input class="form-control" data-bsx="icon" maxlength="40"></label>
+            <label>기준 <span data-bsx="unit"></span><input class="form-control" data-bsx="target" inputmode="numeric" autocomplete="off"></label>
+          </fieldset>
+        </section>
+        <section class="bsx-panel" aria-label="저장 전 미리보기">
+          <h3 class="h6 fw-bold">저장 전 미리보기</h3>
+          <dl class="mb-1"><dt>새로 받는 인원</dt><dd data-bsx="eligible">—</dd><dt>대표 배지가 바뀌는 인원</dt><dd data-bsx="changes">—</dd></dl>
+          <p class="small text-secondary mb-0">기존 배지는 그대로 남아요.</p>
+        </section>
+      </div>
+      <div class="mt-3"><span data-bsx="status" role="status"></span> <button type="button" data-bsx="retry" class="btn btn-sm btn-outline-secondary" hidden>다시 확인</button></div>
+    </div>
+    <footer class="bsx-actions">
+      <button type="button" data-bsx="check" class="btn btn-outline-primary" hidden>저장 결과 확인</button>
+      <button type="button" data-bsx="submit" class="btn btn-primary" disabled>단계 추가 및 지급</button>
+    </footer>
+  </div>
+</dialog>
+<style>
 #badge-workbench{box-sizing:border-box;inline-size:min(44rem,calc(100% - 1.5rem));max-inline-size:calc(100% - 1.5rem);block-size:min(42rem,calc(100% - 1.5rem));max-block-size:calc(100% - 1.5rem);padding:0;border:1px solid var(--bs-border-color,#dee2e6);border-radius:.85rem;background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#212529);overflow:hidden;overflow-wrap:anywhere}
 #badge-workbench::backdrop{background:rgba(15,23,42,.50)}
 #badge-workbench .bw-frame{display:grid;grid-template-rows:auto minmax(0,1fr);block-size:100%;min-inline-size:0}
@@ -4601,14 +4664,14 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.506';
 
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-<script src="admin_member_assets_v1506.js?v=20261121-confirmed-facts-1"></script>
+<script src="admin_member_assets_v1507.js?v=20261121-badge-series-1"></script>
 <link rel="stylesheet" href="/shared/about_design_layout.css?v=1.0.0" integrity="sha384-6ZZ+35oWol9YYZKM6RumSU6bHwMkSVaki+ea4T4cARRvfflHTgFGFuNFApG48KEl" crossorigin="anonymous">
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/shared/hcrec_about_presentation.css?v=1.1.0" integrity="sha384-XPDw6+DuBSgWanDT8U6y7oWM0lfi8+K/Y9no1dtCghWdkPON3mH9PrFP1FLWA7oV" crossorigin="anonymous">
 <script src="/shared/hcrec_about_presentation.js?v=1.1.0" integrity="sha384-FqmOZt29+jqQv0Zg6Hv0SxsHOxDnjV2S50Otuq6RerH4MYIxYOwah29rPwyEMsDQ" crossorigin="anonymous"></script>
 <script src="member_sms_export.js?v=1.0.0"></script>
 <script src="/shared/cooperative_rules.js?v=1.0.0" integrity="sha384-CNofpCsGT79mVM66AV3CQF70jY7BgpDxeT0jL1BAEx0675brG6fVT0wfhFXtF9Bn" crossorigin="anonymous"></script>
-<script src="admin_member_core_v1500.js?v=20261121-referral-detail-1" fetchpriority="high" integrity="sha384-50xV/CnK3PVLy0nlvt99tPe0A0iaGYTBHD8oC6ZGwWjLdBrt+6eWYwTmlFsT5PBO" crossorigin="anonymous" onerror="AdminMemberAssets.showBootFailure()"></script>
+<script src="admin_member_core_v1507.js?v=20261121-badge-series-1" fetchpriority="high" integrity="sha384-akjXDu2zXdoFeEy9bmvuAuOGldEQKBZt+RIdbH8G11S1UCoiDsdSd1IxsBTL8sDG" crossorigin="anonymous" onerror="AdminMemberAssets.showBootFailure()"></script>
 <script src="dividend_workflow.js?v=20261120-calculated-archive-1" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-VQ42+wl8r7M7QCcYb8NBZE9mP9vLHsPHr1vF9pK4s85Ye2/3eNRpk45JjkSdp130" crossorigin="anonymous"></script>
 <script src="dividend_legacy_safety.js?v=1.0.2" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-Cc6gGADTKCTHS/hgV1vc7BaFptSY9wlIzlJHP4Lueym2Xd6Knye8o6QTH9LiXaH9" crossorigin="anonymous"></script>
 <script src="dividend_policy.js?v=1.0.0" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-5IWika7+CSj08VLzNWnCBnva1BFcnkKLVPpGoEbZij3dMuYg19Jc7na6bNrdzZ4t" crossorigin="anonymous"></script>
