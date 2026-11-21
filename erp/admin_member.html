@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.514
-Change: 2026-11-21 - 단계형 배지 묶음 관리와 중복 없는 조건 예시.
+Version: v1.0.515
+Change: 2026-11-21 - 뱃지 제안과 답변.
 -->
 <html lang="ko">
 <head>
@@ -19,7 +19,7 @@ Change: 2026-11-21 - 단계형 배지 묶음 관리와 중복 없는 조건 예�
 <meta name="admin-contribution-certificate-revision" content="20261010.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.514';
+window.ADMIN_MEMBER_VERSION = 'v1.0.515';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -75,7 +75,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.514';
 <script src="/badges.js?v=20260331_01"></script>
 
 
-<link rel="preload" href="admin_member_core_v1514.js?v=20261121-badge-convert-all" as="script" fetchpriority="high" integrity="sha384-I6/lTifAezZSbd0ssmdEdnJzA9bWnc5mSf9jrzbLfIlIgtoyaz/b51sB/QRvNVlk" crossorigin="anonymous">
+<link rel="preload" href="admin_member_core_v1515.js?v=20261121-badge-suggestion" as="script" fetchpriority="high" integrity="sha384-mGxB7NwFAkatWE2ncbhZS3X5qq6YT5YQS0gvB//dNnGpvon3EivmGNfTYQjXIk98" crossorigin="anonymous">
 <script src="member_admission_policy.js?v=1.1.2" defer></script>
 <script src="member_application_manage.js?v=1.3.0" defer></script>
 <script src="member_admission_admin.js?v=1.3.0" defer></script>
@@ -1724,6 +1724,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.514';
 <li id="badge-series-create"><button type="button" class="dropdown-item" onclick="void openBadgeSeriesEditor(document.getElementById('badge-create-menu'))">단계형</button></li>
 </ul>
 </div>
+<button type="button" class="btn btn-sm btn-outline-primary" onclick="void openBadgeSuggestions(this)">제안하기</button>
 </div>
 <div id="badge-workbench-launch-status" class="small mb-2" role="status"></div>
 <div id="badge-list-status" class="small text-warning mb-2" role="status"></div>
@@ -1731,6 +1732,47 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.514';
 <thead class="table-light"><tr><th width="60">순서</th><th width="60">아이콘</th><th>이름 / 설명</th><th width="100">코드</th><th width="100">색상</th><th width="120">관리</th></tr></thead>
 <tbody id="badgeListBody"></tbody></table></div>
 </div>
+
+<style>
+#badge-suggestions{width:min(620px,calc(100% - 24px));max-height:calc(100dvh - 24px);padding:0;border:0;border-radius:16px;color:var(--bs-body-color);background:var(--bs-body-bg);box-shadow:0 14px 45px #0004;overflow:auto}
+#badge-suggestions::backdrop{background:#18213374}
+#badge-suggestions [hidden]{display:none!important}
+#badge-suggestions .bsu-head,#badge-suggestions .bsu-main{padding:16px 20px}
+#badge-suggestions .bsu-head,#badge-suggestions .bsu-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+#badge-suggestions .bsu-head{justify-content:space-between;border-bottom:1px solid var(--bs-border-color)}
+#badge-suggestions [aria-pressed="true"]{color:var(--bs-body-bg);background:var(--bs-body-color)}
+#badge-suggestions .bsu-card{padding:12px;border:1px solid var(--bs-border-color);border-radius:10px;margin-bottom:10px}
+#badge-suggestions .bsu-body{white-space:pre-wrap;overflow-wrap:anywhere;margin:.5rem 0}
+#badge-suggestions .bsu-reply{border-top:1px solid var(--bs-border-color);padding-top:.5rem}
+#badge-suggestions form{display:grid;gap:8px}
+#badge-suggestions form button{justify-self:start}
+</style>
+<dialog id="badge-suggestions" aria-labelledby="badge-suggestion-heading">
+ <header class="bsu-head"><h2 id="badge-suggestion-heading" class="h5 mb-0">뱃지 제안</h2><button data-bsu="close" type="button" class="btn btn-sm btn-outline-secondary">닫기</button></header>
+ <div class="bsu-main">
+  <nav class="bsu-tabs mb-3" aria-label="뱃지 제안 메뉴">
+   <button data-bsu="tab-compose" type="button" class="btn btn-sm btn-outline-secondary" aria-pressed="true">제안하기</button>
+   <button data-bsu="tab-mine" type="button" class="btn btn-sm btn-outline-secondary" aria-pressed="false">내 제안</button>
+   <button data-bsu="tab-inbox" type="button" class="btn btn-sm btn-outline-secondary" aria-pressed="false" hidden>받은 제안</button>
+  </nav>
+  <section data-bsu="panel-compose">
+   <form data-bsu="compose-form">
+    <label class="fw-semibold" for="badge-suggestion-idea">어떤 뱃지를 만들고 싶나요?</label>
+    <textarea id="badge-suggestion-idea" data-bsu="idea" class="form-control" rows="5" maxlength="1500" required placeholder="뱃지 이름이나 어떤 활동을 했을 때 받으면 좋을지 적어 주세요."></textarea>
+    <p class="small mb-0" data-bsu="compose-status" role="status"></p>
+    <button data-bsu="send" type="submit" class="btn btn-primary">제안 보내기</button>
+   </form>
+  </section>
+  <section data-bsu="panel-mine" hidden>
+   <p class="small" data-bsu="mine-status" role="status"></p><div data-bsu="mine-list"></div>
+   <button data-bsu="mine-more" type="button" class="btn btn-sm btn-outline-secondary" hidden>더 보기</button>
+  </section>
+  <section data-bsu="panel-inbox" hidden>
+   <p class="small" data-bsu="inbox-status" role="status"></p><div data-bsu="inbox-list"></div>
+   <button data-bsu="inbox-more" type="button" class="btn btn-sm btn-outline-secondary" hidden>더 보기</button>
+  </section>
+ </div>
+</dialog>
 
 <div class="tab-pane fade" id="tab-site">
 <div class="content-header"><h3 id="site-content-title">🖥️ 홈페이지 관리</h3><button type="button" class="btn btn-sm btn-outline-dark hidden" id="site-org-settings-button" onclick="openMemberCertificateSettingsModal()">🏢 조합 기본 설정</button></div>
@@ -4703,14 +4745,14 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.514';
 
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-<script src="admin_member_assets_v1514.js?v=20261121-badge-convert-all"></script>
+<script src="admin_member_assets_v1515.js?v=20261121-badge-suggestion"></script>
 <link rel="stylesheet" href="/shared/about_design_layout.css?v=1.0.0" integrity="sha384-6ZZ+35oWol9YYZKM6RumSU6bHwMkSVaki+ea4T4cARRvfflHTgFGFuNFApG48KEl" crossorigin="anonymous">
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/shared/hcrec_about_presentation.css?v=1.1.0" integrity="sha384-XPDw6+DuBSgWanDT8U6y7oWM0lfi8+K/Y9no1dtCghWdkPON3mH9PrFP1FLWA7oV" crossorigin="anonymous">
 <script src="/shared/hcrec_about_presentation.js?v=1.1.0" integrity="sha384-FqmOZt29+jqQv0Zg6Hv0SxsHOxDnjV2S50Otuq6RerH4MYIxYOwah29rPwyEMsDQ" crossorigin="anonymous"></script>
 <script src="member_sms_export.js?v=1.0.0"></script>
 <script src="/shared/cooperative_rules.js?v=1.0.0" integrity="sha384-CNofpCsGT79mVM66AV3CQF70jY7BgpDxeT0jL1BAEx0675brG6fVT0wfhFXtF9Bn" crossorigin="anonymous"></script>
-<script src="admin_member_core_v1514.js?v=20261121-badge-convert-all" fetchpriority="high" integrity="sha384-I6/lTifAezZSbd0ssmdEdnJzA9bWnc5mSf9jrzbLfIlIgtoyaz/b51sB/QRvNVlk" crossorigin="anonymous" onerror="AdminMemberAssets.showBootFailure()"></script>
+<script src="admin_member_core_v1515.js?v=20261121-badge-suggestion" fetchpriority="high" integrity="sha384-mGxB7NwFAkatWE2ncbhZS3X5qq6YT5YQS0gvB//dNnGpvon3EivmGNfTYQjXIk98" crossorigin="anonymous" onerror="AdminMemberAssets.showBootFailure()"></script>
 <script src="dividend_workflow.js?v=20261120-calculated-archive-1" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-VQ42+wl8r7M7QCcYb8NBZE9mP9vLHsPHr1vF9pK4s85Ye2/3eNRpk45JjkSdp130" crossorigin="anonymous"></script>
 <script src="dividend_legacy_safety.js?v=1.0.2" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-Cc6gGADTKCTHS/hgV1vc7BaFptSY9wlIzlJHP4Lueym2Xd6Knye8o6QTH9LiXaH9" crossorigin="anonymous"></script>
 <script src="dividend_policy.js?v=1.0.0" onerror="AdminMemberAssets.showBootFailure()" integrity="sha384-5IWika7+CSj08VLzNWnCBnva1BFcnkKLVPpGoEbZij3dMuYg19Jc7na6bNrdzZ4t" crossorigin="anonymous"></script>
