@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.213
-Change: 2026-11-22 - 첫 진입 권한 확인 재사용과 등록 직인 미리보기 분리.
+Version: v1.0.214
+Change: 2026-11-22 - 직원 명단과 조합 기본정보 우선 표시, 급여·인쇄 지연 로드.
 -->
 <html>
 <head>
@@ -15,7 +15,7 @@ Change: 2026-11-22 - 첫 진입 권한 확인 재사용과 등록 직인 미리�
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.213 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.214 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
   <meta charset="UTF-8">
@@ -55,12 +55,6 @@ Change: 2026-11-22 - 첫 진입 권한 확인 재사용과 등록 직인 미리�
   <script src="erp_runtime_guard.js?v=20261122-hr-entry-1"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
   <script src="workflow_assets.js?v=20261119-postcode-1"></script>
-  <script src="print_service.js?v=20261119-certificate-seal-1"></script>
-  <script src="employee_certificate_print.js?v=20261119-1"></script>
-  <script src="expo_employee_certificate.js?v=20261022-1"></script>
-  <script src="payroll_tax_table.js?v=20260508-1"></script>
-  <script src="payroll_durunuri_module.js?v=20260901-1"></script>
-  <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261012-2"></script>
   <script src="leave_ledger.js?v=20261122-leave-detail-8"></script>
   <script src="sun_village_total_manager_admin.js?v=1.0.6" defer></script>
@@ -68,8 +62,6 @@ Change: 2026-11-22 - 첫 진입 권한 확인 재사용과 등록 직인 미리�
 
 <link rel="stylesheet" href="annual_settings.css?v=1.3.0">
 <script src="annual_settings.js?v=1.3.1"></script>
-<script src="contract_payroll.js?v=1.0.0"></script>
-<script src="payroll_import_guard.js?v=1.0.0"></script>
 <script src="coop_settings_view.js?v=1.0.4"></script>
 <script src="coop_settings_groups.js?v=1.0.0"></script>
 <script src="initial_setup_access.js?v=1.1.8"></script>
@@ -102,6 +94,9 @@ Change: 2026-11-22 - 첫 진입 권한 확인 재사용과 등록 직인 미리�
     #settingsModal { word-break: keep-all; overflow-wrap: break-word; color-scheme: light; }
     .erp-coop-settings .coop-settings-content { width: 100%; min-width: 0; }
     .erp-coop-settings #settingTab { position: sticky; top: 0; z-index: 2; background: #fff; margin-top: 0; padding-top: 8px; }
+    #settingsModal[data-basic-first] #setCompany > .row > :not([data-first-profile]),
+    #settingsModal[data-basic-first] #coopSettingCategories [data-category="business"],
+    #settingsModal[data-basic-first] #companySettingsFooter { display: none !important; }
     #settingTab .nav-item { flex: 1 1 0; }
     #settingTab .nav-link { height: 100%; text-align: center; padding: 12px 8px; }
     #setCompany > .row, #coopBusinessSettingsFields { --bs-gutter-y: 20px; }
@@ -206,7 +201,7 @@ Change: 2026-11-22 - 첫 진입 권한 확인 재사용과 등록 직인 미리�
 <div id="hrLoadingScreen" class="hr-loading-shell">
   <div class="spinner-border text-primary mb-3" role="status"></div>
   <div class="fw-bold mb-1">직원관리 화면을 준비하고 있습니다</div>
-  <div class="small text-muted">권한과 설정 정보를 확인한 뒤 목록을 표시합니다.</div>
+  <div class="small text-muted">권한을 확인한 뒤 화면을 표시합니다.</div>
 </div>
 
 <div id="hrInitialSetupOnly" class="main-card hidden"><h1 class="h4 fw-bold">직원 관리 · 초기 설정 권한</h1><div id="hrInitialSetupOnlyAccess"></div></div>
@@ -222,6 +217,7 @@ Change: 2026-11-22 - 첫 진입 권한 확인 재사용과 등록 직인 미리�
     </div>
   </div>
   <div id="employeeInitialSetupAccess" hidden></div>
+  <div class="small mb-2" id="employeeCompanyEntryStatus" hidden><span role="status"></span> <button class="btn btn-link btn-sm" type="button" onclick="loadEmployeeCompanyEntry()" hidden>다시 확인</button></div>
   <section class="employee-roster-query" aria-label="직원 찾기">
     <div class="employee-roster-search">
       <label for="employeeRosterSearch" class="form-label">직원 검색</label>
@@ -3653,7 +3649,84 @@ function setHrBootStateReady() {
     if (shellEl && hrSettingsAuthorized && !coopProfileAuthInvalidated && !window.ERPEmployeeSettingsView.isPage) shellEl.classList.remove('hidden');
 }
 
-window.onload = async function() {
+// Load feature code, not user data; in-flight loads are shared and failures can be retried.
+const employeeFeatureAssets = (() => {
+    const modules = {
+        PrintService:'print_service.js?v=20261119-certificate-seal-1',
+        EmployeeCertificatePrint:'employee_certificate_print.js?v=20261119-1',
+        ExpoEmployeeCertificate:'expo_employee_certificate.js?v=20261022-1',
+        PayrollTaxTable:'payroll_tax_table.js?v=20260508-1',
+        PayrollDurunuriModule:'payroll_durunuri_module.js?v=20260901-1',
+        SalaryLedgerModule:'salary_ledger_module.js?v=1.0.12',
+        ContractPayroll:'contract_payroll.js?v=1.0.0',
+        PayrollImportGuard:'payroll_import_guard.js?v=1.0.0'
+    };
+    const pending = new Map();
+    const ready = name => name === 'PrintService' ? typeof PrintService === 'object' : !!window[name];
+    function load(name) {
+        if (ready(name)) return Promise.resolve();
+        if (pending.has(name)) return pending.get(name);
+        const task = new Promise((resolve,reject) => {
+            const script = document.createElement('script');
+            const finish = ok => {
+                clearTimeout(timer);
+                script.onload = script.onerror = null;
+                if (ok) resolve();
+                else { script.remove(); reject(new Error('HR_FEATURE_ASSET_UNAVAILABLE')); }
+            };
+            const timer = setTimeout(() => finish(false),15000);
+            script.onload = () => finish(ready(name));
+            script.onerror = () => finish(false);
+            script.src = new URL('/erp/' + modules[name],location.origin).href;
+            document.head.appendChild(script);
+        }).finally(() => pending.delete(name));
+        pending.set(name,task);
+        return task;
+    }
+    return (...names) => Promise.all(names.map(load));
+})();
+let employeeCompanyEntryReady = false, employeeCompanyEntryFlight = null;
+let employeeEntryTargetOpened = false;
+function openEmployeeEntryTarget() {
+    if (employeeEntryTargetOpened || !employeeCompanyEntryReady || !isHrSettingsContextCurrent(getHrSettingsOwner())) return;
+    const employee = new URLSearchParams(location.search).get('employee');
+    const target = employee && employeeCache.find(row => String(row.emp_id) === employee);
+    if (target && !document.querySelector('.modal.show, dialog[open]')) {
+        employeeEntryTargetOpened = true;
+        void openEmployeeContractTask(target);
+    }
+}
+function paintEmployeeCompanyEntry(ready, failed = false) {
+    const status = document.getElementById('employeeCompanyEntryStatus');
+    status.hidden = ready;
+    status.firstElementChild.textContent = failed ? '직원 관리 설정을 불러오지 못했습니다.' : '직원 관리 설정을 불러오는 중입니다.';
+    status.lastElementChild.hidden = !failed;
+    document.querySelectorAll('.hr-page-actions button:not([data-erp-home-link]), .employee-roster-tool-actions button, #empListBody .employee-roster-name').forEach(button => {
+        if (!ready && !button.disabled) {
+            button.dataset.hrEntryLocked = '';
+            button.disabled = true;
+        } else if (ready && button.hasAttribute('data-hr-entry-locked')) {
+            button.removeAttribute('data-hr-entry-locked');
+            button.disabled = false;
+        }
+    });
+}
+function loadEmployeeCompanyEntry() {
+    const owner = getHrSettingsOwner();
+    if (!owner || coopProfileAuthInvalidated || employeeCompanyEntryReady) return Promise.resolve();
+    if (employeeCompanyEntryFlight) return employeeCompanyEntryFlight;
+    paintEmployeeCompanyEntry(false);
+    employeeCompanyEntryFlight = loadCompanyInfo({throwOnError:true}).then(() => {
+        if (coopProfileAuthInvalidated || owner !== getHrSettingsOwner()) return;
+        employeeCompanyEntryReady = true;
+        paintEmployeeCompanyEntry(true);
+        openEmployeeEntryTarget();
+    }).catch(() => {
+        if (!coopProfileAuthInvalidated && owner === getHrSettingsOwner()) paintEmployeeCompanyEntry(false,true);
+    }).finally(() => { employeeCompanyEntryFlight = null; });
+    return employeeCompanyEntryFlight;
+}
+document.addEventListener('DOMContentLoaded', async function bootHrEmployee() {
     if (await window.ERPInitialSetupEmployee.boot(_supabase)) return;
     try {
     window.ERPEmployeeSettingsView.prepare();
@@ -3822,23 +3895,16 @@ window.onload = async function() {
             } finally { if (epoch === openEpoch) aiButton.removeAttribute('aria-busy'); }
         };
     }
-    if (!window.ERPEmployeeSettingsView.isPage) void window.ERPInitialSetupEmployee.attach(_supabase);
-    if (window.ERPEmployeeSettingsView.isPage) await loadCoopSettingsMainReads({ refreshUi: true });
-    else await Promise.all([loadList(), loadCompanyInfo({throwOnError:true})]);
+    if (window.ERPEmployeeSettingsView.isPage) await showCoopBasicFirst();
+    else {
+        void window.ERPInitialSetupEmployee.attach(_supabase);
+        const roster = loadList();
+        void loadEmployeeCompanyEntry();
+        setHrBootStateReady();
+        await roster.catch(() => {}); // The list has its own retry, independent of company settings.
+    }
     applyHrRuntimeProfileUi();
-    syncHrProfileCompanySettingsUi();
-    syncHrStructureSettingsUi();
     syncHrModalStack();
-    const contractTargetEmployee = new URLSearchParams(location.search).get('employee');
-    if (!window.ERPEmployeeSettingsView.isPage && contractTargetEmployee && isHrSettingsContextCurrent(getHrSettingsOwner())) {
-        const target = employeeCache.find(row => String(row.emp_id) === contractTargetEmployee);
-        if (target) void openEmployeeContractTask(target);
-    }
-    if (window.ERPEmployeeSettingsView.isPage) {
-        hrSettingsReadyOwner = getHrSettingsOwner();
-        showHrSettingsModal();
-        window.ERPEmployeeSettingsView.checkpoint();
-    }
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:refreshEmployeeSettingsWorkspace,
         authorize:async runtime => { if (!window.ERPEmployeeSettingsView.isPage) await window.ERPInitialSetupEmployee.refresh(_supabase,runtime); return true; },
         busy:() => window.ERPPermissionSettings?.busy() || document.getElementById('coopDepositSetup')?.certificateSetupController?.busy() || document.getElementById('coopDepositSetup')?.certificateSetupController?.dirty() || window.ERPInitialSetupEmployee.busy() || runInvite._inFlight || inviteDiscardPending || hasUnsavedEmployeeInvite()
@@ -3859,7 +3925,7 @@ window.onload = async function() {
     } finally {
         setHrBootStateReady();
     }
-};
+}, {once:true});
 
 function showAlert(msg) {
     if (window.ExpoRuntimeBridge) return window.CoopDialog.alert(msg || '');
@@ -3964,10 +4030,12 @@ async function loadDurunuriEligibilityProfile(empId, { preserveInput = false, re
     const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId)
         && (!readContext || readContext.isCurrent());
     if (!preserveInput) resetDurunuriEligibilityProfileUi();
-    const module = getDurunuriModuleAdmin();
     const helpEl = document.getElementById('durunuriEligibilityHelp');
-    if (!module || !empId) return false;
+    if (isHrWorkforceLiteProfile() || !empId) return false;
     try {
+        await employeeFeatureAssets('PayrollDurunuriModule');
+        if (!isCurrent()) return false;
+        const module = getDurunuriModuleAdmin();
         const state = await module.getEligibilityState(_supabase, empId, '');
         if (!isCurrent()) return false;
         currentDurunuriEligibility = state;
@@ -4695,11 +4763,36 @@ function resetPayrollImportState(options = {}) {
     resetPayrollImportValidationUi();
 } // End of resetPayrollImportState
 
+let employeeToolOpen = null;
+async function openEmployeeTool(key, modules, open) {
+    const owner = getHrSettingsOwner(), frame = window.frameElement;
+    if (!employeeCompanyEntryReady || !isHrSettingsContextCurrent(owner) || employeeToolOpen?.key === key) return;
+    const ticket = {key};
+    employeeToolOpen = ticket;
+    const cancel = () => { if (employeeToolOpen === ticket) employeeToolOpen = null; };
+    const observer = frame && new MutationObserver(cancel);
+    observer?.observe(frame,{attributes:true,attributeFilter:['hidden']});
+    window.addEventListener('pagehide',cancel,{once:true});
+    const current = () => employeeToolOpen === ticket && !coopProfileAuthInvalidated && isHrSettingsContextCurrent(owner)
+        && !document.querySelector('.modal.show, dialog[open]');
+    try {
+        await employeeFeatureAssets(...modules);
+        if (current()) open();
+    } catch (_) {
+        if (current()) showAlert('화면을 준비하지 못했습니다. 다시 열어 주세요.');
+    } finally {
+        observer?.disconnect();
+        window.removeEventListener('pagehide',cancel);
+        cancel();
+    }
+}
 function openPayrollImportModal() {
-    if (!payrollImportState?.rows?.length) resetPayrollImportState({ keepMonth: false });
-    const example = document.getElementById('expoPayrollExample');
-    if (example) example.hidden = !window.ExpoRuntimeBridge;
-    payrollImportModal?.show();
+    return openEmployeeTool('import',['PayrollImportGuard','ContractPayroll'],() => {
+        if (!payrollImportState?.rows?.length) resetPayrollImportState({ keepMonth:false });
+        const example = document.getElementById('expoPayrollExample');
+        if (example) example.hidden = !window.ExpoRuntimeBridge;
+        payrollImportModal?.show();
+    });
 } // End of openPayrollImportModal
 
 let payrollImportFileSequence = 0;
@@ -5367,13 +5460,15 @@ async function loadList() {
     tbody.appendChild(empty);
     tbody.setAttribute('data-roster-ready','');
     applyEmployeeRosterFilter();
+    if (!employeeCompanyEntryReady) paintEmployeeCompanyEntry(false, !employeeCompanyEntryFlight);
+    openEmployeeEntryTarget();
     if (expiredCount > 0 && !hasCheckedExpired) {
         showConfirm(`⚠️ 개인정보 파기 알림\n퇴사 후 3년 경과자 ${expiredCount}명 발견. 삭제하시겠습니까?`, () => showAlert("목록에서 붉은색 직원을 삭제하세요."));
         hasCheckedExpired = true;
     }
 }
 
-async function loadCompanyInfo({ throwOnError = false, refreshUi = true } = {}) {
+async function loadCompanyInfo({ throwOnError = false, refreshUi = true, keepBasic = false } = {}) {
     const coopId = String(myInfo?.coop_id || '').trim();
     const owner = getHrSettingsOwner();
     if (!coopId) {
@@ -5387,10 +5482,11 @@ async function loadCompanyInfo({ throwOnError = false, refreshUi = true } = {}) 
     }
 
     const { data, error } = await _supabase.from('ref_company_info').select('key,value').eq('coop_id', coopId);
-    if (owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+    if (coopProfileAuthInvalidated || owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     if (error) { if (throwOnError) throw error; return; }
     companyInfo = {};
     if (data) data.forEach((r) => { companyInfo[r.key] = r.value; });
+    if (keepBasic && companyProfileState?.owner === owner) Object.assign(companyInfo,companyProfileState.baseline);
     companyInfo.chairman_name = resolveAdminEmployeeChairmanName(companyInfo);
 
     if (companyInfo.logo_horizontal_url && !companyInfo.logo_horizontal_url.startsWith('http')) {
@@ -5896,7 +5992,9 @@ async function retryHrSettingsRead() {
             if (!isHrSettingsContextCurrent(owner)) return;
             hrSettingsReadyOwner = owner;
             hrSettingsReadRetryRequired = false;
-            if (heldProfile) view.checkpointSection('#coopBusinessSettingsFields,#setCalendar,#companyBrandingFields');
+            const first = document.getElementById('settingsModal').hasAttribute('data-basic-first');
+            document.getElementById('settingsModal').removeAttribute('data-basic-first');
+            if (first || heldProfile) view.checkpointSection('#coopBusinessSettingsFields,#setCalendar,#setCompany > .row > :not([data-first-profile])');
             else view.checkpoint();
             if (dirty) view.restore(draft);
             document.getElementById('hrSettingsReadRetry').hidden = true;
@@ -6068,6 +6166,40 @@ async function loadCoopSettingsMainReads({refreshUi = false, isCurrent = () => t
     if (!current()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     await loadSettings({throwOnError:true, loadAuxiliary:false, isCurrent:current, profileRead});
 }
+async function showCoopBasicFirst() {
+    const owner = getHrSettingsOwner(), view = window.ERPEmployeeSettingsView;
+    const current = () => !coopProfileAuthInvalidated && isHrSettingsContextCurrent(owner);
+    const sameOwner = () => !coopProfileAuthInvalidated && owner === getHrSettingsOwner();
+    const root = document.getElementById('settingsModal');
+    if (['capital','deposit','seal'].includes(new URLSearchParams(location.search).get('focus'))) {
+        await loadCoopSettingsMainReads({refreshUi:true,isCurrent:current});
+        if (!current()) return;
+        hrSettingsReadyOwner = owner;
+        view.checkpoint();
+        showHrSettingsModal();
+        return;
+    }
+    root.setAttribute('data-basic-first','');
+    ensureCoopProfileFields();
+    const profile = applyCoopSettingsProfileRead(beginCoopSettingsProfileRead(current));
+    const extras = Promise.all([loadCoopSettingsEmployees(),loadCompanyInfo({throwOnError:true,refreshUi:false,keepBasic:true})])
+        .then(() => true, () => false);
+    await profile;
+    if (!current()) return;
+    view.checkpoint();
+    showHrSettingsModal();
+    setHrBootStateReady();
+    if (!await extras) {
+        if (sameOwner()) showHrSettingsReadRetry('나머지 설정을 불러오지 못했습니다. 기본정보는 계속 이용할 수 있습니다.');
+        return;
+    }
+    if (!sameOwner()) return;
+    await loadSettings({throwOnError:true,isCurrent:sameOwner,preserveProfile:true});
+    if (!sameOwner()) return;
+    hrSettingsReadyOwner = owner;
+    view.checkpointSection('#setCompany > .row > :not([data-first-profile]), #coopBusinessSettingsFields, #setCalendar');
+    root.removeAttribute('data-basic-first');
+}
 function beginCoopSettingsProfileRead(isCurrent) {
     const owner = getHrSettingsOwner();
     const state = companyProfileState;
@@ -6079,6 +6211,21 @@ function beginCoopSettingsProfileRead(isCurrent) {
         ? window.ERPInitialSetupAccess.read(_supabase,'erp_coop_profile',{p_action:'get'}) : null)
         .then(data => ({data}), () => ({failed:true}));
     return { owner, state, current, result };
+}
+async function applyCoopSettingsProfileRead(pendingProfile) {
+    if (!pendingProfile) return;
+    const {owner:profileOwner,state,current} = pendingProfile;
+    try {
+        const {data:result,failed} = await pendingProfile.result;
+        if (failed) throw new Error('COOP_PROFILE_READ_FAILED');
+        if (current() && result && (state?.owner!==profileOwner||!coopProfileDraftDirty())) {
+            const values=mergeCoopProfileBeforeBaseline(profileOwner,state,result.data);
+            commitCoopProfileRead(profileOwner,result,values,{checkpoint:true});
+            coopProfileNotice(coopProfileDraftDirty()?'기본정보를 확인했습니다. 작성 중인 내용은 미저장 상태로 남아 있습니다.':'');
+        }
+    } catch (_) {
+        if (current()) coopProfileNotice('기본정보를 불러오지 못했습니다. 입력은 유지됩니다. 다시 확인해 주세요.',true);
+    }
 }
 async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null, preserveProfile = false, profileRead } = {}) {
     ensureCoopProfileFields();
@@ -6093,20 +6240,7 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCur
     }
     if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     const pendingProfile = !preserveProfile && (profileRead === undefined ? beginCoopSettingsProfileRead(isCurrent) : profileRead);
-    if (pendingProfile) {
-        const {owner:profileOwner, state, current} = pendingProfile;
-        try {
-            const {data:result, failed} = await pendingProfile.result;
-            if (failed) throw new Error('COOP_PROFILE_READ_FAILED');
-            if (current() && result && (state?.owner!==profileOwner||!coopProfileDraftDirty())) {
-                const values=mergeCoopProfileBeforeBaseline(profileOwner,state,result.data);
-                commitCoopProfileRead(profileOwner,result,values,{checkpoint:true});
-                coopProfileNotice(coopProfileDraftDirty()?'기본정보를 확인했습니다. 작성 중인 내용은 미저장 상태로 남아 있습니다.':'');
-            }
-        } catch (_) {
-            if (current()) coopProfileNotice('기본정보를 불러오지 못했습니다. 입력은 유지됩니다. 다시 확인해 주세요.',true);
-        }
-    }
+    await applyCoopSettingsProfileRead(pendingProfile);
     if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     document.getElementById("set_workLunchStartTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_START_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.start);
     document.getElementById("set_workLunchEndTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_END_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.end);
@@ -6287,6 +6421,7 @@ function ensureCoopProfileFields() {
     const identity = document.getElementById('companyIdentityHeading')?.closest('section');
     if (!identity) return;
     identity.id = 'companyIdentityPanel';
+    identity.parentElement.setAttribute('data-first-profile','');
     const panel = document.createElement('section'); panel.id = 'companyProfileDetails'; panel.className = 'coop-setting-panel';
     panel.innerHTML = '<h3 class="coop-setting-heading" id="companyProfileDetailsHeading">📅 설립일 · 공식 연락처</h3><div class="coop-setting-body"><div class="row g-3"><div class="col-md-6"><label for="set_estDate" class="form-label">설립일</label><input id="set_estDate" type="date" class="form-control"></div><div class="col-md-6"><label for="set_contactName" class="form-label">공식 담당자</label><input id="set_contactName" class="form-control" maxlength="100"></div><div class="col-md-6"><label for="set_contactPhone" class="form-label">공식 전화번호</label><input id="set_contactPhone" type="tel" class="form-control" maxlength="40"></div><div class="col-md-6"><label for="set_contactEmail" class="form-label">공식 이메일</label><input id="set_contactEmail" type="email" class="form-control" maxlength="254"></div></div></div>';
     panel.setAttribute('aria-labelledby','companyProfileDetailsHeading'); identity.after(panel);
@@ -7428,6 +7563,7 @@ async function openEmployeeContractTask(employee){
     if(revision!==employeeDetailRevision||String(currentEmpId)!==String(employee.emp_id))modal.removeEventListener('shown.bs.modal',reveal);
 }
 async function openDetail(u, rosterOpener = null) {
+    if (!employeeCompanyEntryReady || !isHrSettingsContextCurrent(getHrSettingsOwner())) return;
     if (isEmployeeDetailSaving()) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
     if (window.EmployeeDetailPreparation?.pendingFor(u.emp_id)) return;
     if (hasUnsavedEmployeeDetail()) {
@@ -8293,6 +8429,15 @@ async function loadSalaryData({readContext} = {}) {
         return;
     }
 
+    try {
+        await employeeFeatureAssets('ContractPayroll','PayrollTaxTable',...(!isHrWorkforceLiteProfile() ? ['PayrollDurunuriModule'] : []));
+    } catch (error) {
+        if (!isCurrent()) return false;
+        if (readContext) throw error;
+        setEmployeeDetailTabState('tabSalary','error');
+        return false;
+    }
+    if (!isCurrent() || !draftUntouched()) return false;
     let saved = null, salaryError = null;
     try { saved = (await getAdminEmployeePayrollRows(empId, month, month, readContext))[0] || null; }
     catch (error) { salaryError = error; }
@@ -9666,9 +9811,24 @@ function bindEmployeeCertificateKeyboard(context) {
     modal.addEventListener('hidden.bs.modal',dispose);
     window.addEventListener('pagehide',dispose);
 }
-function openAdminCertModal() {
+async function openAdminCertModal() {
+    if (openAdminCertModal.loading) return;
+    const context = captureEmployeeDocumentContext({track:true});
+    try {
+        if (!context.isCurrent() || isEmployeeDetailSaving()) return;
+        openAdminCertModal.loading = true;
+        await employeeFeatureAssets('PrintService',window.ExpoRuntimeBridge ? 'ExpoEmployeeCertificate' : 'EmployeeCertificatePrint');
+        if (!context.isCurrent() || isEmployeeDetailSaving()) return;
+        showAdminCertReady(context);
+    } catch (_) {
+        if (context.isCurrent()) showAlert('증명서 창을 준비하지 못했습니다. 다시 열어 주세요.');
+    } finally {
+        context.release();
+        openAdminCertModal.loading = false;
+    }
+}
+function showAdminCertReady(context) {
     if (!window.ExpoRuntimeBridge) {
-        const context = captureEmployeeDocumentContext();
         if (!context.isCurrent() || isEmployeeDetailSaving()) return;
         const key = context.owner + '|' + context.empId, previous = reqIssueCert.operations?.get(key);
         if (previous && !['done','rejected'].includes(previous.state)) return showAlert(employeeDocumentOperationMessage(previous));
@@ -9776,9 +9936,16 @@ async function reqIssueCert() {
 async function printSalaryAdmin() {
     if(!currentSalaryDataForPrint) return showAlert("저장된 급여 내역이 없습니다.");
     const d = currentSalaryDataForPrint;
-    const printContext = captureEmployeeDocumentContext();
+    const printContext = captureEmployeeDocumentContext({track:true});
     const stillCurrent = () => printContext.isCurrent() && currentSalaryDataForPrint === d;
-    if (!stillCurrent()) return;
+    try {
+        if (!stillCurrent() || printSalaryAdmin.loading) return;
+        printSalaryAdmin.loading = true;
+        try { await employeeFeatureAssets('PrintService'); }
+        catch (_) { if (stillCurrent()) showAlert('인쇄 기능을 준비하지 못했습니다. 다시 눌러 주세요.'); return; }
+        finally { printSalaryAdmin.loading = false; }
+        if (!stillCurrent()) return;
+    } finally { printContext.release(); }
     const dedAdvanceLabel = getSalaryDedAdvanceLabelForAdmin(d);
     const payrollTaxAdjustmentTotal = getPayrollTaxAdjustmentTotalForAdmin(d);
     const [y, m] = d.year_month.split('-');
@@ -9921,7 +10088,9 @@ async function fetchCompletedSalaryApprovalForMonth(ym) {
     return Array.isArray(data) && data.length > 0 ? data[0] : null;
 } // End of fetchCompletedSalaryApprovalForMonth
 
-function openLedgerModal() { ledgerModal.show(); }
+function openLedgerModal() {
+    return openEmployeeTool('ledger',['SalaryLedgerModule',...(!isHrWorkforceLiteProfile() ? ['PayrollDurunuriModule'] : [])],() => ledgerModal.show());
+}
 async function printLedger() {
     const ym = document.getElementById("ledgerMonth").value;
     if(!ym) return showAlert("연월을 선택하세요.");

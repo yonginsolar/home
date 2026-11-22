@@ -54,16 +54,48 @@ async function signupReferralSearch(request,env,url,hostname){
  }catch(_){return referralReply(503,{status:'unavailable'});}
 }
 function brandAsset(value){try{const u=new URL(value);return u.href.startsWith(BRAND_PREFIX)&&!u.search&&!u.hash&&!u.username&&!u.password&&/\.(png|jpg|webp)$/.test(u.pathname)?u.href:'';}catch(_){return '';}}
+const brandRefreshAfter=new Map();
+const brandKey=u=>new Request(u.origin+'/__public_branding_cache_v2');
+async function readBrandCache(u){
+  try{
+    const r=await caches.default.match(brandKey(u));
+    return r?{value:await r.json(),fresh:Number(r.headers.get('x-coop-brand-fresh-until'))>Date.now()}:null;
+  }catch(_){return null;}
+}
+async function refreshPublicBrand(u,env){
+  try{
+    const req=new Request(BRAND_API,{method:'POST',headers:{apikey:BRAND_KEY,'Content-Type':'application/json','x-public-host':u.hostname},body:'{}',signal:AbortSignal.timeout(4000)});
+    const r=await (env.BRANDING?env.BRANDING.fetch(req):fetch(req));if(!r.ok)return null;
+    const j=await r.json(),value={coop_name:String(j.coop_name||''),display_url:brandAsset(j.display_url),icon_url:brandAsset(j.icon_url)};
+    try{await caches.default.put(brandKey(u),new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json','Cache-Control':'public,max-age=86400','x-coop-brand-fresh-until':String(Date.now()+300000)}}));}catch(_){}
+    return value;
+  }catch(_){return null;}
+}
 async function publicBrand(request,env){
  const u=new URL(request.url),p=getProfile(u.hostname);
  if(p.id==='unregistered'||p.id==='auth')return {};
- const key=new Request(u.origin+'/__public_branding_cache_v1');
- const cached=await caches.default.match(key);if(cached)return cached.json();
- try{const req=new Request(BRAND_API,{method:'POST',headers:{apikey:BRAND_KEY,'Content-Type':'application/json','x-public-host':u.hostname},body:'{}',signal:AbortSignal.timeout(4000)});
-  const r=await (env.BRANDING?env.BRANDING.fetch(req):fetch(req));if(!r.ok)return {};
-  const j=await r.json(),value={coop_name:String(j.coop_name||''),display_url:brandAsset(j.display_url),icon_url:brandAsset(j.icon_url)};
-  await caches.default.put(key,new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json','Cache-Control':'public,max-age=300'}}));return value;
- }catch(_){return {};}
+ const cached=await readBrandCache(u);if(cached?.fresh)return cached.value;
+ return await refreshPublicBrand(u,env)||cached?.value||{};
+}
+async function brandForHtml(request,env,ctx){
+  const u=new URL(request.url),p=getProfile(u.hostname);
+  if(p.id==='unregistered'||p.id==='auth')return {value:{},mode:'default'};
+  const cached=await readBrandCache(u);
+  if(!cached?.fresh&&ctx?.waitUntil&&Date.now()>=(brandRefreshAfter.get(u.origin)||0)){
+    brandRefreshAfter.set(u.origin,Date.now()+30000);
+    ctx.waitUntil(refreshPublicBrand(u,env));
+  }
+  return {value:cached?.value||{},mode:cached?(cached.fresh?'cached':'stale'):'default'};
+}
+function brandIconVersion(url){
+  let hash=2166136261;
+  for(let i=0;i<url.length;i++)hash=Math.imul(hash^url.charCodeAt(i),16777619);
+  return (hash>>>0).toString(36);
+}
+const brandIcon=(path,url)=>path+'?v='+brandIconVersion(url);
+function markHtmlBrand(response,mode){
+  const headers=new Headers(response.headers);headers.set('X-Coop-Brand-Mode',mode);
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 }
 
 const profile=(id,name,appName,description,origin,publicHosts=[],extra={})=>Object.freeze({
@@ -209,8 +241,8 @@ function headMetadata(p,url,branding={}){
   const description=label?`${p.name} ${label} 페이지입니다.`:p.description;
   const origin=p.origin||`${url.protocol}//${url.host}`;
   const canonical=origin+pathname;
-  const image=branding.icon_url?origin+'/coop-logo-icon.png':(p.imageOrigin||origin)+SUN_IMAGE+'?v='+VERSION;
-  const icon=branding.icon_url?'<link rel="icon" type="image/png" sizes="512x512" href="/coop-favicon.png">':'<link rel="icon" type="image/svg+xml" href="'+SUN_ICON+'">';
+  const image=branding.icon_url?origin+brandIcon('/coop-logo-icon.png',branding.icon_url):(p.imageOrigin||origin)+SUN_IMAGE+'?v='+VERSION;
+  const icon=branding.icon_url?'<link rel="icon" type="image/png" sizes="512x512" href="'+brandIcon('/coop-favicon.png',branding.icon_url)+'">':'<link rel="icon" type="image/svg+xml" href="'+SUN_ICON+'">';
   const meta=(kind,name,value)=>`<meta ${kind}="${name}" content="${esc(value)}">`;
   let result='<meta charset="utf-8"><title>'+esc(title)+'</title>'
     +'<link rel="canonical" href="'+esc(canonical)+'">'
@@ -281,7 +313,7 @@ function secureResponse(request,response){
   return new Response(request.method==='HEAD'?null:response.body,{status:response.status,statusText:response.statusText,headers});
 }
 
-async function routeRequest(request,env){
+async function routeRequest(request,env,ctx){
   const url=new URL(request.url),hostname=host(url.hostname),p=getProfile(hostname);
   if(hostname==='www.hcrec.kr'){
     const target=new URL(request.url);target.hostname='hcrec.kr';target.protocol='https:';
@@ -315,9 +347,16 @@ async function routeRequest(request,env){
     return textResponse(request,JSON.stringify(value),'application/json; charset=utf-8',p.id==='unregistered'||p.id==='auth'?404:200);
   }
   if(['/coop-favicon.png','/coop-logo-icon.png','/favicon.ico','/apple-touch-icon.png'].includes(url.pathname)){
-    const branding=await publicBrand(request,env);
-    if(branding.icon_url){try{const r=await fetch(branding.icon_url,{redirect:'manual',signal:AbortSignal.timeout(4000)});if(r.ok&&(r.headers.get('content-type')||'').startsWith('image/png'))return withProfileHeaders(r,p,false,request.method==='HEAD');}catch(_){/* Keep the local fallback usable without following a redirect. */}}
-    const iconUrl=new URL(request.url);iconUrl.pathname=SUN_IMAGE;return env.ASSETS.fetch(new Request(iconUrl,request));
+    const {value:branding}=await brandForHtml(request,env,ctx);
+    if(branding.icon_url){try{const r=await fetch(branding.icon_url,{redirect:'manual',signal:AbortSignal.timeout(4000)});if(r.ok&&(r.headers.get('content-type')||'').startsWith('image/png')){
+      const branded=withProfileHeaders(r,p,false,request.method==='HEAD');
+      branded.headers.set('Cache-Control',url.searchParams.get('v')===brandIconVersion(branding.icon_url)?'public, max-age=86400, immutable':'public, max-age=60');
+      return branded;
+    }}catch(_){/* Keep the local fallback usable without following a redirect. */}}
+    const iconUrl=new URL(request.url);iconUrl.pathname=SUN_IMAGE;iconUrl.search='';
+    const fallback=await env.ASSETS.fetch(new Request(iconUrl,request));
+    const headers=new Headers(fallback.headers);headers.set('Cache-Control','public, max-age=60');
+    return new Response(fallback.body,{status:fallback.status,statusText:fallback.statusText,headers});
   }
   if(cleanPath(url.pathname)==='/erp/federation'&&['GET','HEAD'].includes(request.method)){
     const response=await env.ASSETS.fetch(request);
@@ -391,10 +430,11 @@ async function routeRequest(request,env){
   if(p.passThrough){
     const response=await env.ASSETS.fetch(request);
     if(request.method!=='GET'||!(response.headers.get('content-type')||'').includes('text/html'))return response;
-    const branding=await publicBrand(request,env);
-    if(!branding.icon_url)return response;
-    const rewritten=new HTMLRewriter().on('head',{element(e){e.prepend('<link rel="icon" type="image/png" sizes="512x512" href="/coop-favicon.png"><link rel="apple-touch-icon" href="/coop-logo-icon.png">',{html:true});}}).on('head link[rel*="icon"]',new RemoveElement()).transform(response);
-    rewritten.headers.delete('etag');rewritten.headers.delete('content-length');return rewritten;
+    const {value:branding,mode}=await brandForHtml(request,env,ctx);
+    if(!branding.icon_url)return markHtmlBrand(response,mode);
+    const icon=brandIcon('/coop-favicon.png',branding.icon_url),touch=brandIcon('/coop-logo-icon.png',branding.icon_url);
+    const rewritten=new HTMLRewriter().on('head',{element(e){e.prepend('<link rel="icon" type="image/png" sizes="512x512" href="'+icon+'"><link rel="apple-touch-icon" href="'+touch+'">',{html:true});}}).on('head link[rel*="icon"]',new RemoveElement()).transform(response);
+    rewritten.headers.delete('etag');rewritten.headers.delete('content-length');return markHtmlBrand(rewritten,mode);
   }
 
   if(p.id==='hwaseong'&&isPublic(p,hostname)){
@@ -421,7 +461,7 @@ async function routeRequest(request,env){
   if(!(response.headers.get('content-type')||'').toLowerCase().includes('text/html'))return withProfileHeaders(response,p,blocked,headRequest);
   if(headRequest)return withProfileHeaders(response,p,blocked,true,true);
 
-  const branding=await publicBrand(request,env);
+  const {value:branding,mode}=await brandForHtml(request,env,ctx);
   const rewritten=new HTMLRewriter()
     .on('head',{element(element){element.prepend(headMetadata(p,url,branding),{html:true});}})
     .on('head title, head link[rel="canonical"], head link[rel*="icon"], head link[rel="alternate"][type="application/rss+xml"], head script[type="application/ld+json"]',new RemoveElement())
@@ -454,9 +494,9 @@ async function routeRequest(request,env){
       if(p.id==='hwaseong')element.removeAttribute('src');
     }}).transform(response);
   rewritten.headers.delete('etag');rewritten.headers.delete('content-length');addProfileHeaders(rewritten.headers,p,blocked);
-  return rewritten;
+  return markHtmlBrand(rewritten,mode);
 }
 
-export default{async fetch(request,env){
-  return secureResponse(request,await routeRequest(request,env));
+export default{async fetch(request,env,ctx){
+  return secureResponse(request,await routeRequest(request,env,ctx));
 }};
