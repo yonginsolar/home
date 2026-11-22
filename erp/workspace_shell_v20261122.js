@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.16 */
+/* Persistent ERP workspace v1.2.17 */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -43,6 +43,8 @@
   };
   function changed(entry = activeEntry) {
     if (!entry?.frame.contentWindow || !entry.route) return false;
+    // A later error document cannot say whether its previous editor was dirty.
+    if (entry.errorDocument) return !entry.initialFrameFailed || entry.openedDocument || !entry.frame.inert || entry.fields.size !== 0;
     try {
       const child = entry.frame.contentWindow;
       const event = new child.Event('beforeunload', {cancelable:true});
@@ -205,7 +207,7 @@
       if (identity.error || access.error) throw new Error('ERP_ACCESS_UNAVAILABLE');
       const id = identity.data?.user?.id, runtime = access.data;
       if (!id || !runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return null;
-      return {id,runtime,key:runtimeKey(runtime)};
+      return {id,runtime,key:runtimeKey(runtime),checkedAt:Date.now()};
     });
     const job = {client:source, promise:null};
     job.promise = Promise.race([work, new Promise((_, reject) => {
@@ -236,7 +238,7 @@
     clearTimeout(probeTimer);
     const inspect = () => {
       if (ticket !== transition || entry !== activeEntry || !requested || !ready || leaving) return;
-      if (!preparedFrame(entry, ticket)) probeTimer = setTimeout(inspect, 250);
+      if (!preparedFrame(entry, ticket) && error.hidden) probeTimer = setTimeout(inspect, 250);
     };
     probeTimer = setTimeout(inspect, 250);
   }
@@ -276,7 +278,7 @@
       status.hidden = true; error.hidden = false;
     }, 25000);
   }
-  function load(target, force = false, feature = '') {
+  function load(target, force = false, feature = '', firstAccess = null) {
     const previous = activeEntry;
     // A retry of the visible prepared task must not manufacture a second context.
     const cached = force ? null : target === activeEntry.route && canRetain(activeEntry)
@@ -336,7 +338,9 @@
             cancelLoading();status.textContent='작성 중인 화면을 보존했습니다. 창을 닫은 뒤 메뉴를 다시 선택해 주세요.';
             status.hidden=false;error.hidden=false;return;
           }
-          frame.hidden=false; syncFrame(); attachDocument(frame.contentDocument,cached);
+          frame.hidden=false;
+          if (!syncFrame()) return;
+          attachDocument(frame.contentDocument,cached);
           if (canRevealBeforeRead) void Promise.resolve().then(()=>{
             if(ticket===transition && activeEntry===cached && !cached.frame.hidden) return adapter.refresh(context);
           }).catch(()=>{}); // The visible task owns its scoped read error/retry controls.
@@ -367,6 +371,7 @@
     activeEntry={frame:nextFrame,route:target,fields:new Map()};
     setFeature(activeEntry,feature);
     const entry=activeEntry;
+    if (firstAccess && reusableHrRoute(target)) entry.firstHrAccess={access:firstAccess,ticket};
     nextFrame.addEventListener('load',()=>frameLoaded(entry));
     // Mount with the allowed destination already set, without an intermediate
     // about:blank load event. Register the listener before the context is mounted.
@@ -466,6 +471,18 @@
     try { void entry.frame.contentWindow.location.href; }
     catch (_) { entry.initialFrameFailed = true; }
   }
+  function taskDocumentFailed(child, doc) {
+    try {
+      const code = child.performance?.getEntriesByType('navigation')?.[0]?.responseStatus;
+      if (code === 503) return true;
+    } catch (_) {}
+    // Safari and other clients may not expose the status. Every allowed task has
+    // the workspace boot script or revision marker (including the async document box).
+    if (doc.readyState !== 'complete') return false;
+    return !doc.querySelector('meta[name="erp-workspace-revision"]')
+      && !Array.from(doc.scripts).some(script => script.getAttribute('src')?.includes('/erp/workspace_boot.js')
+        || (!script.src && script.textContent.includes('/erp/workspace_boot.js')));
+  }
   function syncFrame() {
     try {
       const child = frame.contentWindow, href = child.location.href;
@@ -478,19 +495,30 @@
         else { lockPrint(); status.hidden = true; error.hidden = false; }
         return;
       }
+      const doc = child.document;
+      if (taskDocumentFailed(child,doc)) {
+        activeEntry.errorDocument = doc;
+        activeEntry.initialFrameFailed = !activeEntry.openedDocument && frame.inert && requested === activeEntry.route;
+        const hint=error.querySelector('p');
+        if (hint) hint.textContent='업무 화면을 불러오지 못했습니다. 다시 시도해 주세요.';
+        cancelLoading(); lockPrint(); status.hidden=true; error.hidden=false;
+        return false;
+      }
       activeEntry.openedDocument = true;
       activeEntry.initialFrameFailed = false;
+      activeEntry.errorDocument = null;
       if (retained.get(activeEntry.route)===activeEntry && activeEntry.route!==next) retained.delete(activeEntry.route);
       activeEntry.route = next; current = next; requested = '';
       printableEntry = activeEntry;
       document.documentElement.removeAttribute('data-erp-print-locked');
       setPrintLock(activeEntry,false);
       history.replaceState({erpWorkspace:true}, '', routes.address(featureAddress(next,activeEntry.addressFeature)));
-      document.title = child.document.title;
-      frame.title = child.document.title || 'ERP 업무 화면';
-      window.ErpWorkspace.setDocument(child.document, href);
+      document.title = doc.title;
+      frame.title = doc.title || 'ERP 업무 화면';
+      window.ErpWorkspace.setDocument(doc, href);
       deliverFeature(activeEntry);
       status.hidden = true; error.hidden = true; cancelLoading();
+      return true;
     } catch (_) {
       noteInitialFrameFailure(activeEntry);
       cancelLoading(); lockPrint(); status.hidden = true; error.hidden = false;
@@ -557,12 +585,30 @@
       if (entry.frame.contentWindow.location.href === 'about:blank') return;
       if (!requested && current === entry.route && attached.has(entry.frame.contentDocument)) return;
     } catch (_) {}
-    syncFrame();
-    if (entry.openedDocument) {
+    if (syncFrame()) {
       try { attachDocument(frame.contentDocument, entry); }
       catch (_) {}
       finally { entry.frame.inert = false; }
     }
+  }
+  function reusableHrRoute(value) {
+    const url=new URL(value,location.origin), params=url.searchParams;
+    return url.pathname==='/erp/admin_employee.html' && !url.hash
+      && (!url.search || ([...params].length===1 && params.get('section')==='settings'));
+  }
+  function takeInitialHrAccess(child, doc, actorId, coopId) {
+    const entry=activeEntry, grant=entry.firstHrAccess;
+    if (!grant) return null;
+    try {
+      const {access,ticket}=grant, age=Date.now()-access.checkedAt;
+      if (!ready || leaving || ticket!==transition || !entry.frame.isConnected || entry.frame.hidden
+          || child!==entry.frame.contentWindow || doc!==entry.frame.contentDocument || entry.errorDocument
+          || routes.route(child.location.href)!==entry.route || !reusableHrRoute(entry.route)
+          || actorId!==userId || actorId!==access.id || coopId!==accessCoop || coopId!==access.runtime.coop_id
+          || !Number.isFinite(age) || age<0 || age>8000) return null;
+      entry.firstHrAccess=null; // One child boot only; retries and menu returns recheck as before.
+      return structuredClone(access.runtime);
+    } catch (_) { return null; }
   }
   async function authorizeDocumentBox(child, doc) {
     const entry = activeEntry, ticket = transition;
@@ -711,7 +757,7 @@
           ready=false; leaving=true; purge(); home(target);
         }
       });
-      load(target,false,feature);
+      load(target,false,feature,access);
     } catch (cause) {
       const text = error.querySelector('p');
       const legal=legalSetupLink(target),needsLogin=cause?.message==='ERP_LOGIN_REQUIRED';
@@ -726,5 +772,5 @@
     try { await pending; }
     finally { if (startupPending === pending) { startupPending = null; retry.disabled = false; } }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, authorizeDocumentBox, version:'20261119.1'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, bindContractEmployee, notifyTaskReady, authorizeDocumentBox, takeInitialHrAccess, version:'20261122.2'};
 })();

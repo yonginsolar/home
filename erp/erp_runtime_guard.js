@@ -38,7 +38,9 @@ window.ErpRuntimeGuard = {
   getRuntime: async function(_supabase) {
     const { data, error } = await _supabase.rpc('get_my_erp_runtime');
     if (error) throw error;
-    const runtime = data || null;
+    return window.ErpRuntimeGuard.applyRuntime(_supabase, data || null);
+  },
+  applyRuntime: function(_supabase, runtime) {
     // The layout reuses this server-owned answer; business/auth checks below are unchanged.
     if (window.ErpWorkspace) void window.ErpWorkspace.connect(_supabase, runtime);
     if (runtime && Array.isArray(runtime.effective_permissions)) {
@@ -285,7 +287,16 @@ window.ErpRuntimeGuard = {
 
     let runtime = null;
     try {
-      runtime = await window.ErpRuntimeGuard.requestWithRetry(function() {
+      const startup = moduleKey === 'hr' ? opts.employeeStartup : null;
+      if (startup?.actorId && startup?.coopId && window.parent !== window) {
+        try {
+          const sameOpen = window.parent.ErpWorkspaceShell?.takeInitialHrAccess?.(window,document,startup.actorId,startup.coopId);
+          if (sameOpen?.coop_id === startup.coopId && Array.isArray(sameOpen.effective_permissions)) {
+            runtime = window.ErpRuntimeGuard.applyRuntime(_supabase,sameOpen);
+          }
+        } catch (_) {} // Standalone, mixed-version and unverifiable opens use the existing server check.
+      }
+      if (!runtime) runtime = await window.ErpRuntimeGuard.requestWithRetry(function() {
         return window.ErpRuntimeGuard.getRuntime(_supabase);
       }, { attempts: 2, delayMs: 180 });
     } catch (error) {
