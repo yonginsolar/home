@@ -448,6 +448,71 @@
     return result.data || [];
   }
 
+  function requireAccrualReport(report) {
+    var iso=value=>typeof value==='string' && value!=='' && value===normalizeIsoDate(value);
+    var integer=(value,min=0)=>Number.isSafeInteger(value)&&value>=min;
+    var fail=()=>{throw new Error('LEAVE_ACCRUAL_REPORT_UNAVAILABLE');};
+    if(report?.version!==1||!iso(report.as_of))return fail();
+    if(report.state==='no_hire'||report.state==='not_applicable')return report;
+    if(report.state!=='ready'||!iso(report.hire_date)||!iso(report.first_year_expires_on)
+      ||!integer(report.available_minutes)||!integer(report.day_minutes,1)||!Array.isArray(report.years)
+      ||!Array.isArray(report.automatic_adjustments))return fail();
+    var currentYear=Number(report.as_of.slice(0,4)),seen=new Set(),available=0,expired=0;
+    for(var entry of report.years){
+      if(!integer(entry?.year,1)||entry.year>currentYear||seen.has(entry.year)||!integer(entry.day_minutes,1)
+        ||!Array.isArray(entry.first_year))return fail();
+      seen.add(entry.year);
+      var f=entry.fiscal;
+      if(!integer(f?.granted_minutes)||!integer(f.used_minutes)||!Number.isSafeInteger(f.adjustment_minutes)
+        ||(f.granted_minutes>0)!==(f.issued_on!==null)
+        ||(f.issued_on!==null&&(!iso(f.issued_on)||f.issued_on!==String(entry.year)+'-01-01'))
+        ||(entry.year===currentYear?!integer(f.available_minutes):f.available_minutes!==null))return fail();
+      available+=f.available_minutes??0;
+      var previous='';
+      for(var row of entry.first_year){
+        if(!iso(row?.issued_on)||row.issued_on<=previous||Number(row.issued_on.slice(0,4))!==entry.year
+          ||row.issued_on>report.as_of||!integer(row.granted_minutes,1)||!integer(row.used_minutes)
+          ||!integer(row.expired_minutes)||!integer(row.held_minutes)||!integer(row.available_minutes)
+          ||row.granted_minutes!==row.used_minutes+row.expired_minutes+row.held_minutes+row.available_minutes)return fail();
+        previous=row.issued_on;
+        available+=row.available_minutes;
+        expired+=row.expired_minutes;
+      }
+    }
+    var adjustment=report.automatic_adjustments[0];
+    if(expired>0){
+      if(report.automatic_adjustments.length!==1||adjustment?.kind!=='first_year_expiration'
+        ||adjustment.date!==report.first_year_expires_on||adjustment.date>report.as_of
+        ||!seen.has(Number(adjustment.date.slice(0,4)))
+        ||!Number.isSafeInteger(adjustment.minutes)||adjustment.minutes!==-expired)return fail();
+    }else if(report.automatic_adjustments.length)return fail();
+    return seen.has(currentYear)&&available===report.available_minutes?report:fail();
+  }
+
+  async function loadLeaveDetailReport(supabase, context) {
+    var opts=context||{}, empId=normalizeText(opts.empId), coopId=normalizeText(opts.coopId);
+    if(!empId||!coopId)throw new Error('LEAVE_ACCRUAL_CONTEXT_UNAVAILABLE');
+    var signal=opts.signal;
+    var send=query=>signal&&typeof query.abortSignal==='function'?query.abortSignal(signal):query;
+    var statuses=DEFAULT_RESERVED_STATUSES.concat(DEFAULT_PENDING_STATUSES);
+    var [grant,adjustments,docs]=await Promise.all([
+      send(supabase.rpc('erp_leave_accrual_report',{p_emp_id:empId})),
+      send(supabase.from('hr_leave_adj').select('*').eq('coop_id',coopId).eq('emp_id',empId).order('created_at',{ascending:false})),
+      fetchLeaveApprovals(supabase,empId,{statuses,coopId,signal,columns:opts.columns})
+    ]);
+    if(signal?.aborted)throw new Error('LEAVE_REPORT_CANCELLED');
+    if(grant.error)throw grant.error;
+    if(adjustments.error)throw adjustments.error;
+    var accrual=requireAccrualReport(grant.data);
+    return {
+      accrual,
+      summary:summarizeLeaveDocs(docs,{todayIso:accrual.as_of,reservedStatuses:DEFAULT_RESERVED_STATUSES,includeToday:false}),
+      pendingDocs:docs.filter(doc=>statusIn(doc?.status,DEFAULT_PENDING_STATUSES)
+        && (opts.isPendingDeductible||isDeductibleLeaveDoc)(doc)),
+      adjustments:adjustments.data||[]
+    };
+  }
+
   async function getLeaveSnapshot(supabase, empId, options) {
     if (!supabase) throw new Error('supabase client is required');
     if (!normalizeText(empId)) {
@@ -672,45 +737,54 @@
     return html;
   } // End of renderLeaveDocListHtml
 
-  function buildLeaveGrantListHtml(hireDateValue, options) {
-    var opts = options || {};
-    var today = opts.today instanceof Date ? opts.today : new Date();
-    var html = '<ul class="leave-list">';
-    if (!hireDateValue) {
-      html += '<li class="text-muted">- 입사일 정보 없음 -</li></ul>';
-      return html;
-    }
-    var hireDate = new Date(hireDateValue);
-    if (Number.isNaN(hireDate.getTime())) {
-      html += '<li class="text-muted">- 입사일 정보 없음 -</li></ul>';
-      return html;
-    }
-    var oneYear = new Date(hireDate);
-    oneYear.setFullYear(oneYear.getFullYear() + 1);
-    if (today < oneYear) {
-      var months = (today.getFullYear() - hireDate.getFullYear()) * 12 + (today.getMonth() - hireDate.getMonth());
-      if (today.getDate() < hireDate.getDate()) months -= 1;
-      var monthlyCount=Math.min(11,Math.max(0,months)),monthlyMinutes=0;
-      for(var month=1;month<=monthlyCount;month++){var anniversary=new Date(hireDate);anniversary.setMonth(anniversary.getMonth()+month);monthlyMinutes+=global.CoopLeaveTime?global.CoopLeaveTime.basisMinutes(opts.workBasis,formatKstIsoDate(anniversary)):480;}
-      html += '<li class="text-primary">🟢 1년 미만: ' + monthlyCount + '일 · 총 '+monthlyMinutes/60+'시간</li>';
-    } else {
-      html += '<li class="text-muted">⚪ 1년 미만: 0개</li>';
-    }
-    if (today.getFullYear() > hireDate.getFullYear()) {
-      var fiscalDay=global.CoopLeaveTime?global.CoopLeaveTime.basisMinutes(opts.workBasis,String(today.getFullYear())+'-01-01'):480;
-      html += '<li class="text-primary">🔵 회계연도(' + today.getFullYear() + '): 15일 · 총 '+15*fiscalDay/60+'시간</li>';
-    } else {
-      html += '<li class="text-muted">⚪ 회계연도: 0개</li>';
-    }
-    html += '</ul>';
-    return html;
-  } // End of buildLeaveGrantListHtml
+  function formatAccrualMinutes(minutes) {
+    var absolute=Math.abs(minutes),hours=Math.floor(absolute/60),remainder=absolute%60;
+    return (minutes<0?'-':'')+(hours?hours+'시간':'')+(remainder||!hours?(hours?' ':'')+remainder+'분':'');
+  }
 
-  function buildLeaveAdjustmentListHtml(adjustments) {
+  function buildLeaveGrantListHtml(entry) {
+    var time=formatAccrualMinutes;
+    if(!entry)return '<p class="mb-0 text-muted">발생 내역 없음</p>';
+    var f=entry.fiscal,monthRows=entry.first_year;
+    var html='';
+    if(monthRows.length){
+      html+='<div class="mb-2"><span class="fw-semibold">1년 미만 · '+monthRows.length+'회 발생</span><ul class="leave-list" data-leave-monthly-grants>';
+      monthRows.forEach(function(row){
+        var fields=['발생 '+time(row.granted_minutes),'사용 '+time(row.used_minutes)];
+        if(row.held_minutes>0)fields.push('예정·결재 중 '+time(row.held_minutes));
+        fields.push('사용 가능 '+time(row.available_minutes));
+        html+='<li data-leave-issued-on="'+escapeHtml(row.issued_on)+'"><time datetime="'+escapeHtml(row.issued_on)+'">'
+          +escapeHtml(formatDotDate(row.issued_on))+'</time> · '+escapeHtml(fields.join(' · '))+'</li>';
+      });
+      html+='</ul></div>';
+    }
+    if(f.granted_minutes||f.adjustment_minutes||f.used_minutes||f.available_minutes){
+      var fields=[];
+      if(f.issued_on)fields.push(formatDotDate(f.issued_on)+' 발생 '+time(f.granted_minutes));
+      if(f.adjustment_minutes)fields.push('조정 '+(f.adjustment_minutes>0?'+':'')+time(f.adjustment_minutes));
+      fields.push('사용 '+time(f.used_minutes));
+      if(f.available_minutes!==null)fields.push('사용 가능 '+time(f.available_minutes));
+      html+='<div data-leave-fiscal><span class="fw-semibold">회계연도</span><p class="mb-0">'+escapeHtml(fields.join(' · '))+'</p></div>';
+    }
+    return html||'<p class="mb-0 text-muted">발생 내역 없음</p>';
+  }
+
+  function buildLeaveAdjustmentListHtml(adjustments,automatic) {
     var html = '<ul class="leave-list">';
-    var rows = Array.isArray(adjustments) ? adjustments : [];
+    var rows = (Array.isArray(adjustments) ? adjustments : []).map(item=>({item,date:automatic?formatKstIsoDate(item?.created_at):''}));
+    if(automatic){
+      rows.push({automatic,date:automatic.date});
+      rows.sort((a,b)=>b.date.localeCompare(a.date));
+    }
     if (rows.length > 0) {
-      rows.forEach(function (item) {
+      rows.forEach(function (row) {
+        if(row.automatic){
+          html+='<li data-leave-auto-expiry><time datetime="'+escapeHtml(row.date)+'">'
+            +escapeHtml(formatDotDate(row.date))+'</time> · <span class="text-danger fw-bold">자동 소멸 −'
+            +escapeHtml(formatAccrualMinutes(-row.automatic.minutes))+'</span></li>';
+          return;
+        }
+        var item=row.item;
         var positive = item && (item.adj_type === '지급' || item.adj_type === '포상');
         var toneClass = positive ? 'text-success' : 'text-danger';
         var prefix = positive ? '+' : '-';
@@ -729,13 +803,6 @@
   function getYearFromDateValue(value) {
     var iso = formatKstIsoDate(value);
     return iso ? Number(iso.slice(0, 4)) : null;
-  }
-
-  function buildLeaveReportAsOfDate(year, today) {
-    var current = today instanceof Date ? today : new Date();
-    var currentYear = Number(formatKstIsoDate(current).slice(0, 4));
-    if (Number(year) === currentYear) return current;
-    return new Date(Number(year) + '-12-31T12:00:00+09:00');
   }
 
   function sortLeaveRowsByDate(rows) {
@@ -780,9 +847,11 @@
     ensureLeaveDetailStyles();
     var opts = options || {};
     var summary = opts.summary || {};
-    var today = opts.today instanceof Date ? opts.today : new Date();
-    var currentYear = Number(formatKstIsoDate(today).slice(0, 4));
+    var accrual=requireAccrualReport(opts.accrual);
+    var currentYear = Number(accrual.as_of.slice(0, 4));
     var yearMap = {};
+    var grants=new Map((accrual.years||[]).map(row=>[row.year,row]));
+    var expiry=accrual.state==='ready'?accrual.automatic_adjustments[0]:null;
     Object.keys(summary.byYear || {}).forEach(function (key) {
       yearMap[key] = summary.byYear[key];
     });
@@ -799,9 +868,9 @@
       });
     }
 
-    var hireYear = getYearFromDateValue(opts.hireDate);
-    if (hireYear) yearMap[String(hireYear)] = yearMap[String(hireYear)] || ensureLeaveYearSummary({ todayIso: summary.todayIso || getTodayKstIso(), byYear: {} }, hireYear);
-    yearMap[String(currentYear)] = yearMap[String(currentYear)] || ensureLeaveYearSummary({ todayIso: summary.todayIso || getTodayKstIso(), byYear: {} }, currentYear);
+    for(var grantYear of new Set([currentYear,...grants.keys()])){
+      yearMap[String(grantYear)] ||= ensureLeaveYearSummary({todayIso:accrual.as_of,byYear:{}},grantYear);
+    }
     Object.keys(pendingByYear).forEach(function (key) {
       yearMap[key] = yearMap[key] || ensureLeaveYearSummary({ todayIso: summary.todayIso || getTodayKstIso(), byYear: {} }, Number(key));
     });
@@ -820,23 +889,31 @@
 
     var years = Object.keys(yearMap).map(Number).filter(Number.isFinite).sort(function (a, b) { return b - a; });
     var html = '<div class="d-flex flex-column gap-3">';
+    if(accrual.state==='ready'){
+      var effective=global.CoopLeaveTime?global.CoopLeaveTime.formatDays(accrual.available_minutes/480,accrual.day_minutes)
+        :formatAccrualMinutes(accrual.available_minutes);
+      html+='<p class="fw-semibold mb-0" data-leave-today-available>오늘 사용 가능: '+escapeHtml(effective)+'</p>';
+    }else{
+      html+='<p class="text-muted mb-0">'+(accrual.state==='no_hire'?'발생 내역을 보려면 입사일을 확인해 주세요.':'연차 계산 대상이 아닙니다.')+'</p>';
+    }
     years.forEach(function (year) {
       var key = String(year);
       var yearSummary = yearMap[key];
       var pendingSummary = pendingByYear[key] || { docs: [], days: 0 };
-      var dayMinutes=global.CoopLeaveTime?global.CoopLeaveTime.basisMinutes(opts.workBasis,year===currentYear?null:String(year)+'-01-01'):480;
+      var dayMinutes=grants.get(year)?.day_minutes||accrual.day_minutes||480;
       var format=value=>global.CoopLeaveTime?global.CoopLeaveTime.formatDays(value,dayMinutes):Number(value||0)+'일';
       html += '<details class="leave-year-accordion"><summary><span>📅 ' + year + '년</span><span class="leave-year-summary-metrics">'
         + escapeHtml(reviewByYear[key]?.length
           ? [buildLeaveYearMetricText(yearSummary,pendingSummary,dayMinutes), '정산대기'].filter(x=>x!=='사용 내역 없음').join(' · ')
           : buildLeaveYearMetricText(yearSummary,pendingSummary,dayMinutes)) + '</span></summary><div class="leave-year-body">';
-      html += '<div class="leave-section"><h6>🎁 발생 내역</h6>'
-        + buildLeaveGrantListHtml(opts.hireDate, { today: buildLeaveReportAsOfDate(year, today),workBasis:opts.workBasis }) + '</div>';
+      if(accrual.state==='ready'){
+        html += '<div class="leave-section" data-leave-accrual-year="'+year+'"><h6>🎁 발생 내역</h6>'
+          + buildLeaveGrantListHtml(grants.get(year)) + '</div>';
+      }
       html += '<div class="leave-section"><h6>⚖️ 조정 내역</h6>'
-        + buildLeaveAdjustmentListHtml(adjustmentsByYear[key] || []) + '</div>';
+        + buildLeaveAdjustmentListHtml(adjustmentsByYear[key] || [],expiry?.date.slice(0,4)===key?expiry:null) + '</div>';
       if (pendingSummary.docs.length > 0) {
         html += '<div class="leave-section"><h6>⏳ 결재 예정 내역 <span class="text-warning">' + format(pendingSummary.days || 0) + ' 신청</span></h6>'
-          + '<div class="small text-muted mb-2">결재 진행 중입니다. 휴가일이 지난 신청은 중복 사용을 막기 위해 사용 가능 연차에 임시 반영되며, 승인되면 확정 사용 내역으로 자동 이동합니다.</div>'
           + renderLeaveDocListHtml(sortLeaveRowsByDate(pendingSummary.docs), {
             formatDate: opts.formatDate,
             formatLeaveDocType: opts.formatLeaveDocType,
@@ -918,6 +995,7 @@
     summarizeLeaveDocs: summarizeLeaveDocs,
     summarizePendingLeaveHolds: summarizePendingLeaveHolds,
     fetchLeaveApprovals: fetchLeaveApprovals,
+    loadLeaveDetailReport: loadLeaveDetailReport,
     getLeaveSnapshot: getLeaveSnapshot,
     createDatedLeavePreview: createDatedLeavePreview
   };

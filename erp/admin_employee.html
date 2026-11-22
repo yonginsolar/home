@@ -62,7 +62,7 @@ Change: 2026-11-20 - 조합 설정 기본정보 병렬 조회.
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261012-2"></script>
-  <script src="leave_ledger.js?v=20261122-fifo-2"></script>
+  <script src="leave_ledger.js?v=20261122-accrual-history-1"></script>
   <script src="sun_village_total_manager_admin.js?v=1.0.6" defer></script>
   <script src="employee_leave_report.js?v=1.0.4" defer></script>
 
@@ -9000,34 +9000,6 @@ function formatAdminEmployeeLeaveDocType(docOrType) {
     return `휴가(${String(config?.label || subType).trim()})`;
 } // End of formatAdminEmployeeLeaveDocType
 
-function getAdminEmployeeLeaveStatusBadgeHtml(status) {
-    if (status === '진행중') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">결재중</span>';
-    if (status === '가승인') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">가승인</span>';
-    if (status === '증빙확인중') return '<span class="badge bg-info text-dark ms-1" style="font-size:0.7em">증빙중</span>';
-    if (status === '실물결재대기') return '<span class="badge bg-secondary ms-1" style="font-size:0.7em">실물대기</span>';
-    if (status === '실물결재완료') return '<span class="badge bg-success ms-1" style="font-size:0.7em">실물완료</span>';
-    if (status === '완료') return '<span class="badge bg-primary ms-1" style="font-size:0.7em">완료</span>';
-    return '';
-} // End of getAdminEmployeeLeaveStatusBadgeHtml
-
-function renderAdminEmployeeLeaveDocList(docs, emptyText) {
-    let html = '<ul class="leave-list">';
-    if (Array.isArray(docs) && docs.length > 0) {
-        docs.forEach((doc) => {
-            const leaveLedger = window.LeaveLedger || {};
-            const period = typeof leaveLedger.formatLeavePeriodText === 'function' ? leaveLedger.formatLeavePeriodText(doc) : '';
-            const periodLabel = period ? ` · ${escapeHtml(period)}` : '';
-            const statusBadge = getAdminEmployeeLeaveStatusBadgeHtml(String(doc?.status || ''));
-            const createdAt = formatAdminEmployeeKstDate(doc?.created_at, '-');
-            const amount = Math.max(0, Number(doc?.amount || doc?._leave_amount || 0));
-            html += `<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>${escapeHtml(formatAdminEmployeeLeaveDocType(doc || doc?.doc_type || '휴가'))} ${statusBadge}${periodLabel}</span><span class="fw-bold text-danger">-${amount}일</span></div><div class="text-muted" style="font-size:0.75rem;">${createdAt}</div></li>`;
-        });
-    } else {
-        html += `<li class="text-muted">${emptyText || '- 없음 -'}</li>`;
-    }
-    html += '</ul>';
-    return html;
-} // End of renderAdminEmployeeLeaveDocList
 
 async function showAdminLeaveDetail() {
     if (!currentEmpId) return showAlert('직원을 먼저 선택해주세요.');
@@ -9037,8 +9009,7 @@ async function showAdminLeaveDetail() {
         root:el, modal:() => adminLeaveDetailModal,
         parent:() => ({root:document.getElementById('detailModal'),modal:detailModal}),
         context:() => ({owner:getHrSettingsOwner(),coopId:String(myInfo?.coop_id || ''),
-            empId:String(currentEmpId || ''),revision:employeeDetailRevision,
-            workBasis:JSON.parse(JSON.stringify(currentEmployeeLeaveSnapshot?.workBasis || null))}),
+            empId:String(currentEmpId || ''),revision:employeeDetailRevision}),
         isCurrent:read => read.owner === getHrSettingsOwner() && read.coopId === String(myInfo?.coop_id || '')
             && read.empId === String(currentEmpId || '') && read.revision === employeeDetailRevision
             && isHrSettingsContextCurrent(read.owner) && isEmployeeDetailTabVisible('tabLog'),
@@ -9050,95 +9021,17 @@ async function showAdminLeaveDetail() {
     });
 }
 async function readAdminLeaveDetailReport(read) {
-        const withSignal = query => typeof query.abortSignal === 'function' ? query.abortSignal(read.signal) : query;
-        if (!read.isCurrent()) return null;
-        const [{ data: employeeRow, error: employeeError }, { data: adjustments, error: adjustmentError }] = await Promise.all([
-            withSignal(scopeEmployeeTenant(_supabase.from('ref_employees').select('hire_date')).eq('emp_id', read.empId).single()),
-            withSignal(scopeEmployeeTenant(_supabase.from('hr_leave_adj').select('*')).eq('emp_id', read.empId).order('created_at', { ascending: false }))
-        ]);
-        if (!read.isCurrent()) return null;
-        if (employeeError) throw employeeError;
-        if (adjustmentError) throw adjustmentError;
-
-        let leaveDocs = [];
-        let summary = { reservedDocs: [], pastOrUsedDocs: [], unknownDateDocs: [], reservedDays: 0, pastOrUsedDays: 0, unknownDateDays: 0 };
-        if (window.LeaveLedger && typeof window.LeaveLedger.fetchLeaveApprovals === 'function') {
-            leaveDocs = await window.LeaveLedger.fetchLeaveApprovals(_supabase, read.empId, {
-                columns: 'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot',
-                statuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료', '진행중'],
-                coopId:read.coopId, signal:read.signal
-            });
-            if (!read.isCurrent()) return null;
-            summary = window.LeaveLedger.summarizeLeaveDocs(leaveDocs, {
-                reservedStatuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
-                includeToday: true,
-                unknownAsReserved: false
-            });
-        } else {
-            const { data: leaveRows, error: leaveError } = await withSignal(scopeEmployeeTenant(_supabase.from('ref_approval').select('id,created_at,doc_type,title,content,amount,status,leave_snapshot')).eq('drafter_id', read.empId).in('status', ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료', '진행중']).ilike('doc_type', '휴가%').order('created_at', { ascending: false }));
-            if (!read.isCurrent()) return null;
-            if (leaveError) throw leaveError;
-            leaveDocs = (leaveRows || []).filter((doc) => isAdminEmployeeDeductibleLeaveDoc(doc));
-            summary = { reservedDocs: [], pastOrUsedDocs: leaveDocs, unknownDateDocs: [], reservedDays: 0, pastOrUsedDays: 0, unknownDateDays: 0 };
-        }
-        const leaveLedger = window.LeaveLedger || {};
-        if (typeof leaveLedger.buildLeaveDetailReportHtml === 'function') {
-            return leaveLedger.buildLeaveDetailReportHtml({
-                hireDate: employeeRow?.hire_date || '',
-                workBasis: read.workBasis,
-                adjustments: adjustments || [],
-                summary,
-                pendingDocs: leaveDocs.filter((doc) => String(doc?.status || '').trim() === '진행중' && isAdminEmployeeDeductibleLeaveDoc(doc)),
-                formatDate: (value, fallback) => formatAdminEmployeeKstDate(value, fallback),
-                formatLeaveDocType: (docOrType) => formatAdminEmployeeLeaveDocType(docOrType)
-            });
-        } else {
-            let generatedHtml = '<div class="d-flex flex-column gap-3">';
-            let grantHtml = '<ul class="leave-list">';
-            if (employeeRow?.hire_date) {
-                const hireDate = new Date(employeeRow.hire_date);
-                const now = new Date();
-                const oneYear = new Date(hireDate);
-                oneYear.setFullYear(oneYear.getFullYear() + 1);
-                if (now < oneYear) {
-                    let months = (now.getFullYear() - hireDate.getFullYear()) * 12 + (now.getMonth() - hireDate.getMonth());
-                    if (now.getDate() < hireDate.getDate()) months--;
-                    grantHtml += `<li class="text-primary">🟢 1년 미만: ${Math.min(11, Math.max(0, months))}개</li>`;
-                } else {
-                    grantHtml += '<li class="text-muted">⚪ 1년 미만: 0개</li>';
-                }
-                if (now.getFullYear() > hireDate.getFullYear()) {
-                    grantHtml += `<li class="text-primary">🔵 회계연도(${now.getFullYear()}): 15개</li>`;
-                } else {
-                    grantHtml += '<li class="text-muted">⚪ 회계연도: 0개</li>';
-                }
-            } else {
-                grantHtml += '<li class="text-muted">- 입사일 정보 없음 -</li>';
-            }
-            grantHtml += '</ul>';
-            generatedHtml += `<div class="leave-section"><h6>🎁 발생 내역</h6>${grantHtml}</div>`;
-
-            let adjustmentHtml = '<ul class="leave-list">';
-            if (Array.isArray(adjustments) && adjustments.length > 0) {
-                adjustments.forEach((item) => {
-                    const positive = item.adj_type === '지급' || item.adj_type === '포상';
-                    const toneClass = positive ? 'text-success' : 'text-danger';
-                    const prefix = positive ? '+' : '-';
-                    adjustmentHtml += `<li><span class="${toneClass} fw-bold">[${escapeHtml(item.adj_type || '')}]</span> ${escapeHtml(item.reason || '')} (${prefix}${Number(item.days || 0)}일)</li>`;
-                });
-            } else {
-                adjustmentHtml += '<li class="text-muted">- 없음 -</li>';
-            }
-            adjustmentHtml += '</ul>';
-            generatedHtml += `<div class="leave-section"><h6>⚖️ 조정 내역</h6>${adjustmentHtml}</div>`;
-            generatedHtml += `<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-${Number(summary.reservedDays || 0)}일</span></h6>${renderAdminEmployeeLeaveDocList(summary.reservedDocs, '- 없음 -')}</div>`;
-            generatedHtml += `<div class="leave-section"><h6>🎫 사용/처리 내역 <span class="text-danger">-${Number(summary.pastOrUsedDays || 0)}일</span></h6>${renderAdminEmployeeLeaveDocList(summary.pastOrUsedDocs, '- 없음 -')}</div>`;
-            if (Array.isArray(summary.unknownDateDocs) && summary.unknownDateDocs.length > 0) {
-                generatedHtml += `<div class="leave-section"><h6>ℹ️ 일자 미확인 내역</h6>${renderAdminEmployeeLeaveDocList(summary.unknownDateDocs, '- 없음 -')}</div>`;
-            }
-            generatedHtml += '</div>';
-            return generatedHtml;
-        }
+    if (!read.isCurrent()) return null;
+    const ledger=window.LeaveLedger;
+    if(typeof ledger?.loadLeaveDetailReport!=='function')throw new Error('LEAVE_REPORT_UNAVAILABLE');
+    const report=await ledger.loadLeaveDetailReport(_supabase,{
+        empId:read.empId,coopId:read.coopId,signal:read.signal,
+        isPendingDeductible:isAdminEmployeeDeductibleLeaveDoc,
+        columns:'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot'
+    });
+    if(!read.isCurrent())return null;
+    return ledger.buildLeaveDetailReportHtml({...report,
+        formatDate:formatAdminEmployeeKstDate,formatLeaveDocType:formatAdminEmployeeLeaveDocType});
 } // End of showAdminLeaveDetail
 
 function expoBulkLeaveSnapshot() {
