@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.216 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.217 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -2391,6 +2391,7 @@ window.onload = async function() {
         if(pane==='#tabForm'||pane==='#tabPrepay'){
             void ensureAccountingEntryInputs(accountingRuntimeGate.runtime.coop_id);
             if(pane==='#tabForm'&&document.getElementById('payMethod').checked)void toggleCard();
+            if(pane==='#tabPrepay')paintAccountingPrepayBalances();
         }
         else if(pane==='#tabSync')void ensureAccountingMaster();
     });
@@ -2434,7 +2435,7 @@ function ensureAccountingEntryInputs(coopId,options={}){
         if(accountingEntryInputs!==entry||owner!==accountingReadIdentity())return false;
         if(!entry.prepayInitialized&&accountingMasterLoaded){
             entry.prepayInitialized=true;
-            loadPrepayExpenseAccounts();loadReceivableIncomeAccounts();onReceivableIncomeTypeChange();
+            loadPrepayExpenseAccounts();loadReceivableIncomeAccounts();
         }
         return entry.projectsReady&&accountingMasterLoaded;
     }).catch(()=>false).finally(()=>{entry.pending=null;});
@@ -7045,8 +7046,7 @@ async function refreshAccountingDashboardOnce() {
     const cacheRows = Array.isArray(summary.cache_rows) ? summary.cache_rows : [];
     buildPrepayCache(cacheRows);
     buildReceivableCache(cacheRows);
-    renderPrepayVendorSelect();
-    renderReceivableVendorSelect();
+    if(document.getElementById('tabPrepay').classList.contains('active'))paintAccountingPrepayBalances();
 
     const quarterVatSummary = buildAccountingDashboardVatSummary(
         getCurrentQuarterVatPeriod(todayKst),
@@ -7599,7 +7599,12 @@ function buildPrepayCache(data) {
     };
 }
 
-function renderPrepayVendorSelect() {
+function paintAccountingPrepayBalances(){
+    // Automatic overview results update choices/balances, not a draft's VAT or account.
+    renderPrepayVendorSelect({preserveDraft:true});
+    renderReceivableVendorSelect({preserveDraft:true});
+}
+function renderPrepayVendorSelect({preserveDraft=false}={}) {
     const sel = document.getElementById("prepayVendorSelect");
     if (!sel) return;
     const current = sel.value;
@@ -7622,7 +7627,7 @@ function renderPrepayVendorSelect() {
         sel.value = current;
     }
     // Rebuilding a list is not an explicit change of the selected vendor.
-    onPrepayVendorChange({ preserveAccount: Boolean(current) });
+    onPrepayVendorChange({ preserveAccount: preserveDraft || Boolean(current) });
 }
 
 async function refreshPrepayTab() {
@@ -7920,7 +7925,7 @@ function buildReceivableCache(data) {
     };
 }
 
-function renderReceivableVendorSelect() {
+function renderReceivableVendorSelect({preserveDraft=false}={}) {
     const sel = document.getElementById('receivableVendorSelect');
     if (!sel) return;
     const current = sel.value;
@@ -7951,7 +7956,7 @@ function renderReceivableVendorSelect() {
         if (!Array.from(sel.options).some(o => o.value === current)) sel.add(new Option(current === '__all__' ? '전체 미수 (기존 선택)' : `${current} (기존 선택)`, current));
         sel.value = current;
     }
-    onReceivableVendorChange({ preserveAccount: Boolean(current) });
+    onReceivableVendorChange({ preserveAccount: preserveDraft || Boolean(current) });
 }
 
 function getReceivableIncomeAccount() {
