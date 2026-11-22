@@ -7,7 +7,7 @@
   var DEFAULT_RESERVED_STATUSES = ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'];
   var DEFAULT_PENDING_STATUSES = ['진행중'];
   var DEFAULT_APPROVAL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id';
-  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v4';
+  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v5';
   var leaveDetailDialogs = new WeakSet();
   var LEAVE_REPORT_STYLE_TEXT = [
     '.leave-detail-dialog .modal-dialog{--bs-modal-width:620px}',
@@ -31,11 +31,17 @@
     '.leave-report-first-year{background:var(--bs-tertiary-bg,#f8f9fa)}',
     '.leave-report-heading{font-size:1rem;font-weight:700;margin:0}',
     '.leave-report-heading strong{color:var(--bs-primary-text-emphasis,#084298)}',
-    '.leave-fiscal-metrics{margin:.6rem 0 0}',
-    '.leave-fiscal-metrics>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4rem .75rem;align-items:center;border-top:1px solid var(--bs-border-color,#dee2e6);padding:.45rem 0}',
-    '.leave-fiscal-metrics dt{font-size:.875rem;font-weight:600}',
-    '.leave-fiscal-metrics dt time{display:block;font-size:.75rem;font-weight:400;color:var(--bs-secondary-color,#495057)}',
-    '.leave-fiscal-metrics dd{margin:0;text-align:end;font-weight:700;font-variant-numeric:tabular-nums}',
+    '.leave-fiscal-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:.55rem 0 0;border-top:1px solid var(--bs-border-color,#dee2e6)}',
+    '.leave-fiscal-group{min-width:0;padding:.65rem .7rem 0 0}',
+    '.leave-fiscal-group+.leave-fiscal-group{padding:.65rem 0 0 .7rem;border-inline-start:1px solid var(--bs-border-color,#dee2e6)}',
+    '.leave-fiscal-group h6{margin:0;font-size:.875rem;font-weight:700}',
+    '.leave-fiscal-total,.leave-fiscal-group dl>div{display:flex;justify-content:space-between;align-items:baseline;gap:.25rem .5rem}',
+    '.leave-fiscal-total{flex-wrap:wrap}',
+    '.leave-fiscal-total strong{font-size:1.125rem;font-variant-numeric:tabular-nums}',
+    '.leave-fiscal-group dl{margin:.4rem 0 0;padding-top:.3rem;border-top:1px solid var(--bs-border-color,#dee2e6)}',
+    '.leave-fiscal-group dl>div{padding:.15rem 0}',
+    '.leave-fiscal-group dt{font-size:.83rem;font-weight:400;color:var(--bs-secondary-color,#495057)}',
+    '.leave-fiscal-group dd{margin:0;font-size:.875rem;text-align:end;font-variant-numeric:tabular-nums}',
     '.leave-report-records{display:grid;gap:.55rem;margin-top:.55rem}',
     '.leave-report-disclosure{margin-top:.55rem}',
     '.leave-report-archive{padding-block:0}',
@@ -50,6 +56,7 @@
     '.leave-list li{margin-bottom:6px}',
     '.leave-report .leave-list span{min-width:0;overflow-wrap:anywhere}',
     '@media(max-width:575.98px){.leave-report-balance,.leave-report-card,.leave-section{padding:.65rem}.leave-detail-dialog .modal-body{padding:.65rem!important}}',
+    '@media(max-width:500px){.leave-fiscal-metrics{grid-template-columns:minmax(0,1fr)}.leave-fiscal-group,.leave-fiscal-group+.leave-fiscal-group{padding:.45rem 0;border-inline-start:0}.leave-fiscal-group+.leave-fiscal-group{border-top:1px solid var(--bs-border-color,#dee2e6);margin-top:.25rem}}',
     '@media(max-width:410px){.leave-detail-dialog .modal-content{height:min(27rem,100%)}.leave-detail-dialog .modal-header{column-gap:.3rem;padding-inline:.55rem}.leave-detail-views .btn{padding-inline:.36rem;font-size:.8rem}}',
     '@media(pointer:coarse){.leave-detail-views .btn{min-height:44px}}'
   ].join('');
@@ -602,17 +609,28 @@
     };
     var [accrual,adjustments,docs]=await Promise.all([
       readAccrual(),
-      send(supabase.from('hr_leave_adj').select('*').eq('coop_id',coopId).eq('emp_id',empId).order('created_at',{ascending:false})),
+      send(supabase.from('hr_leave_adj').select('*,days_exact:days::text',{count:'exact'})
+        .eq('coop_id',coopId).eq('emp_id',empId).order('created_at',{ascending:false})),
       fetchLeaveApprovals(supabase,empId,{statuses,coopId,signal,columns:opts.columns})
     ]);
     if(signal?.aborted)throw new Error('LEAVE_REPORT_CANCELLED');
     if(adjustments.error)throw adjustments.error;
+    var adjustmentsComplete=Array.isArray(adjustments.data)&&adjustments.count===adjustments.data.length;
+    if(adjustmentsComplete&&adjustments.count===0&&opts.adjustmentsAreOwn!==true){
+      // For another employee, the existing RLS policy grants all adjustment
+      // rows to administrators and can silently return none to a delegate.
+      // An empty result alone cannot confirm either gross side is zero.
+      var access=await send(supabase.rpc('is_erp_privileged'));
+      if(signal?.aborted)throw new Error('LEAVE_REPORT_CANCELLED');
+      adjustmentsComplete=!access.error&&access.data===true;
+    }
     return {
       accrual,
       summary:summarizeLeaveDocs(docs,{todayIso:accrual.as_of,reservedStatuses:DEFAULT_RESERVED_STATUSES,includeToday:false}),
       pendingDocs:docs.filter(doc=>statusIn(doc?.status,DEFAULT_PENDING_STATUSES)
         && (opts.isPendingDeductible||isDeductibleLeaveDoc)(doc)),
-      adjustments:adjustments.data||[]
+      adjustments:adjustments.data||[],
+      adjustmentsComplete
     };
   }
 
@@ -888,7 +906,7 @@
         +'<span class="d-block ps-3">'+escapeHtml(totalText)+'</span></summary><div class="leave-report-history-body" data-leave-monthly-history>'
       :'<section class="leave-report-card leave-report-first-year" data-leave-first-year-summary><h6 class="leave-report-heading">'
         +heading+'</h6><div class="small mt-1">'+escapeHtml(totalText)+'</div>'
-        +'<details class="leave-report-disclosure" data-leave-monthly-history><summary>월별 발생 기록</summary>';
+        +'<details class="leave-report-disclosure" data-leave-monthly-history open><summary>월별 발생 기록</summary>';
     html+='<p class="small text-muted mb-2">발생 '+escapeHtml(formatAccrualMinutes(total))
       +' · 사용 '+escapeHtml(formatAccrualMinutes(used))+'</p><ul class="leave-list">';
     rows.forEach(function(row){
@@ -907,24 +925,70 @@
     return Boolean(fiscal&&(fiscal.granted_minutes||fiscal.adjustment_minutes||fiscal.used_minutes||fiscal.available_minutes));
   }
 
-  function buildFiscalReportMetrics(fiscal, grantBasis, dayMinutes, totalAvailable) {
+  function buildFiscalGrantHistory(fiscal, grantBasis) {
+    if(!fiscal.issued_on)return '';
     var granted=formatAccrualMinutes(fiscal.granted_minutes);
     if(fiscal.granted_minutes>0&&grantBasis>0&&fiscal.granted_minutes%grantBasis===0){
       granted=(fiscal.granted_minutes/grantBasis)+'일 ('+granted+')';
     }
-    var amount=value=>grantBasis===dayMinutes?formatReportAmount(value,dayMinutes)
-      :(value<0?'−':'')+formatAccrualMinutes(Math.abs(value));
-    var metrics=[
-      ['기본 발생',granted,fiscal.issued_on],
-      ['조정 합계',(fiscal.adjustment_minutes>0?'+':'')+amount(fiscal.adjustment_minutes)],
-      ['사용 합계',amount(fiscal.used_minutes)]
-    ];
-    if(fiscal.available_minutes!==null&&fiscal.available_minutes!==totalAvailable){
-      metrics.push(['회계연도 잔여',formatLeaveBalanceMinutes(fiscal.available_minutes,dayMinutes)]);
+    return '<div class="leave-section"><h6>발생 내역</h6><ul class="leave-list"><li data-leave-fiscal-grant><time datetime="'
+      +escapeHtml(fiscal.issued_on)+'">'+escapeHtml(formatDotDate(fiscal.issued_on))+'</time> · 기본 발생 '
+      +escapeHtml(granted)+'</li></ul></div>';
+  }
+
+  function readAdjustmentBreakdown(rows, year, serverTotal, complete) {
+    if(!complete)return null;
+    var credits=0n,debits=0n;
+    for(var item of rows){
+      // Match the existing fiscal report: null dates/amounts are not summed.
+      if(item?.created_at==null)continue;
+      var itemYear=getYearFromDateValue(item.created_at);
+      if(itemYear===null)return null;
+      if(itemYear!==year||item.days_exact===null)continue;
+      // PostgreSQL rounds each numeric row before summing. Keeping its decimal
+      // text here avoids a pair of opposite rounding errors canceling out.
+      var match=typeof item.days_exact==='string'&&/^(-?)(\d{1,16})(?:\.(\d{1,80}))?$/.exec(item.days_exact);
+      if(!match)return null;
+      var fraction=match[3]||'', scale=10n**BigInt(fraction.length);
+      var minutes=(BigInt(match[2]+fraction)*480n+scale/2n)/scale;
+      var isCredit=(item.adj_type==='지급'||item.adj_type==='포상')!==(match[1]==='-');
+      if(isCredit)credits+=minutes;else debits+=minutes;
     }
-    return '<dl class="leave-fiscal-metrics" data-leave-fiscal>'+metrics.map(pair=>
-      '<div><dt>'+pair[0]+(pair[2]?'<time datetime="'+escapeHtml(pair[2])+'">'+escapeHtml(formatDotDate(pair[2]))+'</time>':'')
-      +'</dt><dd>'+escapeHtml(pair[1])+'</dd></div>').join('')+'</dl>';
+    if(credits-debits!==BigInt(serverTotal)||!Number.isSafeInteger(Number(credits))||!Number.isSafeInteger(Number(debits)))return null;
+    return {credits:Number(credits),debits:Number(debits)};
+  }
+
+  function buildFiscalReportMetrics(fiscal,dayMinutes,monthly,breakdown,availableNow) {
+    var sum=(key)=>monthly.reduce((total,row)=>total+row[key],0);
+    var monthlyGranted=sum('granted_minutes'), used=fiscal.used_minutes+sum('used_minutes');
+    var today=availableNow!==null;
+    var fiscalBeforeBookings=fiscal.granted_minutes+fiscal.adjustment_minutes-fiscal.used_minutes;
+    var booked=today?Math.max(0,fiscalBeforeBookings)-fiscal.available_minutes+sum('held_minutes'):0;
+    var excess=today?Math.max(0,-fiscalBeforeBookings):0;
+    var expired=sum('expired_minutes');
+    var gross=breakdown?fiscal.granted_minutes+monthlyGranted+breakdown.credits:null;
+    var charge=breakdown?used+breakdown.debits+booked+expired-excess:null;
+    var ok=!!breakdown&&Number.isSafeInteger(gross)&&Number.isSafeInteger(charge)&&charge>=0
+      &&(!today||(fiscal.available_minutes<=Math.max(0,fiscalBeforeBookings)&&gross-charge===availableNow));
+    var credits=[['기본 발생',fiscal.granted_minutes],['조정 부여',breakdown?.credits]];
+    if(monthlyGranted)credits.splice(1,0,['1년 미만 발생',monthlyGranted]);
+    var debits=[['휴가 사용',used],['조정 차감',breakdown?.debits]];
+    // Show only reservations that restrict today's balance, not the sum of
+    // future requests that may be covered by future monthly grants.
+    if(ok&&booked>0)debits.push(['예정·결재 중 반영',booked]);
+    if(ok&&expired>0)debits.push(['자동 소멸',expired]);
+    if(ok&&excess>0)debits.push(['초과 차감 제외',-excess]);
+    function format(value) {
+      return Number.isSafeInteger(value)?(value<0?'−':'')+formatLeaveBalanceMinutes(Math.abs(value),dayMinutes):'—';
+    }
+    function group(title,key,total,items) {
+      return '<section class="leave-fiscal-group"><div class="leave-fiscal-total"><h6>'+title
+        +'</h6><strong data-leave-total="'+key+'">'+format(ok?total:null)+'</strong></div><dl>'+items.map(pair=>
+          '<div><dt>'+pair[0]+'</dt><dd>'+format(pair[1])+'</dd></div>').join('')+'</dl></section>';
+    }
+    return '<div class="leave-fiscal-metrics" data-leave-fiscal>'
+      +group('발생 합계','credited',gross,credits)+group('차감 합계','debited',charge,debits)+'</div>'
+      +(!ok?'<p class="text-muted small mt-2 mb-0">합계를 확인하지 못했습니다.</p>':'');
   }
 
   function buildLeaveAdjustmentListHtml(adjustments,automatic,expiryBasis) {
@@ -999,6 +1063,7 @@
     var expiry=accrual.state==='ready'?accrual.automatic_adjustments[0]:null;
     var firstRows=(accrual.years||[]).flatMap(year=>year.first_year).sort((a,b)=>b.issued_on.localeCompare(a.issued_on));
     var firstYearEnded=accrual.as_of>=accrual.first_year_expires_on;
+    var activeFirst=firstYearEnded?[]:firstRows;
     var expiryBases=new Set(firstRows.filter(row=>row.expired_minutes>0).map(row=>row.granted_minutes));
     var expiryBasis=expiryBases.size===1?expiryBases.values().next().value:null;
     Object.keys(summary.byYear || {}).forEach(function (key) {
@@ -1053,16 +1118,23 @@
       var grantBasis=year<currentYear?entry?.day_minutes:entry?.grant_day_minutes;
       var format=value=>formatReportAmount(value*480,dayMinutes);
       var auto=expiry?.date.slice(0,4)===key?expiry:null,manual=adjustmentsByYear[key]||[];
-      var hasFiscal=hasFiscalReport(fiscal);
-      var hasHistory=Boolean(auto||manual.length||pendingSummary.docs.length||reviewByYear[key]?.length
+      var isCurrent=year===currentYear;
+      var hasFiscal=!!fiscal&&(isCurrent||hasFiscalReport(fiscal)||manual.length>0);
+      var hasHistory=Boolean(fiscal?.issued_on||auto||manual.length||pendingSummary.docs.length||reviewByYear[key]?.length
         ||yearSummary.reservedDocs?.length||yearSummary.pastOrUsedDocs?.length||yearSummary.unknownDateDocs?.length);
       if(!hasFiscal&&!hasHistory)return;
-      var title=year+'년 '+(hasFiscal?'회계연도 기록':year>currentYear?'예정 기록':'기록'), past=year<currentYear;
+      var title=year+'년 '+(hasFiscal?(isCurrent&&activeFirst.length?'연차 기록':'회계연도 기록'):
+        year>currentYear?'예정 기록':'기록'), past=year<currentYear;
       var html=past?'<details class="leave-report-archive" data-leave-archive data-leave-accrual-year="'+year
         +'"><summary>'+title+'</summary><div class="leave-report-history-body">'
         :'<section class="leave-report-card" data-leave-accrual-year="'+year+'"><h6 class="leave-report-heading">'+title+'</h6>';
-      if(hasFiscal)html+=buildFiscalReportMetrics(fiscal,grantBasis,dayMinutes,accrual.available_minutes);
+      if(hasFiscal){
+        var breakdown=readAdjustmentBreakdown(manual,year,fiscal.adjustment_minutes,opts.adjustmentsComplete===true);
+        html+=buildFiscalReportMetrics(fiscal,isCurrent?accrual.day_minutes:dayMinutes,
+          isCurrent?activeFirst:[],breakdown,isCurrent?accrual.available_minutes:null);
+      }
       if(hasHistory)html+='<div class="leave-report-records">';
+      if(fiscal?.issued_on)html+=buildFiscalGrantHistory(fiscal,grantBasis);
       if(auto||manual.length){
         html += '<div class="leave-section"><h6>조정 내역</h6>'
           + buildLeaveAdjustmentListHtml(manual,auto,expiryBasis) + '</div>';
