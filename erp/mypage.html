@@ -43,7 +43,7 @@
 <script src="expo_employee_certificate.js?v=20261022-1"></script>
 <script src="payroll_durunuri_module.js?v=20261109-mypage-1"></script>
 <script src="leave_time.js?v=20261012-2"></script>
-<script src="leave_ledger.js?v=20261122-accrual-display-2"></script>
+<script src="leave_ledger.js?v=20261122-leave-detail-tabs-3"></script>
 <script src="/shared/leave_calendar_projection.js?v=1.3.0" integrity="sha384-KUjQSVKrH+HxrLo9Elahdhih7ytd0YEeYlNajYylRVf9NfYUFR4cfIym4xyz92Xc" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="ai_connection.css?v=1.3.1">
 <script src="ai_member_details_settings.js?v=1.0.0" integrity="sha384-ricDiFfEvns5x0CJ9RTxl3k1W3zgLFETEfJV2if+iSKFYLs4aTZLFd8u9YoG6ziU" crossorigin="anonymous"></script>
@@ -369,7 +369,22 @@ body{padding:18px 14px 28px}
 </div>
 </div>
 <div class="modal fade" id="certPurposeModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold">발급 용도</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><select class="form-select mb-2" id="certPurposeSelect" onchange="toggleEtcInput()"><option value="관공서 제출용">관공서 제출용</option><option value="금융기관 제출용">금융기관 제출용</option><option value="기타">기타</option></select><input type="text" id="certPurposeEtc" class="form-control hidden" placeholder="용도 입력"></div><div class="modal-footer"><button class="btn btn-primary btn-sm" onclick="runCertIssue()">인쇄하기</button></div></div></div></div>
-<div class="modal fade" id="leaveDetailModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold">연차 상세 리포트</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-3"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
+<div class="modal fade leave-detail-dialog" id="leaveDetailModal" tabindex="-1" aria-labelledby="leaveDetailModalTitle">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header bg-light">
+        <h6 class="modal-title fw-bold" id="leaveDetailModalTitle">연차 상세</h6>
+        <div class="leave-detail-views" role="group" aria-label="연차 보기 전환" aria-hidden="true">
+          <button class="btn btn-sm" type="button" id="leaveDetailModalCurrentButton" data-leave-view="current" aria-pressed="true" aria-controls="leaveDetailModalCurrent" disabled>현재 연차</button>
+          <button class="btn btn-sm" type="button" id="leaveDetailModalHistoryButton" data-leave-view="history" aria-pressed="false" aria-controls="leaveDetailModalHistory" disabled>지난 기록</button>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="연차 상세 닫기"></button>
+      </div>
+      <div class="modal-body p-3"></div>
+      <div class="modal-footer justify-content-center p-1 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div>
+    </div>
+  </div>
+</div>
 <div class="modal fade" id="noticeDetailModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold" id="noticeModalTitle"></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="text-muted small mb-3"><span id="noticeModalDate"></span> | <span id="noticeModalWriter"></span></div><div id="noticeModalContent" style="white-space: pre-wrap;"></div><div id="noticeFileArea" class="mt-3 pt-2 border-top hidden"><a href="#" id="noticeFileLink" target="_blank">첨부파일 다운로드</a></div></div></div></div></div>
 <div class="modal fade" id="alertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-body text-center fw-bold py-4" id="alertBody" style="white-space: pre-wrap;"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button></div></div></div></div>
 <div class="modal fade" id="eventModal" tabindex="-1" aria-labelledby="mypageEventTitle"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold" id="mypageEventTitle">📅 일정 관리</h6><button type="button" class="btn-close" aria-label="닫기" data-bs-dismiss="modal"></button></div><div class="modal-body">
@@ -2305,9 +2320,8 @@ mypageCalendarInstance.render();
 }catch(_){if(isCurrent())showAlert('달력을 불러오지 못했습니다. 다른 탭으로 이동한 뒤 다시 열어 주세요.');}
 }
 function renderLeaveBadge(snapshot){
-const units=snapshot?.effectiveRemainDays;
-const minutes=units==null||units===''?NaN:Number(units)*CoopLeaveTime.dayMinutes;
-document.getElementById("lvRemain").innerText=Number.isFinite(minutes)&&minutes>=0?CoopLeaveTime.formatMinutes(minutes):'—';
+document.getElementById("lvRemain").innerText=window.LeaveLedger?.formatLeaveBalance?.(
+  snapshot?.effectiveRemainDays,snapshot?.workBasis?.day_minutes)||'—';
 const retry=document.getElementById('mypageLeaveRetry');
 if(retry)retry.hidden=true;
 }
@@ -2337,6 +2351,7 @@ mypageLeaveDetailRead=null;
 async function showLeaveDetail(){
 const el=document.getElementById('leaveDetailModal'),bd=el?.querySelector('.modal-body');
 if(!bd||!leaveDetailModal||!mypageDataAuthorized||!isMypageDataVisible()||window.frameElement?.hidden)return;
+window.LeaveLedger?.prepareLeaveDetailDialog?.(el);
 stopMypageLeaveDetailRead();
 const read={controller:new AbortController(),owner:getMypageDataOwner(),coopId:getMypageCoopId(),empId:String(myInfo?.emp_id||'')};
 mypageLeaveDetailRead=read;
@@ -2355,7 +2370,7 @@ const report=await ledger.loadLeaveDetailReport(_supabase,{
   columns:mypageLeaveSnapshotSupported?MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT:undefined
 });
 if(!isCurrent())return;
-bd.innerHTML=ledger.buildLeaveDetailReportHtml({...report,
+bd.innerHTML=ledger.buildLeaveDetailReportHtml({...report,dialogId:el.id,
   formatDate:(value,fallback)=>formatMypageKstDate(value,fallback),
   formatLeaveDocType:formatMypageLeaveDocType});
 }catch(error){

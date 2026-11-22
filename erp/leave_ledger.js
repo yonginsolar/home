@@ -7,31 +7,51 @@
   var DEFAULT_RESERVED_STATUSES = ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'];
   var DEFAULT_PENDING_STATUSES = ['진행중'];
   var DEFAULT_APPROVAL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id';
-  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v3';
+  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v4';
+  var leaveDetailDialogs = new WeakSet();
   var LEAVE_REPORT_STYLE_TEXT = [
+    '.leave-detail-dialog .modal-dialog{--bs-modal-width:620px}',
+    '.leave-detail-dialog .modal-content{height:min(25.5rem,100%);min-height:0}',
+    '.leave-detail-dialog .modal-header{flex-wrap:wrap;column-gap:.5rem;row-gap:.35rem;padding:.65rem .85rem}',
+    '.leave-detail-dialog .modal-header .btn-close{margin:0;flex:0 0 auto;padding:.45rem}',
+    '.leave-detail-dialog .modal-body{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;background:var(--bs-tertiary-bg,#f8f9fa)}',
+    '.leave-detail-views{display:flex;gap:.15rem;margin-inline-start:auto;padding:.2rem;border:1px solid var(--bs-border-color,#dee2e6);border-radius:.6rem;background:var(--bs-tertiary-bg,#f8f9fa)}',
+    '.leave-detail-views:not([data-ready]){visibility:hidden}',
+    '.leave-detail-views .btn{border:0;white-space:nowrap;color:var(--bs-body-color,#212529)}',
+    '.leave-detail-views .btn[aria-pressed="true"]{background:var(--bs-primary,#0d6efd);color:#fff}',
+    '.leave-detail-views .btn:focus-visible{outline:2px solid var(--bs-primary,#0d6efd);outline-offset:1px}',
+    '.leave-report [hidden]{display:none!important}',
     '.leave-report{display:grid;gap:.75rem;text-align:start;overflow-wrap:anywhere}',
-    '.leave-report-balance,.leave-report-card{border:1px solid var(--bs-border-color,#dee2e6);border-radius:10px;padding:.75rem .875rem;min-width:0}',
+    '.leave-report-panel{display:grid;gap:.75rem;min-width:0}',
+    '.leave-report-balance,.leave-report-card,.leave-report-archive{border:1px solid var(--bs-border-color,#dee2e6);border-radius:10px;padding:.75rem .875rem;min-width:0}',
     '.leave-report-balance{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.25rem .75rem;background:var(--bs-primary-bg-subtle,#e7f1ff);color:var(--bs-primary-text-emphasis,#084298);border-color:var(--bs-primary-border-subtle,#9ec5fe)}',
+    '.leave-report-balance small{display:block;font-size:.75rem}',
     '.leave-report-balance strong{font-size:1.25rem}',
-    '.leave-report-card{background:var(--bs-body-bg,#fff)}',
+    '.leave-report-card,.leave-report-archive{background:var(--bs-body-bg,#fff)}',
     '.leave-report-first-year{background:var(--bs-tertiary-bg,#f8f9fa)}',
     '.leave-report-heading{font-size:1rem;font-weight:700;margin:0}',
     '.leave-report-heading strong{color:var(--bs-primary-text-emphasis,#084298)}',
-    '.leave-fiscal-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,5.65rem),1fr));gap:.45rem;margin:.6rem 0 0}',
-    '.leave-fiscal-metrics>div{min-width:0;padding:.4rem .55rem;background:var(--bs-tertiary-bg,#f8f9fa);border-radius:6px}',
-    '.leave-fiscal-metrics dt{font-size:.8rem;font-weight:600;color:var(--bs-secondary-color,#495057)}',
-    '.leave-fiscal-metrics dd{margin:0;font-weight:700}',
+    '.leave-fiscal-metrics{margin:.6rem 0 0}',
+    '.leave-fiscal-metrics>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4rem .75rem;align-items:center;border-top:1px solid var(--bs-border-color,#dee2e6);padding:.45rem 0}',
+    '.leave-fiscal-metrics dt{font-size:.875rem;font-weight:600}',
+    '.leave-fiscal-metrics dt time{display:block;font-size:.75rem;font-weight:400;color:var(--bs-secondary-color,#495057)}',
+    '.leave-fiscal-metrics dd{margin:0;text-align:end;font-weight:700;font-variant-numeric:tabular-nums}',
+    '.leave-report-records{display:grid;gap:.55rem;margin-top:.55rem}',
     '.leave-report-disclosure{margin-top:.55rem}',
-    '.leave-report-disclosure>summary{cursor:pointer;color:var(--bs-primary-text-emphasis,#084298);font-size:.85rem;font-weight:600;padding:.25rem 0;min-height:2rem}',
-    '.leave-report-disclosure>summary:focus-visible{outline:2px solid var(--bs-primary,#0d6efd);outline-offset:2px;border-radius:4px}',
+    '.leave-report-archive{padding-block:0}',
+    '.leave-report-archive>summary,.leave-report-disclosure>summary{cursor:pointer;color:var(--bs-primary-text-emphasis,#084298);font-weight:600;padding:.55rem 0;min-height:2.75rem}',
+    '.leave-report-archive>summary span{font-size:.8rem;font-weight:400}',
+    '.leave-report-archive>summary:focus-visible,.leave-report-disclosure>summary:focus-visible{outline:2px solid var(--bs-primary,#0d6efd);outline-offset:2px;border-radius:4px}',
+    '.leave-report-history-body{border-top:1px solid var(--bs-border-color,#dee2e6);padding:.55rem 0 .7rem}',
     '.leave-report-disclosure[open]>summary{margin-bottom:.5rem}',
-    '.leave-section{margin-bottom:10px;border:1px solid var(--bs-border-color,#dee2e6);border-radius:8px;background:var(--bs-tertiary-bg,#f8f9fa);padding:13px}',
-    '.leave-section:last-child{margin-bottom:0}',
+    '.leave-section{border:1px solid var(--bs-border-color,#dee2e6);border-radius:8px;background:var(--bs-tertiary-bg,#f8f9fa);padding:13px}',
     '.leave-section h6{font-weight:bold;border-bottom:1px solid var(--bs-border-color,#dee2e6);padding-bottom:8px;margin-bottom:10px;font-size:0.95rem}',
     '.leave-list{list-style:none;padding:0;margin:0;font-size:0.85rem}',
     '.leave-list li{margin-bottom:6px}',
     '.leave-report .leave-list span{min-width:0;overflow-wrap:anywhere}',
-    '@media(max-width:575.98px){.leave-report-balance,.leave-report-card{padding:.65rem}.leave-section{padding:.65rem}}'
+    '@media(max-width:575.98px){.leave-report-balance,.leave-report-card,.leave-section{padding:.65rem}.leave-detail-dialog .modal-body{padding:.65rem!important}}',
+    '@media(max-width:410px){.leave-detail-dialog .modal-content{height:min(27rem,100%)}.leave-detail-dialog .modal-header{column-gap:.3rem;padding-inline:.55rem}.leave-detail-views .btn{padding-inline:.36rem;font-size:.8rem}}',
+    '@media(pointer:coarse){.leave-detail-views .btn{min-height:44px}}'
   ].join('');
 
   function ensureLeaveDetailStyles() {
@@ -44,6 +64,52 @@
       document.head.appendChild(styleEl);
     }
   } // End of ensureLeaveDetailStyles
+
+  function prepareLeaveDetailDialog(root) {
+    ensureLeaveDetailStyles();
+    if (!root || leaveDetailDialogs.has(root)) return;
+    var body=root.querySelector('.modal-body'), controls=root.querySelector('.leave-detail-views');
+    if(!body||!controls)return;
+    leaveDetailDialogs.add(root);
+    var buttons=[...controls.querySelectorAll('[data-leave-view]')];
+    var report=null, selected='current', positions={current:0,history:0};
+    function select(key) {
+      selected=key;
+      for(var button of buttons)button.setAttribute('aria-pressed',String(button.dataset.leaveView===key));
+      if(report)for(var panel of report.querySelectorAll('[data-leave-panel]')){
+        panel.hidden=panel.dataset.leavePanel!==key;
+      }
+      body.scrollTop=positions[key];
+    }
+    function refresh() {
+      var next=body.querySelector('[data-leave-detail-report]');
+      if(next===report)return;
+      report=next;
+      controls.toggleAttribute('data-ready',!!report);
+      controls.setAttribute('aria-hidden',String(!report));
+      for(var button of buttons)button.disabled=!report;
+      positions={current:0,history:0};
+      select('current');
+    }
+    for(var button of buttons)button.addEventListener('click',function(){
+      // Switching views is local and never reloads or moves the keyboard focus.
+      var target=this.dataset.leaveView;
+      if(!report||!body.contains(report)||target===selected)return;
+      positions[selected]=body.scrollTop;
+      select(target);
+    });
+    body.addEventListener('click',function(event){
+      var row=event.target.closest?.('summary')?.parentElement;
+      if(event.defaultPrevented||!report||!row?.matches('[data-leave-archive]')||row.open||!report.contains(row))return;
+      // Drop any other open year before the browser opens this summary, so
+      // the last click wins even before native toggle events are dispatched.
+      for(var other of report.querySelectorAll('[data-leave-archive][open]')){
+        if(other!==row)other.open=false;
+      }
+    });
+    new global.MutationObserver(refresh).observe(body,{childList:true,subtree:true});
+    refresh();
+  }
 
   function toNumber(value, fallback) {
     var n = Number(value);
@@ -779,6 +845,20 @@
     return (minutes<0?'-':'')+(hours?hours+'시간':'')+(remainder||!hours?(hours?' ':'')+remainder+'분':'');
   }
 
+  function formatLeaveBalanceMinutes(minutes, dayMinutes) {
+    if (!Number.isFinite(minutes) || minutes < 0) return '—';
+    var total=Math.round(minutes),basis=Number(dayMinutes);
+    if(!Number.isSafeInteger(total))return '—';
+    if(!Number.isSafeInteger(basis)||basis<1)basis=480;
+    var days=Math.floor(total/basis),rest=total%basis;
+    return days+'일 '+Math.floor(rest/60)+'시간'+(rest%60?' '+rest%60+'분':'');
+  }
+
+  function formatLeaveBalance(units, dayMinutes) {
+    var value=typeof units==='number'||typeof units==='string'&&units.trim()?Number(units):NaN;
+    return formatLeaveBalanceMinutes(value*480,dayMinutes);
+  }
+
   function formatReportAmount(minutes, dayMinutes) {
     if(!Number.isFinite(minutes))return '—';
     var absolute=Math.abs(Math.round(minutes)),sign=minutes<0?'−':'';
@@ -791,24 +871,36 @@
     return sign+(rest?(days?dayText+' ':'')+formatter.formatMinutes(rest):dayText);
   }
 
-  function buildFirstYearGrantSummary(rows) {
+  function buildFirstYearGrantSummary(rows, dayMinutes, ended) {
     if(!rows.length)return '';
     var total=rows.reduce((sum,row)=>sum+row.granted_minutes,0);
-    var duration=' <span class="small text-muted">(총 '+escapeHtml(formatAccrualMinutes(total))+')</span>';
-    var html='<section class="leave-report-card leave-report-first-year" data-leave-first-year-summary>'
-      +'<h6 class="leave-report-heading">1년 미만 연차 · <strong>'+rows.length+'일 발생</strong>'+duration+'</h6>'
-      +'<details class="leave-report-disclosure" data-leave-monthly-history><summary>월별 발생 기록</summary>'
-      +'<ul class="leave-list">';
+    var used=rows.reduce((sum,row)=>sum+row.used_minutes,0);
+    var left=rows.reduce((sum,row)=>sum+row.available_minutes,0);
+    var bases=new Set(rows.map(row=>row.granted_minutes));
+    var usedText=used===total?rows.length+'일':used===0?'0일':bases.size===1
+      ?formatReportAmount(used,rows[0].granted_minutes):formatAccrualMinutes(used);
+    var totalText='발생 '+rows.length+'일 · 사용 '+usedText+' · 잔여 '+formatLeaveBalanceMinutes(left,dayMinutes);
+    var month=row=>row.issued_on.slice(0,7).replace('-','.');
+    var range=month(rows.at(-1))+(month(rows[0])===month(rows.at(-1))?'':'~'+month(rows[0]));
+    var heading='입사 1년 미만 연차 <span class="text-muted">'+escapeHtml(range)+'</span>';
+    var html=ended
+      ?'<details class="leave-report-archive" data-leave-archive data-leave-first-year-summary><summary>'+heading
+        +'<span class="d-block ps-3">'+escapeHtml(totalText)+'</span></summary><div class="leave-report-history-body" data-leave-monthly-history>'
+      :'<section class="leave-report-card leave-report-first-year" data-leave-first-year-summary><h6 class="leave-report-heading">'
+        +heading+'</h6><div class="small mt-1">'+escapeHtml(totalText)+'</div>'
+        +'<details class="leave-report-disclosure" data-leave-monthly-history><summary>월별 발생 기록</summary>';
+    html+='<p class="small text-muted mb-2">발생 '+escapeHtml(formatAccrualMinutes(total))
+      +' · 사용 '+escapeHtml(formatAccrualMinutes(used))+'</p><ul class="leave-list">';
     rows.forEach(function(row){
       var basis=row.granted_minutes;
       var fields=['발생 1일 ('+formatAccrualMinutes(basis)+')'];
       if(row.used_minutes>0)fields.push('사용 '+formatReportAmount(row.used_minutes,basis));
       if(row.held_minutes>0)fields.push('예정·결재 중 '+formatReportAmount(row.held_minutes,basis));
-      if(row.available_minutes>0)fields.push('사용 가능 '+formatAccrualMinutes(row.available_minutes));
+      if(row.available_minutes>0)fields.push('사용 가능 '+formatLeaveBalanceMinutes(row.available_minutes,basis));
       html+='<li data-leave-issued-on="'+escapeHtml(row.issued_on)+'"><time datetime="'+escapeHtml(row.issued_on)+'">'
         +escapeHtml(formatDotDate(row.issued_on))+'</time> · '+escapeHtml(fields.join(' · '))+'</li>';
     });
-    return html+'</ul></details></section>';
+    return html+(ended?'</ul></div></details>':'</ul></details></section>');
   }
 
   function hasFiscalReport(fiscal) {
@@ -823,24 +915,23 @@
     var amount=value=>grantBasis===dayMinutes?formatReportAmount(value,dayMinutes)
       :(value<0?'−':'')+formatAccrualMinutes(Math.abs(value));
     var metrics=[
-      ['기본',granted],
-      ['조정',(fiscal.adjustment_minutes>0?'+':'')+amount(fiscal.adjustment_minutes)],
-      ['사용',amount(fiscal.used_minutes)]
+      ['기본 발생',granted,fiscal.issued_on],
+      ['조정 합계',(fiscal.adjustment_minutes>0?'+':'')+amount(fiscal.adjustment_minutes)],
+      ['사용 합계',amount(fiscal.used_minutes)]
     ];
     if(fiscal.available_minutes!==null&&fiscal.available_minutes!==totalAvailable){
-      metrics.push(['사용 가능',formatAccrualMinutes(fiscal.available_minutes)]);
+      metrics.push(['회계연도 잔여',formatLeaveBalanceMinutes(fiscal.available_minutes,dayMinutes)]);
     }
     return '<dl class="leave-fiscal-metrics" data-leave-fiscal>'+metrics.map(pair=>
-      '<div><dt>'+pair[0]+'</dt><dd>'+escapeHtml(pair[1])+'</dd></div>').join('')+'</dl>';
+      '<div><dt>'+pair[0]+(pair[2]?'<time datetime="'+escapeHtml(pair[2])+'">'+escapeHtml(formatDotDate(pair[2]))+'</time>':'')
+      +'</dt><dd>'+escapeHtml(pair[1])+'</dd></div>').join('')+'</dl>';
   }
 
   function buildLeaveAdjustmentListHtml(adjustments,automatic,expiryBasis) {
     var html = '<ul class="leave-list">';
-    var rows = (Array.isArray(adjustments) ? adjustments : []).map(item=>({item,date:automatic?formatKstIsoDate(item?.created_at):''}));
-    if(automatic){
-      rows.push({automatic,date:automatic.date});
-      rows.sort((a,b)=>b.date.localeCompare(a.date));
-    }
+    var rows = (Array.isArray(adjustments) ? adjustments : []).map(item=>({item,date:item?.created_at?formatKstIsoDate(item.created_at):''}));
+    if(automatic)rows.push({automatic,date:automatic.date});
+    rows.sort((a,b)=>b.date.localeCompare(a.date));
     if (rows.length > 0) {
       rows.forEach(function (row) {
         if(row.automatic){
@@ -854,7 +945,8 @@
         var minutes=Number(item?.days)*480*(positive?1:-1);
         var toneClass = positive ? 'text-success' : 'text-danger';
         var prefix = minutes>0 ? '+' : '';
-        html += '<li><span class="' + toneClass + ' fw-bold">[' + escapeHtml(item && item.adj_type || '') + ']</span> '
+        html += '<li>'+(row.date?'<time datetime="'+escapeHtml(row.date)+'">'+escapeHtml(formatDotDate(row.date))+'</time> · ':'')
+          + '<span class="' + toneClass + ' fw-bold">[' + escapeHtml(item && item.adj_type || '') + ']</span> '
           + escapeHtml(item && item.reason || '')
           + ' (' + prefix + escapeHtml(formatReportAmount(minutes,Number(item?.basis_day_minutes)||480)) + ')'
           + (item?.leave_kind==='extra'?'<div class="text-secondary small">추가 휴가 · 근로일 '+escapeHtml(item.work_date||'')+' · 근로 '+Number(item.worked_minutes||0)/60+'시간 · 부여 '+Number(item.granted_minutes||0)/60+'시간</div>':'') + '</li>';
@@ -905,7 +997,8 @@
     var yearMap = {};
     var grants=new Map((accrual.years||[]).map(row=>[row.year,row]));
     var expiry=accrual.state==='ready'?accrual.automatic_adjustments[0]:null;
-    var firstRows=(accrual.years||[]).flatMap(year=>year.first_year).sort((a,b)=>a.issued_on.localeCompare(b.issued_on));
+    var firstRows=(accrual.years||[]).flatMap(year=>year.first_year).sort((a,b)=>b.issued_on.localeCompare(a.issued_on));
+    var firstYearEnded=accrual.as_of>=accrual.first_year_expires_on;
     var expiryBases=new Set(firstRows.filter(row=>row.expired_minutes>0).map(row=>row.granted_minutes));
     var expiryBasis=expiryBases.size===1?expiryBases.values().next().value:null;
     Object.keys(summary.byYear || {}).forEach(function (key) {
@@ -944,13 +1037,13 @@
     });
 
     var years = Object.keys(yearMap).map(Number).filter(Number.isFinite).sort(function (a, b) { return b - a; });
-    var html = '<div class="leave-report">';
+    var currentHtml='', upcomingHtml='', archive=[];
     if(accrual.state==='ready'){
-      html+='<p class="leave-report-balance mb-0" data-leave-today-available><span>오늘 사용 가능</span> <strong>'
-        +escapeHtml(formatAccrualMinutes(accrual.available_minutes))+'</strong></p>';
-      html+=buildFirstYearGrantSummary(firstRows);
+      currentHtml+='<div class="leave-report-balance" data-leave-today-available><div><span>오늘 사용 가능</span>'
+        +'<small>하루 '+escapeHtml(formatAccrualMinutes(accrual.day_minutes))+' 기준</small></div><strong>'
+        +escapeHtml(formatLeaveBalanceMinutes(accrual.available_minutes,accrual.day_minutes))+'</strong></div>';
     }else{
-      html+='<p class="text-muted mb-0">'+(accrual.state==='no_hire'?'발생 내역을 보려면 입사일을 확인해 주세요.':'연차 계산 대상이 아닙니다.')+'</p>';
+      currentHtml+='<p class="text-muted mb-0">'+(accrual.state==='no_hire'?'발생 내역을 보려면 입사일을 확인해 주세요.':'연차 계산 대상이 아닙니다.')+'</p>';
     }
     years.forEach(function (year) {
       var key = String(year);
@@ -964,11 +1057,12 @@
       var hasHistory=Boolean(auto||manual.length||pendingSummary.docs.length||reviewByYear[key]?.length
         ||yearSummary.reservedDocs?.length||yearSummary.pastOrUsedDocs?.length||yearSummary.unknownDateDocs?.length);
       if(!hasFiscal&&!hasHistory)return;
-      html+='<section class="leave-report-card" data-leave-accrual-year="'+year+'"><h6 class="leave-report-heading">'
-        +year+'년 '+(hasFiscal?'회계연도':'기록')+'</h6>';
+      var title=year+'년 '+(hasFiscal?'회계연도 기록':year>currentYear?'예정 기록':'기록'), past=year<currentYear;
+      var html=past?'<details class="leave-report-archive" data-leave-archive data-leave-accrual-year="'+year
+        +'"><summary>'+title+'</summary><div class="leave-report-history-body">'
+        :'<section class="leave-report-card" data-leave-accrual-year="'+year+'"><h6 class="leave-report-heading">'+title+'</h6>';
       if(hasFiscal)html+=buildFiscalReportMetrics(fiscal,grantBasis,dayMinutes,accrual.available_minutes);
-      if(!hasHistory){html+='</section>';return;}
-      html+='<details class="leave-report-disclosure"><summary>조정·사용 기록</summary>';
+      if(hasHistory)html+='<div class="leave-report-records">';
       if(auto||manual.length){
         html += '<div class="leave-section"><h6>조정 내역</h6>'
           + buildLeaveAdjustmentListHtml(manual,auto,expiryBasis) + '</div>';
@@ -996,7 +1090,7 @@
           formatLeaveDocType: opts.formatLeaveDocType,
           emptyText: '- 없음 -'
         }) + '</div>';
-      if(yearSummary.pastOrUsedDocs?.length)html += '<div class="leave-section"><h6>사용/처리 내역 <span class="text-danger">−' + format(yearSummary.pastOrUsedDays || 0) + '</span></h6>'
+      if(yearSummary.pastOrUsedDocs?.length)html += '<div class="leave-section"><h6>해당 연도 사용/처리 내역 <span class="text-danger">−' + format(yearSummary.pastOrUsedDays || 0) + '</span></h6>'
         + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.pastOrUsedDocs), {
           formatDate: opts.formatDate,
           formatLeaveDocType: opts.formatLeaveDocType,
@@ -1010,10 +1104,23 @@
             emptyText: '- 없음 -'
           }) + '</div>';
       }
-      html += '</details></section>';
+      if(hasHistory)html+='</div>';
+      html+=past?'</div></details>':'</section>';
+      if(past)archive.push({date:year+'-12-31',html});
+      else if(year===currentYear)currentHtml+=html;
+      else upcomingHtml+=html;
     });
-    html += '</div>';
-    return html;
+    var first=buildFirstYearGrantSummary(firstRows,accrual.day_minutes,firstYearEnded);
+    if(firstYearEnded&&first)archive.push({date:accrual.first_year_expires_on,html:first});
+    else currentHtml+=first;
+    var history=archive.sort((a,b)=>b.date.localeCompare(a.date)).map(row=>row.html).join('')
+      ||'<p class="text-muted mb-0">지난 연차 기록이 없습니다.</p>';
+    var id=opts.dialogId&&/^[A-Za-z][A-Za-z0-9-]*$/.test(opts.dialogId)?opts.dialogId:'leaveDetailModal';
+    return '<div class="leave-report" data-leave-detail-report>'
+      +'<section class="leave-report-panel" data-leave-panel="current" id="'+id+'Current" aria-labelledby="'+id+'CurrentButton">'
+      +currentHtml+upcomingHtml+'</section>'
+      +'<section class="leave-report-panel" data-leave-panel="history" id="'+id+'History" aria-labelledby="'+id+'HistoryButton" hidden>'
+      +history+'</section></div>';
   } // End of buildLeaveDetailReportHtml
 
   function setDeductibleSubTypes(subTypes) {
@@ -1052,6 +1159,8 @@
     getLeaveStatusBadgeHtml: getLeaveStatusBadgeHtml,
     renderLeaveDocListHtml: renderLeaveDocListHtml,
     ensureLeaveDetailStyles: ensureLeaveDetailStyles,
+    prepareLeaveDetailDialog: prepareLeaveDetailDialog,
+    formatLeaveBalance: formatLeaveBalance,
     buildLeaveDetailReportHtml: buildLeaveDetailReportHtml,
     summarizeLeaveDocs: summarizeLeaveDocs,
     summarizePendingLeaveHolds: summarizePendingLeaveHolds,

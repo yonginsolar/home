@@ -62,7 +62,7 @@ Change: 2026-11-20 - 조합 설정 기본정보 병렬 조회.
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=1.0.12"></script>
   <script src="leave_time.js?v=20261012-2"></script>
-  <script src="leave_ledger.js?v=20261122-accrual-display-2"></script>
+  <script src="leave_ledger.js?v=20261122-leave-detail-tabs-3"></script>
   <script src="sun_village_total_manager_admin.js?v=1.0.6" defer></script>
   <script src="employee_leave_report.js?v=1.0.4" defer></script>
 
@@ -771,7 +771,22 @@ Change: 2026-11-20 - 조합 설정 기본정보 병렬 조회.
 <div class="modal fade" id="adminCertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">📄 재직증명서 발급</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted mb-1">발급 용도</label><select id="adminCertPurpose" class="form-select form-select-sm" onchange="toggleAdminEtc()"><option value="관공서 제출용">관공서 제출용</option><option value="금융기관 제출용">금융기관 제출용</option><option value="기타">기타 (직접 입력)</option></select><input type="text" id="adminCertEtc" class="form-control form-control-sm mt-2" placeholder="직접 입력" style="display:none;"></div><div class="modal-footer p-1 border-0 justify-content-center"><button class="btn btn-primary btn-sm w-100" onclick="reqIssueCert()">발급 및 인쇄</button></div></div></div></div>
 <div class="modal fade" id="orgChartModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">🏢 조직도</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="small text-muted mb-3">부서/직급 설정을 저장하면 그 구조를 조직도에 반영합니다. 저장된 부서가 없으면 현재 등록된 직원의 부서명을 기준으로 임시 조직도를 구성합니다.</div><div id="orgChartBody" class="org-tree"></div></div><div class="modal-footer p-2 border-0"><button class="btn btn-outline-primary btn-sm" type="button" onclick="renderOrgChart()">새로고침</button><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
 <div class="modal fade" id="ledgerModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">📊 급여대장 출력</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted mb-1" for="ledgerMonth">대상 연월</label><input data-erp-query-control type="month" id="ledgerMonth" class="form-control"></div><div class="modal-footer p-1 border-0 justify-content-center"><button class="btn btn-primary btn-sm w-100" onclick="printLedger()">대장 출력 (A4 가로)</button></div></div></div></div>
-<div class="modal fade" id="adminLeaveDetailModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold">연차 상세 리포트</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-3"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
+<div class="modal fade leave-detail-dialog" id="adminLeaveDetailModal" tabindex="-1" aria-labelledby="adminLeaveDetailModalTitle">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header bg-light">
+        <h6 class="modal-title fw-bold" id="adminLeaveDetailModalTitle">연차 상세</h6>
+        <div class="leave-detail-views" role="group" aria-label="연차 보기 전환" aria-hidden="true">
+          <button class="btn btn-sm" type="button" id="adminLeaveDetailModalCurrentButton" data-leave-view="current" aria-pressed="true" aria-controls="adminLeaveDetailModalCurrent" disabled>현재 연차</button>
+          <button class="btn btn-sm" type="button" id="adminLeaveDetailModalHistoryButton" data-leave-view="history" aria-pressed="false" aria-controls="adminLeaveDetailModalHistory" disabled>지난 기록</button>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="연차 상세 닫기"></button>
+      </div>
+      <div class="modal-body p-3"></div>
+      <div class="modal-footer justify-content-center p-1 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div>
+    </div>
+  </div>
+</div>
 <div class="modal fade" id="bulkLeaveModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
     <div class="modal-content">
@@ -1844,9 +1859,8 @@ function ensureEmployeeLeaveTab({force = false, allowBusy = false} = {}) {
             })]);
             if (!isCurrent() || !result) return false;
             currentEmployeeLeaveSnapshot = result.snapshot;
-            const units = result.snapshot.effectiveRemainDays;
-            const minutes = units == null || units === '' ? NaN : Number(units) * CoopLeaveTime.dayMinutes;
-            document.getElementById('displayLeaveRemain').innerText = Number.isFinite(minutes) && minutes >= 0 ? CoopLeaveTime.formatMinutes(minutes) : '—';
+            document.getElementById('displayLeaveRemain').innerText = window.LeaveLedger?.formatLeaveBalance?.(
+                result.snapshot.effectiveRemainDays,result.snapshot.workBasis?.day_minutes)||'—';
             extraLeaveAccess = result.extraAllowed;
             document.querySelector('#logType option[value="extra"]').disabled = !extraLeaveAccess;
             entry.result = result; entry.ready = true;
@@ -9007,6 +9021,7 @@ async function showAdminLeaveDetail() {
     if (!currentEmpId) return showAlert('직원을 먼저 선택해주세요.');
     const el = document.getElementById('adminLeaveDetailModal');
     if (!el || !adminLeaveDetailModal || !window.EmployeeLeaveReport) return;
+    window.LeaveLedger?.prepareLeaveDetailDialog?.(el);
     return window.EmployeeLeaveReport.open({
         root:el, modal:() => adminLeaveDetailModal,
         parent:() => ({root:document.getElementById('detailModal'),modal:detailModal}),
@@ -9032,7 +9047,7 @@ async function readAdminLeaveDetailReport(read) {
         columns:'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot'
     });
     if(!read.isCurrent())return null;
-    return ledger.buildLeaveDetailReportHtml({...report,
+    return ledger.buildLeaveDetailReportHtml({...report,dialogId:'adminLeaveDetailModal',
         formatDate:formatAdminEmployeeKstDate,formatLeaveDocType:formatAdminEmployeeLeaveDocType});
 } // End of showAdminLeaveDetail
 
