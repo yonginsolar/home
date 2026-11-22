@@ -1186,14 +1186,18 @@
           formatLeaveDocType: opts.formatLeaveDocType,
           emptyText: '- 없음 -'
         }) + '</div>';
-      if(yearSummary.pastOrUsedDocs?.length)html += '<div class="leave-section"><h6>'
+      if(yearSummary.pastOrUsedDocs?.length){
+        var usedDays=yearSummary.pastOrUsedDays || 0;
+        var usedAmount=isCurrent?formatLeaveBalanceMinutes(usedDays*480,accrual.day_minutes):'−'+format(usedDays);
+        html += '<div class="leave-section"><h6>'
         + (isCurrent?'올해 전체 사용 내역':'해당 연도 사용/처리 내역')
-        + ' <span class="text-danger">−' + format(yearSummary.pastOrUsedDays || 0) + '</span></h6>'
+        + ' <span class="text-danger">' + usedAmount + '</span></h6>'
         + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.pastOrUsedDocs), {
           formatDate: opts.formatDate,
           formatLeaveDocType: opts.formatLeaveDocType,
           emptyText: '- 없음 -'
         }) + '</div>';
+      }
       if (Array.isArray(yearSummary.unknownDateDocs) && yearSummary.unknownDateDocs.length > 0) {
         html += '<div class="leave-section"><h6>ℹ️ 일자 미확인 내역</h6>'
           + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.unknownDateDocs), {
