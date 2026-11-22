@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Persistent ERP workspace v1.2.15 — reuse an explicitly validated internal task route. */
+/* Persistent ERP workspace v1.2.16 */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -63,7 +63,9 @@
         if (draftStatus === 'saved' && node.closest('#draftForm')) continue;
         if (fieldValue(node) !== original) return true;
       }
-    } catch (_) { return true; }
+    } catch (_) {
+      return !(entry.initialFrameFailed && !entry.openedDocument && entry.frame.inert && entry.fields.size === 0);
+    }
     return false;
   }
   function fieldValue(node) {
@@ -270,6 +272,7 @@
     timer = setTimeout(() => {
       clearTimeout(probeTimer);
       if (preparedFrame(activeEntry, transition)) return;
+      noteInitialFrameFailure(activeEntry);
       status.hidden = true; error.hidden = false;
     }, 25000);
   }
@@ -360,7 +363,7 @@
     // Query/hash and the allowlisted route remain unchanged; no task or permission data is cached.
     taskUrl.pathname = taskUrl.pathname.replace(/\.html$/, '');
     nextFrame.id = 'erpWorkspaceFrame'; nextFrame.className='erp-workspace-task';
-    nextFrame.title = previous.frame.title; nextFrame.loading = 'eager';
+    nextFrame.title = previous.frame.title; nextFrame.loading = 'eager'; nextFrame.inert = true;
     activeEntry={frame:nextFrame,route:target,fields:new Map()};
     setFeature(activeEntry,feature);
     const entry=activeEntry;
@@ -457,6 +460,12 @@
     entry.frame.contentWindow.addEventListener('beforeprint', () => setPrintLock(entry,!canPrint(entry)));
     entry.frame.contentWindow.addEventListener('hashchange', () => { if (activePrintState(entry)) syncFrame(); });
   }
+  function noteInitialFrameFailure(entry) {
+    if (entry !== activeEntry || entry.openedDocument || !entry.frame.inert || requested !== entry.route) return;
+    // Allow replacement only if the unreadable frame has never accepted task input.
+    try { void entry.frame.contentWindow.location.href; }
+    catch (_) { entry.initialFrameFailed = true; }
+  }
   function syncFrame() {
     try {
       const child = frame.contentWindow, href = child.location.href;
@@ -469,6 +478,8 @@
         else { lockPrint(); status.hidden = true; error.hidden = false; }
         return;
       }
+      activeEntry.openedDocument = true;
+      activeEntry.initialFrameFailed = false;
       if (retained.get(activeEntry.route)===activeEntry && activeEntry.route!==next) retained.delete(activeEntry.route);
       activeEntry.route = next; current = next; requested = '';
       printableEntry = activeEntry;
@@ -480,7 +491,10 @@
       window.ErpWorkspace.setDocument(child.document, href);
       deliverFeature(activeEntry);
       status.hidden = true; error.hidden = true; cancelLoading();
-    } catch (_) { lockPrint(); status.hidden = true; error.hidden = false; }
+    } catch (_) {
+      noteInitialFrameFailure(activeEntry);
+      cancelLoading(); lockPrint(); status.hidden = true; error.hidden = false;
+    }
   }
   function deliverFeature(entry){
     if(entry.feature?.startsWith('tab:')){
@@ -544,7 +558,11 @@
       if (!requested && current === entry.route && attached.has(entry.frame.contentDocument)) return;
     } catch (_) {}
     syncFrame();
-    try { attachDocument(frame.contentDocument, entry); } catch (_) {}
+    if (entry.openedDocument) {
+      try { attachDocument(frame.contentDocument, entry); }
+      catch (_) {}
+      finally { entry.frame.inert = false; }
+    }
   }
   async function authorizeDocumentBox(child, doc) {
     const entry = activeEntry, ticket = transition;

@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.2
-Change: 2026-11-21 - 같은 조합 직원 명부의 정확한 일치로 간단히 보기 이름 보완.
+Version: v1.2.3
+Change: 2026-11-22 - 모바일 검색 조건 접기 및 적용 조건 표시.
 -->
 <html lang="ko">
 <head>
@@ -16,7 +16,7 @@ Change: 2026-11-21 - 같은 조합 직원 명부의 정확한 일치로 간단�
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.2.2 | audit_logs.html');</script>
+  <script>console.log('[Version] v1.2.3 | audit_logs.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -59,10 +59,14 @@ Change: 2026-11-21 - 같은 조합 직원 명부의 정확한 일치로 간단�
     .audit-simple-actor { width: 23%; }
     .audit-when span { display: block; }
     .audit-action-note { display: block; white-space: pre-line; margin-top: .2rem; font-size: .875em; }
+    #auditFilterDisclosure { display: none; }
     @media (max-width: 575px) {
       body.erp-page-audit { padding: 8px; }
       body.erp-unified.erp-page-audit .main-container { padding: 12px !important; }
       [data-audit-view="simple"] #auditResults :is(th,td) { padding-inline: .35rem; }
+      #auditFilterDisclosure { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem .65rem; }
+      #auditFilterSummary { overflow-wrap: anywhere; min-width: 0; }
+      .audit-filter-collapsed #auditSearchForm:not(:focus-within) { display: none; }
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
@@ -78,6 +82,10 @@ Change: 2026-11-21 - 같은 조합 직원 명부의 정확한 일치로 간단�
       <button class="btn btn-outline-secondary btn-sm" onclick="location.href='index.html'" data-erp-home-link>🏠 메뉴로</button>
     </div>
 
+    <div id="auditFilterDisclosure" class="mb-2">
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="auditFilterToggle" aria-controls="auditSearchForm" aria-expanded="false">검색 조건</button>
+      <span id="auditFilterSummary" class="small text-muted" hidden></span>
+    </div>
     <form id="auditSearchForm" class="card p-3 mb-3">
       <div class="row g-2 align-items-end">
         <div class="col-12 col-md-2">
@@ -271,6 +279,21 @@ function auditFilterValues() {
     .map(id => document.getElementById(id).value);
 }
 
+function updateAuditFilterSummary() {
+  const summary = document.getElementById('auditFilterSummary');
+  if (!auditAppliedFilter) { summary.textContent = ''; summary.hidden = true; return; }
+  const [source, start, end, action, actor] = JSON.parse(auditAppliedFilter);
+  const label = {erp:'ERP 로그',admin:'플랫폼 변경',all:'전체 로그'}[source] || '전체 로그';
+  const period = start || end ? `${start || '처음'} ~ ${end || '현재'}` : '';
+  summary.textContent = [label, period, action.trim() && '작업 ' + action.trim(), actor.trim() && '실행자 ' + actor.trim()].filter(Boolean).join(' · ');
+  summary.hidden = false;
+}
+
+function clearAuditFilterSummary() {
+  auditAppliedFilter = '';
+  updateAuditFilterSummary();
+}
+
 function auditResultsMatchFilter() {
   return !!(auditBootReady && auditReadOwner.userId && auditAppliedFilter
     && auditAppliedFilter === JSON.stringify(auditFilterValues()));
@@ -362,6 +385,7 @@ async function bootAudit(epoch, context) {
       interruptAuditRead();auditReadRefreshNeeded = false;auditBootReady = false;
       auditBootPending = null;
       cachedLogs = [];
+      clearAuditFilterSummary();
       currentPage = 0;
       document.getElementById('logBody').innerHTML = '';
       document.getElementById('btnMore').classList.add('hidden');
@@ -377,6 +401,12 @@ async function bootAudit(epoch, context) {
   await loadLogs(true);
 }
 window.onload = startAudit;
+
+document.body.classList.add('audit-filter-collapsed');
+document.getElementById('auditFilterToggle').addEventListener('click', event => {
+  const collapsed = document.body.classList.toggle('audit-filter-collapsed');
+  event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
+});
 
 document.getElementById('auditSearchForm').addEventListener('submit', event => {
   event.preventDefault();if (event.isComposing) return;
@@ -529,6 +559,7 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
   if (!await auditReadAuthorized(owner, request)) {
     if (isCurrent()) {
       cachedLogs = [];
+      clearAuditFilterSummary();
       document.getElementById('logBody').innerHTML = '';
       currentPage = 0;
       document.getElementById('btnMore').classList.add('hidden');
@@ -540,6 +571,7 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
   if (!isCurrent()) return;
   cachedLogs = reset ? list : cachedLogs.concat(list);
   auditAppliedFilter = filterKey;
+  updateAuditFilterSummary();
   renderLogs(list, reset);
   currentPage = offset / pageSize + 1;
   auditReadRefreshNeeded = false;
@@ -550,6 +582,7 @@ async function loadAuditPage(reset, offset, owner, sequence, filterKey, allowHid
     if (error?.code === '42501') {
       auditBootReady = false;
       cachedLogs = [];
+      clearAuditFilterSummary();
       document.getElementById('logBody').innerHTML = '';
       document.getElementById('btnMore').classList.add('hidden');
     }

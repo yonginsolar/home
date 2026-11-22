@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.211
-Change: 2026-11-20 - 조합 설정 기본정보 병렬 조회.
+Version: v1.0.212
+Change: 2026-11-22 - 권한·마을 조회 대기 단축 및 직원 목록의 숨은 설정 조회 지연.
 -->
 <html>
 <head>
@@ -15,7 +15,7 @@ Change: 2026-11-20 - 조합 설정 기본정보 병렬 조회.
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.211 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.212 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
   <meta charset="UTF-8">
@@ -3650,7 +3650,7 @@ function setHrBootStateReady() {
     const loadingEl = document.getElementById('hrLoadingScreen');
     const shellEl = document.getElementById('hrPageShell');
     if (loadingEl) loadingEl.classList.add('hidden');
-    if (shellEl && !window.ERPEmployeeSettingsView.isPage) shellEl.classList.remove('hidden');
+    if (shellEl && hrSettingsAuthorized && !coopProfileAuthInvalidated && !window.ERPEmployeeSettingsView.isPage) shellEl.classList.remove('hidden');
 }
 
 window.onload = async function() {
@@ -3758,12 +3758,18 @@ window.onload = async function() {
     myInfo = hrUserGate.user;
     hrAuthorizedUserId = String(hrUserGate.authUser?.id || '');
     _supabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'||(session?.user?.id&&session.user.id!==hrAuthorizedUserId)){coopProfileAuthInvalidated=true;document.getElementById('employeeAiConnections').hidden=true;closeEmployeeAiConnections?.();interruptEmployeeAuxReads('',true);window.HrContractFollowup?.invalidateOwner(getHrSettingsOwner());window.ERPPermissionSettings?.invalidate();window.MemberAdmissionPolicy?.clear();}});
+    // The village classification does not depend on the existing permission lookup.
+    const permissionsRead = loadPermissions(myInfo).then(permissions => ({permissions}), error => ({error}));
     const villageWorkspace = await _supabase.rpc('sun_village_workspace_context');
+    if (coopProfileAuthInvalidated) return;
     if (!villageWorkspace.error && villageWorkspace.data?.workspaces?.some(item => item?.is_current === true && item?.is_management_coop === false)) {
         location.replace('village_company_info.html');
         return;
     }
-    permissionSet = await loadPermissions(myInfo);
+    const permissions = await permissionsRead;
+    if (coopProfileAuthInvalidated) return;
+    if (permissions.error) throw permissions.error;
+    permissionSet = permissions.permissions;
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
     const hasHrAdmin = permissionSet.size > 0 ? permissionSet.has('hr.admin') : hasHrAdminRoleFallback();
     if (!hasHrAdmin) {
@@ -3777,7 +3783,7 @@ window.onload = async function() {
         alertFn: function(msg) { showAlert(msg); },
         redirectUrl: 'index.html'
     });
-    if (!hrRuntimeGate.ok) return;
+    if (!hrRuntimeGate.ok || coopProfileAuthInvalidated) return;
     hrRuntimeProfile = String(hrRuntimeGate.runtime?.runtime_profile || 'legacy_full');
     applyHrRuntimeProfileUi();
 
@@ -3813,10 +3819,7 @@ window.onload = async function() {
     }
     if (!window.ERPEmployeeSettingsView.isPage) void window.ERPInitialSetupEmployee.attach(_supabase);
     if (window.ERPEmployeeSettingsView.isPage) await loadCoopSettingsMainReads({ refreshUi: true });
-    else {
-        await Promise.all([loadList(), loadCompanyInfo({throwOnError:true})]);
-        await loadSettings({ loadAuxiliary: false, throwOnError: true });
-    }
+    else await Promise.all([loadList(), loadCompanyInfo({throwOnError:true})]);
     applyHrRuntimeProfileUi();
     syncHrProfileCompanySettingsUi();
     syncHrStructureSettingsUi();
@@ -5292,7 +5295,7 @@ async function loadCompanyInfo({ throwOnError = false, refreshUi = true } = {}) 
         return;
     }
 
-    const { data, error } = await _supabase.from('ref_company_info').select('*').eq('coop_id', coopId);
+    const { data, error } = await _supabase.from('ref_company_info').select('key,value').eq('coop_id', coopId);
     if (owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     if (error) { if (throwOnError) throw error; return; }
     companyInfo = {};

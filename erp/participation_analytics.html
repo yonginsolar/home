@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.7 | 2026-11-15 · 참여 통계 조회·권한 재확인 지연 복구 -->
+<!-- Version: v1.0.9 | 2026-11-22 · 활동 목록 바로가기 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.8 | participation_analytics.html');</script>
+  <script>console.log('[Version] v1.0.9 | participation_analytics.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -40,6 +40,7 @@
     body { margin:0; min-height:100vh; background:#eef4fb; color:#0f172a; }
     .page-shell { max-width:1380px; margin:0 auto; padding:26px 20px 56px; }
     .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:20px; }
+    #activityListHeading { scroll-margin-block-start: 1rem; }
     .page-kicker { color:#2563eb; font-size:.78rem; font-weight:850; letter-spacing:.08em; margin-bottom:5px; }
     .page-title { margin:0; font-size:1.72rem; font-weight:900; }
     .page-subtitle { color:#64748b; margin-top:7px; font-size:.94rem; }
@@ -145,6 +146,7 @@
         <div class="page-subtitle">개별 명단 대신 교육·회의·퀴즈·선거의 전체 참여 흐름과 활동별 반응을 확인합니다.</div>
       </div>
       <div class="page-actions d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="activityListJump" aria-controls="activityList" disabled>활동 목록으로</button>
         <button type="button" class="btn btn-outline-primary btn-sm" onclick="location.href='admin_member.html?scope=member_admin&amp;tab=members'">조합원별 상세</button>
         <button type="button" class="btn btn-outline-secondary btn-sm" onclick="location.href='index.html'" data-erp-home-link>ERP 메인</button>
       </div>
@@ -207,9 +209,9 @@
       </div>
     </section>
 
-    <section class="panel d-none" data-analytics-results>
+    <section class="panel d-none" id="activityList" aria-labelledby="activityListHeading" data-analytics-results>
       <div class="panel-title-row">
-        <div><h2 class="panel-title">활동별 조회</h2><div class="panel-desc" id="activityCountText">활동을 불러오는 중입니다.</div></div>
+        <div><h2 class="panel-title" id="activityListHeading" tabindex="-1">활동별 조회</h2><div class="panel-desc" id="activityCountText">활동을 불러오는 중입니다.</div></div>
       </div>
       <div class="activity-table-wrap">
         <table class="activity-table">
@@ -271,6 +273,7 @@
       state.data = null; state.activities = [];
       analyticsDisplayedPeriod = '';
       document.querySelectorAll('[data-analytics-results]').forEach(el => el.classList.add('d-none'));
+      document.getElementById('activityListJump').disabled = true;
       document.getElementById('activityRows').replaceChildren();
       document.getElementById('generatedAt').textContent = '';
     }
@@ -300,7 +303,15 @@
     }
 
     function number(value) { return Number(value || 0).toLocaleString('ko-KR'); }
-    function percent(value) { return value === null || value === undefined ? '-' : `${Number(value).toLocaleString('ko-KR',{ maximumFractionDigits:1 })}%`; }
+    function numericRate(value) {
+      if (typeof value !== 'number' && !(typeof value === 'string' && value.trim())) return null;
+      const rate = Number(value);
+      return Number.isFinite(rate) ? rate : null;
+    }
+    function percent(value) {
+      const rate = numericRate(value);
+      return rate === null ? '-' : `${rate.toLocaleString('ko-KR',{ maximumFractionDigits:1 })}%`;
+    }
     function isoDate(date) {
       const parts = new Intl.DateTimeFormat('en-US', { timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(date);
       return ['year','month','day'].map(key => parts.find(part => part.type === key).value).join('-');
@@ -330,7 +341,7 @@
       rows.forEach(row => {
         row.group = groupFor(row.source_type);
         row.response_status = row.is_unopposed ? 'UNOPPOSED' : 'INSUFFICIENT';
-        row.response_metric = row.source_type === 'EDUCATION' ? Number(row.actual_participant_count || 0) : Number(row.participation_rate ?? NaN);
+        row.response_metric = row.source_type === 'EDUCATION' ? Number(row.actual_participant_count || 0) : numericRate(row.participation_rate);
         if (row.is_unopposed || !Number.isFinite(row.response_metric) || row.group === 'QUIZ' || row.group === 'VOTE') return;
         if (!groups.has(row.group)) groups.set(row.group, []);
         groups.get(row.group).push(row);
@@ -406,7 +417,7 @@
       const html = groups.map(group => {
         const rows = state.activities.filter(row => row.group === group);
         const engagements = rows.reduce((sum,row) => sum + Number(row.engagement_count || 0), 0);
-        const rates = rows.filter(row => !row.is_unopposed && row.participation_rate !== null).map(row => Number(row.participation_rate));
+        const rates = rows.filter(row => !row.is_unopposed).map(row => numericRate(row.participation_rate)).filter(rate => rate !== null);
         const unopposed = rows.filter(row => row.is_unopposed).length;
         const rateText = rates.length ? `평균 참여율 ${percent(rates.reduce((a,b)=>a+b,0)/rates.length)}` : group === 'EDUCATION' ? '실제 참가 규모로 비교' : '참여율 자료 없음';
         return `<div class="category-card"><div class="category-name">${escapeHtml(GROUP_LABELS[group])}</div><div class="category-main">${number(rows.length)}개 활동</div><div class="category-meta">참여 기록 ${number(engagements)}건<br>${escapeHtml(rateText)}${unopposed ? `<br>무투표 참여 인정 ${number(unopposed)}건` : ''}</div></div>`;
@@ -556,6 +567,7 @@
         renderAll();
         analyticsDisplayedPeriod = `${from}/${to}`;
         document.querySelectorAll('[data-analytics-results]').forEach(el => el.classList.remove('d-none'));
+        document.getElementById('activityListJump').disabled = false;
       } catch (error) {
         if (!isCurrent()) return;
         if (error?.code === '42501') clearAnalyticsResults();
@@ -574,6 +586,11 @@
         input.addEventListener('change', analyticsPeriodChanged);
       }
       document.getElementById('loadBtn').addEventListener('click', loadAnalytics);
+      document.getElementById('activityListJump').addEventListener('click', () => {
+        const heading = document.getElementById('activityListHeading');
+        heading.focus({preventScroll:true});
+        heading.scrollIntoView({block:'start'});
+      });
       document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => applyQuickPeriod(button.dataset.period)));
       ['typeFilter','responseFilter'].forEach(id => document.getElementById(id).addEventListener('change', renderActivityTable));
       document.getElementById('activitySearch').addEventListener('input', renderActivityTable);
