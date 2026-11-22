@@ -913,14 +913,44 @@
     return sign+(rest?(days?dayText+' ':'')+formatter.formatMinutes(rest):dayText);
   }
 
+  function readArchivedUsageMinutes(row) {
+    var item=row?._leave_item;
+    var read=(value,multiplier,whole=false)=>{
+      if(!(typeof value==='number'||(typeof value==='string'&&/^\d+(\.\d+)?$/.test(value))))return null;
+      var n=Number(value),minutes=Math.round(n*multiplier);
+      return n>0&&(!whole||Number.isSafeInteger(n))&&Number.isSafeInteger(minutes)&&minutes>0?minutes:null;
+    };
+    // A legacy document without dated items stores its debit in 480-minute units.
+    // Do not interpret a slot label or an unallocated remainder as confirmed time.
+    if(!item)return getLeaveSnapshotItems(row).length?null:read(row?.amount,480);
+    return read(item.deducted_minutes,1,true)
+      ??read(item.deducted_days??item.days,480)
+      ??read(item.deducted_hours??item.hours,60);
+  }
+
+  function formatArchivedUsageTotal(rows, units, deduct) {
+    var total=0,basis=null,uniform=true;
+    for(var row of rows){
+      var minutes=readArchivedUsageMinutes(row);
+      if(minutes===null||minutes!==Math.round(row._leave_amount*480))return '시간 확인 필요';
+      total+=minutes;
+      var rowBasis=row._leave_item?.basis_day_minutes;
+      if(!Number.isSafeInteger(rowBasis)||rowBasis<1||(basis!==null&&rowBasis!==basis))uniform=false;
+      else basis=rowBasis;
+    }
+    if(!Number.isSafeInteger(total)||total!==Math.round(units*480))return '시간 확인 필요';
+    return (deduct&&total>0?'−':'')+(uniform&&basis!==null?formatLeaveBalanceMinutes(total,basis):formatAccrualMinutes(total));
+  }
+
   function buildFirstYearGrantSummary(rows, dayMinutes, ended) {
     if(!rows.length)return '';
     var total=rows.reduce((sum,row)=>sum+row.granted_minutes,0);
     var used=rows.reduce((sum,row)=>sum+row.used_minutes,0);
     var left=rows.reduce((sum,row)=>sum+row.available_minutes,0);
     var bases=new Set(rows.map(row=>row.granted_minutes));
-    var usedText=used===total?rows.length+'일':used===0?'0일':bases.size===1
-      ?formatReportAmount(used,rows[0].granted_minutes):formatAccrualMinutes(used);
+    var usedText=ended?(bases.size===1?formatLeaveBalanceMinutes(used,rows[0].granted_minutes):formatAccrualMinutes(used))
+      :used===total?rows.length+'일':used===0?'0일':bases.size===1
+        ?formatReportAmount(used,rows[0].granted_minutes):formatAccrualMinutes(used);
     var totalText='발생 '+rows.length+'일 · 사용 '+usedText+' · 잔여 '+formatLeaveBalanceMinutes(left,dayMinutes);
     var month=row=>row.issued_on.slice(0,7).replace('-','.');
     var range=month(rows.at(-1))+(month(rows[0])===month(rows.at(-1))?'':'~'+month(rows[0]));
@@ -1142,13 +1172,13 @@
       var grantBasis=year<currentYear?entry?.day_minutes:entry?.grant_day_minutes;
       var format=value=>formatReportAmount(value*480,dayMinutes);
       var auto=expiry?.date.slice(0,4)===key?expiry:null,manual=adjustmentsByYear[key]||[];
-      var isCurrent=year===currentYear;
+      var isCurrent=year===currentYear,past=year<currentYear;
       var hasFiscal=!!fiscal&&(isCurrent||hasFiscalReport(fiscal)||manual.length>0);
       var hasHistory=Boolean(fiscal?.issued_on||auto||manual.length||pendingSummary.docs.length||reviewByYear[key]?.length
         ||yearSummary.reservedDocs?.length||yearSummary.pastOrUsedDocs?.length||yearSummary.unknownDateDocs?.length);
       if(!hasFiscal&&!hasHistory)return;
       var title=year+'년 '+(hasFiscal?(isCurrent?'잔여 계산':'회계연도 기록'):
-        year>currentYear?'예정 기록':'기록'), past=year<currentYear;
+        year>currentYear?'예정 기록':'기록');
       var html=past?'<details class="leave-report-archive" data-leave-archive data-leave-accrual-year="'+year
         +'"><summary>'+title+'</summary><div class="leave-report-history-body">'
         :'<section class="leave-report-card" data-leave-accrual-year="'+year+'"><h6 class="leave-report-heading">'+title+'</h6>';
@@ -1164,7 +1194,9 @@
           + buildLeaveAdjustmentListHtml(manual,auto,expiryBasis) + '</div>';
       }
       if (pendingSummary.docs.length > 0) {
-        html += '<div class="leave-section"><h6>⏳ 결재 예정 내역 <span class="text-warning">' + format(pendingSummary.days || 0) + ' 신청</span></h6>'
+        var pendingAmount=past?formatArchivedUsageTotal(pendingSummary.docs,pendingSummary.days,false):format(pendingSummary.days || 0);
+        html += '<div class="leave-section"><h6>⏳ 결재 예정 내역 <span class="text-warning">' + pendingAmount
+          + (pendingAmount==='시간 확인 필요'?'':' 신청') + '</span></h6>'
           + renderLeaveDocListHtml(sortLeaveRowsByDate(pendingSummary.docs), {
             formatDate: opts.formatDate,
             formatLeaveDocType: opts.formatLeaveDocType,
@@ -1180,7 +1212,8 @@
             formatDate:opts.formatDate,formatLeaveDocType:opts.formatLeaveDocType,amountClass:'text-warning'
           })+'</div>';
       }
-      if(yearSummary.reservedDocs?.length)html += '<div class="leave-section"><h6>결재완료(예정) 내역 <span class="text-primary">−' + format(yearSummary.reservedDays || 0) + '</span></h6>'
+      if(yearSummary.reservedDocs?.length)html += '<div class="leave-section"><h6>결재완료(예정) 내역 <span class="text-primary">'
+        + (past?formatArchivedUsageTotal(yearSummary.reservedDocs,yearSummary.reservedDays,true):'−'+format(yearSummary.reservedDays || 0)) + '</span></h6>'
         + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.reservedDocs), {
           formatDate: opts.formatDate,
           formatLeaveDocType: opts.formatLeaveDocType,
@@ -1188,7 +1221,8 @@
         }) + '</div>';
       if(yearSummary.pastOrUsedDocs?.length){
         var usedDays=yearSummary.pastOrUsedDays || 0;
-        var usedAmount=isCurrent?formatLeaveBalanceMinutes(usedDays*480,accrual.day_minutes):'−'+format(usedDays);
+        var usedAmount=isCurrent?formatLeaveBalanceMinutes(usedDays*480,accrual.day_minutes)
+          :past?formatArchivedUsageTotal(yearSummary.pastOrUsedDocs,usedDays,true):'−'+format(usedDays);
         html += '<div class="leave-section"><h6>'
         + (isCurrent?'올해 전체 사용 내역':'해당 연도 사용/처리 내역')
         + ' <span class="text-danger">' + usedAmount + '</span></h6>'
