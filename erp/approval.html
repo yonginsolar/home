@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.177 | approval.html');</script>
+  <script>console.log('[Version] v1.2.178 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -6325,7 +6325,9 @@ function getApprovalScopedCoopId() {
 }
 
 async function loadApprovalWorkflowContext() {
-    const { data, error } = await _supabase.rpc('erp_approval_workflow_context');
+    const owner=approvalFormReadOwner();
+    const {data,error}=await Promise.resolve(_supabase.rpc('erp_approval_workflow_context')).catch(error=>({error}));
+    if(!owner||owner!==approvalFormReadOwner())return null;
     if (error || !data || typeof data !== 'object') {
         CoopSafeLog.warn("approval workflow context unavailable", error);
         approvalWorkflowContext = null;
@@ -6495,10 +6497,11 @@ function getApprovalPublicAssetUrl(rawValue) {
 } // End of getApprovalPublicAssetUrl
 
 async function refreshApprovalCompanyInfo(coopId) {
+    const owner=approvalFormReadOwner();
     try {
         const { data, error } = await _supabase.from('ref_company_info').select('key,value').eq('coop_id', coopId);
         if (error) throw error;
-        if (getApprovalCoopId() !== coopId) return null;
+        if (!owner || owner!==approvalFormReadOwner() || getApprovalCoopId() !== coopId) return null;
         const nextInfo = {};
         (data || []).forEach((row) => {
             nextInfo[row.key] = row.value;
@@ -6558,7 +6561,7 @@ function applyApprovalEmployeeData(employees = []) {
         : [];
     allUsers = normalizedEmployees;
     populateDelegationTargets();
-    setDelegationDefaultPeriod();
+    if(!document.getElementById('delegationModal')?.classList.contains('show'))setDelegationDefaultPeriod();
 } // End of applyApprovalEmployeeData
 
 async function fetchApprovalEmployeesFromServer() {
@@ -6611,6 +6614,18 @@ async function loadApprovalEmployees() {
     }
     return await refreshApprovalEmployees();
 } // End of loadApprovalEmployees
+
+let approvalDirectoryEntry;
+function ensureApprovalEntryEmployees() {
+    const owner=approvalFormReadOwner();
+    if(!owner || window.frameElement?.hidden)return Promise.resolve([]);
+    if(approvalDirectoryEntry?.owner===owner && approvalDirectoryEntry.pending)return approvalDirectoryEntry.pending;
+    if(approvalDirectoryEntry?.owner===owner && ['ready','loading'].includes(approvalEmployeeDirectoryState))return Promise.resolve(allUsers);
+    const entry={owner,pending:null};
+    approvalDirectoryEntry=entry;
+    entry.pending=loadApprovalEmployees().finally(()=>{entry.pending=null;});
+    return entry.pending;
+}
 
 function refreshVisibleApprovalUserList() {
     if (window.frameElement?.hidden || activeApprovalTab !== 'draft' || !['approver','referrer'].includes(modalType)
@@ -10165,7 +10180,15 @@ function initializeApprovalEditor() {
         approvalMobileEditorListenerBound = true;
         approvalMobileEditorMedia.addEventListener('change', handleApprovalEditorViewportChange);
     }
-    scheduleApprovalIdleTask(() => {
+    if (activeApprovalTab==='draft') warmApprovalDraftEditor();
+}
+
+let approvalDraftEditorWarmed=false;
+function warmApprovalDraftEditor(){
+    if(approvalDraftEditorWarmed)return;
+    scheduleApprovalIdleTask(()=>{
+        if(activeApprovalTab!=='draft'||window.frameElement?.hidden||approvalDraftEditorWarmed)return;
+        approvalDraftEditorWarmed=true;
         void warmApprovalRichEditorAssets();
     });
 }
@@ -10980,8 +11003,14 @@ async function openDelegationModal() {
         showAlert('현재 환경에는 결재 위임 기능(DB RPC)이 설치되어 있지 않습니다.');
         return;
     }
+    if(openDelegationModal.pending)return;
+    const owner=approvalFormReadOwner(),tab=activeApprovalTab,revision=approvalEntryTabRevision;
+    if(!owner||window.frameElement?.hidden)return;
+    openDelegationModal.pending=true;
+    try{await Promise.all([ensureApprovalEntryEmployees(),loadDelegationContext({refreshTodo:false})]);}
+    finally{openDelegationModal.pending=false;}
+    if(owner!==approvalFormReadOwner()||tab!==activeApprovalTab||revision!==approvalEntryTabRevision||window.frameElement?.hidden)return;
     populateDelegationTargets();
-    await loadDelegationContext({ refreshTodo: false });
     if (delegationRpcUnavailable) {
         showAlert('현재 환경에는 결재 위임 기능(DB RPC)이 설치되어 있지 않습니다.');
         return;
@@ -11259,7 +11288,10 @@ function setupAttachmentDropZone() {
     updateAttachmentDropZoneUi();
 }
 
+let approvalEntryStarted=false;
 window.onload = async function() {
+    if(approvalEntryStarted)return;
+    approvalEntryStarted=true;
     if (window.ExpoRuntimeBridge) document.getElementById('expoApprovalExample').hidden = false;
     initializeApprovalRelatedModals();
     const userModalEl = document.getElementById('userModal');
@@ -11361,6 +11393,7 @@ window.onload = async function() {
     });
     if (window.frameElement) new MutationObserver(() => {
         if (window.frameElement?.hidden) return;
+        if(activeApprovalTab==='draft')void prepareApprovalDraftEntry();
         refreshApprovalExpenseForm();
         refreshApprovalPermissionForm();
         refreshApprovalRetentionLink();
@@ -11370,32 +11403,20 @@ window.onload = async function() {
     applyApprovalBootstrapSummary(bootstrapSummary);
     applyApprovalRuntimeProfileUi();
 
-    const companyInfoPromise = loadApprovalCompanyInfo();
-    const workflowContextPromise = loadApprovalWorkflowContext();
-    const employeePromise = loadApprovalEmployees();
+    // Even a read-only inbox uses the verified village/normal approval semantics.
+    approvalEntryWorkflow = loadApprovalWorkflowContext();
+    // Older leave documents without snapshots still use the cooperative's type labels.
+    approvalEntryCompany = loadApprovalCompanyInfo();
+    applyApprovalSchemaFeatureState(APPROVAL_VERIFIED_SCHEMA_FEATURES);
 
     const resolvedInitialTab = getApprovalEntryDefaultTab();
     const initialTab = getApprovalInitialTab(resolvedInitialTab);
     switchTab(initialTab, { skipLoad: true });
-    await loadApprovalTabData(initialTab, { render: true });
-
-    await companyInfoPromise;
-    initApprovalInsuranceNoticeReader();
-    applyApprovalRuntimeProfileUi();
-
-    // The directory applies its own latest reply. Do not reapply the older startup cache here.
-    await employeePromise;
-    await workflowContextPromise;
-    updateJeongyeolUi();
-    if (finalApprovers.length === 0 || isSunVillageApproval()) {
-        applyDefaultApprovalLineTemplate(true);
-    } else {
-        renderLinePreview();
-    }
-    renderRefPreview();
-    if (document.getElementById("chkProxy")?.checked) {
-        toggleProxyMode();
-    }
+    if(initialTab==='draft')void prepareApprovalDraftEntry();
+    const entryTabRevision=approvalEntryTabRevision;
+    const entryList=(initialTab==='todo'?approvalEntryWorkflow:Promise.resolve()).then(()=>{
+        if(entryTabRevision===approvalEntryTabRevision&&!window.frameElement?.hidden)return loadApprovalTabData(initialTab,{render:true});
+    });
     scheduleApprovalBackgroundRefresh(initialTab);
 
     const payrollMonthInput = document.getElementById("payrollMonth");
@@ -11469,7 +11490,6 @@ window.onload = async function() {
     }
 
     initializeApprovalEditor();
-    calculateLeave(); // 연차 계산 (대리상신 고려하여 함수 분리됨)
     const monthlyPanel = document.getElementById('secretaryMonthlyReportPanel');
     if (monthlyPanel) {
         monthlyPanel.classList.toggle('hidden', !isCurrentUserSecretaryGeneral() || !isApprovalJeongyeolFeatureEnabled());
@@ -11493,6 +11513,7 @@ window.onload = async function() {
     normalizeApprovalInitialComposerTitle();
     syncApprovalDraftStatusText();
     updateFileList();
+    await entryList;
     await openApprovalDocFromLocationIfNeeded();
     await window.ServiceContractApproval.load(_supabase);
     // Hold the existing composer in memory; resume refreshes reads, never rebuilds the form.
@@ -11516,6 +11537,38 @@ window.onload = async function() {
     }};
     window.ErpWorkspaceResume?.notifyReady?.();
 };
+document.addEventListener('DOMContentLoaded',()=>{void window.onload();},{once:true});
+
+let approvalEntryWorkflow,approvalEntryCompany,approvalDraftEntry,approvalEntryTabRevision=0;
+function prepareApprovalDraftEntry(){
+    const owner=approvalFormReadOwner();
+    if(!owner||activeApprovalTab!=='draft'||window.frameElement?.hidden)return Promise.resolve(false);
+    if(!approvalDraftEntry||approvalDraftEntry.owner!==owner){
+        const entry={owner,ready:false,applied:false,promise:null};
+        approvalDraftEntry=entry;
+        entry.promise=Promise.all([approvalEntryCompany,ensureApprovalEntryEmployees(),approvalEntryWorkflow]).then(()=>{
+            if(owner!==approvalFormReadOwner())return false;
+            entry.ready=true;
+            initApprovalInsuranceNoticeReader();
+            return true;
+        }).catch(()=>{if(approvalDraftEntry===entry)approvalDraftEntry=null;return false;});
+    }
+    const entry=approvalDraftEntry;
+    return entry.promise.then(ready=>{
+        if(!ready||entry!==approvalDraftEntry||owner!==approvalFormReadOwner()||activeApprovalTab!=='draft'||window.frameElement?.hidden)return false;
+        if(!entry.applied){
+            entry.applied=true;
+            updateJeongyeolUi();
+            if(!finalApprovers.length||isSunVillageApproval())applyDefaultApprovalLineTemplate(true);
+            else renderLinePreview();
+            renderRefPreview();
+            if(document.getElementById('chkProxy')?.checked)toggleProxyMode();
+            else void calculateLeave();
+        }
+        return true;
+    });
+}
+function approvalDraftEntryReady(){return approvalDraftEntry?.applied&&approvalDraftEntry.owner===approvalFormReadOwner();}
 
 async function loadPermissions(user) {
     const result = new Set();
@@ -13264,6 +13317,7 @@ function decorateTodoDelegation(doc) {
 
 function switchTab(tab, options = {}) {
     if(activeApprovalTab !== String(tab || 'draft').trim()){
+        ++approvalEntryTabRevision;
         invalidateApprovalMeetingNoticeRequest();
         invalidateApprovalSalaryExpenseRead();
         if(approvalPayoutState.loading)invalidateApprovalPayoutRead();
@@ -13281,27 +13335,35 @@ function switchTab(tab, options = {}) {
         document.getElementById('view-draft').classList.remove('hidden'); document.getElementById('tab1').classList.add('active');
         refreshApprovalExpenseForm();
         refreshApprovalPermissionForm();
+        if(shouldLoad&&approvalBootstrapReady){void prepareApprovalDraftEntry();warmApprovalDraftEditor();}
     }
     else if(tab==='todo') {
         if (!canProcessApprovals()) { showAlert("접근 권한이 없습니다."); switchTab('draft'); return; }
         document.getElementById('view-todo').classList.remove('hidden');
         document.getElementById('tab2').classList.add('active');
-        if (shouldLoad) void ensureTodoListLoaded();
+        if (shouldLoad) void loadApprovalOpenedList('todo');
     }
     else if (tab === 'pending') {
         document.getElementById('view-pending').classList.remove('hidden');
         document.getElementById('tab3').classList.add('active');
-        if (shouldLoad) void ensureHistoryListLoaded();
+        if (shouldLoad) void loadApprovalOpenedList('pending');
     }
     else {
         document.getElementById('view-history').classList.remove('hidden');
         document.getElementById('tab4').classList.add('active');
         refreshApprovalRetentionLink();
-        if (shouldLoad) void ensureHistoryListLoaded();
+        if (shouldLoad) void loadApprovalOpenedList(activeApprovalTab);
     }
     if (shouldWriteCache) {
         writeApprovalSummaryCache({ active_tab: activeApprovalTab });
     }
+}
+
+async function loadApprovalOpenedList(tab){
+    const revision=approvalEntryTabRevision,owner=approvalFormReadOwner();
+    if(tab==='todo')await approvalEntryWorkflow;
+    if(owner&&owner===approvalFormReadOwner()&&tab===activeApprovalTab&&revision===approvalEntryTabRevision&&!window.frameElement?.hidden)
+        return loadApprovalTabData(tab);
 }
 
 function jumpToApprovalDraftSection(button) {
@@ -14319,6 +14381,7 @@ async function openApprovalSubmitPreview() {
     try {
         initializeApprovalRelatedModals();
         if (approvalSubmitAttempt || window.frameElement?.hidden) return;
+        if(!approvalDraftEntryReady()){void prepareApprovalDraftEntry();return showAlert('기안 설정을 확인하고 있습니다. 잠시 뒤 미리보기를 다시 눌러 주세요.');}
         if (!approvalProxyDraftMatches()) return showAlert('기안 대상자를 다시 선택해 주세요.');
         const modalEl=document.getElementById('relViewModal'),waitOwner=approvalSubmitOwner(),waitRevision=approvalComposerInputRevision;
         if(modalEl?.dataset.submitPreviewClosing==='1'){
@@ -15521,6 +15584,7 @@ async function handleDraftSubmit(e) {
         return showAlert('상신하기 버튼을 직접 눌러야 상신할 수 있습니다.');
     }
     if (!canPerform('approval.submit')) return showAlert("상신 권한이 없습니다.");
+    if(!approvalDraftEntryReady()){void prepareApprovalDraftEntry();return showAlert('기안 설정 확인 뒤 다시 눌러 주세요.');}
     if (!approvalProxyDraftMatches()) return showAlert('기안 대상자를 다시 선택해 주세요.');
     if(approvalSubmitAttempt)return;
     const leaveBlock=getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock();
