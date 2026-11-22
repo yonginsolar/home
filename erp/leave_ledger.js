@@ -7,22 +7,31 @@
   var DEFAULT_RESERVED_STATUSES = ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'];
   var DEFAULT_PENDING_STATUSES = ['진행중'];
   var DEFAULT_APPROVAL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id';
-  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v2';
+  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v3';
   var LEAVE_REPORT_STYLE_TEXT = [
-    '.leave-year-accordion{border:1px solid var(--bs-border-color,#dee2e6);border-radius:10px;background:var(--bs-body-bg,#fff);overflow:hidden}',
-    '.leave-year-accordion>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;padding:14px 16px;font-weight:700;list-style:none}',
-    '.leave-year-accordion>summary::-webkit-details-marker{display:none}',
-    '.leave-year-accordion>summary::after{content:"⌄";font-size:1rem;transition:transform .18s ease}',
-    '.leave-year-accordion[open]>summary::after{transform:rotate(180deg)}',
-    '.leave-year-accordion[open]>summary{border-bottom:1px solid var(--bs-border-color,#dee2e6)}',
-    '.leave-year-summary-metrics{margin-left:auto;font-size:.78rem;font-weight:600;color:var(--bs-secondary-color,#6c757d);text-align:right}',
-    '.leave-year-body{padding:12px}',
+    '.leave-report{display:grid;gap:.75rem;text-align:start;overflow-wrap:anywhere}',
+    '.leave-report-balance,.leave-report-card{border:1px solid var(--bs-border-color,#dee2e6);border-radius:10px;padding:.75rem .875rem;min-width:0}',
+    '.leave-report-balance{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.25rem .75rem;background:var(--bs-primary-bg-subtle,#e7f1ff);color:var(--bs-primary-text-emphasis,#084298);border-color:var(--bs-primary-border-subtle,#9ec5fe)}',
+    '.leave-report-balance strong{font-size:1.25rem}',
+    '.leave-report-card{background:var(--bs-body-bg,#fff)}',
+    '.leave-report-first-year{background:var(--bs-tertiary-bg,#f8f9fa)}',
+    '.leave-report-heading{font-size:1rem;font-weight:700;margin:0}',
+    '.leave-report-heading strong{color:var(--bs-primary-text-emphasis,#084298)}',
+    '.leave-fiscal-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,5.65rem),1fr));gap:.45rem;margin:.6rem 0 0}',
+    '.leave-fiscal-metrics>div{min-width:0;padding:.4rem .55rem;background:var(--bs-tertiary-bg,#f8f9fa);border-radius:6px}',
+    '.leave-fiscal-metrics dt{font-size:.8rem;font-weight:600;color:var(--bs-secondary-color,#495057)}',
+    '.leave-fiscal-metrics dd{margin:0;font-weight:700}',
+    '.leave-report-disclosure{margin-top:.55rem}',
+    '.leave-report-disclosure>summary{cursor:pointer;color:var(--bs-primary-text-emphasis,#084298);font-size:.85rem;font-weight:600;padding:.25rem 0;min-height:2rem}',
+    '.leave-report-disclosure>summary:focus-visible{outline:2px solid var(--bs-primary,#0d6efd);outline-offset:2px;border-radius:4px}',
+    '.leave-report-disclosure[open]>summary{margin-bottom:.5rem}',
     '.leave-section{margin-bottom:10px;border:1px solid var(--bs-border-color,#dee2e6);border-radius:8px;background:var(--bs-tertiary-bg,#f8f9fa);padding:13px}',
     '.leave-section:last-child{margin-bottom:0}',
     '.leave-section h6{font-weight:bold;border-bottom:1px solid var(--bs-border-color,#dee2e6);padding-bottom:8px;margin-bottom:10px;font-size:0.95rem}',
     '.leave-list{list-style:none;padding:0;margin:0;font-size:0.85rem}',
     '.leave-list li{margin-bottom:6px}',
-    '@media(max-width:575.98px){.leave-year-accordion>summary{align-items:flex-start;flex-wrap:wrap}.leave-year-summary-metrics{width:100%;margin-left:0;text-align:left}}'
+    '.leave-report .leave-list span{min-width:0;overflow-wrap:anywhere}',
+    '@media(max-width:575.98px){.leave-report-balance,.leave-report-card{padding:.65rem}.leave-section{padding:.65rem}}'
   ].join('');
 
   function ensureLeaveDetailStyles() {
@@ -495,15 +504,43 @@
     var signal=opts.signal;
     var send=query=>signal&&typeof query.abortSignal==='function'?query.abortSignal(signal):query;
     var statuses=DEFAULT_RESERVED_STATUSES.concat(DEFAULT_PENDING_STATUSES);
-    var [grant,adjustments,docs]=await Promise.all([
-      send(supabase.rpc('erp_leave_accrual_report',{p_emp_id:empId})),
+    var readAccrual=async()=>{
+      var grant=await send(supabase.rpc('erp_leave_accrual_report',{p_emp_id:empId}));
+      if(signal?.aborted)throw new Error('LEAVE_REPORT_CANCELLED');
+      if(grant.error)throw grant.error;
+      var report=requireAccrualReport(grant.data);
+      var current=report.state==='ready'&&report.years.find(row=>row.year===Number(report.as_of.slice(0,4)));
+      if(!current?.fiscal?.issued_on)return report;
+
+      // A historical row already reports its January 1 basis. The current row
+      // reports today's basis, so read the confirmed periods only for that row.
+      var result=await send(supabase.rpc('erp_leave_work_basis',{p_emp_id:empId}));
+      if(signal?.aborted)throw new Error('LEAVE_REPORT_CANCELLED');
+      if(result.error)throw result.error;
+      var basis=result.data, helper=global.CoopLeaveTime;
+      var monthlyBeforeExpiry=report.as_of<report.first_year_expires_on
+        ?report.years.reduce((total,row)=>row.first_year.reduce((sum,grantRow)=>sum+grantRow.granted_minutes,total),0):0;
+      // The work-basis RPC also returns generated units. A differing total
+      // can mean a period changed between the two reads; don't display it.
+      if(!helper||!Array.isArray(basis?.periods)||basis.periods.some((row,index,periods)=>
+        !row||!helper.isDate(row.effective_date)||!Number.isSafeInteger(row.day_minutes)||row.day_minutes<1
+        ||(index>0&&row.effective_date<periods[index-1].effective_date))
+        ||basis.day_minutes!==current.day_minutes
+        ||helper.basisMinutes(basis,report.as_of)!==current.day_minutes
+        ||basis.generated_units==null
+        ||Math.round(Number(basis.generated_units)*helper.dayMinutes)!==current.fiscal.granted_minutes+monthlyBeforeExpiry
+      )throw new Error('LEAVE_GRANT_BASIS_UNAVAILABLE');
+      var issuedBasis=helper.basisMinutes(basis,current.fiscal.issued_on);
+      if(current.fiscal.granted_minutes%issuedBasis!==0)throw new Error('LEAVE_GRANT_BASIS_UNAVAILABLE');
+      return {...report,years:report.years.map(row=>row===current?{...row,grant_day_minutes:issuedBasis}:row)};
+    };
+    var [accrual,adjustments,docs]=await Promise.all([
+      readAccrual(),
       send(supabase.from('hr_leave_adj').select('*').eq('coop_id',coopId).eq('emp_id',empId).order('created_at',{ascending:false})),
       fetchLeaveApprovals(supabase,empId,{statuses,coopId,signal,columns:opts.columns})
     ]);
     if(signal?.aborted)throw new Error('LEAVE_REPORT_CANCELLED');
-    if(grant.error)throw grant.error;
     if(adjustments.error)throw adjustments.error;
-    var accrual=requireAccrualReport(grant.data);
     return {
       accrual,
       summary:summarizeLeaveDocs(docs,{todayIso:accrual.as_of,reservedStatuses:DEFAULT_RESERVED_STATUSES,includeToday:false}),
@@ -742,34 +779,62 @@
     return (minutes<0?'-':'')+(hours?hours+'시간':'')+(remainder||!hours?(hours?' ':'')+remainder+'분':'');
   }
 
-  function buildLeaveGrantListHtml(entry) {
-    var time=formatAccrualMinutes;
-    if(!entry)return '<p class="mb-0 text-muted">발생 내역 없음</p>';
-    var f=entry.fiscal,monthRows=entry.first_year;
-    var html='';
-    if(monthRows.length){
-      html+='<div class="mb-2"><span class="fw-semibold">1년 미만 · '+monthRows.length+'회 발생</span><ul class="leave-list" data-leave-monthly-grants>';
-      monthRows.forEach(function(row){
-        var fields=['발생 '+time(row.granted_minutes),'사용 '+time(row.used_minutes)];
-        if(row.held_minutes>0)fields.push('예정·결재 중 '+time(row.held_minutes));
-        fields.push('사용 가능 '+time(row.available_minutes));
-        html+='<li data-leave-issued-on="'+escapeHtml(row.issued_on)+'"><time datetime="'+escapeHtml(row.issued_on)+'">'
-          +escapeHtml(formatDotDate(row.issued_on))+'</time> · '+escapeHtml(fields.join(' · '))+'</li>';
-      });
-      html+='</ul></div>';
-    }
-    if(f.granted_minutes||f.adjustment_minutes||f.used_minutes||f.available_minutes){
-      var fields=[];
-      if(f.issued_on)fields.push(formatDotDate(f.issued_on)+' 발생 '+time(f.granted_minutes));
-      if(f.adjustment_minutes)fields.push('조정 '+(f.adjustment_minutes>0?'+':'')+time(f.adjustment_minutes));
-      fields.push('사용 '+time(f.used_minutes));
-      if(f.available_minutes!==null)fields.push('사용 가능 '+time(f.available_minutes));
-      html+='<div data-leave-fiscal><span class="fw-semibold">회계연도</span><p class="mb-0">'+escapeHtml(fields.join(' · '))+'</p></div>';
-    }
-    return html||'<p class="mb-0 text-muted">발생 내역 없음</p>';
+  function formatReportAmount(minutes, dayMinutes) {
+    if(!Number.isFinite(minutes))return '—';
+    var absolute=Math.abs(Math.round(minutes)),sign=minutes<0?'−':'';
+    if(!Number.isSafeInteger(dayMinutes)||dayMinutes<1)return sign+formatAccrualMinutes(absolute);
+    if(dayMinutes===480&&absolute%240===0)return sign+(absolute/480)+'일';
+    var formatter=global.CoopLeaveTime;
+    if(!formatter)return sign+formatAccrualMinutes(absolute);
+    var days=Math.floor(absolute/dayMinutes),rest=absolute%dayMinutes;
+    var dayText=formatter.formatDays(absolute/480,dayMinutes).split(' ')[0];
+    return sign+(rest?(days?dayText+' ':'')+formatter.formatMinutes(rest):dayText);
   }
 
-  function buildLeaveAdjustmentListHtml(adjustments,automatic) {
+  function buildFirstYearGrantSummary(rows) {
+    if(!rows.length)return '';
+    var total=rows.reduce((sum,row)=>sum+row.granted_minutes,0);
+    var duration=' <span class="small text-muted">(총 '+escapeHtml(formatAccrualMinutes(total))+')</span>';
+    var html='<section class="leave-report-card leave-report-first-year" data-leave-first-year-summary>'
+      +'<h6 class="leave-report-heading">1년 미만 연차 · <strong>'+rows.length+'일 발생</strong>'+duration+'</h6>'
+      +'<details class="leave-report-disclosure" data-leave-monthly-history><summary>월별 발생 기록</summary>'
+      +'<ul class="leave-list">';
+    rows.forEach(function(row){
+      var basis=row.granted_minutes;
+      var fields=['발생 1일 ('+formatAccrualMinutes(basis)+')'];
+      if(row.used_minutes>0)fields.push('사용 '+formatReportAmount(row.used_minutes,basis));
+      if(row.held_minutes>0)fields.push('예정·결재 중 '+formatReportAmount(row.held_minutes,basis));
+      if(row.available_minutes>0)fields.push('사용 가능 '+formatAccrualMinutes(row.available_minutes));
+      html+='<li data-leave-issued-on="'+escapeHtml(row.issued_on)+'"><time datetime="'+escapeHtml(row.issued_on)+'">'
+        +escapeHtml(formatDotDate(row.issued_on))+'</time> · '+escapeHtml(fields.join(' · '))+'</li>';
+    });
+    return html+'</ul></details></section>';
+  }
+
+  function hasFiscalReport(fiscal) {
+    return Boolean(fiscal&&(fiscal.granted_minutes||fiscal.adjustment_minutes||fiscal.used_minutes||fiscal.available_minutes));
+  }
+
+  function buildFiscalReportMetrics(fiscal, grantBasis, dayMinutes, totalAvailable) {
+    var granted=formatAccrualMinutes(fiscal.granted_minutes);
+    if(fiscal.granted_minutes>0&&grantBasis>0&&fiscal.granted_minutes%grantBasis===0){
+      granted=(fiscal.granted_minutes/grantBasis)+'일 ('+granted+')';
+    }
+    var amount=value=>grantBasis===dayMinutes?formatReportAmount(value,dayMinutes)
+      :(value<0?'−':'')+formatAccrualMinutes(Math.abs(value));
+    var metrics=[
+      ['기본',granted],
+      ['조정',(fiscal.adjustment_minutes>0?'+':'')+amount(fiscal.adjustment_minutes)],
+      ['사용',amount(fiscal.used_minutes)]
+    ];
+    if(fiscal.available_minutes!==null&&fiscal.available_minutes!==totalAvailable){
+      metrics.push(['사용 가능',formatAccrualMinutes(fiscal.available_minutes)]);
+    }
+    return '<dl class="leave-fiscal-metrics" data-leave-fiscal>'+metrics.map(pair=>
+      '<div><dt>'+pair[0]+'</dt><dd>'+escapeHtml(pair[1])+'</dd></div>').join('')+'</dl>';
+  }
+
+  function buildLeaveAdjustmentListHtml(adjustments,automatic,expiryBasis) {
     var html = '<ul class="leave-list">';
     var rows = (Array.isArray(adjustments) ? adjustments : []).map(item=>({item,date:automatic?formatKstIsoDate(item?.created_at):''}));
     if(automatic){
@@ -780,17 +845,18 @@
       rows.forEach(function (row) {
         if(row.automatic){
           html+='<li data-leave-auto-expiry><time datetime="'+escapeHtml(row.date)+'">'
-            +escapeHtml(formatDotDate(row.date))+'</time> · <span class="text-danger fw-bold">자동 소멸 −'
-            +escapeHtml(formatAccrualMinutes(-row.automatic.minutes))+'</span></li>';
+            +escapeHtml(formatDotDate(row.date))+'</time> · <span class="text-danger fw-bold">자동 소멸 '
+            +escapeHtml(formatReportAmount(row.automatic.minutes,expiryBasis))+'</span></li>';
           return;
         }
         var item=row.item;
         var positive = item && (item.adj_type === '지급' || item.adj_type === '포상');
+        var minutes=Number(item?.days)*480*(positive?1:-1);
         var toneClass = positive ? 'text-success' : 'text-danger';
-        var prefix = positive ? '+' : '-';
+        var prefix = minutes>0 ? '+' : '';
         html += '<li><span class="' + toneClass + ' fw-bold">[' + escapeHtml(item && item.adj_type || '') + ']</span> '
           + escapeHtml(item && item.reason || '')
-          + ' (' + prefix + (global.CoopLeaveTime?global.CoopLeaveTime.formatDays(item && item.days || 0,item?.basis_day_minutes||480):Number(item && item.days || 0)+'일') + ')'
+          + ' (' + prefix + escapeHtml(formatReportAmount(minutes,Number(item?.basis_day_minutes)||480)) + ')'
           + (item?.leave_kind==='extra'?'<div class="text-secondary small">추가 휴가 · 근로일 '+escapeHtml(item.work_date||'')+' · 근로 '+Number(item.worked_minutes||0)/60+'시간 · 부여 '+Number(item.granted_minutes||0)/60+'시간</div>':'') + '</li>';
       });
     } else {
@@ -829,19 +895,6 @@
     return map;
   }
 
-  function buildLeaveYearMetricText(yearSummary, pendingSummary, dayMinutes) {
-    var metrics = [];
-    var used = Number(yearSummary && yearSummary.pastOrUsedDays || 0);
-    var reserved = Number(yearSummary && yearSummary.reservedDays || 0);
-    var pending = Number(pendingSummary && pendingSummary.days || 0);
-    var unknown = Number(yearSummary && yearSummary.unknownDateDays || 0);
-    var format=value=>global.CoopLeaveTime?global.CoopLeaveTime.formatDays(value,dayMinutes):value+'일';
-    if (used > 0) metrics.push('사용 ' + format(used));
-    if (reserved > 0) metrics.push('예정 ' + format(reserved));
-    if (pending > 0) metrics.push('결재중 ' + format(pending));
-    if (unknown > 0) metrics.push('일자 확인 필요 ' + format(unknown));
-    return metrics.length > 0 ? metrics.join(' · ') : '사용 내역 없음';
-  }
 
   function buildLeaveDetailReportHtml(options) {
     ensureLeaveDetailStyles();
@@ -852,6 +905,9 @@
     var yearMap = {};
     var grants=new Map((accrual.years||[]).map(row=>[row.year,row]));
     var expiry=accrual.state==='ready'?accrual.automatic_adjustments[0]:null;
+    var firstRows=(accrual.years||[]).flatMap(year=>year.first_year).sort((a,b)=>a.issued_on.localeCompare(b.issued_on));
+    var expiryBases=new Set(firstRows.filter(row=>row.expired_minutes>0).map(row=>row.granted_minutes));
+    var expiryBasis=expiryBases.size===1?expiryBases.values().next().value:null;
     Object.keys(summary.byYear || {}).forEach(function (key) {
       yearMap[key] = summary.byYear[key];
     });
@@ -888,11 +944,11 @@
     });
 
     var years = Object.keys(yearMap).map(Number).filter(Number.isFinite).sort(function (a, b) { return b - a; });
-    var html = '<div class="d-flex flex-column gap-3">';
+    var html = '<div class="leave-report">';
     if(accrual.state==='ready'){
-      var effective=global.CoopLeaveTime?global.CoopLeaveTime.formatDays(accrual.available_minutes/480,accrual.day_minutes)
-        :formatAccrualMinutes(accrual.available_minutes);
-      html+='<p class="fw-semibold mb-0" data-leave-today-available>오늘 사용 가능: '+escapeHtml(effective)+'</p>';
+      html+='<p class="leave-report-balance mb-0" data-leave-today-available><span>오늘 사용 가능</span> <strong>'
+        +escapeHtml(formatAccrualMinutes(accrual.available_minutes))+'</strong></p>';
+      html+=buildFirstYearGrantSummary(firstRows);
     }else{
       html+='<p class="text-muted mb-0">'+(accrual.state==='no_hire'?'발생 내역을 보려면 입사일을 확인해 주세요.':'연차 계산 대상이 아닙니다.')+'</p>';
     }
@@ -900,18 +956,23 @@
       var key = String(year);
       var yearSummary = yearMap[key];
       var pendingSummary = pendingByYear[key] || { docs: [], days: 0 };
-      var dayMinutes=grants.get(year)?.day_minutes||accrual.day_minutes||480;
-      var format=value=>global.CoopLeaveTime?global.CoopLeaveTime.formatDays(value,dayMinutes):Number(value||0)+'일';
-      html += '<details class="leave-year-accordion"><summary><span>📅 ' + year + '년</span><span class="leave-year-summary-metrics">'
-        + escapeHtml(reviewByYear[key]?.length
-          ? [buildLeaveYearMetricText(yearSummary,pendingSummary,dayMinutes), '정산대기'].filter(x=>x!=='사용 내역 없음').join(' · ')
-          : buildLeaveYearMetricText(yearSummary,pendingSummary,dayMinutes)) + '</span></summary><div class="leave-year-body">';
-      if(accrual.state==='ready'){
-        html += '<div class="leave-section" data-leave-accrual-year="'+year+'"><h6>🎁 발생 내역</h6>'
-          + buildLeaveGrantListHtml(grants.get(year)) + '</div>';
+      var entry=grants.get(year),fiscal=entry?.fiscal,dayMinutes=entry?.day_minutes||accrual.day_minutes||480;
+      var grantBasis=year<currentYear?entry?.day_minutes:entry?.grant_day_minutes;
+      var format=value=>formatReportAmount(value*480,dayMinutes);
+      var auto=expiry?.date.slice(0,4)===key?expiry:null,manual=adjustmentsByYear[key]||[];
+      var hasFiscal=hasFiscalReport(fiscal);
+      var hasHistory=Boolean(auto||manual.length||pendingSummary.docs.length||reviewByYear[key]?.length
+        ||yearSummary.reservedDocs?.length||yearSummary.pastOrUsedDocs?.length||yearSummary.unknownDateDocs?.length);
+      if(!hasFiscal&&!hasHistory)return;
+      html+='<section class="leave-report-card" data-leave-accrual-year="'+year+'"><h6 class="leave-report-heading">'
+        +year+'년 '+(hasFiscal?'회계연도':'기록')+'</h6>';
+      if(hasFiscal)html+=buildFiscalReportMetrics(fiscal,grantBasis,dayMinutes,accrual.available_minutes);
+      if(!hasHistory){html+='</section>';return;}
+      html+='<details class="leave-report-disclosure"><summary>조정·사용 기록</summary>';
+      if(auto||manual.length){
+        html += '<div class="leave-section"><h6>조정 내역</h6>'
+          + buildLeaveAdjustmentListHtml(manual,auto,expiryBasis) + '</div>';
       }
-      html += '<div class="leave-section"><h6>⚖️ 조정 내역</h6>'
-        + buildLeaveAdjustmentListHtml(adjustmentsByYear[key] || [],expiry?.date.slice(0,4)===key?expiry:null) + '</div>';
       if (pendingSummary.docs.length > 0) {
         html += '<div class="leave-section"><h6>⏳ 결재 예정 내역 <span class="text-warning">' + format(pendingSummary.days || 0) + ' 신청</span></h6>'
           + renderLeaveDocListHtml(sortLeaveRowsByDate(pendingSummary.docs), {
@@ -929,13 +990,13 @@
             formatDate:opts.formatDate,formatLeaveDocType:opts.formatLeaveDocType,amountClass:'text-warning'
           })+'</div>';
       }
-      html += '<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-' + format(yearSummary.reservedDays || 0) + '</span></h6>'
+      if(yearSummary.reservedDocs?.length)html += '<div class="leave-section"><h6>결재완료(예정) 내역 <span class="text-primary">−' + format(yearSummary.reservedDays || 0) + '</span></h6>'
         + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.reservedDocs), {
           formatDate: opts.formatDate,
           formatLeaveDocType: opts.formatLeaveDocType,
           emptyText: '- 없음 -'
         }) + '</div>';
-      html += '<div class="leave-section"><h6>🎫 사용/처리 내역 <span class="text-danger">-' + format(yearSummary.pastOrUsedDays || 0) + '</span></h6>'
+      if(yearSummary.pastOrUsedDocs?.length)html += '<div class="leave-section"><h6>사용/처리 내역 <span class="text-danger">−' + format(yearSummary.pastOrUsedDays || 0) + '</span></h6>'
         + renderLeaveDocListHtml(sortLeaveRowsByDate(yearSummary.pastOrUsedDocs), {
           formatDate: opts.formatDate,
           formatLeaveDocType: opts.formatLeaveDocType,
@@ -949,7 +1010,7 @@
             emptyText: '- 없음 -'
           }) + '</div>';
       }
-      html += '</div></details>';
+      html += '</details></section>';
     });
     html += '</div>';
     return html;
