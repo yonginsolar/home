@@ -134,8 +134,8 @@ const PrintService = {
     },
 
     // 2. 팝업창 열기 및 렌더링 (Core Function)
-    openWindow: function(type, htmlContent) {
-        const win = window.open('', '', 'width=900,height=1100');
+    openWindow: function(type, htmlContent, reservedWindow) {
+        const win = reservedWindow || window.open('', '', 'width=900,height=1100');
         const finalCss = type === 'ledger' ? this.styles.landscape : this.styles.portrait;
         const pageClass = type === 'ledger' ? 'print-ledger' : (type === 'salary' ? 'print-salary' : 'print-cert');
 
@@ -163,7 +163,7 @@ const PrintService = {
     },
 
     // 3. [기능] 급여명세서 출력
-    printSalary: function(data) {
+    printSalary: function(data, reservedWindow) {
         const safeData = {
             titleDate: this.escapeHtml(data?.titleDate),
             attrDate: this.formatMultilineHtml(data?.attrDate),
@@ -262,7 +262,7 @@ const PrintService = {
             </div>
             ${signatureBlock}
         </div>`;
-        this.openWindow('salary', content);
+        this.openWindow('salary', content, reservedWindow);
     },
 
     // 4. [기능] 재직/경력증명서 출력

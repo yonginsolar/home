@@ -10,8 +10,8 @@
   <script src="/erp/workspace_boot.js?v=20261119-coop-plant-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.137 | index.html');</script>
-<script src="work_overview_v128.js?v=1.2.8"></script>
+  <script>console.log('[Version] v1.0.138 | index.html');</script>
+<script src="work_overview_v128.js?v=1.2.9"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -528,6 +528,9 @@ let employeeMatchActiveUser = null;
 let employeeMatchClaimInFlight = false;
 let menuOrderCache = [];
 let menuOrderLoadedFromServer = false;
+let menuOrderRevision = 0;
+let landingLoadSequence = 0;
+let cancelLandingOrderPaint;
 let menuOrderSaving = false;
 let menuOrderCanCustomize = false;
 let workspaceSwitchContext = null;
@@ -1744,7 +1747,10 @@ window.onload = async function() {
 document.addEventListener('DOMContentLoaded', () => { void window.onload(); }, {once:true});
 
 async function loadUserInfo(user) {
+    const landingLoad = ++landingLoadSequence;
+    cancelLandingOrderPaint?.();
     const serviceAccess = await _supabase.rpc('erp_service_access_state');
+    if (landingLoad !== landingLoadSequence || (currentAuthUser?.id && currentAuthUser.id !== user?.id)) return;
     if (!serviceAccess.error && serviceAccess.data?.closed === true) {
         location.replace('service_contracts.html');
         return;
@@ -1867,11 +1873,18 @@ async function loadUserInfo(user) {
         retiredGraceAccess = true;
     }
 
+    if (landingLoad !== landingLoadSequence || currentAuthUser?.id !== authUserId) return;
     myInfo = data;
     localStorage.setItem('erp_user', JSON.stringify(data));
-    [permissionSet, platformContext, coopRuntime] = await Promise.all([
+    // This read also classifies headquarters vs. village. Keep that gate, but
+    // run it alongside the other verified entry reads instead of after them.
+    const workspaceContextRead = readWorkspaceSwitchContext();
+    const [permissions, nextPlatform, nextRuntime] = await Promise.all([
         loadPermissions(data), loadPlatformContext(), loadCoopRuntime()
     ]);
+    const current = () => landingLoad === landingLoadSequence && currentAuthUser?.id === authUserId && myInfo === data;
+    if (!current()) return;
+    [permissionSet, platformContext, coopRuntime] = [permissions, nextPlatform, nextRuntime];
     applyErpBranding(coopRuntime?.coop_name || '');
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
 
@@ -1892,9 +1905,9 @@ async function loadUserInfo(user) {
     if (elTeam) elTeam.innerText = data.department || "-";
     if (elRank) elRank.innerText = data.position || "";
 
-    const [, workspaceContext] = await Promise.all([
-        loadSharedMenuOrder(canCustomizeMenuOrder(data, platformContext)), readWorkspaceSwitchContext()
-    ]);
+    const order = loadSharedMenuOrder(canCustomizeMenuOrder(data, platformContext), current);
+    const workspaceContext = await workspaceContextRead;
+    if (!current()) return;
     landingFeatureSearchActor = currentAuthUser?.id === authUserId ? authUserId : null;
     applyMenuPermissions(data, platformContext, coopRuntime);
     renderWorkspaceSwitcher(workspaceContext);
@@ -1904,6 +1917,9 @@ async function loadUserInfo(user) {
     document.getElementById('patchNoteArea')?.classList.remove('hidden');
     showScreen('menuArea');
     void loadMainMenuTaskAttention();
+    void order.then(changed => {
+        if (changed && current()) paintVerifiedMenuOrder(current);
+    });
 }
 
 async function loadPermissions(user) {
@@ -2206,6 +2222,7 @@ async function saveSharedMenuOrder(order, { quiet = false, onlyIfMissing = false
         const savedOrder = Array.isArray(data?.menu_order)
             ? data.menu_order
             : (Array.isArray(data) ? data : normalized);
+        ++menuOrderRevision;
         cacheMenuOrder(savedOrder);
         window.ErpWorkspace?.syncOrder(savedOrder,myInfo?.coop_id);
         menuOrderLoadedFromServer = true;
@@ -2229,29 +2246,45 @@ async function saveSharedMenuOrder(order, { quiet = false, onlyIfMissing = false
     }
 }
 
-async function loadSharedMenuOrder(canCustomize) {
+async function loadSharedMenuOrder(canCustomize, current) {
     menuOrderCanCustomize = canCustomize === true;
     const legacyOrder = readLegacyMenuOrder();
     cacheMenuOrder(legacyOrder);
+    const revision = ++menuOrderRevision;
     try {
         const { data, error } = await _supabase.rpc('erp_get_menu_order');
+        if (!current() || revision !== menuOrderRevision) return false;
         if (error) throw error;
-        if (Array.isArray(data)) {
-            cacheMenuOrder(data);
-            menuOrderLoadedFromServer = true;
-            setMenuOrderStatus('조합 공용 순서를 불러왔습니다.', 'success');
-            return;
-        }
-
-        const defaultOrder = getDefaultMenuOrder();
-        cacheMenuOrder(defaultOrder);
+        const saved = Array.isArray(data);
+        const changed = !isSameMenuOrder(readMenuOrder(), saved ? data : getDefaultMenuOrder());
+        cacheMenuOrder(saved ? data : getDefaultMenuOrder());
         menuOrderLoadedFromServer = true;
-        setMenuOrderStatus('아직 저장된 공용 순서가 없어 기본 순서를 사용합니다.', 'muted');
+        setMenuOrderStatus(saved ? '조합 공용 순서를 불러왔습니다.' : '아직 저장된 공용 순서가 없어 기본 순서를 사용합니다.', saved ? 'success' : 'muted');
+        return changed;
     } catch (err) {
-        console.warn('loadSharedMenuOrder failed; using local fallback:', err);
+        if (!current() || revision !== menuOrderRevision) return false;
+        console.warn('loadSharedMenuOrder failed; using local fallback:', String(err?.code || 'unavailable'));
         menuOrderLoadedFromServer = false;
         setMenuOrderStatus('공용 순서를 불러오지 못해 이 컴퓨터에 남아 있던 순서를 표시합니다.', 'warning');
     }
+    return false;
+}
+
+function paintVerifiedMenuOrder(current) {
+    cancelLandingOrderPaint?.();
+    const container = getMenuButtonsContainer();
+    if (!container) return;
+    const controller = new AbortController();
+    cancelLandingOrderPaint = () => controller.abort();
+    const paint = () => {
+        if (!current() || document.getElementById('menuArea').classList.contains('hidden')) return controller.abort();
+        if (container.matches(':hover') || container.contains(document.activeElement)) return;
+        controller.abort();
+        applyMenuOrder();
+        renderMenuOrderList();
+    };
+    for (const event of ['pointerleave', 'focusout']) container.addEventListener(event, () => queueMicrotask(paint), {signal:controller.signal});
+    paint();
 }
 
 function applyMenuOrder() {
@@ -2353,6 +2386,7 @@ async function resetMenuOrder() {
 
 window.addEventListener('erp-menu-order-saved',event=>{
     if(!myInfo || event.detail?.coopId!==myInfo.coop_id || !Array.isArray(event.detail.order))return;
+    ++menuOrderRevision;
     cacheMenuOrder(event.detail.order);applyMenuOrder();renderMenuOrderList();
 });
 
@@ -2715,6 +2749,7 @@ function updateLandingFeatureSearch() {
     landingFeatureSearch.refresh();
 }
 function showScreen(id) {
+    if(id!=='menuArea') cancelLandingOrderPaint?.();
     if(id==='menuArea' && !retiredGraceAccess) window.ErpWorkOverview?.mount({client:_supabase,context:()=>myInfo&&({coop_id:myInfo.coop_id,actor:String(myInfo.id||myInfo.auth_user_id||'')}),runtime:()=>coopRuntime,onTasks:updateWorkOverviewAttention});
     else window.ErpWorkOverview?.clear();
     if (id === 'menuArea' && coopRuntime) void window.ErpWorkspace?.connect(_supabase, coopRuntime);

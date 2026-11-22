@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.1.8 | 본인 AI 연결별 조합원 이름 조회 설정 -->
+<!-- Version: v1.1.9 | 증명서·보험·AI 도구를 필요한 탭에서 준비 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -11,14 +11,14 @@
   <script src="/erp/workspace_resume.js?v=20261011-1-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-<script>console.log('[Version] v1.1.8 | mypage.html');</script>
+<script>console.log('[Version] v1.1.9 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 <title>마이페이지</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-<script src="workflow_assets.js?v=20261022-help-1"></script>
+<script src="workflow_assets.js?v=20261122-demand-1"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script>
@@ -38,16 +38,11 @@
   })();
 </script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
-<script src="print_service.js?v=20261119-certificate-seal-1"></script>
-<script src="employee_certificate_print.js?v=20261119-1"></script>
-<script src="expo_employee_certificate.js?v=20261022-1"></script>
 <script src="payroll_durunuri_module.js?v=20261109-mypage-1"></script>
 <script src="leave_time.js?v=20261012-2"></script>
 <script src="leave_ledger.js?v=20261122-leave-detail-8"></script>
 <script src="/shared/leave_calendar_projection.js?v=1.3.0" integrity="sha384-KUjQSVKrH+HxrLo9Elahdhih7ytd0YEeYlNajYylRVf9NfYUFR4cfIym4xyz92Xc" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="ai_connection.css?v=1.3.1">
-<script src="ai_member_details_settings.js?v=1.0.0" integrity="sha384-ricDiFfEvns5x0CJ9RTxl3k1W3zgLFETEfJV2if+iSKFYLs4aTZLFd8u9YoG6ziU" crossorigin="anonymous"></script>
-<script src="ai_connection.js?v=1.3.3"></script>
   
 <style>
 body{background-color:#f0f2f5;padding:28px 20px 40px;font-family:'Malgun Gothic',sans-serif}
@@ -184,7 +179,6 @@ body{padding:18px 14px 28px}
   <script src="/erp/erp_palette.js?v=1.0.0" integrity="sha384-eqzWMk2JERd7XhuNeGNbJ48/w3Hit4umqaZoA6gO9BLNrCkvVuoF8YKOipNIJB1y" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="./tab_workspace.css?v=1.0.0">
   <script src="tab_workspace.js?v=1.0.0" defer></script>
-  <script src="hr_insurance_status.js?v=1.0.1" defer></script>
   <meta name="erp-mobile-revision" content="20261007.2">
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
   <meta name="erp-workspace-revision" content="20261010.9">
@@ -620,14 +614,24 @@ else if(pane==='tabCalendar')await renderCalendar();
 else await loadMypageVisibleSections();
 }finally{mypageRefreshing=false;}
 }
-function loadMypageInsuranceStatus(){
+function paintMypageToolRetry(root, message, retry){
+const note=document.createElement('span'), button=document.createElement('button');
+note.textContent=message;note.setAttribute('role','status');
+button.type='button';button.className='btn btn-sm btn-outline-secondary ms-2';button.textContent='다시 확인';button.onclick=retry;
+root.replaceChildren(note,button);
+}
+async function loadMypageInsuranceStatus(){
 const owner=getMypageDataOwner(),context={account:myInfo};
-if(!mypageDataAuthorized||!isMypageDataVisible())return Promise.resolve(false);
+if(!mypageDataAuthorized||!isMypageDataVisible())return false;
 loadMypageInsuranceStatus.readContext=context;
-return window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'),{
- isCurrent:()=>mypageDataAuthorized&&context.account===myInfo&&owner===getMypageDataOwner()&&isMypageDataVisible()
-  &&document.getElementById('tabCert').classList.contains('active')
-});
+const root=document.getElementById('myInsuranceStatus');
+const current=()=>loadMypageInsuranceStatus.readContext===context&&mypageDataAuthorized&&context.account===myInfo&&owner===getMypageDataOwner()&&isMypageDataVisible()
+  &&document.getElementById('tabCert').classList.contains('active');
+try {
+ await window.ErpWorkflowAssets.load('mypageInsurance');
+ if(!current())return false;
+ return window.HrInsuranceStatus.mount(_supabase,root,{isCurrent:current});
+}catch(_){if(current())paintMypageToolRetry(root,'보험 서류 도구를 불러오지 못했습니다.',()=>void loadMypageInsuranceStatus());return false;}
 }
 function formatMypageContractHours(data) {
 if(data.state==='legacy_saved'){
@@ -1767,26 +1771,44 @@ if(window.frameElement?.hidden||records.some(r=>r.oldValue===null))leaveMypageCa
 }).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
 const myAiRoot = document.getElementById('aiConnectionsRoot');
 const myAiTab = document.getElementById('tab-ai-btn');
-myAiTab.addEventListener('shown.bs.tab', () => window.ErpAiConnections?.mount(_supabase, myAiRoot));
-myAiTab.addEventListener('hide.bs.tab', () => myAiRoot.aiPause?.());
-window.addEventListener('pagehide', () => myAiRoot.aiPause?.());
+let aiToolSequence=0;
+const pauseAiTools=()=>{++aiToolSequence;myAiRoot.aiPause?.();};
+const showAiTools=async()=>{
+    const request=++aiToolSequence,owner=getMypageDataOwner(),actor=myAiAuthUser;
+    const current=()=>request===aiToolSequence&&actor&&actor===myAiAuthUser&&owner===getMypageDataOwner()
+        &&mypageDataAuthorized&&isMypageDataVisible()&&!window.frameElement?.hidden&&myAiTab.classList.contains('active');
+    if(!current())return;
+    try{
+        await Promise.all(['aiMemberDetails','mypageAi'].map(key=>window.ErpWorkflowAssets.load(key)));
+        if(current())window.ErpAiConnections.mount(_supabase,myAiRoot);
+    }catch(_){if(current())paintMypageToolRetry(myAiRoot,'AI 연결 화면을 열지 못했습니다.',()=>void showAiTools());}
+};
+myAiTab.addEventListener('shown.bs.tab', () => void showAiTools());
+myAiTab.addEventListener('hide.bs.tab', pauseAiTools);
+window.addEventListener('pagehide', pauseAiTools);
 if (window.frameElement) new MutationObserver(records => {
-    if (window.frameElement?.hidden || records.some(record => record.oldValue === null)) myAiRoot.aiPause?.();
+    if (window.frameElement?.hidden || records.some(record => record.oldValue === null)) pauseAiTools();
+    if (!window.frameElement?.hidden && myAiTab.classList.contains('active')) void showAiTools();
 }).observe(window.frameElement, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
 let myAiAuthUser = mypageUserGate.authUser?.id || '';
 _supabase.auth.onAuthStateChange((event, session) => {
     const next = session?.user?.id || '';
     if (event === 'SIGNED_OUT' || (next && myAiAuthUser && next !== myAiAuthUser)) {
+        ++aiToolSequence;
         myAiRoot.aiInvalidate?.();
         mypageSalarySessionValid=false;
         invalidateMypageSalaryReads();
         document.getElementById('tabSalary').classList.add('hidden');
         resetMypageSalaryDetail('');
     }
-    if (next) myAiAuthUser = next;
+    myAiAuthUser = next;
 });
-document.getElementById('tab-cert-btn').addEventListener('shown.bs.tab',function(){void loadMypageInsuranceStatus();});
-document.getElementById('tab-cert-btn').addEventListener('hide.bs.tab',function(){window.HrInsuranceStatus?.suspend(document.getElementById('myInsuranceStatus'));});
+document.getElementById('tab-cert-btn').addEventListener('shown.bs.tab',function(){void loadMypageInsuranceStatus();void prepareMypageCertificateTools().catch(()=>{});});
+document.getElementById('tab-cert-btn').addEventListener('hide.bs.tab',function(){cancelMypageCertificateIntent();window.HrInsuranceStatus?.suspend(document.getElementById('myInsuranceStatus'));});
+window.addEventListener('pagehide',cancelMypageCertificateIntent);
+if(window.frameElement)new MutationObserver(records=>{
+    if(window.frameElement?.hidden||records.some(record=>record.oldValue===null))cancelMypageCertificateIntent();
+}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
 document.getElementById('myTab').addEventListener('shown.bs.tab',()=>{void loadMypageVisibleSections();});
 renderMypageIdentity();
 bindMypagePalette();
@@ -2618,7 +2640,7 @@ if(error)throw error;
 return data?getAdjustedSalaryRowForMypage({...data,year_month:ym},ym,signal):null;
 });
 if(!current())return false;
-if(adjusted)renderMypageSalaryDetail(adjusted,ym);
+if(adjusted){renderMypageSalaryDetail(adjusted,ym);void window.ErpWorkflowAssets.load('printService').catch(()=>{});}
 else resetMypageSalaryDetail('선택한 월에 급여명세서가 없습니다.');
 mypageSalaryAutoOwner=owner;
 return true;
@@ -2660,10 +2682,27 @@ document.getElementById("v_net").innerText=f(adjusted.net_pay)
 // [수정됨] 급여명세서 인쇄 (PrintService 호출)
 async function printSalaryPopup() {
     if (!currentSalaryData) return showAlert("조회된 급여 내역이 없습니다.");
+    if (!isMypageSalaryTabCurrent() || printSalaryPopup.pending) return;
+    const data=currentSalaryData,owner=getMypageDataOwner(),ym=document.getElementById('salaryMonth').value;
+    const current=()=>isMypageSalaryTabCurrent()&&owner===getMypageDataOwner()&&data===currentSalaryData&&ym===document.getElementById('salaryMonth').value;
+    let popup;
+    printSalaryPopup.pending=true;
+    try{
+        if(typeof PrintService==='undefined'){
+            popup=window.open('','','width=900,height=1100');
+            if(!popup)return showAlert('인쇄 창을 열 수 없습니다. 팝업을 허용한 뒤 다시 시도해 주세요.');
+            popup.document.body.textContent='인쇄 미리보기를 준비하고 있습니다…';
+            await window.ErpWorkflowAssets.load('printService');
+            if(popup.closed||!current()){popup.close();return;}
+        }
+        renderMypageSalaryPrint(data,popup);
+    }catch(error){popup?.close();if(current())showAlert(error?.message?.startsWith('ERP_ASSET_')?'인쇄 도구를 불러오지 못했습니다. 다시 시도해 주세요.':error?.message||'인쇄 화면을 열지 못했습니다.');}
+    finally{printSalaryPopup.pending=false;}
+}
 
+function renderMypageSalaryPrint(d, popup) {
     // 숫자 쉼표 포맷팅 헬퍼
     const fmt = (n) => Number(n || 0).toLocaleString();
-    const d = currentSalaryData;
     const dedAdvanceLabel = getSalaryDedAdvanceLabel(d);
     const payrollTaxAdjustmentTotal = getSalaryPayrollTaxAdjustmentTotal(d);
     const [y, m] = d.year_month.split('-'); // 2025-05
@@ -2707,7 +2746,7 @@ async function printSalaryPopup() {
     };
 
     // 모듈 호출
-    PrintService.printSalary(salaryData);
+    PrintService.printSalary(salaryData, popup);
 }
 
 function getSalaryPayrollTaxAdjustmentTotal(row){
@@ -2723,7 +2762,23 @@ return '기타조정';
 } // End of getSalaryDedAdvanceLabel
 
   function toggleEtcInput(){const v=document.getElementById("certPurposeSelect").value,e=document.getElementById("certPurposeEtc");if(v==='기타'){e.classList.remove('hidden');e.focus()}else{e.classList.add('hidden')}}
-function openCertModal(){purposeModal.show()}
+let mypageCertIntent=0;
+function cancelMypageCertificateIntent(){++mypageCertIntent;document.getElementById('btnCert')?.removeAttribute('aria-busy');}
+function prepareMypageCertificateTools(){
+return Promise.all(['printService',window.ExpoRuntimeBridge?'expoEmployeeCertificate':'employeeCertificatePrint'].map(key=>window.ErpWorkflowAssets.load(key)));
+}
+async function openCertModal(){
+ if(!mypageDataAuthorized||!isMypageDataVisible())return;
+ const button=document.getElementById('btnCert'),owner=getMypageDataOwner(),request=++mypageCertIntent;
+ const current=()=>request===mypageCertIntent&&owner===getMypageDataOwner()&&mypageDataAuthorized&&!window.frameElement?.hidden
+  &&isMypageDataVisible()&&document.getElementById('tabCert').classList.contains('active');
+ if(!current())return;
+ if(typeof PrintService!=='undefined'&&(window.ExpoRuntimeBridge?window.ExpoEmployeeCertificate:window.EmployeeCertificatePrint)){purposeModal.show();return;}
+ button.setAttribute('aria-busy','true');
+ try{await prepareMypageCertificateTools();if(current())purposeModal.show();}
+ catch(_){if(current())showAlert('증명서 도구를 불러오지 못했습니다. 다시 시도해 주세요.');}
+ finally{if(request===mypageCertIntent)button.removeAttribute('aria-busy');}
+}
 async function loadNotices(isCurrent=()=>true){
   const{data,error}=await _supabase.from('ref_notice').select('*').order('created_at',{ascending:false}).limit(5);
   if(!isCurrent())return false;

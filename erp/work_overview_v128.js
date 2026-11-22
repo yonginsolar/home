@@ -1,4 +1,4 @@
-/* v1.2.8 — Show the author's unread badge suggestion replies. */
+/* v1.2.9 — Keep completed settings hidden while checking optional groups. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -265,45 +265,57 @@
   }
   function mountSetupPanel(root,status,list,retry){
    const names=['base','certificate','deadline'];
-   const groups=new Map(names.map(name=>[name,{phase:'idle',scope:'',serial:0,rows:null,items:null}]));
+   // Only reuse a recently confirmed result in this active overview instance.
+   // A new entry, role change or tab suspension requires a fresh server read.
+   const groups=new Map(names.map(name=>[name,{phase:'idle',scope:'',serial:0,rows:null,items:null,checkedAt:0}]));
    let baseSummary=null,summaryPhase='idle';
    const timestamp=()=>new Date().toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'});
    function scopeFor(name,paths){
-    if(name==='certificate')return paths.certificate;
-    if(name==='deadline')return paths.deadline?'member':'';
     const runtime=options.runtime?.();
-    return JSON.stringify([owner,runtime?.coop_id,runtime?.is_active,runtime?.runtime_profile,
+    const context=JSON.stringify([owner,runtime?.coop_id,runtime?.is_active,runtime?.runtime_profile,
      [...(runtime?.effective_permissions||[])].sort(),runtime?.modules]);
+    if(name==='certificate')return paths.certificate?context+'|'+paths.certificate:'';
+    if(name==='deadline')return paths.deadline?context+'|member':'';
+    return context;
    }
-   function clearGroup(group){++group.serial;group.phase='idle';group.rows?.remove();group.rows=null;group.items=null;}
+   function clearGroup(group){++group.serial;group.phase='idle';group.rows?.remove();group.rows=null;group.items=null;group.checkedAt=0;}
    function syncScope(){
     const paths=extras();
     for(const [name,group] of groups){const next=scopeFor(name,paths);if(group.scope!==next){clearGroup(group);group.scope=next;}}
    }
    function syncVisibility(){
-    if(['loading','failed'].includes(summaryPhase)){if(baseSummary)root.hidden=false;return;}
+    if(['loading','failed'].includes(summaryPhase))return;
     if(!baseSummary)return;
     const extraGroups=names.slice(1).map(name=>groups.get(name)).filter(group=>group.scope);
-    const extrasComplete=extraGroups.every(group=>group.phase==='ready'&&Array.isArray(group.items)
-     &&group.items.every(item=>['ready','legacy'].includes(item.state)));
-    root.hidden=(!baseSummary.can_view||baseSummary.complete)&&extrasComplete&&!['loading','failed'].includes(groups.get('base').phase);
+    const hasIncomplete=group=>group.phase==='failed'||group.items?.some(item=>!['ready','legacy'].includes(item.state));
+    root.hidden=!(baseSummary.can_view&&!baseSummary.complete||groups.get('base').phase==='failed'||extraGroups.some(hasIncomplete));
     if(root.hidden)root.open=false;
    }
    function updateSummary(value,fromSummary){
     baseSummary=value;summaryPhase='ready';syncScope();
     if(fromSummary&&(!value.can_view||value.complete)){
      if(groups.get('base').phase==='failed')clearGroup(groups.get('base'));
-     for(const name of names.slice(1)){const group=groups.get(name);if(group.scope&&group.phase!=='loading')clearGroup(group);}
     }
     syncVisibility();
     // Only complete base settings need collapsed extra checks; incomplete settings stay lazy.
-    if((!value.can_view||value.complete)&&!root.hidden){
+    if(!document.hidden&&(!value.can_view||value.complete)){
      const paths=extras();
-     for(const name of names.slice(1)){const group=groups.get(name);if(group.scope&&group.phase==='idle')void loadGroup(name,paths);}
+     for(const name of names.slice(1)){const group=groups.get(name);if(group.scope&&(group.phase==='idle'||fromSummary&&group.phase==='ready'&&!freshComplete(group)))void loadGroup(name,paths);}
     }
     if(fromSummary&&root.open&&!root.hidden&&groups.get('base').phase==='idle')void loadGroup('base',extras());
     renderStatus();
    }
+   function freshComplete(group){return group.checkedAt>0&&Date.now()-group.checkedAt<30000;}
+   const expireExtras=()=>{for(const name of names.slice(1)){
+    const group=groups.get(name);group.checkedAt=0;
+    if(group.phase==='loading')clearGroup(group);
+   }};
+   function resumeChecks(){
+    if(document.hidden){expireExtras();return;}
+    // Recheck only settings that went stale; do not restart the work count.
+    if(current()&&summaryPhase==='ready'&&baseSummary&&(!baseSummary.can_view||baseSummary.complete))updateSummary(baseSummary,true);
+   }
+   document.addEventListener('visibilitychange',resumeChecks);
    function renderStatus(){
     const available=[...groups.values()].filter(group=>group.scope), loading=available.some(group=>group.phase==='loading');
     const summaryFailed=summaryPhase==='failed',summaryLoading=summaryPhase==='loading';
@@ -341,7 +353,7 @@
    }
    async function loadGroup(name,paths){
     const group=groups.get(name),scope=group.scope,serial=++group.serial;group.phase='loading';
-    const valid=()=>current()&&!root.hidden&&serial===group.serial&&scope===scopeFor(name,extras());
+    const valid=()=>current()&&!document.hidden&&(name!=='base'||!root.hidden)&&serial===group.serial&&scope===scopeFor(name,extras());
     try{
      let items,visibility;
      if(name==='base'){
@@ -355,6 +367,7 @@
      paint(name,items,paths);
      group.items=items;
      group.phase=items.some(item=>item.state==='unavailable')?'failed':'ready';
+     group.checkedAt=name!=='base'&&items.length>0&&items.every(item=>['ready','legacy'].includes(item.state))?Date.now():0;
      if(visibility)setupVisibility(visibility.value,visibility.ticket);else syncVisibility();
     }catch(error){if(valid()){if(readDenied(error)){paint(name,[],paths);group.items=[];group.phase='ready';}else group.phase='failed';syncVisibility();}}
     finally{
@@ -366,7 +379,7 @@
     if(!current()||!root.open||root.hidden)return;
     if(summaryPhase==='loading'||summaryPhase==='failed')return;
     syncScope();const paths=extras();
-    for(const name of names){const group=groups.get(name);if(group.scope&&group.phase!=='loading'&&(!failedOnly||group.phase==='failed'))void loadGroup(name,paths);}
+    for(const name of names){const group=groups.get(name);if(group.scope&&group.phase!=='loading'&&(failedOnly?group.phase==='failed':!freshComplete(group)))void loadGroup(name,paths);}
     renderStatus();
    }
    const reset=()=>{baseSummary=null;summaryPhase='idle';for(const group of groups.values())clearGroup(group);retry.hidden=true;status.textContent='';};
@@ -385,7 +398,7 @@
     load(true);
    };
    retry.addEventListener('blur',()=>{if(!root.hidden&&current())renderStatus();});
-   sections.push(()=>{root.open=false;reset();});
+   sections.push(()=>{document.removeEventListener('visibilitychange',resumeChecks);root.open=false;reset();});
   }
   for(const [section,title] of [['tasks','📌 내 업무 모아보기'],['setup','✅ 조합 설정 점검표']]) {
    const root=el('details','border rounded p-3 mb-2 bg-white'),heading=el('summary','fw-bold',title);

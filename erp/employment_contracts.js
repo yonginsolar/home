@@ -1,5 +1,5 @@
 /* UI modal revision: 20261013.1 — preserve business versions, authority and drafts. */
-/* Version: v1.3.10 | 2026-11-08 — Verify detail against current history and bound self-history reads. */
+/* Version: v1.3.11 | 2026-11-22 — Prepare PDF only after opening output-capable contract detail. */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -1232,6 +1232,8 @@ function openContract(id, options = {}) {
 async function showContract(id) {
   if (!isContractHistoryReady(id)) return;
   const owner = contractReadOwner();
+  const hint=state.contracts.find(row=>row.id===id);
+  if(hint?.source_type==='editor'&&!(hint.status==='draft'&&state.admin&&!state.forceSelf))warmContractPdfTool();
   try {
   if (!await loadContractDefaults(owner)) return;
   const contract = await readContractDetail(id, owner);
@@ -1290,6 +1292,8 @@ function renderPreview(contract, unsaved) {
   document.getElementById('employeeSignButton')?.addEventListener('click', (event) => signContract(contract.id, 'employee', event.currentTarget));
   document.getElementById('downloadContractButton')?.addEventListener('click', (event) => downloadContractPdf(contract, event.currentTarget));
   document.getElementById('printContractButton')?.addEventListener('click', (event) => printContract(contract, event.currentTarget));
+  // Prime the fixed library only after the requested contract preview is visible.
+  if (document.getElementById('printContractButton')) warmContractPdfTool();
 }
 
 function renderContractDocument(contract) {
@@ -1520,8 +1524,9 @@ function addPdfOutputMarks(pdf, contract) {
   }
 }
 
-async function buildContractPdf(contract) {
-  if (typeof window.html2pdf !== 'function') throw new Error('PDF 생성 기능을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+async function buildContractPdf(contract, current) {
+  await window.ErpWorkflowAssets.load('contractPdf').catch(() => {throw new Error('PDF 생성 기능을 불러오지 못했습니다. 다시 시도해 주세요.');});
+  if (!current()) return null;
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:-100000px;top:0;width:186mm;background:#fff;z-index:-1;';
   root.innerHTML = renderContractDocument(contract);
@@ -1545,20 +1550,27 @@ async function buildContractPdf(contract) {
   }
 }
 
+function warmContractPdfTool(){void window.ErpWorkflowAssets.load('contractPdf').catch(()=>{});}
+
 async function printContract(contract, button) {
   if (state.busy) return;
   const printWindow = window.open('', '_blank');
   if (!printWindow) return showAlert('인쇄 창을 열 수 없습니다. 브라우저의 팝업 차단을 해제한 뒤 다시 시도해 주세요.');
   printWindow.document.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>계약서 인쇄 준비</title></head><body style="font-family:sans-serif;padding:32px">쪽번호와 문서 확인정보를 넣어 인쇄 문서를 준비하고 있습니다.</body></html>');
   printWindow.document.close();
+  const current = contractOutputCurrent(button);
   try {
     button.dataset.label = button.textContent;
     setBusy(true, button);
-    const pdf = await buildContractPdf(contract);
+    const pdf = await buildContractPdf(contract, () => current() && !printWindow.closed);
+    if (!pdf || !current() || printWindow.closed) {printWindow.close();return;}
     const blobUrl = URL.createObjectURL(pdf.output('blob'));
     let printStarted = false;
     const startPrint = () => {
-      if (printStarted || printWindow.closed) return;
+      if (printStarted) return;
+      if (!current() || printWindow.closed) {
+        printStarted = true;URL.revokeObjectURL(blobUrl);printWindow.close();return;
+      }
       printStarted = true;
       try {
         printWindow.focus();
@@ -1573,23 +1585,29 @@ async function printContract(contract, button) {
   } catch (error) {
     printWindow.close();
     console.error('[employment_contracts] print failed', error);
-    showAlert(normalizeError(error));
+    if (current()) showAlert(normalizeError(error));
   } finally {
     setBusy(false, button);
   }
 }
 
+function contractOutputCurrent(button) {
+  const scope=contractReadScope(),detail=state.detailRevision;
+  return () => !!button?.isConnected && scope===contractReadScope() && detail===state.detailRevision && !window.frameElement?.hidden;
+}
+
 async function downloadContractPdf(contract, button) {
   if (state.busy) return;
+  const current=contractOutputCurrent(button);
   try {
     button.dataset.label = button.textContent;
     setBusy(true, button);
     const fileName = sanitizeFileName(`${contract.title || kindLabel(contract.document_kind)}_${contract.terms?.employee_name || '근로자'}_${contract.effective_date || todayKst()}.pdf`);
-    const pdf = await buildContractPdf(contract);
-    pdf.save(fileName);
+    const pdf = await buildContractPdf(contract, current);
+    if (pdf && current()) pdf.save(fileName);
   } catch (error) {
     console.error('[employment_contracts] pdf download failed', error);
-    showAlert(normalizeError(error));
+    if (current()) showAlert(normalizeError(error));
   } finally {
     setBusy(false, button);
   }
