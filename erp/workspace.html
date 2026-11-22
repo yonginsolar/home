@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.2.33 | 서버 오류 재시도 및 같은 업무 진입의 권한 확인 재사용 -->
+<!-- Version: v1.2.34 | 로그인 검사 전에 필요한 SDK는 같은 주소에서 로드 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -25,9 +25,22 @@
   <script src="/erp/workspace_feature_tabs.js?v=1.0.1" integrity="sha384-ShPswNA9jmdA4dBD5nokFNkYj1LewILn/ZcghtVXdu+zuGKb/BfsTOh2/VjaBkDl" crossorigin="anonymous" defer></script>
   <script src="/erp/workspace_nav.js?v=20261121-coop-settings-2" integrity="sha384-XEGqT6cv05uEZWiSzEw8E0YdgyUeTDH2pH+rjs0Zl03YkXjWaemIUSdHZ6uAXAGA" crossorigin="anonymous" defer></script>
   <script src="/erp/workspace_shell_v20261122.js?v=20261122-http503-hr-1" integrity="sha384-h6M3/4lZlZJg38SfOz3pdIFrJYtkCEhdu7c6ttWq+xLlKTYBLmVNHpZB4b/kZcuy" crossorigin="anonymous" defer></script>
+  <script src="/erp/assets/vendor/supabase-js-2.112.2.a57ec93710be.js" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous" defer></script>
+  <script type="importmap">
+    {"imports":{"https://esm.sh/@supabase/supabase-js@2.112.2":"/erp/workspace_sdk_bridge.js?v=20261122-1"}}
+  </script>
   <script type="module">
-    import {supabase} from '/shared/supabase-client.js?v=20261010-1';
-    await window.ErpWorkspaceShell.start(supabase);
+    let client;
+    try {
+      ({supabase:client} = await import('/shared/supabase-client.js?v=20261010-1'));
+    } catch (_) {
+      document.getElementById('erpWorkspaceStatus').hidden = true;
+      const notice = document.getElementById('erpWorkspaceError');
+      notice.querySelector('p').textContent = 'ERP 연결 파일을 불러오지 못했습니다.';
+      document.getElementById('erpWorkspaceRetry').onclick = () => location.reload();
+      notice.hidden = false;
+    }
+    if (client) await window.ErpWorkspaceShell.start(client);
   </script>
 </head>
 <body class="erp-workspace-host">

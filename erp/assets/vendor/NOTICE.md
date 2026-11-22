@@ -1,4 +1,8 @@
-# PDF libraries
+# ERP vendor libraries
+
+- Supabase JS 2.112.2: MIT; see `supabase-js-2.112.2.LICENSE`. The pinned browser file matches the existing CDN integrity and the npm package's `dist/umd/supabase.js` body (apart from jsDelivr's leading comment). [npm release](https://www.npmjs.com/package/@supabase/supabase-js/v/2.112.2). Its filename contains the first 12 hex characters of SHA-256. Change the filename, HTML integrity and exact cache rule together when upgrading.
+
+## PDF libraries
 
 - pdf-lib 1.17.1: MIT, Copyright (c) 2019 Andrew Dillon. The license is supplied in pdf-lib-LICENSE.md. Source: https://github.com/Hopding/pdf-lib
 - @pdf-lib/fontkit 1.1.1: MIT. Source: https://github.com/Hopding/fontkit (its README declares the MIT license); fork of fontkit by Devon Govett. Registry release: https://registry.npmjs.org/@pdf-lib/fontkit/1.1.1

@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.214
-Change: 2026-11-22 - 직원 명단과 조합 기본정보 우선 표시, 급여·인쇄 지연 로드.
+Version: v1.0.215
+Change: 2026-11-22 - 최초 직원 명단에서 설정·도구 코드 분리.
 -->
 <html>
 <head>
@@ -15,7 +15,7 @@ Change: 2026-11-22 - 직원 명단과 조합 기본정보 우선 표시, 급여�
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.214 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.215 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
   <meta charset="UTF-8">
@@ -25,13 +25,9 @@ Change: 2026-11-22 - 직원 명단과 조합 기본정보 우선 표시, 급여�
 <script src="/erp/corporate_number_input.js?v=20261114-registry-2" integrity="sha384-/UVCDxd+ZB9pae+tQdWiaX6joFu56Z8p58bQ3VP2yzzZHN6VUBgWIu2f+/itVwaQ" crossorigin="anonymous"></script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
+  <script src="/erp/assets/vendor/supabase-js-2.112.2.a57ec93710be.js" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script src="number_input.js?v=20261010-1"></script>
-<script src="../shared/company_seal_upload.js?v=20261009-17"></script>
-<script src="../shared/coop_logo_upload.js?v=1.1.0"></script>
-<script src="../shared/coop_favicon_field.js?v=1.0.1"></script>
-<script src="coop_logo_settings.js?v=1.1.4"></script>
 <script src="coop_certificate_setup.js?v=20261110-write-lock"></script>
 <script src="../shared/member_capital.js?v=20261008-3"></script>
 <script src="member_capital_settings.js?v=20261016-1"></script>
@@ -54,7 +50,6 @@ Change: 2026-11-22 - 직원 명단과 조합 기본정보 우선 표시, 급여�
 </script>
   <script src="erp_runtime_guard.js?v=20261122-hr-entry-1"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-  <script src="workflow_assets.js?v=20261119-postcode-1"></script>
   <script src="leave_time.js?v=20261012-2"></script>
   <script src="leave_ledger.js?v=20261122-leave-detail-8"></script>
   <script src="sun_village_total_manager_admin.js?v=1.0.6" defer></script>
@@ -187,7 +182,6 @@ Change: 2026-11-22 - 직원 명단과 조합 기본정보 우선 표시, 급여�
   <link rel="stylesheet" href="./employee_roster.css?v=1.0.2">
   <link rel="stylesheet" href="./tab_workspace.css?v=1.0.0">
   <script src="tab_workspace.js?v=1.0.0" defer></script>
-  <script src="hr_insurance_status.js?v=1.0.1" defer></script>
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
   <script src="/erp/workspace_nav.js?v=20261014-setup2" defer></script>
@@ -3659,7 +3653,13 @@ const employeeFeatureAssets = (() => {
         PayrollDurunuriModule:'payroll_durunuri_module.js?v=20260901-1',
         SalaryLedgerModule:'salary_ledger_module.js?v=1.0.12',
         ContractPayroll:'contract_payroll.js?v=1.0.0',
-        PayrollImportGuard:'payroll_import_guard.js?v=1.0.0'
+        PayrollImportGuard:'payroll_import_guard.js?v=1.0.0',
+        ErpWorkflowAssets:'workflow_assets.js?v=20261119-postcode-1',
+        HrInsuranceStatus:'hr_insurance_status.js?v=1.0.1',
+        CoopCompanySealUpload:'/shared/company_seal_upload.js?v=20261009-17',
+        CoopLogoUpload:'/shared/coop_logo_upload.js?v=1.1.0',
+        CoopFaviconField:'/shared/coop_favicon_field.js?v=1.0.1',
+        CoopLogoSettings:'coop_logo_settings.js?v=1.1.4'
     };
     const pending = new Map();
     const ready = name => name === 'PrintService' ? typeof PrintService === 'object' : !!window[name];
@@ -3677,7 +3677,8 @@ const employeeFeatureAssets = (() => {
             const timer = setTimeout(() => finish(false),15000);
             script.onload = () => finish(ready(name));
             script.onerror = () => finish(false);
-            script.src = new URL('/erp/' + modules[name],location.origin).href;
+            const path = modules[name];
+            script.src = new URL(path.startsWith('/') ? path : '/erp/' + path,location.origin).href;
             document.head.appendChild(script);
         }).finally(() => pending.delete(name));
         pending.set(name,task);
@@ -3685,6 +3686,10 @@ const employeeFeatureAssets = (() => {
     }
     return (...names) => Promise.all(names.map(load));
 })();
+async function loadEmployeeWorkflowAsset(name) {
+    await employeeFeatureAssets('ErpWorkflowAssets');
+    return window.ErpWorkflowAssets.load(name);
+}
 let employeeCompanyEntryReady = false, employeeCompanyEntryFlight = null;
 let employeeEntryTargetOpened = false;
 function openEmployeeEntryTarget() {
@@ -4451,7 +4456,7 @@ async function openAddressSearch() {
         if (typeof window.daum?.Postcode !== 'function') {
             request.loading = true;
             status.textContent = '주소 검색을 준비하고 있습니다…';
-            await window.ErpWorkflowAssets.load('postcode');
+            await loadEmployeeWorkflowAsset('postcode');
             request.loading = false;
             if (!current()) {
                 if (employeeAddressSearch === request) resetEmployeeAddressSearch();
@@ -5146,7 +5151,7 @@ async function handlePayrollImportFileChange(input) {
         return;
     }
     try {
-        await window.ErpWorkflowAssets.load('spreadsheet');
+        await loadEmployeeWorkflowAsset('spreadsheet');
     } catch (_) {
         if (isCurrent()) showAlert('엑셀 도구를 불러오지 못했습니다. 파일을 다시 선택해 주세요. 입력한 내용은 유지됩니다.');
         return;
@@ -6194,7 +6199,11 @@ async function showCoopBasicFirst() {
         return;
     }
     if (!sameOwner()) return;
-    await loadSettings({throwOnError:true,isCurrent:sameOwner,preserveProfile:true});
+    try { await loadSettings({throwOnError:true,isCurrent:sameOwner,preserveProfile:true}); }
+    catch (_) {
+        if (sameOwner()) showHrSettingsReadRetry('나머지 설정을 불러오지 못했습니다. 기본정보는 계속 이용할 수 있습니다.');
+        return;
+    }
     if (!sameOwner()) return;
     hrSettingsReadyOwner = owner;
     view.checkpointSection('#setCompany > .row > :not([data-first-profile]), #coopBusinessSettingsFields, #setCalendar');
@@ -6228,7 +6237,12 @@ async function applyCoopSettingsProfileRead(pendingProfile) {
     }
 }
 async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null, preserveProfile = false, profileRead } = {}) {
+    if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     ensureCoopProfileFields();
+    await employeeFeatureAssets('CoopCompanySealUpload','CoopLogoUpload','CoopFaviconField');
+    if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+    await employeeFeatureAssets('CoopLogoSettings'); // Its mount consumes the favicon controller.
+    if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     ensureCoopPermissionLaunchers();
     ensureCoopDepositSettings();
     initAnnualSettings();
@@ -7726,9 +7740,20 @@ async function loadEmployeeInsuranceStatus() {
     const root = document.getElementById('employeeInsuranceStatus');
     if (!empId || !isHrSettingsContextCurrent(owner) || !isEmployeeDetailTabVisible('tabInsuranceStatus')
         || window.HrInsuranceStatus?.isMounted(root)) return;
-    await window.HrInsuranceStatus?.mount(_supabase, root, {empId, admin:true,
-        isCurrent:()=>owner===getHrSettingsOwner()&&revision===employeeDetailRevision&&empId===String(currentEmpId||'')
-            &&isHrSettingsContextCurrent(owner)&&isEmployeeDetailTabVisible('tabInsuranceStatus')});
+    const current = () => !coopProfileAuthInvalidated && revision===employeeDetailRevision && empId===String(currentEmpId||'')
+        && isHrSettingsContextCurrent(owner) && isEmployeeDetailTabVisible('tabInsuranceStatus');
+    try { await employeeFeatureAssets('HrInsuranceStatus'); }
+    catch (_) {
+        if (!current()) return;
+        const retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'btn btn-outline-primary btn-sm';
+        retry.textContent = '4대보험 다시 확인';
+        retry.onclick = () => void loadEmployeeInsuranceStatus();
+        root.replaceChildren(retry);
+        return;
+    }
+    if (!current() || window.HrInsuranceStatus.isMounted(root)) return;
+    await window.HrInsuranceStatus.mount(_supabase, root, {empId,admin:true,isCurrent:current});
 }
 function revealEmployeeDetailTab(link) {
     if (!link) return;
@@ -10175,7 +10200,7 @@ function loadEmployeeStatsDashboard() {
         loadingMessage:'통계를 불러오는 중입니다.',
         errorMessage:'통계를 확인하지 못했습니다. 다시 확인해 주세요.',
         read:async context => {
-            await window.ErpWorkflowAssets.load('chart');
+            await loadEmployeeWorkflowAsset('chart');
             if (!context.isCurrent()) throw new Error('EMPLOYEE_STATS_STOPPED');
             const oneYearAgo = new Date(); oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
             const dateStr = oneYearAgo.toISOString();
