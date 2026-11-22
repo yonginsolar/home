@@ -7,17 +7,18 @@
   var DEFAULT_RESERVED_STATUSES = ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'];
   var DEFAULT_PENDING_STATUSES = ['진행중'];
   var DEFAULT_APPROVAL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id';
-  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v6';
+  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v7';
   var leaveDetailDialogs = new WeakSet();
   var LEAVE_REPORT_STYLE_TEXT = [
-    '.leave-detail-dialog .modal-dialog{--bs-modal-width:620px}',
-    '.leave-detail-dialog .modal-content{height:min(25.5rem,100%);min-height:0}',
+    '.leave-detail-dialog .modal-dialog{--bs-modal-width:680px}',
+    '.leave-detail-dialog .modal-content{height:min(28rem,100%);min-height:0}',
     '.leave-detail-dialog .modal-header{flex-wrap:wrap;column-gap:.5rem;row-gap:.35rem;padding:.65rem .85rem}',
+    '.leave-detail-dialog .modal-title{font-size:1.0625rem}',
     '.leave-detail-dialog .modal-header .btn-close{margin:0;flex:0 0 auto;padding:.45rem}',
     '.leave-detail-dialog .modal-body{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;background:var(--bs-tertiary-bg,#f8f9fa)}',
     '.leave-detail-views{display:flex;gap:.15rem;margin-inline-start:auto;padding:.2rem;border:1px solid var(--bs-border-color,#dee2e6);border-radius:.6rem;background:var(--bs-tertiary-bg,#f8f9fa)}',
     '.leave-detail-views:not([data-ready]){visibility:hidden}',
-    '.leave-detail-views .btn{border:0;white-space:nowrap;color:var(--bs-body-color,#212529)}',
+    '.leave-detail-views .btn{border:0;font-size:.9375rem;white-space:nowrap;color:var(--bs-body-color,#212529)}',
     '.leave-detail-views .btn[aria-pressed="true"]{background:var(--erp-primary,var(--bs-primary,#0d6efd));color:#fff}',
     '.leave-detail-views .btn:focus-visible{outline:2px solid var(--erp-primary,var(--bs-primary,#0d6efd));outline-offset:1px}',
     '.leave-report [hidden]{display:none!important}',
@@ -25,39 +26,39 @@
     '.leave-report-panel{display:grid;gap:.75rem;min-width:0}',
     '.leave-report-balance,.leave-report-card,.leave-report-archive{border:1px solid var(--bs-border-color,#dee2e6);border-radius:10px;padding:.75rem .875rem;min-width:0}',
     '.leave-report-balance{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.25rem .75rem;background:var(--erp-primary-soft,var(--bs-primary-bg-subtle,#e7f1ff));color:var(--erp-primary-strong,var(--bs-primary-text-emphasis,#084298));border-color:var(--erp-border-strong,var(--bs-primary-border-subtle,#9ec5fe))}',
-    '.leave-report-balance small{display:block;font-size:.75rem}',
-    '.leave-report-balance strong{font-size:1.25rem}',
+    '.leave-report-balance small{display:block;font-size:.8125rem}',
+    '.leave-report-balance strong{font-size:1.375rem}',
     '.leave-report-card,.leave-report-archive{background:var(--bs-body-bg,#fff)}',
     '.leave-report-first-year{background:var(--bs-tertiary-bg,#f8f9fa)}',
-    '.leave-report-heading{font-size:1rem;font-weight:700;margin:0}',
+    '.leave-report-heading{font-size:1.0625rem;font-weight:700;margin:0}',
     '.leave-report-heading strong{color:var(--erp-primary-strong,var(--bs-primary-text-emphasis,#084298))}',
     '.leave-fiscal-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:.55rem 0 0;border-top:1px solid var(--bs-border-color,#dee2e6)}',
     '.leave-fiscal-group{min-width:0;padding:.65rem .7rem 0 0}',
     '.leave-fiscal-group+.leave-fiscal-group{padding:.65rem 0 0 .7rem;border-inline-start:1px solid var(--bs-border-color,#dee2e6)}',
-    '.leave-fiscal-group h6{margin:0;font-size:.875rem;font-weight:700}',
+    '.leave-fiscal-group h6{margin:0;font-size:.9375rem;font-weight:700}',
     '.leave-fiscal-total,.leave-fiscal-group dl>div{display:flex;justify-content:space-between;align-items:baseline;gap:.25rem .5rem}',
     '.leave-fiscal-total{flex-wrap:wrap}',
-    '.leave-fiscal-total strong{font-size:1.125rem;font-variant-numeric:tabular-nums}',
+    '.leave-fiscal-total strong{font-size:1.1875rem;font-variant-numeric:tabular-nums}',
     '.leave-fiscal-group dl{margin:.4rem 0 0;padding-top:.3rem;border-top:1px solid var(--bs-border-color,#dee2e6)}',
     '.leave-fiscal-group dl>div{padding:.15rem 0}',
-    '.leave-fiscal-group dt{font-size:.83rem;font-weight:400;color:var(--bs-secondary-color,#495057)}',
-    '.leave-fiscal-group dd{margin:0;font-size:.875rem;text-align:end;font-variant-numeric:tabular-nums}',
+    '.leave-fiscal-group dt{font-size:.9rem;font-weight:400;color:var(--bs-secondary-color,#495057)}',
+    '.leave-fiscal-group dd{margin:0;font-size:.9375rem;text-align:end;font-variant-numeric:tabular-nums}',
     '.leave-report-records{display:grid;gap:.55rem;margin-top:.55rem}',
     '.leave-report-disclosure{margin-top:.55rem}',
     '.leave-report-archive{padding-block:0}',
     '.leave-report-archive>summary,.leave-report-disclosure>summary{cursor:pointer;color:var(--erp-primary-strong,var(--bs-primary-text-emphasis,#084298));font-weight:600;padding:.55rem 0;min-height:2.75rem}',
-    '.leave-report-archive>summary span{font-size:.8rem;font-weight:400}',
+    '.leave-report-archive>summary span{font-size:.875rem;font-weight:400}',
     '.leave-report-archive>summary:focus-visible,.leave-report-disclosure>summary:focus-visible{outline:2px solid var(--erp-primary,var(--bs-primary,#0d6efd));outline-offset:2px;border-radius:4px}',
     '.leave-report-history-body{border-top:1px solid var(--bs-border-color,#dee2e6);padding:.55rem 0 .7rem}',
     '.leave-report-disclosure[open]>summary{margin-bottom:.5rem}',
     '.leave-section{border:1px solid var(--bs-border-color,#dee2e6);border-radius:8px;background:var(--bs-tertiary-bg,#f8f9fa);padding:13px}',
-    '.leave-section h6{font-weight:bold;border-bottom:1px solid var(--bs-border-color,#dee2e6);padding-bottom:8px;margin-bottom:10px;font-size:0.95rem}',
-    '.leave-list{list-style:none;padding:0;margin:0;font-size:0.85rem}',
+    '.leave-section h6{font-weight:bold;border-bottom:1px solid var(--bs-border-color,#dee2e6);padding-bottom:8px;margin-bottom:10px;font-size:1rem}',
+    '.leave-list{list-style:none;padding:0;margin:0;font-size:.9375rem}',
     '.leave-list li{margin-bottom:6px}',
     '.leave-report .leave-list span{min-width:0;overflow-wrap:anywhere}',
     '@media(max-width:575.98px){.leave-report-balance,.leave-report-card,.leave-section{padding:.65rem}.leave-detail-dialog .modal-body{padding:.65rem!important}}',
     '@media(max-width:500px){.leave-fiscal-metrics{grid-template-columns:minmax(0,1fr)}.leave-fiscal-group,.leave-fiscal-group+.leave-fiscal-group{padding:.45rem 0;border-inline-start:0}.leave-fiscal-group+.leave-fiscal-group{border-top:1px solid var(--bs-border-color,#dee2e6);margin-top:.25rem}}',
-    '@media(max-width:410px){.leave-detail-dialog .modal-content{height:min(27rem,100%)}.leave-detail-dialog .modal-header{column-gap:.3rem;padding-inline:.55rem}.leave-detail-views .btn{padding-inline:.36rem;font-size:.8rem}}',
+    '@media(max-width:410px){.leave-detail-dialog .modal-content{height:min(29rem,100%)}.leave-detail-dialog .modal-header{column-gap:.3rem;padding-inline:.55rem}.leave-detail-views .btn{padding-inline:.36rem;font-size:.875rem}}',
     // Give the records the available height without shrinking the text.
     '@media(max-height:480px){'
       +'.leave-detail-dialog .modal-dialog{--bs-modal-margin:8px;width:calc(100% - 2 * var(--bs-modal-margin));margin-inline:auto}'
@@ -77,7 +78,8 @@
     // On the smallest screens the top close is sufficient. Keep the footer
     // while it has keyboard focus so a resize does not take that focus away.
     '@media(max-height:340px) and (max-width:500px){'
-      +'.leave-detail-views .btn{line-height:1.15}'
+      +'.leave-detail-dialog .modal-title{font-size:1rem}'
+      +'.leave-detail-views .btn{font-size:.8rem;line-height:1.15}'
       +'.leave-detail-dialog .modal-footer:not(:focus-within){display:none}'
       +'.leave-detail-dialog .modal-content:has(.modal-footer:focus-within){overflow:auto}}',
     '@media(pointer:coarse){.leave-detail-views .btn{min-height:44px}}'
@@ -994,7 +996,7 @@
       &&(!today||(fiscal.available_minutes<=Math.max(0,fiscalBeforeBookings)&&gross-charge===availableNow));
     var credits=[['기본 발생',fiscal.granted_minutes],['조정 부여',breakdown?.credits]];
     if(monthlyGranted)credits.splice(1,0,['1년 미만 발생',monthlyGranted]);
-    var debits=[[today?'현재 잔여에 반영된 사용':'휴가 사용',used],['조정 차감',breakdown?.debits]];
+    var debits=[[today?'사용 연차':'휴가 사용',used],['조정 차감',breakdown?.debits]];
     // Show only reservations that restrict today's balance, not the sum of
     // future requests that may be covered by future monthly grants.
     if(ok&&booked>0)debits.push(['예정·결재 중 반영',booked]);
@@ -1145,7 +1147,7 @@
       var hasHistory=Boolean(fiscal?.issued_on||auto||manual.length||pendingSummary.docs.length||reviewByYear[key]?.length
         ||yearSummary.reservedDocs?.length||yearSummary.pastOrUsedDocs?.length||yearSummary.unknownDateDocs?.length);
       if(!hasFiscal&&!hasHistory)return;
-      var title=year+'년 '+(hasFiscal?(isCurrent&&activeFirst.length?'연차 기록':'회계연도 기록'):
+      var title=year+'년 '+(hasFiscal?(isCurrent?'잔여 계산':'회계연도 기록'):
         year>currentYear?'예정 기록':'기록'), past=year<currentYear;
       var html=past?'<details class="leave-report-archive" data-leave-archive data-leave-accrual-year="'+year
         +'"><summary>'+title+'</summary><div class="leave-report-history-body">'
