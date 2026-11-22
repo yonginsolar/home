@@ -2871,44 +2871,6 @@ async function loadApprovalLeaveCancelTargetDoc(targetDocId, targetEmpId, option
     return { ok: true, message: '', targetDoc: data };
 } // End of loadApprovalLeaveCancelTargetDoc
 
-async function applyApprovalLeaveCancelSettlement(doc, newStatus, options = {}) {
-    if (!isLeaveCancelApprovalDoc(doc) || String(newStatus || '').trim() !== '완료') return '';
-    const targetResult = options.targetDoc
-        ? { ok: true, targetDoc: options.targetDoc }
-        : await loadApprovalLeaveCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
-            excludeDocId: doc?.id || '',
-            checkExistingCancel: false
-        });
-    if (!targetResult?.ok || !targetResult?.targetDoc) {
-        throw new Error(targetResult?.message || '취소 대상 휴가를 확인하지 못했습니다.');
-    }
-
-    const targetDoc = targetResult.targetDoc;
-    const { error: targetUpdateError } = await _supabase
-        .from('ref_approval')
-        .update({ status: '결재취소', current_approver: null })
-        .eq('coop_id', getApprovalScopedCoopId())
-        .eq('id', targetDoc.id);
-    if (targetUpdateError) throw targetUpdateError;
-
-    await logAudit('approval.cancel', targetDoc.id, '휴가 취소 승인 반영', {
-        reason: `${String(doc.title || '휴가 취소 요청').trim()} 승인`,
-        cancel_request_doc_id: doc?.id || null,
-        cancel_request_doc_type: String(doc?.doc_type || '').trim() || null
-    });
-
-    if (targetDoc.current_approver) {
-        await createNotification(
-            targetDoc.current_approver,
-            '휴가 취소',
-            `${targetDoc.title || '휴가'}가 휴가 취소 결재 승인으로 취소되었습니다.`,
-            `approval.html?doc=${targetDoc.id}`,
-            { doc_id: targetDoc.id, cancel_request_doc_id: doc?.id || null }
-        );
-    }
-    return '';
-} // End of applyApprovalLeaveCancelSettlement
-
 function isApprovalBusinessTripCancelCategory(docType) {
     return String(docType || '').trim() === '출장취소';
 } // End of isApprovalBusinessTripCancelCategory
@@ -3291,34 +3253,29 @@ async function loadApprovalBusinessTripCancelTargetDoc(targetDocId, targetEmpId,
     return { ok: true, message: '', targetDoc: data };
 } // End of loadApprovalBusinessTripCancelTargetDoc
 
-async function applyApprovalBusinessTripCancelSettlement(doc, newStatus, options = {}) {
-    if (!isApprovalBusinessTripCancelDocType(doc?.doc_type || doc) || String(newStatus || '').trim() !== '완료') return '';
-    const targetResult = options.targetDoc
-        ? { ok: true, targetDoc: options.targetDoc }
-        : await loadApprovalBusinessTripCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
-            excludeDocId: doc?.id || '',
-            checkExistingCancel: false,
-            checkCancelWindow: false
-        });
-    if (!targetResult?.ok || !targetResult?.targetDoc) {
-        throw new Error(targetResult?.message || '취소 대상 출장을 확인하지 못했습니다.');
-    }
-
-    const targetDoc = targetResult.targetDoc;
-    const { error: targetUpdateError } = await _supabase
-        .from('ref_approval')
-        .update({ status: '결재취소', current_approver: null })
-        .eq('coop_id', getApprovalScopedCoopId())
-        .eq('id', targetDoc.id);
-    if (targetUpdateError) throw targetUpdateError;
-
-    await logAudit('approval.cancel', targetDoc.id, '출장 취소 승인 반영', {
-        reason: `${String(doc.title || '출장 취소 요청').trim()} 승인`,
-        cancel_request_doc_id: doc?.id || null,
-        cancel_request_doc_type: String(doc?.doc_type || '').trim() || null
+function isApprovalCancellationRequest(doc) {
+    return isLeaveCancelApprovalDoc(doc)||isApprovalBusinessTripCancelDocType(doc?.doc_type);
+}
+async function confirmApprovalCancellationReceipt(id,status,stamp=null) {
+    const owner=getApprovalActionOwner(),safeId=toPositiveDocId(id);
+    if(!owner||!safeId||!['완료','실물결재완료'].includes(status))return false;
+    try {
+        const {data,error}=await boundedApprovalAttachmentRead(signal=>_supabase.rpc('erp_approval_cancellation_result',{
+            p_request_id:safeId,p_final_status:status,p_finished_at:stamp
+        },{get:true}).abortSignal(signal));
+        return !error&&data===true&&owner===getApprovalActionOwner();
+    }catch(_){return false;}
+}
+async function auditApprovalCancellation(doc) {
+    const id=toPositiveDocId(doc?.related_doc_id);
+    if(!id)return;
+    await logAudit('approval.cancel',id,isLeaveCancelApprovalDoc(doc)?'휴가 취소 승인 반영':'출장 취소 승인 반영',{
+        cancel_request_doc_id:doc.id,cancel_request_doc_type:doc.doc_type
     });
-    return '';
-} // End of applyApprovalBusinessTripCancelSettlement
+}
+function isDefiniteApprovalCancellationFailure(error) {
+    return ['22023','22P02','42501','PT409','23514','P0001','23505'].includes(String(error?.code||''));
+}
 
 function clearApprovalDraftLocalFiles() {
     const input = document.getElementById('attachFile');
@@ -13106,11 +13063,17 @@ function preserveApprovalActionMemo() {
 function syncApprovalActionSubmitButton() {
     const p=pendingApprovalAction,btn=document.getElementById('btnApprovalActionSubmit');
     if (!p || !btn || p.owner!==getApprovalActionOwner()) return;
-    const prior=assignedApprovalRequests.get(getAssignedApprovalRequestKey(p.docId));
-    btn.textContent=prior ? '처리 결과 확인' : p.action==='반려' ? '반려 처리' : `${getApprovalPositiveActionLabel()} 완료`;
+    const key=getAssignedApprovalRequestKey(p.docId);
+    const prior=assignedApprovalRequests.get(key);
+    const direct=directApprovalCancellationResults.has(key);
+    btn.textContent=prior||direct ? '처리 결과 확인' : p.action==='반려' ? '반려 처리' : `${getApprovalPositiveActionLabel()} 완료`;
     if (prior) {
         const guide=document.getElementById('approvalActionModalGuide');
         if (guide) guide.textContent=`${prior.expected.title || '이 문서'} · 이전에 요청한 ${prior.action}의 처리 결과를 확인합니다.`;
+    }
+    if(direct){
+        const guide=document.getElementById('approvalActionModalGuide');
+        if(guide)guide.textContent='다시 승인하지 않고 취소 반영 여부만 확인합니다.';
     }
 }
 function resetApprovalActionModal() {
@@ -16252,6 +16215,7 @@ async function procDoc(docId, action) {
 } // End of procDoc
 
 const assignedApprovalRequests = new Map();
+const directApprovalCancellationResults = new Map();
 function getPendingAssignedApprovalRequests() {
     const owner=getApprovalActionOwner();
     return !window.ExpoRuntimeBridge && owner ? [...assignedApprovalRequests].filter(([key])=>key.startsWith(owner+'|')).map(([,request])=>request) : [];
@@ -16259,18 +16223,30 @@ function getPendingAssignedApprovalRequests() {
 function syncPendingApprovalResults() {
     const btn=document.getElementById('btnPendingApprovalResults');
     if (!btn) return;
-    const pending=getPendingAssignedApprovalRequests();
-    btn.hidden=pending.length===0;
-    btn.textContent=`처리 결과 확인 · ${pending.length}건`;
+    const pending=getPendingAssignedApprovalRequests().length+getOtherPendingApprovalResults().length;
+    btn.hidden=pending===0;
+    btn.textContent=`처리 결과 확인 · ${pending}건`;
+}
+function getOtherPendingApprovalResults() {
+    const owner=getApprovalActionOwner();
+    if(!owner)return [];
+    return [
+        ...[...directApprovalCancellationResults.values()].filter(op=>op.owner===owner),
+        ...[...physicalCompleteRequests.values()].filter(op=>op.owner===owner&&op.phase==='unknown'&&isApprovalCancellationRequest(op.doc))
+    ];
 }
 function openPendingApprovalResult() {
     const pending=getPendingAssignedApprovalRequests()[0];
-    if (pending) openApprovalActionModal(pending.expected.id,pending.action);
+    if (pending) { openApprovalActionModal(pending.expected.id,pending.action);return; }
+    const op=getOtherPendingApprovalResults()[0];
+    if(!op)return;
+    if(op.kind==='direct')openApprovalActionModal(op.docId,'승인');
+    else startPhysicalComplete(op.docId);
 }
 window.addEventListener('beforeunload', event=>{
     if (window.ExpoRuntimeBridge) return;
     const owner=getApprovalActionOwner();
-    if (owner && (getPendingAssignedApprovalRequests().length || processApprovalDoc._busy
+    if (owner && (getPendingAssignedApprovalRequests().length || getOtherPendingApprovalResults().length || processApprovalDoc._busy
         || [...approvalActionMemos].some(([key,value])=>key.startsWith(owner+'|') && value.trim()))) {
         event.preventDefault();event.returnValue='';
     }
@@ -16287,9 +16263,12 @@ async function saveAssignedApprovalTransition(doc, action, reason) {
         syncPendingApprovalResults();
     }
     let result;
-    try { result = await _supabase.rpc('erp_process_assigned_approval', {
-        p_document_id: Number(doc.id), p_action: action, p_reason: reason,
-        p_expected: request.expected, p_request_key: request.key
+    try { result = await boundedApprovalAttachmentRead(signal=>{
+        let query=_supabase.rpc('erp_process_assigned_approval',{
+            p_document_id:Number(doc.id),p_action:action,p_reason:reason,p_expected:request.expected,p_request_key:request.key
+        }).abortSignal(signal);
+        if(typeof query.retry==='function')query=query.retry(false);
+        return query;
     }); } catch (error) { request.uncertain=true;syncPendingApprovalResults();throw error; }
     if (result.error) {
         if (!request.uncertain && ['22023','22P02','42501','PT409','23514','P0001'].includes(String(result.error.code || ''))) assignedApprovalRequests.delete(key);
@@ -16298,7 +16277,7 @@ async function saveAssignedApprovalTransition(doc, action, reason) {
         throw result.error;
     }
     if (result.data?.ok !== true || result.data?.verified !== true) { request.uncertain=true; throw new Error('처리 결과를 확인하지 못했습니다. 같은 내용으로 다시 확인해 주세요.'); }
-    assignedApprovalRequests.delete(key);
+    if(result.data.status!=='완료'||!isLeaveCancelApprovalDoc(doc)&&!isApprovalBusinessTripCancelDocType(doc.doc_type))assignedApprovalRequests.delete(key);
     syncPendingApprovalResults();
     return result.data;
 }
@@ -16332,19 +16311,39 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
 
     if (owner!==getApprovalActionOwner()) return {ok:false};
     const pendingKey=getAssignedApprovalRequestKey(docId);
+    const directPending=directApprovalCancellationResults.get(pendingKey);
+    if(directPending){
+        if(!await confirmApprovalCancellationReceipt(directPending.docId,'완료',directPending.stamp)){
+            showActionAlert('취소 반영을 아직 확인하지 못했습니다. 같은 화면에서 결과만 다시 확인해 주세요.');
+            return {ok:false};
+        }
+        directApprovalCancellationResults.delete(pendingKey);syncPendingApprovalResults();
+        await Promise.allSettled([loadTodoList(),loadHistoryList()]);
+        return {ok:true,keepActionMemo:action!=='승인'||directPending.reason!==reason,notice:'취소가 반영된 것을 확인했습니다.'};
+    }
     const pending=!window.ExpoRuntimeBridge ? assignedApprovalRequests.get(pendingKey) : null;
     const keepActionMemo=!!pending && (pending.action!==action || pending.reason!==reason);
     if (pending) {
-        const receipt=await _supabase.rpc('erp_assigned_approval_result',{p_document_id:Number(docId),p_request_key:pending.key});
+        const receipt=await boundedApprovalAttachmentRead(signal=>_supabase.rpc('erp_assigned_approval_result',
+            {p_document_id:Number(docId),p_request_key:pending.key}).abortSignal(signal));
         if (owner!==getApprovalActionOwner()) return {ok:false};
         if (receipt.error || receipt.data?.ok!==true || receipt.data?.verified!==true || typeof receipt.data.found!=='boolean') {
             showActionAlert('이전 처리 결과를 확인하지 못했습니다. 다시 확인해 주세요.'); return {ok:false};
         }
         if (receipt.data.found) {
+            if(receipt.data.status==='완료'&&isApprovalCancellationRequest(pending.expected)
+                &&!await confirmApprovalCancellationReceipt(docId,'완료',receipt.data.processed_at)){
+                showActionAlert('취소 반영을 아직 확인하지 못했습니다. 같은 화면에서 결과만 다시 확인해 주세요.');
+                return {ok:false};
+            }
             assignedApprovalRequests.delete(pendingKey);
             syncPendingApprovalResults();
             await Promise.allSettled([loadTodoList(),loadHistoryList()]);
             return {ok:true,keepActionMemo,notice:'이전 요청의 처리 결과를 확인했습니다. 목록에서 현재 상태를 확인해 주세요.'};
+        }
+        if(isApprovalCancellationRequest(pending.expected)){
+            showActionAlert('이전 요청의 결과를 아직 확인하지 못했습니다. 다시 승인하지 않고 결과만 확인할 수 있어요.');
+            return {ok:false};
         }
         // No completed receipt: only the exact original action may be retried.
         action=pending.action;reason=pending.reason;
@@ -16398,31 +16397,8 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
         else newStatus = '완료';
     }
 
-    let leaveCancelTargetDoc = null;
-    if (action !== '반려' && newStatus === '완료' && isLeaveCancelApprovalDoc(doc)) {
-        const leaveCancelTarget = await loadApprovalLeaveCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
-            excludeDocId: doc?.id || '',
-            checkExistingCancel: false
-        });
-        if (!leaveCancelTarget.ok || !leaveCancelTarget.targetDoc) {
-            showActionAlert(leaveCancelTarget.message || '취소 대상 휴가를 확인하지 못했습니다.');
-            return { ok: false };
-        }
-        leaveCancelTargetDoc = leaveCancelTarget.targetDoc;
-    }
-    let businessTripCancelTargetDoc = null;
-    if (action !== '반려' && newStatus === '완료' && isApprovalBusinessTripCancelDocType(doc?.doc_type || doc)) {
-        const businessTripCancelTarget = await loadApprovalBusinessTripCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
-            excludeDocId: doc?.id || '',
-            checkExistingCancel: false,
-            checkCancelWindow: false
-        });
-        if (!businessTripCancelTarget.ok || !businessTripCancelTarget.targetDoc) {
-            showActionAlert(businessTripCancelTarget.message || '취소 대상 출장을 확인하지 못했습니다.');
-            return { ok: false };
-        }
-        businessTripCancelTargetDoc = businessTripCancelTarget.targetDoc;
-    }
+    const cancellation=isApprovalCancellationRequest(doc);
+    let finalCancellation=cancellation&&newStatus==='완료'&&!window.ExpoRuntimeBridge;
 
     const approvalUpdatePayload = { approval_line: line, current_approver: nextUser, status: newStatus };
     if (newStatus === '완료') {
@@ -16440,11 +16416,19 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
         try { assignedResult = await saveAssignedApprovalTransition(doc, action, reason); }
         catch (error) { approvalUpdateError = error; }
     } else {
-        const result = await scopeApprovalTenant(_supabase.from('ref_approval').update(approvalUpdatePayload)).eq('id', docId);
-        approvalUpdateError=result.error;
+        if(finalCancellation){
+            directApprovalCancellationResults.set(pendingKey,{kind:'direct',owner,docId:Number(doc.id),stamp:nowIso,reason});
+            syncPendingApprovalResults();
+        }
+        try { await updateApprovalFromExpected(doc,approvalUpdatePayload); }
+        catch (error) {
+            approvalUpdateError=error;
+            if(finalCancellation&&isDefiniteApprovalCancellationFailure(error))directApprovalCancellationResults.delete(pendingKey);
+            syncPendingApprovalResults();
+        }
     }
     if (approvalUpdateError) {
-        showActionAlert(meetingNoticeFailureMessage(approvalUpdateError, 'process') || (approvalUpdateError.code === 'PT409'
+        showActionAlert(approvalUpdateError.message==='APPROVAL_CANCEL_SOURCE_NOT_CONFIRMED'?'휴가·출장 원본을 취소할 수 없어 승인하지 않았습니다. 신청 상태를 다시 확인해 주세요.':meetingNoticeFailureMessage(approvalUpdateError, 'process') || (approvalUpdateError.code === 'PT409'
             ? '문서 상태가 변경되었습니다. 목록을 다시 확인해 주세요.'
             : '결재 처리 결과를 확인하지 못했습니다. 같은 내용으로 다시 확인해 주세요.'));
         return { ok: false };
@@ -16453,26 +16437,28 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
     if (assignedResult) {
         newStatus = assignedResult.status;
         nextUser = assignedResult.current_approver;
+        finalCancellation=cancellation&&newStatus==='완료';
         if (assignedResult.replayed) {
+            if(finalCancellation&&!await confirmApprovalCancellationReceipt(doc.id,'완료',assignedResult.processed_at)){
+                showActionAlert('취소 반영을 아직 확인하지 못했습니다. 같은 화면에서 결과만 다시 확인해 주세요.');return {ok:false};
+            }
+            assignedApprovalRequests.delete(pendingKey);
+            syncPendingApprovalResults();
             if ((!options.isUiCurrent || options.isUiCurrent()) && Number(currentViewingDocId) === Number(docId)) relViewModal?.hide();
             await Promise.allSettled([loadTodoList(), loadHistoryList()]);
             return { ok: true,keepActionMemo, notice: '이미 처리된 결과를 확인했습니다. 목록에서 현재 상태를 확인해 주세요.' };
         }
     }
-    let leaveCancelSettlementNotice = '';
-    try {
-        await applyApprovalLeaveCancelSettlement(doc, newStatus, { targetDoc: leaveCancelTargetDoc });
-    } catch (leaveCancelError) {
-        CoopSafeLog.error("휴가 취소 반영 실패:", leaveCancelError);
-        leaveCancelSettlementNotice = '원 휴가 문서 취소 반영은 완료하지 못했습니다. 휴가 상태를 확인해 주세요.';
+    if(finalCancellation){
+        if(!await confirmApprovalCancellationReceipt(doc.id,'완료',assignedResult?assignedResult.processed_at:nowIso)){
+            showActionAlert('취소 반영을 아직 확인하지 못했습니다. 같은 화면에서 결과만 다시 확인해 주세요.');
+            return {ok:false};
+        }
+        directApprovalCancellationResults.delete(pendingKey);
+        syncPendingApprovalResults();
+        await auditApprovalCancellation(doc);
     }
-    let businessTripCancelSettlementNotice = '';
-    try {
-        await applyApprovalBusinessTripCancelSettlement(doc, newStatus, { targetDoc: businessTripCancelTargetDoc });
-    } catch (businessTripCancelError) {
-        CoopSafeLog.error("출장 취소 반영 실패:", businessTripCancelError);
-        businessTripCancelSettlementNotice = '원 출장 문서 취소 반영은 완료하지 못했습니다. 출장 상태를 확인해 주세요.';
-    }
+    if(assignedResult){assignedApprovalRequests.delete(pendingKey);syncPendingApprovalResults();}
     let attendanceSettlementNotice = '';
     try {
         await applyApprovalAttendanceSettlement(doc, newStatus);
@@ -16485,8 +16471,6 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
         reason: reason || null,
         delegated_from_emp_id: delegatedFrom ? effectiveApproverEmpId : null,
         delegate_emp_id: delegatedFrom ? actorEmpId : null,
-        leave_cancel_warning: leaveCancelSettlementNotice || null,
-        business_trip_cancel_warning: businessTripCancelSettlementNotice || null,
         attendance_settlement_warning: attendanceSettlementNotice || null
     });
 
@@ -16514,17 +16498,13 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
     await Promise.all([loadTodoList(), loadHistoryList()]);
     const hasTelegramFallback = notificationResults.some((result) => result?.ok && result?.telegramSent === false && (result?.appNotificationSaved === true || result?.fallbackInserted === true));
     const notices = [];
-    if (leaveCancelSettlementNotice) notices.push(leaveCancelSettlementNotice);
-    if (businessTripCancelSettlementNotice) notices.push(businessTripCancelSettlementNotice);
     if (attendanceSettlementNotice) notices.push(attendanceSettlementNotice);
     if (hasTelegramFallback) notices.push('앱 알림은 저장했지만 Telegram 전송은 실패했습니다.');
     if (notificationResults.some(result => result?.simulation)) notices.push('🔔 시연 알림 · 이 단계에서 알림이 발송됩니다. 지금은 실제로 전송하지 않았어요.');
     return {
         ok: true,
         keepActionMemo,
-        notice: notices.length > 0
-            ? `처리되었습니다.\n${notices.join('\n')}`
-            : "처리되었습니다."
+        notice:[finalCancellation?'승인과 취소 반영을 확인했습니다.':'처리되었습니다.',...notices].join('\n')
     };
 } // End of processApprovalDoc
 
@@ -16549,8 +16529,11 @@ async function submitDraftCancel() {
     const submitBtn = document.getElementById('btnCancelDraftSubmit');
     if (submitBtn) submitBtn.disabled = true;
     try {
-        const ok = await procUserAction(pendingCancelDocId, '취소', reasonText);
-        if (ok && cancelDraftModalInstance) cancelDraftModalInstance.hide();
+        const id=pendingCancelDocId,owner=getApprovalActionOwner(),tab=activeApprovalTab;
+        const current=()=>id===pendingCancelDocId&&owner===getApprovalActionOwner()&&tab===activeApprovalTab
+            &&!window.frameElement?.hidden&&document.getElementById('cancelDraftModal')?.classList.contains('show');
+        const ok = await procUserAction(id, '취소', reasonText,current);
+        if (ok && current()) cancelDraftModalInstance?.hide();
     } finally {
         if (submitBtn) submitBtn.disabled = false;
     }
@@ -16601,20 +16584,31 @@ async function deleteCanceledDoc(docId) {
 }
 
 // [추가] 사용자 액션 (증빙제출/상신취소)
-async function procUserAction(docId, action, explicitReason = null) {
+const ownDraftCancelWrites=new Set();
+async function procUserAction(docId, action, explicitReason = null, remainsCurrent) {
+    const owner=getApprovalActionOwner(),coop=getApprovalScopedCoopId(),empId=myInfo?.emp_id,visit=approvalEntryTabRevision;
+    const current=()=>owner&&owner===getApprovalActionOwner()&&coop===getApprovalScopedCoopId()&&visit===approvalEntryTabRevision
+        &&!window.frameElement?.hidden&&(!remainsCurrent||remainsCurrent());
+    if(!current())return false;
+    const key=JSON.stringify([owner,docId]);
+    if(action!=='취소'){if(action==='증빙제출'){startEvidenceUpload(docId);return true;}return false;}
+    if(ownDraftCancelWrites.has(key))return false;
+    ownDraftCancelWrites.add(key);
+    try{
     const { data: doc, error: docErr } = await _supabase
         .from('ref_approval')
-        .select('id, title, current_approver, drafter_id, status, approval_line')
-        .eq('coop_id', getApprovalScopedCoopId())
+        .select('id, coop_id, title, current_approver, drafter_id, status, approval_line, processed_at')
+        .eq('coop_id', coop)
         .eq('id', docId)
         .single();
+    if(!current())return false;
     if (docErr || !doc) {
         showAlert("문서를 찾을 수 없습니다.");
         return false;
     }
 
     if (action === '취소') {
-        if (doc.drafter_id !== myInfo.emp_id) {
+        if (doc.drafter_id !== empId) {
             showAlert("기안자만 취소할 수 있습니다.");
             return false;
         }
@@ -16629,7 +16623,7 @@ async function procUserAction(docId, action, explicitReason = null) {
                 title: '상신 취소',
                 placeholder: '취소 사유를 입력하세요.'
             });
-            if (reason === null) return false;
+            if (reason === null||!current()) return false;
             reasonText = String(reason || '').trim();
             if (!reasonText) {
                 showAlert("취소 사유를 입력하세요.");
@@ -16637,15 +16631,13 @@ async function procUserAction(docId, action, explicitReason = null) {
             }
         }
 
-        const { error: cancelErr } = await _supabase
-            .from('ref_approval')
-            .update({ status: '결재취소', current_approver: null })
-            .eq('coop_id', getApprovalScopedCoopId())
-            .eq('id', docId);
-        if (cancelErr) {
-            showAlert("취소 처리 실패: " + cancelErr.message);
+        if(!current())return false;
+        try {await updateApprovalFromExpected(doc,{status:'결재취소',current_approver:null});}
+        catch (error) {
+            if(current())showAlert(error?.code==='PT409'?'이미 상태가 바뀌어 상신취소하지 않았습니다. 목록을 다시 확인해 주세요.':'상신취소 결과를 확인하지 못했습니다. 현재 문서 상태를 확인해 주세요.');
             return false;
         }
+        if(owner!==getApprovalActionOwner())return true;
         await logAudit('approval.cancel', docId, '사용자 취소', { reason: reasonText });
         if (doc?.current_approver) {
             await createNotification(
@@ -16656,14 +16648,31 @@ async function procUserAction(docId, action, explicitReason = null) {
                 { doc_id: docId, reason: reasonText }
             );
         }
-        showAlert("취소되었습니다.");
-        loadHistoryList();
-        return true;
-    } else if (action === '증빙제출') {
-        startEvidenceUpload(docId);
+        if(current()){showAlert('취소되었습니다.');void loadHistoryList();}
         return true;
     }
     return false;
+    }finally{ownDraftCancelWrites.delete(key);}
+}
+
+// Existing table authority applies. Ask PostgREST for a row receipt: a 2xx on
+// an UPDATE affecting zero rows is a conflict, not proof that it committed.
+async function updateApprovalFromExpected(doc,payload) {
+    const coop=getApprovalScopedCoopId(),id=toPositiveDocId(doc?.id);
+    if(!id||doc.coop_id!==coop)throw Object.assign(Error('APPROVAL_DOCUMENT_CHANGED'),{code:'PT409'});
+    let query=_supabase.from('ref_approval').update(payload).eq('coop_id',coop).eq('id',id);
+    for(const field of ['status','drafter_id','current_approver','processed_at','approval_line']){
+        const value=doc[field];
+        if(value===undefined)throw Object.assign(Error('APPROVAL_DOCUMENT_CHANGED'),{code:'PT409'});
+        query=value===null?query.is(field,null):query.eq(field,field==='approval_line'?JSON.stringify(value):value);
+    }
+    query=query.select('id,coop_id,status,current_approver');
+    const {data,error}=await boundedApprovalAttachmentRead(signal=>query.abortSignal(signal));
+    if(error)throw error;
+    if(!Array.isArray(data)||data.length!==1||Number(data[0].id)!==id||data[0].coop_id!==coop
+        ||data[0].status!==payload.status||data[0].current_approver!==payload.current_approver)
+        throw Object.assign(Error('APPROVAL_DOCUMENT_CHANGED'),{code:'PT409'});
+    return data[0];
 }
 
 function hasMeaningfulApprovalDraftContentForReplacement() {
@@ -17815,6 +17824,7 @@ function renderDocs(target, list, isTodo) {
 
             if (canPhysical && ['진행중','가승인','증빙확인중','실물결재대기'].includes(doc.status)) {
                 actions.push(`<button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="printPhysicalDoc(${doc.id})">🖨️ 실물결재 출력</button>`);
+                if(doc.status!=='실물결재대기')actions.push(`<button type="button" class="btn btn-sm btn-outline-dark me-1" onclick="confirmPhysicalTransition(${doc.id})">실물결재로 전환</button>`);
             }
             if (canPhysical && doc.status === '실물결재대기') {
                 actions.push(`<button type="button" class="btn btn-sm btn-success me-1" onclick="startPhysicalComplete(${doc.id})">✅ 서명첨부 완료</button>`);
@@ -18098,6 +18108,29 @@ function printPhysicalDoc(docId) {
     return openApprovalPrint(docId,true);
 }
 
+const physicalTransitionWrites=new Set();
+async function confirmPhysicalTransition(docId){
+    const id=toPositiveDocId(docId),owner=getApprovalActionOwner(),coop=getApprovalScopedCoopId(),visit=approvalEntryTabRevision;
+    const current=()=>owner&&owner===getApprovalActionOwner()&&visit===approvalEntryTabRevision&&!window.frameElement?.hidden&&canPerform('approval.physical');
+    if(!id||!current())return;
+    const key=JSON.stringify([owner,id]);
+    if(physicalTransitionWrites.has(key))return;
+    physicalTransitionWrites.add(key);
+    try{
+        const {data:doc,error}=await boundedApprovalAttachmentRead(signal=>_supabase.from('ref_approval')
+            .select('id,coop_id,status,approval_line,current_approver,drafter_id,processed_at').eq('coop_id',coop).eq('id',id).abortSignal(signal).maybeSingle());
+        if(!current())return;
+        if(error||!doc||!['진행중','가승인','증빙확인중'].includes(doc.status))return showAlert('전환할 수 있는 상태가 아닙니다. 문서 목록을 다시 확인해 주세요.');
+        if(!await showConfirm('전자결재 담당을 해제하고 이 문서를 실물결재 대기로 전환할까요?',{title:'실물결재로 전환',okText:'전환하기'}))return;
+        if(!current())return;
+        await updateApprovalFromExpected(doc,{status:'실물결재대기',current_approver:null});
+        if(owner!==getApprovalActionOwner())return;
+        await logAudit('approval.physical_transition',id,'실물결재 대기로 전환',{previous_status:doc.status});
+        if(current()){showAlert('실물결재 대기로 전환했습니다.');void loadHistoryList();}
+    }catch(error){if(current())showAlert(error?.code==='PT409'?'문서 상태가 바뀌어 전환하지 않았습니다.':'전환 결과를 확인하지 못했습니다. 문서 상태를 다시 확인해 주세요.');}
+    finally{physicalTransitionWrites.delete(key);}
+}
+
 let approvalPrintOpening=null;
 async function openApprovalPrint(docId, physical) {
     const safeDocId = toPositiveDocId(docId);
@@ -18145,12 +18178,6 @@ async function openApprovalPrint(docId, physical) {
         catch (_) {throw Error('APPROVAL_PRINT_IMAGES');}
         if(!current())return;
         print.disabled=false;
-        if(physical && !['실물결재대기','실물결재완료'].includes(doc.status)) {
-            await scopeApprovalTenant(_supabase.from('ref_approval')
-                .update({ status: '실물결재대기', current_approver: null })).eq('id',safeDocId);
-            await logAudit('approval.physical_print',safeDocId,'실물결재 출력',null);
-            if(current())loadHistoryList();
-        }
     } catch (error) {
         if(current())showAlert({
             APPROVAL_PRINT_PERMISSION:'문서 출력 권한이 없습니다.',
@@ -18177,7 +18204,7 @@ function startPhysicalComplete(docId) {
     const id=Number(docId),owner=getApprovalActionOwner();
     if(!Number.isSafeInteger(id) || id<=0 || !owner || window.frameElement?.hidden)return;
     const key=JSON.stringify([owner,id]),prior=physicalCompleteRequests.get(key);
-    if(prior?.busy)return;
+    if(prior?.busy||prior?.phase==='settled')return;
     // A second picker must not retarget a file selected in the first picker.
     if(physicalCompleteIntent?.picking)return;
     const view={docId:id,owner,key,tab:activeApprovalTab,picking:!prior};
@@ -18194,21 +18221,22 @@ function isPhysicalCompleteCurrent(view) {
         && canPerform('approval.physical') && activeApprovalTab===view.tab && !window.frameElement?.hidden;
 }
 async function processPhysicalComplete(op,view) {
-    if(op.busy)return;
+    if(op.busy||op.phase==='settled')return;
     op.busy=true;
     physicalCompleteRequests.set(op.key,op);
     const sameActor=()=>op.owner===getApprovalActionOwner() && canPerform('approval.physical');
     const current=()=>isPhysicalCompleteCurrent(view);
+    const resultOnly=op.phase==='unknown';
     const readDoc=async()=>{
         const result=await waitApprovalLegacyRead(_supabase.from('ref_approval')
-            .select('id,status,approval_line,title,drafter_id,processed_at,signed_doc_url,physical_approved_at,physical_approved_by')
+            .select('id,status,approval_line,title,drafter_id,processed_at,signed_doc_url,physical_approved_at,physical_approved_by,doc_type,related_doc_id')
             .eq('coop_id',op.coopId).eq('id',op.docId).single(),new AbortController());
         if(result.error)throw result.error;
         if(!result.data || Number(result.data.id)!==op.docId)throw Error('PHYSICAL_DOCUMENT_UNAVAILABLE');
         return result.data;
     };
     try {
-        let doc=await readDoc();
+        let doc=resultOnly&&isApprovalCancellationRequest(op.doc)?op.doc:await readDoc();
         if(!sameActor())return;
         if(op.phase==='reading'){
             if(!current())return;
@@ -18248,28 +18276,36 @@ async function processPhysicalComplete(op,view) {
             query=op.doc.processed_at==null?query.is('processed_at',null):query.eq('processed_at',op.doc.processed_at);
             query=op.doc.approval_line==null?query.is('approval_line',null):query.eq('approval_line',JSON.stringify(op.doc.approval_line));
             op.phase='unknown';
+            syncPendingApprovalResults();
+            if(typeof query.retry==='function')query=query.retry(false);
             const result=await waitApprovalLegacyRead(query.select('id'),new AbortController());
             if(result.error){
                 const status=Number(result.status||result.error.status||0),code=String(result.error.code||'');
-                if((status>=400 && status<500 && status!==408) || /^[0-9A-Z]{5}$/.test(code) || code.startsWith('PGRST'))op.phase='failed';
+                if(isApprovalCancellationRequest(op.doc)?isDefiniteApprovalCancellationFailure(result.error):
+                    (status>=400 && status<500 && status!==408) || /^[0-9A-Z]{5}$/.test(code) || code.startsWith('PGRST'))op.phase='failed';
                 throw result.error;
             }
             op.acknowledgedEmpty=Array.isArray(result.data)&&result.data.length===0;
             if(!sameActor())return;
-            doc=await readDoc();
+            if(!isApprovalCancellationRequest(op.doc))doc=await readDoc();
         }
         if(!sameActor())return;
-        const verified=doc.status==='실물결재완료' && doc.signed_doc_url===op.ref
+        const cancellation=isApprovalCancellationRequest(op.doc);
+        const verified=cancellation?await confirmApprovalCancellationReceipt(op.docId,'실물결재완료',op.stamp)
+            : doc.status==='실물결재완료' && doc.signed_doc_url===op.ref
             && String(doc.physical_approved_by)===String(op.empId) && Date.parse(doc.processed_at)===Date.parse(op.stamp)
             && physicalRejectLineFingerprint(doc.approval_line)===physicalRejectLineFingerprint(op.line);
+        if(!sameActor())return;
         if(!verified){
             if(op.acknowledgedEmpty){op.phase='failed';if(current())showAlert('문서가 변경되어 반영하지 않았습니다. 현재 상태를 확인한 뒤 서명본을 다시 선택해 주세요.');}
             else if(current())showAlert('처리 결과를 아직 확인하지 못했습니다. 같은 문서의 실물결재 완료를 눌러 결과만 다시 확인해 주세요.');return;
         }
         op.phase='settled';
+        if(cancellation&&resultOnly)op.postProcessed=true;
         if(!op.postProcessed){
             op.postProcessed=true;
             await logAudit('approval.physical_complete',op.docId,'실물결재 완료',{signed_doc_url:op.ref});
+            if(cancellation&&sameActor()) await auditApprovalCancellation(op.doc);
             if(sameActor() && op.doc?.drafter_id && op.doc.drafter_id!==op.empId)
                 await createNotification(op.doc.drafter_id,'실물결재 완료',`${op.doc.title||'문서'} 실물결재가 완료되었습니다.`,
                     `approval.html?doc=${op.docId}`,{doc_id:op.docId});
@@ -18278,7 +18314,7 @@ async function processPhysicalComplete(op,view) {
             pendingPhysicalDocId=null;
             const input=document.getElementById('signedDocInput');
             if(input?.files?.[0]===op.file)input.value='';
-            showAlert('실물결재가 완료되었습니다.');loadHistoryList();
+            showAlert(cancellation?'실물결재와 취소 반영을 확인했습니다.':'실물결재가 완료되었습니다.');loadHistoryList();
         }
     }catch(error){
         if(current())showAlert(op.phase==='unknown'
@@ -18288,6 +18324,7 @@ async function processPhysicalComplete(op,view) {
     }finally{
         op.busy=false;
         if((op.phase==='reading' || op.phase==='failed') && physicalCompleteRequests.get(op.key)===op)physicalCompleteRequests.delete(op.key);
+        syncPendingApprovalResults();
     }
 }
 
