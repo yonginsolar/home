@@ -2776,6 +2776,106 @@ function collectTransIds(entries) {
         .filter(Boolean)));
 }
 
+function isProtectedPayoutTransId(id){return /^(?:WD-RES-|DIV-(?:RES|PAY)-)/.test(id);}
+// The live legacy column is text, while older fixtures returned booleans.
+// A missing/null historical status is different from an unrecognized value.
+function legacyDividendAccounted(value){
+    if(value===true||value==='true')return true;
+    if(value===false||value==='false'||value===null)return false;
+    return null;
+}
+function legacyDividendAccountedMark(row,done){
+    return {table:'ref_dividends',field:'is_accounted',id:String(row.id),before:row.is_accounted,
+        next:done?'true':'false',source:{amount:row.amount,payment_date:row.payment_date??null}};
+}
+function approvalSyncOrdinaryUndo(plans,confirmedIds,{payrollReceipt,protectedCount,owner,supportIds=[],restores=[]}={}){
+    const candidates=new Set(confirmedIds.filter(id=>!isProtectedPayoutTransId(id)));
+    if(protectedCount&&payrollReceipt){
+        // The exact payroll batch keeps its separate recovery rules. Do not
+        // include any of its rows or support/status writes in ordinary undo.
+        const isolated=[];
+        for(const plan of plans)if(plan.kind!=='payout_approval'&&plan.kind!=='salary_accrual'&&!plan.salaryMonth)
+            appendApprovalEntriesFromPlan(isolated,plan);
+        return collectTransIds(isolated).filter(id=>candidates.has(id)).length?{
+            type:'approval',label:'전자결재 연동 · 일반 전표만',created_at:new Date().toISOString(),
+            recovery_owner:owner,trans_ids:collectTransIds(isolated).filter(id=>candidates.has(id)),restores:[],ordinary_only:true
+        }:null;
+    }
+    if(!candidates.size&&!supportIds.length&&!restores.length)return null;
+    return {type:'approval',label:protectedCount?'전자결재 연동 · 일반 전표만':'전자결재 연동',created_at:new Date().toISOString(),
+        recovery_owner:owner,trans_ids:[...candidates],durunuri_audit_ids:supportIds,restores,ordinary_only:!!protectedCount,
+        ...(payrollReceipt?{recovery_request:payrollReceipt}:{})};
+}
+
+async function settleApprovalPayoutBatch(ids,scope,undo,current){
+    // Retain the confirmed ordinary result before starting a different write.
+    if(undo&&scope.identity===accountingReadIdentity())setLastAutoSyncUndo(undo);
+    if(!ids.length)return 'done';
+    if(!current())return 'stopped';
+    let q=_supabase.rpc(window.ExpoRuntimeBridge?'erp_expo_sync_payout_approvals':'accounting_sync_payout_approvals',{p_approval_ids:ids});
+    if(typeof q.retry==='function')q=q.retry(false);
+    const result=await Promise.resolve(q).catch(error=>({error}));
+    const synced=result?.data?.synced_count;
+    return !result?.error&&Number.isInteger(synced)&&synced===ids.length?'done':'unverified';
+}
+
+const legacyAutoSyncPending=new Set();
+async function storeLegacyAutoSync(entries,marks,scope){
+    const current=()=>accountingReadScopeCurrent(scope)&&canPerform('accounting.edit');
+    const wanted=collectTransIds(entries),result={transIds:[],restores:[],unconfirmed:0,phase:'ready'};
+    if(!current())return {...result,phase:'stopped'};
+    if(legacyAutoSyncPending.has(scope.identity))return {...result,phase:'busy'};
+    legacyAutoSyncPending.add(scope.identity);
+    try{
+    if(entries.length){
+        // An absent response is not a reason to insert again or to remove a
+        // journal. The next preview recalculates the current ledger first.
+        try{
+            let q=_supabase.from('ac_journal').insert(entries.map(row=>({...row,coop_id:scope.owner.coop_id}))).select('Trans_ID,coop_id');
+            if(typeof q.retry==='function')q=q.retry(false);
+            const {data,error}=await q;
+            if(error&&['42501','23505','23514','22023','PT409'].includes(error.code))return {...result,phase:'rejected'};
+            const actual=Array.isArray(data)?collectTransIds(data):[];
+            if(error||!Array.isArray(data)||data.length!==entries.length||data.some(row=>row.coop_id!==scope.owner.coop_id)
+                ||actual.length!==wanted.length||actual.some(id=>!wanted.includes(id)))return {...result,phase:'unverified'};
+            result.transIds=actual;
+        }catch(_){return {...result,phase:'unverified'};}
+    }
+    for(const mark of marks){
+        if(!current()){++result.unconfirmed;continue;}
+        try{
+            let q=_supabase.from(mark.table).update({[mark.field]:mark.next}).eq('coop_id',scope.owner.coop_id).eq('id',mark.id);
+            q=mark.before===null?q.is(mark.field,null):q.eq(mark.field,mark.before);
+            for(const [field,value] of Object.entries(mark.source||{}))q=value===null?q.is(field,null):q.eq(field,value);
+            if(typeof q.retry==='function')q=q.retry(false);
+            const {data,error}=await q.select('id,coop_id,'+mark.field);
+            if(error||!Array.isArray(data)||data.length!==1||String(data[0].id)!==String(mark.id)
+                ||data[0].coop_id!==scope.owner.coop_id||data[0][mark.field]!==mark.next){++result.unconfirmed;continue;}
+            result.restores.push({table:mark.table,key_column:'id',key_value:mark.id,values:{[mark.field]:mark.before},expected:{[mark.field]:mark.next}});
+        }catch(_){++result.unconfirmed;}
+    }
+    if(result.unconfirmed)result.phase='partial';
+    return result;
+    }finally{legacyAutoSyncPending.delete(scope.identity);}
+}
+
+function reportLegacyAutoSync(result,label,scope,success){
+    if(!accountingReadScopeCurrent(scope))return;
+    if(result.phase==='busy')return showAlert('연동 진행 중','앞선 연동의 결과를 먼저 확인해 주세요.');
+    if(result.phase==='rejected')return showAlert('전표 저장 실패','이번 전표와 처리표시는 반영하지 않았습니다. 연동 내용을 다시 확인해 주세요.');
+    if(result.phase==='unverified')return showAlert('전표 결과 미확인','전표 저장을 확인하지 못했습니다. 다시 연동하기 전에 장부와 연동 미리보기에서 결과를 확인해 주세요.');
+    if(result.phase==='partial'){
+        // In particular, do not delete confirmed journals or restore a mark
+        // for which the original update did not return a receipt.
+        showAlert('전표·처리표시 확인 필요',`${label}: 확인한 전표 ${result.transIds.length}건 · 처리표시 ${result.restores.length}건 · 미확인 ${result.unconfirmed}건. 장부와 연동 미리보기를 다시 확인해 주세요.`);
+    }else if(result.phase==='ready'){
+        if(result.transIds.length||result.restores.length)setLastAutoSyncUndo({type:label,label,created_at:new Date().toISOString(),
+            recovery_owner:scope.identity,trans_ids:result.transIds,restores:result.restores});
+        success();
+    }else return;
+    void refreshDashboard();void loadHistory();
+}
+
 function getLastAutoSyncUndo() {
     try {
         const raw = localStorage.getItem(AUTO_SYNC_UNDO_KEY);
@@ -5851,16 +5951,24 @@ async function syncApprovedSalarySupportForDocs(docs) {
     }
 } // End of syncApprovedSalarySupportForDocs
 
-async function deleteAutoSyncJournals(transIds) {
+async function deleteAutoSyncJournals(transIds,{ordinaryOnly=false}={}) {
     const ids = Array.from(new Set((Array.isArray(transIds) ? transIds : []).map(value => String(value || '').trim()).filter(Boolean)));
     if (!ids.length) return { error: null };
+    if(ordinaryOnly&&ids.some(isProtectedPayoutTransId))return {error:new Error('배당금·출자금 반환 전표는 일반 전표와 함께 되돌릴 수 없습니다.')};
     const owner = myInfo;
     if (!owner?.coop_id || !accountingDataAuthorized || !canPerform('accounting.edit')) return { error: new Error('전표를 되돌릴 권한이 없습니다.') };
     const check = await _supabase.rpc('accounting_journal_workflow_delete', { p_action: 'payroll_undo', p_coop: owner.coop_id, p_ids: ids });
     if (check.error) return check;
     if (check.data?.ordinary === true) {
         if (myInfo !== owner || !accountingDataAuthorized || !canPerform('accounting.edit')) return { error: new Error('현재 회계 화면을 다시 확인해 주세요.') };
-        return _supabase.from('ac_journal').delete().eq('coop_id', owner.coop_id).in('Trans_ID', ids);
+        let q=_supabase.from('ac_journal').delete().eq('coop_id', owner.coop_id).in('Trans_ID', ids);
+        if(!ordinaryOnly)return q;
+        if(typeof q.retry==='function')q=q.retry(false);
+        const result=await q.select('Trans_ID,coop_id');
+        const removed=Array.isArray(result.data)?collectTransIds(result.data):[];
+        return result.error||removed.length!==ids.length||removed.some(id=>!ids.includes(id))
+            ||result.data.some(row=>row.coop_id!==owner.coop_id)
+            ?{error:result.error||new Error('일반 전표 취소 결과를 모두 확인하지 못했습니다. 장부를 다시 확인해 주세요.')}:result;
     }
     return Number.isInteger(check.data?.deleted) ? { error: null } : { error: new Error('되돌린 전표의 결과를 확인하지 못했습니다.') };
 }
@@ -5872,9 +5980,9 @@ function autoSyncJournalUndoError(error) {
     return message || '전표 되돌리기 결과를 확인하지 못했습니다.';
 }
 
-async function rollbackApprovalSyncWrites(transIds, durunuriAuditIds, salaryRestores = []) {
+async function rollbackApprovalSyncWrites(transIds, durunuriAuditIds, salaryRestores = [], options) {
     const failures = [];
-    const { error: journalError } = await deleteAutoSyncJournals(transIds);
+    const { error: journalError } = await deleteAutoSyncJournals(transIds,options);
     if (journalError) return ['회계 전표: ' + autoSyncJournalUndoError(journalError)];
     const module = getDurunuriModuleOrNull();
     const auditIds = Array.isArray(durunuriAuditIds) ? durunuriAuditIds.filter((id) => id != null) : [];
@@ -9752,6 +9860,10 @@ function confirmSync(type) {
                 const insertedTransIds = Array.from(new Set((insertedJournalRows || [])
                     .map((row) => String(row?.Trans_ID || '').trim())
                     .filter(Boolean)));
+                const expectedTransIds=collectTransIds(entries);
+                if(entries.length&&(insertedJournalRows.length!==entries.length||insertedTransIds.length!==expectedTransIds.length
+                    ||insertedTransIds.some(id=>!expectedTransIds.includes(id))))
+                    return notify('일반 전표 결과 미확인','일반 전표 저장을 확인하지 못했습니다. 장부와 연동 목록을 확인해 주세요.');
                 const salaryWrite = await markApprovalSalaryRowsAccounted(runPlanResult.plans);
                 if (salaryWrite.error) {
                     const rollbackFailures = await rollbackApprovalSyncWrites(insertedTransIds, salarySupportWrite.ids, []);
@@ -9784,31 +9896,19 @@ function confirmSync(type) {
                     .filter((plan) => plan.kind === 'payout_approval')
                     .map((plan) => Number(plan.approvalId))
                     .filter((id) => Number.isInteger(id) && id > 0);
-                if (payoutApprovalIds.length > 0) {
-                    const payoutSyncResult = await _supabase.rpc(window.ExpoRuntimeBridge?'erp_expo_sync_payout_approvals':'accounting_sync_payout_approvals', {
-                        p_approval_ids: payoutApprovalIds
-                    });
-                    if (payoutSyncResult.error) {
-                        const rollbackFailures = await rollbackApprovalSyncWrites(insertedTransIds, [...salarySupportWrite.ids, ...durunuriWrite.ids], salaryWrite.restores);
-                        const detail = rollbackFailures.length > 0 ? `\n${rollbackFailures.join('\n')}` : '';
-                        return notify('오류', `출자금 반환·배당금 승인전표를 기록하지 못해 이번 일반 전표를 되돌렸습니다: ${payoutSyncResult.error.message}${detail}`);
+                const ordinaryUndo=approvalSyncOrdinaryUndo(runPlanResult.plans,insertedTransIds,{
+                    payrollReceipt,protectedCount:payoutApprovalIds.length,owner:paymentScope.identity,
+                    supportIds:[...salarySupportWrite.ids,...durunuriWrite.ids],restores:salaryWrite.restores
+                });
+                const payoutPhase=await settleApprovalPayoutBatch(payoutApprovalIds,paymentScope,ordinaryUndo,current);
+                if (payoutPhase!=='done') {
+                    if(payoutPhase==='unverified') {
+                        if(current()){
+                            notify('보호 전표 결과 다시 확인',ordinaryUndo?'확인된 일반 전표는 그대로이며 직전 취소에서 되돌릴 수 있습니다. 출자금 반환·배당금 전표는 장부와 연동 목록에서 다시 확인해 주세요.':'출자금 반환·배당금 전표를 다시 등록하기 전에 장부와 연동 목록을 확인해 주세요.');
+                            void refreshDashboard();void loadHistory();
+                        }
                     }
-                }
-
-                if (payoutApprovalIds.length > 0) {
-                    // 지급 승인전표는 원 결재·지급 잠금과 함께 서버에서 원자적으로 기록되므로
-                    // 브라우저의 단순 전표 삭제 방식으로 되돌리지 않는다.
-                    clearLastAutoSyncUndo();
-                } else {
-                    setLastAutoSyncUndo({
-                        type: 'approval',
-                        label: '전자결재 연동',
-                        created_at: new Date().toISOString(),
-                        trans_ids: collectTransIds(entries),
-                        durunuri_audit_ids: [...salarySupportWrite.ids, ...durunuriWrite.ids],
-                        ...(payrollReceipt ? {recovery_request:payrollReceipt,recovery_owner:accountingReadIdentity()} : {}),
-                        restores: salaryWrite.restores
-                    });
+                    return;
                 }
                 const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
                 notify("완료", `${runPlanResult.plans.length}건 연동 성공\n- 급여 발생전표 ${runPlanResult.salaryAccrualCount || 0}건\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 급여 원천세 분리전표 ${runPlanResult.withholdingTaxCount || 0}건\n- 출자금 반환·배당금 승인전표 ${runPlanResult.payoutApprovalCount || 0}건\n- 재고 입고 매입전표 ${runPlanResult.inventoryPurchaseCount || 0}건\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 증액결의 ${runPlanResult.adjustmentIncreaseCount || 0}건\n- 감액결의 ${runPlanResult.adjustmentDecreaseCount || 0}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
@@ -9830,12 +9930,16 @@ function confirmSync(type) {
 // (3) 출자금 연동
     else if (type === 'capital') {
         (async () => {
+            const scope=accountingReadScope('tabSync',{valid:()=>canPerform('accounting.edit')});
+            if(!accountingReadScopeCurrent(scope))return;
             let previewSnapshot;
             try {
-                previewSnapshot = await fetchCapitalSyncSnapshot();
+                previewSnapshot = await fetchCapitalSyncSnapshot({scope});
             } catch (previewError) {
-                return showAlert("오류", "미리보기 조회 실패: " + previewError.message);
+                if(accountingReadScopeCurrent(scope))showAlert("오류", "미리보기 조회 실패: " + previewError.message);
+                return;
             }
+            if(!accountingReadScopeCurrent(scope))return;
             const previewMembers = previewSnapshot.members;
             if (!previewMembers || previewMembers.length === 0) return showAlert("알림", "열린 회계기간에 처리할 출자금 내역이 없습니다.");
             const previewSummary = summarizeCapitalSyncSnapshot(previewSnapshot);
@@ -9851,16 +9955,19 @@ function confirmSync(type) {
             ].join('\n');
 
             showConfirm("출자금 연동", previewMsg, async () => {
+            if(!accountingReadScopeCurrent(scope))return;
             let currentSnapshot;
             try {
-                currentSnapshot = await fetchCapitalSyncSnapshot();
+                currentSnapshot = await fetchCapitalSyncSnapshot({scope});
             } catch (fetchError) {
-                return showAlert("오류", "출자금 조회 실패: " + fetchError.message);
+                if(accountingReadScopeCurrent(scope))showAlert("오류", "출자금 조회 실패: " + fetchError.message);
+                return;
             }
+            if(!accountingReadScopeCurrent(scope))return;
             const members = currentSnapshot.members;
             if (!members || members.length === 0) return showAlert("알림", "열린 회계기간에 처리할 출자금 내역이 없습니다.");
             const memberStatusBefore = new Map(
-                members.map((member) => [String(member.id), String(member.status || '')])
+                members.map((member) => [String(member.id),member.status??null])
             );
 
             let entries = [];
@@ -9923,76 +10030,14 @@ function confirmSync(type) {
                 }
             });
 
-            if (entries.length > 0) {
-                const { data: insertedRows, error: insertError } = await _supabase
-                    .from('ac_journal')
-                    .insert(entries)
-                    .select('Trans_ID');
-                if (insertError) {
-                    console.error("전표 저장 실패:", insertError);
-                    return showAlert("오류", "전표 저장 실패: " + insertError.message);
-                }
-                const uniqueMarkIds = Array.from(new Set(markIds));
-                if (uniqueMarkIds.length > 0) {
-                    const { error: updateError } = await _supabase
-                        .from('ref_members')
-                        .update({ status: '전표완료' })
-                        .in('id', uniqueMarkIds);
-                    if (updateError) {
-                        const insertedTransIds = Array.isArray(insertedRows)
-                            ? Array.from(new Set(insertedRows.map(row => String(row?.Trans_ID || '').trim()).filter(Boolean)))
-                            : [];
-                        if (insertedTransIds.length > 0) {
-                            const { error: rollbackError } = await _supabase.from('ac_journal').delete().in('Trans_ID', insertedTransIds);
-                            if (rollbackError) {
-                                return showAlert("부분 오류", "상태 변경과 전표 롤백이 모두 실패했습니다: " + rollbackError.message);
-                            }
-                        }
-                        return showAlert("오류", "상태 변경 실패로 신규 전표를 자동 되돌렸습니다: " + updateError.message);
-                    }
-                }
-            }
-
             const uniqueMarkIds = Array.from(new Set(markIds));
-            if (entries.length === 0 && uniqueMarkIds.length > 0) {
-                const { error: updateOnlyError } = await _supabase
-                    .from('ref_members')
-                    .update({ status: '전표완료' })
-                    .in('id', uniqueMarkIds);
-                if (updateOnlyError) {
-                    return showAlert("오류", "상태 변경 실패: " + updateOnlyError.message);
-                }
-            }
-
-            const restores = uniqueMarkIds.map((id) => ({
-                table: 'ref_members',
-                key_column: 'id',
-                key_value: id,
-                values: { status: memberStatusBefore.get(id) || '완료' }
-            }));
-
             if (entries.length === 0 && uniqueMarkIds.length === 0) {
                 return showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
             }
-
-            if (entries.length > 0 || restores.length > 0) {
-                setLastAutoSyncUndo({
-                    type: 'capital',
-                    label: '출자금 연동',
-                    created_at: new Date().toISOString(),
-                    trans_ids: collectTransIds(entries),
-                    restores
-                });
-            }
-
-            const baseMsg = `${formatAccountingSyncPeriod(currentSnapshot)}\n신규 ${newCount}건, 정정 ${correctionCount}건, 처리표시 ${uniqueMarkIds.length}건`;
-            if (legacySkipCount > 0) {
-                showAlert("완료", `${baseMsg}\n(레거시 전표 연결 불가 ${legacySkipCount}건은 자동정정에서 제외됨)`);
-            } else {
-                showAlert("완료", baseMsg);
-            }
-            refreshDashboard();
-            loadHistory();
+            const originals=new Map(members.map(row=>[String(row.id),row]));
+            const marks=uniqueMarkIds.map(id=>({table:'ref_members',field:'status',id,before:memberStatusBefore.get(id),next:'전표완료',source:{amount:originals.get(id).amount,deposit_date:originals.get(id).deposit_date??null}}));
+            const result=await storeLegacyAutoSync(entries,marks,scope);
+            reportLegacyAutoSync(result,'출자금 연동',scope,()=>showAlert('완료',`${formatAccountingSyncPeriod(currentSnapshot)}\n신규 ${newCount}건, 정정 ${correctionCount}건, 처리표시 ${result.restores.length}건${legacySkipCount?`\n이전 전표 연결 확인 ${legacySkipCount}건 제외`:''}`));
             });
         })();
     }
@@ -10000,12 +10045,16 @@ function confirmSync(type) {
     // (4) 기부금 연동
     else if (type === 'donation') {
         (async () => {
+            const scope=accountingReadScope('tabSync',{valid:()=>canPerform('accounting.edit')});
+            if(!accountingReadScopeCurrent(scope))return;
             let previewSnapshot;
             try {
-                previewSnapshot = await fetchDonationSyncSnapshot();
+                previewSnapshot = await fetchDonationSyncSnapshot({scope});
             } catch (previewError) {
-                return showAlert("오류", "미리보기 조회 실패: " + previewError.message);
+                if(accountingReadScopeCurrent(scope))showAlert("오류", "미리보기 조회 실패: " + previewError.message);
+                return;
             }
+            if(!accountingReadScopeCurrent(scope))return;
 
             const previewDonations = previewSnapshot.donations;
             if (!previewDonations || previewDonations.length === 0) return showAlert("알림", "열린 회계기간에 연동할 기부금 내역이 없습니다.");
@@ -10022,12 +10071,15 @@ function confirmSync(type) {
             ].join('\n');
 
             showConfirm("기부금 연동", previewMsg, async () => {
+            if(!accountingReadScopeCurrent(scope))return;
             let currentSnapshot;
             try {
-                currentSnapshot = await fetchDonationSyncSnapshot();
+                currentSnapshot = await fetchDonationSyncSnapshot({scope});
             } catch (fetchError) {
-                return showAlert("오류", "기부금 조회 실패: " + fetchError.message);
+                if(accountingReadScopeCurrent(scope))showAlert("오류", "기부금 조회 실패: " + fetchError.message);
+                return;
             }
+            if(!accountingReadScopeCurrent(scope))return;
 
             const donations = currentSnapshot.donations;
             if (!donations || donations.length === 0) return showAlert("알림", "열린 회계기간에 연동할 기부금 내역이 없습니다.");
@@ -10057,7 +10109,7 @@ function confirmSync(type) {
                     if (hasDone) {
                         legacySkipCount += 1;
                     } else if (desired > 0) {
-                        markTargets.push({ id: sourceId, note: rawNote });
+                        markTargets.push({id:sourceId,note:rawNote,amount:d.amount,date:d.donation_date??null});
                     }
                     return;
                 }
@@ -10089,78 +10141,17 @@ function confirmSync(type) {
                     });
                     if (isInitialPost) createdCount += 1;
                     else correctedCount += 1;
-                    markTargets.push({ id: sourceId, note: rawNote });
+                    markTargets.push({id:sourceId,note:rawNote,amount:d.amount,date:d.donation_date??null});
                 } else if (currentNet !== 0) {
                     correctedCount += 1;
                 }
             });
 
-            if (entries.length > 0) {
-                const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
-                if (insertError) return showAlert("오류", "기부금 전표 저장 실패: " + insertError.message);
-            }
-
-            // 전표 처리 완료 마킹 (중복 방지)
-            let markFailed = 0;
-            const successfulMarks = [];
             const uniqueMarkTargets = Array.from(new Map(markTargets.map(item => [item.id, item])).values());
-            for (const row of uniqueMarkTargets) {
-                const current = String(row.note || '').trim();
-                const hasDone = current.includes('[전표완료]');
-                const nextNote = hasDone
-                    ? current
-                    : (current ? `${current} [전표완료]` : '[전표완료]');
-                const { error: markError } = await _supabase
-                    .from('coop_donations')
-                    .update({ note: nextNote })
-                    .eq('id', row.id);
-                if (markError) {
-                    markFailed += 1;
-                    console.error('기부금 처리완료 마킹 실패:', row.id, markError);
-                } else {
-                    successfulMarks.push(row);
-                }
-            }
-
-            const doneCount = uniqueMarkTargets.length;
-            const restores = successfulMarks.map((row) => ({
-                table: 'coop_donations',
-                key_column: 'id',
-                key_value: String(row.id),
-                values: { note: row.note === undefined ? null : row.note }
-            }));
-
-            if (entries.length > 0 || restores.length > 0) {
-                setLastAutoSyncUndo({
-                    type: 'donation',
-                    label: '기부금 연동',
-                    created_at: new Date().toISOString(),
-                    trans_ids: collectTransIds(entries),
-                    restores
-                });
-            }
-
-            if (entries.length === 0 && doneCount === 0) {
-                if (legacySkipCount > 0) {
-                    showAlert("알림", `변경 내역은 없고 전표완료 스킵 ${legacySkipCount}건이 있습니다.`);
-                } else {
-                    showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
-                }
-            } else if (markFailed > 0) {
-                if (legacySkipCount > 0) {
-                    showAlert("부분 완료", `신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount - markFailed}/${doneCount}건 완료\n전표완료 스킵 ${legacySkipCount}건`);
-                } else {
-                    showAlert("부분 완료", `신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount - markFailed}/${doneCount}건 완료`);
-                }
-            } else {
-                if (legacySkipCount > 0) {
-                    showAlert("성공", `${formatAccountingSyncPeriod(currentSnapshot)}\n기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료\n전표완료 스킵 ${legacySkipCount}건`);
-                } else {
-                    showAlert("성공", `${formatAccountingSyncPeriod(currentSnapshot)}\n기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료`);
-                }
-            }
-            refreshDashboard();
-            loadHistory();
+            if(!entries.length&&!uniqueMarkTargets.length)return showAlert('알림',legacySkipCount?`변경 내역 없음 · 이미 완료 ${legacySkipCount}건`:'변경된 내역이 없습니다.');
+            const marks=uniqueMarkTargets.map(({id,note,amount,date})=>{const value=String(note??'').trim();return {table:'coop_donations',field:'note',id,before:note??null,next:value.includes('[전표완료]')?value:(value?value+' [전표완료]':'[전표완료]'),source:{amount,donation_date:date}};});
+            const result=await storeLegacyAutoSync(entries,marks,scope);
+            reportLegacyAutoSync(result,'기부금 연동',scope,()=>showAlert('완료',`${formatAccountingSyncPeriod(currentSnapshot)}\n신규 ${createdCount}건, 정정 ${correctedCount}건, 처리표시 ${result.restores.length}건${legacySkipCount?`\n이미 완료 ${legacySkipCount}건 제외`:''}`));
             });
         })();
     }
@@ -10168,17 +10159,23 @@ function confirmSync(type) {
     // (5) 배당금 연동
     else if (type === 'dividend') {
         (async () => {
+            const scope=accountingReadScope('tabSync',{valid:()=>canPerform('accounting.edit')});
+            if(!accountingReadScopeCurrent(scope))return;
             const { data: previewDivs, error: previewDivError } = await _supabase
                 .from('ref_dividends')
                 .select('id,amount,is_accounted')
+                .eq('coop_id',scope.owner.coop_id)
                 .order('payment_date', { ascending: true });
+            if(!accountingReadScopeCurrent(scope))return;
             if (previewDivError) return showAlert("오류", "미리보기 조회 실패: " + previewDivError.message);
             if (!previewDivs || previewDivs.length === 0) return showAlert("알림", "처리할 배당 내역이 없습니다.");
 
             const { data: previewDivRows, error: previewDivRowsError } = await _supabase
                 .from('ac_journal')
                 .select('Trans_ID,Account,Debit,Credit')
+                .eq('coop_id',scope.owner.coop_id)
                 .like('Trans_ID', 'DIV-%');
+            if(!accountingReadScopeCurrent(scope))return;
             if (previewDivRowsError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewDivRowsError.message);
 
             const previewCashNetMap = buildCashNetMap(previewDivRows || [], 'DIV');
@@ -10192,7 +10189,8 @@ function confirmSync(type) {
                 const amount = Math.max(0, Number(row.amount || 0));
                 const desired = amount > 0 ? -amount : 0;
                 const current = Number(previewCashNetMap.get(sourceId) || 0);
-                const wasDone = row.is_accounted === true;
+                const wasDone = legacyDividendAccounted(row.is_accounted);
+                if(wasDone===null){previewLegacySkip+=1;return;}
                 if (wasDone && current === 0 && amount > 0) { previewLegacySkip += 1; return; }
                 if (current === desired) return;
                 if (!wasDone && current === 0 && desired !== 0) previewNew += 1;
@@ -10208,10 +10206,13 @@ function confirmSync(type) {
             ].join('\n');
 
             showConfirm("배당금 연동", previewMsg, async () => {
+            if(!accountingReadScopeCurrent(scope))return;
             const { data: divs, error } = await _supabase
                 .from('ref_dividends')
                 .select('*')
+                .eq('coop_id',scope.owner.coop_id)
                 .order('payment_date', { ascending: true });
+            if(!accountingReadScopeCurrent(scope))return;
 
             if (error) return showAlert("오류", "데이터 조회 실패: " + error.message);
             if (!divs || divs.length === 0) return showAlert("알림", "처리할 배당 내역이 없습니다.");
@@ -10219,7 +10220,9 @@ function confirmSync(type) {
             const { data: divRows, error: divError } = await _supabase
                 .from('ac_journal')
                 .select('Trans_ID,Account,Debit,Credit')
+                .eq('coop_id',scope.owner.coop_id)
                 .like('Trans_ID', 'DIV-%');
+            if(!accountingReadScopeCurrent(scope))return;
             if (divError) return showAlert("오류", "기존 전표 확인 실패: " + divError.message);
 
             const cashNetMap = buildCashNetMap(divRows || [], 'DIV');
@@ -10228,7 +10231,6 @@ function confirmSync(type) {
             let correctionCount = 0;
             let legacySkipCount = 0;
 
-            const statusBefore = new Map();
             const statusUpdates = new Map();
 
             divs.forEach((d) => {
@@ -10238,11 +10240,10 @@ function confirmSync(type) {
                 const amount = Math.max(0, Number(d.amount || 0));
                 const desired = amount > 0 ? -amount : 0; // 배당 지급은 보통예금 감소
                 const currentNet = Number(cashNetMap.get(sourceId) || 0);
-                const wasDone = d.is_accounted === true;
+                const wasDone = legacyDividendAccounted(d.is_accounted);
+                if(wasDone===null){legacySkipCount+=1;return;}
                 const txDate = d.payment_date || today;
                 const descBase = `[배당] ${d.member_id || sourceId} 지급`;
-
-                statusBefore.set(sourceId, d.is_accounted === true);
 
                 if (wasDone && currentNet === 0 && amount > 0) {
                     // 과거 랜덤 Trans_ID 전표는 소스 연결이 없어 자동 정정을 건너뜀
@@ -10252,7 +10253,7 @@ function confirmSync(type) {
 
                 if (currentNet === desired) {
                     const shouldDone = desired !== 0;
-                    if ((d.is_accounted === true) !== shouldDone) statusUpdates.set(sourceId, shouldDone);
+                    if (wasDone !== shouldDone) statusUpdates.set(sourceId, shouldDone);
                     return;
                 }
 
@@ -10283,62 +10284,20 @@ function confirmSync(type) {
                     });
                     if (isInitialPost) newCount += 1;
                     else correctionCount += 1;
-                    if (d.is_accounted !== true) statusUpdates.set(sourceId, true);
+                    if (!wasDone) statusUpdates.set(sourceId, true);
                 } else {
                     if (currentNet !== 0) correctionCount += 1;
-                    if (d.is_accounted === true) statusUpdates.set(sourceId, false);
+                    if (wasDone) statusUpdates.set(sourceId, false);
                 }
             });
 
-            if (entries.length > 0) {
-                const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
-                if (insertError) return showAlert("오류", "전표 저장 중 문제가 발생했습니다: " + insertError.message);
-            }
-
-            const setTrueIds = Array.from(statusUpdates.entries()).filter(([, value]) => value === true).map(([id]) => id);
-            const setFalseIds = Array.from(statusUpdates.entries()).filter(([, value]) => value === false).map(([id]) => id);
-
-            if (setTrueIds.length > 0) {
-                const { error: trueError } = await _supabase
-                    .from('ref_dividends')
-                    .update({ is_accounted: true })
-                    .in('id', setTrueIds);
-                if (trueError) return showAlert("부분 완료", "전표는 생성되었으나 배당 상태(true) 반영에 실패했습니다: " + trueError.message);
-            }
-            if (setFalseIds.length > 0) {
-                const { error: falseError } = await _supabase
-                    .from('ref_dividends')
-                    .update({ is_accounted: false })
-                    .in('id', setFalseIds);
-                if (falseError) return showAlert("부분 완료", "전표는 생성되었으나 배당 상태(false) 반영에 실패했습니다: " + falseError.message);
-            }
-
             if (entries.length === 0 && statusUpdates.size === 0) {
-                return showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
+                return showAlert("알림", legacySkipCount?'이번에 연동할 내역이 없습니다. 이전 배당 전표 연결을 확인해 주세요.':'변경된 내역이 없어 처리할 항목이 없습니다.');
             }
-
-            const restores = Array.from(statusUpdates.keys()).map((id) => ({
-                table: 'ref_dividends',
-                key_column: 'id',
-                key_value: id,
-                values: { is_accounted: statusBefore.get(id) === true }
-            }));
-            setLastAutoSyncUndo({
-                type: 'dividend',
-                label: '배당금 연동',
-                created_at: new Date().toISOString(),
-                trans_ids: collectTransIds(entries),
-                restores
-            });
-
-            const baseMsg = `신규 ${newCount}건, 정정 ${correctionCount}건 처리`;
-            if (legacySkipCount > 0) {
-                showAlert("완료", `${baseMsg}\n(레거시 전표 연결 불가 ${legacySkipCount}건은 자동정정에서 제외됨)`);
-            } else {
-                showAlert("완료", baseMsg);
-            }
-            refreshDashboard();
-            loadHistory();
+            const originals=new Map(divs.map(row=>[String(row.id),row]));
+            const marks=Array.from(statusUpdates,([id,next])=>legacyDividendAccountedMark(originals.get(id),next));
+            const result=await storeLegacyAutoSync(entries,marks,scope);
+            reportLegacyAutoSync(result,'배당금 연동',scope,()=>showAlert('완료',`신규 ${newCount}건, 정정 ${correctionCount}건, 처리표시 ${result.restores.length}건${legacySkipCount?`\n이전 전표 연결 확인 ${legacySkipCount}건 제외`:''}`));
             });
         })();
     }
@@ -10523,6 +10482,7 @@ function confirmSync(type) {
         const promptUndo = () => showConfirm("자동연동 직전 취소", undoState.recovery_request
             ? `${label}의 원래 묶음을 되돌리시겠습니까?\n나중에 추가한 급여 행은 그대로 유지합니다.`
             : `${label} 내역을 되돌리시겠습니까?\n전표 ${transIds.length}건 + 두루누리 기록 ${durunuriAuditIds.length}건 + 상태복원 ${restores.length}건`, async () => {
+            if(!accountingReadScopeCurrent(undoScope)||JSON.stringify(getLastAutoSyncUndo())!==JSON.stringify(undoState))return;
             let recoveredFailures = [];
             if (undoState.recovery_request) {
                 if (payrollRecoveryBusy || approvalSyncBusy || !accountingReadScopeCurrent(undoScope) ||
@@ -10547,12 +10507,12 @@ function confirmSync(type) {
                     return;
                 } finally { payrollRecoveryBusy = false; renderAutoSyncUndoInfo(); }
             } else if (durunuriAuditIds.length > 0) {
-                const rollbackFailures = await rollbackApprovalSyncWrites(transIds, durunuriAuditIds);
+                const rollbackFailures = await rollbackApprovalSyncWrites(transIds, durunuriAuditIds,[],{ordinaryOnly:undoState.ordinary_only===true});
                 if (rollbackFailures.length > 0) {
                     return showAlert("부분 완료", `자동연동 취소 일부가 실패했습니다.\n${rollbackFailures.join('\n')}\n기록은 재확인을 위해 유지합니다.`);
                 }
             } else if (transIds.length > 0) {
-                const { error: deleteError } = await deleteAutoSyncJournals(transIds);
+                const { error: deleteError } = await deleteAutoSyncJournals(transIds,{ordinaryOnly:undoState.ordinary_only===true});
                 if (deleteError) return showAlert("전표를 되돌리지 못했습니다", autoSyncJournalUndoError(deleteError));
             }
 
@@ -10566,14 +10526,25 @@ function confirmSync(type) {
                     restoreFail += 1;
                     continue;
                 }
-                const { error: restoreError } = await _supabase
-                    .from(table)
-                    .update(values)
-                    .eq(keyColumn, keyValue);
-                if (restoreError) restoreFail += 1;
+                if(restore.expected){
+                    const fields={ref_members:'status',ref_dividends:'is_accounted',coop_donations:'note'};
+                    const field=fields[table];
+                    if(!field||keyColumn!=='id'||!Object.hasOwn(values,field)||!Object.hasOwn(restore.expected,field)
+                        ||undoScope.identity!==accountingReadIdentity()){++restoreFail;continue;}
+                    try{
+                        const before=restore.expected[field];
+                        let q=_supabase.from(table).update({[field]:values[field]}).eq('coop_id',undoScope.owner.coop_id).eq('id',keyValue);
+                        q=before===null?q.is(field,null):q.eq(field,before);
+                        const {data,error}=await q.select('id,coop_id,'+field);
+                        if(error||data?.length!==1||String(data[0].id)!==String(keyValue)||data[0].coop_id!==undoScope.owner.coop_id||data[0][field]!==values[field])++restoreFail;
+                    }catch(_){++restoreFail;}
+                }else{
+                    const {error:restoreError}=await _supabase.from(table).update(values).eq(keyColumn,keyValue);
+                    if(restoreError)++restoreFail;
+                }
             }
 
-            if (!undoState.recovery_request || getLastAutoSyncUndo()?.recovery_request === undoState.recovery_request) clearLastAutoSyncUndo();
+            if (!restoreFail&&!recoveredFailures.length&&JSON.stringify(getLastAutoSyncUndo())===JSON.stringify(undoState)) clearLastAutoSyncUndo();
             if (restoreFail > 0 || recoveredFailures.length) {
                 showAlert("부분 완료", `전표는 취소했지만 후속 상태 일부를 확인해야 합니다.\n상태복원 ${restoreFail}건 실패${recoveredFailures.length ? '\n'+recoveredFailures.join('\n') : ''}`);
             } else {

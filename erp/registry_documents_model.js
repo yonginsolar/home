@@ -12,6 +12,7 @@
   return !(input.applicantMemberId&&input.applicantMemberId===input.chairMemberId&&text(input.applicant)===text(input.chairName));
  }
  function requirements(input){
+  input={...input,...root.CoopRegistryModel.changeScope(input)};
   const kinds=new Set(input.kinds||[]),need=new Map(),add=(key,mode='select')=>need.set(key,{key,label:labels[key],mode});
   const articles=kinds.has('articles')||kinds.has('name')||kinds.has('purpose')||!!input.unitReduced||!!input.unitIncreased;
   if(articles){add('articles');add('assembly');add('notice');}
