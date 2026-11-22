@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.215 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.216 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -312,7 +312,7 @@
           </div>
           <div class="col-6">
             <label class="small text-muted" for="projectSelect">프로젝트</label>
-            <select class="form-select" id="projectSelect" required></select>
+            <select class="form-select" id="projectSelect" required><option value="본사">본사</option></select>
           </div>
         </div>
 
@@ -395,6 +395,8 @@
            <div class="d-flex align-items-center gap-2" id="cardOptionDiv">
                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="payMethod" onchange="toggleCard()"><label class="form-check-label small" for="payMethod">💳 카드결제</label></div>
                <select class="form-select form-select-sm hidden ms-2" id="cardSelect" style="width: 120px;"><option value="">카드선택</option></select>
+               <span id="accountingCardChoiceStatus" class="small text-muted" role="status" hidden></span>
+               <button id="accountingCardChoiceRetry" class="btn btn-outline-secondary btn-sm" type="button" onclick="toggleCard()" hidden>다시 확인</button>
                <button class="btn btn-outline-secondary btn-sm" type="button" onclick="openCardManageModal()">카드관리</button>
            </div>
            <div class="ms-auto"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="vatCheck" checked><label class="form-check-label small" for="vatCheck">부가세포함</label></div></div>
@@ -2186,7 +2188,10 @@ async function getInsuranceLiabilitySummaryByMonths(targetMonths) {
 }
 
 // 1. 초기화
+let accountingEntryStarted=false;
 window.onload = async function() {
+    if(accountingEntryStarted)return;
+    accountingEntryStarted=true;
     selectModal = new bootstrap.Modal(document.getElementById('selectModal'));
     reportModal = new bootstrap.Modal(document.getElementById('reportModal'));
     addModal = new bootstrap.Modal(document.getElementById('addModal'));
@@ -2316,6 +2321,8 @@ window.onload = async function() {
     _supabase.auth.onAuthStateChange((event,session)=>{
         const actor=session?.user?.id||'';
         if(event==='SIGNED_OUT'||(guideAuthActor&&actor&&guideAuthActor!==actor)){
+            accountingDataAuthorized=false;
+            ++accountingCardsReadSequence;
             accountingGuideAuthInvalid=true;accountingGuideView?.destroy();accountingGuideView=null;
         }
         guideAuthActor=actor;
@@ -2370,13 +2377,8 @@ window.onload = async function() {
         refreshDashboard();
     });
 
-    // Independent reads needed for the visible entry form; keep the complete summary RPC.
-    await Promise.all([ loadProjects(accountingRuntimeGate.runtime.coop_id), loadMasterData(), loadCards().catch(() => { if (!window.frameElement?.hidden) showAlert('조회 실패','카드 목록을 불러오지 못했습니다. 카드관리를 다시 열어 주세요.'); }), refreshDashboard() ]);
-    loadPrepayExpenseAccounts();
-    loadReceivableIncomeAccounts();
     renderPrepayVendorSelect();
     renderReceivableVendorSelect();
-    onReceivableIncomeTypeChange();
     toggleAdvancedMode();
     renderAutoSyncUndoInfo();
     renderAccountingPayrollResult();
@@ -2384,11 +2386,24 @@ window.onload = async function() {
     window.addEventListener('storage', event => {
         if (event.key === null || event.key.startsWith('coop.accounting.payroll.result.v1:')) renderAccountingPayrollResult();
     });
-    if (document.getElementById('tabSync')?.classList.contains('active')) await loadApprovalUnclassifiedQueue();
+    document.getElementById('accTab').addEventListener('shown.bs.tab',event=>{
+        const pane=event.target?.dataset.bsTarget;
+        if(pane==='#tabForm'||pane==='#tabPrepay'){
+            void ensureAccountingEntryInputs(accountingRuntimeGate.runtime.coop_id);
+            if(pane==='#tabForm'&&document.getElementById('payMethod').checked)void toggleCard();
+        }
+        else if(pane==='#tabSync')void ensureAccountingMaster();
+    });
     if (new URLSearchParams(location.search).get('work') === 'taxes') {
         bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#tabTaxes"]')).show();
-        await openAccountingTaxTasks();
+        void openAccountingTaxTasks();
+    } else {
+        const pane=document.querySelector('.tab-content.no-print > .tab-pane.active')?.id;
+        if(!pane||pane==='tabForm'||pane==='tabPrepay')void ensureAccountingEntryInputs(accountingRuntimeGate.runtime.coop_id);
+        else if(pane==='tabSync'){void ensureAccountingMaster();void loadApprovalUnclassifiedQueue();}
     }
+    // The overview is visible, but never holds the entry form or the requested tax panel.
+    requestAnimationFrame(()=>{if(accountingDataAuthorized&&!window.frameElement?.hidden)void refreshDashboard().catch(()=>{});});
     window.ErpWorkspaceResume.register({modules:['accounting'], refreshWhenDirty:()=>['tabHistory','tabStatements','tabTaxes','tabMoney'].some(id=>document.getElementById(id)?.classList.contains('active')), refresh:async () => {
         const pane = document.querySelector('.tab-content.no-print > .tab-pane.active')?.id;
         if (pane === 'tabHistory') await loadHistory({allowHidden:true});
@@ -2397,9 +2412,34 @@ window.onload = async function() {
         else if (pane === 'tabMoney') await AccountingMoney.refresh({allowHidden:true});
         else if (pane === 'tabAssets') await loadAssetOverview({allowHidden:true});
         else if (pane === 'tabSync') await loadApprovalUnclassifiedQueue({allowHidden:true});
-        else if (pane === 'tabForm' || !pane) await refreshDashboard();
+        else if (pane === 'tabForm' || !pane) {
+            await Promise.all([ensureAccountingEntryInputs(accountingRuntimeGate.runtime.coop_id,{allowHidden:true}),refreshDashboard()]);
+        }
     }});
 };
+document.addEventListener('DOMContentLoaded',()=>{void window.onload();},{once:true});
+
+let accountingEntryInputs;
+function ensureAccountingMaster(options={}){
+    if(accountingMasterLoaded&&accountingMasterOwner===accountingReadIdentity()&&accountingMasterPhase==='loaded')return Promise.resolve(true);
+    return loadMasterData(options);
+}
+function ensureAccountingEntryInputs(coopId,options={}){
+    const owner=accountingReadIdentity();
+    if(!owner||!accountingDataAuthorized||String(myInfo?.coop_id||'')!==coopId)return Promise.resolve(false);
+    if(accountingEntryInputs?.owner===owner&&accountingEntryInputs.pending)return accountingEntryInputs.pending;
+    const entry=accountingEntryInputs?.owner===owner?accountingEntryInputs:{owner,projectsReady:false,pending:null};
+    accountingEntryInputs=entry;
+    entry.pending=Promise.all([entry.projectsReady?true:loadProjects(coopId).then(ready=>{entry.projectsReady=ready===true;return ready;}),ensureAccountingMaster(options)]).then(()=>{
+        if(accountingEntryInputs!==entry||owner!==accountingReadIdentity())return false;
+        if(!entry.prepayInitialized&&accountingMasterLoaded){
+            entry.prepayInitialized=true;
+            loadPrepayExpenseAccounts();loadReceivableIncomeAccounts();onReceivableIncomeTypeChange();
+        }
+        return entry.projectsReady&&accountingMasterLoaded;
+    }).catch(()=>false).finally(()=>{entry.pending=null;});
+    return entry.pending;
+}
 
 let accountingGuideLoading=null,accountingGuideView=null,accountingGuideScope=null,accountingGuideAuthInvalid=false;
 let accountingTaxController = null, accountingTaxLoading = null;
@@ -6123,15 +6163,12 @@ async function loadProjects(coopId) {
     const sel = document.getElementById("projectSelect");
     if (!sel) return;
 
-    const previousValue = String(sel.value || '').trim();
-    sel.innerHTML = "";
-    sel.add(new Option("본사", "본사"));
+    const owner=accountingReadIdentity();
 
     const normalizedCoopId = String(coopId || '').trim();
     if (!normalizedCoopId) {
         console.warn('[Accounting] 현재 조합을 확인하지 못해 본사만 표시합니다.');
-        sel.value = "본사";
-        return;
+        return false;
     }
 
     const { data, error } = await _supabase
@@ -6140,23 +6177,27 @@ async function loadProjects(coopId) {
         .eq('coop_id', normalizedCoopId)
         .order('display_order', { ascending: true })
         .order('name', { ascending: true });
+    if(!owner||owner!==accountingReadIdentity())return false;
 
     if (error) {
         console.warn('[Accounting] 발전소 목록을 불러오지 못해 본사만 표시합니다.', error.message);
-        sel.value = "본사";
-        return;
+        return false;
     }
 
-    const registeredNames = new Set();
+    const previousValue=String(sel.value||'').trim();
+    const options=[new Option('본사','본사')];
+    const registeredNames = new Set(['본사']);
     (Array.isArray(data) ? data : []).forEach((plant) => {
         const name = String(plant?.name || '').trim();
         if (!name || registeredNames.has(name)) return;
         registeredNames.add(name);
-        sel.add(new Option(name, name));
+        options.push(new Option(name, name));
     });
 
-    const canRestorePrevious = Array.from(sel.options).some((option) => option.value === previousValue);
+    sel.replaceChildren(...options);
+    const canRestorePrevious = registeredNames.has(previousValue);
     sel.value = canRestorePrevious ? previousValue : "본사";
+    return true;
 }
 
 let assetOverviewLoading = false;
@@ -6392,8 +6433,9 @@ async function loadCards() {
     } finally {clearTimeout(timer);}
     const { data, error } = result;
     if (error) throw error;
-    if (myInfo !== owner || sequence !== accountingCardsReadSequence) return;
+    if (myInfo !== owner || sequence !== accountingCardsReadSequence || !accountingDataAuthorized) return false;
     cardData = Array.isArray(data) ? data : [];
+    accountingCardsLoadedFor=accountingReadIdentity();
     const sel = document.getElementById("cardSelect");
     if (sel) {
         const selected = sel.value;
@@ -6413,7 +6455,19 @@ async function loadCards() {
     }
     populateCashbackCardOptions();
     renderCardManageList();
+    return true;
 } // End of loadCards
+
+let accountingCardsLoadedFor='',accountingCardEntryRead;
+function ensureAccountingCards({fresh=false}={}){
+    const owner=accountingReadIdentity();
+    if(!owner||!accountingDataAuthorized)return Promise.resolve(false);
+    if(accountingCardEntryRead?.owner===owner)return accountingCardEntryRead.promise;
+    if(!fresh&&accountingCardsLoadedFor===owner)return Promise.resolve(true);
+    const entry={owner,promise:null};accountingCardEntryRead=entry;
+    entry.promise=loadCards().finally(()=>{if(accountingCardEntryRead===entry)accountingCardEntryRead=null;});
+    return entry.promise;
+}
 
 function populateCashbackCardOptions() {
     const selectEl = document.getElementById('cashbackCardSelect');
@@ -6678,14 +6732,14 @@ function renderCardManageList() {
 async function openCardManageModal() {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
     const store = prepareAccountingCardDraft('cardManageModal'); if (!store || store.busy || store.reading) return;
-    const owner = myInfo; store.reading = true;
+    const pane=document.querySelector('.tab-content.no-print > .tab-pane.active')?.id;
+    const scope=accountingReadScope(pane),visit=accountingCardPickerVisit;store.reading = true;
     try {
-        await loadCards();
-        if (myInfo !== owner || !canPerform('accounting.edit') || window.frameElement?.hidden) return;
+        if(!await ensureAccountingCards({fresh:true})||visit!==accountingCardPickerVisit||!accountingReadScopeCurrent(scope)||!canPerform('accounting.edit'))return;
         const selectedCard = (cardData || []).find(card => accountingCardDraftKey(card) === store.activeKey);
         if (selectedCard) startEditCard(selectedCard);
         renderCardManageList(); cardManageModal.show();
-    } catch (_) { if (myInfo === owner && !window.frameElement?.hidden) showAlert('조회 실패','카드 목록을 불러오지 못했습니다. 다시 열어 주세요.'); }
+    } catch (_) { if (visit===accountingCardPickerVisit&&accountingReadScopeCurrent(scope)) showAlert('조회 실패','카드 목록을 불러오지 못했습니다. 다시 열어 주세요.'); }
     finally {store.reading = false;}
 } // End of openCardManageModal
 
@@ -6875,9 +6929,16 @@ function resolveCashbackIncomeAccount() {
     };
 } // End of resolveCashbackIncomeAccount
 
-function openCardCashbackModal() {
+async function openCardCashbackModal() {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
-    const store = prepareAccountingCardDraft('cardCashbackModal'); if (!store || store.busy) return;
+    const store = prepareAccountingCardDraft('cardCashbackModal'); if (!store || store.busy||store.reading) return;
+    const scope=accountingReadScope('tabSync'),visit=accountingCardPickerVisit;store.reading=true;
+    try{
+        const [cards]=await Promise.all([ensureAccountingCards(),ensureAccountingMaster()]);
+        if(!cards||visit!==accountingCardPickerVisit||!accountingReadScopeCurrent(scope)||!canPerform('accounting.edit'))return;
+        if(!accountingMasterLoaded||accountingMasterPhase!=='loaded')throw Error('ACCOUNTING_MASTER_UNAVAILABLE');
+    }catch(_){if(visit===accountingCardPickerVisit&&accountingReadScopeCurrent(scope))showAlert('조회 실패','카드와 계정 목록을 확인하지 못했습니다. 다시 열어 주세요.');return;}
+    finally{store.reading=false;}
     const incomeAccount = resolveCashbackIncomeAccount();
     if (!incomeAccount.item) {
         return showAlert('오류', '캐시백 잡이익 계정을 찾지 못했습니다. ac_master에 영업외수익/잡이익 계정을 확인하세요.');
@@ -6965,6 +7026,7 @@ async function refreshAccountingDashboardOnce() {
     const now = new Date();
     const todayKst = formatAccountingKstDate(now);
     const selectedYear = getDashboardYear();
+    const owner=accountingReadIdentity();
     const otherRevenueEl = document.getElementById("valOtherRev");
     if (otherRevenueEl) otherRevenueEl.innerText = '조회 중';
     const { data, error } = await _supabase.rpc('get_accounting_dashboard_summary', {
@@ -6972,7 +7034,7 @@ async function refreshAccountingDashboardOnce() {
         p_as_of_date: todayKst
     });
 
-    if (selectedYear !== getDashboardYear()) return;
+    if (selectedYear !== getDashboardYear()||!owner||owner!==accountingReadIdentity()||!accountingDataAuthorized) return;
     if (error) {
         if (otherRevenueEl) otherRevenueEl.innerText = '조회 실패';
         console.error('회계 대시보드 집계 조회 실패:', error);
@@ -6983,6 +7045,8 @@ async function refreshAccountingDashboardOnce() {
     const cacheRows = Array.isArray(summary.cache_rows) ? summary.cache_rows : [];
     buildPrepayCache(cacheRows);
     buildReceivableCache(cacheRows);
+    renderPrepayVendorSelect();
+    renderReceivableVendorSelect();
 
     const quarterVatSummary = buildAccountingDashboardVatSummary(
         getCurrentQuarterVatPeriod(todayKst),
@@ -7433,11 +7497,27 @@ function toggleSettleMode() {
     }
 }
 
-function toggleCard() {
+let accountingCardPickerVisit=0,accountingCardChoiceIntent=0;
+document.getElementById('accTab').addEventListener('hide.bs.tab',()=>{++accountingCardPickerVisit;++accountingCardChoiceIntent;});
+if(window.frameElement)new MutationObserver(records=>{
+    if(window.frameElement?.hidden||records.some(record=>record.oldValue===null)){++accountingCardPickerVisit;++accountingCardChoiceIntent;}
+    if(!window.frameElement?.hidden&&document.getElementById('tabForm')?.classList.contains('active')&&document.getElementById('payMethod')?.checked)void toggleCard();
+}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});
+async function toggleCard() {
     const chk = document.getElementById("payMethod").checked;
     const sel = document.getElementById("cardSelect");
-    if(chk) { sel.classList.remove("hidden"); sel.required = true; }
-    else { sel.classList.add("hidden"); sel.value=""; sel.required = false; }
+    const note=document.getElementById('accountingCardChoiceStatus'),retry=document.getElementById('accountingCardChoiceRetry');
+    const intent=++accountingCardChoiceIntent,scope=accountingReadScope('tabForm');
+    const current=()=>intent===accountingCardChoiceIntent&&accountingReadScopeCurrent(scope)&&document.getElementById('payMethod').checked;
+    retry.hidden=true;
+    if(!chk){sel.classList.add('hidden');sel.value='';sel.required=false;note.hidden=true;return;}
+    sel.classList.remove('hidden');sel.required=true;
+    if(accountingCardsLoadedFor===scope.identity&&scope.identity){note.hidden=true;return;}
+    note.hidden=false;note.textContent='카드 목록을 불러오는 중…';
+    try{
+        if(!await ensureAccountingCards())throw Error('CARD_LIST_UNAVAILABLE');
+        if(current())note.hidden=true;
+    }catch(_){if(current()){note.textContent='카드 목록을 확인하지 못했습니다.';retry.hidden=false;}}
 }
 
 function extractTagValue(desc, prefix) {
