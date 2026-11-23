@@ -1,0 +1,260 @@
+/* 재직·경력증명서 전용 A4 인쇄. 보호된 직인 준비와 출력 레이아웃은 별개다. */
+(function (root) {
+    'use strict';
+    const bucket = 'attachments';
+    const sealError = '등록된 직인을 불러오지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.';
+
+    function storageAddress(value, storageBase, signedOnly = false) {
+        const literal = /^https:\/\/[^/?#]+(\/[^?#]*)(?:[?#]|$)/i.exec(value);
+        const url = new URL(value), base = new URL(storageBase);
+        const path = literal?.[1]?.match(/^\/storage\/v1\/object\/(?:(public|sign|authenticated)\/)?attachments\/(.+)$/);
+        if (url.protocol !== 'https:' || url.origin !== base.origin || url.username || url.password || !path
+            || (signedOnly && (path[1] !== 'sign' || !url.searchParams.get('token')))) throw Error(sealError);
+        const segments = path[2].split('/').map(decodeURIComponent);
+        if (segments.some(part => /[\/\\]/.test(part))) throw Error(sealError);
+        return {url, segments};
+    }
+
+    function sealKey(value, storageBase, coopId) {
+        const raw = String(value ?? '').trim();
+        if (!raw) return '';
+        const segments = /^https:\/\//i.test(raw)
+            ? storageAddress(raw, storageBase).segments : raw.replace(/^\/(?!\/)/, '').split('/');
+        if (!coopId || segments.length < 3 || segments[0] !== 'company-seals' || segments[1] !== coopId
+            || segments.some(part => !part || part === '.' || part === '..' || /[\\\x00-\x1f\x7f?#]/.test(part))) throw Error(sealError);
+        return segments.join('/');
+    }
+
+    function open({legacyReady = false} = {}) {
+        const win = root.open('', '', 'width=900,height=1100');
+        if (!win || win.closed) return null;
+        const doc = win.document, controller = new AbortController();
+        let seal = null, loaded = legacyReady, ready = false, presented = false, permanentlyOversized = false;
+        let ensurePrintable = () => false;
+        const isOpen = () => !controller.signal.aborted && !win.closed;
+        const sealReady = () => !seal || (seal.complete && seal.naturalWidth > 0);
+        function close() {
+            controller.abort();
+            if (!win.closed) win.close();
+        }
+        doc.open();
+        doc.write('<html lang="ko"><head><meta charset="utf-8"><title>인쇄 미리보기</title><style id="pending-print">@media print{body{display:none}}</style></head><body><button type="button">닫기</button> <span role="status">재직증명서 준비 중…</span></body></html>');
+        doc.close();
+        doc.querySelector('button').addEventListener('click', close);
+        win.addEventListener('pagehide', () => controller.abort(), {once:true});
+        win.addEventListener('keydown', event => {
+            if (!ready && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') event.preventDefault();
+        }, true);
+        win.addEventListener('beforeprint', () => { ensurePrintable(); });
+
+        async function loadSeal({client, storageBase, coopId, previouslyRegistered, isCurrent}) {
+            const cancelled = () => !isOpen() || !isCurrent();
+            const check = () => { if (cancelled()) throw Error(sealError); };
+            let timer, abort, done = false, stopImage = () => {};
+            const cancel = new Promise((_, reject) => {
+                abort = () => reject(Error(sealError));
+                timer = root.setTimeout(abort, 12000);
+                controller.signal.addEventListener('abort', abort, {once:true});
+            });
+            const checkStage = () => { if (done) throw Error(sealError); check(); };
+            try {
+                await Promise.race([cancel, (async () => {
+                    checkStage();
+                    const {data: setting, error: readError} = await client.from('ref_company_info')
+                        .select('value').eq('coop_id',coopId).eq('key','seal_url').maybeSingle();
+                    checkStage();
+                    if (readError || (!setting && previouslyRegistered)) throw Error(sealError);
+                    const key = sealKey(setting?.value, storageBase, coopId);
+                    if (!key) return;
+                    const {data, error} = await client.storage.from(bucket).createSignedUrl(key, 120);
+                    checkStage();
+                    if (error || !data?.signedUrl) throw Error(sealError);
+                    const address = storageAddress(data.signedUrl, storageBase, true);
+                    if (address.segments.join('/') !== key) throw Error(sealError);
+                    const image = doc.createElement('img');
+                    image.referrerPolicy = 'no-referrer';
+                    image.alt = '조합 직인';
+                    image.hidden = true;
+                    doc.body.append(image);
+                    stopImage = () => {image.onload = image.onerror = null; image.removeAttribute('src'); image.remove();};
+                    await new Promise((resolve, reject) => {
+                        image.onload = resolve;
+                        image.onerror = () => reject(Error(sealError));
+                        image.src = address.url.href;
+                        if (image.complete && image.naturalWidth > 0) resolve();
+                    });
+                    if (image.decode) await image.decode();
+                    checkStage();
+                    if (!image.complete || !(image.naturalWidth > 0)) throw Error(sealError);
+                    image.onload = image.onerror = null;
+                    seal = image;
+                    stopImage = () => {};
+                })()]);
+                loaded = true;
+            } catch (_) {
+                throw Error(sealError);
+            } finally {
+                done = true;
+                root.clearTimeout(timer);
+                controller.signal.removeEventListener('abort',abort);
+                stopImage();
+            }
+        }
+
+        function present(content, css) {
+            if (!isOpen() || !loaded || presented || !sealReady()) return false;
+            const style = doc.createElement('style');
+            style.textContent = css;
+            doc.head.append(style);
+            // 이 자리에서만 기존 인쇄 서식에, 이미 읽어 온 동일한 이미지 노드를 끼운다.
+            const body = doc.createElement('div');
+            body.innerHTML = `<div class="print-fab no-print employee-print-actions"><span role="status">인쇄 미리보기</span>
+                <button type="button" disabled>인쇄하기</button>
+                <button type="button">닫기</button></div>
+                <div class="employee-page print-cert">${content}</div>`;
+            const slot = body.querySelector('[data-employee-certificate-seal]');
+            if (seal) {
+                if (!slot) return false;
+                seal.style.cssText = slot.style.cssText;
+                seal.className = slot.className;
+                seal.hidden = false;
+                slot.replaceWith(seal);
+            }
+            const [printButton, closeButton] = body.querySelectorAll('.print-fab button');
+            const status = body.querySelector('[role=status]');
+            const paper = body.querySelector('.employee-paper');
+            const blocking = doc.getElementById('pending-print');
+            const stampedImage = seal || body.querySelector('img[data-employee-certificate-seal]');
+            const logoImage = body.querySelector('.employee-document-logo');
+            printButton.addEventListener('click', () => { if (ensurePrintable()) win.print(); });
+            closeButton.addEventListener('click', close);
+            doc.body.replaceChildren(...body.childNodes);
+            presented = true;
+            function printable() {
+                if (!isOpen()) return false;
+                const fits = !permanentlyOversized && fitPaper(paper);
+                const stampOk = !stampedImage || (stampedImage.complete && stampedImage.naturalWidth > 0);
+                const logoOk = !logoImage || logoImage.complete;
+                ready = fits && stampOk && logoOk;
+                blocking.disabled = ready;
+                // Keeping the same style node also blocks the browser's own print command.
+                blocking.textContent = ready ? '' : '@media print{body{display:none!important}}';
+                printButton.disabled = !ready;
+                status.textContent = !fits ? '내용이 A4 한 장을 넘습니다. 인쇄할 수 없습니다.'
+                    : !stampOk && stampedImage.complete ? '직인을 표시하지 못했습니다. 다시 열어 주세요.'
+                    : ready ? '인쇄 미리보기' : '증명서 이미지 준비 중…';
+                return ready;
+            }
+            permanentlyOversized = !fitPaper(paper);
+            ensurePrintable = printable;
+            for (const image of [stampedImage, logoImage].filter(Boolean)) {
+                image.addEventListener('load', printable, {once:true});
+                image.addEventListener('error', printable, {once:true});
+            }
+            printable();
+            return !permanentlyOversized;
+        }
+        return {isOpen, loadSeal, present, hasSeal:()=>!!seal, discard:()=>{if (!presented || permanentlyOversized) close();}};
+    }
+
+    const certificateCss = `
+        @page { size: A4 portrait; margin: 0; }
+        .employee-page { width:210mm; height:297mm; margin:0 auto; padding:10mm; background:white; }
+        .employee-paper { --ink:#19355c; --accent:#3b6ea5; --tint:#f3f6fb; --rule:#66768a;
+            height:100%; border:.42mm solid var(--ink); padding:10mm 10mm 9mm; color:#17263a;
+            font: 11pt/1.48 Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+        .employee-document-meta { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:3mm; min-height:10mm; align-items:start; font-size:9.5pt; }
+        .employee-document-meta img { max-width:35mm; max-height:11mm; object-fit:contain; object-position:left top; }
+        .employee-document-site { text-align:right; }
+        .employee-document-heading { text-align:center; margin:3mm 0 7mm; }
+        .employee-document-heading h1 { margin:0; color:var(--ink); font-size:25pt; line-height:1.24; font-weight:750; letter-spacing:.08em; }
+        .employee-document-heading p { margin:1mm 0 2.4mm; font-weight:650; font-size:9.5pt; color:#45576d; letter-spacing:.11em; }
+        .employee-document-heading::after { display:block; content:""; width:32mm; border-bottom:.35mm solid var(--accent); margin:auto; }
+        .employee-document-number { text-align:right; margin-bottom:4mm; font-size:10pt; }
+        .employee-section { margin:0 0 4.5mm; }
+        .employee-section h2 { color:#25374c; font-weight:750; margin:0 0 1.4mm; font-size:11pt; }
+        .employee-section table { width:100%; border-collapse:collapse; table-layout:fixed; font:inherit; }
+        .employee-section .employee-label { width:24mm; }
+        .employee-section th,.employee-section td { border:.25mm solid var(--rule); padding:1.65mm 2.3mm; vertical-align:middle; }
+        .employee-section th { background:var(--tint); text-align:left; font-weight:750; color:#20324a; word-break:keep-all; }
+        .employee-document-purpose { color:var(--ink); font-weight:650; }
+        .employee-paper [data-cert-flow] { display:block; min-width:0; white-space:normal; word-break:keep-all; overflow-wrap:normal; }
+        .employee-doc-token { white-space:nowrap; word-break:normal; overflow-wrap:normal; }
+        .employee-paper [data-cert-flow].cert-value-small { font-size:.93em; }
+        .employee-paper [data-cert-flow].cert-value-break { overflow-wrap:break-word; }
+        .employee-cert-statement { text-align:center; margin:9mm 0 3mm; }
+        .employee-cert-date { text-align:center; margin:0; font-weight:650; }
+        .employee-cert-signature { text-align:center; margin-top:6mm; }
+        .employee-cert-company { font-weight:750; font-size:15pt; }
+        .employee-cert-chair-row { display:flex; align-items:center; justify-content:center; gap:3mm; margin-top:1.4mm; }
+        .employee-cert-chair { font-weight:750; font-size:15pt; min-width:0; }
+        .employee-cert-seal { flex:0 0 24mm; width:24mm; height:24mm; object-fit:contain; }
+        .employee-cert-footer { text-align:center; margin-top:5mm; border-top:.25mm solid var(--rule); padding-top:2.6mm; font-size:9pt; color:#45576d; }
+        .employee-cert-demo { text-align:center; font:bold 11pt/1.5 sans-serif; color:#8a4300; }
+        .employee-paper.cert-paper-compact { padding-inline:7mm; padding-block:8mm; }
+        .employee-paper.cert-paper-compact .employee-label { width:21mm; }
+        .employee-paper.cert-paper-compact .employee-section th,.employee-paper.cert-paper-compact .employee-section td { padding:1.25mm 1.65mm; }
+        .employee-paper.cert-paper-compact .employee-document-heading { margin-bottom:5mm; }
+        .employee-paper.cert-paper-compact .employee-cert-statement { margin-top:6mm; }
+        .employee-print-actions { align-items:center; line-height:1.3; font:14px/1.3 sans-serif; }
+        .employee-print-actions button { border:1px solid #66768a; padding:6px 12px; border-radius:10px; background:white; color:#19355c; }
+        .employee-print-actions button:disabled { opacity:.45; }
+    `;
+    function fitPaper(paper) {
+        if (!paper || !paper.clientWidth) return false;
+        const values = Array.from(paper.querySelectorAll('[data-cert-flow]'));
+        const overflow = element => element.clientWidth > 0 && element.scrollWidth > element.clientWidth + 1;
+        const tooTall = () => paper.scrollHeight > paper.clientHeight + 1;
+        paper.classList.remove('cert-paper-compact');
+        values.forEach(node=>node.classList.remove('cert-value-small','cert-value-break'));
+        if (values.some(overflow) || tooTall()) paper.classList.add('cert-paper-compact');
+        values.filter(overflow).forEach(node=>node.classList.add('cert-value-small'));
+        values.filter(overflow).filter(node=>!node.hasAttribute('data-cert-atomic')).forEach(node=>node.classList.add('cert-value-break'));
+        return !values.some(overflow) && !overflow(paper) && !tooTall();
+    }
+    function print(service, data, preview) {
+        const e = value => service.escapeHtml(value);
+        const atomic = word => /^(?:\(₩[\d,]+\)|[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+|[\d,]+(?:\.\d+)?(?:원|좌)?)$/.test(word);
+        const valueHtml = value => String(value ?? '').split(/<br\s*\/?>|\r?\n/i).map(line =>
+            line.split(/(\s+)/).map(word => atomic(word)
+                ? `<span class="employee-doc-token">${e(word)}</span>` : e(word)).join('')).join('<br>');
+        const flow = (value, cls='') => `<div class="${cls}" data-cert-flow>${valueHtml(value)}</div>`;
+        const simulation = data?.simulation === true;
+        const certTitle = String(data?.certTitle || '재직증명서');
+        const career = certTitle.includes('경력증명서');
+        const logo = service.safeUrl(data?.logo,true);
+        const seal = service.safeUrl(data?.seal,true);
+        const preparedSeal = preview?.hasSeal();
+        const footerAddress = [data?.compAddr,data?.compName].map(v=>String(v??'').trim()).filter(Boolean).join(' ');
+        const contact = String(data?.contact ?? '').trim();
+        const content = `<article class="employee-paper">
+            ${simulation ? '<div class="employee-cert-demo">DEMO · 박람회 체험용 / 실제 증명서로 사용할 수 없어요</div>' : ''}
+            <div class="employee-document-meta">${logo ? `<img class="employee-document-logo" src="${e(logo)}" alt="">` : '<div></div>'}
+                ${flow(String(data?.siteUrl || '').trim(),'employee-document-site')}</div>
+            <header class="employee-document-heading"><h1>${e(certTitle)}</h1>
+                <p>${career ? 'CERTIFICATE OF CAREER' : 'CERTIFICATE OF EMPLOYMENT'}</p></header>
+            <div class="employee-document-number" data-cert-flow data-cert-atomic>문서번호: <span class="employee-doc-token">${e(data?.docNum)}</span></div>
+            <section class="employee-section"><h2>1. 인적사항</h2><table>
+                <colgroup><col class="employee-label"><col><col class="employee-label"><col></colgroup>
+                <tr><th scope="row">성명</th><td>${flow(data?.name)}</td><th scope="row">생년월일</th><td>${flow(data?.birth)}</td></tr>
+                <tr><th scope="row">소속</th><td>${flow(data?.dept)}</td><th scope="row">직위</th><td>${flow(data?.pos)}</td></tr>
+                <tr><th scope="row">주소</th><td colspan="3">${flow(data?.address)}</td></tr>
+            </table></section>
+            <section class="employee-section"><h2>2. 재직사항</h2><table>
+                <colgroup><col class="employee-label"><col></colgroup>
+                <tr><th scope="row">재직기간</th><td>${flow(data?.tenure)}</td></tr>
+                <tr><th scope="row">용도</th><td>${flow(data?.purpose,'employee-document-purpose')}</td></tr>
+            </table></section>
+            ${flow(data?.employmentStatement || '위와 같이 재직하고 있음을 증명합니다.','employee-cert-statement')}
+            ${flow(data?.today,'employee-cert-date')}
+            <div class="employee-cert-signature">${flow(data?.compName,'employee-cert-company')}
+                <div class="employee-cert-chair-row">${flow('이사장 '+String(data?.chairman ?? ''),'employee-cert-chair')}
+                ${preparedSeal ? '<span class="employee-cert-seal" data-employee-certificate-seal></span>'
+                    : seal ? `<img class="employee-cert-seal" data-employee-certificate-seal alt="조합 직인" src="${e(seal)}">` : ''}</div></div>
+            ${footerAddress || contact ? `<div class="employee-cert-footer">${flow(footerAddress)}${contact ? flow('문의: '+contact) : ''}</div>` : ''}
+        </article>`;
+        const target = preview || open({legacyReady:true});
+        return target?.present(content, service.styles.common + certificateCss) ?? false;
+    }
+    root.EmployeeCertificatePrint = Object.freeze({version:'2.0.0',open,print});
+})(window);

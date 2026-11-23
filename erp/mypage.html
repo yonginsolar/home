@@ -2764,8 +2764,30 @@ return '기타조정';
   function toggleEtcInput(){const v=document.getElementById("certPurposeSelect").value,e=document.getElementById("certPurposeEtc");if(v==='기타'){e.classList.remove('hidden');e.focus()}else{e.classList.add('hidden')}}
 let mypageCertIntent=0;
 function cancelMypageCertificateIntent(){++mypageCertIntent;document.getElementById('btnCert')?.removeAttribute('aria-busy');}
+let mypageCertAssetFlight;
+function loadMypageCertificatePrint() {
+    if (window.EmployeeCertificatePrint?.version === '2.0.0') return Promise.resolve();
+    if (mypageCertAssetFlight) return mypageCertAssetFlight;
+    mypageCertAssetFlight = new Promise((resolve,reject)=>{
+        const script=document.createElement('script');
+        const finish=ok=>{
+            clearTimeout(timer);script.onload=script.onerror=null;
+            if(ok) resolve();
+            else {script.remove();reject(Error('CERTIFICATE_PRINT_ASSET_UNAVAILABLE'));}
+        };
+        const timer=setTimeout(()=>finish(false),15000);
+        script.src='/erp/employee_certificate_print_v2.js?v=2.0.0';
+        script.integrity='sha384-YOs2Cji/uYXpuGSBh1m432ohP8hZ8ivtr+zjo+2Mr4sqgQjW29up7TOU4okfWW8I';
+        script.crossOrigin='anonymous';
+        script.onload=()=>finish(window.EmployeeCertificatePrint?.version==='2.0.0');
+        script.onerror=()=>finish(false);
+        document.head.appendChild(script);
+    }).finally(()=>{mypageCertAssetFlight=null;});
+    return mypageCertAssetFlight;
+}
 function prepareMypageCertificateTools(){
-return Promise.all(['printService',window.ExpoRuntimeBridge?'expoEmployeeCertificate':'employeeCertificatePrint'].map(key=>window.ErpWorkflowAssets.load(key)));
+return Promise.all([window.ErpWorkflowAssets.load('printService'),window.ExpoRuntimeBridge
+    ? window.ErpWorkflowAssets.load('expoEmployeeCertificate') : loadMypageCertificatePrint()]);
 }
 async function openCertModal(){
  if(!mypageDataAuthorized||!isMypageDataVisible())return;
@@ -2773,7 +2795,7 @@ async function openCertModal(){
  const current=()=>request===mypageCertIntent&&owner===getMypageDataOwner()&&mypageDataAuthorized&&!window.frameElement?.hidden
   &&isMypageDataVisible()&&document.getElementById('tabCert').classList.contains('active');
  if(!current())return;
- if(typeof PrintService!=='undefined'&&(window.ExpoRuntimeBridge?window.ExpoEmployeeCertificate:window.EmployeeCertificatePrint)){purposeModal.show();return;}
+ if(typeof PrintService!=='undefined'&&(window.ExpoRuntimeBridge ? window.ExpoEmployeeCertificate : window.EmployeeCertificatePrint?.version==='2.0.0')){purposeModal.show();return;}
  button.setAttribute('aria-busy','true');
  try{await prepareMypageCertificateTools();if(current())purposeModal.show();}
  catch(_){if(current())showAlert('증명서 도구를 불러오지 못했습니다. 다시 시도해 주세요.');}
@@ -2881,7 +2903,7 @@ async function runMypageEmploymentCertificate(certMeta) {
             || (newCert.coop_id != null && String(newCert.coop_id) !== String(account.coop_id))) throw Error();
         entry.dispatched = false;
         if (!isCurrent()) return;
-        const printed = PrintService.printCert(makeMypageCertificateData(account,certMeta,profile,purpose,birthDate,newCert.cert_num,''),preview);
+        const printed = window.EmployeeCertificatePrint.print(PrintService,makeMypageCertificateData(account,certMeta,profile,purpose,birthDate,newCert.cert_num,''),preview);
         if (!printed) throw Error('발급은 완료되었지만 인쇄 미리보기를 표시하지 못했습니다.');
         purposeModal.hide();
     } catch (error) {
@@ -2996,7 +3018,7 @@ async function runCertIssue() {
     };
 
     // 모듈 호출
-    PrintService.printCert(certData);
+    window.EmployeeCertificatePrint.print(PrintService,certData);
 }
   // [공통] 입력 시 자동 하이픈 추가 (2025-24-0002 형식)
 function autoHyphenMemberId(target) {
