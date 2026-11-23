@@ -918,6 +918,9 @@
         <div class="actions">
           <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetApprovalComposerWithConfirm()">📝 새 문서</button>
           <button type="button" class="btn btn-outline-primary btn-sm" id="btnSaveApprovalDraft" onclick="saveApprovalDraft()">💾 임시저장</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="btnApprovalSubmissionResult" onclick="checkOrdinaryApprovalSubmission()" hidden>상신 결과 확인</button>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="btnApprovalSubmissionRetry" onclick="retryOrdinaryApprovalSubmission(event)" hidden>이전 상신 다시 시도</button>
+          <button type="button" class="btn btn-link btn-sm" id="btnApprovalSubmissionDismiss" onclick="dismissOrdinaryApprovalSubmission()" hidden>이전 요청 종료</button>
           <button type="button" class="btn btn-outline-dark btn-sm" onclick="openApprovalDraftManager()">📂 임시저장함</button>
         </div>
       </div>
@@ -1976,6 +1979,7 @@ let approvalCategoryBodyDraftScope = '';
 let approvalMeetingNoticeRequestSequence = 0;
 let approvalMeetingNoticeLink = null;
 let approvalSubmitAttempt = null;
+let ordinaryApprovalResultBusy=false;
 let approvalSubmitPreviewState = null;
 let approvalComposerInputRevision = 0;
 let approvalRelViewRevision = 0;
@@ -3823,9 +3827,10 @@ function isApprovalDraftLoadCurrent(intent) {
 async function loadApprovalDraftFromServer(draftId) {
     const safeDraftId = Number(draftId);
     if (!Number.isInteger(safeDraftId) || safeDraftId <= 0) return;
-    const intent={context:captureApprovalDraftLoadContext(),actor:approvalSubmitActor(),restoring:false};
+    if(approvalDraftSaving||approvalSubmitAttempt)return showAlert('임시저장이나 상신이 끝난 뒤 초안을 열어 주세요.');
+    const intent={context:captureApprovalDraftLoadContext(),actor:approvalSubmitActor(),restoring:false,reading:true};
     approvalDraftLoadIntent=intent;
-    if(!isApprovalDraftLoadCurrent(intent))return;
+    if(!isApprovalDraftLoadCurrent(intent)){intent.reading=false;return;}
 
     try {
     const targetDraft = approvalDraftCache.find((item) => Number(item?.id || 0) === safeDraftId);
@@ -4177,6 +4182,7 @@ async function loadApprovalDraftFromServer(draftId) {
         closeApprovalDraftModal({ force: true });
         showAlert('임시저장 문서를 불러오는 중 화면 구성에 실패했습니다.\n페이지를 새로고침한 뒤 다시 시도해 주세요.');
     } finally {
+        intent.reading=false;
         if(approvalDraftLoadIntent===intent)approvalDraftRestoreEditorModeHint = '';
     }
 } // End of loadApprovalDraftFromServer
@@ -4206,6 +4212,7 @@ function reconcileApprovalDraftSavedAttachments(submitted, submittedItems, saved
 
 async function saveApprovalDraft() {
     if (approvalDraftSaving) return;
+    if(approvalDraftLoadIntent?.reading||approvalSubmitAttempt)return showAlert('초안 준비나 상신이 끝난 뒤 저장해 주세요.');
     if(getApprovalDraftAttachmentRemoval())return showAlert('첨부 처리 결과를 먼저 확인해 주세요. 현재 입력은 유지됩니다.');
     if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) return showAlert('권한 받을 사람·업무 권한을 선택하고 기존 결재선에서 결재자를 지정한 뒤 상신해 주세요.');
     if (!canPerform('approval.submit')) return showAlert('임시저장 권한이 없습니다.');
@@ -12982,7 +12989,8 @@ async function invokeApprovalEdgeFunction(functionName, body, options = {}) {
     const buildInvokeOptions = (token) => ({
         body,
         headers: {
-            Authorization: `Bearer ${token}`
+            Authorization: `Bearer ${token}`,
+            ...(options.erpHost ? {'x-erp-host':options.erpHost} : {})
         }
     });
 
@@ -14541,9 +14549,14 @@ function getApprovalFormReadSubmitBlock() {
 }
 function syncApprovalSubmitControls() {
     const leaveBlock=getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock() || (getApprovalDraftAttachmentRemoval()?'첨부 처리 결과를 먼저 확인해 주세요.':'');
+    const pending=!!peekOrdinaryApprovalSubmission();
+    for(const id of ['btnApprovalSubmissionResult','btnApprovalSubmissionRetry','btnApprovalSubmissionDismiss']){
+        const control=document.getElementById(id);
+        if(control){control.hidden=!pending||!canPerform('approval.submit');control.disabled=!!approvalSubmitAttempt||ordinaryApprovalResultBusy;}
+    }
     const button=document.getElementById('btnSubmit');
     if(button){
-        button.disabled=!!approvalSubmitAttempt || !canPerform('approval.submit') || !!leaveBlock;
+        button.disabled=!!approvalSubmitAttempt || pending || !canPerform('approval.submit') || !!leaveBlock;
         if(leaveBlock)button.title=leaveBlock;else button.removeAttribute('title');
     }
     const openPreview=document.getElementById('btnSubmitPreview');
@@ -14552,7 +14565,7 @@ function syncApprovalSubmitControls() {
     if(!previewButton)return;
     const preview=approvalSubmitPreviewState;
     const current=!!preview && isApprovalSubmitSnapshotCurrent(preview.snapshot);
-    previewButton.disabled=!!approvalSubmitAttempt || !preview?.ready || !current || !!leaveBlock;
+    previewButton.disabled=!!approvalSubmitAttempt || pending || !preview?.ready || !current || !!leaveBlock;
     previewButton.textContent=approvalSubmitAttempt?'상신 준비 중…':'상신하기';
     if(preview){
         const hint=document.getElementById('relViewActionHint');
@@ -15435,8 +15448,9 @@ async function buildJeongyeolMonthlyDraft() {
 
 
 // [신규] 문서번호 자동 생성 (제YYYY-NNN호)
-async function generateDocNo() {
-    const { data, error } = await _supabase.rpc('get_next_official_doc_no');
+async function generateDocNo(signal) {
+    const query=_supabase.rpc('get_next_official_doc_no');
+    const { data, error } = await (signal?query.abortSignal(signal):query);
     if (error) throw error;
     return data || null;
 } // End of generateDocNo
@@ -15450,36 +15464,250 @@ function isDocNoConflictError(error) {
     return code === '23505' && (message.includes('doc_no') || details.includes('doc_no'));
 }
 
-async function insertApprovalWithDocNoRetry(basePayload, maxAttempts = 5) {
-    let lastConflictError = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        const docNo = await generateDocNo();
-        const payload = {
-            ...basePayload,
-            coop_id: basePayload?.coop_id || getApprovalCoopId() || null,
-            doc_no: docNo,
-            created_at: new Date()
-        };
-        const { data, error } = await _supabase
-            .from('ref_approval')
-            .insert(payload)
-            .select('id, doc_no')
-            .single();
-
-        if (!error && data?.id) {
-            return { insertedDoc: data, docNo };
-        }
-        if (isDocNoConflictError(error)) {
-            lastConflictError = error;
-            continue;
-        }
-        throw error;
+function ordinaryApprovalSubmissionKey() {
+    return 'erp.approval.submission.v2:'+approvalSubmitActor();
+}
+function readOrdinaryApprovalSubmission(key=ordinaryApprovalSubmissionKey()) {
+    const text=localStorage.getItem(key);
+    if(!text)return null;
+    const row=JSON.parse(text);
+    if(!row||typeof row.id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(row.id)
+        ||typeof row.drafter!=='string'||!row.drafter||row.coop!==getApprovalScopedCoopId()||row.auth!==myAuthUserId)
+        throw Error('이전 상신 정보를 확인하지 못했습니다.');
+    return row;
+}
+function peekOrdinaryApprovalSubmission() {
+    if(window.ExpoRuntimeBridge||!myAuthUserId||!getApprovalScopedCoopId())return null;
+    try{return readOrdinaryApprovalSubmission();}catch(_){return null;}
+}
+function clearOrdinaryApprovalSubmission(key,id) {
+    try{if(readOrdinaryApprovalSubmission(key)?.id===id)localStorage.removeItem(key);}catch(_){/* Keeping the marker is safe. */}
+    ordinarySubmissionInMemory.delete(id);
+}
+const ordinarySubmissionInMemory=new Map();
+function ordinaryApprovalConfirmed(row) {
+    return row?.state==='saved'&&!!toPositiveDocId(row.id);
+}
+async function callOrdinaryApproval(name,args){
+    const {data,error}=await boundedApprovalAttachmentRead(signal=>{
+        let q=_supabase.rpc(name,args).abortSignal(signal);
+        if(typeof q.retry==='function')q=q.retry(false);
+        return q;
+    });
+    if(error)throw error;
+    if(data?.request_id!==args.p_request||!['saved','ready','missing','dismissed'].includes(data.state)
+        ||data.state==='saved'&&!ordinaryApprovalConfirmed(data))
+        throw Error('상신 응답을 확인하지 못했습니다.');
+    return data;
+}
+const ordinaryApprovalState=(request,action='status',extra={})=>
+    callOrdinaryApproval('erp_ordinary_submission_state',{p_request:request.id,p_coop:request.coop,p_actor:request.auth,p_action:action,...extra});
+async function dispatchOrdinaryApprovalNotification(receipt) {
+    if(!toPositiveDocId(receipt?.notification_id))return {ok:true,appNotificationSaved:true,telegramSent:false};
+    try {
+        const erpHost=window.CoopRouteGuard?.getErpRuntimeHost(window.location)||window.location?.hostname||'';
+        const {data,error}=await invokeApprovalEdgeFunction('erp-approval-telegram-dm',{
+            mode:'dispatch_existing',ordinarySubmission:true,notificationId:receipt.notification_id,erpBaseUrl:getApprovalNotificationBaseUrl()
+        },{erpHost});
+        if(!error&&data?.ok===true&&data?.sent===true)return {ok:true,telegramSent:true,appNotificationSaved:true};
+        // An opaque provider result is not a reason to send or insert another alert.
+        if(error||data?.skipped==='already_sent_or_locked')return {ok:true,telegramSent:false,fallbackInserted:false};
+    }catch(_){return {ok:true,telegramSent:false,fallbackInserted:false};}
+    return {ok:true,appNotificationSaved:true,telegramSent:false};
+}
+async function prepareOrdinaryApprovalDigest(payload,descriptors) {
+    const digest=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),
+        n=>n.toString(16).padStart(2,'0')).join('');
+    const attachments=[];
+    for(const descriptor of descriptors){
+        if(descriptor.kind==='local')attachments.push(['file',descriptor.file.name,await digest(await descriptor.file.arrayBuffer())]);
+        else attachments.push(['saved',descriptor.item.rawRef,descriptor.item.displayName]);
     }
+    return digest(new TextEncoder().encode(JSON.stringify([payload,attachments])));
+}
+async function checkOrdinaryApprovalSubmission() {
+    if(ordinaryApprovalResultBusy||approvalSubmitAttempt||!canPerform('approval.submit'))return;
+    const key=ordinaryApprovalSubmissionKey(),owner=approvalSubmitOwner();
+    const current=()=>owner===approvalSubmitOwner()&&!window.frameElement?.hidden&&canPerform('approval.submit');
+    ordinaryApprovalResultBusy=true;
+    try {
+        const request=readOrdinaryApprovalSubmission(key);
+        if(!request)return;
+        syncApprovalSubmitControls();
+        const receipt=await ordinaryApprovalState(request);
+        if(!current())return;
+        if(receipt.state==='dismissed'){clearOrdinaryApprovalSubmission(key,request.id);return;}
+        if(!ordinaryApprovalConfirmed(receipt))return showAlert(receipt.state==='ready'
+            ?'아직 상신을 확인하지 못했습니다. 이전 상신 다시 시도를 눌러 주세요.'
+            :'아직 상신을 확인하지 못했습니다. 새로고침했다면 원래 초안을 열고 같은 파일을 다시 선택한 뒤 이전 상신 다시 시도를 눌러 주세요.');
+        void dispatchOrdinaryApprovalNotification(receipt);
+        if(approvalDraftSaving||approvalDraftLoadIntent?.reading)return showAlert('상신이 확인되었습니다. 초안 작업이 끝난 뒤 새 기안을 시작할 수 있습니다.');
+        const snapshot=captureApprovalSubmitSnapshot();
+        const next=await showConfirm(`상신이 확인되었습니다${receipt.doc_no?' · '+receipt.doc_no:''}. 입력은 유지하고 결과 안내를 닫을까요?`,
+            {title:'상신 결과 확인',okText:'확인',cancelText:'나중에'});
+        if(next&&current()&&!approvalDraftSaving&&!approvalDraftLoadIntent?.reading&&isApprovalSubmitSnapshotCurrent(snapshot)
+            &&readOrdinaryApprovalSubmission(key)?.id===request.id){
+            clearOrdinaryApprovalSubmission(key,request.id);
+        }
+    }catch(_){if(current())showAlert('상신 결과를 확인하지 못했습니다. 입력과 첨부를 유지합니다.');}
+    finally{ordinaryApprovalResultBusy=false;syncApprovalSubmitControls();}
+}
+window.addEventListener('storage',event=>{
+    if(event.key===ordinaryApprovalSubmissionKey())syncApprovalSubmitControls();
+});
 
-    if (lastConflictError) {
-        throw new Error('문서번호 충돌이 반복되어 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+function knownOrdinaryApprovalRejection(error){
+    return ['22023','22P02','42501','23502','23503','23505','23514','P0001','PT409','PGRST204'].includes(String(error?.code||''));
+}
+async function dismissOrdinaryApprovalSubmission(){
+    if(ordinaryApprovalResultBusy||approvalSubmitAttempt||!canPerform('approval.submit'))return;
+    const key=ordinaryApprovalSubmissionKey(),owner=approvalSubmitOwner(),request=readOrdinaryApprovalSubmission(key);
+    if(!request)return;
+    const current=()=>owner===approvalSubmitOwner()&&!window.frameElement?.hidden&&canPerform('approval.submit')
+        &&readOrdinaryApprovalSubmission(key)?.id===request.id;
+    ordinaryApprovalResultBusy=true;syncApprovalSubmitControls();
+    try{
+        const found=await ordinaryApprovalState(request);
+        if(!current())return;
+        if(ordinaryApprovalConfirmed(found)){ordinaryApprovalResultBusy=false;return await checkOrdinaryApprovalSubmission();}
+        if(found.state!=='dismissed'&&(!await showConfirm('이전 요청만 종료합니다. 지금 입력과 첨부는 그대로 둡니다.',
+            {title:'이전 요청 종료',okText:'요청 종료'})||!current()))return;
+        const result=found.state==='dismissed'?found:await ordinaryApprovalState(request,'dismiss');
+        if(!current())return;
+        if(result.state==='dismissed')clearOrdinaryApprovalSubmission(key,request.id);
+        else showAlert('상신 결과를 다시 확인해 주세요.');
+    }catch(_){if(current())showAlert('이전 요청을 종료하지 못했습니다. 다시 확인해 주세요.');}
+    finally{ordinaryApprovalResultBusy=false;syncApprovalSubmitControls();}
+}
+async function completeOrdinaryApproval(request,current,maxAttempts){
+    for(let count=0;count<maxAttempts;count++){
+        if(!current())throw Error('상신 정보가 바뀌었습니다. 다시 확인해 주세요.');
+        const docNo=await boundedApprovalAttachmentRead(signal=>generateDocNo(signal));
+        if(!current())throw Error('상신 정보가 바뀌었습니다. 다시 확인해 주세요.');
+        try{return await callOrdinaryApproval('erp_commit_ordinary_submission',
+            {p_request:request.id,p_coop:request.coop,p_actor:request.auth,p_doc_no:docNo});}
+        catch(error){if(!isDocNoConflictError(error))throw error;}
     }
-    throw new Error('문서 저장에 실패했습니다.');
+    throw Error('문서번호 충돌이 반복되었습니다. 잠시 후 다시 시도해 주세요.');
+}
+async function retryOrdinaryApprovalSubmission(event) {
+    const retryButton=event?.currentTarget;
+    if(retryButton?.id!=='btnApprovalSubmissionRetry'||ordinaryApprovalResultBusy||approvalSubmitAttempt
+        ||approvalDraftSaving||approvalDraftLoadIntent?.reading||!canPerform('approval.submit'))return;
+    const key=ordinaryApprovalSubmissionKey(),owner=approvalSubmitOwner(),actor=approvalSubmitActor();
+    const current=()=>owner===approvalSubmitOwner()&&actor===approvalSubmitActor()&&!window.frameElement?.hidden&&canPerform('approval.submit');
+    ordinaryApprovalResultBusy=true;syncApprovalSubmitControls();
+    let recreate=null;
+    try{
+        const request=readOrdinaryApprovalSubmission(key);
+        if(!request)return;
+        let state=await ordinaryApprovalState(request);
+        if(!current())return;
+        if(state.state==='saved'){ordinaryApprovalResultBusy=false;return await checkOrdinaryApprovalSubmission();}
+        if(state.state==='dismissed'){clearOrdinaryApprovalSubmission(key,request.id);return;}
+        let original=ordinarySubmissionInMemory.get(request.id);
+        if(state.state==='missing'&&!original){
+            if(!request.fingerprint)return showAlert('원래 상신 내용을 확인하지 못했습니다. 결과를 먼저 확인해 주세요.');
+            recreate=request;return;
+        }
+        if(!await showConfirm('이전 상신을 같은 요청으로 다시 시도합니다. 지금 입력은 유지됩니다.',
+            {title:'이전 상신 다시 시도',okText:'다시 시도'})||!current()||readOrdinaryApprovalSubmission(key)?.id!==request.id)return;
+        if(state.state==='missing')state=await ordinaryApprovalState(request,'stage',{p_fingerprint:request.fingerprint,p_payload:original});
+        if(!current())return;
+        if(state.state==='ready')state=await completeOrdinaryApproval(request,current,5);
+        if(!current())return;
+        if(!ordinaryApprovalConfirmed(state))return showAlert('아직 상신을 확인하지 못했습니다. 상신 결과를 다시 확인해 주세요.');
+        await dispatchOrdinaryApprovalNotification(state);
+        if(!current())return;
+        const snapshot=captureApprovalSubmitSnapshot();
+        const next=await showConfirm(`상신했습니다${state.doc_no?' · '+state.doc_no:''}. 지금 입력은 그대로 둡니다.`,
+            {title:'상신 완료',okText:'확인'});
+        if(next&&current()&&isApprovalSubmitSnapshotCurrent(snapshot))clearOrdinaryApprovalSubmission(key,request.id);
+    }catch(error){
+        if(!current())return;
+        if(knownOrdinaryApprovalRejection(error)){
+            const request=readOrdinaryApprovalSubmission(key);
+            if(request&&await showConfirm('이전 요청을 처리할 수 없습니다. 현재 입력은 유지하고 이 요청만 종료할까요?',
+                {title:'이전 상신 종료',okText:'요청 종료',cancelText:'유지'})&&current()&&readOrdinaryApprovalSubmission(key)?.id===request.id){
+                try{
+                    const result=await ordinaryApprovalState(request,'dismiss');
+                    if(current()&&result.state==='dismissed')clearOrdinaryApprovalSubmission(key,request.id);
+                    else if(current())showAlert('상신 결과를 다시 확인해 주세요.');
+                }catch(_){if(current())showAlert('이전 상신을 종료하지 못했습니다. 다시 확인해 주세요.');}
+            }
+        }else showAlert('상신 결과가 아직 확인되지 않았습니다. 입력과 첨부는 유지됩니다.');
+    }finally{
+        ordinaryApprovalResultBusy=false;syncApprovalSubmitControls();
+        if(recreate&&current()&&retryButton===document.getElementById('btnApprovalSubmissionRetry'))
+            await handleDraftSubmit({currentTarget:retryButton,preventDefault(){}},recreate);
+    }
+}
+
+async function insertApprovalWithDocNoRetry(basePayload, isCurrent, {fingerprint,recovery,onUnused}={},maxAttempts=5) {
+    const actor=approvalSubmitActor(),coop=getApprovalScopedCoopId();
+    const current=()=>actor===approvalSubmitActor()&&coop===getApprovalScopedCoopId()&&isCurrent()&&canPerform('approval.submit');
+    const key=ordinaryApprovalSubmissionKey(),tracked=!window.ExpoRuntimeBridge;
+    const run=async()=>{
+        if(!current()||!coop||!basePayload.drafter_id)throw Error('상신 정보가 바뀌었습니다. 다시 확인해 주세요.');
+        if(tracked){
+            const request=recovery||{id:crypto.randomUUID(),coop,auth:myAuthUserId,drafter:String(basePayload.drafter_id),fingerprint};
+            const previous=readOrdinaryApprovalSubmission(key);
+            if(recovery?(previous?.id!==request.id||request.fingerprint!==fingerprint):!!previous)
+                throw Error('이전 상신 내용을 먼저 확인해 주세요.');
+            localStorage.setItem(key,JSON.stringify(request));
+            ordinarySubmissionInMemory.set(request.id,basePayload);
+            try{
+                let state=await ordinaryApprovalState(request,'stage',{p_fingerprint:fingerprint,p_payload:basePayload});
+                if(!state.new_stage){
+                    ordinarySubmissionInMemory.delete(request.id);
+                    if(state.state==='ready'&&state.same_files===false)await onUnused?.();
+                }
+                if(!current())throw Error('상신 화면이 바뀌었습니다.');
+                if(state.state==='ready')state=await completeOrdinaryApproval(request,current,maxAttempts);
+                if(ordinaryApprovalConfirmed(state))return {insertedDoc:state,receipt:{key,id:request.id}};
+                throw Error('상신 상태를 확인하지 못했습니다.');
+            }catch(error){
+                if(current()&&!recovery&&knownOrdinaryApprovalRejection(error)){
+                    let outcome;
+                    try{outcome=await ordinaryApprovalState(request,'dismiss');}
+                    catch(_){/* Unknown: keep the request and attachments. */}
+                    if(ordinaryApprovalConfirmed(outcome))return {insertedDoc:outcome,receipt:{key,id:request.id}};
+                    if(outcome?.state==='dismissed'){
+                        clearOrdinaryApprovalSubmission(key,request.id);
+                        throw error;
+                    }
+                }
+                if(current()&&!knownOrdinaryApprovalRejection(error)){
+                    try{
+                        const state=await ordinaryApprovalState(request);
+                        if(current()&&ordinaryApprovalConfirmed(state))return {insertedDoc:state,receipt:{key,id:request.id}};
+                    }catch(_){/* The stable request can be confirmed or retried later. */}
+                }
+                throw Object.assign(Error('상신 결과를 확인하지 못했습니다. 첨부와 입력은 유지됩니다.'),{approvalSubmitUncertain:true});
+            }
+        }
+        // Retired demo bridge keeps its existing response contract and notification simulation.
+        for(let count=0;count<maxAttempts;count++){
+            if(!current())throw Error('상신 정보가 바뀌었습니다.');
+            const docNo=await boundedApprovalAttachmentRead(signal=>generateDocNo(signal));
+            if(!current())throw Error('상신 정보가 바뀌었습니다.');
+            let result;
+            try{result=await boundedApprovalAttachmentRead(signal=>_supabase.from('ref_approval')
+                .insert({...basePayload,coop_id:coop,doc_no:docNo,created_at:new Date()})
+                .select('id,doc_no').single().abortSignal(signal));}catch(error){result={error};}
+            const {data,error}=result||{};
+            if(!error&&toPositiveDocId(data?.id))return {insertedDoc:data,receipt:null};
+            if(isDocNoConflictError(error))continue;
+            if(knownOrdinaryApprovalRejection(error))throw error;
+            throw Object.assign(Error('상신 결과를 확인하지 못했습니다.'),{approvalSubmitUncertain:true});
+        }
+        throw Error('문서번호 충돌이 반복되었습니다. 잠시 후 다시 시도해 주세요.');
+    };
+    return tracked&&navigator.locks?.request
+        ? navigator.locks.request(key,{ifAvailable:true},lock=>{
+            if(!lock)throw Error('다른 창에서 상신을 처리 중입니다.');
+            return run();
+        }):run();
 }
 
 function buildNoticeContentFromApproval(doc) {
@@ -15536,20 +15764,24 @@ function getApprovalSubmitTrigger(e) {
     };
 }
 
-async function handleDraftSubmit(e) {
+async function handleDraftSubmit(e,recovery=null) {
     e.preventDefault();
     if(getApprovalDraftAttachmentRemoval())return showAlert('첨부 처리 결과를 먼저 확인해 주세요. 현재 입력은 유지됩니다.');
     const submitTrigger = getApprovalSubmitTrigger(e);
-    if (submitTrigger.id !== 'btnSubmit' || submitTrigger.type !== 'submit') {
+    if (recovery?e.currentTarget?.id!=='btnApprovalSubmissionRetry':(submitTrigger.id !== 'btnSubmit' || submitTrigger.type !== 'submit')) {
         await logAudit('approval.submit_blocked', null, '명시적 상신 버튼 외 제출 차단', {
             submit_trigger: submitTrigger
         });
         return showAlert('상신하기 버튼을 직접 눌러야 상신할 수 있습니다.');
     }
     if (!canPerform('approval.submit')) return showAlert("상신 권한이 없습니다.");
+    const pending=peekOrdinaryApprovalSubmission();
+    if(recovery&&pending?.id!==recovery.id)return;
+    if(!recovery&&pending)return checkOrdinaryApprovalSubmission();
     if(!approvalDraftEntryReady()){void prepareApprovalDraftEntry();return showAlert('기안 설정 확인 뒤 다시 눌러 주세요.');}
     if (!approvalProxyDraftMatches()) return showAlert('기안 대상자를 다시 선택해 주세요.');
     if(approvalSubmitAttempt)return;
+    if(approvalDraftSaving||approvalDraftLoadIntent?.reading)return showAlert('초안 저장이나 불러오기가 끝난 뒤 상신해 주세요.');
     const leaveBlock=getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock();
     if(leaveBlock){syncApprovalSubmitControls();return showAlert(leaveBlock);}
     const submitAttempt={owner:approvalSubmitOwner(),actor:approvalSubmitActor(),preview:approvalSubmitPreviewState,
@@ -15559,6 +15791,7 @@ async function handleDraftSubmit(e) {
     try {
 
     if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) {
+        if(recovery)return showAlert('이전 상신과 같은 초안을 먼저 열어 주세요.');
         return await CoopPermissionRequest.submit(_supabase, createNotification, showAlert, async () => {
             await Promise.all([loadTodoList(), loadHistoryList()]);
             renderApprovalCategoryOptions();
@@ -15925,39 +16158,7 @@ async function handleDraftSubmit(e) {
     const btn = document.getElementById("btnSubmit");
     btn.disabled = true; btn.innerText = "처리 중...";
 
-    // 3. 파일 업로드
-    const uploadedUrls = [];
-    const uploadRollbackItems = [];
     const isSalaryExpenseDoc = mainType === '지출결의' && expenseSubType === '급여';
-    try {
-        const uploaded = await prepareApprovalSubmitAttachments();
-        uploadedUrls.push(...uploaded.fileRefs);
-        uploadRollbackItems.push(...uploaded.copiedObjects);
-
-    } catch (error) {
-        try {
-            await deleteDraftAttachmentObjects(uploadRollbackItems);
-        } catch (_) { /* noop */ }
-        const submitFileNames = orderedAttachments.map((descriptor) => descriptor.kind === 'local'
-            ? String(descriptor.file?.name || '').trim()
-            : String(descriptor.item?.displayName || '').trim()
-        ).filter(Boolean);
-        void notifyApprovalUploadFailure({
-            error,
-            contextKey: 'submit',
-            contextLabel: '상신 첨부',
-            docType: subType || mainType || '',
-            fileNames: submitFileNames
-        });
-        showAlert(buildApprovalUploadErrorMessage(error, {
-            contextLabel: '상신 첨부',
-            docType: subType || mainType || '',
-            fileNames: submitFileNames
-        }));
-        btn.innerText = "상신하기";
-        return;
-    }
-
     const relatedDocId = document.getElementById("relDocId").value || null;
     const allowHtmlContent = isApprovalHtmlEditorType(mainType);
     if (expenseSnapshotPayload?.execution?.prepaid) appendDesc += `\n\n[선지출]\n- ${['credit_card','check_card'].includes(expenseSnapshotPayload.payment_method)?'카드 사용일':'실제 지출(이체)일'}: ${expenseSnapshotPayload.execution.date}`;
@@ -16003,7 +16204,6 @@ async function handleDraftSubmit(e) {
         drafter_name: drafterName,
         approval_line: approvalLineData,
         ref_line: refData,
-        file_links: uploadedUrls,
         current_approver: finalApprovers[0].emp_id,
         status: initialStatus, // 가승인 or 진행중
         related_doc_id: relatedDocId, // [New]
@@ -16023,20 +16223,53 @@ async function handleDraftSubmit(e) {
     const submittedDraftId=currentApprovalDraftId;
     const submittedFirstApprover={...finalApprovers[0]};
     const submissionNotificationKind=isSunVillageApproval()?'검토 요청':'결재 요청';
+    let fingerprint=null;
+    const targetDraft=String(submittedDraftId||'');
+    if(!window.ExpoRuntimeBridge){
+        try{fingerprint=await prepareOrdinaryApprovalDigest([targetDraft,approvalInsertPayload],orderedAttachments);}
+        catch(_){return showAlert('원본 입력과 파일을 확인하지 못했습니다. 파일을 다시 선택해 주세요.');}
+        if(!isApprovalSubmitSnapshotCurrent(submissionReview))return;
+        if(recovery&&fingerprint!==recovery.fingerprint)return showAlert('원래 상신과 입력 또는 첨부가 다릅니다. 같은 초안과 파일을 선택해 주세요.');
+        if(recovery&&!await showConfirm('같은 입력과 첨부로 이전 상신을 다시 시도할까요?',
+            {title:'이전 상신 다시 시도',okText:'다시 시도'}))return;
+    }
+    if(!isApprovalSubmitSnapshotCurrent(submissionReview))return;
+    let uploadRollbackItems=[];
+    const removeUnusedUploads=async()=>{
+        const items=uploadRollbackItems;uploadRollbackItems=[];
+        try{await deleteDraftAttachmentObjects(items);}catch(_){/* Conservatively retain unused copies. */}
+    };
+    try{
+        const uploaded=await prepareApprovalSubmitAttachments();
+        approvalInsertPayload.file_links=uploaded.fileRefs;uploadRollbackItems=uploaded.copiedObjects;
+    }catch(error){
+        const submitFileNames=orderedAttachments.map(d=>d.kind==='local'?d.file.name:d.item?.displayName).filter(Boolean);
+        const context={contextLabel:'상신 첨부',docType:subType||mainType||'',fileNames:submitFileNames};
+        if(isApprovalSubmitSnapshotCurrent(submissionReview)){
+            void notifyApprovalUploadFailure({error,contextKey:'submit',...context});
+            showAlert(buildApprovalUploadErrorMessage(error,context));
+        }
+        return;
+    }
 
-    let insertedDoc = null;
+    let insertedDoc = null, submissionReceipt = null;
     try {
         if(!isApprovalSubmitSnapshotCurrent(submissionReview))throw new Error('입력이나 로그인 정보가 바뀌었습니다. 현재 내용을 확인한 뒤 다시 상신해 주세요.');
         if(submitAttempt.preview && (approvalSubmitPreviewState!==submitAttempt.preview || !document.getElementById('relViewModal')?.classList.contains('show')))throw new Error('미리보기가 바뀌었습니다. 현재 내용을 다시 확인해 주세요.');
         if (isNoticeDraft && (JSON.stringify(meetingNoticeSubmissionLink) !== JSON.stringify(approvalMeetingNoticeLink)
             || meetingNoticeSubmissionOwner.coopId !== getApprovalScopedCoopId() || meetingNoticeSubmissionOwner.authId !== myAuthUserId)) throw new Error('연결된 회의나 로그인 계정이 바뀌었습니다. 현재 공문을 확인한 뒤 다시 상신해 주세요.');
-        const insertResult = await insertApprovalWithDocNoRetry(approvalInsertPayload);
+        const insertResult = await insertApprovalWithDocNoRetry(approvalInsertPayload,()=>isApprovalSubmitSnapshotCurrent(submissionReview)
+            &&(!submitAttempt.preview||approvalSubmitPreviewState===submitAttempt.preview&&document.getElementById('relViewModal')?.classList.contains('show')),
+            {fingerprint,recovery,onUnused:removeUnusedUploads});
         insertedDoc = insertResult.insertedDoc;
+        submissionReceipt=insertResult.receipt;
     } catch (error) {
-        try {
-            await deleteDraftAttachmentObjects(uploadRollbackItems);
-        } catch (_) { /* noop */ }
+        if(!error?.approvalSubmitUncertain)await removeUnusedUploads();
         if(submitAttempt.owner!==approvalSubmitOwner() || window.frameElement?.hidden)return;
+        if(error?.approvalSubmitUncertain){
+            showAlert('상신 결과가 아직 확인되지 않았습니다. 첨부를 유지했습니다. 상신 결과 확인을 눌러 주세요.');
+            return;
+        }
         const errorText = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
         const noticeFailure = meetingNoticeFailureMessage(error, 'submit');
         if (errorText.includes('ANNUAL_LEAVE_PERIOD_ALREADY_REQUESTED')) {
@@ -16070,7 +16303,9 @@ async function handleDraftSubmit(e) {
 
     const docId = insertedDoc?.id;
     if(submitAttempt.actor!==approvalSubmitActor())return;
-    if (docId) {
+    if(docId&&submissionReceipt){
+        insertedDoc._notificationResult=await dispatchOrdinaryApprovalNotification(insertedDoc);
+    }else if (docId) {
         await logAudit('approval.submit', docId, `${title} 상신`, {
             status: initialStatus,
             jeongyeol_mode: jeongyeolDecision.applied ? jeongyeolDecision.mode : null,
@@ -16116,6 +16351,7 @@ async function handleDraftSubmit(e) {
     if(submitAttempt.preview && approvalSubmitPreviewState===submitAttempt.preview)relViewModal?.hide();
     const keepOtherDrafts=hasParkedApprovalProxyDrafts();
     resetApprovalComposerForm({keepProxyDrafts:keepOtherDrafts});
+    if(submissionReceipt)clearOrdinaryApprovalSubmission(submissionReceipt.key,submissionReceipt.id);
     btn.innerText = "상신하기";
     const submitNotice = buildApprovalSubmitNotice(firstApproverName, insertedDoc?._notificationResult);
     if(activeApprovalTab==='draft' && !window.frameElement?.hidden)showAlert(submitNotice, () => {

@@ -50,7 +50,7 @@
 <script src="/shared/cooperative_rules.js?v=1.0.0" integrity="sha384-CNofpCsGT79mVM66AV3CQF70jY7BgpDxeT0jL1BAEx0675brG6fVT0wfhFXtF9Bn" crossorigin="anonymous"></script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
-  <script src="accounting_withholding_payment.js?v=1.0.2"></script>
+  <script src="accounting_withholding_payment.js?v=1.0.3" integrity="sha384-y0gTlcoN2YzY61SZ21xjIKg5FIwyN+x3dqf6Q4x81TfvBAdT2PDR7QGRXnX7Tlbx" crossorigin="anonymous"></script>
   <script src="insurance_payment.js?v=1.0.1"></script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="accounting_payment_dates.js?v=1.3.2" integrity="sha384-BYK9ZB1pln/YWnFF0BeRV70P1/wgAgIJpJNB8F9EbhfNuzpO9bS+BEm8SygO7z4f" crossorigin="anonymous"></script>
@@ -3192,6 +3192,8 @@ async function fetchCapitalSyncSnapshot(options = {}) {
     if (error) throw error;
 
     const members = Array.isArray(data?.members) ? data.members : [];
+    if(options.requireComplete&&(!Array.isArray(data?.members)||data.capital_count!==members.length))
+        throw Error('출자금 연동 자료를 모두 확인하지 못했습니다.');
     return {
         capitalCount: Number(data?.capital_count || members.length),
         members,
@@ -3243,6 +3245,8 @@ async function fetchDonationSyncSnapshot(options = {}) {
     if (error) throw error;
 
     const donations = Array.isArray(data?.donations) ? data.donations : [];
+    if(options.requireComplete&&(!Array.isArray(data?.donations)||data.donation_count!==donations.length))
+        throw Error('기부금 연동 자료를 모두 확인하지 못했습니다.');
     return {
         donationCount: Number(data?.donation_count || donations.length),
         donations,
@@ -3281,20 +3285,6 @@ function summarizeDonationSyncSnapshot(snapshot) {
 
     summary.pendingCount = summary.newCount + summary.correctionCount + summary.markOnlyCount;
     return summary;
-}
-
-async function checkAccountingFundSyncBeforeClosing(year) {
-    const startDate = `${year}-01-01`;
-    const endDate = `${year}-12-31`;
-    const [capitalSnapshot, donationSnapshot] = await Promise.all([
-        fetchCapitalSyncSnapshot({ startDate, endDate }),
-        fetchDonationSyncSnapshot({ startDate, endDate })
-    ]);
-
-    return {
-        capital: summarizeCapitalSyncSnapshot(capitalSnapshot),
-        donation: summarizeDonationSyncSnapshot(donationSnapshot)
-    };
 }
 
 function parseApprovalSourceIdFromTransId(transId) {
@@ -5304,6 +5294,10 @@ function appendApprovalInsuranceEntries(entries, payload) {
 }
 
 async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) {
+    const closingModule=window.CoopWithholdingPayment,closeCoop=myInfo?.coop_id;
+    const checkPaymentPeriod=closingModule?.createPeriodChecker
+        ? closingModule.createPeriodChecker(_supabase,closeCoop)
+        : date=>closingModule?.periodError?.(_supabase,closeCoop,date) ?? '결산 마감 여부를 확인하지 못했습니다. 다시 시도해 주세요.';
     const plans = [];
     const blockedDocs = [];
     let totalAmount = 0;
@@ -5353,7 +5347,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
             if (!reason && payment.signature !== window.CoopPaymentDates.signature(doc)) reason = '결재 내용이 달라졌습니다. 지출일을 다시 확인해 주세요.';
             const prepaid = doc.expense_snapshot?.execution;
             if (!reason && prepaid?.prepaid === true && payment.date !== prepaid.date) reason = '선지출은 승인 문서에 기재한 지출일을 사용해야 합니다.';
-            if (!reason) reason = (await window.CoopWithholdingPayment.periodError(_supabase, myInfo?.coop_id, payment.date)).replaceAll('원천세', '지출');
+            if (!reason) reason = (await checkPaymentPeriod(payment.date)).replaceAll('원천세', '지출');
             if (reason) { blockedDocs.push({ id: doc.id, label: doc.title || '지출결의', reason }); continue; }
             journalDate = payment.date;
             confirmedPayment = payment;
@@ -5441,9 +5435,9 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
                 });
                 continue;
             }
-            const periodError = await window.CoopWithholdingPayment.periodError(_supabase, myInfo?.coop_id, payment.date);
-            if (periodError) {
-                blockedDocs.push({ id: doc.id, label, reason: periodError });
+            const periodMessage = await checkPaymentPeriod(payment.date);
+            if (periodMessage) {
+                blockedDocs.push({ id: doc.id, label, reason: periodMessage });
                 continue;
             }
             plans.push({
@@ -8728,24 +8722,32 @@ async function buildClosingContext(targetYear, options = {}) {
     const startDate = `${targetYear}-01-01`;
     const endDate = `${targetYear}-12-31`;
 
-    const query=q=>options.signal?q.abortSignal(options.signal):q;
-    const { data: journals,error:journalError } = await query(_supabase.from('ac_journal').select('*')
-        .gte('Date', startDate).lte('Date', endDate));
-    if(journalError)throw journalError;
+    const coop=String(myInfo?.coop_id||''),owner=accountingReadIdentity(),formalName=accountingFormalName;
+    const current=()=>!!coop&&owner===accountingReadIdentity()&&formalName===accountingFormalName&&accountingDataAuthorized
+        &&canPerform('accounting.edit')&&(!options.isCurrent||options.isCurrent());
+    if(!current())throw Error('결산 조합과 권한을 확인해 주세요.');
+    let q=_supabase.rpc('erp_prepare_annual_closing',{p_year:targetYear});
+    if(options.signal)q=q.abortSignal(options.signal);
+    const {data:source,error}=await q;
+    if(!current()||options.signal?.aborted)throw Error('결산 조회가 취소되었습니다.');
+    if(error)throw error;
+    if(source?.coop_id!==coop||source.year!==targetYear||source.formal_name!==formalName
+        ||!(/^[0-9a-f]{64}$/.test(source.proof||''))||!Array.isArray(source.ledger)
+        ||!['capital_pending','donation_pending'].every(k=>Number.isSafeInteger(source[k])&&source[k]>=0))
+        throw Error('결산 자료의 조합·기간을 확인하지 못했습니다.');
+    const ledger=source.ledger;
+    if(ledger.some(r=>r?.coop_id!==coop||!['Debit','Credit'].every(k=>Number.isSafeInteger(Number(r[k]??0)))))
+        throw Error('결산 전표의 금액을 확인하지 못했습니다.');
+    const journals=ledger.filter(r=>r.Date>=startDate);
 
     const baseJournals = getClosingContextBaseRows(journals || [], targetYear);
     const closingSummary = buildExistingClosingSummary(journals || [], targetYear);
-    const inventoryResult = await query(_supabase.rpc('accounting_inventory_valuation', { p_year: targetYear }));
-    if (inventoryResult.error) throw new Error(`재고 평가액 조회 실패: ${inventoryResult.error.message}`);
-    const inventoryValuation = inventoryResult.data || {};
+    const inventoryValuation=source.inventory;
+    if(!inventoryValuation||!['cost','quantity','unpriced_quantity','pending_approval_count'].every(k=>
+        inventoryValuation[k]!=null&&Number.isSafeInteger(Number(inventoryValuation[k]))&&Number(inventoryValuation[k])>=0))
+        throw Error('재고 평가 자료를 확인하지 못했습니다.');
     const inventoryCost = Number(inventoryValuation.cost || 0);
-    const { data: inventoryJournalRows, error: inventoryJournalError } = await query(_supabase
-        .from('ac_journal')
-        .select('Debit,Credit')
-        .eq('coop_id', String(myInfo?.coop_id || '00000000-0000-0000-0000-000000000000'))
-        .eq('Account', '행사용재고자산')
-        .lte('Date', endDate));
-    if (inventoryJournalError) throw new Error(`재고자산 장부 조회 실패: ${inventoryJournalError.message}`);
+    const inventoryJournalRows=ledger.filter(r=>r.Account==='행사용재고자산');
     const inventoryBookValue = (inventoryJournalRows || []).reduce((sum, row) =>
         sum + Number(row.Debit || 0) - Number(row.Credit || 0), 0);
     const inventoryDelta = inventoryCost - inventoryBookValue;
@@ -8763,22 +8765,22 @@ async function buildClosingContext(targetYear, options = {}) {
     const taxAdjust = buildTaxAdjustmentSummary(baseJournals);
     const prepaidTaxSummary = buildClosingPrepaidTaxSummary(baseJournals);
 
-    const { data: capRows,error:capitalError } = await query(_supabase.from('ac_journal').select('*').eq('Account','출자금').lte('Date', endDate));
-    if(capitalError)throw capitalError;
-    const { data: legalRows,error:legalError } = await query(_supabase.from('ac_journal').select('*').eq('Account','법정적립금').lte('Date', endDate));
-    if(legalError)throw legalError;
+    const capRows=ledger.filter(r=>r.Account==='출자금');
+    const legalRows=ledger.filter(r=>r.Account==='법정적립금');
     let capitalTotal = 0;
     let legalBalance = 0;
     if (capRows) capRows.forEach(r => { capitalTotal += (Number(r.Credit||0) - Number(r.Debit||0)); });
     if (legalRows) legalRows.forEach(r => { legalBalance += (Number(r.Credit||0) - Number(r.Debit||0)); });
-    const carryResult = await query(_supabase.from('ac_journal').select('Debit,Credit').eq('Account','이월이익잉여금').lt('Date',startDate));
-    if(carryResult.error)throw carryResult.error;
-    const carryBalance=(carryResult.data||[]).reduce((sum,r)=>sum+Number(r.Credit||0)-Number(r.Debit||0),0);
-    if(![capitalTotal,legalBalance,carryBalance].every(Number.isSafeInteger)||capitalTotal<0||legalBalance<0)throw Error('출자금·적립금·이월손익 잔액을 확인해 주세요.');
+    const carryBalance=ledger.filter(r=>r.Account==='이월이익잉여금'&&r.Date<startDate)
+        .reduce((sum,r)=>sum+Number(r.Credit||0)-Number(r.Debit||0),0);
+    if(![capitalTotal,legalBalance,carryBalance].every(Number.isSafeInteger))throw Error('출자금·적립금·이월손익 잔액을 확인해 주세요.');
 
     const thresholdMet = legalBalance >= (capitalTotal * 3);
 
     return {
+        ledgerProof:source.proof,
+        capitalPending:source.capital_pending,
+        donationPending:source.donation_pending,
         year: targetYear,
         startDate,
         endDate,
@@ -8797,7 +8799,7 @@ async function buildClosingContext(targetYear, options = {}) {
         existingVoluntary: closingSummary.voluntary,
         capitalTotal,
         legalBalance,
-        formalName: accountingFormalName,
+        formalName,
         carryBalance,
         deficit: Math.max(0,-carryBalance),
         thresholdMet,
@@ -9095,7 +9097,9 @@ function handleClosingLegalInputChange() {
     else warn.classList.add("hidden");
 }
 
+let closingConfirmationBusy=false;
 async function runClosingFromModal() {
+    if(closingConfirmationBusy)return;
     if(!canPerform('accounting.edit'))return showAlert('수정 권한이 없습니다.');
     if (!closingPreparedScope || !accountingReadScopeCurrent(closingPreparedScope) || accountingReadTasks.has('closing')) await refreshClosingContext();
     if (!closingPreparedScope || !accountingReadScopeCurrent(closingPreparedScope) || accountingReadTasks.has('closing') || Number(closingContext?.year)!==Number(document.getElementById('closingYearInput').value)) return;
@@ -9131,49 +9135,16 @@ async function runClosingFromModal() {
         if ((legal + vol) > ctx.netIncome) return showAlert("오류", "법정적립금 + 임의적립금이 당기순이익을 초과할 수 없습니다.");
     }
 
-    let fundSyncCheck;
-    try {
-        fundSyncCheck = await checkAccountingFundSyncBeforeClosing(ctx.year);
-    } catch (syncCheckError) {
-        if(!current())return;
-        return showAlert(
-            "결산 전 자동연동 확인 실패",
-            "출자금·기부금 연동 상태를 확인하지 못해 결산을 중단했습니다.\n" + (syncCheckError?.message || '알 수 없는 오류')
-        );
-    }
-
-    if(!current())return;
-
-    const pendingCapital = Number(fundSyncCheck?.capital?.pendingCount || 0);
-    const pendingDonation = Number(fundSyncCheck?.donation?.pendingCount || 0);
-    if (pendingCapital > 0 || pendingDonation > 0) {
-        const capital = fundSyncCheck.capital;
-        const donation = fundSyncCheck.donation;
-        return showAlert(
-            "결산 전 자동연동 필요",
-            [
-                `${ctx.year}년 출자금·기부금 자동연동을 먼저 완료해 주세요.`,
-                `- 출자금: 신규 ${capital.newCount}건 · 정정 ${capital.correctionCount}건 · 처리표시 ${capital.markOnlyCount}건`,
-                `- 기부금: 신규 ${donation.newCount}건 · 정정 ${donation.correctionCount}건 · 처리표시 ${donation.markOnlyCount}건`,
-                '자동연동을 다시 실행한 뒤 결산을 진행할 수 있습니다.'
-            ].join('\n')
-        );
-    }
+    if(!current()||closingConfirmationBusy)return;
+    if(ctx.capitalPending>0||ctx.donationPending>0)return showAlert('결산 전 자동연동 필요',
+        `출자금 ${ctx.capitalPending}건 · 기부금 ${ctx.donationPending}건을 먼저 연동해 주세요.`);
 
     const confirmMessage = `${ctx.year}년 결산을 진행합니다.\n남은 재고 ${Number(ctx.inventoryValuation.quantity || 0).toLocaleString()}개 · 취득원가 ${Number(ctx.inventoryValuation.cost || 0).toLocaleString()}원 · 재고자산 조정 ${ctx.inventoryDelta.toLocaleString()}원\n법인세 차감전 당기순이익: ${ctx.preTaxNetIncome.toLocaleString()}원\n추정 과세표준: ${estimate.taxBase.toLocaleString()}원\n추정 법인세(국세, 공제후): ${estimate.nationalAfterCredit.toLocaleString()}원\n추정 법인지방소득세: ${estimate.localTax.toLocaleString()}원\n세액공제/감면: ${estimate.creditApplied.toLocaleString()}원\n기납부 법인세(국세): ${estimate.prepaidNationalApplied.toLocaleString()}원\n기납부 법인지방소득세: ${estimate.prepaidLocalApplied.toLocaleString()}원\n예상 국세 납부액: ${estimate.expectedNationalPayable.toLocaleString()}원\n예상 지방세 납부액: ${estimate.expectedLocalPayable.toLocaleString()}원\n예상 합계 납부세액: ${estimate.expectedPayable.toLocaleString()}원\n반영 법인세비용: ${taxExpense.toLocaleString()}원\n법인세 차감후 당기순손익: ${ctx.netIncome.toLocaleString()}원\n법정적립: ${legal.toLocaleString()}원\n임의적립: ${vol.toLocaleString()}원`;
     const confirmAction = async () => {
-        if(!current())return;
-        let latest;
-        try { latest = await buildClosingContext(ctx.year); }
-        catch (error) { if(current())return showAlert('결산 확인 실패', error.message || String(error));return; }
-        if(!current())return;
-        if (latest.isClosed || latest.inventoryDelta !== ctx.inventoryDelta ||
-            Number(latest.inventoryValuation.unpriced_quantity || 0) > 0 ||
-            Number(latest.inventoryValuation.pending_approval_count || 0) > 0 ||
-            latest.preTaxNetIncome !== ctx.preTaxNetIncome || latest.capitalTotal!==ctx.capitalTotal || latest.legalBalance!==ctx.legalBalance || latest.carryBalance!==ctx.carryBalance || latest.formalName!==ctx.formalName) {
-            return showAlert('결산 자료 변경', '재고 또는 회계 자료가 바뀌었습니다. 결산 화면을 다시 불러와 확인해 주세요.');
-        }
-        await executeClosing(ctx, legal, vol, taxExpense);
+        if(!current()||closingConfirmationBusy)return;
+        closingConfirmationBusy=true;
+        try{await executeClosing(ctx, legal, vol, taxExpense, current);}
+        finally{closingConfirmationBusy=false;}
     };
     const closingEl = document.getElementById('closingModal');
 
@@ -9190,15 +9161,12 @@ async function runClosingFromModal() {
     showConfirm("연말결산 실행", confirmMessage, confirmAction);
 }
 
-async function executeClosing(ctx, legal, vol, taxExpense) {
+async function executeClosing(ctx, legal, vol, taxExpense, isCurrent=()=>true) {
     if(!accountingDataAuthorized||!canPerform('accounting.edit')||ctx.formalName!==accountingFormalName)return;
     let reserve;
     try{reserve=window.CoopRules.reserve({formalName:ctx.formalName,profit:ctx.preTaxNetIncome-taxExpense,capital:ctx.capitalTotal,balance:ctx.legalBalance,deficit:ctx.deficit,rate:ctx.reserve?.rate});if(![legal,vol].every(n=>Number.isSafeInteger(n)&&n>=0)||legal<reserve.minimum||legal+vol>reserve.available||!window.CoopRules.policy(ctx.formalName).dividends&&legal+vol!==reserve.available)throw Error('적립금과 결산 기준을 다시 확인해 주세요.');}catch(error){return showAlert('결산 기준 확인',error.message);}
-    const relatedKey = `CLOSE-${ctx.year}`;
+    const coop=String(myInfo?.coop_id||''),relatedKey = `CLOSE-${ctx.year}`;
     const writer = myInfo ? myInfo.emp_name : "System";
-
-    const { data: dup } = await _supabase.from('ac_journal').select('Trans_ID').eq('Trans_ID', relatedKey).limit(1);
-    if (dup && dup.length > 0) return showAlert("중복", `이미 ${ctx.year}년도 결산이 완료되었습니다.`);
 
     let entries = [];
     if (ctx.inventoryDelta !== 0) {
@@ -9254,12 +9222,26 @@ async function executeClosing(ctx, legal, vol, taxExpense) {
     }
 
     if(entries.length > 0) {
-        applyTransId(entries);
-        const { error } = await _supabase.from('ac_journal').insert(entries);
-        if(error) showAlert("오류", error.message);
-        else {
+        if(!isCurrent())return;
+        let result;
+        try{
+            let q=_supabase.rpc('erp_commit_annual_closing',{p_year:ctx.year,p_proof:ctx.ledgerProof,p_rows:entries});
+            if(typeof q.retry==='function')q=q.retry(false);
+            result=await q;
+        }catch(error){result={error};}
+        if(!isCurrent())return;
+        const {data,error}=result||{};
+        if(!error&&data?.coop_id===coop&&data.year===ctx.year){
+            if(data.state==='already_closed'){refreshDashboard();return showAlert('결산 완료',`이미 ${ctx.year}년도 결산이 완료되었습니다.`);}
+            if(data.state==='stale'||data.state==='blocked')
+                return showAlert('결산 자료 변경','재계산을 눌러 바뀐 자료를 확인해 주세요.');
+        }
+        if(!error&&data?.coop_id===coop&&data.year===ctx.year&&data.state==='saved'&&data.rows===entries.length){
             showAlert("완료", `결산 및 이익처분이 완료되었습니다.\n법인세 차감후 당기순손익: ${ctx.netIncome.toLocaleString()}원`);
             refreshDashboard();
+        }else{
+            showAlert('결산 다시 확인',error?.code==='55P03'?'다른 회계 작업이 진행 중입니다. 재계산 후 다시 확인해 주세요.'
+                :'결산 결과를 확인하지 못했습니다. 재계산을 눌러 해당 연도의 마감 상태를 확인해 주세요.');
         }
     } else {
         showAlert("알림", "마감할 내역이 없습니다.");

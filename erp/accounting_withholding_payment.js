@@ -27,21 +27,29 @@
             Number(doc.amount), tax.paymentMonth, tax.salaryMonth, tax.filingMonth,
             tax.nationalAmount, tax.localAmount]);
     }
-    async function periodError(client, coopId, date) {
-        if (!coopId || !validDate(date)) return '조합과 실제 납부일을 확인할 수 없습니다.';
-        // The internal period assertion is not a browser RPC. Read only the
-        // current user's authorized journal instead of exposing that helper.
-        const { data, error } = await client.from('ac_journal')
-            .select('Trans_ID').eq('coop_id', coopId).like('Trans_ID', 'CLOSE-%')
-            .order('Trans_ID', { ascending: false }).limit(1);
-        if (error) return '결산 마감 여부를 확인하지 못했습니다. 다시 시도해 주세요.';
-        if (!data?.length) return '';
-        const match = /^CLOSE-(\d{4})$/.exec(String(data[0].Trans_ID || ''));
-        if (!match) return '결산 마감 기록을 확인해 주세요.';
-        return date <= `${match[1]}-12-31`
-            ? `${match[1]}년까지 결산이 마감되어 이 날짜로 원천세를 연동할 수 없습니다. 열린 회계기간의 처리 방법을 확인해 주세요.`
-            : '';
+    async function readClosingPeriod(client, coopId) {
+        try {
+            const {data,error}=await client.from('ac_journal')
+                .select('Trans_ID').eq('coop_id',coopId).like('Trans_ID','CLOSE-%')
+                .order('Trans_ID',{ascending:false}).limit(1);
+            if(error||!Array.isArray(data))throw Error('closing period unavailable');
+            if(!data.length)return {year:''};
+            const match=/^CLOSE-(\d{4})$/.exec(String(data[0]?.Trans_ID || ''));
+            return match?{year:match[1]}:{message:'결산 마감 기록을 확인해 주세요.'};
+        }catch(_){return {message:'결산 마감 여부를 확인하지 못했습니다. 다시 시도해 주세요.'};}
     }
+    function createPeriodChecker(client, coopId) {
+        let read;
+        return async date => {
+            if(!coopId||!validDate(date))return '조합과 실제 납부일을 확인할 수 없습니다.';
+            read ||= readClosingPeriod(client,coopId);
+            const {year,message}=await read;
+            if(message)return message;
+            return year&&date<=`${year}-12-31`
+                ?`${year}년까지 결산이 마감되어 이 날짜로 원천세를 연동할 수 없습니다. 열린 회계기간의 처리 방법을 확인해 주세요.`:'';
+        };
+    }
+    const periodError=(client,coopId,date)=>createPeriodChecker(client,coopId)(date);
     function element(tag, className, text) {
         const el = document.createElement(tag);
         if (className) el.className = className;
@@ -184,5 +192,5 @@
             });
         });
     }
-    window.CoopWithholdingPayment = Object.freeze({ validDate, validate, signature, periodError, collect, review, fitDialog });
+    window.CoopWithholdingPayment = Object.freeze({ validDate, validate, signature, periodError, createPeriodChecker, collect, review, fitDialog });
 })();

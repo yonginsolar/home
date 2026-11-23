@@ -4140,9 +4140,9 @@ function resetDurunuriSupportState() {
     if (bizEl) bizEl.value = 0;
 }
 
-async function loadDurunuriSupportState(month, empId, readContext = null) {
+async function loadDurunuriSupportState(month, empId, readContext = null, supportRead = null) {
     if (readContext && !readContext.isCurrent()) return;
-    const revision = employeeDetailRevision, salaryRevision = employeeSalaryLoadRevision;
+    const revision = employeeDetailRevision, salaryRevision = employeeSalaryLoadRevision, owner=getHrSettingsOwner();
     resetDurunuriSupportState();
     const ym = String(month || '').trim();
     const eid = String(empId || '').trim();
@@ -4150,8 +4150,9 @@ async function loadDurunuriSupportState(month, empId, readContext = null) {
     const module = getDurunuriModuleAdmin();
     if (!module) return;
     try {
-        const supportMap = await module.getSupportMap(_supabase, ym);
-        if (revision !== employeeDetailRevision || salaryRevision !== employeeSalaryLoadRevision || eid !== String(currentEmpId)
+        const supportMap = await (supportRead || module.getSupportMap(_supabase, ym));
+        if (owner !== getHrSettingsOwner() || ym !== document.getElementById('salaryMonth')?.value
+            || revision !== employeeDetailRevision || salaryRevision !== employeeSalaryLoadRevision || eid !== String(currentEmpId)
             || (readContext && !readContext.isCurrent())) return;
         const support = supportMap?.[eid] || null;
         currentDurunuriSupport = {
@@ -4170,11 +4171,11 @@ async function loadDurunuriSupportState(month, empId, readContext = null) {
     }
 }
 
-async function getAdjustedSalaryRowWithDurunuri(row, ym) {
+async function getAdjustedSalaryRowWithDurunuri(row, ym, supportRead = null) {
     const module = getDurunuriModuleAdmin();
     if (!module) return row;
     try {
-        const supportMap = await module.getSupportMap(_supabase, ym);
+        const supportMap = await (supportRead || module.getSupportMap(_supabase, ym));
         return module.adjustSalaryRow(row, supportMap);
     } catch (e) {
         console.warn('Durunuri adjustment failed:', e?.message || e);
@@ -8528,7 +8529,12 @@ async function loadSalaryData({readContext} = {}) {
 
     const previousMeal = !saved && !contractDefaults.linked ? await getAdminEmployeePreviousMonthMeal(empId, month) : {found:false,amount:0};
     if (!isCurrent()) return false;
-    const adjustedSalary = saved ? await getAdjustedSalaryRowWithDurunuri({...saved,year_month:month},month) : null;
+    // One invocation owns one support read. A refresh, month or owner change
+    // gets a new invocation rather than reusing an account-wide cache.
+    const supportModule=getDurunuriModuleAdmin();
+    const supportRead=supportModule ? supportModule.getSupportMap(_supabase,month) : null;
+    supportRead?.catch(()=>{}); // Unsaved salary rows consume it later in the UI.
+    const adjustedSalary = saved ? await getAdjustedSalaryRowWithDurunuri({...saved,year_month:month},month,supportRead) : null;
     if (!isCurrent() || !draftUntouched()) return false;
     currentPayrollContractContext = {basis:contractBasis,defaults:contractDefaults,saved:!!saved,savedRow:saved,empId:String(empId),month,owner};
     ContractPayroll.render(document.getElementById('salaryContractBasis'),contractBasis,!!saved);
@@ -8625,7 +8631,7 @@ async function loadSalaryData({readContext} = {}) {
     currentPayrollContractContext.moneyInput = salaryMoneyInputSignature();
     syncSalaryTaxPreview();
     checkpointEmployeeDetailDraft(document.getElementById('tabSalary'));
-    await loadDurunuriSupportState(month, empId, readContext);
+    await loadDurunuriSupportState(month, empId, readContext, supportRead);
     if (!isCurrent()) return;
     return true;
 }

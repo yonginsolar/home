@@ -328,20 +328,23 @@
         await fetchDividendExportBatches();
         if (active('export') && !g_dividend_export_state.initialized) { g_dividend_export_state.initialized = true; void fetchWithdrawalDeemedDividendReviews(false); }
     };
-    loadDividendExportRows = function(force = false) {
+    loadDividendExportRows = function(force = false, sources = 'all') {
         const c = context('export'); if (!c.batch || !current(c)) return Promise.resolve(null);
         const debit = el('dividendExportDebitMemo')?.value || '배당금', credit = el('dividendExportCreditMemo')?.value || '배당금';
-        const fingerprint = JSON.stringify([c.owner,c.batch,debit,credit]);
+        sources=['tax-summary','tax','summary'].includes(sources)?sources:'all';
+        const needBank=sources==='all',needTax=sources!=='summary',needSummary=sources!=='tax';
+        const fingerprint = JSON.stringify([c.owner,c.batch,debit,credit,sources]);
         if (!force && exportCache?.fingerprint === fingerprint) return Promise.resolve(exportCache.data);
         const batch = {...getDividendExportSelectedBatch()};
-        return read('export-rows',c,fingerprint,async () => {
+        return read(sources==='all'?'export-rows':'export-rows:'+sources,c,fingerprint,async () => {
             const [bank,tax,summary] = await Promise.all([
-                _supabase.rpc('get_dividend_bank_transfer_rows',{p_batch_id:c.batch,p_debit_memo:debit,p_credit_memo:credit}),
-                _supabase.rpc('get_dividend_tax_ledger_rows',{p_batch_id:c.batch}),_supabase.rpc('get_dividend_withholding_summary',{p_batch_id:c.batch})]);
+                needBank ? _supabase.rpc('get_dividend_bank_transfer_rows',{p_batch_id:c.batch,p_debit_memo:debit,p_credit_memo:credit}) : {data:[]},
+                needTax ? _supabase.rpc('get_dividend_tax_ledger_rows',{p_batch_id:c.batch}) : {data:[]},
+                needSummary ? _supabase.rpc('get_dividend_withholding_summary',{p_batch_id:c.batch}) : {data:[]}]);
             return {bankRows:unwrap(bank),taxRows:unwrap(tax),withholdingSummaryRows:unwrap(summary),batch};
         }, data => {
             exportCache = {fingerprint,data}; status('dividendExportLastLoaded','현재 회차의 파일 데이터를 준비했습니다.');
-        }, () => retry('dividendExportLastLoaded','파일 자료를 확인하지 못했습니다. 다시 확인해 주세요.',() => loadDividendExportRows(true)));
+        }, () => retry('dividendExportLastLoaded','파일 자료를 확인하지 못했습니다. 다시 확인해 주세요.',() => loadDividendExportRows(true,sources)));
     };
     const originalFileName = makeDividendExportFileName;
     makeDividendExportFileName = function(suffix,extension,batch) {

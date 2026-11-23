@@ -14075,11 +14075,13 @@ function requireDividendExportBatchId() {
     return batchId;
 } // End of requireDividendExportBatchId
 
-async function loadDividendExportRows(forceRefresh = false) {
+async function loadDividendExportRows(forceRefresh = false, sources = 'all') {
     const batchId = requireDividendExportBatchId();
     if (!batchId) return null;
 
-    if (!forceRefresh
+    sources=['tax-summary','tax','summary'].includes(sources)?sources:'all';
+    const needBank=sources==='all',needTax=sources!=='summary',needSummary=sources!=='tax';
+    if (sources==='all' && !forceRefresh
         && Array.isArray(g_dividend_export_state.bankRows)
         && Array.isArray(g_dividend_export_state.taxRows)
         && Array.isArray(g_dividend_export_state.withholdingSummaryRows)) {
@@ -14096,21 +14098,21 @@ async function loadDividendExportRows(forceRefresh = false) {
     showLoading(true);
     try {
         const [bankResult, taxResult, summaryResult] = await Promise.all([
-            _supabase.rpc('get_dividend_bank_transfer_rows', {
+            needBank ? _supabase.rpc('get_dividend_bank_transfer_rows', {
                 p_batch_id: batchId,
                 p_debit_memo: debitMemo,
                 p_credit_memo: creditMemo
-            }),
-            _supabase.rpc('get_dividend_tax_ledger_rows', { p_batch_id: batchId }),
-            _supabase.rpc('get_dividend_withholding_summary', { p_batch_id: batchId })
+            }) : {data:[]},
+            needTax ? _supabase.rpc('get_dividend_tax_ledger_rows', { p_batch_id: batchId }) : {data:[]},
+            needSummary ? _supabase.rpc('get_dividend_withholding_summary', { p_batch_id: batchId }) : {data:[]}
         ]);
 
         const error = bankResult.error || taxResult.error || summaryResult.error;
         if (error) throw error;
 
-        g_dividend_export_state.bankRows = Array.isArray(bankResult.data) ? bankResult.data : [];
-        g_dividend_export_state.taxRows = Array.isArray(taxResult.data) ? taxResult.data : [];
-        g_dividend_export_state.withholdingSummaryRows = Array.isArray(summaryResult.data) ? summaryResult.data : [];
+        if(needBank)g_dividend_export_state.bankRows = Array.isArray(bankResult.data) ? bankResult.data : [];
+        if(needTax)g_dividend_export_state.taxRows = Array.isArray(taxResult.data) ? taxResult.data : [];
+        if(needSummary)g_dividend_export_state.withholdingSummaryRows = Array.isArray(summaryResult.data) ? summaryResult.data : [];
         document.getElementById('dividendExportLastLoaded').innerText = `${formatAdminMemberKstDateTime(new Date())} 기준 파일 데이터 준비 완료`;
 
         return {
@@ -14420,7 +14422,7 @@ async function downloadDividendTaxLedgerXlsx() {
     if (!workflow?.current(context)) return;
     if (!(await ensureAdminMemberSpreadsheetReady())) return;
     if (!workflow.current(context)) return;
-    const loaded = await loadDividendExportRows(true);
+    const loaded = await loadDividendExportRows(true,'tax-summary');
     if (!loaded) return;
 
     const taxRows = loaded.taxRows || [];
@@ -14510,7 +14512,7 @@ function downloadDividendCsvFile(fileName, rows) {
 } // End of downloadDividendCsvFile
 
 async function downloadDividendHometaxPaymentStatementCsv() {
-    const loaded = await loadDividendExportRows(true);
+    const loaded = await loadDividendExportRows(true,'tax');
     if (!loaded) return;
 
     const taxRows = loaded.taxRows || [];
@@ -14542,7 +14544,7 @@ async function downloadDividendHometaxPaymentStatementCsv() {
 } // End of downloadDividendHometaxPaymentStatementCsv
 
 async function downloadDividendWithholdingSummaryCsv() {
-    const loaded = await loadDividendExportRows(true);
+    const loaded = await loadDividendExportRows(true,'summary');
     if (!loaded) return;
 
     const summaryRows = loaded.withholdingSummaryRows || [];

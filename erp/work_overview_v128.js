@@ -1,4 +1,4 @@
-/* v1.2.9 — Keep completed settings hidden while checking optional groups. */
+/* v1.3.0 — Keep the last verified task list within the current work scope. */
 (function (host) {
  'use strict';
  const links = Object.freeze({
@@ -17,6 +17,7 @@
   domain:['홈페이지·ERP 도메인',''],deposit:['출자금 납입 안내 계좌',''],seal:['출자증서용 조합 직인',''],payment_policy:['가입 출자금 납입기한','admin_member.html?scope=member_admin&sub=payment-policy']
  });
  const labels={ready:'등록됨',missing:'확인 필요',default:'기본 기준 · 확인 필요',legacy:'기존 적용본 유지',connected:'연결됨',optional:'선택 사항 · 미연결',unavailable:'조회 실패 · 다시 확인'};
+ const RESUME_TTL_MS=30000; // Same focus/visibility window as the setup checklist.
  function setupRoutes(rt,coop){
   if(!rt||rt.coop_id!==coop||rt.is_active===false)return {};
   const rights=new Set(rt.effective_permissions||[]),enabled=k=>rt.modules?.[k]!==false;
@@ -33,10 +34,25 @@
   if(binding) {binding.invalidate();binding=undefined;}
   const container=document.getElementById('workOverview');if(!container)return;
   container.replaceChildren();const sections=[],controllers=new Map(),panels=new Map();
-  const key=()=>{const c=options.context();return c?`${c.coop_id}|${c.actor}`:'';};
+  const key=()=>{
+   const c=options.context(),rt=options.runtime?.();
+   if(!c?.coop_id||!c.actor||rt&&(rt.coop_id!==c.coop_id||rt.is_active===false))return '';
+   return JSON.stringify([c.coop_id,c.auth||c.actor,c.actor,rt?.runtime_profile||'',
+    [...(c.permissions||rt?.effective_permissions||[])].sort(),Object.entries(rt?.modules||{}).sort(([a],[b])=>a.localeCompare(b))]);
+  };
   const owner=key();
   let dialog=null,dialogReturnFocus=null,disposed=false,summaryPending=null,readSequence=0,lastTaskTicket=0,lastSetupTicket=0,contractListGeneration=0,contractListController=null;
+  let taskCountsReady=false,refreshAttemptAt=null,changeRevision=0,queuedChange=false;
   const current=()=>!disposed&&key()===owner&&!!owner&&container.isConnected&&!container.closest('.hidden');
+  function ensureScope(){
+   if(disposed)return false;
+   const next=key();
+   if(next!==owner){
+    if(next)mount(options);else host.ErpWorkOverview.clear();
+    return false;
+   }
+   return current();
+  }
   const extras=()=>setupRoutes(options.runtime?.(),options.context()?.coop_id);
   async function readSetupExtra(group,paths){
    const coop=options.context()?.coop_id,controller=new AbortController();let timer;
@@ -73,6 +89,7 @@
   const readDenied=e=>[401,403].includes(Number(e?.status))||['42501','PGRST301','PGRST302'].includes(String(e?.code));
   async function read(section){
    const ticket=++readSequence,controller=new AbortController();controllers.set(controller,section);let timer;
+   if(section==='tasks')refreshAttemptAt=Date.now();
    // Reserve the boundary when a read starts, including reads that later fail.
    if(section==='summary'||section==='tasks')lastTaskTicket=ticket;
    if(section==='summary'||section==='setup')lastSetupTicket=ticket;
@@ -95,11 +112,13 @@
     keys.add(item.key);total+=item.count;
    }
    if(!Number.isSafeInteger(total))throw Error('COUNT_UNAVAILABLE');
-   lastTaskTicket=ticket;const badge=panels.get('tasks').badge;
-   const panel=panels.get('tasks'),snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
-   if(panel.snapshot&&panel.snapshot!==snapshot){panel.list.replaceChildren();panel.status.textContent='대기 건수가 바뀌었습니다. 최신 목록을 다시 확인해 주세요.';panel.snapshot=null;}
+   lastTaskTicket=ticket;const panel=panels.get('tasks'),badge=panel.badge;
+   // A task kind disappearing from the server response can be a permission
+   // change. Do not keep rendering that unverified list, even on network error.
+   if(panel.hasRemovedKind(keys)){panel.clearRows();closeDialog(true);}
    badge.textContent=total?'대기 '+total.toLocaleString('ko-KR')+'건':data.items.some(x=>x.key==='tax'&&x.configured===false)?'세무 주기 확인 필요':'대기 업무 없음';
    badge.className=total?'badge text-bg-danger ms-2':'small text-muted ms-2';
+   taskCountsReady=true;
    options.onTasks?.(data.items,'ready');
    return true;
   }
@@ -112,34 +131,49 @@
    panels.get('setup').updateSummary(value,fromSummary);
    return true;
   }
-  function failTasks(ticket,message){
+  function failTasks(ticket,message,error){
    if(!current()||ticket<lastTaskTicket)return;
-   const panel=panels.get('tasks');panel.badge.textContent='확인 필요';panel.badge.className='badge text-bg-warning ms-2';
-   options.onTasks?.(null,'failed');panel.status.textContent=message;
+   const panel=panels.get('tasks');
+   if(readDenied(error)){panel.clearRows();closeDialog(true);taskCountsReady=false;}
+   if(!taskCountsReady){
+    panel.badge.textContent='확인 필요';panel.badge.className='badge text-bg-warning ms-2';options.onTasks?.(null,'failed');
+   }
+   panel.status.textContent=panel.hasRows()?'최신 목록을 확인하지 못했습니다. 이전 목록을 표시합니다.':message;
   }
-  function refresh(){
-   if(!current())return null;
-   if(summaryPending)return summaryPending;
-   const panel=panels.get('tasks');panel.reset();panel.list.replaceChildren();panel.snapshot=null;closeDialog(true);
-   for(const [controller,section]of controllers)if(section==='tasks')controller.abort();
-   panel.badge.textContent='확인 중…';panel.badge.className='small text-muted ms-2';panel.status.textContent='대기 건수를 확인하는 중…';options.onTasks?.(null,'loading');
+  function refresh(reason){
+   if(!ensureScope())return null;
+   if(reason==='change')changeRevision++;
+   if(summaryPending){if(reason==='change')queuedChange=true;return summaryPending;}
+   refreshAttemptAt=Date.now();
+   const panel=panels.get('tasks'),revision=changeRevision;
+   panel.markStale();closeDialog(true);
+   if(!taskCountsReady){
+    panel.badge.textContent='확인 중…';panel.badge.className='small text-muted ms-2';options.onTasks?.(null,'loading');
+   }
+   panel.status.textContent=panel.hasRows()?'이전 목록을 표시하며 최신 목록을 확인하는 중…':'대기 건수를 확인하는 중…';
    const attemptTicket=readSequence+1;
    panels.get('setup').beginSummary();
    summaryPending=(async()=>{try{
     const {data,ticket}=await read('summary');
     setupVisibility(data.setup,ticket,true);
-    if(counts(data,ticket)){
-     panel.status.textContent=data.items.some(item=>item.count>0)?'대기 건수를 확인했습니다. 펼치면 최신 목록을 볼 수 있습니다.':'현재 확인할 대기 업무가 없습니다.';
-     if(current()&&panel.root.open&&ticket===lastTaskTicket)await panel.load();
+    if(revision===changeRevision&&counts(data,ticket)){
+     if(panel.root.open&&ticket===lastTaskTicket)await panel.load(true);
+     else if(!panel.hasRows())panel.status.textContent=data.items.some(item=>item.count>0)?'대기 건수를 확인했습니다. 펼치면 목록을 볼 수 있습니다.':'현재 확인할 대기 업무가 없습니다.';
     }
    }catch(error){if(current()){
-    failTasks(attemptTicket,'대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
+    if(revision===changeRevision){
+     panel.pauseDetail();
+     failTasks(attemptTicket,'대기 건수와 설정 상태를 확인하지 못했습니다. 다시 확인해 주세요.',error);
+    }
     const setup=panels.get('setup');
     if(attemptTicket>=lastSetupTicket){
      if(readDenied(error)){setup.root.hidden=true;setup.root.open=false;setup.reset();}
      else setup.failSummary();
     }
-   }}})().finally(()=>{summaryPending=null;panel.syncRetry();});
+   }}})().finally(()=>{
+    summaryPending=null;panel.syncRetry();
+    if(queuedChange){queuedChange=false;if(current())void refresh();}
+   });
    panel.syncRetry();
    return summaryPending;
   }
@@ -158,7 +192,7 @@
    const live=()=>current()&&dialog===opened;
    const coop=options.context()?.coop_id, uuid=/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
    let changed=false, loading=false, loadController=null, pending=0;
-   opened.addEventListener('close',()=>{loadController?.abort();if(changed&&current()&&!dialog)void refresh();},{once:true});
+   opened.addEventListener('close',()=>{loadController?.abort();if(changed&&current()&&!dialog)void refresh('change');},{once:true});
    async function call(args,controller){
     if(controller)controllers.set(controller,'badge-replies');
     let timer;
@@ -191,7 +225,7 @@
      }finally{
       running=false;pending--;
       if(live()&&!done)seen.removeAttribute('aria-disabled');
-      if(!live()&&changed&&pending===0&&current()&&!dialog)void refresh();
+      if(!live()&&changed&&pending===0&&current()&&!dialog)void refresh('change');
      }
     };
     block.append(seen,hint);list.append(block);
@@ -409,16 +443,24 @@
    if(section==='setup')body.append(el('p','small mb-2','가입을 열기 전 설립목적·가입 개인정보 동의와 출자 기준을 확인해 주세요. 납입 계좌는 입금 안내에, 조합 직인은 출자증서에 사용됩니다. 이 점검표와 임시 권한 부여 종료는 별도입니다.'));
    body.append(status,list,retry);root.append(heading,body);container.append(root);
    if(section==='setup'){mountSetupPanel(root,status,list,retry);continue;}
-   let sequence=0,busy=false,retrying=false;
-   const isCurrent=serial=>serial===sequence&&current();
-   const syncRetry=()=>{const locked=busy||retrying||(section==='tasks'&&!!summaryPending);retry.disabled=locked;list.querySelectorAll('button').forEach(button=>{button.disabled=locked;});};
-   const reset=()=>{++sequence;busy=false;syncRetry();};
-   panels.set(section,{root,status,list,badge,reset,syncRetry,load});
-   async function load() {
-    if(busy||!root.open)return;const serial=++sequence,attemptTicket=readSequence+1;busy=true;syncRetry();list.replaceChildren();if(section==='tasks')panels.get(section).snapshot=null;status.textContent='불러오는 중…';
-    try {
-     const {data,ticket}=await read(section);if(!isCurrent(serial))return;
+   let needsDetail=true,detailPending=null,rendered=null;
+   const syncRetry=()=>{const locked=!!(detailPending||summaryPending);retry.disabled=locked;list.querySelectorAll('button').forEach(button=>{button.disabled=locked;});};
+   const clearRows=()=>{rendered=null;list.replaceChildren();};
+   panels.set(section,{root,status,badge,syncRetry,load,hasRows:()=>!!rendered,
+    hasRemovedKind:keys=>rendered?.keys.some(k=>!keys.has(k)),clearRows,
+    markStale:()=>{needsDetail=true;},pauseDetail:()=>{needsDetail=false;}});
+   function load(afterSummary=false) {
+    if(!root.open||!ensureScope())return null;
+    if(summaryPending&&!afterSummary)return summaryPending;
+    if(detailPending)return afterSummary?detailPending.then(()=>load(true)):detailPending;
+    if(!needsDetail)return null;
+    needsDetail=false;
+    const attemptTicket=readSequence+1,revision=changeRevision;
+    status.textContent=rendered?'이전 목록을 표시하며 최신 목록을 확인하는 중…':'불러오는 중…';
+    detailPending=(async()=>{try {
+     const {data,ticket}=await read(section);if(!current()||revision!==changeRevision)return;
      if(!counts(data,ticket))return;
+     const next={keys:data.items.map(item=>item.key)},rows=[];
      for(const item of data.items) {
       const entry=links[item.key];if(!entry)throw new Error('UNKNOWN_ITEM');
       const row=el('div','d-flex align-items-center justify-content-between gap-3 border rounded p-2');
@@ -426,7 +468,7 @@
       const choose=['receipts','material','badge_reply'].includes(item.key)||item.key.startsWith('contract_');
       const link=el(choose?'button':'a',choose?'btn btn-link text-start p-0 text-decoration-none':'text-decoration-none',entry[0]);
       if(choose){link.type='button';link.onclick=()=>{
-       if(!isCurrent(serial)||busy||retrying||(section==='tasks'&&summaryPending))return;
+       if(!current()||rendered!==next||detailPending||summaryPending)return;
        if(item.key==='badge_reply'){showBadgeReplies(section);return;}
        if(item.key.startsWith('contract_')){showContractList(item.key,section);return;}
         const targets=(item.targets||[]).filter(x=>x.event_id==='unassigned'||/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(x.event_id));
@@ -435,22 +477,27 @@
       row.append(link);
        if(!Number.isSafeInteger(item.count)||item.count<0)throw new Error('COUNT_UNAVAILABLE');
        row.append(el('span',item.count?'badge text-bg-primary':'text-muted small',item.key==='tax'&&item.configured===false?(item.count?`${item.count.toLocaleString('ko-KR')}건 · 주기 확인`:'주기 미설정'):`${item.count.toLocaleString('ko-KR')}${item.key.startsWith('contract_')?'명':'건'}`));
-      list.append(row);
+      rows.push(row);
      }
+     list.replaceChildren(...rows);rendered=next;
      status.textContent=data.items.length?`확인 시각 ${new Date(data.generated_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})}`:'현재 권한으로 확인할 항목이 없습니다.';
-     if(section==='tasks')panels.get(section).snapshot=JSON.stringify(data.items.map(x=>[x.key,x.count]));
-    }catch(_){if(isCurrent(serial)&&attemptTicket>=(section==='tasks'?lastTaskTicket:lastSetupTicket)){
-     list.replaceChildren();status.textContent='불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.';
-     if(section==='tasks')failTasks(attemptTicket,status.textContent);
-    }}
-    finally{if(serial===sequence){busy=false;syncRetry();}}
+    }catch(error){
+     if(revision===changeRevision)failTasks(attemptTicket,'불러오지 못했습니다. 다시 확인하거나 기존 업무 메뉴를 이용해 주세요.',error);
+    }})().finally(()=>{detailPending=null;syncRetry();});
+    syncRetry();return detailPending;
    }
-   root.addEventListener('toggle',()=>{if(root.open)void load();});retry.onclick=async()=>{
-    if(busy||retrying)return;retrying=true;retry.disabled=true;
-    try{await refresh();if(current()&&section!=='tasks')await load();}finally{retrying=false;syncRetry();}
-   };
-   sections.push(()=>{++sequence;busy=false;root.open=false;list.replaceChildren();status.textContent='';});
+   root.addEventListener('toggle',()=>{if(root.open)void load();});
+   retry.onclick=()=>{if(!retry.disabled)void refresh();};
+   sections.push(()=>{root.open=false;clearRows();status.textContent='';});
   }
+  const resume=(event)=>{
+   if(document.hidden||!ensureScope()||dialog||summaryPending)return;
+   if(event?.type==='pageshow'&&!event.persisted)return;
+   if(event?.persisted||refreshAttemptAt===null||Date.now()-refreshAttemptAt>=RESUME_TTL_MS)void refresh();
+  };
+  host.addEventListener('focus',resume);host.addEventListener('pageshow',resume);
+  document.addEventListener('visibilitychange',resume);
+  sections.push(()=>{host.removeEventListener('focus',resume);host.removeEventListener('pageshow',resume);document.removeEventListener('visibilitychange',resume);});
   binding={refresh,invalidate:()=>{disposed=true;controllers.forEach((_,c)=>c.abort());closeDialog();sections.forEach(fn=>fn());}};
   // A single scoped count/status read; detailed targets and configuration remain lazy.
   Promise.resolve().then(()=>{if(!disposed)void refresh();});
