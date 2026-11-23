@@ -411,6 +411,8 @@ async function routeRequest(request,env,ctx){
       '/erp/admin_member_site.js?20261109-photo-safety-1':'/erp/admin_member_site_20261109_photo_safety_legacy.js',
       '/erp/home_visual_editor.js?20261022-help-1':'/erp/home_visual_editor_20261022_help_legacy.js',
       '/erp/site_inline_editor.js?20261025-cert-intent-1':'/erp/site_inline_editor_20261025_cert_intent_legacy.js',
+      '/erp/admin_member_core_v1518.js?20261122-demand-1':'/erp/admin_member_core_v1518_20261122_demand_legacy.js',
+      '/erp/dividend_workflow.js?20261120-calculated-archive-1':'/erp/dividend_workflow_20261120_archive_legacy.js',
     }[url.pathname+'?'+version];
     if(retainedEditor){
       const target=new URL(request.url);target.pathname=retainedEditor;target.search='';
