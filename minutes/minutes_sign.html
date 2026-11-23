@@ -637,6 +637,7 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
         let currentMinuteId = null;
         let currentMinuteDoc = null;
         let detailRequestVersion = 0;
+        let pendingDetailVersion = null;
         let signatureDisplayVersion = 0;
         let auditEditing = false;
         let auditOriginalContent = '';
@@ -829,7 +830,14 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
                 .replace(/'/g, '&#39;');
         }
 
-        async function renderAttachments(doc) {
+        function clearMinuteAttachments() {
+            const panel = document.getElementById('attachment-panel');
+            const list = document.getElementById('attachment-list');
+            if (panel) panel.style.display = 'none';
+            list?.replaceChildren();
+        }
+
+        async function renderAttachments(doc, current) {
             const panel = document.getElementById('attachment-panel');
             const list = document.getElementById('attachment-list');
             if (!panel || !list) return;
@@ -850,6 +858,7 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
             const resolved = [];
             for (let i = 0; i < urls.length; i += 1) {
                 const resolvedUrl = await resolveAttachmentUrl(urls[i]);
+                if (!current()) return;
                 if (!resolvedUrl) continue;
                 resolved.push({
                     url: resolvedUrl,
@@ -857,6 +866,7 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
                 });
             }
 
+            if (!current()) return;
             if (resolved.length === 0) {
                 panel.style.display = 'none';
                 list.innerHTML = '';
@@ -1341,20 +1351,26 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
             appendListMessage(listPanel, message, '#b91c1c');
         }
         function showConfirm(msg) {
+            if (confirmResolve) window.closeConfirm(false);
             document.getElementById('confirmText').innerText = msg;
             document.getElementById('confirmModal').classList.add('show');
             return new Promise(resolve => { confirmResolve = resolve; });
         }
         window.closeConfirm = (ok) => {
             document.getElementById('confirmModal').classList.remove('show');
-            if (confirmResolve) confirmResolve(ok);
+            const resolve = confirmResolve;
+            confirmResolve = null;
+            resolve?.(ok);
         };
 
         function showList() {
+            if (auditEditing) return showToast('감사보고서 수정 내용을 먼저 저장하거나 취소해 주세요.');
             signatureChoice.close();
-            if (auditEditing) cancelAuditEdit();
+            if (confirmResolve) window.closeConfirm(false);
             detailRequestVersion++;
+            pendingDetailVersion = null;
             signatureDisplayVersion++;
+            clearMinuteAttachments();
             document.getElementById('detail-panel').classList.add('hidden');
             document.getElementById('list-panel').style.display = 'block';
             setDetailModePill(false);
@@ -1548,16 +1564,36 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
             }
         }
 
+        function captureMinuteDetail() {
+            return { authId:myAuthId, minuteId:currentMinuteId, coopId:currentMinuteDoc?.coop_id, version:detailRequestVersion };
+        }
+        function minuteDetailCurrent(view) {
+            return !!view.authId && view.authId === myAuthId && view.minuteId === currentMinuteId
+                && view.coopId === currentMinuteDoc?.coop_id && view.version === detailRequestVersion && pendingDetailVersion === null
+                && !window.frameElement?.hidden && !document.getElementById('detail-panel').classList.contains('hidden');
+        }
+
 async function openDocumentById(id) {
+            if (auditEditing) return showToast('감사보고서 수정 내용을 먼저 저장하거나 취소해 주세요.');
             signatureChoice.close();
+            if (confirmResolve) window.closeConfirm(false);
             const requestVersion = ++detailRequestVersion;
+            pendingDetailVersion = requestVersion;
+            const authId = myAuthId;
+            const current = () => requestVersion === detailRequestVersion && authId === myAuthId && !window.frameElement?.hidden;
             signatureDisplayVersion++;
+            clearMinuteAttachments();
             try {
-                const { data: doc } = await MinutesService.getMinuteById(id);
-                if (requestVersion !== detailRequestVersion) return;
-                if (!doc) {
+                const { data: doc, error } = await MinutesService.getMinuteById(id);
+                if (!current()) return;
+                if (error) throw error;
+                if (!doc || String(doc.id) !== String(id)) {
                     showToast('문서를 찾을 수 없습니다.');
                     return;
+                }
+                if (currentMinuteId !== id) {
+                    alreadySignedOnce = false;
+                    forceSignedOnce = false;
                 }
                 currentMinuteId = id;
                 currentMinuteDoc = doc;
@@ -1574,20 +1610,22 @@ async function openDocumentById(id) {
                 document.getElementById('audit-edit-help').classList.remove('show');
                 document.getElementById('signatures-panel').style.display = 'none';
                 document.getElementById('signatures-list').replaceChildren();
-                await renderAttachments(doc);
-                if (requestVersion !== detailRequestVersion) return;
+                await renderAttachments(doc, current);
+                if (!current()) return;
 
                 await updateSignStatus(doc);
-                if (requestVersion !== detailRequestVersion) return;
+                if (!current()) return;
                 await renderDocumentSignatures(doc);
-                if (requestVersion !== detailRequestVersion) return;
+                if (!current()) return;
 
                 document.getElementById('list-panel').style.display = 'none';
                 document.getElementById('detail-panel').classList.remove('hidden');
             } catch (err) {
-                if (requestVersion !== detailRequestVersion) return;
+                if (!current()) return;
                 console.error('minutes_sign openDocumentById error:', err);
                 showToast('문서 내용을 불러오지 못했습니다.');
+            } finally {
+                if (pendingDetailVersion === requestVersion) pendingDetailVersion = null;
             }
         }
 
@@ -1667,8 +1705,12 @@ async function openDocumentById(id) {
                 return;
             }
 
-            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(doc.id);
+            const { data: signatures, error } = await MinutesService.listSignaturesByMinuteId(doc.id);
             if (!stillCurrent()) return;
+            if (error || !Array.isArray(signatures)) {
+                statusEl.innerText = '서명 상태를 확인하지 못했습니다. 문서를 다시 열어 주세요.';
+                return;
+            }
             const alreadySigned = forceSignedOnce || isLocallySigned(currentMinuteId) || hasMySignatureForDoc(signatures);
             if (alreadySigned) {
                 const mySignature = findMySignatureForDoc(signatures, doc);
@@ -1919,10 +1961,23 @@ async function openDocumentById(id) {
             auditEditing = false;
         }
 
+        let auditEditRead = null, auditSavePending = null;
         async function editAuditReport() {
-            if (!currentMinuteId || String(currentMinuteDoc?.doc_type || '').toUpperCase() !== 'AUDIT_REPORT') return;
-            const { data: signatures, error } = await MinutesService.listSignaturesByMinuteId(currentMinuteId);
-            if (error) return showToast('서명 상태를 확인하지 못했습니다.');
+            const view = captureMinuteDetail();
+            if (!view.minuteId || !minuteDetailCurrent(view) || auditEditing
+                || String(currentMinuteDoc?.doc_type || '').toUpperCase() !== 'AUDIT_REPORT') return;
+            if (auditEditRead && minuteDetailCurrent(auditEditRead)) return;
+            auditEditRead = view;
+            let signatures, error;
+            try {
+                ({ data:signatures, error } = await MinutesService.listSignaturesByMinuteId(view.minuteId));
+            } catch (_) {
+                error = true;
+            } finally {
+                if (auditEditRead === view) auditEditRead = null;
+            }
+            if (!minuteDetailCurrent(view) || auditEditing) return;
+            if (error || !Array.isArray(signatures)) return showToast('서명 상태를 확인하지 못했습니다.');
             if (currentMinuteDoc.status !== 'OPEN' || (signatures || []).length > 0) {
                 showToast('전자서명이 시작된 감사보고서는 수정할 수 없습니다.');
                 await updateSignStatus(currentMinuteDoc);
@@ -1944,30 +1999,43 @@ async function openDocumentById(id) {
         }
 
         async function saveAuditReport() {
-            if (!auditEditing || !currentMinuteId) return;
+            const view = captureMinuteDetail();
+            if (!auditEditing || !view.minuteId || !minuteDetailCurrent(view) || auditSavePending) return;
             const editor = document.getElementById('detail-content');
-            const safeContent = normalizeAuditReportContent(editor.innerHTML || '');
+            const originalInput = editor.innerHTML;
+            const safeContent = normalizeAuditReportContent(originalInput || '');
             if (!safeContent.trim()) return showToast('감사보고서 내용을 입력해 주세요.');
             if (!auditOverallOpinionIsReady(safeContent)) {
                 showToast('종합 의견은 반드시 작성해야 합니다.');
                 editor.querySelector('.audit-overall-opinion')?.focus();
                 return;
             }
-            const { error } = await MinutesService.updateMyAuditReport(currentMinuteId, safeContent);
-            if (error) {
-                showToast('감사보고서 저장 실패: ' + (error.message || '확인할 수 없는 오류'));
-                return;
+            auditSavePending = view;
+            const button = document.getElementById('btn-save-audit');
+            if (button) button.disabled = true;
+            try {
+                const { error } = await MinutesService.updateMyAuditReport(view.minuteId, safeContent);
+                if (!minuteDetailCurrent(view) || !auditEditing) return;
+                if (error) return showToast('감사보고서 저장 실패: ' + (error.message || '확인할 수 없는 오류'));
+                auditOriginalContent = safeContent;
+                currentMinuteDoc = { ...currentMinuteDoc, content:safeContent };
+                if (editor.innerHTML !== originalInput) {
+                    return showToast('보낸 내용은 저장했습니다. 이후에 입력한 내용은 화면에 남겼습니다.');
+                }
+                editor.innerHTML = safeContent;
+                leaveAuditEditMode();
+                await updateSignStatus(currentMinuteDoc);
+                if (minuteDetailCurrent(view)) showToast('감사보고서 수정 내용을 저장했습니다.');
+            } catch (_) {
+                if (minuteDetailCurrent(view)) showToast('저장 결과를 확인하지 못했습니다. 입력은 그대로 유지했습니다.');
+            } finally {
+                if (auditSavePending === view) auditSavePending = null;
+                if (button) button.disabled = false;
             }
-            auditOriginalContent = safeContent;
-            currentMinuteDoc = { ...currentMinuteDoc, content: safeContent };
-            editor.innerHTML = safeContent;
-            leaveAuditEditMode();
-            await updateSignStatus(currentMinuteDoc);
-            showToast('감사보고서 수정 내용을 저장했습니다.');
         }
 
         function cancelAuditEdit() {
-            if (!auditEditing) return;
+            if (!auditEditing || auditSavePending) return;
             leaveAuditEditMode({ restore: true });
             if (currentMinuteDoc) updateSignStatus(currentMinuteDoc);
             if (currentMinuteDoc) renderDocumentSignatures(currentMinuteDoc);
@@ -1979,13 +2047,14 @@ async function openDocumentById(id) {
 
         let expoSignPending = false;
         window.handleSign = async () => {
-            if (!currentMinuteId) return;
+            const view = captureMinuteDetail();
+            if (!view.minuteId || !minuteDetailCurrent(view)) return;
             if (auditEditing) return showToast('감사보고서 수정 내용을 먼저 저장하거나 취소해 주세요.');
             if (String(currentMinuteDoc?.doc_type || '').toUpperCase() === 'AUDIT_REPORT'
                 && !auditOverallOpinionIsReady(currentMinuteDoc?.content || '')) {
                 showToast('서명 전에 감사보고서의 종합 의견을 작성해 주세요.');
                 await editAuditReport();
-                document.querySelector('#detail-content .audit-overall-opinion')?.focus();
+                if (minuteDetailCurrent(view) && auditEditing) document.querySelector('#detail-content .audit-overall-opinion')?.focus();
                 return;
             }
             if (alreadySignedOnce) {
@@ -2011,47 +2080,55 @@ async function openDocumentById(id) {
         };
 
 
+        let signatureCancelPending = null;
         window.cancelSignature = async () => {
-            if (!currentMinuteId || myOfficialIds.length === 0) return;
-            const cancelMinuteId = currentMinuteId, cancelVersion = detailRequestVersion;
-            const expoCurrent = () => !window.ExpoRuntimeBridge || (currentMinuteId === cancelMinuteId && detailRequestVersion === cancelVersion);
-            const ok = await showConfirm('이미 서명한 내역을 취소하시겠습니까?');
-            if (!ok || !expoCurrent()) return;
-            const { data: currentDoc } = await MinutesService.getMinuteById(currentMinuteId);
-            if (!expoCurrent()) return;
-            const { data: sigs } = await MinutesService.listSignaturesByMinuteId(currentMinuteId);
-            if (!expoCurrent()) return;
-            const mySig = findMySignatureForDoc(sigs, currentDoc);
-            const cancelOfficialId = Number(mySig?.official_id || myOfficialId || 0);
-            if (!cancelOfficialId) {
-                showToast('취소할 서명 정보를 찾지 못했습니다.');
-                return;
-            }
-            const isExternalDirector = myOfficialRows.some(row => Number(row?.id || 0) === cancelOfficialId && row?.is_external_director === true);
-            const { data: deletedRows, error } = await MinutesService.deleteSignature(currentMinuteId, cancelOfficialId, isExternalDirector);
-            if (!expoCurrent()) return;
-            const deletedSignatureUrl = Array.isArray(deletedRows) && deletedRows.length > 0
-                ? String(deletedRows[0]?.signature_url || '').trim()
-                : '';
-            const signatureUrlToRemove = deletedSignatureUrl || String(mySig?.signature_url || '').trim();
-            if (!error) {
-                await removeSignaturePreviewFile(currentMinuteId, cancelOfficialId, mySig?.id);
-                if (signatureUrlToRemove) await removeSignatureFile(signatureUrlToRemove);
-            }
-            if (error) {
-                showToast('서명 취소 실패: ' + error.message);
-                return;
-            }
-            alreadySignedOnce = false;
-            forceSignedOnce = false;
-            clearLocallySigned(currentMinuteId);
-            showToast('서명 취소가 완료되었습니다.');
-            const { data: doc } = await MinutesService.getMinuteById(currentMinuteId);
-            if (!expoCurrent()) return;
-            if (doc) {
-                currentMinuteDoc = doc;
-                await updateSignStatus(doc);
-                await renderDocumentSignatures(doc);
+            const view = captureMinuteDetail();
+            if (!view.minuteId || !minuteDetailCurrent(view) || signatureCancelPending || auditEditing || myOfficialIds.length === 0) return;
+            signatureCancelPending = view;
+            const current = () => minuteDetailCurrent(view);
+            try {
+                if (!await showConfirm('이미 서명한 내역을 취소하시겠습니까?') || !current()) return;
+                const [docResult, sigResult] = await Promise.all([
+                    MinutesService.getMinuteById(view.minuteId), MinutesService.listSignaturesByMinuteId(view.minuteId)
+                ]);
+                if (!current()) return;
+                if (docResult.error || sigResult.error) return showToast('문서와 서명 상태를 다시 확인해 주세요.');
+                const doc = docResult.data;
+                if (!doc || String(doc.id) !== String(view.minuteId) || doc.coop_id !== view.coopId || doc.status !== 'OPEN') {
+                    return showToast('문서 상태가 바뀌었습니다. 다시 열어 확인해 주세요.');
+                }
+                const mySig = findMySignatureForDoc(sigResult.data, doc);
+                const officialId = Number(mySig?.official_id || 0);
+                if (!officialId) return showToast('취소할 서명 정보를 찾지 못했습니다.');
+                const external = myOfficialRows.some(row => Number(row?.id || 0) === officialId && row?.is_external_director === true);
+                const { data:deletedRows, error } = await MinutesService.deleteSignature(view.minuteId, officialId, external);
+                if (error || !Array.isArray(deletedRows) || deletedRows.length !== 1) {
+                    if (current()) showToast(error ? '서명 취소 실패: ' + error.message : '서명 취소 결과를 확인하지 못했습니다. 문서를 다시 열어 주세요.');
+                    return;
+                }
+                if (view.authId === myAuthId) {
+                    clearLocallySigned(view.minuteId);
+                    try {
+                        await removeSignaturePreviewFile(view.minuteId, officialId, mySig.id);
+                        const path = String(deletedRows[0]?.signature_url || '').trim();
+                        if (path && view.authId === myAuthId) await removeSignatureFile(path);
+                    } catch (_) {
+                        if (current()) showToast('서명은 취소됐지만 첨부 정리를 확인하지 못했습니다.');
+                    }
+                }
+                if (!current()) return;
+                alreadySignedOnce = false;
+                forceSignedOnce = false;
+                showToast('서명 취소가 완료되었습니다.');
+                const { data:updatedDoc } = await MinutesService.getMinuteById(view.minuteId);
+                if (!current() || !updatedDoc || String(updatedDoc.id) !== String(view.minuteId)) return;
+                currentMinuteDoc = updatedDoc;
+                await updateSignStatus(updatedDoc);
+                if (current()) await renderDocumentSignatures(updatedDoc);
+            } catch (_) {
+                if (current()) showToast('서명 취소 결과를 확인하지 못했습니다. 문서를 다시 열어 주세요.');
+            } finally {
+                if (signatureCancelPending === view) signatureCancelPending = null;
             }
         };
 

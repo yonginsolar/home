@@ -744,6 +744,7 @@ function safeUrl(value) {
 }
     import { AdminService } from './AdminService.js?v=20261021-expo-2';
     import { supabase, buildElectionVoteSummary, DISTRICT_VOTE_STATE } from './ElectionService.js?v=20261005-1';
+    import { planVoterAssignments, moveVoterAssignment, insertVoterAssignments } from './voter_assignment.js?v=20261124-1';
 
     const KST_TZ_VOTE_ADMIN = 'Asia/Seoul';
     const formatVoteAdminKstDate = (value, fallback = '미정') => {
@@ -869,11 +870,15 @@ function safeUrl(value) {
     let voterStatsPending = null;
     let voterStatsRevision = 0;
     let voterDetailRevision = 0;
+    let addVoterViewVersion = 0;
+    let addVoterSearchVersion = 0;
+    let addVoterAssignmentPending = false;
     const voterDetailPending = new Map();
     function voterScreenVisible() {
         try { return !window.frameElement?.hidden; } catch (_) { return true; }
     }
     function invalidateVoterReads() {
+        addVoterViewVersion++;
         voterStatsRevision++;
         voterDetailRevision++;
         voterStatsPending = null;
@@ -1061,7 +1066,9 @@ function safeUrl(value) {
         syncModalStack();
     };
 
+    let cancelCommonConfirm = null;
     window.showModal = (title, contentHtml, onConfirm = null, showCancel = true) => {
+        cancelCommonConfirm?.();
         voterDetailRevision++;
         const modal = document.getElementById('common-modal');
 
@@ -1098,8 +1105,13 @@ function safeUrl(value) {
         return new Promise((resolve) => {
             const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
             window.showModal(title, `<div style="line-height:1.6;">${safeMessage}</div>`, () => {
+                cancelCommonConfirm = null;
                 resolve(true);
             }, true);
+            cancelCommonConfirm = () => {
+                cancelCommonConfirm = null;
+                resolve(false);
+            };
 
             const modal = document.getElementById('common-modal');
             const cancelBtn = modal.querySelector('.btn-outline');
@@ -1149,6 +1161,7 @@ function safeUrl(value) {
     };
 
     window.closeModal = () => {
+        cancelCommonConfirm?.();
         voterDetailRevision++;
         closeModalOverlay(document.getElementById('common-modal'));
     };
@@ -2546,6 +2559,7 @@ async function openVoterGroup(dName, list, electionId, coopId) {
     }
 }
     window.closeAddVoterModal = () => {
+        addVoterViewVersion++;
         closeModalOverlay(document.getElementById('add-voter-modal'));
     };
 
@@ -2864,6 +2878,7 @@ async function updateVoterDistrict() {
     };
 
     window.switchAddVoterModalTab = (tabName) => {
+        addVoterViewVersion++;
         const isMemberTab = tabName !== 'district';
         const memberPane = document.getElementById('pane-add-voter-member');
         const districtPane = document.getElementById('pane-add-voter-district');
@@ -3244,8 +3259,15 @@ async function updateVoterDistrict() {
     };
 
 window.searchMembers = async () => {
-        const keyword = document.getElementById('search-member-input').value.trim();
+        const input = document.getElementById('search-member-input');
+        const keyword = input.value.trim();
         const resultArea = document.getElementById('search-result-area');
+        const request = ++addVoterSearchVersion;
+        const view = addVoterViewVersion, authId = candidateAuthUserId, electionId = currentElectionId, coopId = currentCoopId;
+        const current = () => request === addVoterSearchVersion && view === addVoterViewVersion && !!authId &&
+            authId === candidateAuthUserId && electionId === currentElectionId && coopId === currentCoopId &&
+            voterScreenVisible() && input.value.trim() === keyword;
+        if (!current()) return;
 
         if (keyword.length < 2) {
             showAlert("검색어를 2글자 이상 입력해주세요.");
@@ -3261,7 +3283,8 @@ window.searchMembers = async () => {
                 showAlert("검색어를 다시 입력해주세요.");
                 return;
             }
-            const members = await service.getElectionMembers(currentElectionId, { keyword });
+            const members = await service.getElectionMembers(electionId, { keyword });
+            if (!current()) return;
 
             if (!members || members.length === 0) {
                 resultArea.innerHTML = '<p style="text-align:center; color:#666;">검색 결과가 없습니다.</p>';
@@ -3269,23 +3292,26 @@ window.searchMembers = async () => {
             }
 
             // 검색된 사람들의 현재 등록 상태 확인
-            const searchedMemberNos = members.map(m => m.member_id);
-            const { data: registeredData } = await scopeByTenant(
-                supabase.from('election_voters').select('member_no, district_id')
-            )
-                .eq('election_id', currentElectionId)
-                .in('member_no', searchedMemberNos);
+            const searchedIds = members.map(m => m.id).filter(Boolean);
+            const registeredData = [];
+            for (let i = 0; i < searchedIds.length; i += 35) {
+                const { data, error } = await scopeByTenant(supabase.from('election_voters').select('member_uuid,district_id'))
+                    .eq('election_id', electionId).in('member_uuid', searchedIds.slice(i, i + 35));
+                if (!current()) return;
+                if (error || !Array.isArray(data)) throw new Error('기존 배정을 확인하지 못했습니다. 다시 검색해 주세요.');
+                registeredData.push(...data);
+            }
 
             // 등록된 정보를 맵핑 (이미 등록된 사람은 현재 지역구 정보를 표시)
-            const regMap = {};
+            const regMap = new Map();
             if(registeredData) {
                 registeredData.forEach(r => {
-                    const dInfo = districtList.find(d => d.id === r.district_id);
+                    const dInfo = districtList.find(d => String(d.id) === String(r.district_id));
                     // 비례가 아닌 지역구를 우선 표시 (변경 대상)
                     if(dInfo && !dInfo.is_common) {
-                        regMap[r.member_no] = { districtName: dInfo.name, districtId: dInfo.id };
-                    } else if(!regMap[r.member_no]) {
-                        regMap[r.member_no] = { districtName: '(비례/기타)', districtId: '' };
+                        regMap.set(r.member_uuid, { districtName: dInfo.name, districtId: dInfo.id });
+                    } else if(!regMap.has(r.member_uuid)) {
+                        regMap.set(r.member_uuid, { districtName: '(비례/기타)', districtId: '' });
                     }
                 });
             }
@@ -3294,7 +3320,7 @@ window.searchMembers = async () => {
             let html = '<ul style="list-style:none; padding:0; margin:0;">';
             
             members.forEach(m => {
-                const registeredInfo = regMap[m.member_id];
+                const registeredInfo = regMap.get(m.id);
                 const registeredDistrict = registeredInfo?.districtName || '';
                 const currentDistrictId = registeredInfo?.districtId || '';
                 const isRegistered = !!registeredInfo;
@@ -3333,6 +3359,7 @@ window.searchMembers = async () => {
             resultArea.innerHTML = html;
 
         } catch (e) {
+            if (!current()) return;
             console.error(e);
             resultArea.innerHTML = `<p style="color:red;">오류: ${escapeHtml(e.message)}</p>`;
         }
@@ -3340,127 +3367,68 @@ window.searchMembers = async () => {
 
 // [수정됨] 명부 등재 실행 (UUID 포함 Insert 및 이메일 로깅)
 window.addVoterToElection = async (memberNo, memberName, memberUuid) => {
+        if (addVoterAssignmentPending || !ensureTenantContext('유권자 추가')) return;
         const distSelect = document.getElementById('add-voter-district-select');
-        const districtId = distSelect.value;
-        if (!ensureTenantContext('유권자 추가')) return;
-
-        if (!districtId) {
-            showAlert("먼저 하단의 [배정할 선거구]를 선택해주세요.");
+        const scope = { electionId: currentElectionId, coopId: currentCoopId, districtId: distSelect.value };
+        if (!scope.districtId) {
+            showAlert('먼저 배정할 선거구를 선택해 주세요.');
             distSelect.focus();
             return;
         }
-
-        // UUID 확인 (없으면 에러)
-        // [방어코드] 자바스크립트 undefined 문자열 체크 추가
-        if (!memberUuid || memberUuid === 'undefined' || memberUuid === 'null') {
-            showAlert("시스템 오류: 회원의 고유 ID(UUID)가 누락되었습니다.");
-            return;
-        }
-
+        if (!memberUuid || ['undefined', 'null'].includes(memberUuid)) return;
+        const version = addVoterViewVersion;
+        const authId = candidateAuthUserId;
+        const current = () => !!authId && version === addVoterViewVersion && voterScreenVisible() && authId === candidateAuthUserId &&
+            document.getElementById('add-voter-modal')?.style.display === 'flex' &&
+            scope.electionId === currentElectionId && scope.coopId === currentCoopId && scope.districtId === distSelect.value &&
+            memberUuid === document.getElementById('selected-voter-member-uuid')?.value;
+        if (!current()) return;
+        addVoterAssignmentPending = true;
+        let moved = false, wrote = false;
         try {
-            // 기존 등록 상태 확인 (등록된 유권자도 지역구 변경 가능)
-            const { data: existingRows, error: existingError } = await scopeByTenant(
-                supabase.from('election_voters').select('district_id')
-            )
-                .eq('election_id', currentElectionId)
-                .eq('member_no', memberNo);
-            if (existingError) throw existingError;
-
-            // 공통(비례/찬반) 선거구는 모두 자동 포함
-            const commonDistricts = districtList.filter(d => d.is_common === true);
-            const commonDistrictIdSet = new Set(commonDistricts.map((district) => String(district.id)));
-            const currentRegionalIds = Array.from(new Set(
-                (existingRows || [])
-                    .map((row) => String(row.district_id))
-                    .filter((id) => !commonDistrictIdSet.has(id))
-            ));
-            const currentRegionalNames = currentRegionalIds
-                .map((id) => districtList.find((district) => String(district.id) === id)?.name || '')
-                .filter(Boolean);
-            const selectedDistrictName = districtList.find((district) => String(district.id) === String(districtId))?.name || '선택 선거구';
-            const isDistrictChange = currentRegionalIds.length > 0 && !currentRegionalIds.includes(String(districtId));
-
-            const commonDistrictNames = commonDistricts.map(d => d.name).filter(Boolean);
-            const confirmMsg = isDistrictChange
-                ? `[${memberName}] 님의 지역구를 [${currentRegionalNames.join(', ')}] → [${selectedDistrictName}] 로 변경하시겠습니까?${commonDistricts.length > 0 ? `\n(공통 선거구 ${commonDistrictNames.length}개는 자동 포함됩니다)` : ''}`
-                : (commonDistricts.length > 0
-                    ? `[${memberName}] 님을 선택한 선거구로 추가/반영하시겠습니까?\n(공통 선거구 ${commonDistrictNames.length}개도 자동 포함됩니다)`
-                    : `[${memberName}] 님을 추가/반영하시겠습니까?`);
-
-            if (!await showConfirm(confirmMsg)) return;
-
-            // 기존 지역구(비공통) 배정은 모두 정리 후 새 선택 지역구로 반영
-            if (currentRegionalIds.length > 0) {
-                const { error: clearRegionalError } = await scopeByTenant(
-                    supabase.from('election_voters').delete()
-                )
-                    .eq('election_id', currentElectionId)
-                    .eq('member_no', memberNo)
-                    .in('district_id', currentRegionalIds);
-                if (clearRegionalError) throw clearRegionalError;
+            const { data, error } = await scopeByTenant(supabase.from('election_voters').select('id,member_uuid,district_id'))
+                .eq('election_id', scope.electionId).eq('member_uuid', memberUuid);
+            if (!current()) return;
+            if (error || !Array.isArray(data)) throw new Error('현재 선거구 배정을 불러오지 못했습니다. 다시 확인해 주세요.');
+            const [plan] = planVoterAssignments({ target: scope.districtId, districts: districtList, members: [{id: memberUuid}], rows: data, includeCommon: true });
+            const selectedName = districtList.find(d => String(d.id) === String(scope.districtId))?.name || '선택 선거구';
+            const oldName = plan.move && districtList.find(d => String(d.id) === String(plan.move.district_id))?.name;
+            if (!plan.move && !plan.adds.length) return showAlert('선택한 유권자는 이미 이 선거구에 배정되어 있습니다.');
+            const commonCount = plan.adds.filter(id => districtList.some(d => String(d.id) === id && d.is_common)).length;
+            const question = plan.move
+                ? `[${memberName}] 님의 지역구를 [${oldName}]에서 [${selectedName}](으)로 변경하시겠습니까?`
+                : `[${memberName}] 님을 명부에 반영하시겠습니까?`;
+            if (!await showConfirm(question + (commonCount ? `\n누락된 공통 선거구 ${commonCount}개에도 포함됩니다.` : '')) || !current()) return;
+            if (plan.move) {
+                wrote = true;
+                await moveVoterAssignment(supabase, scope, plan.move);
+                moved = true;
             }
-
-            const rowsToInsert = [];
-
-            // 1) 선택 지역구 행 추가 (member_uuid 포함)
-            rowsToInsert.push({
-                election_id: currentElectionId,
-                member_no: memberNo,
-                district_id: districtId,
-                member_uuid: memberUuid 
-            });
-
-            // 2) 공통(비례/찬반) 선거구 행 자동 추가 (member_uuid 포함)
-            const existingCommonIds = new Set(
-                (existingRows || [])
-                    .map((row) => String(row.district_id))
-                    .filter((id) => commonDistrictIdSet.has(id))
-            );
-            commonDistricts.forEach((commonDistrict) => {
-                if (String(commonDistrict.id) === String(districtId)) return;
-                if (existingCommonIds.has(String(commonDistrict.id))) return;
-                rowsToInsert.push({
-                    election_id: currentElectionId,
-                    member_no: memberNo,
-                    district_id: commonDistrict.id,
-                    member_uuid: memberUuid
-                });
-            });
-
-            // 동일 district_id 중복 방지
-            const uniqueRows = [];
-            const seenDistrictIds = new Set();
-            rowsToInsert.forEach((row) => {
-                const key = String(row.district_id);
-                if (seenDistrictIds.has(key)) return;
-                seenDistrictIds.add(key);
-                uniqueRows.push(row);
-            });
-
-            if (uniqueRows.length > 0) {
-                // DB 입력 실행
-                const { error } = await supabase
-                    .from('election_voters')
-                    .insert(withTenantRows(uniqueRows));
-                if (error && error.code !== '23505') throw error;
+            if (!current()) return;
+            if (plan.adds.length) {
+                wrote = true;
+                await insertVoterAssignments(supabase, withTenantRows(plan.adds.map(districtId => ({
+                    election_id: scope.electionId, member_no: memberNo, member_uuid: memberUuid, district_id: districtId
+                }))));
             }
-
-            // 성공 처리
-            showAlert(isDistrictChange ? `${memberName} 님 지역구를 변경했습니다.` : `${memberName} 님이 반영되었습니다.`);
-            await window.syncCommonVotersFromRegional(false);
-            window.closeAddVoterModal(); // 모달 닫기
-            loadVoterStats(); // 명부 새로고침
-            
-            // [수정] 로그에 작업자 이메일 포함
-            const logMessage = isDistrictChange
-                ? `유권자 지역구 변경: ${memberName}(${memberNo}) ${currentRegionalNames.join(',')} -> ${selectedDistrictName} (작업자: ${currentUserEmail})`
+            if (!current()) return;
+            showAlert(plan.move ? `${memberName} 님의 지역구를 변경했습니다.` : `${memberName} 님을 명부에 반영했습니다.`);
+            const logMessage = plan.move
+                ? `유권자 지역구 변경: ${memberName}(${memberNo}) ${oldName} -> ${selectedName} (작업자: ${currentUserEmail})`
                 : `유권자 추가/반영: ${memberName}(${memberNo}) (작업자: ${currentUserEmail})`;
-            await service.logAction(currentElectionId, 'VOTER_ADD', logMessage);
-            loadLogs(); // 로그 갱신
-
-        } catch (e) {
-            console.error(e);
-            showAlert("추가 실패: " + e.message);
+            window.closeAddVoterModal();
+            loadVoterStats();
+            try {
+                await service.logAction(scope.electionId, 'VOTER_ADD', logMessage);
+                if (scope.electionId === currentElectionId && scope.coopId === currentCoopId && authId === candidateAuthUserId) loadLogs();
+            } catch (_) { /* The roster update is already confirmed. */ }
+        } catch (error) {
+            if (current()) {
+                showAlert((moved ? '지역구는 변경됐습니다. ' : '') + (error?.message || '명부 반영 결과를 확인하지 못했습니다.'));
+                if (wrote) loadVoterStats();
+            }
+        } finally {
+            addVoterAssignmentPending = false;
         }
     };
     
