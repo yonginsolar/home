@@ -1,8 +1,8 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.278
-Change: 2026-11-21 - 용인 조합원 내 정보의 추천 점수.
+Version: v1.0.279
+Change: 2026-11-24 - 조합원 포털 디지털 조합원증·4버튼 출자/신청·테마 리뉴얼 및 증명서 v1.2 연동.
 -->
 <html lang="ko">
 <head>
@@ -17,10 +17,10 @@ Change: 2026-11-21 - 용인 조합원 내 정보의 추천 점수.
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
-<script src="shared/member_portal_layout.js?v=1.3.5" integrity="sha384-IcwaTuuPaMoh8p4EaYxvDbn0Ye+NrQUGy3diLEArvhVNaLjODZgpVZI/c3lJmmeh" crossorigin="anonymous" defer></script>
+<script src="shared/member_portal_layout_v2.js" integrity="sha384-sd9GpYb/LVM0eJ5v6xuDZEziXowk5sx+se3m1M3LgGEOsNqCEE0yfruJpvxAqDPa" crossorigin="anonymous" defer></script>
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous" defer></script>
 <script src="/shared/hcrec_member_referral.js?v=1.0.0" integrity="sha384-mLlDe5K1h1YppHBjxTlyDIfbIAQu6cq6/lK8CGI2mkZpHLA0em3tQQTmHSdVxWsO" crossorigin="anonymous" defer></script>
-    <script>console.log('[Version] v1.0.278 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.279 | membermanage.html');</script>
 <script src="shared/member_telegram.js?v=20261012-1-uimodal-20261013-1" defer></script>
 <meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261027-drafts-1" integrity="sha384-Y6GJlyFfoJiOEqchuEc4XI2MWH+7YTRfdWerBU64g5isJW0VcUhmDs0BAJSpmmTC" crossorigin="anonymous"></script>
@@ -62,9 +62,9 @@ allowKakaoApp: true
 <script src="/shared/public_image_index.js?v=20261012-1"></script>
 <script src="/shared/image_display.js?v=20261012-2"></script>
 <script src="/shared/participation_image_display.js?v=20261012-2"></script>
-<script src="/shared/certificate_template_v1_1.js?v=1.1.0" integrity="sha384-053PhMFtSzGP7dbN5KHtmpVgwYHaiv+c+LQd++rD8IbCOBAgIPOx5GNsD7qttrmj" crossorigin="anonymous"></script>
-<script src="cert_generator.js?v=20261101-unified-1"></script>
-<script src="shared/contribution_cert_preview.js?v=20261101-preparation-1"></script>
+<script src="/shared/certificate_template_v1_2.js" integrity="sha384-nGEelOdGU9e547pyn/FQ2Dnkm1aYSIaID2waqO/hVGUgSpsfyJxCxPece5hDCXIx" crossorigin="anonymous"></script>
+<script src="cert_generator_print_v2.js" integrity="sha384-gkrKKIJ/NAACYBWbUOsLowl64dTt5QROXuexTr8XQm3Dn5zEPtquOh9q004B2GNU" crossorigin="anonymous"></script>
+<script src="shared/contribution_cert_preview_v1_3_1.js" integrity="sha384-3+wrLvO6Au8IDUCAH4fPFB2kmVd5Z965k8wFehCrXR3obPmEOKEXdLieF81+Zu1a" crossorigin="anonymous"></script>
 <script src="shared/member_confirmation.js?v=20261101-preparation-1"></script>
 <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" integrity="sha384-xgNdoEQu0JeBEAN3/f7mrS+EPOsrmARCvhS7PEpk7QI2wvo4YOF3xY3EjQGKHAY9" crossorigin="anonymous"></script>
@@ -2112,6 +2112,7 @@ NO. <span id="infoMemberId">-</span>
 
 <div id="tabWithdraw" class="hidden">
 <h6 class="fw-bold text-danger mb-3">탈퇴 신청</h6>
+<div class="alert alert-secondary small" id="withdrawOwnProfileNotice" hidden>본인 개인 프로필에서만 탈퇴를 신청할 수 있습니다.</div>
 <div class="alert alert-warning small" id="withdrawRefundAccountNotice" hidden>
 <div class="fw-bold mb-1"><i class="bi bi-bank me-1"></i>환급 계좌 확인</div>
 <div id="withdrawRefundAccountMessage"></div>
@@ -2179,7 +2180,7 @@ NO. <span id="infoMemberId">-</span>
 <div id="tabCert" class="hidden text-center py-3">
 <h6 class="fw-bold" id="memberContributionCertificateTitle">출자 증명서</h6>
 <p class="small text-muted">현재 납입된 출자금을 기준으로 발급합니다.</p>
-<button id="memberContributionCertificateView" class="btn btn-outline-success w-100 fw-bold" onclick="downloadCert()">
+<button id="memberContributionCertificateView" class="btn btn-outline-success w-100 fw-bold" onclick="downloadCert(this)">
 <i class="bi bi-file-earmark-text me-2"></i>출자증명서 보기
 </button>
 <hr class="my-4">
@@ -2723,9 +2724,66 @@ window.CoopDialog?.cancelAll(window);closeCustomModal();
 document.getElementById('btnModalYes').onclick=null;document.getElementById('btnModalNo').onclick=null;
 return true;
 },
+canSwitchFund: () => !(portalApplicationWritePending || window.__memberAppLocks?.submitApplication || window.__memberAppLocks?.modifyApplication),
 openApplication: type => toggleTab(type,null,{direct:true}),
 renderHistory: (type,title,summary,list) => renderMemberHistory(type,title,summary,list),
 canViewDividends: () => canViewMemberDividends(),
+isCertificateBusy: () => typeof contributionCertificateBusy !== 'undefined' && Boolean(contributionCertificateBusy),
+openContributionCertificate: (trigger, button) => {
+if (button && typeof button.onclick === 'function' && !String(button.onclick).includes('downloadCert')) { button.click(); return; }
+if (typeof downloadCert === 'function') void downloadCert(trigger);
+else button?.click();
+},
+getMemberCardSnapshot: () => {
+const cardState = portalDashboardCardState;
+if (cardState?.state === 'error') return { state: 'error' };
+const owner = getFamilyRegistrationOwner();
+if (!curMem || !owner || cardState?.state !== 'ready' || cardState.owner !== owner) return { state: 'loading' };
+const coopName = String(
+  (typeof currentMemberCoopName !== 'undefined' && currentMemberCoopName)
+  || (typeof coopRuntimeFormalName !== 'undefined' && coopRuntimeFormalName)
+  || window.__PUBLIC_SITE_COOP_NAME__
+  || (typeof getMembermanageFallbackCoopName === 'function' ? getMembermanageFallbackCoopName() : '')
+  || document.getElementById('headerCoopLink')?.textContent
+  || '협동조합'
+).trim();
+const isGroup = typeof isMemberGroupRecord === 'function'
+  ? isMemberGroupRecord(curMem)
+  : (String(curMem.member_type || '').trim() === '단체' || String(curMem.member_type || '').trim() === 'organization');
+const rootId = typeof getRootMemberProfileId === 'function' ? getRootMemberProfileId() : '';
+const isOwnPersonal = !isGroup && !!rootId
+  && String(curMem.id) === String(rootId)
+  && (!curMem.auth_user_id || String(curMem.auth_user_id) === String(curAuth?.id || ''));
+const isChild = !isOwnPersonal && !isGroup && (
+  (typeof isMemberMinorRecord === 'function' && isMemberMinorRecord(curMem))
+  || String(curMem.join_category || '').trim() === '가족'
+);
+const assetObj = typeof globalAssetSummary !== 'undefined' ? globalAssetSummary : null;
+const rawCap = assetObj && 'total_capital' in assetObj ? assetObj.total_capital : curMem.total_capital;
+const hasCapital = Boolean(cardState.hasCapital && rawCap !== null && rawCap !== undefined && Number.isFinite(Number(rawCap)));
+const canDiv = canViewMemberDividends();
+const rawDivNet = assetObj && 'total_dividend_net' in assetObj ? assetObj.total_dividend_net : null;
+const hasDividend = Boolean(canDiv && (cardState.hasDividend || (rawDivNet !== null && rawDivNet !== undefined && Number.isFinite(Number(rawDivNet)))));
+const shareUnit = (portalCapitalRules && Number.isSafeInteger(portalCapitalRules.unit) && portalCapitalRules.unit > 0) ? portalCapitalRules.unit : null;
+return {
+  state: 'ready',
+  coopName,
+  displayName: getMemberPreferredDisplayName(curMem) || String(curMem.name || '').trim() || '이름 확인 필요',
+  memberId: String(curMem.member_id || '').trim(),
+  joinDate: String(curMem.join_date || '').trim(),
+  isSiteMember: isSiteMemberPortalProfile(),
+  isGroup,
+  isOwnPersonal,
+  isChild,
+  hasCapital,
+  totalCapital: hasCapital ? Number(rawCap) : null,
+  shareUnit,
+  canDividends: canDiv,
+  hasDividend,
+  dividendNet: hasDividend && rawDivNet !== null && rawDivNet !== undefined && Number.isFinite(Number(rawDivNet)) ? Number(rawDivNet) : null,
+  dividendGross: hasDividend && assetObj && Number.isFinite(Number(assetObj.total_dividend_gross)) ? Number(assetObj.total_dividend_gross) : null
+};
+},
 documents: {
 getClient: () => _supabase,
 getContext: () => getFamilyRegistrationOwner() ? {owner:getFamilyRegistrationOwner(),actor:String(curAuth.id),coop:String(currentMemberCoopId),profile:String(curMem.id),role:curMem.role,officials:portalDocumentRoles,documents:isCoopRuntimeModuleEnabled('documents'),notices:isCoopRuntimeModuleEnabled('site_admin')} : null,
@@ -2739,12 +2797,14 @@ async function preparePortalDirectSections(key,settings={}) {
 const owner=getFamilyRegistrationOwner(),revision=++portalDirectRevision;
 const current=()=>owner&&owner===getFamilyRegistrationOwner()&&revision===portalDirectRevision&&window.MemberPortalPurposeController?.getSelected()===key;
 void loadPortalPurposeExtras(key);
-syncMemberReferralPanels(key);
+if (typeof syncMemberReferralPanels === 'function') syncMemberReferralPanels(key);
 if(key==='funds') {
 syncWithdrawRefundAccountUi();
 if(settings.reason==='extra-capital-link')await Promise.resolve();
-else await toggleTab('extra',null,{restore:true,direct:true});
-if(current()) await toggleTab('reduction',null,{restore:true,direct:true});
+else if(settings.reason!=='application') {
+const activeFund = window.MemberPortalPurposeController?.getSelectedFund?.() || 'extra';
+if (current() && activeFund) await toggleTab(activeFund,null,{restore:true,direct:true});
+}
 } else if(key==='profile') {
 setProfileDetailsExpanded(true);
 if(current()&&canUsePortalPartner())void toggleTab('partner',null,{restore:true});
@@ -2762,8 +2822,9 @@ eligible:access?.found===true && String(access.profile_id)===String(curMem?.id) 
     && !!extraMenu&&!extraMenu.hidden&&!extraMenu.classList.contains('hidden'),
 current:currentProfileLoad,
 consume(){try{history.replaceState(history.state,'', '/membermanage');}catch(_){}},
-showFunds:()=>controller.show('funds',{reason:'extra-capital-link'}),
+showFunds:()=>{controller.selectFund?.('extra',{invoke:false});return controller.show('funds',{reason:'extra-capital-link'});},
 openExtra(){
+controller.selectFund?.('extra',{invoke:false});
 void toggleTab('extra',null,{direct:true});
 const heading=document.getElementById('portalExtraCapitalHeading');
 if(currentProfileLoad()&&heading?.isConnected&&!heading.closest('.portal-direct-card[hidden]')
@@ -2861,6 +2922,7 @@ return portalIdentityClaim.open({name:document.getElementById('manualName').valu
 }
 let curAuth = null;
 // Personal drafts stay in this page's memory, keyed by authenticated owner/coop/profile.
+let portalDashboardCardState = { state: 'loading', owner: '', hasCapital: false, hasDividend: false };
 const portalProfileDrafts = new Map();
 let portalProfileEditor = null;
 let portalProfileDraftOwner = '';
@@ -3093,6 +3155,10 @@ if (!draft) return;
 const [owner,member,id,type] = JSON.parse(key);
 if (owner !== portalApplicationOwner() || member !== String(curMem?.id || '')) return;
 const trigger = document.activeElement;
+if (['extra','reduction'].includes(type) && window.MemberPortalPurposeController?.isDirect) {
+window.MemberPortalPurposeController.selectFund?.(type, { invoke: false });
+void toggleTab(type, null, { restore: true, direct: true });
+}
 openModifyModal(id,type,draft.baseline);
 const state = portalModifyEditor;
 if (!currentPortalModifyContext(state) || state.key !== key) return;
@@ -3120,7 +3186,9 @@ if (!accepted || !current() || revision !== portalModifyRevision || portalModify
     || snapshot !== JSON.stringify(portalModifySnapshot())) return;
 portalModifyDrafts.delete(state.key);
 closeModifyModal();renderPortalModifyDrafts();
-const target = document.querySelector('#portalModifyDraftList button') || document.getElementById('actionArea');
+const target = document.querySelector('#portalModifyDraftList button')
+    || (window.MemberPortalPurposeController?.isDirect ? window.MemberPortalPurposeController.getFundButton?.(state.type) : null)
+    || document.getElementById('actionArea');
 if (target) { if (target.id === 'actionArea') target.tabIndex = -1;target.focus({preventScroll:true}); }
 } catch (_) {
 if (current()) showModal('확인창을 열지 못했습니다. 다시 시도해 주세요.');
@@ -3711,7 +3779,7 @@ CoopSafeLog.error("Failed to clear Supabase auth cache:", e);
 }
 
 async function signOutSilently(client = _supabase) {
-window.ContributionCertPreview?.clear();
+window.ContributionCertPreview?.clear({restoreFocus:false});
 clearPortalProfileEdits();
 resetFamilyRegistrationDraft();
 suppressSessionExpiredHandling = true;
@@ -4357,7 +4425,7 @@ _supabase.auth.onAuthStateChange(async (event, session) => {
 if (!session || (curAuth?.id && curAuth.id !== session.user?.id)) {
 hcrecReferralProfile?.clear();
 clearMemberReferralPanels();
-window.ContributionCertPreview?.clear();
+window.ContributionCertPreview?.clear({restoreFocus:false});
 window.MemberTelegramConnection?.clear();
 clearPortalProfileEdits();
 resetFamilyRegistrationDraft();
@@ -5572,12 +5640,13 @@ hcrecReferralProfile?.sync();
 }
 async function loadDashboardData(uuid, options = {}) {
 hcrecReferralProfile?.clear();
-clearMemberReferralPanels();
+if (typeof clearMemberReferralPanels === 'function') clearMemberReferralPanels();
 window.PortalLoginToolRecovery?.cancel();
 portalIdentityClaim?.suspend();
 if (portalProfileSaving || portalApplicationWritePending || portalPartnerWritePending || window.PortalBoardEditor?.busy()) return false;
 loadMemberCapitalRules.cancel?.();
 if (typeof invalidateExtraCapitalDepositAccountRead === 'function') invalidateExtraCapitalDepositAccountRead();
+portalDashboardCardState = { state: 'loading', owner: '', hasCapital: false, hasDividend: false };
 window.MemberPortalPurposeController?.suspend();++portalDirectRevision;
 portalDeferredViews?.badgeStage?.remove();portalDeferredViews=null;
 if (typeof invalidateIncomingConnects === 'function') invalidateIncomingConnects();
@@ -5601,7 +5670,7 @@ const currentProfileLoad = () => profileLoadRevision === portalProfileLoadRevisi
 invalidatePortalProfileDirectoryRead();
 portalProfileReadFailure = null;
 hidePortalRetryState();
-if (curMem?.id && String(curMem.id) !== String(uuid)) window.ContributionCertPreview?.clear();
+if (curMem?.id && String(curMem.id) !== String(uuid)) window.ContributionCertPreview?.clear({restoreFocus:false});
 try {
 // [핵심 변경] 현재 로드하는 프로필 ID를 브라우저에 기억시킴 (새로고침 대비)
 sessionStorage.setItem('lastActiveProfile', uuid);
@@ -5672,6 +5741,9 @@ const dividends = mergeDividendHistoryRows(
 Array.isArray(recent.legacy_dividends) ? recent.legacy_dividends : [],
 Array.isArray(recent.confirmed_dividends) ? recent.confirmed_dividends : []
 );
+const rawAssets = dashboardData?.assets;
+const hasConfirmedCapital = Boolean(rawAssets && rawAssets.total_capital !== null && rawAssets.total_capital !== undefined && Number.isFinite(Number(rawAssets.total_capital)));
+const hasConfirmedDividend = Boolean(rawAssets && rawAssets.total_dividend_net !== null && rawAssets.total_dividend_net !== undefined && Number.isFinite(Number(rawAssets.total_dividend_net)));
 const assets = {
 total_capital: Number(dashboardData?.assets?.total_capital || 0),
 total_donation: Number(dashboardData?.assets?.total_donation || 0),
@@ -5708,6 +5780,7 @@ if (!currentProfileLoad()) return;
 
 // 5. 렌더링 호출
 portalDeferredViews={owner:getFamilyRegistrationOwner(),member:String(uuid),revision:profileLoadRevision,profile:false,activity:false,badgeStage:null};
+portalDashboardCardState={owner:getFamilyRegistrationOwner(),state:'ready',hasCapital:hasConfirmedCapital,hasDividend:hasConfirmedDividend};
 renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta);
 const restoredApplicationTab = ['extra','reduction','withdraw','cert'].find(type => !document.getElementById('tab'+type[0].toUpperCase()+type.slice(1))?.classList.contains('hidden'));
 if (restoredApplicationTab && typeof toggleTab === 'function') void toggleTab(restoredApplicationTab, null, {restore:true});
@@ -5721,7 +5794,7 @@ if(!window.MemberPortalPurposeController?.isDirect){void loadPortalPurposeExtras
 
 	showOnly('dashboardSection');
 	syncHcrecReferralProfile();
-	syncMemberReferralPanels(window.MemberPortalPurposeController?.getSelected() ?? 'profile');
+	if (typeof syncMemberReferralPanels === 'function') syncMemberReferralPanels(window.MemberPortalPurposeController?.getSelected() ?? 'profile');
 	openHcrecCapitalShortcut(currentProfileLoad);
 	if (!isSiteMemberPortalProfile()) await handlePendingEducationQrCheckIn(uuid);
 	if (!isSiteMemberPortalProfile()) {
@@ -5734,6 +5807,8 @@ return {ok:true,revision:profileLoadRevision,actor:profileLoadActor,member:Strin
 
 	} catch (e) {
 if (!currentProfileLoad()) return;
+portalDashboardCardState = { state: 'error', owner: '', hasCapital: false, hasDividend: false };
+window.MemberPortalPurposeController?.syncCard?.();
 CoopSafeLog.error("Dashboard Load Error:", e);
 if (options && options.rethrowOnError) {
 if (e && (e.code === 'PGRST301' || e.status === 403)) {
@@ -7321,6 +7396,14 @@ if(!window.MemberPortalPurposeController?.isDirect)void loadQuizPilotEntry();
 renderTimeline(ledger, apps, visibleDonations, visiblePoints, visibleDividends);
 initializePortalProfileEdit(member);
 portalDocumentRoles = Array.isArray(myRoles) ? myRoles.slice() : [];
+if (portalDashboardCardState.owner !== getFamilyRegistrationOwner()) {
+portalDashboardCardState = {
+  owner: getFamilyRegistrationOwner(),
+  state: 'ready',
+  hasCapital: Boolean(assets && assets.total_capital !== null && assets.total_capital !== undefined && Number.isFinite(Number(assets.total_capital))),
+  hasDividend: Boolean(assets && assets.total_dividend_net !== null && assets.total_dividend_net !== undefined && Number.isFinite(Number(assets.total_dividend_net)))
+};
+}
 window.MemberPortalPurposeController?.refresh();
 }
 
@@ -9595,13 +9678,16 @@ String(curMem?.bank_name || '').trim()
 
 function syncWithdrawRefundAccountUi() {
 const ready = hasRefundAccountLocally();
-const own = !!curMem && String(curMem.id) === String(getRootMemberProfileId() || '')
+const isGroup = typeof isMemberGroupRecord === 'function' ? isMemberGroupRecord(curMem) : String(curMem?.member_type || '').trim() === '단체';
+const own = !!curMem && !isGroup && String(curMem.id) === String(getRootMemberProfileId() || '')
     && (!curMem.auth_user_id || String(curMem.auth_user_id) === String(curAuth?.id || ''));
+const ownNotice = document.getElementById('withdrawOwnProfileNotice');
 const message = document.getElementById('withdrawRefundAccountMessage');
 const notice = document.getElementById('withdrawRefundAccountNotice');
 const reductionNotice = document.getElementById('reductionRefundAccountNotice');
 const setupButton = document.getElementById('withdrawRefundAccountButton');
 const submitButton = document.getElementById('withdrawSubmitButton');
+if (ownNotice) ownNotice.hidden = !curMem || own;
 if (message) {
 message.textContent = !own || ready ? '' : '환급받을 계좌를 내 정보에서 등록해 주세요.';
 }
@@ -9657,6 +9743,7 @@ if(btn) btn.classList.add('active');
 const targetId = 'tab' + type.charAt(0).toUpperCase() + type.slice(1);
 const targetEl = document.getElementById(targetId);
 if(targetEl) targetEl.classList.remove('hidden');
+if(['extra','reduction','withdraw','cert'].includes(type)) window.MemberPortalPurposeController?.selectFund?.(type,{invoke:false});
 
 if(type === 'extra') {
 loadExtraCapitalDepositAccount();
@@ -9741,9 +9828,13 @@ if(!current())return;
 if(!window.MemberConfirmation)return showModal('확인서 준비 기능을 불러오지 못했습니다. 다시 시도해 주세요.');
 await window.MemberConfirmation.open({client:_supabase,memberId,coopId,isCurrent:current,notify:showModal});
 }
-async function downloadCert() {
+async function downloadCert(triggerElement = null) {
 if (!curMem || !curAuth) return;
 if (!window.ContributionCertPreview) return showModal('증명서 미리보기를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
+const openerFocus = (triggerElement && typeof triggerElement.focus === 'function' && triggerElement.isConnected)
+  ? triggerElement
+  : document.activeElement;
+const revision = portalProfileLoadRevision;
 if (contributionCertificateBusy && contributionCertificateRun?.phase === 'preparation' && !contributionCertificateRun.preview?.isCurrent()) {
 const previous = contributionCertificateRun;previous.preview?.close();
 if (contributionCertificateRun === previous) { contributionCertificateRun = null;contributionCertificateBusy = false; }
@@ -9752,7 +9843,7 @@ if (contributionCertificateBusy) {
 const run = contributionCertificateRun;
 if (run && !run.preview?.isCurrent() && !run.waiting?.isCurrent()) {
 const target=curMem.id,actor=curAuth.id,coop=currentMemberCoopId;
-run.waiting=window.ContributionCertPreview.start({isCurrent:()=>curMem?.id===target && curAuth?.id===actor && currentMemberCoopId===coop});
+run.waiting=window.ContributionCertPreview.start({isCurrent:()=>revision===portalProfileLoadRevision && curMem?.id===target && curAuth?.id===actor && currentMemberCoopId===coop, returnFocus:openerFocus});
 run.waiting.fail('발급 결과를 확인하고 있습니다.');
 }
 return;
@@ -9765,8 +9856,8 @@ try {
 const member = { ...curMem };
 const authId = curAuth.id;
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
-if (contributionCertificateRun !== run) return;
-const sameContext = () => curAuth?.id === authId && curMem?.id === member.id && currentMemberCoopId === coopId;
+if (contributionCertificateRun !== run || revision !== portalProfileLoadRevision) return;
+const sameContext = () => revision === portalProfileLoadRevision && curAuth?.id === authId && curMem?.id === member.id && currentMemberCoopId === coopId;
 const requireIdentity = identity => {
 if(identity.error || identity.data?.user?.id !== authId || !sameContext()) {
 if(preview?.isCurrent()) window.ContributionCertPreview.clear();
@@ -9781,7 +9872,7 @@ requireIdentity(identity);
 if(access.error) throw new Error('증명서 발급 권한을 확인하지 못했습니다. 다시 시도해주세요.');
 if(access.data !== true) { if(preview?.isCurrent()) window.ContributionCertPreview.clear();throw new Error('본인 또는 등록된 단체 관리자의 발급 권한이 필요합니다.'); }
 };
-preview = window.ContributionCertPreview.start({ isCurrent: sameContext, authorize, onClose: () => {
+preview = window.ContributionCertPreview.start({ isCurrent: sameContext, authorize, returnFocus: openerFocus, onClose: () => {
 if (run.phase === 'preparation' && contributionCertificateRun === run) { contributionCertificateRun = null;contributionCertificateBusy = false; }
 } });
 run.preview = preview;
@@ -9831,13 +9922,13 @@ coopId,requireSeal:true,companyProfile,output:'preview',issueDate
 if (e?.code === 'CERTIFICATE_PREPARATION_CANCELED') return;
 CoopSafeLog.error("[membermanage] operation failed", e);
 if (preview) {
-if (e?.code === 'CERTIFICATE_PREPARATION_TIMEOUT') preview.fail('증명서 준비가 지연되고 있습니다. 다시 확인해 주세요.', { retry: downloadCert });
+if (e?.code === 'CERTIFICATE_PREPARATION_TIMEOUT') preview.fail('증명서 준비가 지연되고 있습니다. 다시 확인해 주세요.', { retry: () => downloadCert(openerFocus) });
 else if (e?.code !== 'CERTIFICATE_PREPARATION_CANCELED') preview.fail('증명서 발급 중 오류가 발생했습니다.\n' + (e.message || ''));
 }
 else showModal('증명서를 준비하지 못했습니다. 다시 시도해 주세요.');
 } finally {
 if (contributionCertificateRun === run) { contributionCertificateRun = null;contributionCertificateBusy = false; }
-run.waiting?.fail('발급 상태를 다시 확인해 주세요.', { retry: downloadCert });
+run.waiting?.fail('발급 상태를 다시 확인해 주세요.', { retry: () => downloadCert(openerFocus) });
 }
 }
 
@@ -12281,8 +12372,13 @@ syncIncomingConnectStatus(active);
 // [수정] 화면 전환 유틸리티: style 제어 방식 폐기 -> classList 제어 방식 도입
 function showOnly(sectionId) {
 window.PortalLoginToolRecovery?.cancel();
-if(sectionId!=='dashboardSection'){hcrecReferralProfile?.clear();clearMemberReferralPanels();}
-if (sectionId !== 'dashboardSection') window.MemberPortalPurposeController?.suspend();
+if(sectionId!=='dashboardSection'){hcrecReferralProfile?.clear();if(typeof clearMemberReferralPanels==='function')clearMemberReferralPanels();}
+if (sectionId !== 'dashboardSection') {
+if (portalDashboardCardState?.state !== 'error') {
+portalDashboardCardState = { state: 'loading', owner: '', hasCapital: false, hasDividend: false };
+}
+window.MemberPortalPurposeController?.suspend();
+}
 // 제어할 대상 섹션 ID 목록 (명시적으로 지정하여 안전성 확보)
 const sections = ['loginSection', 'dashboardSection', 'formerMemberSection'];
 
