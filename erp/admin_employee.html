@@ -521,17 +521,25 @@ Change: 2026-11-22 - 최초 직원 명단에서 설정·도구 코드 분리.
   </details>
 </div>
        <div class="tab-pane fade" id="tabSalary">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2" id="salaryMonthControls">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <label class="fw-bold small" for="salaryMonth">귀속월</label>
+      <div class="d-flex align-items-center gap-2">
+        <input data-erp-query-control type="month" id="salaryMonth" class="form-control form-control-sm w-auto"
+               aria-describedby="salaryMonthStatus" oninput="syncEmployeeSalaryMonthUi()" onchange="syncEmployeeSalaryMonthUi()">
+        <button type="button" class="btn btn-sm btn-primary text-nowrap" id="btnQuerySalaryMonth" onclick="changeEmployeeSalaryMonth(event)"
+                onkeydown="if (event.key === 'Enter' &amp;&amp; event.repeat &amp;&amp; !event.isComposing &amp;&amp; event.keyCode !== 229) event.preventDefault()">조회</button>
+      </div>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-dark" id="btnPrintEmployeeSalary" onclick="printSalaryAdmin()" disabled>🖨️ 명세서 인쇄</button>
+  </div>
+  <p id="salaryMonthStatus" class="small text-muted mb-3" role="status" aria-live="polite" hidden></p>
+  <fieldset class="border-0 p-0 m-0" id="employeeSalaryFields" disabled hidden>
   <div id="salaryAlertBox" class="mb-3 d-none"></div>
 
   <div class="alert alert-info d-flex justify-content-between align-items-center py-2 mb-3">
     <span class="small">📢 연봉 기준 <strong>자동 계산</strong> (귀속월 기준)</span>
     <span class="badge bg-secondary" id="salaryStatusBadge">조회 중...</span>
-  </div>
-
-  <div class="d-flex align-items-center mb-3">
-    <label class="me-2 fw-bold small" for="salaryMonth">귀속월</label>
-    <input data-erp-query-control type="month" id="salaryMonth" class="form-control form-control-sm w-auto me-2" onchange="changeEmployeeSalaryMonth()">
-    <button class="btn btn-sm btn-outline-dark" onclick="printSalaryAdmin()">🖨️ 명세서 인쇄</button>
   </div>
 
   <div class="info-card border mb-3">
@@ -672,6 +680,7 @@ Change: 2026-11-22 - 최초 직원 명단에서 설정·도구 코드 분리.
   <button id="btnDeleteSalary" class="btn btn-danger w-25 btn-rounded d-none" onclick="deleteSalary()">🗑️ 삭제</button>
   <button id="btnSaveSalary" class="btn btn-success flex-grow-1 btn-rounded" onclick="saveSalary()">💾 급여 확정 및 저장</button>
 </div>
+  </fieldset>
 </div>
           <div class="tab-pane fade" id="tabLog">
             <div class="card bg-light border-0 p-3 mb-3 text-center leave-summary-card-button" role="button" tabindex="0" onclick="showAdminLeaveDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdminLeaveDetail();}" title="연차 상세 리포트 보기"><small class="text-muted">사용 가능 휴가</small><h3 class="fw-bold text-primary m-0" id="displayLeaveRemain">—</h3><div class="small text-primary mt-2">상세 보기</div></div>
@@ -1210,32 +1219,87 @@ function syncEmployeeLeaveApplyState() {
         reason.textContent = extraUnavailable ? '추가 휴가를 부여할 권한을 확인하지 못했습니다.' : '';
     }
 }
-function requestEmployeeDetailDiscard(action, {tabId = ''} = {}) {
+function requestEmployeeDetailDiscard(action, {tabId = '', onCancel, isCurrent = () => true} = {}) {
     if (employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
+    if (!isCurrent()) return;
     if (!(tabId ? hasUnsavedEmployeeDetailTab(tabId) : hasUnsavedEmployeeDetail())) { action(); return; }
     employeeDetailDiscardPending = true;
     const empId = currentEmpId, revision = employeeDetailRevision;
-    document.getElementById('confirmModal').addEventListener('hidden.bs.modal', () => {
+    const modal = document.getElementById('confirmModal');
+    let accepted = false;
+    const finish = () => {
+        modal.removeEventListener('hidden.bs.modal',finish);
         employeeDetailDiscardPending = false;
-    }, { once: true });
-    showConfirm('저장하지 않은 변경사항을 버릴까요?', () => {
-        if (empId !== currentEmpId || revision !== employeeDetailRevision || isEmployeeDetailSaving()) return;
+        if (!accepted) onCancel?.();
+        if (tabId === 'tabSalary') syncEmployeeSalaryMonthUi();
+    };
+    modal.addEventListener('hidden.bs.modal',finish,{once:true});
+    const confirmation = showConfirm('저장하지 않은 변경사항을 버릴까요?', () => {
+        if (empId !== currentEmpId || revision !== employeeDetailRevision || isEmployeeDetailSaving() || !isCurrent()) return;
+        accepted = true;
         checkpointEmployeeDetailDraft(document.getElementById(tabId || 'detailModal'));
         action();
     });
+    if (onCancel && confirmation?.then) void confirmation.then(finish,finish);
 }
-function changeEmployeeSalaryMonth() {
+function employeeSalaryInputMonth() {
     const input = document.getElementById('salaryMonth');
-    const requestedMonth = input.value;
-    input.value = employeeSalarySelectedMonth;
-    if (requestedMonth === employeeSalarySelectedMonth || employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
+    return input && !input.validity.badInput && /^\d{4}-(0[1-9]|1[0-2])$/.test(input.value) ? input.value : '';
+}
+function employeeSalaryTabEntry() {
+    return employeeDetailTabLoads.get(`${getHrSettingsOwner()}|${String(currentEmpId || '')}|${employeeDetailRevision}|tabSalary|${employeeSalarySelectedMonth}`);
+}
+function canUseEmployeeSalaryMonth(month = employeeSalarySelectedMonth) {
+    const entry = employeeSalaryTabEntry();
+    const owner = getHrSettingsOwner();
+    const contract = currentPayrollContractContext;
+    return !!month && month === employeeSalarySelectedMonth && month === employeeSalaryInputMonth()
+        && entry?.ready === true && entry.context.isCurrent() && isHrSettingsContextCurrent(owner)
+        && contract?.owner === owner && contract.empId === String(currentEmpId) && contract.month === month;
+}
+function syncEmployeeSalaryMonthUi(state = employeeSalaryTabEntry()?.viewState || 'idle') {
+    const input = document.getElementById('salaryMonth');
+    const button = document.getElementById('btnQuerySalaryMonth');
+    const fields = document.getElementById('employeeSalaryFields');
+    const status = document.getElementById('salaryMonthStatus');
+    const print = document.getElementById('btnPrintEmployeeSalary');
+    const pendingMonth = employeeSalaryInputMonth();
+    const matches = !!pendingMonth && pendingMonth === employeeSalarySelectedMonth;
+    const owned = isHrSettingsContextCurrent(getHrSettingsOwner()) && !!currentEmpId;
+    const busy = isEmployeeDetailSaving() || employeeDetailDiscardPending;
+    input.disabled = !owned || isEmployeeDetailSaving();
+    button.setAttribute('aria-disabled',String(!owned || busy || state === 'loading' && matches));
+    button.setAttribute('aria-busy',String(state === 'loading'));
+    fields.hidden = !owned || state !== 'ready';
+    fields.disabled = busy || !canUseEmployeeSalaryMonth();
+    print.disabled = fields.disabled || !currentSalaryDataForPrint;
+    const message = !owned ? '급여를 조회할 권한을 확인하지 못했습니다.'
+        : state === 'loading' ? `${employeeSalarySelectedMonth} 급여를 조회하는 중입니다.`
+        : !pendingMonth ? '귀속월을 입력해 주세요.'
+        : state === 'error' && matches ? '급여를 불러오지 못했습니다. 조회를 다시 눌러 주세요.'
+        : !matches && state === 'ready' ? `현재 ${employeeSalarySelectedMonth} 자료입니다. 새 월을 보려면 조회를 눌러 주세요.`
+        : !matches ? '입력한 월을 보려면 조회를 눌러 주세요.' : '';
+    status.hidden = !message;
+    if (status.textContent !== message) status.textContent = message;
+}
+function changeEmployeeSalaryMonth(event) {
+    const input = document.getElementById('salaryMonth');
+    const requestedMonth = employeeSalaryInputMonth();
+    if (!isEmployeeDetailTabVisible('tabSalary') || employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
+    if (!requestedMonth) { syncEmployeeSalaryMonthUi();input.focus();return; }
+    if (requestedMonth === employeeSalarySelectedMonth && (employeeSalaryTabEntry()?.pending || event?.detail > 1)) return;
     const empId = currentEmpId, revision = employeeDetailRevision, owner = getHrSettingsOwner();
+    const current = () => !!empId && empId === currentEmpId && revision === employeeDetailRevision
+        && isHrSettingsContextCurrent(owner) && isEmployeeDetailTabVisible('tabSalary') && employeeSalaryInputMonth() === requestedMonth;
     requestEmployeeDetailDiscard(() => {
-        if (empId !== currentEmpId || revision !== employeeDetailRevision || owner !== getHrSettingsOwner()) return;
         employeeSalarySelectedMonth = requestedMonth;
-        input.value = requestedMonth;
         void ensureEmployeeDetailTab('tabSalary', {force:true});
-    }, {tabId:'tabSalary'});
+    }, {tabId:'tabSalary',isCurrent:current,onCancel:()=>{
+        if (!current()) return;
+        input.value = employeeSalarySelectedMonth;
+        syncEmployeeSalaryMonthUi();
+    }});
+    if (employeeDetailDiscardPending) syncEmployeeSalaryMonthUi();
 }
 function snapshotEmployeeDetailTabDraft(tabId) {
     const pane = document.getElementById(tabId);
@@ -1514,6 +1578,7 @@ function isEmployeeDetailTabVisible(tabId) {
         && (!accessGroup || accessGroup.classList.contains('active'));
 }
 function setEmployeeDetailTabState(tabId, state) {
+    if (tabId === 'tabSalary') { renderEmployeeSalaryReadState(employeeSalaryTabEntry(),state);return; }
     const pane = document.getElementById(tabId);
     if (!pane) return;
     let status = pane.querySelector('[data-detail-demand-status]');
@@ -1560,45 +1625,19 @@ async function verifyEmployeeDetailTabAccess(owner, readContext = null) {
     }
 }
 function renderEmployeeSalaryReadState(entry, state) {
-    const pane = document.getElementById('tabSalary');
-    let status = pane.querySelector('[data-detail-demand-status]');
-    if (!status) {
-        status = document.createElement('div');
-        status.dataset.detailDemandStatus = '1'; status.className = 'text-center text-muted py-4';
-        pane.prepend(status);
-    }
-    if (entry.status !== status || !entry.retry?.isConnected) {
-        entry.status = status; entry.message = document.createElement('span');
-        entry.retry = document.createElement('button'); entry.retry.type = 'button';
-        entry.retry.className = 'btn btn-sm btn-outline-primary ms-2 text-wrap';
-        entry.retry.onclick = () => { if (!entry.pending && entry.context.isOwned()) void ensureEmployeeDetailTab('tabSalary', {force:true}); };
-        entry.retry.onkeydown = event => {
-            if (!event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && event.key === 'Enter' && event.repeat) event.preventDefault();
-        };
-        status.replaceChildren(entry.message, entry.retry);
-    }
-    if (!employeeDetailTabVisibility.has(pane.id)) employeeDetailTabVisibility.set(pane.id, new Map());
-    const visibility = employeeDetailTabVisibility.get(pane.id);
-    for (const child of pane.children) {
-        if (child === status) continue;
-        if (!visibility.has(child)) visibility.set(child, child.hidden);
-        child.hidden = state === 'ready' ? visibility.get(child) : true;
-    }
-    status.hidden = state === 'ready';
-    status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-    status.setAttribute('aria-busy', String(state === 'loading'));
-    entry.message.textContent = state === 'error' ? '급여 자료를 확인하지 못했습니다. 입력한 내용은 유지됩니다.' : '급여 자료를 확인하는 중입니다.';
-    entry.retry.textContent = state === 'loading' ? '확인 중…' : '다시 확인';
-    entry.retry.setAttribute('aria-disabled', String(state === 'loading'));
+    if (entry) entry.viewState = state;
+    syncEmployeeSalaryMonthUi(state);
 }
-function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
+function ensureEmployeeDetailTab(tabId, {force = false, allowBusy = false} = {}) {
     if (tabId === 'tabLog') return ensureEmployeeLeaveTab({force});
     if (['tabModuleAccess','tabNotificationAccess'].includes(tabId)) return ensureEmployeeAccessTab(tabId, {force});
     const loaders = {tabSalary:loadSalaryData,tabLog:loadLeave,tabModuleAccess:loadEmployeeModuleAccess,tabNotificationAccess:loadEmployeeNotificationAssignments};
-    if (!loaders[tabId] || !isEmployeeDetailTabVisible(tabId) || isEmployeeDetailSaving()) return Promise.resolve();
+    if (!loaders[tabId] || !isEmployeeDetailTabVisible(tabId)) return Promise.resolve();
+    if (!allowBusy && isEmployeeDetailSaving()) { syncEmployeeSalaryMonthUi(); return Promise.resolve(); }
     const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
-    if (!owner || !empId) return Promise.resolve();
-    const month = tabId === 'tabSalary' ? document.getElementById('salaryMonth').value : '';
+    if (!owner || !empId) { syncEmployeeSalaryMonthUi('idle'); return Promise.resolve(); }
+    const month = employeeSalarySelectedMonth;
+    if (!month) {renderEmployeeSalaryReadState(null,'idle');return Promise.resolve();}
     const key = `${owner}|${empId}|${revision}|${tabId}|${month}`;
     for (const [previousKey, previous] of employeeDetailTabLoads) {
         if (previousKey === key || previous.context?.tabId !== 'tabSalary' || !previous.pending) continue;
@@ -1613,13 +1652,10 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
     const readRevision = ++entry.readRevision, controller = new AbortController();
     const isOwned = () => owner === getHrSettingsOwner() && empId === String(currentEmpId || '')
         && revision === employeeDetailRevision
-        && (tabId !== 'tabSalary' || month === document.getElementById('salaryMonth').value);
+        && month === employeeSalarySelectedMonth;
     const isCurrent = () => isOwned() && entry.readRevision === readRevision && !controller.signal.aborted && isEmployeeDetailTabVisible(tabId);
     const context = {tabId,isOwned,isCurrent,signal:controller.signal};
-    const trigger = document.activeElement, followFocus = trigger === entry.retry;
-    let moved = false, timer;
-    const track = event => { if (event.target !== trigger && event.target !== entry.retry && event.target !== entry.status) moved = true; };
-    if (followFocus) for (const name of ['focusin','pointerdown','keydown']) document.addEventListener(name,track,true);
+    let timer;
     entry.context = context; entry.controller = controller; entry.resume = false; entry.ready = false;
     renderEmployeeSalaryReadState(entry, 'loading');
     const task = async () => {
@@ -1648,18 +1684,9 @@ function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
             return false;
         } finally {
             clearTimeout(timer);
-            if (followFocus) for (const name of ['focusin','pointerdown','keydown']) document.removeEventListener(name,track,true);
             if (entry.readRevision === readRevision) {
                 entry.pending = null; entry.controller = null;
                 if (isOwned() && !isEmployeeDetailTabVisible(tabId) && !entry.ready) entry.resume = true;
-                const box = trigger?.getBoundingClientRect();
-                if (followFocus && !moved && isOwned() && isEmployeeDetailTabVisible(tabId) && document.hasFocus()
-                    && box && box.top >= 0 && box.bottom <= window.innerHeight
-                    && (document.activeElement === entry.retry || document.activeElement === document.body)) {
-                    const target = entry.ready ? document.getElementById(tabId) : entry.retry;
-                    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex','-1');
-                    target.focus({preventScroll:true});
-                }
             }
         }
     })();
@@ -3823,7 +3850,7 @@ document.addEventListener('DOMContentLoaded', async function bootHrEmployee() {
     }
 
     document.getElementById("btnConfirmYes").onclick = function() { if(confirmCallback) confirmCallback(); confirmModal.hide(); };
-    document.getElementById("salaryMonth").value = formatAdminEmployeeKstMonth();
+    document.getElementById("salaryMonth").value = employeeSalarySelectedMonth = formatAdminEmployeeKstMonth();
     document.getElementById("ledgerMonth").value = formatAdminEmployeeKstMonth();
     const payrollImportMonthInput = document.getElementById('payrollImportMonth');
     if (payrollImportMonthInput && !payrollImportMonthInput.value) {
@@ -4163,7 +4190,7 @@ async function loadDurunuriSupportState(month, empId, readContext = null, suppor
     if (!module) return;
     try {
         const supportMap = await (supportRead || module.getSupportMap(_supabase, ym));
-        if (owner !== getHrSettingsOwner() || ym !== document.getElementById('salaryMonth')?.value
+        if (owner !== getHrSettingsOwner() || ym !== employeeSalarySelectedMonth
             || revision !== employeeDetailRevision || salaryRevision !== employeeSalaryLoadRevision || eid !== String(currentEmpId)
             || (readContext && !readContext.isCurrent())) return;
         const support = supportMap?.[eid] || null;
@@ -4753,7 +4780,7 @@ function resetPayrollImportValidationUi() {
 function resetPayrollImportState(options = {}) {
     getPayrollImportBatchController().clear();
     const keepMonth = options?.keepMonth === true;
-    const defaultMonth = document.getElementById('salaryMonth')?.value || formatAdminEmployeeKstMonth();
+    const defaultMonth = employeeSalarySelectedMonth || formatAdminEmployeeKstMonth();
     payrollImportState = {
         fileName: '',
         sheetName: '',
@@ -5280,9 +5307,9 @@ function getPayrollImportBatchController() {
         mapping: buildPayrollImportPersistedMapping,
         mappingSaved: value => { companyInfo[HR_PAYROLL_IMPORT_MAPPING_KEY] = JSON.stringify(value); },
         afterSave: async month => {
-            if (String(document.getElementById('salaryMonth')?.value || '') === month && currentEmpId
+            if (employeeSalarySelectedMonth === month && currentEmpId
                 && isEmployeeDetailTabVisible('tabSalary') && !hasUnsavedEmployeeDetailTab('tabSalary'))
-                await loadSalaryData();
+                await ensureEmployeeDetailTab('tabSalary',{force:true,allowBusy:true});
         }
     });
     return payrollImportBatchController;
@@ -7619,7 +7646,7 @@ async function openDetail(u, rosterOpener = null) {
     document.getElementById('tabInsuranceStatus').open = false;
     window.HrInsuranceStatus?.suspend(document.getElementById('employeeInsuranceStatus'));
     window.SunVillageTotalManagerAdmin?.select(currentEmpId);
-    employeeSalarySelectedMonth = document.getElementById('salaryMonth').value;
+    document.getElementById('salaryMonth').value = employeeSalarySelectedMonth ||= formatAdminEmployeeKstMonth();
     document.getElementById('logType').value = '지급';
     document.getElementById('logValue').value = '';
     document.getElementById('logReason').value = '';
@@ -8429,8 +8456,8 @@ async function loadSalaryData({readContext} = {}) {
     const owner = getHrSettingsOwner();
     const isCurrent = () => revision === employeeDetailRevision && salaryRevision === employeeSalaryLoadRevision && String(empId) === String(currentEmpId)
         && owner === getHrSettingsOwner() && isEmployeeDetailTabVisible('tabSalary')
-        && month === document.getElementById('salaryMonth').value && (!readContext || readContext.isCurrent());
-    const month = document.getElementById("salaryMonth").value;
+        && month === employeeSalarySelectedMonth && (!readContext || readContext.isCurrent());
+    const month = employeeSalarySelectedMonth;
     const initialDraft = snapshotEmployeeDetailTabDraft('tabSalary');
     const draftUntouched = () => [...initialDraft].every(([id,value]) => employeeDetailDraftValue(document.getElementById(id)) === value);
     currentPayrollContractContext = null;
@@ -8650,7 +8677,8 @@ async function loadSalaryData({readContext} = {}) {
 
 function applyContractPayrollUnits() {
     const context = currentPayrollContractContext;
-    if (!context || context.saved || context.owner !== getHrSettingsOwner() || context.empId !== String(currentEmpId) || context.month !== document.getElementById('salaryMonth').value) return;
+    if (!context || context.saved || !canUseEmployeeSalaryMonth(context.month) || isEmployeeDetailSaving()
+        || context.owner !== getHrSettingsOwner() || context.empId !== String(currentEmpId)) return;
     try {
         const units = document.getElementById('salaryContractPaidUnits').value;
         if (units === '') throw new Error('지급 대상 일수·시간을 입력해 주세요.');
@@ -8662,8 +8690,8 @@ function applyContractPayrollUnits() {
 
 // [신규] 급여 삭제 함수
 async function deleteSalary() {
-    const month = document.getElementById("salaryMonth").value;
-    if (!month || !currentEmpId) return;
+    const month = employeeSalarySelectedMonth;
+    if (!canUseEmployeeSalaryMonth(month) || isEmployeeDetailSaving()) return;
     const selectedEmpId=currentEmpId, revision=employeeDetailRevision, owner=getHrSettingsOwner(), context=currentPayrollContractContext;
     if (!context?.savedRow || context.savedRow.is_accounted || salarySaveInFlight) return showAlert('회계 반영된 급여는 삭제할 수 없습니다.');
 
@@ -8672,16 +8700,20 @@ async function deleteSalary() {
         "🗑️ 급여 내역 삭제",
         `<strong>${month}</strong>월 급여 데이터를 정말 삭제하시겠습니까?<br><span class="text-danger small">삭제 후에는 자동 계산 상태로 돌아갑니다.</span>`,
         async function() {
-            if (String(selectedEmpId)!==String(currentEmpId) || revision!==employeeDetailRevision || owner!==getHrSettingsOwner() || month!==document.getElementById('salaryMonth').value) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
+            if (isEmployeeDetailSaving() || String(selectedEmpId)!==String(currentEmpId) || revision!==employeeDetailRevision
+                || owner!==getHrSettingsOwner() || context!==currentPayrollContractContext || !canUseEmployeeSalaryMonth(month))
+                return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
             salarySaveInFlight=true;
+            syncEmployeeSalaryMonthUi();
             syncEmployeeLeaveApplyState();
             showLoading();
             try {
                 const { error } = await _supabase.rpc('erp_hr_payroll_delete', {p_emp_id:String(selectedEmpId),p_year_month:month,p_expected_key:context.savedRow.row_key});
                 if (error) return showAlert('삭제 실패: '+payrollSaveErrorMessage(error));
                 showAlert('삭제되었습니다.');
-                if (!hasUnsavedEmployeeDetailTab('tabSalary')) await loadSalaryData();
-            } finally { hideLoading();salarySaveInFlight=false;syncEmployeeLeaveApplyState(); }
+                if (owner===getHrSettingsOwner() && revision===employeeDetailRevision && month===employeeSalarySelectedMonth
+                    && !hasUnsavedEmployeeDetailTab('tabSalary')) await ensureEmployeeDetailTab('tabSalary',{force:true,allowBusy:true});
+            } finally { hideLoading();salarySaveInFlight=false;syncEmployeeLeaveApplyState();syncEmployeeSalaryMonthUi(); }
         }
     );
 }
@@ -9045,9 +9077,8 @@ async function getAdminEmployeeRecentWorkDescription(empId, month) {
 }
 
 function saveSalary() {
-    const month = String(document.getElementById('salaryMonth').value || '').trim();
-    if (!month || !currentEmpId) return showAlert('직원과 귀속월을 선택해 주세요.');
-    if (salarySaveInFlight || employeeBasicSaveInFlight) return;
+    const month = employeeSalarySelectedMonth;
+    if (!canUseEmployeeSalaryMonth(month) || isEmployeeDetailSaving()) return;
     const context = currentPayrollContractContext;
     if (!context || context.empId !== String(currentEmpId) || context.month !== month || context.owner !== getHrSettingsOwner()) return showAlert('급여를 다시 조회해 주세요.');
     const recalculate = !context.saved || context.moneyInput !== salaryMoneyInputSignature();
@@ -9059,23 +9090,25 @@ function saveSalary() {
     showConfirm('💾 '+actionLabel+' 확인',
         `${month} ${currentEmpName || ''}\n지급 총액: ${formatAdminEmployeeWon(payment.pay_total)}\n근로일수: ${document.getElementById('workDays').value}일 · 근로시간: ${document.getElementById('workHours').value}시간\n\n${recalculate ? '현재 입력한 조건과 해당 월의 등록 기준으로 지급액·공제를 계산합니다.' : '지급액·공제·실수령액과 적용 기준은 그대로 유지합니다.'}\n${actionLabel}하시겠습니까?`,
         async function() {
-            if (salarySaveInFlight || employeeBasicSaveInFlight) return;
-            if (detailRevision !== employeeDetailRevision || String(selectedEmpId) !== String(currentEmpId) || month !== document.getElementById('salaryMonth').value) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
+            if (isEmployeeDetailSaving()) return;
+            if (detailRevision !== employeeDetailRevision || String(selectedEmpId) !== String(currentEmpId)
+                || currentPayrollContractContext !== context || !canUseEmployeeSalaryMonth(month)) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
             if ([...confirmedDraft].some(([id,v])=>employeeDetailDraftValue(document.getElementById(id))!==v)) return showAlert('입력 내용이 변경되었습니다. 다시 확인해 주세요.');
             salarySaveInFlight=true;
+            syncEmployeeSalaryMonthUi();
             syncEmployeeLeaveApplyState();
-            try { await persistSalary(); } finally { salarySaveInFlight=false;syncEmployeeLeaveApplyState(); }
+            try { await persistSalary(); } finally { salarySaveInFlight=false;syncEmployeeLeaveApplyState();syncEmployeeSalaryMonthUi(); }
         });
 }
 
 // [수정] 확인을 거친 급여 저장 (연도별 요율 적용)
 async function persistSalary() {
-    const month = document.getElementById("salaryMonth").value;
-    if (!month) return showAlert("귀속월을 선택해주세요.");
+    const month = employeeSalarySelectedMonth;
+    if (!canUseEmployeeSalaryMonth(month)) return;
     const savedEmpId = currentEmpId, savedRevision = employeeDetailRevision, savedOwner = getHrSettingsOwner();
-    const isSavedTargetCurrent = () => savedEmpId === currentEmpId && savedRevision === employeeDetailRevision
-        && savedOwner === getHrSettingsOwner() && month === document.getElementById('salaryMonth').value;
     const contractContext = currentPayrollContractContext;
+    const isSavedTargetCurrent = () => savedEmpId === currentEmpId && savedRevision === employeeDetailRevision
+        && savedOwner === getHrSettingsOwner() && contractContext === currentPayrollContractContext && canUseEmployeeSalaryMonth(month);
     if (!contractContext || contractContext.owner !== savedOwner || contractContext.empId !== String(savedEmpId) || contractContext.month !== month) return showAlert('급여와 계약 기준을 다시 조회해 주세요.');
     if (!contractContext.saved && contractContext.defaults.linked && !document.getElementById('salaryContractReviewed').checked) return showAlert('계약 조건과 이번 달 지급액·근로시간을 확인해 주세요.');
     if (!contractContext.saved && contractContext.defaults.linked && ['workDays','workHours','payTotalFixed'].some(id=>document.getElementById(id).value==='')) return showAlert('지급액과 근로일수·근로시간을 입력해 주세요.');
@@ -9097,7 +9130,7 @@ async function persistSalary() {
         if (isSavedTargetCurrent()) {
             contractContext.savedRow=result.data;
             checkpointSavedEmployeeDetailTab('tabSalary',savedDraft);
-            if (!hasUnsavedEmployeeDetailTab('tabSalary') && isEmployeeDetailTabVisible('tabSalary')) await loadSalaryData();
+            if (!hasUnsavedEmployeeDetailTab('tabSalary')) await ensureEmployeeDetailTab('tabSalary',{force:true,allowBusy:true});
         }
         return showAlert('메모·근태를 저장했습니다.');
     }
@@ -9203,9 +9236,7 @@ async function persistSalary() {
                 showAlert(`급여와 회사부담금은 저장됐지만 두루누리 지원금 연동에 실패했습니다.\n${syncError?.message || syncError}\n회계 반영을 진행하지 말고 원인을 확인해주세요.`);
             }
             if (isSavedTargetCurrent() && !hasUnsavedEmployeeDetailTab('tabSalary') && isEmployeeDetailTabVisible('tabSalary')) {
-                setEmployeeDetailTabState('tabSalary', 'loading');
-                const loaded = await loadSalaryData();
-                if (isSavedTargetCurrent() && isEmployeeDetailTabVisible('tabSalary')) setEmployeeDetailTabState('tabSalary', loaded === true ? 'ready' : 'error');
+                await ensureEmployeeDetailTab('tabSalary',{force:true,allowBusy:true});
             }
         }
     }
@@ -9977,10 +10008,14 @@ async function reqIssueCert() {
 }
 
 async function printSalaryAdmin() {
+    const month = employeeSalarySelectedMonth;
+    if (!canUseEmployeeSalaryMonth(month) || isEmployeeDetailSaving()) return;
     if(!currentSalaryDataForPrint) return showAlert("저장된 급여 내역이 없습니다.");
     const d = currentSalaryDataForPrint;
+    if (d.year_month !== month) return;
     const printContext = captureEmployeeDocumentContext({track:true});
-    const stillCurrent = () => printContext.isCurrent() && currentSalaryDataForPrint === d;
+    const stillCurrent = () => printContext.isCurrent() && currentSalaryDataForPrint === d
+        && canUseEmployeeSalaryMonth(month) && !isEmployeeDetailSaving();
     try {
         if (!stillCurrent() || printSalaryAdmin.loading) return;
         printSalaryAdmin.loading = true;

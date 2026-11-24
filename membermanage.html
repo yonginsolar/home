@@ -17,7 +17,7 @@ Change: 2026-11-24 - 조합원 포털 디지털 조합원증·4버튼 출자/신
 <script src="shared/member_identity_claim.js?v=1.0.2" integrity="sha384-EeNhKgyd/uKysxxDLP6vt/NWuSEjoYXZad2hvVOuMccHNj8EVANx34aSpoRZSWnF" crossorigin="anonymous" defer></script>
 <script src="shared/member_login_methods.js?v=1.0.4" integrity="sha384-c+fIIKHWZfg7x+JQCV6eyOvf5KaxV6Po+WRAYwtMJPKJ5dKSyyTJxDFWAsonAyvS" crossorigin="anonymous" defer></script>
 <script src="shared/member_portal_documents.js?v=1.0.1" integrity="sha384-UepDAf1/qJe4T+vhs0dn+EslIddmapsLc5HzVyQi2oynfoP5QUEHzJRsxEyTW5fW" crossorigin="anonymous" defer></script>
-<script src="shared/member_portal_layout_v2.js" integrity="sha384-sd9GpYb/LVM0eJ5v6xuDZEziXowk5sx+se3m1M3LgGEOsNqCEE0yfruJpvxAqDPa" crossorigin="anonymous" defer></script>
+<script src="shared/member_portal_layout_v3.js" integrity="sha384-0LHGcdA1KWGdWOu8N8dlIu19fbPlIjeDV7IlOqHT130xWm0NHBEvrqlv3VV1lJVy" crossorigin="anonymous" defer></script>
 <script src="/shared/hcrec_capital_shortcut.js?v=1.0.0" integrity="sha384-jtATHqquVpgAt53KhJw+rZZEvbTTxWp9g1PcJOi9qbwMkc53jicI7t6EUcW4bIN1" crossorigin="anonymous" defer></script>
 <script src="/shared/hcrec_member_referral.js?v=1.0.0" integrity="sha384-mLlDe5K1h1YppHBjxTlyDIfbIAQu6cq6/lK8CGI2mkZpHLA0em3tQQTmHSdVxWsO" crossorigin="anonymous" defer></script>
     <script>console.log('[Version] v1.0.279 | membermanage.html');</script>
@@ -2296,7 +2296,7 @@ NO. <span id="infoMemberId">-</span>
 
 <div id="customModalOverlay" class="custom-modal-overlay">
 <div class="custom-modal-box">
-<div style="font-size: 2rem; margin-bottom: 10px;">📢</div>
+<div class="member-modal-notice-icon" style="font-size: 2rem; margin-bottom: 10px;" aria-hidden="true">📢</div>
 <p id="customModalMsg" style="white-space: pre-wrap; margin-bottom: 20px; font-weight: 500; font-size: 1.1rem; color:#333;"></p>
 <div class="custom-modal-btn-group">
 <button id="btnModalNo" class="btn-modal btn-modal-no" onclick="closeCustomModal()">취소</button>
@@ -2725,6 +2725,7 @@ document.getElementById('btnModalYes').onclick=null;document.getElementById('btn
 return true;
 },
 canSwitchFund: () => !(portalApplicationWritePending || window.__memberAppLocks?.submitApplication || window.__memberAppLocks?.modifyApplication),
+isExtraApplicationReady: () => currentPortalApplicationState(),
 openApplication: type => toggleTab(type,null,{direct:true}),
 renderHistory: (type,title,summary,list) => renderMemberHistory(type,title,summary,list),
 canViewDividends: () => canViewMemberDividends(),
@@ -9646,25 +9647,37 @@ return state.promise;
 async function copyExtraCapitalDepositAccount() {
 const context = extraCapitalDepositAccountContext();
 if (!context) return;
+const revision = (copyExtraCapitalDepositAccount.revision || 0) + 1;
+copyExtraCapitalDepositAccount.revision = revision;
+const current = () => copyExtraCapitalDepositAccount.revision === revision && context === extraCapitalDepositAccountContext();
+const opener = document.getElementById('copyExtraCapitalAccountBtn');
+const notifyCopy = message => showModal(message,{compact:true,opener});
 const account = await loadExtraCapitalDepositAccount();
-if (!account?.accountNumber || context !== extraCapitalDepositAccountContext()) return;
+if (!account?.accountNumber || !current()) return;
 try {
 if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
 await navigator.clipboard.writeText(account.accountNumber);
-if (context !== extraCapitalDepositAccountContext()) return;
-showModal('계좌번호를 복사했습니다.');
+if (!current()) return;
+notifyCopy('계좌번호를 복사했습니다.');
 } catch (_) {
-if (context !== extraCapitalDepositAccountContext()) return;
+if (!current()) return;
 const copyTarget = document.createElement('textarea');
 copyTarget.value = account.accountNumber;
 copyTarget.setAttribute('readonly', '');
 copyTarget.style.position = 'fixed';
 copyTarget.style.opacity = '0';
 document.body.appendChild(copyTarget);
+const previousFocus = document.activeElement;
 copyTarget.select();
-const copied = document.execCommand('copy');
-copyTarget.remove();
-showModal(copied ? '계좌번호를 복사했습니다.' : `계좌번호: ${account.accountNumber}`);
+let copied = false;
+try { copied = document.execCommand('copy'); }
+catch (_) {}
+finally { copyTarget.remove(); }
+if (!current()) return;
+if (document.activeElement === document.body && previousFocus !== document.body && previousFocus?.isConnected) {
+previousFocus.focus({preventScroll:true});
+}
+notifyCopy(copied ? '계좌번호를 복사했습니다.' : `계좌번호: ${account.accountNumber}`);
 }
 } // End of copyExtraCapitalDepositAccount
 
@@ -10071,16 +10084,17 @@ function setText(id, txt) { const el=document.getElementById(id); if(el) el.inne
 function setVal(id, val) { const el=document.getElementById(id); if(el) {el.value = val || '';if(id==='editBankName')window.CoopBankChoices?.refresh(el);} }
 
 // [추가] 모달 제어 함수
-function showModal(msg) {
+function showModal(msg, options = {}) {
 // Scope keyboard ownership to this information notice, not business confirmations.
 const previousFocus = showModal.noticeCleanup?.returnFocus?.();
 closePortalPartnerConfirmation(false);
 showModal.noticeCleanup?.(false);
 const overlay = document.getElementById('customModalOverlay'),button = document.getElementById('btnModalYes');
 let origin = previousFocus?.origin || document.activeElement;
+if (origin === document.body && options?.opener?.getClientRects().length) origin = options.opener;
 const context = () => JSON.stringify([String(curAuth?.id || ''),String(currentMemberCoopId || ''),String(curMem?.id || ''),portalDirectRevision,window.MemberPortalPurposeController?.getSelected() || '']);
 const originalContext = context();
-const attrs = new Map(['role','aria-modal','aria-labelledby','aria-describedby','aria-label','tabindex'].map(k=>[k,overlay.getAttribute(k)]));
+const attrs = new Map(['role','aria-modal','aria-labelledby','aria-describedby','aria-label','tabindex','data-portal-notice-size'].map(k=>[k,overlay.getAttribute(k)]));
 const editing = origin?.matches('input,textarea,select,[contenteditable="true"]') && !overlay.contains(origin);
 let range = previousFocus?.range || (editing && typeof origin.selectionStart === 'number' ? [origin.selectionStart,origin.selectionEnd,origin.selectionDirection] : null);
 let active = true,displaced = false,observer,relationTarget = null;
@@ -10145,6 +10159,7 @@ document.getElementById('btnModalNo').style.display = 'none'; // 취소버튼 �
 button.onclick = closeCustomModal;
 overlay.setAttribute('role','alertdialog');overlay.setAttribute('aria-modal','true');
 overlay.removeAttribute('aria-labelledby');overlay.setAttribute('aria-label','안내');overlay.setAttribute('aria-describedby','customModalMsg');overlay.setAttribute('tabindex','-1');
+overlay.dataset.portalNoticeSize = options?.compact ? 'compact' : 'text';
 overlay.style.display = 'flex';showModal.noticeCleanup = cleanup;
 window.addEventListener('keydown',keydown,true);window.addEventListener('change',relationChanged,true);document.addEventListener('focusin',focusChanged,true);
 const noticeText = document.getElementById('customModalMsg').innerText;
@@ -10173,22 +10188,21 @@ document.getElementById('customModalMsg').innerText = msg;
 document.getElementById('btnModalNo').style.display = 'block';
 
 const overlay = document.getElementById('customModalOverlay');
+overlay.dataset.portalNoticeSize = 'text';
 overlay.style.display = 'flex';
 
 document.getElementById('btnModalYes').onclick = function() {
-overlay.style.display = 'none';
-setModalDepth(false); // 복구
+closeCustomModal();
 if(yesCallback) yesCallback();
 };
-document.getElementById('btnModalNo').onclick = function() {
-overlay.style.display = 'none';
-setModalDepth(false); // 복구
-};
+document.getElementById('btnModalNo').onclick = closeCustomModal;
 }
 
 function closeCustomModal() {
 showModal.noticeCleanup?.(true);
-document.getElementById('customModalOverlay').style.display = 'none';
+const overlay = document.getElementById('customModalOverlay');
+overlay.style.display = 'none';
+delete overlay.dataset.portalNoticeSize;
 setModalDepth(false);
 }
 

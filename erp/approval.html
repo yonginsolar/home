@@ -661,6 +661,29 @@
       border-bottom: 0;
     }
     .rel-attachment-list .list-group-item > div { flex-wrap:wrap; overflow-wrap:anywhere; }
+    .rel-attachment-stage.approval-submit-scroll {
+      display:block; min-height:0; max-height:58vh; max-height:58dvh; overscroll-behavior:contain;
+    }
+    .approval-submit-attachment-dialog {
+      width:min(70rem, calc(100% - 1rem)); max-height:calc(100vh - 1rem); max-height:calc(100dvh - 1rem);
+      padding:0; border:1px solid #d2d9e2; border-radius:.75rem;
+      background:var(--bs-body-bg,#fff); color:var(--bs-body-color,#172033); overflow:hidden;
+    }
+    .approval-submit-attachment-dialog[open] { display:flex; flex-direction:column; margin:auto; }
+    .approval-submit-attachment-dialog::backdrop { background:#0f172a66; }
+    .approval-submit-attachment-dialog .modal-header,
+    .approval-submit-attachment-dialog .modal-footer { flex-shrink:0; padding:.65rem .85rem; }
+    .approval-submit-attachment-dialog .modal-title { min-width:0; overflow-wrap:anywhere; }
+    .approval-submit-attachment-dialog .btn-close { flex-shrink:0; }
+    .approval-submit-attachment-dialog .modal-body {
+      min-height:0; overflow:auto; overscroll-behavior:contain; background:#f8fafc;
+    }
+    .approval-submit-attachment-dialog iframe { display:block; width:100%; min-height:60vh; border:0; }
+    .approval-submit-attachment-image { display:block; max-width:100%; max-height:65dvh; margin:auto; }
+    .approval-submit-pdf { width:100%; }
+    .approval-submit-pdf-pages { display:grid; gap:1rem; width:min(100%, 54rem); margin:auto; }
+    .approval-submit-pdf-paper { width:100%; background:#fff; border:1px solid #dbe1e8; }
+    .approval-submit-pdf-paper canvas { display:block; width:100%; height:auto; }
     .approval-editor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
     .approval-editor-tabs { display: flex; gap: 8px; margin: 6px 0 10px; }
     .approval-editor-panel { display: none; }
@@ -14004,6 +14027,7 @@ async function buildApprovalSubmitPreviewAttachments(previewDoc) {
                 displayName: String(file.name || '첨부파일').trim() || '첨부파일',
                 size: Number(file.size || 0) || 0,
                 mimeType: String(file.type || '').trim(),
+                attachmentFile: file,
                 insurancePreview,
                 insuranceFile: insurancePreview ? (source?.file || file) : null
             });
@@ -14454,7 +14478,7 @@ async function openApprovalSubmitPreview() {
         const attachmentLife = new AbortController();
         previewState.disposeAttachments = () => attachmentLife.abort();
         const attachmentViewerEl = await buildRelAttachmentViewer(previewAttachments, {
-            current:isCurrent, autoPreview:true, signal:attachmentLife.signal
+            current:isCurrent, autoPreview:true, signal:attachmentLife.signal, submitModal:modalEl
         });
         if (!isCurrent()) return;
         attachmentPlaceholder.replaceWith(attachmentViewerEl);
@@ -14583,6 +14607,7 @@ function syncApprovalSubmitControls() {
     previewButton.disabled=!!approvalSubmitAttempt || pending || !preview?.ready || !current || !!leaveBlock;
     previewButton.textContent=approvalSubmitAttempt?'상신 준비 중…':'상신하기';
     if(preview){
+        if(!current) preview.disposeAttachments?.();
         const hint=document.getElementById('relViewActionHint');
         if(hint)hint.textContent=!current?'작성 내용이 바뀌었습니다. 미리보기를 다시 열어 주세요.'
             : leaveBlock||(!preview.ready?'첨부파일 미리보기를 준비하고 있습니다.':'');
@@ -18978,6 +19003,29 @@ async function selectRelDoc(doc) {
     relSearchModal.hide();
 }
 
+let approvalSubmitAttachmentViewRequest;
+function loadApprovalSubmitAttachmentView() {
+    if (window.ApprovalSubmitAttachmentView) return Promise.resolve(window.ApprovalSubmitAttachmentView);
+    if (!approvalSubmitAttachmentViewRequest) {
+        approvalSubmitAttachmentViewRequest = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            const finish = () => {
+                clearTimeout(timer);
+                script.onload = script.onerror = null;
+                if (window.ApprovalSubmitAttachmentView) resolve(window.ApprovalSubmitAttachmentView);
+                else { script.remove(); reject(new Error('ATTACHMENT_VIEW_UNAVAILABLE')); }
+            };
+            const timer = setTimeout(finish, 12000);
+            script.src = new URL('approval_submit_attachment_view_v1.js', location.href).href;
+            script.integrity = 'sha384-q2Yu3dg5qEQkKFglq/noxKjEfyeujiIy8ywpg4WDe9m+9Ogq/9V212QFwokANWsI';
+            script.crossOrigin = 'anonymous';
+            script.onload = script.onerror = finish;
+            document.head.append(script);
+        }).finally(() => { approvalSubmitAttachmentViewRequest = null; });
+    }
+    return approvalSubmitAttachmentViewRequest;
+}
+
 async function buildRelAttachmentViewer(attachments, options = null) {
     const inline = typeof options?.current === 'function';
     const autoPreview = !inline || options?.autoPreview === true;
@@ -19056,7 +19104,138 @@ async function buildRelAttachmentViewer(attachments, options = null) {
 
     let stageObjectUrl = null;
     let insuranceStage = null;
-    options?.signal?.addEventListener('abort', () => insuranceStage?.abort(), {once:true});
+    let submitChild = null;
+    const reads = options?.submitModal ? new Map() : null;
+    options?.signal?.addEventListener('abort', () => {
+        insuranceStage?.abort();
+        submitChild?.(false);
+        reads?.clear();
+    }, {once:true});
+
+    const readSubmitAttachment = item => {
+        if (item.attachmentFile) return Promise.resolve(item.attachmentFile);
+        if (reads.has(item.rawRef)) return reads.get(item.rawRef);
+        const request = fetchPreviewBlob(item.rawRef, options?.expiresSec || 60 * 60 * 3).then(payload => {
+            URL.revokeObjectURL(payload.url);
+            return payload.blob;
+        }).catch(error => { reads.delete(item.rawRef); throw error; });
+        reads.set(item.rawRef,request);
+        return request;
+    };
+    const previewUrl = (file, signal) => {
+        const url = URL.createObjectURL(file);
+        signal.addEventListener('abort', () => URL.revokeObjectURL(url), {once:true});
+        return url;
+    };
+    async function mountSubmitAttachment(target, scroll, item, name, live, signal) {
+        const file = item.insuranceFile || await readSubmitAttachment(item);
+        if (!live()) return;
+        const view = await loadApprovalSubmitAttachmentView();
+        if (!live()) return;
+        const type = getAttachmentPreviewType(name,file.type || item.mimeType);
+        if (!type) throw new Error('unsupported-preview-type');
+        view.mount(target,{
+            file,name:item.insurancePreview === 'source' ? file.name || name : name,type,kind:item.insurancePreview,
+            scroll,current:live,signal,
+            passwordFor:()=>item.insurancePreview && approvalCompanyInfoRemoteConfirmed
+                ? String(approvalCompanyInfo.bizNum || '').replace(/\D/g,'') : '',
+            fallback:()=>{
+                if(!live())return;
+                const frame=document.createElement('iframe');
+                frame.title=name;
+                frame.src=previewUrl(file,signal)+'#toolbar=1';
+                target.replaceChildren(frame);
+            }
+        });
+    }
+    function openSubmitAttachment(item, trigger) {
+        const owner = options.submitModal;
+        const ownerOpen = () => !options.signal?.aborted && viewerCurrent() && owner.classList.contains('show') && trigger.isConnected;
+        if (submitChild || !ownerOpen()) return;
+        const dialog = document.createElement('dialog');
+        dialog.className = 'approval-submit-attachment-dialog';
+        dialog.setAttribute('aria-labelledby','approvalSubmitAttachmentTitle');
+        const header = document.createElement('div');
+        header.className = 'modal-header gap-2';
+        const name = getItemDisplayName(item, '첨부파일');
+        const title = document.createElement('h2');
+        title.className = 'modal-title h6 mb-0';title.id = 'approvalSubmitAttachmentTitle';
+        title.textContent = item.insurancePreview === 'source' ? item.insuranceFile?.name || name : name;
+        const closeButton = document.createElement('button');
+        closeButton.className = 'btn-close';closeButton.type = 'button';closeButton.setAttribute('aria-label','닫기');
+        header.append(title,closeButton);
+        const body = document.createElement('div');
+        body.className = 'modal-body';body.tabIndex = 0;body.setAttribute('aria-label','첨부파일 미리보기');
+        const target = document.createElement('div');
+        body.append(target);
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer';
+        const download = document.createElement('a');
+        download.className = 'btn btn-sm btn-outline-secondary d-none';download.textContent = '첨부파일 저장';download.download = name;
+        footer.append(download);dialog.append(header,body,footer);
+        const life = new AbortController();
+        const live = () => !life.signal.aborted && ownerOpen() && dialog.open;
+        let frameWatch;
+        const close = restore => {
+            if (life.signal.aborted) return;
+            const active = document.activeElement;
+            const canRestore = restore && ownerOpen() && (active === document.body || dialog.contains(active));
+            life.abort();
+            frameWatch?.disconnect();
+            submitChild = null;
+            if (dialog.open) dialog.close();
+            dialog.remove();
+            if (canRestore && !trigger.closest('[hidden],[inert]')) trigger.focus({preventScroll:true});
+        };
+        closeButton.onclick = () => close(true);
+        dialog.addEventListener('cancel',event=>{event.preventDefault();close(true);});
+        dialog.addEventListener('close',()=>close(true),{once:true});
+        dialog.addEventListener('keydown',event=>{
+            if (event.key === 'Escape') {
+                event.stopPropagation();
+                if (!event.isComposing) { event.preventDefault();close(true); }
+            }
+        });
+        owner.addEventListener('hide.bs.modal',()=>close(false),{once:true,signal:life.signal});
+        window.addEventListener('pagehide',()=>close(false),{once:true,signal:life.signal});
+        if (window.frameElement) {
+            frameWatch = new MutationObserver(()=>{if (!live()) close(false);});
+            frameWatch.observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
+        }
+        submitChild = close;
+        // The parent Bootstrap focus trap accepts descendants; the dialog's native top layer owns input.
+        owner.append(dialog);
+        try { dialog.showModal(); }
+        catch (_) {
+            close(false);
+            if (ownerOpen()) {
+                const ix = state.previewable.findIndex(entry => entry.idx === Number(trigger.dataset.submitAttachment));
+                if (ix >= 0) {
+                    void renderCurrent(ix);
+                    stage.scrollIntoView({block:'nearest'});
+                }
+            }
+            return;
+        }
+        closeButton.focus({preventScroll:true});
+        const render = async () => {
+            if (!live()) return;
+            target.textContent = '첨부파일을 불러오는 중입니다.';
+            try {
+                // A locally retained full notice is view-only. The save action always uses the attached bytes.
+                if (!download.hasAttribute('href')) {
+                    const attachment = await readSubmitAttachment(item);
+                    if (!live()) return;
+                    download.href = item.previewUrl || previewUrl(attachment,life.signal);
+                    download.classList.remove('d-none');
+                }
+                await mountSubmitAttachment(target,body,item,name,live,life.signal);
+            } catch (error) {
+                if (live()) renderApprovalAttachmentFailure(target,error,()=>void render());
+            }
+        };
+        void render();
+    }
     const resetStageObjectUrl = () => {
         if (!stageObjectUrl) return;
         try {
@@ -19084,39 +19263,25 @@ async function buildRelAttachmentViewer(attachments, options = null) {
         const current = state.previewable[state.index];
         syncAttachmentNavButtons();
         navBox.classList.toggle('d-none', !!current.insurancePreview && state.previewable.length === 1);
+        const scrollNotice = Boolean(current.insurancePreview && options?.submitModal);
+        stage.classList.toggle('approval-submit-scroll',scrollNotice);
+        if (scrollNotice) {
+            stage.tabIndex = 0;stage.setAttribute('aria-label','첨부파일 미리보기');stage.scrollTop = 0;
+        } else {stage.removeAttribute('tabindex');stage.removeAttribute('aria-label');}
         stage.innerHTML = '<div class="text-muted">첨부파일을 불러오는 중입니다.</div>';
+        const currentName = getItemDisplayName(current, `첨부파일 ${current.idx + 1}`);
+        const failed = error => {
+            if (!currentRead()) return;
+            metaBox.textContent = `${currentName} · 미리보기 실패`;
+            renderApprovalAttachmentFailure(stage,error,()=>{ if (currentRead()) void renderCurrent(state.index); });
+        };
         try {
             resetStageObjectUrl();
-            const currentName = getItemDisplayName(current, `첨부파일 ${current.idx + 1}`);
-            if (current.insurancePreview && typeof window.CoopInsuranceNotice?.previewAttachment === 'function') {
-                let file = current.insuranceFile;
-                if (!file) {
-                    // Only an already-authorized attachment reference uses the existing preview read.
-                    const payload = await fetchPreviewBlob(current.rawRef, options?.expiresSec || 60 * 60 * 3);
-                    URL.revokeObjectURL(payload.url);
-                    if (!currentRead()) return;
-                    file = payload.blob;
-                }
+            if (scrollNotice) {
                 insuranceStage = new AbortController();
                 metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${currentName}`;
-                window.CoopInsuranceNotice.previewAttachment(stage,{
-                    file,name:currentName,kind:current.insurancePreview,current:currentRead,signal:insuranceStage.signal,
-                    passwordFor:()=>approvalCompanyInfoRemoteConfirmed
-                        ? String(approvalCompanyInfo.bizNum || '').replace(/\D/g,'') : '',
-                    fallback:()=>{
-                        if(!currentRead()||current.insurancePreview==='source')return;
-                        const url=current.previewUrl || URL.createObjectURL(file);
-                        if(!current.previewUrl){
-                            stageObjectUrl=url;
-                            if(options?.objectUrls)options.objectUrls.add(url);
-                            else relViewObjectUrls.push(url);
-                        }
-                        const frame=document.createElement('iframe');
-                        frame.title=currentName;
-                        frame.src=url+'#toolbar=1';
-                        stage.replaceChildren(frame);
-                    }
-                });
+                // Do not delay the document preview or its action buttons while the read-only PDF starts.
+                void mountSubmitAttachment(stage,stage,current,currentName,currentRead,insuranceStage.signal).catch(failed);
                 return;
             }
             if (String(current.previewUrl || '').trim()) {
@@ -19154,9 +19319,7 @@ async function buildRelAttachmentViewer(attachments, options = null) {
                 },{once:true});
             }
         } catch (error) {
-            if (!currentRead()) return;
-            metaBox.textContent = `${getItemDisplayName(current, `첨부파일 ${current.idx + 1}`)} · 미리보기 실패`;
-            renderApprovalAttachmentFailure(stage,error,()=>{ if (currentRead()) void renderCurrent(state.index); });
+            failed(error);
         }
     };
 
@@ -19173,7 +19336,9 @@ async function buildRelAttachmentViewer(attachments, options = null) {
                 </div>
                 <div class="d-flex gap-2">
                     ${canPreview ? `<button type="button" class="btn btn-sm btn-outline-primary" data-preview-index="${state.previewable.findIndex(entry => entry.idx === idx)}">바로보기</button>` : ''}
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-open-url="${escapeHtml(encodeURIComponent(item.rawRef))}">새 창</button>
+                    ${options?.submitModal && canPreview
+                        ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-submit-attachment="${idx}">새창으로 보기</button>`
+                        : `<button type="button" class="btn btn-sm btn-outline-secondary" data-open-url="${escapeHtml(encodeURIComponent(item.rawRef))}">새 창</button>`}
                 </div>
             </div>
         `;
@@ -19186,6 +19351,12 @@ async function buildRelAttachmentViewer(attachments, options = null) {
         if (previewBtn) {
             const previewIndex = Number(previewBtn.getAttribute('data-preview-index'));
             if (Number.isFinite(previewIndex) && previewIndex >= 0) renderCurrent(previewIndex);
+            return;
+        }
+        const childBtn = event.target.closest('[data-submit-attachment]');
+        if (options?.submitModal && childBtn) {
+            const item = attachments[Number(childBtn.dataset.submitAttachment)];
+            if (item) openSubmitAttachment(item,childBtn);
             return;
         }
         const openBtn = event.target.closest('[data-open-url]');
