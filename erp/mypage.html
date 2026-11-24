@@ -1300,6 +1300,7 @@ function buildMypageCompanyPrintProfile(){
 return {
 companyName:resolveMypageCompanyName(companyInfo),
 chairmanName:resolveMypageChairmanName(companyInfo),
+bizNum:trimMypageCompanyValue(companyInfo?.bizNum||companyInfo?.business_number),
 address:buildMypageCompanyAddress(companyInfo),
 contact:buildMypageCompanyContact(companyInfo),
 logoUrl:trimMypageCompanyValue(companyInfo?.logo_horizontal_url),
@@ -2766,7 +2767,7 @@ let mypageCertIntent=0;
 function cancelMypageCertificateIntent(){++mypageCertIntent;document.getElementById('btnCert')?.removeAttribute('aria-busy');}
 let mypageCertAssetFlight;
 function loadMypageCertificatePrint() {
-    if (window.EmployeeCertificatePrint?.version === '2.0.0') return Promise.resolve();
+    if (window.EmployeeCertificatePrint?.version === '3.0.0') return Promise.resolve();
     if (mypageCertAssetFlight) return mypageCertAssetFlight;
     mypageCertAssetFlight = new Promise((resolve,reject)=>{
         const script=document.createElement('script');
@@ -2776,10 +2777,10 @@ function loadMypageCertificatePrint() {
             else {script.remove();reject(Error('CERTIFICATE_PRINT_ASSET_UNAVAILABLE'));}
         };
         const timer=setTimeout(()=>finish(false),15000);
-        script.src='/erp/employee_certificate_print_v2.js?v=2.0.0';
-        script.integrity='sha384-YOs2Cji/uYXpuGSBh1m432ohP8hZ8ivtr+zjo+2Mr4sqgQjW29up7TOU4okfWW8I';
+        script.src='/erp/employee_certificate_print_v3.js?v=3.0.0';
+        script.integrity='sha384-VV4AjJyvLbje4Pv0UAHHQMdmETxg0UA6R7O7+VH5zg8yjVBadZJXvIKaSRXcJFMF';
         script.crossOrigin='anonymous';
-        script.onload=()=>finish(window.EmployeeCertificatePrint?.version==='2.0.0');
+        script.onload=()=>finish(window.EmployeeCertificatePrint?.version==='3.0.0');
         script.onerror=()=>finish(false);
         document.head.appendChild(script);
     }).finally(()=>{mypageCertAssetFlight=null;});
@@ -2795,7 +2796,7 @@ async function openCertModal(){
  const current=()=>request===mypageCertIntent&&owner===getMypageDataOwner()&&mypageDataAuthorized&&!window.frameElement?.hidden
   &&isMypageDataVisible()&&document.getElementById('tabCert').classList.contains('active');
  if(!current())return;
- if(typeof PrintService!=='undefined'&&(window.ExpoRuntimeBridge ? window.ExpoEmployeeCertificate : window.EmployeeCertificatePrint?.version==='2.0.0')){purposeModal.show();return;}
+ if(typeof PrintService!=='undefined'&&(window.ExpoRuntimeBridge ? window.ExpoEmployeeCertificate : window.EmployeeCertificatePrint?.version==='3.0.0')){purposeModal.show();return;}
  button.setAttribute('aria-busy','true');
  try{await prepareMypageCertificateTools();if(current())purposeModal.show();}
  catch(_){if(current())showAlert('증명서 도구를 불러오지 못했습니다. 다시 시도해 주세요.');}
@@ -2936,7 +2937,7 @@ function makeMypageCertificateData(account, certMeta, profile, purpose, birthDat
         dept:account.department || '-',pos:account.position || '-',address:account.address || '-',tenure,purpose,
         today:`${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일`,
         certTitle:certMeta.type,employmentStatement:certMeta.statement,chairman:profile.chairmanName,
-        compName:profile.companyName,compAddr:profile.address,contact:profile.contact,seal,siteUrl:''};
+        compName:profile.companyName,bizNum:profile.bizNum,compAddr:profile.address,contact:profile.contact,seal,siteUrl:''};
 }
 
 async function runCertIssue() {
@@ -3011,6 +3012,7 @@ async function runCertIssue() {
         employmentStatement: certMeta.statement,
         chairman: companyProfile.chairmanName,
         compName: companyProfile.companyName,
+        bizNum: companyProfile.bizNum,
         compAddr: companyProfile.address,
         contact: companyProfile.contact,
         seal: companyProfile.sealUrl,
