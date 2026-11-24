@@ -52,7 +52,7 @@
   <script src="leave_ledger.js?v=20261122-fifo-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
-  <script src="approval_insurance_notice_v1_2.js" integrity="sha384-oql2ZZ/xl5QuN8CiTZugt5EB4CmkTf69ruRQrrsq0GwMSs6R4FTYCXJXAzuTcpYd" crossorigin="anonymous"></script>
+  <script src="approval_insurance_notice_v1_3.js" integrity="sha384-x5/6vg6+q38DmS9asr9tX4qpnPF6pnF6zOYa+3lNozwVZCWJlysIigvXbJIIFORk" crossorigin="anonymous"></script>
   <script src="approval_permission_request.js?v=1.2.2"></script>
   <script src="workflow_assets_print_v1.js" integrity="sha384-Y1ouImMNdgejf/IoEufA9cl7zESy2MnClk81r+cNhtZG4JnjQq3QW7DEgdM5BI6U" crossorigin="anonymous"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
@@ -13987,18 +13987,25 @@ function openAppDescPreview() {
 
 async function buildApprovalSubmitPreviewAttachments(previewDoc) {
     const attachments = [];
+    const insurance = previewDoc?.doc_type === '지출결의(4대보험)';
+    const viewKind = (name, mime) => insurance && getAttachmentPreviewType(name, mime) === 'pdf'
+        ? (/^4대보험_고지서_\d+쪽_첨부용\.pdf$/i.test(name) ? 'summary' : 'attachment') : '';
     getApprovalOrderedAttachmentDescriptors().forEach((descriptor) => {
         if (descriptor.kind === 'local') {
             const file = descriptor.file;
             if (!(file instanceof File)) return;
             const objectUrl = URL.createObjectURL(file);
             relViewObjectUrls.push(objectUrl);
+            const source = insurance ? approvalInsuranceNoticeReader?.getAttachmentSource(file) : null;
+            const insurancePreview = source ? 'source' : viewKind(file.name, file.type);
             attachments.push({
                 rawRef: objectUrl,
                 previewUrl: objectUrl,
                 displayName: String(file.name || '첨부파일').trim() || '첨부파일',
                 size: Number(file.size || 0) || 0,
-                mimeType: String(file.type || '').trim()
+                mimeType: String(file.type || '').trim(),
+                insurancePreview,
+                insuranceFile: insurancePreview ? (source?.file || file) : null
             });
             return;
         }
@@ -14007,7 +14014,8 @@ async function buildApprovalSubmitPreviewAttachments(previewDoc) {
             rawRef: item.rawRef,
             displayName: item.displayName,
             size: Number(item.size || 0) || 0,
-            mimeType: String(item.mimeType || '').trim()
+            mimeType: String(item.mimeType || '').trim(),
+            insurancePreview: viewKind(item.displayName || extractDisplayFileName(item.rawRef), item.mimeType)
         });
     });
 
@@ -14364,6 +14372,7 @@ async function openApprovalSubmitPreview() {
         if(leaveBlock){showAlert(leaveBlock);return;}
         const previewDoc = buildApprovalSubmitPreviewData();
         currentViewingDocId = null;
+        invalidateApprovalSubmitPreview();
         resetRelViewObjectUrls();
         const contentEl = document.getElementById("relViewContent");
         const modalTitleEl = document.getElementById("relViewModalTitle");
@@ -14442,7 +14451,11 @@ async function openApprovalSubmitPreview() {
         contentEl.appendChild(attachmentPlaceholder);
         const previewAttachments = await buildApprovalSubmitPreviewAttachments(previewDoc);
         if (!isCurrent()) return;
-        const attachmentViewerEl = await buildRelAttachmentViewer(previewAttachments);
+        const attachmentLife = new AbortController();
+        previewState.disposeAttachments = () => attachmentLife.abort();
+        const attachmentViewerEl = await buildRelAttachmentViewer(previewAttachments, {
+            current:isCurrent, autoPreview:true, signal:attachmentLife.signal
+        });
         if (!isCurrent()) return;
         attachmentPlaceholder.replaceWith(attachmentViewerEl);
         previewState.ready = true;
@@ -14493,6 +14506,7 @@ function isApprovalSubmitSnapshotCurrent(snapshot) {
         && snapshot.files.every((file,index)=>file===now.files[index]);
 }
 function invalidateApprovalSubmitPreview() {
+    approvalSubmitPreviewState?.disposeAttachments?.();
     approvalSubmitPreviewState = null;
     const button=document.getElementById('btnSubmitFromPreview');
     if(button)button.disabled=true;
@@ -18966,6 +18980,7 @@ async function selectRelDoc(doc) {
 
 async function buildRelAttachmentViewer(attachments, options = null) {
     const inline = typeof options?.current === 'function';
+    const autoPreview = !inline || options?.autoPreview === true;
     const viewerRevision = inline ? null : ++relAttachmentViewerRevision;
     const ownerCurrent = inline ? options.current : approvalAttachmentReadContext();
     const viewerCurrent = () => ownerCurrent() && (inline || viewerRevision === relAttachmentViewerRevision);
@@ -19040,6 +19055,8 @@ async function buildRelAttachmentViewer(attachments, options = null) {
     };
 
     let stageObjectUrl = null;
+    let insuranceStage = null;
+    options?.signal?.addEventListener('abort', () => insuranceStage?.abort(), {once:true});
     const resetStageObjectUrl = () => {
         if (!stageObjectUrl) return;
         try {
@@ -19052,8 +19069,9 @@ async function buildRelAttachmentViewer(attachments, options = null) {
 
     const renderCurrent = async (previewIndex) => {
         const revision = ++state.revision;
-        const currentRead = () => revision === state.revision && viewerCurrent();
+        const currentRead = () => revision === state.revision && !options?.signal?.aborted && viewerCurrent();
         if (!currentRead()) return;
+        insuranceStage?.abort();insuranceStage=null;
         navBox.hidden = false;
         stage.hidden = false;
         if (!state.previewable.length) {
@@ -19065,10 +19083,42 @@ async function buildRelAttachmentViewer(attachments, options = null) {
         state.index = Math.max(0, Math.min(previewIndex, state.previewable.length - 1));
         const current = state.previewable[state.index];
         syncAttachmentNavButtons();
+        navBox.classList.toggle('d-none', !!current.insurancePreview && state.previewable.length === 1);
         stage.innerHTML = '<div class="text-muted">첨부파일을 불러오는 중입니다.</div>';
         try {
             resetStageObjectUrl();
             const currentName = getItemDisplayName(current, `첨부파일 ${current.idx + 1}`);
+            if (current.insurancePreview && typeof window.CoopInsuranceNotice?.previewAttachment === 'function') {
+                let file = current.insuranceFile;
+                if (!file) {
+                    // Only an already-authorized attachment reference uses the existing preview read.
+                    const payload = await fetchPreviewBlob(current.rawRef, options?.expiresSec || 60 * 60 * 3);
+                    URL.revokeObjectURL(payload.url);
+                    if (!currentRead()) return;
+                    file = payload.blob;
+                }
+                insuranceStage = new AbortController();
+                metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${currentName}`;
+                window.CoopInsuranceNotice.previewAttachment(stage,{
+                    file,name:currentName,kind:current.insurancePreview,current:currentRead,signal:insuranceStage.signal,
+                    passwordFor:()=>approvalCompanyInfoRemoteConfirmed
+                        ? String(approvalCompanyInfo.bizNum || '').replace(/\D/g,'') : '',
+                    fallback:()=>{
+                        if(!currentRead()||current.insurancePreview==='source')return;
+                        const url=current.previewUrl || URL.createObjectURL(file);
+                        if(!current.previewUrl){
+                            stageObjectUrl=url;
+                            if(options?.objectUrls)options.objectUrls.add(url);
+                            else relViewObjectUrls.push(url);
+                        }
+                        const frame=document.createElement('iframe');
+                        frame.title=currentName;
+                        frame.src=url+'#toolbar=1';
+                        stage.replaceChildren(frame);
+                    }
+                });
+                return;
+            }
             if (String(current.previewUrl || '').trim()) {
                 const previewType = getAttachmentPreviewType(currentName, current.mimeType || '');
                 if (!previewType) throw new Error('unsupported-preview-type');
@@ -19157,7 +19207,7 @@ async function buildRelAttachmentViewer(attachments, options = null) {
     viewer.appendChild(list);
     wrapper.appendChild(viewer);
 
-    if (!inline) await renderCurrent(0);
+    if (autoPreview) await renderCurrent(0);
     return wrapper;
 }
 
