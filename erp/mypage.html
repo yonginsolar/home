@@ -18,7 +18,7 @@
 <title>마이페이지</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-<script src="workflow_assets_print_v1.js" integrity="sha384-Y1ouImMNdgejf/IoEufA9cl7zESy2MnClk81r+cNhtZG4JnjQq3QW7DEgdM5BI6U" crossorigin="anonymous"></script>
+<script src="workflow_assets_print_v2.js" integrity="sha384-t7ZTZ1ZovGzFJ3k8juHnAZ/O3MH0093TgFWYig9PIyBf++Xj4BjSfrKigcbXVDbP" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script>
@@ -2688,11 +2688,11 @@ async function printSalaryPopup() {
     let popup;
     printSalaryPopup.pending=true;
     try{
-        if(typeof PrintService==='undefined'){
+        if(typeof PrintService==='undefined'||!window.SalarySlipPrint){
             popup=window.open('','','width=900,height=1100');
             if(!popup)return showAlert('인쇄 창을 열 수 없습니다. 팝업을 허용한 뒤 다시 시도해 주세요.');
             popup.document.body.textContent='인쇄 미리보기를 준비하고 있습니다…';
-            await window.ErpWorkflowAssets.load('printService');
+            await Promise.all(['printService','salarySlipPrint'].map(key=>window.ErpWorkflowAssets.load(key)));
             if(popup.closed||!current()){popup.close();return;}
         }
         renderMypageSalaryPrint(data,popup);
@@ -2746,7 +2746,7 @@ function renderMypageSalaryPrint(d, popup) {
     };
 
     // 모듈 호출
-    PrintService.printSalary(salaryData, popup);
+    window.SalarySlipPrint.print(salaryData, popup);
 }
 
 function getSalaryPayrollTaxAdjustmentTotal(row){

@@ -298,6 +298,8 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
             color: #334155;
         }
         .channel-toggle input { margin: 0; }
+        .minute-preview-sign-image { width:64px; height:38px; object-fit:contain; }
+        .minute-preview-sign-note { max-width:130px; font-size:.75rem; color:#64748b; }
     </style>
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
@@ -673,11 +675,12 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
 
     <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
     <script src="/erp/chatgpt_edit_guide.js?v=1.0.0" integrity="sha384-eVMu5C+DyenFdmrEBIL/DYTUL1zTmurBluHFpYAQSQxsuBEk0GPruzw0tt4Ae4bX" crossorigin="anonymous" defer></script>
-    <script src="/minutes/print_templates_v1_1.js?v=1.1.0" integrity="sha384-zj/sIGYEJiA8L+mjW910x6bbC6a9X47ueF67U8B/ICylV0opTemCFkB7JWT53tmZ" crossorigin="anonymous" defer></script>
+    <script src="/minutes/print_templates_v1_3.js?v=1.3.0" integrity="sha384-WrmbNHXHBy6W50urdAzFSOXSxD7MDKFv3ZOZjaDz0gO0axw3oNI4qEep504pqoam" crossorigin="anonymous" defer></script>
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.61';
         import { bindMinuteNoticeImport } from './minute_notice_import.js?v=1.1.0';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
+        import { loadMinuteSignatureAssets } from './signature_print_assets_v1.js';
         import { supabase } from '../shared/supabase-client.js';
 
         function getErpHomeUrl() {
@@ -861,6 +864,7 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
             supabase.auth.onAuthStateChange((event, nextSession) => {
                 if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== currentUserId)) {
                     clearNoticeEditDrafts();
+                    invalidateMinuteOutput();
                     invalidateMinutesList();
                     minuteNoticeImporter?.reset();
                     document.getElementById('sub-tab-editor').disabled = true;
@@ -1040,6 +1044,7 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
         let minuteEditTargetId = null;
         let minuteEditRequest = 0;
         let minutePreviewRequest = 0;
+        let minuteOutputRevision = 0;
         let minuteEditBaseline = '';
         let minuteEditSaving = false;
 
@@ -2785,7 +2790,7 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
             `;
         }
 
-        async function buildMinuteSignaturePreviewHtml(minute, signatures) {
+        function buildMinuteSignaturePreviewHtml(minute, signatures, assets, templates) {
             if (!minute || !minute.requires_sign || minute.doc_type === 'NOTICE') return '';
 
             const requiredIds = getRequiredSignerIds(minute);
@@ -2796,30 +2801,26 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
             const signedCount = requiredIds.filter(id => sigMap.has(String(id))).length;
             const totalCount = requiredIds.length;
 
-            const itemHtml = await Promise.all(requiredIds.map(async (id) => {
+            const itemHtml = requiredIds.map(id => {
                 const off = (allOfficials || []).find(o => String(o.id) === String(id));
                 const safeName = escapeHtml(off?.name || '임원');
                 const sig = sigMap.get(String(id));
                 const isSigned = !!sig;
 
-                let imgHtml = '<div style="width:42px; height:42px; border:1px solid #e5e7eb; border-radius:50%; background:#fff;"></div>';
-                if (sig?.signature_url) {
-                    const signedUrl = safeUrl(await resolveSignatureUrl(sig.signature_url), { allowDataImage: true });
-                    if (signedUrl) {
-                        imgHtml = `<img src="${signedUrl}" alt="서명" style="width:42px; height:42px; border-radius:50%; border:1px solid #e5e7eb; object-fit:contain; background:#fff;">`;
-                    }
-                }
+                const imgHtml = isSigned && !window.ExpoRuntimeBridge
+                    ? templates.signatureImage(assets.get(String(id)), 'minute-preview-sign-image', 'minute-preview-sign-note')
+                    : '';
 
                 return `
                     <div style="display:flex; align-items:center; gap:8px; border:1px solid #e5e7eb; border-radius:12px; padding:7px 9px; background:${isSigned ? '#f8fafc' : '#f1f5f9'}; ${isSigned ? '' : 'opacity:0.65;'}">
-                        ${imgHtml}
                         <div>
                             <div style="font-size:0.84rem; font-weight:700; color:#111827;">${safeName}</div>
                             <div style="font-size:0.75rem; color:#64748b;">${isSigned ? '서명 완료' : '미서명'}</div>
                         </div>
+                        ${imgHtml}
                     </div>
                 `;
-            }));
+            });
 
             return `
                 <div style="margin-top:16px; padding-top:12px; border-top:1px solid #e5e7eb;">
@@ -3011,32 +3012,45 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
             return true;
         }
 
-        async function injectInlineSignatureImages(contentHtml, minute, signatures) {
-            if (!minute || !minute.requires_sign || minute.doc_type === 'NOTICE') return contentHtml;
-            const html = String(contentHtml || '');
-            if (!html) return html;
-
-            const requiredIds = getRequiredSignerIds(minute);
-            if (!requiredIds.length) return html;
-
-            const sigRows = Array.isArray(signatures) ? signatures : [];
-            const sigMap = new Map(sigRows.map(row => [String(row.official_id), row]));
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            for (const id of requiredIds) {
-                const off = (allOfficials || []).find(o => String(o.id) === String(id));
-                if (!off) continue;
-                const sig = sigMap.get(String(id));
-                if (!sig?.signature_url) continue;
-                const signedUrl = await resolveSignatureUrl(sig.signature_url);
-                if (!signedUrl) continue;
-                appendMinuteSignatureImageToOfficialName(doc.body, off, signedUrl);
-            }
-            return doc.body.innerHTML;
+        function currentMinuteRead() {
+            const owner = { ...minutesListOwner };
+            const revision = minuteOutputRevision;
+            return () => isAdminUser && !!owner.coopId && owner.userId === currentUserId
+                && owner.coopId === minutesListOwner.coopId && owner.revision === minutesListOwner.revision
+                && revision === minuteOutputRevision
+                && (!window.frameElement?.hidden)
+                && document.getElementById('tab-minutes')?.classList.contains('active')
+                && document.getElementById('sub-panel-manage')?.classList.contains('active');
         }
 
-        async function buildPrintableMinuteHtml(minute, signatures) {
-            return window.CoopMinutesPrintTemplates.create({allOfficials,MinutesService}).minute(minute,signatures);
+        function invalidateMinuteOutput() {
+            minuteOutputRevision++;
+            window.closeMinutePreview?.();
+        }
+
+        async function readMinuteForOutput(id, current) {
+            const coopId = String(minutesListOwner.coopId || '');
+            const matches = row => !!row && String(row.id) === String(id)
+                && (window.ExpoRuntimeBridge || String(row.coop_id || '') === coopId);
+            const cached = minutesCache.get(id);
+            if (matches(cached) && String(cached.content || '').trim()) return cached;
+            const { data, error } = await MinutesService.getMinuteById(id);
+            if (!current()) return null;
+            if (error || !matches(data)) throw new Error('minute unavailable');
+            minutesCache.set(id, data);
+            return data;
+        }
+
+        async function readMinuteOutputSignatures(minute, templates, current) {
+            if (!minute.requires_sign || minute.doc_type === 'NOTICE') return { signatures:[], assets:new Map() };
+            const { data, error } = await MinutesService.listSignaturesByMinuteId(minute.id);
+            if (!current()) return null;
+            if (error) throw new Error('signature status unavailable');
+            const signatures = Array.isArray(data) ? data : [];
+            const assets = window.ExpoRuntimeBridge ? new Map() : await loadMinuteSignatureAssets({
+                minute, signatures, requiredIds:templates.required(minute), client:supabase, current
+            });
+            return current() ? { signatures, assets } : null;
         }
 
         async function waitForPrintWindowImages(printWindow, timeoutMs = 3000) {
@@ -3146,73 +3160,70 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
 
         window.openMinutePreview = async (id) => {
             const request = ++minutePreviewRequest;
-            let minute = minutesCache?.get(id);
-            if (!minute || !Object.prototype.hasOwnProperty.call(minute,'content')) {
-                const { data, error } = await MinutesService.getMinuteById(id);
-                if (request !== minutePreviewRequest) return;
-                if (error || !data) {
-                    showToast('의사록 정보를 불러오지 못했습니다.');
-                    return;
-                }
-                minute = data;
-                minutesCache.set(id, minute);
-            }
+            const ownerCurrent = currentMinuteRead();
+            const current = () => request === minutePreviewRequest && ownerCurrent();
+            if (!current()) return;
+            try {
+                const minute = await readMinuteForOutput(id, current);
+                if (!minute || !current()) return;
 
-            if (!String(minute.content || '').trim()) {
-                const { data, error } = await MinutesService.getMinuteById(id);
-                if (!error && data) {
-                    minute = { ...minute, ...data };
-                    minutesCache.set(id, minute);
-                }
+                const normalized = normalizeMinuteContent(minute.content || '');
+                const templates = window.CoopMinutesPrintTemplates.create({allOfficials, MinutesService});
+                const prepared = await readMinuteOutputSignatures(minute, templates, current);
+                if (!prepared || !current()) return;
+                const { signatures, assets } = prepared;
+                const safeBodyHtml = normalized ? sanitizeHtml(normalized) : '<div style="color:#6b7280;">표시할 본문이 없습니다.</div>';
+                const inlineBodyHtml = normalized && !window.ExpoRuntimeBridge ? templates.inlineSignatures(safeBodyHtml, minute, assets) : safeBodyHtml;
+                const certificationHtml = buildMinuteCertificationPreviewHtml(minute, signatures);
+                const signatureHtml = buildMinuteSignaturePreviewHtml(minute, signatures, assets, templates);
+                document.getElementById('minutePreviewTitle').innerText = minute.title || '의사록';
+                document.getElementById('minutePreviewMeta').innerText = `${getDocTypeLabel(minute.doc_type)} | ${formatMinutesAdminKstDate(minute.created_at)}`;
+                document.getElementById('minutePreviewBody').innerHTML = `
+                    ${certificationHtml}
+                    ${inlineBodyHtml}
+                    ${signatureHtml}
+                `;
+                document.getElementById('minutePreviewModal').classList.add('show');
+            } catch {
+                if (current()) showToast('의사록 또는 서명 현황을 불러오지 못했습니다. 다시 시도해 주세요.');
             }
-
-            const normalized = normalizeMinuteContent(minute.content || '');
-            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(id);
-            const safeBodyHtml = normalized ? sanitizeHtml(normalized) : '<div style="color:#6b7280;">표시할 본문이 없습니다.</div>';
-            const inlineBodyHtml = normalized ? await injectInlineSignatureImages(safeBodyHtml, minute, signatures || []) : safeBodyHtml;
-            const certificationHtml = buildMinuteCertificationPreviewHtml(minute, signatures || []);
-            const signatureHtml = await buildMinuteSignaturePreviewHtml(minute, signatures || []);
-            if (request !== minutePreviewRequest) return;
-            document.getElementById('minutePreviewTitle').innerText = minute.title || '의사록';
-            document.getElementById('minutePreviewMeta').innerText = `${getDocTypeLabel(minute.doc_type)} | ${formatMinutesAdminKstDate(minute.created_at)}`;
-            document.getElementById('minutePreviewBody').innerHTML = `
-                ${certificationHtml}
-                ${inlineBodyHtml}
-                ${signatureHtml}
-            `;
-            document.getElementById('minutePreviewModal').classList.add('show');
         };
         window.printMinute = async (id) => {
-            let minute = minutesCache?.get(id);
-            if (!minute || !Object.prototype.hasOwnProperty.call(minute,'content')) {
-                const { data, error } = await MinutesService.getMinuteById(id);
-                if (error || !data) {
-                    showToast('의사록 정보를 불러오지 못했습니다.');
-                    return;
-                }
-                minute = data;
-                minutesCache.set(id, minute);
-            }
-
-            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(id);
-            const html = await buildPrintableMinuteHtml(minute, signatures || []);
+            const ownerCurrent = currentMinuteRead();
+            if (!ownerCurrent()) return;
             const printWindow = window.open('', '_blank', 'width=960,height=900');
             if (!printWindow) {
                 showToast('팝업이 차단되어 출력 창을 열지 못했습니다.');
                 return;
             }
-            printWindow.document.open();
-            printWindow.document.write(html);
-            printWindow.document.close();
-            printWindow.focus();
-            await waitForPrintWindowImages(printWindow);
+            const current = () => !printWindow.closed && ownerCurrent();
             try {
-                printWindow.print();
-            } catch (e) {}
+                printWindow.document.title = '의사록 출력 준비 중';
+                printWindow.document.body.textContent = '의사록과 서명 이미지를 불러오는 중입니다…';
+                const minute = await readMinuteForOutput(id, current);
+                if (!minute || !current()) return;
+
+                const templates = window.CoopMinutesPrintTemplates.create({allOfficials, MinutesService});
+                const prepared = await readMinuteOutputSignatures(minute, templates, current);
+                if (!prepared || !current()) return;
+                const html = templates.minute(minute, prepared.signatures, prepared.assets);
+                printWindow.document.open();
+                printWindow.document.write(html);
+                printWindow.document.close();
+                printWindow.focus();
+                await waitForPrintWindowImages(printWindow);
+                if (current()) printWindow.print();
+            } catch {
+                if (!printWindow.closed) printWindow.close();
+                if (ownerCurrent()) showToast('의사록을 출력하지 못했습니다. 다시 시도해 주세요.');
+            } finally {
+                if (!current() && !printWindow.closed) printWindow.close();
+            }
         };
         window.closeMinutePreview = () => {
             minutePreviewRequest++;
             document.getElementById('minutePreviewModal').classList.remove('show');
+            document.getElementById('minutePreviewBody')?.replaceChildren();
         };
 
         window.openSignerEditor = async (id) => {
@@ -3665,7 +3676,10 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
             const isMinutes = safeName === 'minutes';
             const isNotices = safeName === 'notices';
             const isMaterials = safeName === 'materials';
-            if (!isMinutes) invalidateMinutesList();
+            if (!isMinutes) {
+                invalidateMinutesList();
+                if (minutesPanel.classList.contains('active')) invalidateMinuteOutput();
+            }
             if (!isMinutes) minuteNoticeImporter?.reset();
             minutesBtn.classList.toggle('active', isMinutes);
             noticesBtn.classList.toggle('active', isNotices);
@@ -3715,6 +3729,7 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
                 loadMinutes();
             } else {
                 invalidateMinutesList();
+                invalidateMinuteOutput();
                 window.CoopChatGptEditGuide?.setVisible(document.getElementById('minutes-chatgpt-guide'),isAdminUser);
                 manage?.classList.remove('active');
                 editor?.classList.add('active');
@@ -3877,7 +3892,10 @@ Change: 2026-11-20 - 승인 소집 공문의 기본정보를 새 의사록에 �
             window.ErpWorkspaceResume.register({modules:['minutes'],authorize:async runtime=>{
                 invalidateMinutesList();
                 minuteNoticeImporter?.reset();
-                if (minutesListOwner.coopId && minutesListOwner.coopId !== runtime.coop_id) clearNoticeEditDrafts();
+                if (minutesListOwner.coopId && minutesListOwner.coopId !== runtime.coop_id) {
+                    clearNoticeEditDrafts();
+                    invalidateMinuteOutput();
+                }
                 minutesListOwner = { userId:currentUserId, coopId:runtime.coop_id, revision:minutesListOwner.revision + 1 };
                 return runtime.effective_permissions.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
                     || await MinutesService.isAdmin(session.user.id,session.user.email);
