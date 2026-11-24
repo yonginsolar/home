@@ -5,7 +5,7 @@
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
   <meta name="erp-query-controls-revision" content="20261023.1">
-  <script src="/shared/coop_dialog.js?v=20261112-caret-1" integrity="sha384-dtSAC1/LrXrXqO9RVxDSzlj1VBHozxdBNK/3cNkJhkB2M2iA/zbF2Z+M2J4oyHGN" crossorigin="anonymous"></script>
+  <script src="/shared/coop_dialog_v1_1.js" integrity="sha384-tCpWFdciV61dadwPTtfT+U592nZW7YH8aTnSZPRUCI1CFUcPapI9LhOD3cewIuDE" crossorigin="anonymous"></script>
   <script src="/shared/workflow_help.js?v=20261026-mobile-help-1" integrity="sha384-aDygb3b3+ARJmbKazWhergFuAz+9LZCHQH8bfj4EIisehZMMJM8FvaxnmRoObWjM" crossorigin="anonymous" defer></script>
   <script>console.log('[Version] ui.20261013.1 | approval.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
@@ -52,7 +52,7 @@
   <script src="leave_ledger.js?v=20261122-fifo-2"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
-  <script src="approval_insurance_notice.js?v=1.1.2" integrity="sha384-Z8vzUhvGeHVYL+SRkQ1El4RZEdpeoApq+UsAilxqnRLWaECj6/cTAkyFRfsIEeTh" crossorigin="anonymous"></script>
+  <script src="approval_insurance_notice_v1_2.js" integrity="sha384-oql2ZZ/xl5QuN8CiTZugt5EB4CmkTf69ruRQrrsq0GwMSs6R4FTYCXJXAzuTcpYd" crossorigin="anonymous"></script>
   <script src="approval_permission_request.js?v=1.2.2"></script>
   <script src="workflow_assets_print_v1.js" integrity="sha384-Y1ouImMNdgejf/IoEufA9cl7zESy2MnClk81r+cNhtZG4JnjQq3QW7DEgdM5BI6U" crossorigin="anonymous"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
@@ -6836,6 +6836,7 @@ function initApprovalInsuranceNoticeReader() {
     const fingerprint = () => JSON.stringify([collectApprovalDraftFormPayload(), currentApprovalDraftId, currentApprovalDraftUpdatedAt, getApprovalOrderedAttachmentDescriptors().map(x => x.id)]);
     approvalInsuranceNoticeReader = window.CoopInsuranceNotice.create({
         button, getContext: context, getFingerprint: fingerprint, onDirty: () => syncApprovalDraftStatusText(),
+        hasAttachment: file => Array.from(document.getElementById('attachFile')?.files || []).includes(file),
         apply(values, file, baseline, previousFile) {
             if (!context().allowed || !context().visible || fingerprint() !== baseline) return false;
             const input = document.getElementById('attachFile');
@@ -18187,7 +18188,7 @@ function updateFileList() {
             displayName = file.name || '첨부파일';
             sourceLabel = `이 기기에서만 선택됨${file.size ? ` · ${formatAttachmentSize(file.size)}` : ''}`;
             previewButton = canPreview
-                ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openLocalAttachmentPreview(${descriptor.localIndex})">바로보기</button>`
+                ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openLocalAttachmentPreview(${descriptor.localIndex}, this)">바로보기</button>`
                 : '';
             removeButton = `<button type="button" class="btn btn-sm btn-outline-danger" onclick="removeLocalAttachment(${descriptor.localIndex})">제외</button>`;
         }
@@ -18268,10 +18269,12 @@ async function openAttachmentPreview(encodedUrl) {
     }
 }
 
-function openLocalAttachmentPreview(fileIndex) {
+function openLocalAttachmentPreview(fileIndex, trigger) {
     approvalAttachmentPreviewRevision++;
     const file = Array.from(document.getElementById('attachFile')?.files || [])[fileIndex];
     if (!file) return;
+    // Only the exact same draft's local print-copy can open its locally selected source.
+    if (approvalInsuranceNoticeReader?.openAttachmentSource(file, trigger)) return;
     const previewType = getAttachmentPreviewType(file.name || '', file.type || '');
     if (!previewType) {
         showAlert('현재는 PDF와 이미지 파일만 웹 바로보기를 지원합니다.');
