@@ -19,7 +19,7 @@ Change: 2026-11-22 - 조합원 관리 권한 확인과 목록 갱신 분리.
 <meta name="admin-contribution-certificate-revision" content="20261010.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.518';
+window.ADMIN_MEMBER_VERSION = 'v1.0.519';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -99,10 +99,13 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
   <meta name="erp-workspace-revision" content="20261010.9">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
   <script src="/erp/workspace_nav.js?v=20261103-plants-1" defer></script>
+  <script src="/erp/erp_palette.js?v=1.0.0" integrity="sha384-eqzWMk2JERd7XhuNeGNbJ48/w3Hit4umqaZoA6gO9BLNrCkvVuoF8YKOipNIJB1y" crossorigin="anonymous" defer></script>
+  <link rel="stylesheet" href="./erp_ui_common_v1.css?v=1.0.0" integrity="sha384-niodDcGsGAUoztn3/NbKkNJXkyc3phcpFjuSEc3r3gzJO+rny1ut14+p3vgn/S16" crossorigin="anonymous">
+  <link rel="stylesheet" href="./admin_member_v2.css?v=2.0.0" integrity="sha384-AyXm5JQwvL9rDIv0jxtH8C+o2fLaQ7Ye0tF7/n63xo31mL9bijvRVHz7RkaCgaDN" crossorigin="anonymous">
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 
-<body class="erp-unified erp-pc-workspace erp-page-admin-member" data-erp-mobile-task="member">
+<body class="erp-unified erp-pc-workspace erp-page-admin-member erp-ui-v2" data-erp-mobile-task="member">
 
 <div id="admin-boot-gate" role="status" aria-live="polite" aria-busy="true">
 <div class="admin-boot-card" id="adminBootCard">
@@ -252,72 +255,87 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
     </section>
     <div class="tab-pane fade" id="tab-notifications" style="display:none;"></div>
     <div class="tab-pane fade show active" id="tab-dashboard">
-    <h3 class="fw-bold mb-4" style="font-family:'GmarketSans';">운영 대시보드</h3>
+    <div class="erp-page-head">
+        <div>
+            <h3 class="erp-page-title">운영 대시보드</h3>
+        </div>
+    </div>
 
     <div class="row g-3 mb-4">
         <div class="col-md-6 col-lg-3">
-            <button type="button" class="card bg-primary bg-opacity-10 border-0 shadow-sm h-100 w-100 text-start" id="dashboard-regular-members" onclick="goToRegularMembers()" aria-label="정조합원 명부 보기">
-                <span class="card-body d-block p-4">
-                    <span class="d-block fs-6 text-primary fw-bold mb-2">정조합원</span>
-                    <span class="d-block display-6 fw-bold mb-0" id="dashboard-total-count">0명</span>
-                </span>
-            </button>
-        </div>
-
-        <div class="col-md-6 col-lg-3">
-            <button type="button" class="card bg-warning bg-opacity-10 border-0 shadow-sm h-100 w-100 text-start" id="dashboard-pending-members" onclick="goToPendingMembers()" onkeydown="if(event.key===' '||event.code==='Space'){event.preventDefault();if(!event.repeat)this.click();}" aria-label="가입 승인 대기 명부 보기">
-                <span class="card-body p-4 d-block w-100">
-                    <span class="d-flex justify-content-between align-items-center mb-2">
-                        <span class="fs-6 text-dark fw-bold mb-0">승인 대기</span>
-                        <i class="bi bi-arrow-right-circle text-warning text-dark"></i>
+            <button type="button" class="card erp-kpi-card is-accent is-action h-100 w-100 text-start" id="dashboard-regular-members" onclick="goToRegularMembers()" aria-label="정조합원 명부 보기">
+                <span class="card-body d-block">
+                    <span class="erp-kpi-label">
+                        <span class="erp-kpi-label-text">정조합원</span>
+                        <span class="erp-kpi-arrow" aria-hidden="true"><i class="bi bi-arrow-right"></i></span>
                     </span>
-                    <span class="d-block display-6 fw-bold mb-0" id="dashboard-pending-count">0명</span>
-                    <span class="d-block small text-dark mt-2">명부 보기 →</span>
+                    <span class="erp-kpi-value mb-0" id="dashboard-total-count">0명</span>
+                    <span class="erp-kpi-meta">명부 바로가기</span>
                 </span>
             </button>
         </div>
 
         <div class="col-md-6 col-lg-3">
-            <div class="card bg-secondary bg-opacity-10 border-0 shadow-sm h-100">
-                <div class="card-body p-4">
-                    <h6 class="text-secondary fw-bold mb-2">신규 가입 (7일)</h6>
-                    <h2 class="display-6 fw-bold mb-0" id="dashboard-new-signups">0명</h2>
-                    <div class="small text-muted mt-2">승인대기만 집계</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6 col-lg-3">
-            <div class="card bg-success bg-opacity-10 border-0 shadow-sm h-100">
-                <div class="card-body p-4">
-                    <h6 class="text-success fw-bold mb-2">누적 출자금</h6>
-                    <h2 class="fs-2 fw-bold mb-0 text-success" id="dash-capital">-</h2>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6 col-lg-6">
-            <button type="button" class="card bg-danger bg-opacity-10 border-0 shadow-sm h-100 w-100 text-start" id="dashboard-pending-applications" onclick="switchTab('applications')" onkeydown="if(event.key===' '||event.code==='Space'){event.preventDefault();if(!event.repeat)this.click();}" aria-label="처리 대기 신청 보기">
-                <span class="card-body p-4 d-block w-100">
-                    <span class="d-block fs-6 text-danger fw-bold mb-2">처리 대기 신청</span>
-                    <span class="d-block display-6 fw-bold mb-0 text-danger" id="dash-app-pending">0건</span>
-                    <span class="d-block small text-muted mt-2">출자/감자/탈퇴 요청 · 신청 보기 →</span>
+            <button type="button" class="card erp-kpi-card is-warn is-action h-100 w-100 text-start" id="dashboard-pending-members" onclick="goToPendingMembers()" onkeydown="if(event.key===' '||event.code==='Space'){event.preventDefault();if(!event.repeat)this.click();}" aria-label="가입 승인 대기 명부 보기">
+                <span class="card-body d-block w-100">
+                    <span class="erp-kpi-label">
+                        <span class="erp-kpi-label-text">승인 대기</span>
+                        <span class="erp-kpi-arrow" aria-hidden="true"><i class="bi bi-arrow-right"></i></span>
+                    </span>
+                    <span class="erp-kpi-value mb-0" id="dashboard-pending-count">0명</span>
+                    <span class="erp-kpi-meta">가입 승인 대기 명부 보기</span>
                 </span>
             </button>
         </div>
 
-        <div class="col-md-6 col-lg-6">
-            <div class="card bg-warning bg-opacity-10 border-0 shadow-sm h-100" style="cursor:pointer;" onclick="openCapitalReturnManagement()">
-                <div class="card-body p-4">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6 class="text-dark fw-bold mb-0">출자금 반환 추적</h6>
-                        <i class="bi bi-arrow-right-circle text-warning"></i>
+        <div class="col-md-6 col-lg-3">
+            <div class="card erp-kpi-card is-neutral h-100">
+                <div class="card-body">
+                    <div class="erp-kpi-label">
+                        <span class="erp-kpi-label-text">신규 가입 (7일)</span>
                     </div>
-                    <h2 class="fs-3 fw-bold mb-1" id="dash-return-summary">0명 · 0원</h2>
-                    <div class="small text-muted" id="dash-return-breakdown">감자 0명 · 탈퇴 0명</div>
-                    <div class="small text-danger mt-2" id="dash-return-stages">신규 확인 0건 · 총회 대기 0건 · 지급 대기 0건</div>
+                    <h2 class="erp-kpi-value mb-0" id="dashboard-new-signups">0명</h2>
+                    <div class="erp-kpi-meta">승인대기만 집계</div>
                 </div>
             </div>
+        </div>
+
+        <div class="col-md-6 col-lg-3">
+            <div class="card erp-kpi-card is-success h-100">
+                <div class="card-body">
+                    <div class="erp-kpi-label">
+                        <span class="erp-kpi-label-text">누적 출자금</span>
+                    </div>
+                    <h2 class="erp-kpi-value mb-0" id="dash-capital">-</h2>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 col-lg-6">
+            <button type="button" class="card erp-kpi-card is-danger is-action h-100 w-100 text-start" id="dashboard-pending-applications" onclick="switchTab('applications')" onkeydown="if(event.key===' '||event.code==='Space'){event.preventDefault();if(!event.repeat)this.click();}" aria-label="처리 대기 신청 보기">
+                <span class="card-body d-block w-100">
+                    <span class="erp-kpi-label">
+                        <span class="erp-kpi-label-text">처리 대기 신청</span>
+                        <span class="erp-kpi-arrow" aria-hidden="true"><i class="bi bi-arrow-right"></i></span>
+                    </span>
+                    <span class="erp-kpi-value mb-0" id="dash-app-pending">0건</span>
+                    <span class="erp-kpi-meta">출자/감자/탈퇴 요청 · 신청 목록으로 이동</span>
+                </span>
+            </button>
+        </div>
+
+        <div class="col-md-6 col-lg-6">
+            <button type="button" class="card erp-kpi-card is-warn is-action h-100" onclick="openCapitalReturnManagement()">
+                <span class="card-body d-block">
+                    <span class="erp-kpi-label">
+                        <span class="erp-kpi-label-text">출자금 반환 추적</span>
+                        <span class="erp-kpi-arrow" aria-hidden="true"><i class="bi bi-arrow-right"></i></span>
+                    </span>
+                    <span class="erp-kpi-value mb-1" id="dash-return-summary">0명 · 0원</span>
+                    <span class="erp-kpi-meta mt-1" id="dash-return-breakdown">감자 0명 · 탈퇴 0명</span>
+                    <span class="d-block small text-danger fw-semibold mt-1" id="dash-return-stages">신규 확인 0건 · 총회 대기 0건 · 지급 대기 0건</span>
+                </span>
+            </button>
         </div>
 
      </div>
@@ -455,7 +473,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 
     <div class="card border-0 shadow-sm p-4 mb-3">
         <h5 class="fw-bold mb-3">바로가기</h5>
-        <div class="d-flex gap-2">
+        <div class="erp-dash-shortcut-bar">
             <button class="btn btn-outline-dark" onclick="openNoticeModal()">📢 공지사항 쓰기</button>
             <button class="btn btn-outline-success" onclick="document.getElementById('nav-members').click()">👥 조합원 검색</button>
             <button class="btn btn-outline-secondary" onclick="openAdminLogModal()">🛡️ 관리자 로그</button>
@@ -463,30 +481,41 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
     </div>
 
 </div> <div class="tab-pane fade" id="tab-applications">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">📥 업무 신청 현황</h3>
-            <button class="btn btn-dark shadow-sm" onclick="openProxyModal()">
-                <i class="bi bi-telephone-plus-fill me-2"></i>전화/대리 접수
+        <div class="erp-page-head">
+            <h3 class="erp-page-title">📥 업무 신청 현황</h3>
+            <button class="btn btn-primary btn-sm px-3" onclick="openProxyModal()">
+                <i class="bi bi-telephone-plus-fill me-1"></i>전화/대리 접수
             </button>
         </div>
 
-        <ul class="nav nav-pills gap-2 mb-3" id="app-type-tabs">
-            <li class="nav-item">
-                <button id="app-type-extra" class="nav-link active fw-bold" onclick="filterAppType('extra')">
-                    추가출자 <span id="app-type-extra-count" class="badge bg-light text-dark ms-1">0</span>
-                </button>
-            </li>
-            <li class="nav-item">
-                <button id="app-type-governance" class="nav-link text-secondary" onclick="filterAppType('governance')">
-                    감자·탈퇴 <span id="app-type-governance-count" class="badge bg-light text-dark ms-1">0</span>
-                </button>
-            </li>
-            <li class="nav-item">
-                <button id="app-type-all" class="nav-link text-secondary" onclick="filterAppType('all')">
-                    전체 <span id="app-type-all-count" class="badge bg-light text-dark ms-1">0</span>
-                </button>
-            </li>
-        </ul>
+        <div class="erp-apps-toolbar">
+            <ul class="nav nav-pills erp-seg-tabs" id="app-type-tabs">
+                <li class="nav-item">
+                    <button id="app-type-extra" class="nav-link active fw-bold" onclick="filterAppType('extra')">
+                        추가출자 <span id="app-type-extra-count" class="badge bg-light text-dark ms-1">0</span>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button id="app-type-governance" class="nav-link text-secondary" onclick="filterAppType('governance')">
+                        감자·탈퇴 <span id="app-type-governance-count" class="badge bg-light text-dark ms-1">0</span>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button id="app-type-all" class="nav-link text-secondary" onclick="filterAppType('all')">
+                        전체 <span id="app-type-all-count" class="badge bg-light text-dark ms-1">0</span>
+                    </button>
+                </li>
+            </ul>
+
+            <ul class="nav nav-tabs" id="app-status-tabs">
+                <li class="nav-item">
+                    <button class="nav-link active fw-bold" onclick="filterAppList('pending')">처리 대기중</button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link text-secondary" onclick="filterAppList('all')">전체 이력</button>
+                </li>
+            </ul>
+        </div>
 
         <div id="app-governance-notice" class="alert alert-warning border-warning d-none mb-3">
             <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
@@ -499,15 +528,6 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
                 </button>
             </div>
         </div>
-
-        <ul class="nav nav-tabs mb-3" id="app-status-tabs">
-            <li class="nav-item">
-                <button class="nav-link active fw-bold" onclick="filterAppList('pending')">처리 대기중</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link text-secondary" onclick="filterAppList('all')">전체 이력</button>
-            </li>
-        </ul>
 
         <div class="card border-0 shadow-sm">
             <div class="table-responsive">
@@ -705,9 +725,9 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 #member-referral-detail [data-rd="status"]:empty{display:none}
 </style>
 <section class="tab-pane fade" id="tab-referrals" aria-labelledby="hcrec-referral-workspace-title">
-  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-    <h3 class="fw-bold m-0" id="hcrec-referral-workspace-title">추천인 관리</h3>
-    <button type="button" class="btn btn-outline-secondary" id="hcrec-referral-workspace-refresh" hidden>다시 확인</button>
+  <div class="erp-page-head">
+    <h3 class="erp-page-title" id="hcrec-referral-workspace-title">추천인 관리</h3>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="hcrec-referral-workspace-refresh" hidden>다시 확인</button>
   </div>
   <div class="d-flex flex-wrap gap-2 mb-3" role="tablist" aria-label="추천인 관리 분류" id="hcrec-referral-workspace-tabs">
     <button type="button" class="btn btn-outline-primary active" role="tab" aria-selected="true" aria-controls="hcrec-referral-workspace-body" id="hcrec-referrals-pending" data-referral-mode="pending_review">확인 필요</button>
@@ -726,23 +746,23 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
   </div>
 </section>
 <div class="tab-pane fade" id="tab-members">
-    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">조합원 명부</h3>
-        <div class="d-flex gap-2">
-            <button class="btn btn-sm btn-primary" onclick="openCreateMemberModal()">+ 조합원 등록</button>
+    <div class="erp-page-head">
+        <h3 class="erp-page-title">조합원 명부</h3>
+        <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-sm btn-primary px-3" onclick="openCreateMemberModal()">+ 조합원 등록</button>
         </div>
     </div>
 
     <div id="hcrec-referral-admin-actions" class="mb-3" hidden>
       <div class="d-flex flex-wrap gap-2">
-        <button type="button" class="btn btn-outline-primary" id="hcrec-referral-admin-open" hidden>추천인 관리</button>
-        <button type="button" class="btn btn-outline-secondary" id="hcrec-referral-admin-points">포인트 관리</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="hcrec-referral-admin-open" hidden>추천인 관리</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="hcrec-referral-admin-points">포인트 관리</button>
       </div>
     </div>
 
-    <div class="card p-3 mb-3 border-0 bg-light">
+    <div class="card erp-toolbar-card erp-member-filter-bar">
         <div class="row g-2 align-items-center">
-            <div class="col-md-2">
+            <div class="col-6 col-md-2">
                 <select data-erp-query-control id="filter-status" class="form-select form-select-sm" onchange="resetMemberPageAndFetch()">
                     <option value="all" selected>상태: 전체</option>
                     <option value="정상">정상 (정조합원)</option>
@@ -751,7 +771,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
                 </select>
             </div>
 
-            <div class="col-md-2">
+            <div class="col-6 col-md-2">
                 <select data-erp-query-control id="filter-type" class="form-select form-select-sm" onchange="resetMemberPageAndFetch()">
                     <option value="all">유형: 전체</option>
                     <option value="개인">개인</option>
@@ -759,7 +779,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
                 </select>
             </div>
 
-            <div class="col-md-2">
+            <div class="col-12 col-md-2">
                 <select data-erp-query-control id="sort-order" class="form-select form-select-sm" onchange="resetMemberPageAndFetch()">
                     <option value="name">이름순</option>
                     <option value="join_date">가입일순 (최신)</option>
@@ -767,15 +787,15 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
                 </select>
             </div>
 
-            <div class="col-md-4">
+            <div class="col-12 col-md-4">
                 <div class="input-group input-group-sm">
                     <input data-erp-query-control type="text" id="search-keyword" class="form-control" placeholder="이름 / 별칭 / 전화번호 / 조합원번호" onkeyup="if(event.key=='Enter') resetMemberPageAndFetch()">
-                    <button id="member-search-button" type="button" class="btn btn-secondary" onclick="resetMemberPageAndFetch()">검색</button>
+                    <button id="member-search-button" type="button" class="btn btn-erp-query" onclick="resetMemberPageAndFetch()">검색</button>
                 </div>
             </div>
 
-            <div class="col-md-2 text-end">
-                <div class="d-flex gap-2 justify-content-end flex-wrap">
+            <div class="col-12 col-md-2">
+                <div class="erp-member-excel-group">
                     <button id="member-excel-upload-button" type="button" class="btn btn-sm btn-outline-primary hidden" onclick="openMemberExcelUpload()">📤 엑셀 업로드</button>
                     <button id="capital-import-button" type="button" hidden onclick="openCapitalImportModal()">출자금 엑셀</button>
                     <button id="member-workbook-button" type="button" hidden onclick="openMemberWorkbookModal()">회원·출자금 함께</button>
@@ -789,7 +809,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
         <span id="member-list-read-message">조합원 명부를 불러오는 중입니다.</span>
         <button id="member-list-read-retry" data-erp-query-control type="button" class="btn btn-sm btn-outline-secondary ms-2" onclick="retryMemberRosterRead()" hidden>다시 확인</button>
     </div>
-    <div class="table-responsive bg-white border rounded">
+    <div class="table-responsive erp-member-table-wrap">
         <table class="table table-hover align-middle mb-0 text-center">
             <thead class="table-light">
                 <tr>
@@ -897,11 +917,11 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 </div>
 
 <div class="tab-pane fade" id="tab-funds-manage">
-    <div class="content-header">
-        <h3 class="fw-bold m-0" id="funds-manage-title" style="font-family:'GmarketSans';">💰 운영자금 및 배당 관리</h3>
+    <div class="erp-page-head">
+        <h3 class="erp-page-title" id="funds-manage-title">💰 운영자금 및 배당 관리</h3>
     </div>
 
-    <ul class="nav nav-tabs mb-4">
+    <ul class="nav nav-tabs erp-subtabs mb-4">
         <li class="nav-item">
             <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#sub-tab-donations" type="button" onclick="fetchGlobalDonations()">
                 🎁 자산수증이익 (운영기금)
@@ -929,26 +949,28 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 
     <div class="tab-content">
         <div class="tab-pane fade show active" id="sub-tab-donations">
-            <div class="card border-0 shadow-sm p-3 mb-3 bg-light">
-                <div class="row g-2 align-items-center">
-                    <div class="col-md-3">
-                        <label class="small fw-bold text-muted">조회 시작일</label>
+            <div class="card erp-toolbar-card mb-3">
+                <div class="row g-2 align-items-end">
+                    <div class="col-6 col-md-3">
+                        <label class="small fw-bold text-muted" for="don-date-start">조회 시작일</label>
                         <input data-erp-query-control type="date" id="don-date-start" class="form-control form-control-sm">
                     </div>
-                    <div class="col-md-3">
-                        <label class="small fw-bold text-muted">조회 종료일</label>
+                    <div class="col-6 col-md-3">
+                        <label class="small fw-bold text-muted" for="don-date-end">조회 종료일</label>
                         <input data-erp-query-control type="date" id="don-date-end" class="form-control form-control-sm">
                     </div>
-<div class="col-md-2 d-flex align-items-end mt-auto">
-    <button class="btn btn-sm btn-dark w-100" onclick="fetchGlobalDonations()">
-        <i class="bi bi-search"></i> 조회
-    </button>
-</div>
-                    <div class="col-md-4 text-end d-flex align-items-center justify-content-end">
-                        <div class="text-end">
+                    <div class="col-12 col-md-2">
+                        <button class="btn btn-sm btn-erp-query w-100" onclick="fetchGlobalDonations()">
+                            <i class="bi bi-search me-1"></i>조회
+                        </button>
+                    </div>
+                    <div class="col-12 col-md-4 text-md-end d-flex align-items-center justify-content-md-end">
+                        <div class="erp-funds-total-box">
                             <small class="text-muted d-block">기간 내 총 모금액</small>
-                            <span class="fs-4 fw-bold text-primary" id="don-total-sum">0</span>
-                            <span class="small fw-bold text-primary">원</span>
+                            <div>
+                                <span class="fs-4 fw-bold" id="don-total-sum">0</span>
+                                <span class="small fw-bold erp-funds-total-unit">원</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -992,11 +1014,11 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
                 <strong>이용실적 보상 원장</strong> 조합원의 사업 이용 실적, 활동, 미션 보상을 적립/차감하고 이후 이용실적 배당 계산의 기준으로 사용합니다.
             </div>
 
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <div class="input-group" style="width: 350px;">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <div class="input-group" style="width: 350px; max-width: 100%;">
                     <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
                     <input data-erp-query-control type="text" id="div-search-keyword" class="form-control form-control-sm border-start-0" placeholder="이름 또는 ID 검색" maxlength="120" aria-label="이용실적 원장 이름 또는 ID 검색" onkeyup="if(event.key=='Enter' && !event.isComposing) fetchGlobalDividends()">
-                    <button class="btn btn-sm btn-dark" onclick="fetchGlobalDividends()">검색</button>
+                    <button class="btn btn-sm btn-erp-query" onclick="fetchGlobalDividends()">검색</button>
                 </div>
                 <button class="btn btn-sm btn-primary fw-bold px-3" onclick="openDividendModal()">
                     + 이용고배당 수동 지급/차감
@@ -1382,8 +1404,8 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
                 </div>
             </div>
 
-            <div class="card border-primary-subtle shadow-sm mt-4">
-                <div class="card-header bg-primary bg-opacity-10 d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2">
+            <div class="card shadow-sm mt-4">
+                <div class="card-header erp-deemed-header d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2">
                     <div>
                         <h6 class="fw-bold mb-1">🧾 탈퇴 지분환급 의제배당</h6>
                         <div class="small text-muted">납입출자금을 초과한 지분환급만 별도로 검토합니다. 정기 출자배당·이용고배당 통계에는 합치지 않습니다.</div>
@@ -1665,20 +1687,22 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 </div>
 
 <div id="tab-deposit" class="tab-pane">
-<div class="content-header"><h3>💰 입금 내역 매칭</h3></div>
-<div class="row">
+<div class="erp-page-head"><h3 class="erp-page-title">💰 입금 내역 매칭</h3></div>
+<div class="row g-3">
 <div class="col-md-4">
 <div class="card p-3 h-100 border-0 shadow-sm">
 <h6 class="fw-bold mb-3">1. 은행 엑셀 업로드</h6>
-<input type="file" id="depositFile" class="form-control mb-3" onchange="readExcel(this)">
+<div class="erp-upload-drop">
+<input type="file" id="depositFile" class="form-control mb-2" onchange="readExcel(this)">
 <div class="small text-muted">엑셀 파일에 '입금자명' 또는 '성명', '입금액' 칼럼이 있어야 자동으로 인식합니다.</div>
+</div>
 </div>
 </div>
 <div class="col-md-8">
 <div class="card p-3 h-100 border-0 shadow-sm">
 <h6 class="fw-bold mb-3">2. 매칭 결과</h6>
 <div class="table-responsive" style="max-height: 500px; overflow-y:auto;">
-<table class="table table-sm">
+<table class="table table-sm table-hover">
 <thead style="position:sticky; top:0; background:white;"><tr><th>입금자명</th><th>입금액</th><th>매칭된 조합원</th></tr></thead>
 <tbody id="depositResultBody"><tr><td colspan="3" class="text-center text-muted py-5">파일을 업로드하세요.</td></tr></tbody>
 </table>
@@ -1689,9 +1713,9 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 </div>
 
 <div id="tab-notices" class="tab-pane">
-<div class="content-header">
-<h3>📢 공지사항 관리</h3>
-<button class="btn btn-primary btn-sm" onclick="openNoticeModal()"><i class="bi bi-pencil"></i> 공지 작성</button>
+<div class="erp-page-head">
+<h3 class="erp-page-title">📢 공지사항 관리</h3>
+<button class="btn btn-primary btn-sm px-3" onclick="openNoticeModal()"><i class="bi bi-pencil me-1"></i>공지 작성</button>
 </div>
 <div id="notice-list-status" class="small text-warning mb-2" role="status"></div>
 <div class="card border-0 shadow-sm">
@@ -1705,9 +1729,9 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 </div>
 
 <div class="tab-pane fade" id="tab-official-sign">
-<div class="content-header">
-<h3>🖋️ 임원·대의원·선관위원 서명/도장 관리</h3>
-<button class="btn btn-outline-secondary btn-sm" onclick="loadOfficialSignatures()"><i class="bi bi-arrow-clockwise"></i> 새로고침</button>
+<div class="erp-page-head">
+<h3 class="erp-page-title">🖋️ 임원·대의원·선관위원 서명/도장 관리</h3>
+<button class="btn btn-outline-secondary btn-sm" onclick="loadOfficialSignatures()"><i class="bi bi-arrow-clockwise me-1"></i>새로고침</button>
 </div>
 <div class="alert alert-info small">
 <i class="bi bi-info-circle-fill"></i> 임원/대의원/선관위원 서명 이미지는 이곳에서 관리합니다. 업로드된 이미지는 문서 전자서명에 재사용됩니다.
@@ -1723,8 +1747,9 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 </div>
 
 <div class="tab-pane fade" id="tab-badges">
-<h3 class="fw-bold mb-4">🏅 뱃지 관리</h3>
-<div class="d-flex flex-wrap gap-2 justify-content-end mb-2">
+<div class="erp-page-head">
+<h3 class="erp-page-title">🏅 뱃지 관리</h3>
+<div class="d-flex flex-wrap gap-2 justify-content-end">
 <button type="button" class="btn btn-sm btn-outline-secondary text-wrap" onclick="void openBadgeWorkbench('drafts',this)">초안 보기</button>
 <div class="dropdown">
 <button id="badge-import-menu" type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">뱃지 불러오기</button>
@@ -1742,11 +1767,14 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.518';
 </div>
 <button type="button" class="btn btn-sm btn-outline-primary" onclick="void openBadgeSuggestions(this)">제안하기</button>
 </div>
+</div>
 <div id="badge-workbench-launch-status" class="small mb-2" role="status"></div>
 <div id="badge-list-status" class="small text-warning mb-2" role="status"></div>
-<div class="table-responsive"><table class="table table-bordered bg-white text-center align-middle">
+<div class="erp-table-card">
+<div class="table-responsive"><table class="table table-hover erp-table-clean bg-white text-center align-middle mb-0">
 <thead class="table-light"><tr><th width="60">순서</th><th width="60">아이콘</th><th>이름 / 설명</th><th width="100">코드</th><th width="100">색상</th><th width="120">관리</th></tr></thead>
 <tbody id="badgeListBody"></tbody></table></div>
+</div>
 </div>
 
 <style>
