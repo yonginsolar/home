@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.219 | 신고·결산 매뉴얼 -->
+<!-- Version: v1.0.220 | 두루누리 동일 조건 배분 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.219 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.220 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -48,7 +48,7 @@
 </script>
 <script src="/shared/cooperative_rules.js?v=1.0.0" integrity="sha384-CNofpCsGT79mVM66AV3CQF70jY7BgpDxeT0jL1BAEx0675brG6fVT0wfhFXtF9Bn" crossorigin="anonymous"></script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
-  <script src="payroll_durunuri_module.js?v=20260901-1"></script>
+  <script src="payroll_durunuri_module_v3.js" integrity="sha384-0eYCt42e3z8HZAF0K6ZtF+Fq06PTeHPrq7i0BpiBAQHcWCFD0NlbGbWDf4yOecRm" crossorigin="anonymous"></script>
   <script src="accounting_withholding_payment.js?v=1.0.3" integrity="sha384-y0gTlcoN2YzY61SZ21xjIKg5FIwyN+x3dqf6Q4x81TfvBAdT2PDR7QGRXnX7Tlbx" crossorigin="anonymous"></script>
   <script src="insurance_payment.js?v=1.0.1"></script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
@@ -1003,6 +1003,7 @@
           <div id="durunuriCalculatorHint" class="small text-muted mt-2">
             목록을 불러오면 지원 귀속월 급여대장의 국민연금/고용보험 공제액 기준으로 직원별 금액을 나눕니다.
           </div>
+          <p id="durunuriAllocationReview" class="alert alert-warning small mt-2 mb-0" role="alert" tabindex="-1" hidden></p>
         </div>
         <div id="durunuriSupportSummary" class="small text-muted mb-2">목록 로딩 전입니다.</div>
         <div class="table-responsive border rounded" style="max-height: 420px;">
@@ -1319,6 +1320,8 @@ const assetReviewBusy = new Set();
 let assetReviewUI = null;
 let approvalSplitReclassState = null;
 let durunuriSupportRowsCache = [];
+let durunuriAllocationNeedsReview = false;
+let durunuriHasProtectedAllocation = false;
 const AUTO_SYNC_UNDO_KEY = 'erp_auto_sync_last_undo_v1';
 const INSURANCE_PENDING_TAG = '[4대보험정산대기]';
 const INSURANCE_AUTO_DEBIT_DISCOUNT_TAG = '[4대보험 자동이체 감액]';
@@ -4045,50 +4048,6 @@ function getDurunuriCombinedPremiumBase(row) {
     return Math.max(0, Number(row?.ded_pension || 0)) + Math.max(0, Number(row?.ded_employ || 0));
 }
 
-function splitDurunuriSharedSupport(totalAmount) {
-    const total = parseDurunuriWon(totalAmount);
-    const emp = Math.floor(total / 2);
-    return { emp, biz: total - emp };
-}
-
-function allocateDurunuriAmount(totalAmount, items, weightSelector) {
-    const amount = parseDurunuriWon(totalAmount);
-    const safeItems = Array.isArray(items) ? items : [];
-    const allocations = safeItems.map(() => 0);
-    if (!(amount > 0)) return allocations;
-
-    const weighted = safeItems.map((item, index) => {
-        const weight = Math.max(0, Number(weightSelector(item) || 0));
-        return { index, weight };
-    }).filter((item) => item.weight > 0);
-    const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0);
-    if (!(totalWeight > 0)) return null;
-
-    let assigned = 0;
-    const shares = weighted.map((item) => {
-        const exact = amount * item.weight / totalWeight;
-        const floor = Math.floor(exact);
-        assigned += floor;
-        return {
-            index: item.index,
-            floor,
-            remainder: exact - floor
-        };
-    });
-    shares.sort((a, b) => {
-        if (b.remainder !== a.remainder) return b.remainder - a.remainder;
-        return a.index - b.index;
-    });
-
-    let remainder = amount - assigned;
-    shares.forEach((share) => {
-        const addOne = remainder > 0 ? 1 : 0;
-        allocations[share.index] = share.floor + addOne;
-        remainder -= addOne;
-    });
-    return allocations;
-}
-
 function syncDurunuriSupportCacheFromInputs() {
     const empInputs = Array.from(document.querySelectorAll('.durunuri-emp-input'));
     const bizInputs = Array.from(document.querySelectorAll('.durunuri-biz-input'));
@@ -4142,6 +4101,7 @@ function updateDurunuriSupportSummaryFromInputs() {
 }
 
 function setDurunuriSupportInputValues(empAllocations, bizAllocations) {
+    showDurunuriAllocationReview('');
     const empInputs = Array.from(document.querySelectorAll('.durunuri-emp-input'));
     const bizInputs = Array.from(document.querySelectorAll('.durunuri-biz-input'));
     empInputs.forEach((input) => {
@@ -4160,19 +4120,30 @@ function setDurunuriSupportInputValues(empAllocations, bizAllocations) {
     updateDurunuriSupportSummaryFromInputs();
 }
 
+function showDurunuriAllocationReview(message) {
+    durunuriAllocationNeedsReview = Boolean(message);
+    const warning = document.getElementById('durunuriAllocationReview');
+    warning.textContent = message;
+    warning.hidden = !message;
+    if (message) warning.focus();
+}
+
 function applyDurunuriTotalCalculator() {
     const rows = Array.isArray(durunuriSupportRowsCache) ? durunuriSupportRowsCache : [];
     if (rows.length === 0) return showAlert('알림', '먼저 목록을 불러오세요.');
+    const module = getDurunuriModuleOrNull();
+    if (!module) return showAlert('오류', '두루누리 모듈을 불러오지 못했습니다.');
     const empTotal = parseDurunuriWon(ERPNumberInput.raw(document.getElementById('durunuriTotalEmpSupport')?.value));
     const bizTotal = parseDurunuriWon(ERPNumberInput.raw(document.getElementById('durunuriTotalBizSupport')?.value));
     if (!(empTotal > 0 || bizTotal > 0)) return showAlert('알림', '배분할 지원금 합계를 입력하세요.');
 
-    const empAllocations = allocateDurunuriAmount(empTotal, rows, getDurunuriCombinedPremiumBase);
-    const bizAllocations = allocateDurunuriAmount(bizTotal, rows, getDurunuriCombinedPremiumBase);
-    if (!empAllocations || !bizAllocations) {
-        return showAlert('알림', '지원 귀속월 급여대장에 국민연금/고용보험 공제액이 없어 자동 배분할 수 없습니다.');
+    try {
+        const empAllocations = module.allocateAmount(empTotal, rows, getDurunuriCombinedPremiumBase);
+        const bizAllocations = module.allocateAmount(bizTotal, rows, getDurunuriCombinedPremiumBase);
+        setDurunuriSupportInputValues(empAllocations, bizAllocations);
+    } catch (error) {
+        return showDurunuriAllocationReview(error.message);
     }
-    setDurunuriSupportInputValues(empAllocations, bizAllocations);
 }
 
 function applyDurunuriInvoiceCalculator() {
@@ -4193,7 +4164,7 @@ function applyDurunuriInvoiceCalculator() {
         unemployment: unemploymentTotal,
         stability: stabilityTotal
     });
-    if (allocation.error) return showAlert('알림', allocation.error.message);
+    if (allocation.error) return showDurunuriAllocationReview(allocation.error.message);
     const empAllocations = allocation.rows.map((row) => row.emp_support);
     const bizAllocations = allocation.rows.map((row) => row.biz_support);
     setDurunuriSupportInputValues(empAllocations, bizAllocations);
@@ -4291,9 +4262,12 @@ async function refreshDurunuriSupportRows() {
             ...row,
             initial_emp_support: parseDurunuriWon(row.emp_support),
             initial_biz_support: parseDurunuriWon(row.biz_support),
+            initial_memo: String(row.memo || '').trim(),
             suggested_emp_support: parseDurunuriWon(row.emp_support),
             suggested_biz_support: parseDurunuriWon(row.biz_support)
         }));
+        showDurunuriAllocationReview('');
+        durunuriHasProtectedAllocation = result.has_protected_allocation === true;
         durunuriSupportRowsCache = rows;
         renderDurunuriSupportRows(rows);
         if (summaryEl && result.excluded?.length) {
@@ -4301,6 +4275,7 @@ async function refreshDurunuriSupportRows() {
         }
     } catch (e) {
         durunuriSupportRowsCache = [];
+        durunuriHasProtectedAllocation = false;
         if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-3">지원 대상 원장을 불러오지 못했습니다.</td></tr>';
         if (summaryEl) summaryEl.textContent = '조회 실패: ' + (e?.message || e);
     }
@@ -4325,6 +4300,9 @@ function collectDurunuriSupportRowsFromInputs() {
             biz_support: parseDurunuriWon(bizEl?.value),
             expected_emp_support: parseDurunuriWon(base.suggested_emp_support ?? base.initial_emp_support),
             expected_biz_support: parseDurunuriWon(base.suggested_biz_support ?? base.initial_biz_support),
+            initial_emp_support: parseDurunuriWon(base.initial_emp_support),
+            initial_biz_support: parseDurunuriWon(base.initial_biz_support),
+            initial_memo: String(base.initial_memo || ''),
             memo: String(memoByIndex.get(index)?.value || '').trim()
         };
     }).filter((row) => row.emp_id);
@@ -4332,6 +4310,7 @@ function collectDurunuriSupportRowsFromInputs() {
 
 async function saveDurunuriSupportRows() {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
+    if (durunuriAllocationNeedsReview) return showDurunuriAllocationReview('이전 입력은 그대로 두었습니다. 고지서 금액을 확인한 뒤 다시 계산하거나 목록을 다시 불러오세요.');
     const module = getDurunuriModuleOrNull();
     if (!module) return showAlert('오류', '두루누리 모듈을 불러오지 못했습니다.');
     const sourceMonth = String(document.getElementById('durunuriSourceMonth')?.value || '').trim();
@@ -4340,6 +4319,11 @@ async function saveDurunuriSupportRows() {
 
     const rows = collectDurunuriSupportRowsFromInputs();
     if (rows.length === 0) return showAlert('알림', '저장할 직원 데이터가 없습니다.');
+    if (durunuriHasProtectedAllocation && rows.some((row) =>
+        (row.emp_support !== row.initial_emp_support || row.biz_support !== row.initial_biz_support)
+        && (!row.memo || row.memo === row.initial_memo))) {
+        return showAlert('알림', '이미 배분된 지원금을 직접 변경하려면 이번 예외 조정 사유를 입력하세요.');
+    }
     const missingReason = rows.find((row) => (
         row.emp_support !== row.expected_emp_support
         || row.biz_support !== row.expected_biz_support
@@ -4355,6 +4339,7 @@ async function saveDurunuriSupportRows() {
             actor_emp_id: myInfo?.emp_id || null,
             actor_name: myInfo?.emp_name || null,
             origin: 'manual_exception',
+            allocation_version: durunuriHasProtectedAllocation ? module.ALLOCATION_VERSION : undefined,
             rows
         });
         await refreshDurunuriSupportRows();
