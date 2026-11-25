@@ -749,8 +749,17 @@
 	          <h6 class="fw-bold m-0">전표 조회</h6>
 	          <div class="d-flex gap-2 history-ledger-toolbar-actions"><button type="button" class="btn btn-sm btn-primary" onclick="openBankCompare()">통장 파일 대조</button><button class="btn btn-sm btn-outline-primary" onclick="loadHistory()">🔄 새로고침</button></div>
 	      </div>
-	      <div class="d-flex justify-content-end align-items-center mb-3">
-	          <button type="button" class="btn btn-sm btn-outline-primary me-auto" onclick="openAccountingLoanRegister()">대출 관리</button>
+	      <div class="d-flex flex-wrap gap-2 justify-content-end align-items-center mb-3">
+	          <div class="d-flex flex-wrap align-items-center gap-2 me-auto">
+	              <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAccountingLoanRegister()">대출 관리</button>
+	              <div id="accountingPilotTools" hidden>
+	                  <div class="d-flex flex-wrap align-items-center gap-1">
+	                      <span class="badge bg-secondary">용인 시범</span>
+	                      <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAccountingReviewPilot('rent',this)">임대 매출</button>
+	                      <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAccountingReviewPilot('instructor',this)">강사비 원천세</button>
+	                  </div>
+	              </div>
+	          </div>
 	          <small class="text-muted" id="historyMeta"></small>
 	      </div>
           <form id="journalHistorySearch" class="row g-2 align-items-end mb-3" onsubmit="event.preventDefault();loadHistory();">
@@ -2319,6 +2328,9 @@ window.onload = async function() {
     if (!accountingRuntimeGate.ok) return;
     accountingFormalName = String(accountingRuntimeGate.runtime.coop_name || '');
     accountingDataAuthorized = true;
+    accountingPilotRuntimeCoop = String(accountingRuntimeGate.runtime.coop_id || '');
+    syncAccountingPilotAccess();
+    document.querySelector('[data-bs-target="#tabHistory"]')?.addEventListener('hide.bs.tab',closeAccountingReviewPilot);
     document.getElementById('btnClosingReport').disabled = !(canPerform('accounting.view') || canPerform('accounting.edit'));
     const guideTab=document.querySelector('[data-bs-target="#tabGuide"]');
     guideTab.addEventListener('shown.bs.tab',mountAccountingGuide);
@@ -2328,6 +2340,7 @@ window.onload = async function() {
         const actor=session?.user?.id||'';
         if(event==='SIGNED_OUT'||(guideAuthActor&&actor&&guideAuthActor!==actor)){
             accountingDataAuthorized=false;
+            syncAccountingPilotAccess();
             ++accountingCardsReadSequence;
             accountingGuideAuthInvalid=true;accountingGuideView?.destroy();accountingGuideView=null;
         }
@@ -10631,6 +10644,51 @@ async function openAccountingLoanRegister(){
         if(current())window.CoopAccountingLoans.open({client:_supabase,coopId:scope.owner.coop_id,current,canEdit:()=>current()&&canPerform('accounting.edit')});
     }catch(_){if(current())showAlert('대출 관리 도구를 불러오지 못했습니다. 다시 시도해 주세요.');}
     finally{accountingLoanOpening=false;}
+}
+
+const ACCOUNTING_PILOT_COOP = 'a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
+let accountingPilotRuntimeCoop = '', accountingPilotLoading = null, accountingPilotOpening = false;
+function accountingPilotAllowed() {
+    return accountingPilotRuntimeCoop === ACCOUNTING_PILOT_COOP && myInfo?.coop_id === ACCOUNTING_PILOT_COOP
+        && accountingDataAuthorized && (canPerform('accounting.view') || canPerform('accounting.edit'));
+}
+function closeAccountingReviewPilot() {
+    window.CoopAccountingReviewPilot?.close();
+}
+function syncAccountingPilotAccess() {
+    const allowed = accountingPilotAllowed();
+    const tools = document.getElementById('accountingPilotTools');
+    if (tools) tools.hidden = !allowed;
+    if (!allowed) closeAccountingReviewPilot();
+}
+window.addEventListener('pagehide', closeAccountingReviewPilot);
+async function openAccountingReviewPilot(mode, trigger) {
+    const scope = accountingReadScope('tabHistory', { valid: accountingPilotAllowed });
+    const current = () => accountingReadScopeCurrent(scope);
+    if (!current() || accountingPilotOpening || !['rent','instructor'].includes(mode)) return;
+    accountingPilotOpening = true;
+    try {
+        if (window.CoopAccountingReviewPilot?.version !== '1.0.0' && !accountingPilotLoading) {
+            accountingPilotLoading = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                const finish = ok => {
+                    clearTimeout(timer); script.onload = script.onerror = null;
+                    if (ok) resolve(); else { script.remove(); reject(Error('ACCOUNTING_PILOT_UNAVAILABLE')); }
+                };
+                const timer = setTimeout(() => finish(false), 10000);
+                script.onload = () => finish(window.CoopAccountingReviewPilot?.version === '1.0.0');
+                script.onerror = () => finish(false);
+                script.src = new URL('accounting_review_pilot_v1.js', document.baseURI).href;
+                script.integrity = 'sha384-J8riglJy37lY5MYtYXtA4xQGFc+abNKsgSGhx9KWeWzuGP4DbriMqDRnmY3z+eIa';
+                script.crossOrigin = 'anonymous';
+                document.head.append(script);
+            }).finally(() => { accountingPilotLoading = null; });
+        }
+        await accountingPilotLoading;
+        if (current()) window.CoopAccountingReviewPilot.open(mode, { coopId: scope.owner.coop_id, current, trigger });
+    } catch (_) {
+        if (current()) showAlert('검토 도구를 불러오지 못했습니다. 다시 시도해 주세요.');
+    } finally { accountingPilotOpening = false; }
 }
 
 function isCashLikeAccount(accountName) {
