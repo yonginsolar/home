@@ -117,7 +117,7 @@
   <link rel="stylesheet" href="/erp/official_workbook.css?v=1.0.0" integrity="sha384-uJh6mMHkeBKCKiEWOWyr70TVLtzZlrTdYbHDAB6F+oQLGcC/25LHTQ5yLEh8Db1q" crossorigin="anonymous">
   <script src="/erp/official_workbook.js?v=1.0.3" integrity="sha384-BmF4DbGBcNDsa6GAEApjULIwXtjjlgKFn4f+by0DCQ06BUwZShFPbWvrsrzNyRir" crossorigin="anonymous" defer></script>
   <script src="/erp/official_registration_choice.js?v=1.0.0" integrity="sha384-N8L1FCUP4CrHrjVJEhIs9IILpWgZoS6hwvwEFi8y8FT9eyEjoXKzpRDGStWSOpR+" crossorigin="anonymous" defer></script>
-  <script src="/erp/official_record_edit.js?v=1.0.1" integrity="sha384-i4dGr2W7KwbZajAtgZ+i0CangdiLUjLxsVqfscM8qhCmctNkfmP0EWYSfX8jcvjK" crossorigin="anonymous" defer></script>
+  <script src="/erp/official_record_edit_v1_1_0.js" integrity="sha384-scAs+495sziS0mcG9UioHWWD1LwuSCf3UyNTnsi3TG5TG0o9G0+kIRTXO8HVGQbW" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 <body class="erp-unified erp-pc-workspace erp-page-officials">
@@ -208,7 +208,10 @@
                 <button class="btn btn-sm btn-outline-secondary official-filter-btn" id="officialTabExecutive" type="button" onclick="setOfficialCategoryFilter('executive')">임원 <span class="badge text-bg-light ms-1" id="officialTabCountExecutive">0</span></button>
                 <button class="btn btn-sm btn-outline-secondary official-filter-btn" id="officialTabDelegate" type="button" onclick="setOfficialCategoryFilter('delegate')">대의원 <span class="badge text-bg-light ms-1" id="officialTabCountDelegate">0</span></button>
                 <button class="btn btn-sm btn-outline-secondary official-filter-btn" id="officialTabElection" type="button" onclick="setOfficialCategoryFilter('election_comm')">선관위 <span class="badge text-bg-light ms-1" id="officialTabCountElection">0</span></button>
+                <label id="officialShowVoidedLabel" class="small align-self-center" hidden><input type="checkbox" id="officialShowVoided"> 삭제 기록 포함</label>
               </div>
+              <div id="officialVoidHistoryStatus" class="small text-muted mb-2" role="status" hidden></div>
+              <button type="button" id="officialVoidHistoryMore" class="btn btn-sm btn-outline-secondary mb-2" hidden>삭제 기록 더 보기</button>
               <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
                   <thead class="table-light">
@@ -267,6 +270,17 @@
       <div class="col-12 col-sm-6"><label for="officialEditTermCount" class="form-label">회차</label><input id="officialEditTermCount" class="form-control" type="number" min="1" max="2147483646" step="1" inputmode="numeric" data-official-edit="term_count" disabled></div>
       <div class="col-12"><label><input type="checkbox" data-official-edit="is_registered" disabled> 등기 임원</label></div>
       <div class="col-12"><button type="submit" class="btn btn-primary" data-official-edit="save" disabled>저장</button></div>
+    </form>
+    <div class="mt-2">
+      <button type="button" class="btn btn-sm btn-outline-danger" data-official-edit="delete" hidden>삭제</button>
+      <span class="small text-muted" data-official-edit="delete_block" hidden></span>
+    </div>
+    <form data-official-edit="delete_form" class="border rounded mt-2 p-2" hidden>
+      <p class="small mb-2"><strong data-official-edit="delete_target"></strong> 기록을 삭제할까요? 원본과 변경 기록은 남습니다.</p>
+      <label for="officialDeleteReason" class="form-label">삭제 사유</label>
+      <textarea id="officialDeleteReason" class="form-control mb-2" data-official-edit="delete_reason" rows="2" required maxlength="300"></textarea>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-official-edit="delete_cancel">취소</button>
+      <button type="submit" class="btn btn-sm btn-danger" data-official-edit="delete_confirm">삭제 확정</button>
     </form>
     <div class="small mt-2" data-official-edit="status" role="status" aria-live="polite"></div>
     <button type="button" class="btn btn-sm btn-outline-primary mt-1" data-official-edit="retry" hidden>다시 확인</button>
@@ -517,6 +531,7 @@
     let officialDataAuthorized = false;
     let officialWriteAuthorized = false, officialExternalWriteAuthorized = false, officialWriteAccessFailure = false, officialWriteRevision = 0, officialRecordEditor = null;
     let individualOfficialSaving = false;
+    let officialVoidHistory = null;
     let committeeController=null,committeeLoading=null,committeeActive=false,committeeTabRevision=0,committeeAuthId='';
     let officialWorkbook, officialRegistrationChooser, individualRegistrationOpener;
     function officialWriteAllowed(){return officialDataAuthorized && officialWriteAuthorized && !!currentCoopId && !!committeeAuthId && !window.frameElement?.hidden;}
@@ -525,11 +540,18 @@
       if(!officialRecordContext().allowed || !window.OfficialRecordEdit)return;
       const dialog=document.getElementById('officialEditDialog');
       if(!officialRecordEditor && typeof dialog?.showModal==='function') officialRecordEditor=window.OfficialRecordEdit.create({client:_supabase,dialog,getContext:officialRecordContext,refresh:loadOfficials,
-        findReturnFocus:ids=>Array.from(document.querySelectorAll('#officialListBody [data-edit-ids]')).find(btn=>btn.dataset.editIds.split(',').some(id=>ids.includes(id)))});
-      officialRecordEditor?.open(officialRowsCache.filter(row=>ids.includes(String(row.id))),trigger);
+        findReturnFocus:ids=>Array.from(document.querySelectorAll('#officialListBody [data-edit-ids]')).find(btn=>btn.dataset.editIds.split(',').some(id=>ids.includes(id)))
+          ||document.getElementById('officialTabAll')});
+      officialRecordEditor?.open(rosterRows(officialRowsCache).filter(row=>ids.includes(String(row.id))),trigger);
     }
     function syncOfficialWriteControls(){
       const allowed=officialWriteAllowed();
+      if(!allowed){
+        officialVoidHistory=null;
+        const show=document.getElementById('officialShowVoided');if(show)show.checked=false;
+        const label=document.getElementById('officialShowVoidedLabel');if(label)label.hidden=true;
+        syncOfficialVoidHistory();
+      }
       document.getElementById('officialRegistrationButton').disabled=!allowed;
       for(const [id,visible] of [['externalDirectorButton',allowed&&officialExternalWriteAuthorized],['openMemberSearchBtn',allowed&&memberSearchEnabled],['importElectionWinnersBtn',allowed&&voteImportEnabled],['officialRoleCatalogButton',allowed]])
         document.getElementById(id)?.classList.toggle('d-none',!visible);
@@ -1994,7 +2016,12 @@
     }
 
     function updateOfficialCategoryTabs(rows) {
-      const safeRows = Array.isArray(rows) ? rows : [];
+      const canShow = officialRecordContext().allowed;
+      const control = document.getElementById('officialShowVoided');
+      const label = document.getElementById('officialShowVoidedLabel');
+      if(label)label.hidden=!canShow;
+      if(!canShow && control)control.checked=false;
+      const safeRows = rosterRows(rows);
       const allEl = document.getElementById('officialTabCountAll');
       const executiveEl = document.getElementById('officialTabCountExecutive');
       const delegateEl = document.getElementById('officialTabCountDelegate');
@@ -2029,9 +2056,65 @@
     }
 
     function getFilteredOfficialRows() {
-      if (activeOfficialCategoryFilter === 'all') return Array.isArray(officialRowsCache) ? officialRowsCache.slice() : [];
-      return (Array.isArray(officialRowsCache) ? officialRowsCache : []).filter((row) => String(row.category || '') === activeOfficialCategoryFilter);
+      const rows=rosterRows(officialRowsCache);
+      return activeOfficialCategoryFilter === 'all' ? rows : rows.filter(row=>String(row.category || '')===activeOfficialCategoryFilter);
     }
+
+    function rosterRows(rows) {
+      const h=currentOfficialVoidHistory();
+      const history=h?.rows||[];
+      const voidedIds=new Set(history.map(row=>String(row.id)));
+      return (Array.isArray(rows)?rows:[]).filter(row=>row.status!=='voided'&&!voidedIds.has(String(row.id))).concat(history);
+    }
+    function currentOfficialVoidHistory(){
+      const context=officialRecordContext();
+      return context.allowed && document.getElementById('officialShowVoided')?.checked
+        && officialVoidHistory?.owner===context.key ? officialVoidHistory : null;
+    }
+    function syncOfficialVoidHistory(){
+      const h=currentOfficialVoidHistory(), status=document.getElementById('officialVoidHistoryStatus');
+      const more=document.getElementById('officialVoidHistoryMore');if(!status||!more)return;
+      status.textContent=h?.busy?'삭제 기록을 불러오고 있습니다…':h?.error?'삭제 기록을 불러오지 못했습니다.'
+        :h?.loaded&&!h.rows.length?'삭제한 기록이 없습니다.':'';
+      status.hidden=!status.textContent;
+      more.hidden=!h||(!h.error&&!h.next);more.disabled=!!h?.busy;
+      more.textContent=h?.error?'다시 시도':'삭제 기록 더 보기';
+    }
+    async function loadOfficialVoidHistory(reset=false){
+      const context=officialRecordContext();
+      if(!context.allowed||!document.getElementById('officialShowVoided')?.checked)return;
+      if(reset||officialVoidHistory?.owner!==context.key)
+        officialVoidHistory={owner:context.key,rows:[],next:null,loaded:false,busy:false,error:false};
+      const h=officialVoidHistory;
+      if(h.busy||(h.loaded&&!h.next&&!h.error))return;
+      h.busy=true;h.error=false;syncOfficialVoidHistory();
+      try{
+        const {data,error}=await _supabase.rpc('list_voided_official_records',{p_before_id:h.next});
+        if(currentOfficialVoidHistory()!==h)return;
+        if(error||!Array.isArray(data?.items)||data.items.some(r=>r?.status!=='voided')
+            || data.items.length>50
+            || (data.next_before_id!==null&&(!/^\d+$/.test(String(data.next_before_id))||data.next_before_id===h.next)))throw Error('history');
+        const ids=new Set(data.items.map(row=>String(row.id)));
+        h.rows.push(...data.items);h.next=data.next_before_id;h.loaded=true;
+        if(ids.size){
+          officialRowsCache=officialRowsCache.filter(row=>!ids.has(String(row.id)));
+          updateOfficialSummary(officialRowsCache);
+        }
+      }catch(_){if(currentOfficialVoidHistory()===h)h.error=true;}
+      finally{
+        h.busy=false;
+        if(currentOfficialVoidHistory()===h){
+          syncOfficialVoidHistory();updateOfficialCategoryTabs(officialRowsCache);renderOfficialList();
+        }
+      }
+    }
+    document.getElementById('officialShowVoided')?.addEventListener('change',event=>{
+      if(event.currentTarget.checked){void loadOfficialVoidHistory(true);return;}
+      officialVoidHistory=null;syncOfficialVoidHistory();
+      updateOfficialCategoryTabs(officialRowsCache);
+      renderOfficialList();
+    });
+    document.getElementById('officialVoidHistoryMore')?.addEventListener('click',()=>{void loadOfficialVoidHistory();});
 
     function compareOfficialText(left, right) {
       return String(left || '').localeCompare(String(right || ''), 'ko-KR', {
@@ -2092,7 +2175,7 @@
         const stateClass = active ? 'active' : 'inactive';
         const stateLabel = active
           ? '활성'
-          : (String(row.end_reason || '') === 'resignation' ? '사임' : '중도 종료');
+          : row.status==='voided' ? '삭제됨' : (String(row.end_reason || '') === 'resignation' ? '사임' : '중도 종료');
         const signerLabel = row.seal_url ? 'O' : 'X';
         const signerStateLabel = row.seal_url ? '서명 등록' : '서명 미등록';
         const signerClass = row.seal_url ? 'registered' : 'unregistered';
@@ -2187,6 +2270,7 @@
       updateOfficialCategoryTabs(officialRowsCache);
       syncOfficialFilterButtons();
       renderOfficialList();
+      if(currentOfficialVoidHistory())void loadOfficialVoidHistory(true);
     }
 
     document.getElementById('officialRole')?.addEventListener('change', (event) => {
