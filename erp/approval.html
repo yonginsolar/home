@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.177 | 회의 종류별 소집 공문 확정 안내 -->
+<!-- Version: v1.2.180 | 사무국장 전결 및 정상 결재 인계 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.178 | approval.html');</script>
+  <script>console.log('[Version] v1.2.180 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -6328,6 +6328,11 @@ function isSunVillageApproval() {
     return approvalWorkflowContext?.mode === 'sun_village';
 }
 
+function isSunVillageSecretaryOnly() {
+    return isSunVillageApproval() && approvalWorkflowContext?.ready === true
+        && !!approvalWorkflowContext?.reviewer?.emp_id && !approvalWorkflowContext?.chair?.emp_id;
+}
+
 function isMainCoopMoneyChairRequired() {
     return approvalWorkflowContext?.money_chair_required === true;
 }
@@ -8674,6 +8679,7 @@ function buildDefaultApprovalLineTemplate() {
         if (approvalWorkflowContext?.ready !== true) return [];
         const reviewer = normalizeApprovalDraftLineUser(approvalWorkflowContext.reviewer);
         const chair = normalizeApprovalDraftLineUser(approvalWorkflowContext.chair);
+        if (isSunVillageSecretaryOnly() && reviewer?.emp_id) return [reviewer];
         return reviewer?.emp_id && chair?.emp_id ? [reviewer, chair] : [];
     }
     if (isMainCoopMoneyChairRequired() && isApprovalMoneyRelatedType(currentType)) {
@@ -13209,10 +13215,12 @@ function syncRelViewActionArea(doc) {
                 hintText = `이 문서는 현재 이 화면에서 ${getApprovalPositiveActionLabel()} 또는 반려할 수 있습니다.`;
             }
 
-            actions.push(`
-                <button type="button" class="btn btn-success btn-sm" onclick="procDoc(${Number(doc.id)}, '승인')">${getApprovalPositiveActionLabel()}</button>
-                <button type="button" class="btn btn-danger btn-sm" onclick="procDoc(${Number(doc.id)}, '반려')">반려</button>
-            `);
+            if (doc.approval_line?.[0]?.secretary_phone_only !== true) {
+                actions.push(`<button type="button" class="btn btn-success btn-sm" data-approval-positive onclick="procDoc(${Number(doc.id)}, '승인')">${getApprovalPositiveActionLabel()}</button>`);
+            } else {
+                hintText = '문서 상단에서 전결하거나 여기에서 반려할 수 있습니다.';
+            }
+            actions.push(`<button type="button" class="btn btn-danger btn-sm" onclick="procDoc(${Number(doc.id)}, '반려')">반려</button>`);
         }
     }
 
@@ -15310,7 +15318,7 @@ function renderLinePreview() {
         el.innerText = isSunVillageApproval() ? getSunVillageApprovalNotReadyMessage() : "결재자를 추가해주세요.";
         return;
     }
-    const lineHtml = finalApprovers.map((u, i) => `<span class="line-step">${isSunVillageApproval() ? (i === 0 ? '검토 · ' : '결재 · ') : ''}${escapeHtml(u.emp_name)} ${escapeHtml(u.position)}</span>` + (i < finalApprovers.length-1 ? '<span class="line-arrow">➡</span>' : '')).join("");
+    const lineHtml = finalApprovers.map((u, i) => `<span class="line-step">${isSunVillageSecretaryOnly() ? '전결 · ' : isSunVillageApproval() ? (i === 0 ? '검토 · ' : '결재 · ') : ''}${escapeHtml(u.emp_name)} ${escapeHtml(u.position)}</span>` + (i < finalApprovers.length-1 ? '<span class="line-arrow">➡</span>' : '')).join("");
     const fixedLabel = escapeHtml(formatLabelWithEuroRo(jeongyeolLockReasonLabel || '결재자'));
     const lockHint = jeongyeolLineLocked ? `<div class="small text-primary mt-2">전결 적용으로 결재선이 ${fixedLabel} 고정되었습니다.</div>` : '';
     el.innerHTML = `${lineHtml}${lockHint}`;
@@ -16172,7 +16180,7 @@ async function handleDraftSubmit(e,recovery=null) {
     if (isSunVillageApproval()) {
         if (approvalWorkflowContext.ready !== true) return showAlert(getSunVillageApprovalNotReadyMessage());
         const required = buildDefaultApprovalLineTemplate();
-        if (required.length !== 2 || finalApprovers.length !== 2
+        if (required.length !== (isSunVillageSecretaryOnly() ? 1 : 2) || finalApprovers.length !== required.length
             || finalApprovers.some((approver, index) => String(approver?.emp_id) !== String(required[index]?.emp_id))) {
             return showAlert('마을 결재선을 다시 불러오도록 새로고침해 주세요.');
         }
@@ -16264,7 +16272,7 @@ async function handleDraftSubmit(e,recovery=null) {
         emp_id: u.emp_id,
         name: u.emp_name,
         position: u.position,
-        ...(isSunVillageApproval() ? { stage: idx === 0 ? 'review' : 'final_approval' } : {}),
+        ...(isSunVillageApproval() ? { stage: isSunVillageSecretaryOnly() ? 'final_approval' : idx === 0 ? 'review' : 'final_approval' } : {}),
         status: '대기',
         comment: '',
         processed_at: null,
@@ -16351,7 +16359,9 @@ async function handleDraftSubmit(e,recovery=null) {
         }
         const errorText = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
         const noticeFailure = meetingNoticeFailureMessage(error, 'submit');
-        if (errorText.includes('ANNUAL_LEAVE_PERIOD_ALREADY_REQUESTED')) {
+        if (errorText.includes('VILLAGE_PHONE_APPROVAL_TYPE_UNSUPPORTED')) {
+            showAlert('이 문서는 사무국장 전결 대상이 아닙니다. 마을 이사장 결재선을 확인해 주세요.');
+        } else if (errorText.includes('ANNUAL_LEAVE_PERIOD_ALREADY_REQUESTED')) {
             showAlert('이미 신청한 휴가와 날짜·시간이 겹쳐요. 결재 대기 중인 휴가도 포함되니 기존 신청을 확인해 주세요.');
             void calculateLeave({force:true});
         } else if (errorText.includes('ANNUAL_LEAVE_BALANCE_EXCEEDED')) {
@@ -16487,6 +16497,10 @@ async function submitApprovalActionModal() {
 async function procDoc(docId, action) {
     const safeDocId = toPositiveDocId(docId);
     const safeAction = String(action || '').trim() === '반려' ? '반려' : '승인';
+    if (safeAction === '승인' && todoCache.some(doc => Number(doc.id) === Number(safeDocId)
+        && doc.approval_line?.[0]?.secretary_phone_only === true)) {
+        return openRelView(safeDocId);
+    }
     const owner=getApprovalActionOwner(),revision=approvalActionRevision;
     const isCurrent=()=>window.ExpoRuntimeBridge || (owner===getApprovalActionOwner() && revision===approvalActionRevision
         && !window.frameElement?.hidden && (!currentViewingDocId || Number(currentViewingDocId)===Number(safeDocId)));
@@ -16727,7 +16741,7 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
             p_expected:doc,p_request_key:crypto.randomUUID()
         });
         approvalUpdateError=result.error || (result.data?.ok===true&&result.data?.verified===true&&result.data?.simulation===true?null:new Error('시연 결재 처리 결과를 확인하지 못했습니다. 목록을 다시 확인해 주세요.'));
-    } else if (!delegatedFrom && !isSunVillageApproval() && doc.status !== '실물결재대기') {
+    } else if (usesAssignedApprovalTransition(doc, delegatedFrom)) {
         try { assignedResult = await saveAssignedApprovalTransition(doc, action, reason); }
         catch (error) { approvalUpdateError = error; }
     } else {
@@ -16822,6 +16836,17 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
         notice:[finalCancellation?'승인과 취소 반영을 확인했습니다.':'처리되었습니다.',...notices].join('\n')
     };
 } // End of processApprovalDoc
+
+function usesAssignedApprovalTransition(doc, delegatedFrom) {
+    if (delegatedFrom || doc.status === '실물결재대기') return false;
+    if (!isSunVillageApproval()) return true;
+    // The server permits a one-step chair line only via an audited handoff.
+    // Its assigned RPC can complete a staff chair's row without giving the
+    // browser access to completed rows beyond the existing RLS.
+    const line = doc.approval_line;
+    return isChairmanApprovalUser() && Array.isArray(line) && line.length === 1
+        && line[0]?.secretary_phone_only !== true && line[0]?.emp_id === myInfo?.emp_id;
+}
 
 function startDraftCancel(docId) {
     pendingCancelDocId = docId;
@@ -19420,8 +19445,145 @@ async function openRelView(docId) {
     if(!isCurrentView())return;
     contentEl.appendChild(attachmentViewerEl);
     syncRelViewActionArea(data);
+    void mountApprovalSecretaryDecision(contentEl, data, isCurrentView);
     void mountApprovalExecutionDetails(contentEl,data,isCurrentView);
     void mountApprovalTaxTaskLinks(contentEl, data);
+}
+
+async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
+    const hwaseongSecretary = ['erp.hcrec.kr', 'hcrec.kr', 'www.hcrec.kr'].includes(location.hostname) && isCurrentUserSecretaryGeneral();
+    const first = doc.approval_line?.[0];
+    const possibleHandoff = isSunVillageApproval() && first?.secretary_phone_only === true && doc.status === '진행중'
+        && (isSunVillageReviewUser() || isChairmanApprovalUser());
+    const possiblePhoneReview = isSunVillageApproval() && first?.secretary_phone_only === true && first.emp_id === myInfo?.emp_id;
+    if (!(hwaseongSecretary || isSunVillageReviewUser() || possibleHandoff || possiblePhoneReview)
+        || !canPerform('approval.process') || window.ExpoRuntimeBridge) return;
+    if (!myInfo?.emp_id || (!possibleHandoff && first?.emp_id !== myInfo.emp_id) ||
+        (doc.status !== '진행중' && !(doc.status==='완료' && first.secretary_decision === true))) return;
+    const rpc = (action, expected = null, reason = null) => _supabase.rpc('erp_secretary_decision', {
+        p_document_id: doc.id, p_action: action, p_expected: expected, p_reason: reason
+    });
+    let status;
+    try {
+        const result = await rpc('inspect');
+        if (result.error || !result.data?.visible || !isCurrentView()) return;
+        status = result.data;
+    } catch (_) { return; }
+    const section = document.createElement('section');
+    section.className = 'mt-3 p-3 border rounded';
+    section.setAttribute('aria-label', '사무국장 결재 방식');
+    const heading = document.createElement('h5');
+    heading.className = 'h6 fw-bold mb-2';
+    heading.textContent = '사무국장 결재 방식';
+    section.append(heading);
+    const hint = document.createElement('p');
+    hint.className = 'small mb-2';
+    section.append(hint);
+    if (status.phase === 'direct' && status.chair_allowed !== true) return;
+    if (status.eligible !== true) {
+        hint.textContent = '이 문서는 별도 결재 절차가 있어 전결할 수 없습니다.';
+        content.prepend(section);
+        return;
+    }
+    if (!['secretary','chair','direct','handoff'].includes(status.phase) || typeof status.version !== 'string') return;
+    hint.textContent = ({secretary:'결재 방식을 선택해 주세요.',chair:'이사장 결재 대기 중',
+        direct:'사무국장 전결 완료',handoff:'미처리 문서를 인계받을 수 있습니다.'})[status.phase];
+    const label = document.createElement('label');
+    label.className = 'd-block small mb-2';
+    label.textContent = '전결 메모 (선택)';
+    const reason = document.createElement('textarea');
+    reason.className = 'form-control form-control-sm';
+    reason.rows = 2;
+    reason.maxLength = 1000;
+    label.append(reason);
+    const row = document.createElement('div');
+    row.className = 'd-flex flex-wrap gap-2';
+    const feedback = document.createElement('div');
+    feedback.className = 'small text-danger mt-2';
+    feedback.setAttribute('role','status');
+    if (status.phase !== 'handoff') section.append(label);
+    section.append(row,feedback);
+    let busy = false;
+    const choices = status.phase === 'handoff' ? [
+        ['handoff','내 결재로 인계','btn-primary',status.chair_handoff
+            ? '이 문서를 이사장 결재로 인계받을까요? 기존 승인 기록은 바뀌지 않습니다.'
+            : '이 문서를 현재 마을 담당자인 내게 인계할까요? 기존 결재 이력은 유지됩니다.']
+    ] : [
+        ['chair','결재 후 상신','btn-outline-primary','이사장에게 결재를 올릴까요?'],
+        ['direct','사무국장 전결','btn-primary',status.final_direct === true
+            ? '사무국장 전결로 확정할까요? 확정하면 이 화면에서 이사장 결재 대기로 되돌릴 수 없습니다.'
+            : '사무국장 전결로 완료할까요?']
+    ];
+    if (status.can_handoff_chair === true) choices.push(['handoff_chair','이사장 결재로 인계','btn-outline-primary',
+        '현재 연결된 이사장에게 이 문서를 인계할까요? 기존 결재 이력은 유지됩니다.']);
+    for (const [mode,title,style,question] of choices) {
+        if (mode === 'chair' && status.chair_allowed !== true) continue;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm ' + style;
+        button.textContent = title;
+        button.dataset.secretaryChoice = mode;
+        button.disabled = status.phase === mode && mode !== 'handoff';
+        button.addEventListener('click',async () => {
+            if (busy || !isCurrentView() || status.phase===mode && mode !== 'handoff') return;
+            busy=true;
+            row.querySelectorAll('button').forEach(b=>b.disabled=true);
+            reason.disabled=true;
+            const note=mode==='direct'?reason.value:null;
+            try {
+                if (!await window.CoopDialog.confirm(question) || !isCurrentView()) return;
+                const result=await rpc(mode,status.version,note);
+                if (result.error) throw result.error;
+                if (result.data?.ok!==true || result.data.phase!==mode) throw new Error('RESULT_UNCONFIRMED');
+                if (!isCurrentView()) return;
+                feedback.classList.remove('text-danger');
+                feedback.textContent='처리 결과를 확인했습니다.';
+                void Promise.allSettled([loadTodoList(),loadHistoryList()]);
+                // Refresh this document only; do not reload the ERP tab.
+                if (isCurrentView()) await openRelView(doc.id);
+            } catch (error) {
+                if (!isCurrentView()) return;
+                feedback.classList.add('text-danger');
+                feedback.textContent = error?.code==='PT409'
+                    ? '문서 상태나 연동이 달라졌습니다. 문서를 다시 열어 확인해 주세요.'
+                    : '처리 결과를 확인하지 못했습니다. 같은 선택으로 다시 확인해 주세요.';
+            } finally {
+                busy=false;
+                if (isCurrentView()) {
+                    reason.disabled=false;
+                    row.querySelectorAll('button').forEach(b=>b.disabled=b.dataset.secretaryChoice===status.phase && status.phase !== 'handoff');
+                }
+            }
+        });
+        row.append(button);
+    }
+    if (isCurrentView()) {
+        content.prepend(section);
+        if (status.phase==='secretary') {
+            document.querySelector('#relViewActionButtons [data-approval-positive]')?.classList.add('hidden');
+            const hintEl=document.getElementById('relViewActionHint');
+            if (hintEl) hintEl.textContent='위에서 결재하거나 여기에서 반려할 수 있습니다.';
+        }
+    }
+}
+
+function renderSecretaryDecisionRecord(content, doc) {
+    const step = Array.isArray(doc?.approval_line) ? doc.approval_line[0] : null;
+    if (step?.secretary_decision !== true) return;
+    const record = document.createElement('div');
+    record.className = 'p-3 mb-3 border rounded';
+    const title = document.createElement('div');
+    title.className = 'fw-bold';
+    title.textContent = ['사무국장 전결',step.secretary_decision_by,formatApprovalKstDateISO(step.secretary_decision_at,'')].filter(Boolean).join(' · ');
+    record.append(title);
+    if (typeof step.secretary_decision_memo === 'string' && step.secretary_decision_memo.trim()) {
+        const memo = document.createElement('div');
+        memo.className = 'small mt-2 text-break';
+        memo.style.whiteSpace = 'pre-wrap';
+        memo.textContent = step.secretary_decision_memo;
+        record.append(memo);
+    }
+    content.append(record);
 }
 
 async function mountApprovalExecutionDetails(content,doc,current) {
@@ -19460,6 +19622,7 @@ function renderApprovalReadOnlyDetail(contentEl, data) {
     const lines = (Array.isArray(data.approval_line) ? data.approval_line : [])
         .map(l => `${l.name || ''}(${l.status || ''})`).join(" → ");
     contentEl.innerHTML = "";
+    renderSecretaryDecisionRecord(contentEl, data);
 
     const titleEl = document.createElement("h4");
     titleEl.className = "fw-bold mb-3";
