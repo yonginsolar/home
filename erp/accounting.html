@@ -15,7 +15,7 @@
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
   <script src="accounting_report_save.js?v=1.0.0" integrity="sha384-AzLhwgwH2GCLUoGPmH84klNCeErIK1TS80qvB89ZFoXhSOEMec79STufobsxF1kw" crossorigin="anonymous"></script>
-  <script src="accounting_bank_compare.js?v=1.1.4"></script>
+  <script src="accounting_bank_compare_v1_2.js" integrity="sha384-+oNSxGYEzHB27HcYVRcvcVL2Ck3gOq/muhTR8vibdDbxt7ownOnbnRDyhr8BNO4A" crossorigin="anonymous"></script>
   <script src="accounting_payroll_recovery_v2.js?v=1.1.0" integrity="sha384-E21YgL5nld+cPHhFryWSP/PXrO4ctgS9j0iKoYdZd8immP7qjqu9ovbuMQLeVc/9" crossorigin="anonymous"></script>
   <script src="accounting_journal_typo.js?v=1.1.1" integrity="sha384-doIdycMuLRG8oxw5/ieVw8ij7JBthcg2jyqcg2RvEd0RUwE52IeizXx2N/WCPbRi" crossorigin="anonymous" defer></script>
   <script src="workflow_assets_vat_unified_v1.js" integrity="sha384-I+7UO2hxg4fkQs2BfTzMIUP85CftM1+N98F6i2MVXVL7C8W3VDgj7g/sSfXIT+7/" crossorigin="anonymous"></script>
@@ -747,6 +747,7 @@
 	          <div class="d-flex gap-2 history-ledger-toolbar-actions"><button type="button" class="btn btn-sm btn-primary" onclick="openBankCompare()">통장 파일 대조</button><button class="btn btn-sm btn-outline-primary" onclick="loadHistory()">🔄 새로고침</button></div>
 	      </div>
 	      <div class="d-flex justify-content-end align-items-center mb-3">
+	          <button type="button" class="btn btn-sm btn-outline-primary me-auto" onclick="openAccountingLoanRegister()">대출 관리</button>
 	          <small class="text-muted" id="historyMeta"></small>
 	      </div>
           <form id="journalHistorySearch" class="row g-2 align-items-end mb-3" onsubmit="event.preventDefault();loadHistory();">
@@ -10598,8 +10599,35 @@ function loadHistory(options = {}) {
 
 function openBankCompare() {
     if (!canPerform('accounting.view') && !canPerform('accounting.edit')) return showAlert('회계 조회 권한이 없습니다.');
-    window.CoopBankCompare.open({client:_supabase,context:()=>myInfo&&({coop_id:myInfo.coop_id,actor:String(myInfo.emp_id||myInfo.id||''),auth_user_id:myInfo.auth_user_id,year:Number(document.getElementById('reportYearSelect').value)||new Date().getFullYear()}),
+    window.CoopBankCompare.open({client:_supabase,context:()=>myInfo&&(canPerform('accounting.view')||canPerform('accounting.edit'))&&({coop_id:myInfo.coop_id,actor:String(myInfo.emp_id||myInfo.id||''),auth_user_id:myInfo.auth_user_id,year:Number(document.getElementById('reportYearSelect').value)||new Date().getFullYear()}),
         canEdit:()=>canPerform('accounting.edit'),edit:async transId=>window.CoopPaymentDates.edit(_supabase,[transId],async()=>{await refreshDashboard();await loadHistory();})});
+}
+
+let accountingLoanOpening=false,accountingLoanAsset=null;
+async function openAccountingLoanRegister(){
+    const scope=accountingReadScope('tabHistory');
+    const current=()=>accountingReadScopeCurrent(scope);
+    if(!current()||accountingLoanOpening)return;
+    accountingLoanOpening=true;
+    try{
+        if(!window.CoopAccountingLoans&&!accountingLoanAsset){
+            accountingLoanAsset=new Promise((resolve,reject)=>{
+                const tag=document.createElement('script');
+                const finish=ok=>{
+                    clearTimeout(timer);tag.onload=tag.onerror=null;
+                    if(ok)resolve();else{tag.remove();reject(Error('LOAN_ASSET_UNAVAILABLE'));}
+                };
+                const timer=setTimeout(()=>finish(false),10000);
+                tag.onload=()=>finish(window.CoopAccountingLoans?.version==='1.0.0');tag.onerror=()=>finish(false);
+                tag.src=new URL('accounting_loan_register_v1.js',document.baseURI).href;
+                tag.integrity='sha384-c2FWcOmXeyc6NXTNORi/5QuTCjjWX8FgI6RgIcLGQzfXQnGIADn7U+MlpuX6My8r';
+                tag.crossOrigin='anonymous';document.head.appendChild(tag);
+            }).finally(()=>accountingLoanAsset=null);
+        }
+        await accountingLoanAsset;
+        if(current())window.CoopAccountingLoans.open({client:_supabase,coopId:scope.owner.coop_id,current,canEdit:()=>current()&&canPerform('accounting.edit')});
+    }catch(_){if(current())showAlert('대출 관리 도구를 불러오지 못했습니다. 다시 시도해 주세요.');}
+    finally{accountingLoanOpening=false;}
 }
 
 function isCashLikeAccount(accountName) {

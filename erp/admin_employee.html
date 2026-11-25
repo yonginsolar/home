@@ -3675,12 +3675,12 @@ const employeeFeatureAssets = (() => {
     const modules = {
         PrintService:'print_service_v2.js',
         EmployeeCertificatePrint:'employee_certificate_print_v3.js?v=3.0.0',
-        SalarySlipPrint:'salary_slip_print_v1.js',
+        SalarySlipPrintV2:'salary_slip_print_v2.js',
         ExpoEmployeeCertificate:'expo_employee_certificate.js?v=20261022-1',
         PayrollTaxTable:'payroll_tax_table.js?v=20260508-1',
         PayrollDurunuriModule:'payroll_durunuri_module_v3.js',
         SalaryLedgerModule:'salary_ledger_module.js?v=1.0.12',
-        ContractPayroll:'contract_payroll.js?v=1.0.0',
+        ContractPayroll:'contract_payroll_v2.js',
         PayrollImportGuard:'payroll_import_guard.js?v=1.0.0',
         ErpWorkflowAssets:'workflow_assets_print_v1.js',
         HrInsuranceStatus:'hr_insurance_status.js?v=1.0.1',
@@ -3692,7 +3692,8 @@ const employeeFeatureAssets = (() => {
     const pending = new Map();
     const ready = name => name === 'PrintService' ? typeof PrintService === 'object'
         : name === 'EmployeeCertificatePrint' ? window.EmployeeCertificatePrint?.version === '3.0.0'
-        : name === 'PayrollDurunuriModule' ? window.PayrollDurunuriModule?.ALLOCATION_VERSION === 3 : !!window[name];
+        : name === 'PayrollDurunuriModule' ? window.PayrollDurunuriModule?.ALLOCATION_VERSION === 3
+        : name === 'ContractPayroll' ? window.ContractPayroll?.version === '2.0.0' : !!window[name];
     function load(name) {
         if (ready(name)) return Promise.resolve();
         if (pending.has(name)) return pending.get(name);
@@ -3712,8 +3713,9 @@ const employeeFeatureAssets = (() => {
             const printHashes = {
                 EmployeeCertificatePrint:'sha384-VV4AjJyvLbje4Pv0UAHHQMdmETxg0UA6R7O7+VH5zg8yjVBadZJXvIKaSRXcJFMF',
                 PayrollDurunuriModule:'sha384-0eYCt42e3z8HZAF0K6ZtF+Fq06PTeHPrq7i0BpiBAQHcWCFD0NlbGbWDf4yOecRm',
-                SalarySlipPrint:'sha384-le/7kWDt8bDq92Bo+xVVaklILa0P4UtZQlS3cWq7QKu0H704SFaHCl9p5dV0veso',
+                SalarySlipPrintV2:'sha384-J9ZB2oDIYtYWzczfU+uPoepKOVP7yXJSdkz2AJJqWGgMlSVDIS3BYC5Rb4d3tbtZ',
                 PrintService:'sha384-Q3QwPRZuXNWcpC9pI9m9M8wtttmZflnEFUK/Ghzr6wNMxvK1eooRmMT1TuZm+9sZ',
+                ContractPayroll:'sha384-U/0QWsOoDG4xDUMyXz9pWubvlN0Z8hx74dUA3vf4XdNHlEAkRexaKulYOb2dEben',
                 ErpWorkflowAssets:'sha384-Y1ouImMNdgejf/IoEufA9cl7zESy2MnClk81r+cNhtZG4JnjQq3QW7DEgdM5BI6U'
             };
             if (printHashes[name]) {
@@ -10012,21 +10014,22 @@ async function reqIssueCert() {
 
 async function printSalaryAdmin() {
     const month = employeeSalarySelectedMonth;
-    if (!canUseEmployeeSalaryMonth(month) || isEmployeeDetailSaving()) return;
+    if (!canUseEmployeeSalaryMonth(month) || isEmployeeDetailSaving() || printSalaryAdmin.loading) return;
     if(!currentSalaryDataForPrint) return showAlert("저장된 급여 내역이 없습니다.");
     const d = currentSalaryDataForPrint;
     if (d.year_month !== month) return;
     const printContext = captureEmployeeDocumentContext({track:true});
     const stillCurrent = () => printContext.isCurrent() && currentSalaryDataForPrint === d
         && canUseEmployeeSalaryMonth(month) && !isEmployeeDetailSaving();
+    let popup, handedOff=false;
+    printSalaryAdmin.loading=true;
     try {
-        if (!stillCurrent() || printSalaryAdmin.loading) return;
-        printSalaryAdmin.loading = true;
-        try { await employeeFeatureAssets('PrintService','SalarySlipPrint'); }
-        catch (_) { if (stillCurrent()) showAlert('인쇄 기능을 준비하지 못했습니다. 다시 눌러 주세요.'); return; }
-        finally { printSalaryAdmin.loading = false; }
-        if (!stillCurrent()) return;
-    } finally { printContext.release(); }
+    if (!stillCurrent()) return;
+    popup=window.open('','','width=900,height=1100');
+    if(!popup)return showAlert('인쇄 창을 열 수 없습니다. 팝업을 허용한 뒤 다시 시도해 주세요.');
+    popup.document.body.textContent='인쇄 미리보기를 준비하고 있습니다…';
+    await employeeFeatureAssets('PrintService','SalarySlipPrintV2');
+    if (popup.closed || !stillCurrent()) return;
     const dedAdvanceLabel = getSalaryDedAdvanceLabelForAdmin(d);
     const payrollTaxAdjustmentTotal = getPayrollTaxAdjustmentTotalForAdmin(d);
     const [y, m] = d.year_month.split('-');
@@ -10047,25 +10050,24 @@ async function printSalaryAdmin() {
         return `${yy}년 ${mm}월<br>(${yy}.${String(mm).padStart(2,'0')}.${String(startDay).padStart(2,'0')} ~ ${yy}.${String(mm).padStart(2,'0')}.${lastDay})`;
     };
 
-    const payDateObj = new Date(y, Number(m), 10);
-    const payDateStr = `${payDateObj.getFullYear()}년 ${payDateObj.getMonth()+1}월 ${payDateObj.getDate()}일`;
     const fmt = (n) => Number(n || 0).toLocaleString();
 
     // 회사 정보 안전하게 참조
     const companyProfile = buildAdminEmployeeCompanyPrintProfile();
-    try {
-        ensureAdminEmployeeCompanyPrintProfile(companyProfile, '급여명세서 출력');
-        companyProfile.sealUrl = await readCompanySealUrl();
-    } catch (error) { if (stillCurrent()) showAlert(error.message); return; }
-    if (!stillCurrent()) return;
+    ensureAdminEmployeeCompanyPrintProfile(companyProfile, '급여명세서 출력');
+    const [payment,seal,{data:employeeOrg}]=await Promise.all([
+        window.SalarySlipPrintV2.readPayment(_supabase,d),readCompanySealUrl(),
+        scopeEmployeeTenant(_supabase.from('ref_employees').select('department, position')).eq('emp_id',printContext.empId).single()
+    ]);
+    if (popup.closed || !stillCurrent()) return;
 
     // 데이터 패키징
     const salaryData = {
         titleDate: `${y}년 ${Number(m)}월`,
         attrDate: getSmartAttribution(d.year_month),
-        payDate: payDateStr,
+        payment,
         empInfo: `${currentEmpDisplayNo || printContext.empId} / ${printContext.empName}`,
-        dept: "", pos: "",
+        dept: employeeOrg?.department, pos: employeeOrg?.position,
         p_basic: fmt(d.pay_basic), p_meal: fmt(d.pay_meal), p_car: fmt(d.pay_car),
         p_pos: fmt(d.pay_position), p_svc: fmt(d.pay_service), p_ot: fmt(d.pay_overtime),
         p_child: fmt(d.pay_child), p_bonus: fmt(d.pay_bonus), p_total: fmt(d.pay_total),
@@ -10076,18 +10078,21 @@ async function printSalaryAdmin() {
         d_adv: fmt(d.ded_advance), d_adv_label: dedAdvanceLabel, d_cap: fmt(d.ded_capital), d_total: fmt(d.ded_total),
         net: fmt(d.net_pay),
         logo: companyProfile.logoUrl,
-        seal: companyProfile.sealUrl,
+        seal,
         chairman: companyProfile.chairmanName,
         compName: companyProfile.companyName
     };
 
-    // 부서/직급 조회 후 인쇄 모듈 호출
-    scopeEmployeeTenant(_supabase.from('ref_employees').select('department, position')).eq('emp_id', printContext.empId).single().then(({data}) => {
-        if (!stillCurrent()) return;
-        if(data) { salaryData.dept = data.department; salaryData.pos = data.position; }
-        // [변경] 외부 모듈 호출
-        window.SalarySlipPrint.print(salaryData);
-    });
+    window.SalarySlipPrintV2.print(salaryData,popup);
+    handedOff=true;
+    } catch(error) {
+        if(stillCurrent())showAlert(error?.message === 'HR_FEATURE_ASSET_UNAVAILABLE'
+            ? '인쇄 기능을 준비하지 못했습니다. 다시 눌러 주세요.' : error?.message || '인쇄 화면을 열지 못했습니다.');
+    } finally {
+        if(!handedOff)popup?.close();
+        printSalaryAdmin.loading=false;
+        printContext.release();
+    }
 }
 
 function getPayrollTaxAdjustmentTotalForAdmin(row) {

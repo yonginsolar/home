@@ -18,7 +18,7 @@
 <title>마이페이지</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-<script src="workflow_assets_print_v2.js" integrity="sha384-t7ZTZ1ZovGzFJ3k8juHnAZ/O3MH0093TgFWYig9PIyBf++Xj4BjSfrKigcbXVDbP" crossorigin="anonymous"></script>
+<script src="workflow_assets_print_v3.js" integrity="sha384-7tv9qGl2YF9mLIOVNa6R5kVJyPSfsDpISSyuoYl4A9WjOMny77hqv8JmVvOKbZRH" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script>
@@ -2686,31 +2686,26 @@ async function printSalaryPopup() {
     if (!isMypageSalaryTabCurrent() || printSalaryPopup.pending) return;
     const data=currentSalaryData,owner=getMypageDataOwner(),ym=document.getElementById('salaryMonth').value;
     const current=()=>isMypageSalaryTabCurrent()&&owner===getMypageDataOwner()&&data===currentSalaryData&&ym===document.getElementById('salaryMonth').value;
-    let popup;
+    const popup=window.open('','','width=900,height=1100');
+    if(!popup)return showAlert('인쇄 창을 열 수 없습니다. 팝업을 허용한 뒤 다시 시도해 주세요.');
     printSalaryPopup.pending=true;
     try{
-        if(typeof PrintService==='undefined'||!window.SalarySlipPrint){
-            popup=window.open('','','width=900,height=1100');
-            if(!popup)return showAlert('인쇄 창을 열 수 없습니다. 팝업을 허용한 뒤 다시 시도해 주세요.');
-            popup.document.body.textContent='인쇄 미리보기를 준비하고 있습니다…';
-            await Promise.all(['printService','salarySlipPrint'].map(key=>window.ErpWorkflowAssets.load(key)));
-            if(popup.closed||!current()){popup.close();return;}
-        }
-        renderMypageSalaryPrint(data,popup);
+        popup.document.body.textContent='인쇄 미리보기를 준비하고 있습니다…';
+        await Promise.all(['printService','salarySlipPrintV2'].map(key=>window.ErpWorkflowAssets.load(key)));
+        if(popup.closed||!current()){popup.close();return;}
+        const payment=await window.SalarySlipPrintV2.readPayment(_supabase,data);
+        if(popup.closed||!current()){popup.close();return;}
+        renderMypageSalaryPrint(data,popup,payment);
     }catch(error){popup?.close();if(current())showAlert(error?.message?.startsWith('ERP_ASSET_')?'인쇄 도구를 불러오지 못했습니다. 다시 시도해 주세요.':error?.message||'인쇄 화면을 열지 못했습니다.');}
     finally{printSalaryPopup.pending=false;}
 }
 
-function renderMypageSalaryPrint(d, popup) {
+function renderMypageSalaryPrint(d, popup, payment) {
     // 숫자 쉼표 포맷팅 헬퍼
     const fmt = (n) => Number(n || 0).toLocaleString();
     const dedAdvanceLabel = getSalaryDedAdvanceLabel(d);
     const payrollTaxAdjustmentTotal = getSalaryPayrollTaxAdjustmentTotal(d);
     const [y, m] = d.year_month.split('-'); // 2025-05
-
-    // 날짜 포맷팅
-    const payDateObj = new Date(y, Number(m), 10); // 다음달 10일 (예시 로직)
-    const payDateStr = `${payDateObj.getFullYear()}년 ${payDateObj.getMonth() + 1}월 ${payDateObj.getDate()}일`;
 
     // 데이터 패키징 (PrintService 규격에 맞춤)
     const companyProfile = buildMypageCompanyPrintProfile();
@@ -2719,7 +2714,7 @@ function renderMypageSalaryPrint(d, popup) {
     const salaryData = {
         titleDate: `${y}년 ${Number(m)}월`,
         attrDate: `${y}년 ${Number(m)}월 (귀속)`,
-        payDate: payDateStr,
+        payment,
         empInfo: `${getMypageEmployeeDisplayNoValue(myInfo)} / ${myInfo.emp_name}`,
         dept: myInfo.department || "-",
         pos: myInfo.position || "-",
@@ -2747,7 +2742,7 @@ function renderMypageSalaryPrint(d, popup) {
     };
 
     // 모듈 호출
-    window.SalarySlipPrint.print(salaryData, popup);
+    window.SalarySlipPrintV2.print(salaryData, popup);
 }
 
 function getSalaryPayrollTaxAdjustmentTotal(row){
