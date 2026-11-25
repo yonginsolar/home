@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.182 | 승인 방식 선택과 전결 알림 -->
+<!-- Version: v1.2.183 | 회의 내용 불러오기는 공문에서만 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.182 | approval.html');</script>
+  <script>console.log('[Version] v1.2.183 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -3310,6 +3310,7 @@ function clearApprovalDraftLocalFiles() {
 } // End of clearApprovalDraftLocalFiles
 
 function collectApprovalDraftFormPayload() {
+    const category = getCurrentDraftMainType();
     const proposalSubjectEl = document.getElementById('proposalSubject');
     const noticeSubjectEl = document.getElementById('noticeSubject');
     const selectedHalf = document.querySelector('input[name="ampm"]:checked');
@@ -3317,7 +3318,7 @@ function collectApprovalDraftFormPayload() {
     const mixedDetailMode = isApprovalMixedLeaveDetailMode();
     return {
         version: 1,
-        category: getCurrentDraftMainType(),
+        category,
         proxy: {
             enabled: !!document.getElementById('chkProxy')?.checked,
             target_emp_id: String(document.getElementById('proxyTargetSelect')?.value || '').trim()
@@ -3339,7 +3340,7 @@ function collectApprovalDraftFormPayload() {
             notice_usage: OfficialNotice.normalize(document.getElementById('noticeUsage')?.value),
             notice_via: String(document.getElementById('noticeVia')?.value || '').trim(),
             notice_approval_memo: String(document.getElementById('noticeApprovalMemo')?.value || '').trim(),
-            notice_meeting_link: approvalMeetingNoticeLink ? {...approvalMeetingNoticeLink} : null,
+            notice_meeting_link: category === '공문' && approvalMeetingNoticeLink ? {...approvalMeetingNoticeLink} : null,
             amount: String(ERPNumberInput.raw(document.getElementById('appAmount')?.value) || '').trim(),
             related_doc_id: String(document.getElementById('relDocId')?.value || '').trim(),
             related_doc_label: String(document.getElementById('relDocName')?.textContent || '').trim(),
@@ -4104,7 +4105,7 @@ async function loadApprovalDraftFromServer(draftId) {
         if (noticeViaEl) noticeViaEl.value = String(fields.notice_via || '').trim();
         const noticeMemoEl = document.getElementById('noticeApprovalMemo');
         if (noticeMemoEl) noticeMemoEl.value = String(fields.notice_approval_memo || '').trim();
-        setApprovalMeetingNoticeLink(fields.notice_meeting_link);
+        setApprovalMeetingNoticeLink(effectiveCategory === '공문' ? fields.notice_meeting_link : null);
         setApprovalEditorContent(String(payload?.body || '').trim());
 
         setApprovalRelatedDocLabel(String(fields.related_doc_id || '').trim(), String(fields.related_doc_label || '').trim());
@@ -13564,20 +13565,14 @@ function invalidateApprovalMeetingNoticeRequest() {
 }
 
 function canImportApprovalMeeting(type) {
-    return ['공문','일반품의'].includes(type) && canPerform('minutes.manage');
+    return type === '공문' && canPerform('minutes.manage');
 }
 
 function syncApprovalMeetingImportType(type, changed) {
     document.getElementById('divMeetingNotice').classList.toggle('hidden', !canImportApprovalMeeting(type));
-    const notice = type === '공문';
-    const kind = document.getElementById('noticeMeetingKind');
-    document.getElementById('noticeMeetingKindLabel').textContent = notice ? '공문 종류' : '회의 안건 가져오기';
-    kind.options[0].textContent = notice ? '일반 공문' : '선택 안 함';
-    kind.options[1].textContent = notice ? '이사회 소집' : '이사회';
-    kind.options[2].textContent = notice ? '총회 소집' : '총회';
-    document.getElementById('noticeMeetingLinkStatus').classList.toggle('hidden', !notice);
     if (changed) {
-        kind.value = '';
+        document.getElementById('noticeMeetingKind').value = '';
+        document.getElementById('noticeMeetingSelect').replaceChildren(new Option('회의꾸러미를 선택하세요', ''));
         document.getElementById('noticeMeetingFields').classList.add('hidden');
         document.getElementById('noticeMeetingStatus').textContent = '';
     }
@@ -13626,15 +13621,21 @@ function prepareApprovalCategoryBodyChange(previousType, nextType) {
     approvalCategoryBodyDraftScope = scope;
     invalidateApprovalMeetingNoticeRequest();
     // The select already contains the new type. Read the editor belonging to the old type.
-    if (!previousType) return { hasDraft: false, body: '' };
+    if (!previousType) {
+        setApprovalMeetingNoticeLink(null);
+        return { hasDraft: false, body: '' };
+    }
     if (!scopeChanged) {
         const titleInput = document.getElementById(previousType === '공문' ? 'noticeSubject' : 'proposalSubject');
         approvalCategoryBodyDrafts.set(previousType, {
             body: getApprovalEditorContent(previousType),
-            title: titleInput ? { value: titleInput.value, auto: titleInput.dataset.autoGenerated === '1' } : null
+            title: titleInput ? { value: titleInput.value, auto: titleInput.dataset.autoGenerated === '1' } : null,
+            ...(previousType === '공문' && approvalMeetingNoticeLink ? { meetingLink: {...approvalMeetingNoticeLink} } : {})
         });
     }
     const entry = approvalCategoryBodyDrafts.get(nextType);
+    // The formal notice's link belongs to its own parked body, not the active proposal.
+    setApprovalMeetingNoticeLink(nextType === '공문' ? entry?.meetingLink : null);
     const saved = { hasDraft: approvalCategoryBodyDrafts.has(nextType), body: typeof entry === 'string' ? entry : entry?.body || '', title: entry?.title || null };
     setApprovalEditorContent('');
     return saved;
@@ -13936,7 +13937,7 @@ async function changeApprovalMeetingNoticeKind() {
     const request = approvalMeetingNoticeRequestSequence;
     const kind = document.getElementById('noticeMeetingKind').value;
     // Merely browsing a different meeting never retargets the imported body.
-    if (!kind && type === '공문') setApprovalMeetingNoticeLink(null);
+    if (!kind) setApprovalMeetingNoticeLink(null);
     const {coopId,isCurrent} = captureApprovalMeetingImport(type,request,kind);
     if (!isCurrent()) return;
     document.getElementById('noticeMeetingFields').classList.toggle('hidden', !kind);
@@ -13957,10 +13958,9 @@ async function applyApprovalMeetingNotice() {
     const meetingId = document.getElementById('noticeMeetingSelect').value;
     const {coopId,isCurrent} = captureApprovalMeetingImport(type,request,kind,meetingId);
     if (!isCurrent()) return;
-    const notice = type === '공문';
     const title = document.getElementById('noticeSubject'), receiver = document.getElementById('noticeReceiver');
     const status = document.getElementById('noticeMeetingStatus');
-    const snapshot = () => [String(getApprovalEditorContent(type) || ''), ...(notice ? [title.value,receiver.value] : [])];
+    const snapshot = () => [String(getApprovalEditorContent(type) || ''), title.value, receiver.value];
     const original = snapshot();
     const inputUnchanged = () => snapshot().every((value,index) => value === original[index]);
     const canApply = () => {
@@ -13975,23 +13975,13 @@ async function applyApprovalMeetingNotice() {
         if (!canApply()) return;
         const data = await CoopMeetingNotice.read(_supabase, coopId, meetingId, kind, type);
         if (!canApply()) return;
-        if (!notice && original[0].includes(data.content)) {
-            status.textContent = '같은 회의 안건이 이미 본문에 있습니다.';
-            return;
-        }
-        if (original.some(value => value.trim()) && !await showConfirm(notice
-            ? '작성 중인 제목·수신·본문을 선택한 회의의 소집 공문으로 바꿀까요?'
-            : '작성 중인 품의 본문 뒤에 회의 안건을 추가할까요?')) return;
+        if (original.some(value => value.trim()) && !await showConfirm('작성 중인 제목·수신·본문을 선택한 회의의 소집 공문으로 바꿀까요?')) return;
         if (!canApply()) return;
-        if (notice) {
-            title.value = data.title;
-            receiver.value = data.receiver;
-            markApprovalTitleInputDirty('notice');
-            setApprovalEditorContent(data.content);
-            setApprovalMeetingNoticeLink(data.meetingLink);
-        } else {
-            setApprovalEditorContent(original[0] + data.content);
-        }
+        title.value = data.title;
+        receiver.value = data.receiver;
+        markApprovalTitleInputDirty('notice');
+        setApprovalEditorContent(data.content);
+        setApprovalMeetingNoticeLink(data.meetingLink);
         status.textContent = '일시·장소·안건 제목을 불러왔습니다.';
     } catch (error) { if (isCurrent()) showAlert(error.message); }
     finally { if (request === approvalMeetingNoticeRequestSequence) button.disabled = false; }
