@@ -486,11 +486,14 @@ background: #f0fdf4;
 color: #14532d;
 }
 .extra-capital-account-main { flex: 1 1 15rem; min-width: 0; max-width: 100%; }
+.extra-capital-account-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.extra-capital-account-card .extra-capital-account-actions .btn { width: auto; }
 .extra-capital-account-label { font-size: .78rem; font-weight: 750; color: #15803d; }
 .extra-capital-account-value { margin-top: 3px; font-size: .96rem; line-height: 1.45; font-weight: 800; word-break: keep-all; overflow-wrap: anywhere; }
 .extra-capital-account-copy, .extra-capital-account-retry { flex: 0 1 auto; min-width: 44px; min-height: 44px; max-width: 100%; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
 @media (max-width: 480px) {
 .extra-capital-account-card { align-items: stretch; flex-direction: column; }
+.extra-capital-account-main { flex: 0 1 auto; }
 .extra-capital-account-copy, .extra-capital-account-retry { width: 100%; }
 }
 
@@ -2080,10 +2083,13 @@ NO. <span id="infoMemberId">-</span>
 <div class="extra-capital-account-label"><i class="bi bi-bank me-1"></i>추가 출자금 입금 계좌</div>
 <div class="extra-capital-account-value" id="extraCapitalAccountValue">계좌 정보를 불러오는 중...</div>
 </div>
+<div class="extra-capital-account-actions">
 <button type="button" class="btn btn-sm btn-outline-success extra-capital-account-copy hidden" id="copyExtraCapitalAccountBtn" onclick="copyExtraCapitalDepositAccount()">
 <i class="bi bi-copy me-1"></i>계좌번호 복사
 </button>
+<button type="button" class="btn btn-sm btn-outline-primary extra-capital-account-copy hidden" id="extraCapitalTossBtn" onclick="openExtraCapitalToss()">토스로 보내기</button>
 <button type="button" class="btn btn-sm btn-outline-success extra-capital-account-retry hidden" id="retryExtraCapitalAccountBtn" aria-controls="extraCapitalAccountValue" onclick="retryExtraCapitalDepositAccount()">계좌 다시 확인</button>
+</div>
 </div>
 <div class="mb-3">
 <label class="form-label small" for="exAmount">약정 금액</label>
@@ -9610,6 +9616,7 @@ const value = document.getElementById('extraCapitalAccountValue');
 const copyButton = document.getElementById('copyExtraCapitalAccountBtn');
 const retry = document.getElementById('retryExtraCapitalAccountBtn');
 if (!value || !copyButton) return;
+syncExtraCapitalTossButton(account);
 document.getElementById('extraCapitalAccountCard')?.setAttribute('aria-busy',String(status === 'loading'));
 if (retry) {
 if (status !== 'loading') retry.classList.remove('hidden');
@@ -9711,6 +9718,56 @@ if (state.run === run) { state.run = null;state.promise = null; }
 });
 return state.promise;
 } // End of loadExtraCapitalDepositAccount
+
+let extraCapitalTossAsset=null;
+function loadExtraCapitalToss() {
+if(window.CoopCapitalToss)return Promise.resolve(window.CoopCapitalToss);
+if(!extraCapitalTossAsset)extraCapitalTossAsset=new Promise((resolve,reject)=>{
+ const script=document.createElement('script');
+ script.src='/shared/capital_toss_v1.js';script.integrity='sha384-lv/Mq9mBYEX0PYhALD9qw4e7XBXyTEtAlzvYPn6SjFCCI9WqvFnCPTKBfiDtUYen';script.crossOrigin='anonymous';
+ script.onload=()=>window.CoopCapitalToss?resolve(window.CoopCapitalToss):reject(new Error('CAPITAL_TOSS_UNAVAILABLE'));
+ script.onerror=()=>{script.remove();reject(new Error('CAPITAL_TOSS_UNAVAILABLE'));};
+ document.head.appendChild(script);
+}).catch(e=>{extraCapitalTossAsset=null;throw e;});
+return extraCapitalTossAsset;
+}
+function extraCapitalTossAccount() {
+const context=extraCapitalDepositAccountContext(), state=extraCapitalDepositAccountState;
+const profile=String(curMem?.id || ''), coop=String(currentMemberCoopId || '');
+if (!context || window.frameElement?.hidden || document.getElementById('tabExtra')?.classList.contains('hidden')
+    || !profile || profile!==String(getRootMemberProfileId() || '') || coop!==String(curMem?.coop_id || '')
+    || !memberAccessContext?.found || memberAccessContext.access_mode!=='current'
+    || String(memberAccessContext.profile_id)!==profile || String(memberAccessContext.coop_id)!==coop
+    || !['정상','active','normal'].includes(String(curMem?.status || '').trim().toLowerCase())
+    || state.status!=='ready' || state.readyContext!==context || !state.data) return null;
+const {bank,accountNumber,holder}=state.data;
+const guide={bank,account:accountNumber,holder};
+return guide;
+}
+function syncExtraCapitalTossButton(account) {
+const button=document.getElementById('extraCapitalTossBtn');
+if(!button)return;
+const guide=account&&extraCapitalTossAccount(), api=window.CoopCapitalToss;
+button.classList.toggle('hidden',!api?.supportedAccount(guide));
+if(guide&&!api)void loadExtraCapitalToss().then(loaded=>{
+  button.classList.toggle('hidden',!loaded.supportedAccount(extraCapitalTossAccount()));
+}).catch(()=>{});
+}
+
+function openExtraCapitalToss() {
+const account=extraCapitalTossAccount(), rules=portalCapitalRules;
+const opener=document.getElementById('extraCapitalTossBtn');
+if(document.hidden || !window.CoopCapitalToss?.supportedAccount(account) || !opener || opener.classList.contains('hidden')) return;
+const input=document.getElementById('exAmount'), amount=input?.value || '';
+if(!rules) return showModal('출자 기준을 확인한 뒤 다시 시도해 주세요.',{compact:true,opener});
+const existing=Math.max(Number(curMem?.total_capital || 0),0);
+if(!CoopMemberCapital.valid(amount,rules,false) || !CoopMemberCapital.withinLimit(amount,rules,existing)){
+  return showModal('추가 출자 금액과 약정 기준을 먼저 확인해 주세요.',{compact:true,opener:input||opener});
+}
+const url=window.CoopCapitalToss.url(account,amount);
+if(!url) return showModal('토스로 보낼 금액을 확인해 주세요.',{compact:true,opener});
+window.location.assign(url);
+}
 
 async function copyExtraCapitalDepositAccount() {
 const context = extraCapitalDepositAccountContext();
