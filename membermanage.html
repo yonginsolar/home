@@ -1814,7 +1814,7 @@ gtag('config', 'G-TR217L7JN9');
  <output id="hcrec-referral-own-code" class="fw-bold mt-2" style="overflow-wrap:anywhere" aria-label="내 추천 코드" hidden></output>
  <p id="hcrec-referral-share-status" class="small mt-2 mb-0" role="status"></p>
 </section>
-<section id="portal-hwaseong-points" class="dashboard-card p-3 mb-3" aria-label="화성 조합원 포인트" hidden>
+<section id="portal-hwaseong-points" class="dashboard-card p-3 mb-3" aria-label="조합원 포인트" hidden>
  <button type="button" id="portal-hwaseong-points-toggle" class="btn btn-outline-success btn-sm" aria-controls="portal-hwaseong-points-panel" aria-expanded="false">내 포인트·신청</button>
  <div id="portal-hwaseong-points-panel" class="mt-3" hidden></div>
 </section>
@@ -5636,9 +5636,17 @@ function syncMemberReferralPanels(key){syncMyReferralCount(key);myReferralScore.
 function clearMemberReferralPanels(){clearMyReferralCount();myReferralScore.clear();hidePortalHwaseongPoints();}
 
 let portalHwaseongPointsView=null,portalHwaseongPointsAsset=null,portalHwaseongPointsRevision=0;
+let portalHwaseongOfficeOpened=false;
+const portalHwaseongOfficeLink=new URLSearchParams(location.search).get('points')==='office';
+function portalActivityPointsProgram(){
+ const coop=String(currentMemberCoopId||'');
+ if(window.CoopHcrecMemberReferral?.isPublic(coop))return 'hcrec';
+ return coop==='a4e65bb0-aa8e-4cef-a895-cd7865a67fef'
+    &&!isSiteMemberPortalProfile()&&isCoopRuntimeModuleEnabled('member_admin')?'yongin':'';
+}
 function portalHwaseongPointsIdentity(){
  const profile=String(curMem?.id||''),coop=String(currentMemberCoopId||''),actor=String(curAuth?.id||'');
- return actor&&profile&&window.CoopHcrecMemberReferral?.isPublic(coop)
+ return actor&&profile&&portalActivityPointsProgram()
   && String(getRootMemberProfileId()||'')===profile && String(curMem?.coop_id||'')===coop
   && memberAccessContext?.found===true&&memberAccessContext.access_mode==='current'
   && String(memberAccessContext.profile_id||'')===profile&&String(memberAccessContext.coop_id||'')===coop
@@ -5661,24 +5669,24 @@ function hidePortalHwaseongPoints(){
  const section=document.getElementById('portal-hwaseong-points');if(section)section.hidden=true;
 }
 function loadPortalHwaseongPointsAsset(){
- if(window.HwaseongActivityPoints?.version==='1.0.0')return Promise.resolve(window.HwaseongActivityPoints);
+ if(window.HwaseongActivityPoints?.version==='3.0.0')return Promise.resolve(window.HwaseongActivityPoints);
  if(portalHwaseongPointsAsset)return portalHwaseongPointsAsset;
  portalHwaseongPointsAsset=new Promise((resolve,reject)=>{
    const script=document.createElement('script');
    const finish=()=>{
      window.clearTimeout(timer);script.onload=script.onerror=null;
-     if(window.HwaseongActivityPoints?.version==='1.0.0')resolve(window.HwaseongActivityPoints);
+     if(window.HwaseongActivityPoints?.version==='3.0.0')resolve(window.HwaseongActivityPoints);
      else {script.remove();reject(Error('POINTS_LOAD_FAILED'));}
    };
    const timer=window.setTimeout(finish,15000);
-   script.src='/shared/hwaseong_points_v1.js';script.integrity='sha384-np6dwHvmDqlTgfgVhJTO8Vsx7zm3kQofThNqEXN41HmflV1zLa832mTfYKcj+Afd';
+   script.src='/shared/activity_points_v3.js';script.integrity='sha384-RmBwiHWXrLGVpBvZiOt71gIT5Z+2bI4mC5Odw5m/XabjA7RcK3RYVo9ukON8mGBU';
    script.crossOrigin='anonymous';script.onload=finish;script.onerror=finish;document.head.append(script);
  }).catch(e=>{portalHwaseongPointsAsset=null;throw e;});
  return portalHwaseongPointsAsset;
 }
 async function togglePortalHwaseongPoints(){
- const identity=portalHwaseongPointsIdentity(), panel=document.getElementById('portal-hwaseong-points-panel');
- if(!identity||!panel)return;
+ const identity=portalHwaseongPointsIdentity(), program=portalActivityPointsProgram(), panel=document.getElementById('portal-hwaseong-points-panel');
+ if(!identity||!program||!panel)return;
  if(!panel.hidden){closePortalHwaseongPoints();return;}
  const revision=++portalHwaseongPointsRevision;
  panel.hidden=false;panel.textContent='포인트 화면을 준비하고 있어요.';
@@ -5687,10 +5695,17 @@ async function togglePortalHwaseongPoints(){
  try{
    const feature=await loadPortalHwaseongPointsAsset();
    if(!valid())return;
-   portalHwaseongPointsView=feature.mount({mode:'member',panel,client:_supabase,owner:portalHwaseongPointsOwner,
+   portalHwaseongPointsView=feature.mount({mode:'member',program,panel,client:_supabase,owner:portalHwaseongPointsOwner,
+     initialActivity:portalHwaseongOfficeLink?'office':undefined,
      confirm:message=>Promise.resolve(window.confirm(message))});
    await portalHwaseongPointsView.enter();
  }catch(_){if(valid())panel.textContent='포인트 화면을 불러오지 못했어요. 닫았다 다시 열어 주세요.';}
+}
+function openPortalHwaseongOfficeLink(){
+ if(!portalHwaseongOfficeLink||portalHwaseongOfficeOpened||portalActivityPointsProgram()!=='hcrec'||!portalHwaseongPointsIdentity())return;
+ portalHwaseongOfficeOpened=true;
+ const panel=document.getElementById('portal-hwaseong-points-panel');
+ if(panel?.hidden)void togglePortalHwaseongPoints();
 }
 document.getElementById('portal-hwaseong-points-toggle')?.addEventListener('click',togglePortalHwaseongPoints);
 window.addEventListener('pagehide',hidePortalHwaseongPoints);
@@ -5869,6 +5884,8 @@ if(!window.MemberPortalPurposeController?.isDirect){void loadPortalPurposeExtras
 	showOnly('dashboardSection');
 	syncHcrecReferralProfile();
 	document.getElementById('portal-hwaseong-points').hidden=!portalHwaseongPointsIdentity();
+	document.getElementById('portal-hwaseong-points-toggle').textContent=portalActivityPointsProgram()==='yongin'?'내 포인트':'내 포인트·신청';
+	openPortalHwaseongOfficeLink();
 	if (typeof syncMemberReferralPanels === 'function') syncMemberReferralPanels(window.MemberPortalPurposeController?.getSelected() ?? 'profile');
 	openHcrecCapitalShortcut(currentProfileLoad);
 	if (!isSiteMemberPortalProfile()) await handlePendingEducationQrCheckIn(uuid);
