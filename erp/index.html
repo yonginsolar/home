@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.137 | 조합 기본 설정과 임시 초기 설정 구분 -->
+<!-- Version: v1.0.139 | 화성 햇빛소득마을 로그인 인계 보완 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261119-coop-plant-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.138 | index.html');</script>
+  <script>console.log('[Version] v1.0.139 | index.html');</script>
 <script src="work_overview_v128.js?v=1.3.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -146,6 +146,7 @@
     </div>
     
     <div id="loginForm" class="hidden">
+      <p class="alert alert-warning small" id="villageHandoffLoginHint" role="status" hidden>자동 로그인 연결을 확인하지 못했습니다. 이 마을 ERP에서 직접 로그인해 주세요.</p>
       <p class="text-muted mb-4 small">
         등록된 이메일로 간편하게 로그인하세요.<br>
         메일로 받은 인증코드를 이 화면에서 바로 입력하면 됩니다.
@@ -493,6 +494,8 @@ const ERP_SESSION_EXPIRED_NOTICE_KEY = 'erp_session_expired_notice_v1';
 const ERP_WORKSPACE_HANDOFF_PARAM = 'workspace_handoff';
 const ERP_WORKSPACE_SOURCE_PARAM = 'workspace_source';
 const ERP_WORKSPACE_MODE_PARAM = 'workspace_mode';
+const ERP_HWASEONG_WORKSPACE_ORIGIN = 'https://erp.hcrec.kr';
+const ERP_VILLAGE_HANDOFF_NOTICE_KEY = 'erp_village_handoff_login_hint';
 const MAGICLINK_RATE_KEY = 'erp_magiclink_rate_v1';
 const MAGICLINK_COOLDOWN_MS = 60 * 1000;
 const MAGICLINK_MIN_PAGE_AGE_MS = 1200;
@@ -571,8 +574,9 @@ function normalizeWorkspaceOrigin(raw) {
     }
 } // End of normalizeWorkspaceOrigin
 
-function isHwaseongMapajiOpenHandoff(raw, params, target = window.location) {
-    return raw === 'https://erp.hcrec.kr' && target.origin === 'https://sv-c9527d362f77.coopco.kr'
+function isHwaseongVillageOpenHandoff(raw, params, target = window.location) {
+    return raw === ERP_HWASEONG_WORKSPACE_ORIGIN && target.origin === 'https://' + target.hostname
+        && /^sv-[a-f0-9]{12}\.coopco\.kr$/.test(target.hostname)
         && target.pathname === '/erp/' && params.get(ERP_WORKSPACE_MODE_PARAM) === 'open'
         && [ERP_WORKSPACE_MODE_PARAM, ERP_WORKSPACE_SOURCE_PARAM, ERP_WORKSPACE_HANDOFF_PARAM]
             .every(key => params.getAll(key).length === 1);
@@ -591,12 +595,103 @@ function clearWorkspaceHandoffParams() {
     }
 } // End of clearWorkspaceHandoffParams
 
+async function verifyHwaseongVillageSession(accessToken, claimedCoopId, target, signal) {
+    // Read-only existing RPC. Use the received access token only for the
+    // canonical ERP endpoint; no browser session is saved during validation.
+    const read = async host => {
+        const response = await window.fetch(SUPABASE_URL + '/rest/v1/rpc/sun_village_workspace_context', {
+            method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error', signal,
+            headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + accessToken,
+                'content-type': 'application/json', 'x-erp-host': host },
+            body: '{}'
+        });
+        if (!response.ok) throw new Error('VILLAGE_ROUTE_VERIFY_FAILED');
+        return response.json();
+    };
+    const [source, destination] = await Promise.all([
+        read(new URL(ERP_HWASEONG_WORKSPACE_ORIGIN).hostname), read(target.hostname)
+    ]);
+    const coopId = destination?.current_coop_id;
+    const managingId = source?.current_coop_id;
+    const exactRow = (context, atDestination) => {
+        const rows = context?.workspaces;
+        if (!Array.isArray(rows)) return false;
+        return rows.filter(row => row?.coop_id === coopId && row.hostname === target.hostname
+            && row.workspace_url === target.origin + '/erp/' && row.service_status === 'active'
+            && row.is_management_coop === false && row.is_switchable === true
+            && row.is_current === atDestination).length === 1;
+    };
+    return !!(typeof coopId === 'string' && coopId && (!claimedCoopId || claimedCoopId === coopId)
+        && typeof managingId === 'string' && managingId && managingId !== coopId
+        && source.is_total_admin === true && source.managing_coop_id === managingId
+        && destination.managing_coop_id === managingId && exactRow(source,false) && exactRow(destination,true));
+}
+
+function installHwaseongVillageHandoff(params, nonce, opener) {
+    const sourceOrigin = ERP_HWASEONG_WORKSPACE_ORIGIN;
+    const scopedEntry=isHwaseongVillageOpenHandoff(params.get(ERP_WORKSPACE_SOURCE_PARAM),params)
+        && /^[A-Za-z0-9_-]{24,96}$/.test(nonce);
+    if (!scopedEntry || !opener || opener === window) {
+        if(scopedEntry)try { sessionStorage.setItem(ERP_VILLAGE_HANDOFF_NOTICE_KEY,'1'); } catch (_) {}
+        clearWorkspaceHandoffParams();
+        return false;
+    }
+    const deadline = Date.now() + 15000;
+    const controller = new AbortController();
+    let settled = false, accepting = false;
+    const current = () => !settled && Date.now() < deadline && window.opener === opener;
+    function clean() {
+        settled = true;
+        controller.abort();
+        window.clearTimeout(timer);
+        window.removeEventListener('message',receive);
+        window.removeEventListener('pagehide',clean);
+    }
+    function finish(session) {
+        if (settled) return;
+        clean();
+        const url = clearWorkspaceHandoffParams();
+        if (!session) {
+            try { sessionStorage.setItem(ERP_VILLAGE_HANDOFF_NOTICE_KEY,'1'); } catch (_) {}
+        }
+        const answer = session ? {type:'erp-workspace-session-ready',nonce,
+            accessToken:session.access_token,refreshToken:session.refresh_token}
+            : {type:'erp-workspace-session-failed',nonce};
+        try { if (window.opener === opener) opener.postMessage(answer, sourceOrigin); } catch (_) {}
+        window.location.replace(url);
+    }
+    async function receive(event) {
+        if (!current() || accepting || event.source !== opener || event.origin !== sourceOrigin) return;
+        const packet = event.data;
+        if (packet?.type !== 'erp-workspace-session' || packet.nonce !== nonce
+            || typeof packet.accessToken !== 'string' || !packet.accessToken.trim()
+            || typeof packet.refreshToken !== 'string' || !packet.refreshToken.trim()) return;
+        accepting = true;
+        try {
+            if (!(await verifyHwaseongVillageSession(packet.accessToken,packet.targetCoopId,window.location,controller.signal))
+                || !current()) { finish(null); return; }
+            const {data,error} = await _supabase.auth.setSession({access_token:packet.accessToken,refresh_token:packet.refreshToken});
+            if (!current() || error || !data?.session?.user
+                || (packet.ownerAuthId && data.session.user.id !== packet.ownerAuthId)) {finish(null);return;}
+            finish(data.session);
+        } catch (_) { finish(null); }
+    }
+    const timer=window.setTimeout(()=>finish(null),15000);
+    window.addEventListener('message',receive);
+    window.addEventListener('pagehide',clean,{once:true});
+    try { opener.postMessage({type:'erp-workspace-session-request',nonce,targetOrigin:window.location.origin},sourceOrigin); }
+    catch (_) { finish(null); }
+    return true;
+}
+
 function installWorkspaceHandoffReceiver() {
     const params = new URLSearchParams(window.location.search || '');
     const nonce = String(params.get(ERP_WORKSPACE_HANDOFF_PARAM) || '').trim();
     const rawSource = params.get(ERP_WORKSPACE_SOURCE_PARAM);
-    const villageOpen = isHwaseongMapajiOpenHandoff(rawSource, params);
-    const sourceOrigin = villageOpen ? 'https://erp.hcrec.kr' : normalizeWorkspaceOrigin(rawSource);
+    if (rawSource === ERP_HWASEONG_WORKSPACE_ORIGIN && params.get(ERP_WORKSPACE_MODE_PARAM) === 'open') {
+        return installHwaseongVillageHandoff(params,nonce,window.opener);
+    }
+    const sourceOrigin = normalizeWorkspaceOrigin(rawSource);
     const handoffMode = params.get(ERP_WORKSPACE_MODE_PARAM) === 'open' ? 'open' : 'switch';
     if (!nonce && !sourceOrigin) return false;
 
@@ -609,8 +704,6 @@ function installWorkspaceHandoffReceiver() {
 
     workspaceHandoffReceiverActive = true;
     let settled = false;
-    let acceptingVillageSession = false;
-    const villageDeadline = villageOpen ? Date.now() + 15000 : 0;
     const timeoutId = window.setTimeout(() => {
         if (settled) return;
         settled = true;
@@ -621,20 +714,17 @@ function installWorkspaceHandoffReceiver() {
 
     async function receiveSession(event) {
         if (settled || event.source !== opener || window.opener !== opener || event.origin !== sourceOrigin) return;
-        if (villageOpen && (acceptingVillageSession || Date.now() >= villageDeadline)) return;
         const payload = event.data && typeof event.data === 'object' ? event.data : {};
         if (payload.type !== 'erp-workspace-session' || payload.nonce !== nonce) return;
         const accessToken = String(payload.accessToken || '').trim();
         const refreshToken = String(payload.refreshToken || '').trim();
         if (!accessToken || !refreshToken) return;
-        if (villageOpen) acceptingVillageSession = true;
 
         try {
             const { data, error } = await _supabase.auth.setSession({
                 access_token: accessToken,
                 refresh_token: refreshToken
             });
-            if (villageOpen && (settled || Date.now() >= villageDeadline || window.opener !== opener)) return;
             if (error || !data?.session?.user) throw error || new Error('WORKSPACE_SESSION_NOT_CREATED');
             settled = true;
             window.clearTimeout(timeoutId);
@@ -652,7 +742,6 @@ function installWorkspaceHandoffReceiver() {
                 window.setTimeout(() => window.close(), 180);
             }
         } catch (error) {
-            if (villageOpen && settled) return;
             console.error('Workspace session handoff failed:', error);
             settled = true;
             window.clearTimeout(timeoutId);
@@ -2782,6 +2871,13 @@ function showScreen(id) {
     if (id === 'menuArea') updateLandingFeatureSearch();
     else { landingFeatureSearchActor = null; landingFeatureSearch?.refresh(); }
     if (id === 'loginForm') {
+        const handoffHint=document.getElementById('villageHandoffLoginHint');
+        try {
+            if(handoffHint && sessionStorage.getItem(ERP_VILLAGE_HANDOFF_NOTICE_KEY)==='1') {
+                sessionStorage.removeItem(ERP_VILLAGE_HANDOFF_NOTICE_KEY);
+                handoffHint.hidden=false;
+            }
+        } catch (_) {}
         loginFormOpenedAt = Date.now();
         applyMagicLinkCooldown();
     }
