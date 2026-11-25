@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.181 | 두루누리 동일 조건 배분 -->
+<!-- Version: v1.2.182 | 승인 방식 선택과 전결 알림 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.181 | approval.html');</script>
+  <script>console.log('[Version] v1.2.182 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -13179,6 +13179,7 @@ function openApprovalActionModal(docId, action) {
 
 function syncRelViewActionArea(doc) {
     invalidateApprovalSubmitPreview();
+    approvalSecretaryDetail = doc;
     const footerEl = document.getElementById('relViewModalFooter');
     const hintEl = document.getElementById('relViewActionHint');
     const buttonsEl = document.getElementById('relViewActionButtons');
@@ -16497,13 +16498,16 @@ async function submitApprovalActionModal() {
 async function procDoc(docId, action) {
     const safeDocId = toPositiveDocId(docId);
     const safeAction = String(action || '').trim() === '반려' ? '반려' : '승인';
-    if (safeAction === '승인' && todoCache.some(doc => Number(doc.id) === Number(safeDocId)
-        && doc.approval_line?.[0]?.secretary_phone_only === true)) {
-        return openRelView(safeDocId);
-    }
     const owner=getApprovalActionOwner(),revision=approvalActionRevision;
     const isCurrent=()=>window.ExpoRuntimeBridge || (owner===getApprovalActionOwner() && revision===approvalActionRevision
         && !window.frameElement?.hidden && (!currentViewingDocId || Number(currentViewingDocId)===Number(safeDocId)));
+    if (safeAction === '승인') {
+        const doc=Number(approvalSecretaryDetail?.id)===Number(safeDocId)
+            ? approvalSecretaryDetail : todoCache.find(row=>Number(row.id)===Number(safeDocId));
+        if (doc && await maybeOpenApprovalSecretaryChoice(doc,isCurrent)) return;
+        if (!isCurrent()) return;
+        if (doc?.approval_line?.[0]?.secretary_phone_only === true) return openRelView(safeDocId);
+    }
     const relViewModalEl = document.getElementById('relViewModal');
     const isPreviewFlow = !!(
         safeDocId
@@ -19450,22 +19454,127 @@ async function openRelView(docId) {
     void mountApprovalTaxTaskLinks(contentEl, data);
 }
 
-async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
+let approvalSecretaryDetail = null;
+let approvalSecretaryChoicePending = false;
+
+function canReadApprovalSecretaryChoice(doc) {
     const hwaseongSecretary = ['erp.hcrec.kr', 'hcrec.kr', 'www.hcrec.kr'].includes(location.hostname) && isCurrentUserSecretaryGeneral();
     const first = doc.approval_line?.[0];
     const possibleHandoff = isSunVillageApproval() && first?.secretary_phone_only === true && doc.status === '진행중'
         && (isSunVillageReviewUser() || isChairmanApprovalUser());
     const possiblePhoneReview = isSunVillageApproval() && first?.secretary_phone_only === true && first.emp_id === myInfo?.emp_id;
     if (!(hwaseongSecretary || isSunVillageReviewUser() || possibleHandoff || possiblePhoneReview)
-        || !canPerform('approval.process') || window.ExpoRuntimeBridge) return;
+        || !canPerform('approval.process') || window.ExpoRuntimeBridge) return false;
     if (!myInfo?.emp_id || (!possibleHandoff && first?.emp_id !== myInfo.emp_id) ||
-        (doc.status !== '진행중' && !(doc.status==='완료' && first.secretary_decision === true))) return;
-    const rpc = (action, expected = null, reason = null) => _supabase.rpc('erp_secretary_decision', {
+        (doc.status !== '진행중' && !(doc.status==='완료' && first?.secretary_decision === true))) return false;
+    return true;
+}
+
+function approvalSecretaryDecisionRpc(doc, action, expected = null, reason = null) {
+    return _supabase.rpc('erp_secretary_decision', {
         p_document_id: doc.id, p_action: action, p_expected: expected, p_reason: reason
     });
+}
+
+async function dispatchApprovalSecretaryTelegram(receipt, owner) {
+    const ids = [...new Set((Array.isArray(receipt?.telegram_notification_ids) ? receipt.telegram_notification_ids : [])
+        .map(toPositiveDocId).filter(Boolean))];
+    if (receipt?.ok !== true || receipt.phase !== 'direct' || !ids.length || !owner || owner !== getApprovalActionOwner()) return;
+    const erpHost=window.CoopRouteGuard?.getErpRuntimeHost(window.location)||window.location?.hostname||'';
+    if (!erpHost) return;
+    // Only dispatch server-created app rows. A failed or uncertain send
+    // leaves the app notification and never creates another one.
+    await Promise.allSettled(ids.map(notificationId => invokeApprovalEdgeFunction('erp-approval-telegram-dm', {
+        mode:'dispatch_existing',secretaryDecision:true,notificationId
+    },{erpHost})));
+}
+
+async function runApprovalSecretaryDecision(doc, status, mode, memo, owner) {
+    const result=await approvalSecretaryDecisionRpc(doc,mode,status.version,memo);
+    if (result.error) throw result.error;
+    if (result.data?.ok!==true || result.data.phase!==mode) throw new Error('RESULT_UNCONFIRMED');
+    if (mode==='direct') void dispatchApprovalSecretaryTelegram(result.data,owner);
+    return result.data;
+}
+
+async function maybeOpenApprovalSecretaryChoice(doc,isCurrent) {
+    if (doc.status!=='진행중' || doc.current_approver!==myInfo?.emp_id || !canReadApprovalSecretaryChoice(doc)) return false;
+    if (approvalSecretaryChoicePending || document.getElementById('approvalSecretaryChoiceDialog')) return true;
+    approvalSecretaryChoicePending=true;
+    try {
+        const result=await approvalSecretaryDecisionRpc(doc,'inspect');
+        if (!isCurrent()) return true;
+        if (result.error) throw result.error;
+        const status=result.data;
+        if (status?.visible!==true || status.eligible!==true || status.phase!=='secretary') return false;
+        if (typeof status.version!=='string') throw Error('RESULT_UNCONFIRMED');
+        showApprovalSecretaryChoice(doc,status,isCurrent);
+        return true;
+    } catch (_) {
+        if (isCurrent()) showAlert('전결 가능 여부를 확인하지 못했습니다. 문서를 다시 열어 확인해 주세요.');
+        return true;
+    } finally { approvalSecretaryChoicePending=false; }
+}
+
+function showApprovalSecretaryChoice(doc,status,isCurrent) {
+    if (!isCurrent() || document.getElementById('approvalSecretaryChoiceDialog')) return;
+    const focused=document.activeElement, owner=getApprovalActionOwner();
+    const dialog=document.createElement('dialog');
+    dialog.id='approvalSecretaryChoiceDialog';
+    dialog.className='rounded-3 border p-0 shadow';
+    dialog.style.width='min(92vw, 440px)';
+    dialog.setAttribute('aria-labelledby','approvalSecretaryChoiceTitle');
+    dialog.innerHTML=`<div class="p-3 d-grid gap-2 bg-body text-body">
+      <h2 class="h5 mb-1" id="approvalSecretaryChoiceTitle">결재 방식 선택</h2>
+      <button type="button" class="btn btn-primary" data-mode="direct">사무국장 전결</button>
+      <button type="button" class="btn btn-outline-primary" data-mode="chair">승인 후 이사장에게 상신</button>
+      <div data-stage="direct" hidden>
+        <label class="d-block small">전결 메모 (선택)<textarea class="form-control mb-2" rows="2" maxlength="1000"></textarea></label>
+        <button type="button" class="btn btn-primary" data-mode="confirm">전결 확정</button>
+      </div>
+      <div class="text-danger small" role="status"></div>
+      <button type="button" class="btn btn-outline-secondary" data-mode="cancel">취소</button>
+    </div>`;
+    const select=mode=>dialog.querySelector('[data-mode="'+mode+'"]');
+    const area=dialog.querySelector('[data-stage="direct"]'),memo=dialog.querySelector('textarea'),statusEl=dialog.querySelector('[role="status"]');
+    const buttons=[...dialog.querySelectorAll('button')];
+    let busy=false, completed=false;
+    select('chair').hidden=status.chair_allowed!==true;
+    select('direct').onclick=()=>{if(!busy && isCurrent()){area.hidden=false;memo.focus();}};
+    select('cancel').onclick=()=>{if(!busy)dialog.close();};
+    dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
+    dialog.addEventListener('close',()=>{
+        dialog.remove();
+        if(!completed && isCurrent() && focused?.isConnected) focused.focus();
+    },{once:true});
+    async function settle(mode){
+        if (busy || !isCurrent() || owner!==getApprovalActionOwner()) return;
+        busy=true;statusEl.textContent='';buttons.forEach(b=>b.disabled=true);memo.disabled=true;
+        try {
+            await runApprovalSecretaryDecision(doc,status,mode,mode==='direct'?memo.value:null,owner);
+            completed=true;dialog.close();
+            if(!isCurrent())return;
+            void Promise.allSettled([loadTodoList(),loadHistoryList()]);
+            await openRelView(doc.id);
+        } catch (error) {
+            if (!isCurrent()) {dialog.close();return;}
+            statusEl.textContent=error?.code==='PT409'
+                ? '문서 상태가 달라졌습니다. 문서를 다시 열어 확인해 주세요.'
+                : '처리 결과를 확인하지 못했습니다. 같은 선택으로 다시 확인해 주세요.';
+        } finally {busy=false;buttons.forEach(b=>b.disabled=false);memo.disabled=false;}
+    }
+    select('chair').onclick=()=>settle('chair');
+    select('confirm').onclick=()=>settle('direct');
+    document.body.append(dialog);
+    if (typeof dialog.showModal==='function') {dialog.showModal();select('cancel').focus();}
+    else {dialog.remove();showAlert('결재 방식 선택창을 열 수 없습니다.');}
+}
+
+async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
+    if (!canReadApprovalSecretaryChoice(doc)) return;
     let status;
     try {
-        const result = await rpc('inspect');
+        const result = await approvalSecretaryDecisionRpc(doc,'inspect');
         if (result.error || !result.data?.visible || !isCurrentView()) return;
         status = result.data;
     } catch (_) { return; }
@@ -19486,6 +19595,20 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
         return;
     }
     if (!['secretary','chair','direct','handoff'].includes(status.phase) || typeof status.version !== 'string') return;
+    if (status.phase==='secretary') {
+        const actions=document.getElementById('relViewActionButtons');
+        if (actions && !actions.querySelector('[data-approval-positive]')) {
+            const button=document.createElement('button');
+            button.type='button';button.className='btn btn-success btn-sm';button.setAttribute('data-approval-positive','');
+            button.textContent='승인';
+            button.onclick=()=>procDoc(doc.id,'승인');
+            actions.prepend(button);
+            document.getElementById('relViewModalFooter')?.classList.remove('hidden');
+            const hintEl=document.getElementById('relViewActionHint');
+            if(hintEl)hintEl.textContent='승인을 누른 뒤 결재 방식을 선택할 수 있습니다.';
+        }
+        return;
+    }
     hint.textContent = ({secretary:'결재 방식을 선택해 주세요.',chair:'이사장 결재 대기 중',
         direct:'사무국장 전결 완료',handoff:'미처리 문서를 인계받을 수 있습니다.'})[status.phase];
     const label = document.createElement('label');
@@ -19532,9 +19655,7 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
             const note=mode==='direct'?reason.value:null;
             try {
                 if (!await window.CoopDialog.confirm(question) || !isCurrentView()) return;
-                const result=await rpc(mode,status.version,note);
-                if (result.error) throw result.error;
-                if (result.data?.ok!==true || result.data.phase!==mode) throw new Error('RESULT_UNCONFIRMED');
+                await runApprovalSecretaryDecision(doc,status,mode,note,getApprovalActionOwner());
                 if (!isCurrentView()) return;
                 feedback.classList.remove('text-danger');
                 feedback.textContent='처리 결과를 확인했습니다.';
@@ -19559,11 +19680,6 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
     }
     if (isCurrentView()) {
         content.prepend(section);
-        if (status.phase==='secretary') {
-            document.querySelector('#relViewActionButtons [data-approval-positive]')?.classList.add('hidden');
-            const hintEl=document.getElementById('relViewActionHint');
-            if (hintEl) hintEl.textContent='위에서 결재하거나 여기에서 반려할 수 있습니다.';
-        }
     }
 }
 
