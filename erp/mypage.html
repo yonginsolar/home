@@ -2312,7 +2312,38 @@ showAlert('달력 파일을 내려받았습니다. Apple 또는 Google 캘린더
 finally{if(mypageCalendarDownload===run)mypageCalendarDownload=null;}
 } // End of downloadGoogleCalendarIcs
 let mypageCalendarInstance=null, mypageCalendarSequence=0,mypageCalendarVisit=0,mypageCalendarDownload=null;
-function invalidateMypageCalendarVisit(){mypageCalendarVisit++;mypageCalendarDownload=null;}
+let mypageMemberBirthdayRequest=null;
+const MYPAGE_MEMBER_BIRTHDAY_SOURCE='erp-member-birthdays';
+function clearMypageMemberBirthdays(){
+  mypageMemberBirthdayRequest?.controller.abort();
+  mypageMemberBirthdayRequest=null;
+  mypageCalendarInstance?.getEventSourceById(MYPAGE_MEMBER_BIRTHDAY_SOURCE)?.remove();
+}
+window.addEventListener('pagehide',clearMypageMemberBirthdays);
+async function loadMypageMemberBirthdayEvents(calendar,isCurrent){
+  if(!isCurrent()||!mypageDataAuthorized||!permissionSet.has('member.admin')||window.frameElement?.hidden)return;
+  const request={owner:getMypageDataOwner(),controller:new AbortController()};
+  mypageMemberBirthdayRequest=request;
+  const current=()=>mypageMemberBirthdayRequest===request&&isCurrent()&&calendar===mypageCalendarInstance
+    &&request.owner===getMypageDataOwner()&&mypageDataAuthorized&&permissionSet.has('member.admin')&&!window.frameElement?.hidden;
+  const timer=setTimeout(()=>request.controller.abort(),10000);
+  try{
+    const result=await _supabase.rpc('erp_calendar_member_birthdays').abortSignal(request.controller.signal);
+    if(!current()||request.controller.signal.aborted||result.error||!Array.isArray(result.data))return;
+    const y=Number(formatMypageKstDate(new Date()).slice(0,4)), events=[];
+    for(const row of result.data){
+      const name=typeof row?.name==='string'?row.name.trim():'';
+      const day=typeof row?.month_day==='string'&&/^\d{2}-\d{2}$/.test(row.month_day)?row.month_day:'';
+      if(!name||!day)continue;
+      for(const date of getMypageBirthdayDates(day,y-2,y+2)){
+        events.push({title:name+' 조합원 생일',start:date,allDay:true,color:'#6652a5'});
+      }
+    }
+    if(current()&&events.length)calendar.addEventSource({id:MYPAGE_MEMBER_BIRTHDAY_SOURCE,events});
+  }catch(_){ /* Optional ERP-only events must not stop the rest of the calendar. */ }
+  finally{clearTimeout(timer);if(mypageMemberBirthdayRequest===request)mypageMemberBirthdayRequest=null;}
+}
+function invalidateMypageCalendarVisit(){mypageCalendarVisit++;mypageCalendarDownload=null;clearMypageMemberBirthdays();}
 function leaveMypageCalendar(){
 invalidateMypageCalendarVisit();
 const guide=mypageCalendarGuideRun?.dialog;
@@ -2322,6 +2353,7 @@ if(guide?.open)guide.close();
 if(mypageEventDialog){mypageEventDialog=null;eventModal?.hide();}
 }
 async function renderCalendar(){
+clearMypageMemberBirthdays();
 const request=++mypageCalendarSequence, owner=myInfo;
 const visit=mypageCalendarVisit;
 const isCurrent=()=>request===mypageCalendarSequence&&owner===myInfo
@@ -2336,10 +2368,11 @@ const source=await loadMypageCalendarSourceData('erp');
 if(!isCurrent())return;
 const evts=buildMypageCalendarDisplayEvents(source,'erp');
 const el=document.getElementById('calendar');
-if(mypageCalendarInstance){mypageCalendarInstance.getEventSources().forEach(source=>source.remove());mypageCalendarInstance.addEventSource(evts);mypageCalendarInstance.render();return;}
+if(mypageCalendarInstance){mypageCalendarInstance.getEventSources().forEach(source=>source.remove());mypageCalendarInstance.addEventSource(evts);mypageCalendarInstance.render();void loadMypageMemberBirthdayEvents(mypageCalendarInstance,isCurrent);return;}
 mypageCalendarInstance=new FullCalendar.Calendar(el,{initialView:'dayGridMonth',locale:'ko',height:600,headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,listMonth'},buttonText:{month:'월간',list:'일정 목록'},buttonHints:{prev:'이전 달',next:'다음 달',today:'이번 달'},viewHint:'$0 보기',navLinkHint:'$0로 이동',closeHint:'닫기',timeHint:'시간',eventHint:'일정',moreLinkHint:'일정 $0개 더 보기',dayMaxEvents:true,
 displayEventEnd:true,eventTimeFormat:{hour:'2-digit',minute:'2-digit',hour12:false},events:evts,selectable:true,dateClick:function(i){openEventModal(null,i.dateStr)},eventClick:function(i){const props=i.event.extendedProps;if(props.origin){openEventModal(props.origin,null,props.manualOccurrence)}}});
 mypageCalendarInstance.render();
+void loadMypageMemberBirthdayEvents(mypageCalendarInstance,isCurrent);
 }catch(_){if(isCurrent())showAlert('달력을 불러오지 못했습니다. 다른 탭으로 이동한 뒤 다시 열어 주세요.');}
 }
 function renderLeaveBadge(snapshot){

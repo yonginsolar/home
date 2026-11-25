@@ -1328,7 +1328,7 @@
             <tbody>
               ${coopRows.map((row) => `
                 <tr>
-                  <td class="fw-bold">${escapeHtml(row.coop_name || '-')}</td>
+                  <td class="fw-bold">${escapeHtml(row.coop_name || '-')}${row.show_sun_village_label === true ? ' <span class="badge-soft">햇빛소득마을</span>' : ''}</td>
                   <td>${renderProfileBadge(row.runtime_profile)}</td>
                   <td><span class="badge-soft ${row.is_active ? '' : 'off'}">${row.is_active ? '활성' : '중지'}</span></td>
                   <td>${escapeHtml(row.employee_count ?? 0)}</td>
@@ -1351,11 +1351,17 @@
       const revision = platformReadRevision;
       const wrap = document.getElementById('coopTableWrap');
       wrap.innerHTML = '<div class="empty-box">조합 목록을 불러오는 중입니다.</div>';
-      const { data, error } = await _supabase.rpc('platform_list_coops');
+      const current = () => owner === currentUser?.id && revision === platformReadRevision;
+      let { data, error } = await _supabase.rpc('platform_list_coops_village_label');
+      if (!current()) return;
+      if (error?.code === 'PGRST202' || error?.code === '42883') {
+        ({data,error}=await _supabase.rpc('platform_list_coops'));
+        if (!current()) return;
+      }
       if (error) throw error;
       const rows = Array.isArray(data) ? data : [];
       const visible = await (window.CoopPlatformExpoVisibility?.visible(rows) ?? rows);
-      if (owner !== currentUser?.id || revision !== platformReadRevision) return;
+      if (!current()) return;
       renderCoopTable(visible);
     }
 
