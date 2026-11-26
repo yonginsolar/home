@@ -3680,8 +3680,8 @@ const employeeFeatureAssets = (() => {
         PayrollTaxTable:'payroll_tax_table.js?v=20260508-1',
         PayrollDurunuriModule:'payroll_durunuri_module_v3.js',
         SalaryLedgerModule:'salary_ledger_module.js?v=1.0.12',
-        ContractPayroll:'contract_payroll_v2.js',
-        PayrollImportGuard:'payroll_import_guard.js?v=1.0.0',
+        ContractPayroll:'contract_payroll_v3.js',
+        PayrollImportGuard:'payroll_import_guard_v2.js',
         ErpWorkflowAssets:'workflow_assets_print_v1.js',
         HrInsuranceStatus:'hr_insurance_status.js?v=1.0.1',
         CoopCompanySealUpload:'/shared/company_seal_upload.js?v=20261009-17',
@@ -3693,7 +3693,7 @@ const employeeFeatureAssets = (() => {
     const ready = name => name === 'PrintService' ? typeof PrintService === 'object'
         : name === 'EmployeeCertificatePrint' ? window.EmployeeCertificatePrint?.version === '3.0.0'
         : name === 'PayrollDurunuriModule' ? window.PayrollDurunuriModule?.ALLOCATION_VERSION === 3
-        : name === 'ContractPayroll' ? window.ContractPayroll?.version === '2.0.0' : !!window[name];
+        : name === 'ContractPayroll' ? window.ContractPayroll?.version === '3.0.0' : !!window[name];
     function load(name) {
         if (ready(name)) return Promise.resolve();
         if (pending.has(name)) return pending.get(name);
@@ -3715,7 +3715,8 @@ const employeeFeatureAssets = (() => {
                 PayrollDurunuriModule:'sha384-0eYCt42e3z8HZAF0K6ZtF+Fq06PTeHPrq7i0BpiBAQHcWCFD0NlbGbWDf4yOecRm',
                 SalarySlipPrintV3:'sha384-IrHGblj0G8XFic34nfNTwDX2vdnMQ0+RZ8esqfsLychqxQHVmbymskF7twCHd9vj',
                 PrintService:'sha384-Q3QwPRZuXNWcpC9pI9m9M8wtttmZflnEFUK/Ghzr6wNMxvK1eooRmMT1TuZm+9sZ',
-                ContractPayroll:'sha384-U/0QWsOoDG4xDUMyXz9pWubvlN0Z8hx74dUA3vf4XdNHlEAkRexaKulYOb2dEben',
+                ContractPayroll:'sha384-tR2DoWUs7ixdiPN4nkroGV20qgAGeYYTDr5WHWaYEnOie0mQhUzv1RcbU6Ks62s2',
+                PayrollImportGuard:'sha384-NeMI3/YBf0MhMQzReY6qSLRrFQRerOuim12y6V6PvCpFACyg8cea2hpOJUfwXWc8',
                 ErpWorkflowAssets:'sha384-Y1ouImMNdgejf/IoEufA9cl7zESy2MnClk81r+cNhtZG4JnjQq3QW7DEgdM5BI6U'
             };
             if (printHashes[name]) {
@@ -8638,9 +8639,9 @@ async function loadSalaryData({readContext} = {}) {
         document.getElementById('payPosition').value = contractDefaults.position || 0;
         document.getElementById('payOtherFixed').value = contractDefaults.other || 0;
         document.getElementById('payOvertime').value = 0;
-        document.getElementById("payCar").value = 0;
-        document.getElementById("payChild").value = 0;
-        document.getElementById("payBonus").value = 0;
+        document.getElementById("payCar").value = contractDefaults.car || 0;
+        document.getElementById("payChild").value = contractDefaults.child || 0;
+        document.getElementById("payBonus").value = contractDefaults.bonus || 0;
         setSalaryMealCarryState({
             sourceMonth: previousMeal.sourceMonth,
             sourceAmount: previousMeal.amount,
@@ -8839,7 +8840,10 @@ function payrollSaveErrorMessage(error) {
     return ({PAYROLL_RECORD_CHANGED:'다른 담당자가 먼저 급여를 수정했습니다. 입력은 유지됩니다. 다시 조회해 확인해 주세요.',
         SETTINGS_ACCOUNTED_PAYROLL_LOCKED:'회계 반영된 급여의 금액은 변경할 수 없습니다.',
         SETTINGS_ACCESS_DENIED:'급여를 조회·수정할 권한이 없습니다.',PAYROLL_TOTAL_MISMATCH:'지급액과 공제 합계를 확인해 주세요.',
-        PAYROLL_MINUTE_PRECISION_REQUIRED:'근로시간은 분 단위까지 입력해 주세요.'})[error?.message] || error?.message || '급여를 저장하지 못했습니다.';
+        PAYROLL_MINUTE_PRECISION_REQUIRED:'근로시간은 분 단위까지 입력해 주세요.',
+        PAYROLL_WAGE_COMPONENTS_REOPEN_REQUIRED:'새 계약의 수당·상여금을 확인하려면 최신 직원 관리 화면에서 급여를 다시 열어 주세요.',
+        PAYROLL_HOLIDAY_CALENDAR_UNVERIFIED:'이 연도의 명절 날짜를 확인할 수 없어 급여를 확정할 수 없습니다.',
+        PAYROLL_CONTRACT_BONUS_MISSING:'이 달 계약에 정해진 상여금을 포함해 주세요.'})[error?.message] || error?.message || '급여를 저장하지 못했습니다.';
 }
 
 function setSalaryWorkMetaHelpText(text) {
@@ -9143,6 +9147,7 @@ async function persistSalary() {
     try { payment=salaryPaymentInputs(); } catch(error) { return showAlert(error.message); }
     const {pay_basic:p_basic,pay_meal:p_meal,pay_car:p_car,pay_child:p_child,pay_bonus:p_bonus,pay_position:p_position,pay_service:p_service,pay_overtime:p_overtime,pay_total:p_total}=payment;
     const contractSnapshotForSave = contractContext.saved ? contractContext.basis : {...contractContext.basis,
+        wage_components_reviewed: 1,
         reviewed:document.getElementById('salaryContractReviewed').checked,
         paid_units:document.getElementById('salaryContractPaidUnits').value===''?null:Number(document.getElementById('salaryContractPaidUnits').value)};
     const targetYear=month.split('-')[0];
