@@ -6296,6 +6296,8 @@ function isApprovalExpenseAutomaticBody(value) {
     const defaults = [
         '확정 배당금 지급을 위해 지출결의를 상신합니다.',
         '총회에서 확정한 출자금 반환을 위해 지출결의를 상신합니다.',
+        buildApprovalInstructorIntro('강사비'),
+        buildApprovalInstructorIntro('강사비 원천세'),
         /^\d{4}-\d{2}$/.test(payroll) ? `${formatYearMonthLabel(payroll)} 급여 지급을 위해 지출결의를 상신합니다.` : '',
         buildApprovalInsuranceDefaultBody(insurance),
         /^\d{4}-\d{2}$/.test(filing) ? `${formatYearMonthLabel(getApprovalWithholdingPeriod(filing).payment_month)} 지급분 급여 원천세 신고·납부를 위해 지출결의를 상신합니다.` : ''
@@ -12190,7 +12192,27 @@ function approvalInstructorMode() {
 function approvalInstructorWorkKey() {
     return JSON.stringify([approvalSubmitOwner(),approvalDraftComposerEpoch]);
 }
+function buildApprovalInstructorIntro(mode) {
+    return mode==='강사비'
+        ? '아래와 같이 강사비 지급을 위해 지출결의를 상신합니다.'
+        : '지급을 확인한 강사비의 원천세 신고·납부를 위해 지출결의를 상신합니다.';
+}
+function invalidateApprovalInstructorTax(s=approvalInstructorWork) {
+    if(!s)return;
+    s.seq++;
+    s.tax=null;
+    if(approvalInstructorTaxRead?.owner===s){
+        const read=approvalInstructorTaxRead;
+        approvalInstructorTaxRead=null;
+        read.controller.abort();
+    }
+    if(s!==approvalInstructorWork)return;
+    document.getElementById('approvalInstructorTaxRead')?.removeAttribute('aria-busy');
+    const status=document.getElementById('approvalInstructorTaxStatus');
+    if(status)status.textContent='';
+}
 function resetApprovalInstructorWork() {
+    invalidateApprovalInstructorTax();
     approvalInstructorWork?.widget?.restore(null);
     approvalInstructorWork=null;
     const month=document.getElementById('approvalInstructorPaidMonth');
@@ -12202,7 +12224,7 @@ function getApprovalInstructorWork() {
     const key=approvalInstructorWorkKey();
     if(approvalInstructorWork?.key!==key) {
         resetApprovalInstructorWork();
-        approvalInstructorWork={key,batchId:'',widget:null,saved:null,month:'',tax:null,upload:null,seq:0};
+        approvalInstructorWork={key,batchId:'',widget:null,saved:null,month:'',tax:null,taxActive:false,upload:null,seq:0};
     }
     return approvalInstructorWork;
 }
@@ -12226,7 +12248,8 @@ function restoreApprovalInstructorWork(fields) {
         const month=document.getElementById('approvalInstructorPaidMonth');
         s.month=/^20\d\d-(0[1-9]|1[0-2])$/.test(fields?.instructor_paid_month||'')?fields.instructor_paid_month:'';
         month.value=s.month;
-        s.tax=null;setApprovalInstructorAmount();
+        invalidateApprovalInstructorTax(s);
+        setApprovalInstructorAmount();
     }
 }
 function loadApprovalInstructorScript(name, integrity, ready) {
@@ -12287,18 +12310,23 @@ function setApprovalInstructorAmount(updateLine=false) {
 }
 function syncApprovalInstructorWorkUi() {
     const mode=approvalInstructorMode();
+    if(mode!=='강사비 원천세'&&approvalInstructorWork?.taxActive){
+        approvalInstructorWork.taxActive=false;
+        invalidateApprovalInstructorTax();
+    }
     document.getElementById('approvalInstructorBatchPanel').hidden=mode!=='강사비';
     document.getElementById('approvalInstructorTaxPanel').hidden=mode!=='강사비 원천세';
     if(mode==='강사비')void openApprovalInstructorBatch();
     if(mode==='강사비 원천세'){
         const s=getApprovalInstructorWork(), month=document.getElementById('approvalInstructorPaidMonth');
         if(!month.value) month.value=s.month||formatApprovalKstMonth();
-        if(s.month!==month.value)s.tax=null;
+        if(!s.taxActive||s.month!==month.value)invalidateApprovalInstructorTax(s);
+        s.taxActive=true;
         s.month=month.value;
         month.onchange=()=>{
             if(s!==approvalInstructorWork)return;
-            s.seq++;s.month=month.value;s.tax=null;
-            document.getElementById('approvalInstructorTaxStatus').textContent='';
+            invalidateApprovalInstructorTax(s);
+            s.month=month.value;
             setApprovalInstructorAmount(true);
         };
     }
@@ -12308,17 +12336,22 @@ async function loadApprovalInstructorTax() {
     const s=getApprovalInstructorWork(), month=document.getElementById('approvalInstructorPaidMonth').value;
     if(!/^20\d\d-(0[1-9]|1[0-2])$/.test(month))return showAlert('실제 지급월을 선택하세요.');
     if(approvalInstructorTaxRead?.owner===s&&approvalInstructorTaxRead.month===month)return approvalInstructorTaxRead.promise;
-    const token=++s.seq; s.tax=null;s.month=month;setApprovalInstructorAmount(true);
+    invalidateApprovalInstructorTax(s);
+    const token=s.seq; s.month=month;setApprovalInstructorAmount(true);
     const status=document.getElementById('approvalInstructorTaxStatus'), button=document.getElementById('approvalInstructorTaxRead');
     const current=()=>s===approvalInstructorWork&&s.key===approvalInstructorWorkKey()&&approvalInstructorMode()==='강사비 원천세'
         && token===s.seq&&month===document.getElementById('approvalInstructorPaidMonth').value&&activeApprovalTab==='draft'&&!window.frameElement?.hidden;
     status.textContent='지급 확인분을 불러오고 있습니다…';button.setAttribute('aria-busy','true');
-    const read={owner:s,month,promise:null};
+    const read={owner:s,month,promise:null,controller:new AbortController()};
     approvalInstructorTaxRead=read;
     read.promise=(async()=>{try{
         const {data,error}=await boundedApprovalAttachmentRead(signal=>{
+            if(read.controller.signal.aborted)throw Error('INSTRUCTOR_TAX_READ_CANCELED');
             const q=_supabase.rpc('erp_instructor_tax_preview',{p_paid_month:month+'-01'});
-            return typeof q.abortSignal==='function'?q.abortSignal(signal):q;
+            if(typeof q.abortSignal!=='function')return q;
+            const abort=()=>read.controller.abort();
+            signal.addEventListener('abort',abort,{once:true});
+            return Promise.resolve(q.abortSignal(read.controller.signal)).finally(()=>signal.removeEventListener('abort',abort));
         });
         if(!current())return;
         if(error||!data||data.paid_month!==month||!Array.isArray(data.proofs)||Number(data.count)!==data.proofs.length)throw Error('TAX_READ');
@@ -12650,6 +12683,7 @@ function handleExpenseSubTypeChange(options = {}) {
             amountInput.readOnly=true;
         }
         setApprovalInstructorAmount();
+        if(replaceExpenseBody)setApprovalExpenseAutomaticBody(buildApprovalInstructorIntro(mode));
         updateJeongyeolUi();
         syncApprovalTitleInput('지출결의');
         return;
@@ -14937,6 +14971,11 @@ function leaveApprovalSubmitPreview() {
     pendingPhysicalDocId=null;
     approvalDraftLoadIntent=null;
     invalidateApprovalExpenseLookups();
+    if(approvalInstructorWork?.taxActive){
+        approvalInstructorWork.taxActive=false;
+        invalidateApprovalInstructorTax();
+        if(approvalInstructorMode()==='강사비 원천세')setApprovalInstructorAmount();
+    }
     const preview=approvalSubmitPreviewState;
     approvalComposerInputRevision++;approvalRelViewRevision++;
     invalidateApprovalSubmitPreview();
@@ -16782,6 +16821,16 @@ async function handleDraftSubmit(e,recovery=null) {
             showAlert('선택한 날짜와 시간을 확인해 주세요. 이미 잡힌 일정이나 공휴일, 근무시간과 맞지 않을 수 있어요.');
         } else if (noticeFailure) {
             showAlert(noticeFailure);
+        } else if (expenseSubType === '강사비 원천세' && errorText.includes('INSTRUCTOR_TAX_SOURCE_CHANGED')) {
+            if(approvalInstructorMode()==='강사비 원천세'){
+                invalidateApprovalInstructorTax();
+                setApprovalInstructorAmount(true);
+                if(submitAttempt.preview&&approvalSubmitPreviewState===submitAttempt.preview){
+                    invalidateApprovalSubmitPreview();
+                    relViewModal?.hide();
+                }
+            }
+            showAlert('이미 상신됐거나 지급 확인 내역이 바뀐 건이 있습니다. 입력은 유지했으니 지급 확인분을 다시 불러와 주세요.');
         } else if (expenseSubType === '원천세' && (/23505/.test(errorText) || /ref_approval_unique_withholding_payment_month/.test(errorText))) {
             showAlert('같은 급여 지급월의 원천세 결재가 방금 먼저 등록되었습니다. 결재함에서 기존 문서를 확인하세요.');
         } else {
