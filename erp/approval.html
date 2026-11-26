@@ -1111,6 +1111,8 @@
                 <label class="small text-muted fw-bold" for="expenseSubType">지출 항목</label>
                 <select class="form-select form-select-sm" id="expenseSubType" onchange="handleExpenseSubTypeChange()">
                   <option value="일반">일반 지출</option>
+                  <option value="강사비" hidden disabled>강사비</option>
+                  <option value="강사비 원천세" hidden disabled>강사비 원천세</option>
                   <option value="급여">급여 (급여대장 연동)</option>
                   <option value="4대보험">4대보험 (고지서 입력)</option>
                   <option value="원천세">급여 원천세 (신고·납부)</option>
@@ -1352,6 +1354,19 @@
                   <span id="approvalInstructorStatus" class="small ms-2" role="status"></span>
                 </details>
               </div>
+              <section class="col-12" id="approvalInstructorBatchPanel" hidden>
+                <div class="border rounded-3 bg-body p-3" id="approvalInstructorBatchEditor"></div>
+              </section>
+              <section class="col-12" id="approvalInstructorTaxPanel" hidden>
+                <div class="border rounded-3 bg-body p-3">
+                  <label class="form-label" for="approvalInstructorPaidMonth">강사비 실제 지급월</label>
+                  <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <input class="form-control w-auto" id="approvalInstructorPaidMonth" type="month">
+                    <button type="button" class="btn btn-outline-primary" id="approvalInstructorTaxRead" onclick="loadApprovalInstructorTax()">지급 확인분 불러오기</button>
+                  </div>
+                  <div class="small mt-2" id="approvalInstructorTaxStatus" role="status"></div>
+                </div>
+              </section>
               <div class="col-12 hidden" id="divPayoutExpense">
                 <div class="border rounded-3 bg-white p-3">
                   <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
@@ -3381,6 +3396,7 @@ function collectApprovalDraftFormPayload() {
             related_doc_label: String(document.getElementById('relDocName')?.textContent || '').trim(),
             expense_adjustment_mode: getApprovalExpenseAdjustmentMode(),
             expense_sub_type: String(document.getElementById('expenseSubType')?.value || '').trim(),
+            ...getApprovalInstructorDraftFields(),
             expense_payment_method: String(document.getElementById('expensePaymentMethod')?.value || '').trim(),
             expense_prepaid: !!document.getElementById('expensePrepaid')?.checked,
             expense_prepaid_date: String(document.getElementById('expensePrepaidDate')?.value || ''),
@@ -3705,6 +3721,7 @@ async function prepareApprovalSubmitAttachments(prefix = '') {
 
 function resetApprovalComposerForm(options = {}) {
     approvalDraftComposerEpoch++;
+    resetApprovalInstructorWork();
     invalidateApprovalSalaryExpenseRead();
     approvalExpenseAutomaticBodies.delete(document.getElementById('appDesc'));
     approvalExpenseManualBodies.delete(document.getElementById('appDesc'));
@@ -4036,6 +4053,7 @@ async function loadApprovalDraftFromServer(draftId) {
             expenseSubTypeEl.value = String(fields.expense_sub_type || '').trim();
             handleExpenseSubTypeChange();
         }
+        restoreApprovalInstructorWork(fields);
         const expensePaymentMethodEl = document.getElementById('expensePaymentMethod');
         const restoredExpenseMethod = String(fields.expense_payment_method || '').trim();
         if (expensePaymentMethodEl && restoredExpenseMethod) {
@@ -4320,6 +4338,10 @@ async function saveApprovalDraft() {
             return;
         }
 
+        if (approvalInstructorMode()==='강사비') {
+            await prepareApprovalInstructorEvidence(false);
+            if (!visible()) return;
+        }
         let draftId = Number(currentApprovalDraftId || 0) || null;
         let mergedAttachments = orderedAttachments
             .filter((descriptor) => descriptor.kind === 'saved')
@@ -9182,6 +9204,10 @@ function toKoreanWonText(value) {
 }
 
 function getApprovalAmountDisplayPayload(doc) {
+    if (doc?.doc_type==='강사비 지급결의'||doc?.doc_type==='강사비 원천세 결의') {
+        return {showAmount:true,labelText:doc.doc_type==='강사비 지급결의'?'승인금액(실지급액)':'원천세 합계',
+            mainText:formatMoney(doc.amount)+'원',subText:''};
+    }
     const adjustmentType = getApprovalExpenseAdjustmentType(doc);
     if (adjustmentType !== 'new') {
         const amount = Math.max(0, Number(doc?.amount || 0));
@@ -10285,7 +10311,7 @@ function mapApprovalDocTypeToMainCategory(docType) {
     if (raw.startsWith('휴가')) return '휴가';
     if (raw.startsWith('시간외근로') || raw.startsWith('야근') || raw.startsWith('휴일근로')) return '시간외근로';
     if (raw.startsWith('부양가족')) return '부양가족';
-    if (raw.startsWith('지출결의')) return '지출결의';
+    if (raw.startsWith('지출결의')||['강사비 지급결의','강사비 원천세 결의'].includes(raw)) return '지출결의';
     if (raw.startsWith('공문')) return '공문';
     if (raw.startsWith('출장신청')) return '출장신청';
     if (raw.startsWith('구매요청')) return '구매요청';
@@ -12084,6 +12110,7 @@ function canUseApprovalExpenseSubType(value) {
     const member = permissions.has('member.admin');
     const access = approvalExpenseServerAccess;
     if (type === '일반') return true;
+    if (['강사비','강사비 원천세'].includes(type)) return approvalInstructorWritable();
     // hr_salary permits all-employee reading only to ERP privileged administrators.
     // A payroll menu must not offer a partial self-only salary ledger to other staff.
     if (type === '급여' || type === '원천세') return access.privileged && (permissions.has('hr.admin') || accounting);
@@ -12093,7 +12120,7 @@ function canUseApprovalExpenseSubType(value) {
     return false;
 } // End of canUseApprovalExpenseSubType
 
-let approvalInstructorAsset = null, approvalInstructorWidget = null, approvalInstructorOwner = '';
+let approvalInstructorWidget = null, approvalInstructorOwner = '';
 function approvalInstructorFeeEligible() {
     return approvalBootstrapReady && !approvalFormReadInvalidated && !isSunVillageApproval()
         && getApprovalScopedCoopId()==='a4e65bb0-aa8e-4cef-a895-cd7865a67fef'
@@ -12118,20 +12145,9 @@ async function openApprovalInstructorFeePilot() {
     const details = panel.querySelector('details');
     const owner = approvalInstructorOwner;
     if (!details.open || !owner || !approvalInstructorFeeEligible() || approvalInstructorWidget) return;
-    if (!approvalInstructorAsset) approvalInstructorAsset = new Promise((resolve,reject)=>{
-        const tag=document.createElement('script');
-        const end=ok=>{clearTimeout(timer); if(ok)resolve();else{tag.remove();reject(new Error('APPROVAL_INSTRUCTOR_ASSET'));}};
-        const timer=setTimeout(()=>end(false),10000);
-        tag.onload=()=>end(!!window.ApprovalInstructorFee);
-        tag.onerror=()=>end(false);
-        tag.src=new URL('approval_instructor_preview_v2.js',document.baseURI).href;
-        tag.integrity='sha384-1S4B6jLqoMdt4OuRCbQosoKomCMiJgcUEKeSC3iSSihsO9Xcyc1KElJvK8b+ly5N';
-        tag.crossOrigin='anonymous';
-        document.head.append(tag);
-    }).finally(()=>{approvalInstructorAsset=null;});
     const status=document.getElementById('approvalInstructorStatus');
     try {
-        await approvalInstructorAsset;
+        await loadApprovalInstructorCalculator();
         if(owner!==approvalInstructorOwner || !details.open || !approvalInstructorFeeEligible() || approvalInstructorWidget) return;
         const current=()=>details.open && activeApprovalTab==='draft' && !window.frameElement?.hidden
             && !approvalDraftLoadIntent?.reading && !approvalDraftSaving && !approvalSubmitAttempt
@@ -12156,6 +12172,233 @@ async function openApprovalInstructorFeePilot() {
     }
 }
 
+let approvalInstructorWork=null, approvalInstructorBatchRead=null, approvalInstructorCalculatorRead=null, approvalInstructorTaxRead=null;
+const approvalInstructorReceiptIds=new WeakMap();
+function approvalInstructorYongin() {
+    return approvalBootstrapReady && !approvalFormReadInvalidated && !window.ExpoRuntimeBridge && !isSunVillageApproval()
+        && getApprovalScopedCoopId()==='a4e65bb0-aa8e-4cef-a895-cd7865a67fef' && canPerform('approval.view');
+}
+function approvalInstructorWritable() {
+    return approvalInstructorYongin() && approvalExpenseSnapshotSupported
+        && canPerform('approval.submit') && permissionSet instanceof Set && permissionSet.has('accounting.edit');
+}
+function approvalInstructorMode() {
+    if (getCurrentDraftMainType()!=='지출결의'|| getApprovalExpenseAdjustmentMode()!=='new'||!approvalInstructorWritable()) return '';
+    const choice=document.getElementById('expenseSubType')?.value;
+    return ['강사비','강사비 원천세'].includes(choice)?choice:'';
+}
+function approvalInstructorWorkKey() {
+    return JSON.stringify([approvalSubmitOwner(),approvalDraftComposerEpoch]);
+}
+function resetApprovalInstructorWork() {
+    approvalInstructorWork?.widget?.restore(null);
+    approvalInstructorWork=null;
+    const month=document.getElementById('approvalInstructorPaidMonth');
+    if(month)month.value='';
+    const hint=document.getElementById('approvalInstructorTaxStatus');
+    if(hint)hint.textContent='';
+}
+function getApprovalInstructorWork() {
+    const key=approvalInstructorWorkKey();
+    if(approvalInstructorWork?.key!==key) {
+        resetApprovalInstructorWork();
+        approvalInstructorWork={key,batchId:'',widget:null,saved:null,month:'',tax:null,upload:null,seq:0};
+    }
+    return approvalInstructorWork;
+}
+function getApprovalInstructorDraftFields() {
+    const s=approvalInstructorWork;
+    if (!s||s.key!==approvalInstructorWorkKey()||!approvalInstructorMode()) return {};
+    return approvalInstructorMode()==='강사비'
+        ? {instructor_batch:{id:s.batchId,data:s.widget?.snapshot()||s.saved}}
+        : {instructor_paid_month:s.month};
+}
+function restoreApprovalInstructorWork(fields) {
+    if(!approvalInstructorMode())return;
+    const s=getApprovalInstructorWork();
+    if (fields?.instructor_batch && approvalInstructorMode()==='강사비') {
+        const ticket=String(fields.instructor_batch.id||'');
+        if (/^[a-f0-9-]{36}$/.test(ticket)) s.batchId=ticket;
+        s.saved=fields.instructor_batch.data||null;
+        s.widget?.restore(s.saved); setApprovalInstructorAmount();
+    }
+    if (approvalInstructorMode()==='강사비 원천세') {
+        const month=document.getElementById('approvalInstructorPaidMonth');
+        s.month=/^20\d\d-(0[1-9]|1[0-2])$/.test(fields?.instructor_paid_month||'')?fields.instructor_paid_month:'';
+        month.value=s.month;
+        s.tax=null;setApprovalInstructorAmount();
+    }
+}
+function loadApprovalInstructorScript(name, integrity, ready) {
+    return new Promise((resolve,reject)=>{
+        const script=document.createElement('script'), timeout=setTimeout(()=>finish(false),10000);
+        function finish(ok) {clearTimeout(timeout);if(ok)resolve();else{script.remove();reject(new Error('INSTRUCTOR_ASSET'));}}
+        script.integrity=integrity;script.crossOrigin='anonymous';script.src=new URL(name,document.baseURI).href;
+        script.onload=()=>finish(ready());script.onerror=()=>finish(false);document.head.append(script);
+    });
+}
+function loadApprovalInstructorCalculator() {
+    if(window.ApprovalInstructorFee) return Promise.resolve();
+    if(!approvalInstructorCalculatorRead)approvalInstructorCalculatorRead=loadApprovalInstructorScript(
+        'approval_instructor_preview_v2.js','sha384-1S4B6jLqoMdt4OuRCbQosoKomCMiJgcUEKeSC3iSSihsO9Xcyc1KElJvK8b+ly5N',
+        ()=>!!window.ApprovalInstructorFee).finally(()=>{approvalInstructorCalculatorRead=null;});
+    return approvalInstructorCalculatorRead;
+}
+async function openApprovalInstructorBatch() {
+    if(approvalInstructorMode()!=='강사비')return;
+    const s=getApprovalInstructorWork(), host=document.getElementById('approvalInstructorBatchEditor');
+    if(s.widget)return;
+    host.textContent='강사비 입력을 준비하고 있습니다…';
+    if(!window.ApprovalInstructorBatch&&!approvalInstructorBatchRead)approvalInstructorBatchRead=loadApprovalInstructorScript(
+        'approval_instructor_batch_v1.js','sha384-X1F279h7OiCdfHnKg+p5hUwcTkWBC8noEJaNmFDuBoPiimCwHh04Pt3UkD4BQT4J',()=>!!window.ApprovalInstructorBatch)
+        .finally(()=>{approvalInstructorBatchRead=null;});
+    try{
+        await Promise.all([loadApprovalInstructorCalculator(),approvalInstructorBatchRead]);
+        if(s!==approvalInstructorWork||s.key!==approvalInstructorWorkKey()||approvalInstructorMode()!=='강사비'||s.widget)return;
+        const current=()=>s===approvalInstructorWork&&s.key===approvalInstructorWorkKey()&&approvalInstructorMode()==='강사비'
+            && activeApprovalTab==='draft'&&!window.frameElement?.hidden&&!s.upload&&!approvalDraftSaving&&!approvalSubmitAttempt;
+        if(!s.batchId)s.batchId=crypto.randomUUID();
+        s.widget=window.ApprovalInstructorBatch.mount(host,{current,calculate:window.ApprovalInstructorFee.calculate,raw:ERPNumberInput.raw,onChange(){
+            if(s!==approvalInstructorWork)return;
+            setApprovalInstructorAmount(true);
+            // A file selection is a composer edit even when the HTML file input is cleared.
+            document.getElementById('draftForm')?.dispatchEvent(new Event('input',{bubbles:true}));
+        }});
+        if(s.saved)s.widget.restore(s.saved);
+        setApprovalInstructorAmount();
+    }catch(_){
+        if(s!==approvalInstructorWork||approvalInstructorMode()!=='강사비')return;
+        const retry=document.createElement('button');
+        retry.type='button';retry.className='btn btn-outline-primary';retry.textContent='강사비 입력 다시 열기';retry.onclick=openApprovalInstructorBatch;
+        host.replaceChildren(retry);
+    }
+}
+function setApprovalInstructorAmount(updateLine=false) {
+    const mode=approvalInstructorMode(), s=approvalInstructorWork, amount=document.getElementById('appAmount');
+    if(!mode||!s||!amount||s.key!==approvalInstructorWorkKey())return;
+    let value=null;
+    if(mode==='강사비' && s.widget) {
+        try {value=window.ApprovalInstructorBatch.collect(s.widget.snapshot(),{calculate:window.ApprovalInstructorFee.calculate,
+            raw:ERPNumberInput.raw,requireEvidence:false}).totals.net;} catch(_){}
+    } else if(mode==='강사비 원천세'&&s.tax) value=Number(s.tax.national)+Number(s.tax.local);
+    const before=String(ERPNumberInput.raw(amount.value)||'');
+    amount.value=value==null?'':String(value);
+    if(updateLine&&String(value??'')!==before)updateJeongyeolUi();
+}
+function syncApprovalInstructorWorkUi() {
+    const mode=approvalInstructorMode();
+    document.getElementById('approvalInstructorBatchPanel').hidden=mode!=='강사비';
+    document.getElementById('approvalInstructorTaxPanel').hidden=mode!=='강사비 원천세';
+    if(mode==='강사비')void openApprovalInstructorBatch();
+    if(mode==='강사비 원천세'){
+        const s=getApprovalInstructorWork(), month=document.getElementById('approvalInstructorPaidMonth');
+        if(!month.value) month.value=s.month||formatApprovalKstMonth();
+        if(s.month!==month.value)s.tax=null;
+        s.month=month.value;
+        month.onchange=()=>{
+            if(s!==approvalInstructorWork)return;
+            s.seq++;s.month=month.value;s.tax=null;
+            document.getElementById('approvalInstructorTaxStatus').textContent='';
+            setApprovalInstructorAmount(true);
+        };
+    }
+}
+async function loadApprovalInstructorTax() {
+    if(approvalInstructorMode()!=='강사비 원천세')return;
+    const s=getApprovalInstructorWork(), month=document.getElementById('approvalInstructorPaidMonth').value;
+    if(!/^20\d\d-(0[1-9]|1[0-2])$/.test(month))return showAlert('실제 지급월을 선택하세요.');
+    if(approvalInstructorTaxRead?.owner===s&&approvalInstructorTaxRead.month===month)return approvalInstructorTaxRead.promise;
+    const token=++s.seq; s.tax=null;s.month=month;setApprovalInstructorAmount(true);
+    const status=document.getElementById('approvalInstructorTaxStatus'), button=document.getElementById('approvalInstructorTaxRead');
+    const current=()=>s===approvalInstructorWork&&s.key===approvalInstructorWorkKey()&&approvalInstructorMode()==='강사비 원천세'
+        && token===s.seq&&month===document.getElementById('approvalInstructorPaidMonth').value&&activeApprovalTab==='draft'&&!window.frameElement?.hidden;
+    status.textContent='지급 확인분을 불러오고 있습니다…';button.setAttribute('aria-busy','true');
+    const read={owner:s,month,promise:null};
+    approvalInstructorTaxRead=read;
+    read.promise=(async()=>{try{
+        const {data,error}=await boundedApprovalAttachmentRead(signal=>{
+            const q=_supabase.rpc('erp_instructor_tax_preview',{p_paid_month:month+'-01'});
+            return typeof q.abortSignal==='function'?q.abortSignal(signal):q;
+        });
+        if(!current())return;
+        if(error||!data||data.paid_month!==month||!Array.isArray(data.proofs)||Number(data.count)!==data.proofs.length)throw Error('TAX_READ');
+        s.tax=data;
+        status.textContent=data.count?data.count+'건 · 소득세 '+formatMoney(data.national)+'원 · 지방소득세 '+formatMoney(data.local)+'원':'아직 넘길 지급 확인분이 없습니다.';
+        setApprovalInstructorAmount(true);
+        document.getElementById('draftForm')?.dispatchEvent(new Event('input',{bubbles:true}));
+    }catch(_){if(current())status.textContent='지급 확인분을 불러오지 못했습니다. 다시 눌러 주세요.';}
+    finally{if(approvalInstructorTaxRead===read){approvalInstructorTaxRead=null;button.removeAttribute('aria-busy');}}})();
+    return read.promise;
+}
+async function prepareApprovalInstructorEvidence(requireReady) {
+    const s=getApprovalInstructorWork();
+    if(approvalInstructorMode()!=='강사비')return;
+    if(!s.widget)throw Error('강사비 입력을 먼저 열어 주세요.');
+    if(s.upload)return s.upload;
+    const files=s.widget.files(), draft=s.widget.snapshot(), shape=JSON.stringify(draft);
+    const current=()=>s===approvalInstructorWork&&s.key===approvalInstructorWorkKey()&&approvalInstructorMode()==='강사비'
+        && activeApprovalTab==='draft'&&!window.frameElement?.hidden&&shape===JSON.stringify(s.widget.snapshot());
+    if(requireReady) {
+        window.ApprovalInstructorBatch.collect(draft,{calculate:window.ApprovalInstructorFee.calculate,raw:ERPNumberInput.raw,requireEvidence:false});
+        if(draft.payees.some(p=>['identity','bank'].some(kind=>!p[kind]&&!files.has(p.id+':'+kind))))
+            throw Error('강사마다 신분증과 계좌사본을 추가해 주세요.');
+    }
+    if(!files.size)return;
+    const receipts=[];
+    s.upload=(async()=>{
+        for(const [slot,file] of files) {
+            if(!current())throw Error('강사비 입력이 바뀌었습니다. 다시 확인해 주세요.');
+            const [personId,kind]=slot.split(':');
+            const ext=file.name.split('.').at(-1).toLowerCase();
+            const mime=ext==='pdf'?'application/pdf':ext==='png'?'image/png':'image/jpeg';
+            const signature=new Uint8Array(await file.slice(0,8).arrayBuffer());
+            const magic=ext==='pdf'? [37,80,68,70,45]:ext==='png'?[137,80,78,71,13,10,26,10]:[255,216,255];
+            if(!magic.every((value,i)=>signature[i]===value))throw Error('신분증과 계좌사본은 PDF·PNG·JPG만 첨부할 수 있습니다.');
+            if(!current())throw Error('강사비 입력이 바뀌었습니다. 다시 확인해 주세요.');
+            const uploader=_supabase.storage.from('instructor-evidence');
+            let allocated=approvalInstructorReceiptIds.get(file);
+            if(allocated?.batchId!==s.batchId||allocated.slot!==slot){allocated={batchId:s.batchId,slot,id:crypto.randomUUID()};approvalInstructorReceiptIds.set(file,allocated);}
+            const {data:path,error:prepareError}=await _supabase.rpc('erp_stage_instructor_evidence',{
+                p_id:allocated.id,p_batch_id:s.batchId,p_payee_id:personId,p_kind:kind,p_ext:ext,p_size:file.size
+            });
+            if(prepareError||typeof path!=='string'||!current())throw Error('증빙 보관 위치를 확인하지 못했습니다. 입력은 유지됩니다.');
+            const uploaded=await uploader.upload(path,file,{contentType:mime,cacheControl:'0',upsert:false});
+            if(uploaded.error){
+                const code=Number(uploaded.error.statusCode||uploaded.error.status);
+                if(code!==409)throw Error('증빙을 보관하지 못했습니다. 같은 파일로 다시 시도해 주세요.');
+                const prior=await uploader.download(path);
+                if(prior.error||prior.data?.size!==file.size)throw Error('증빙 보관 결과를 확인하지 못했습니다.');
+                const [a,b]=await Promise.all([file.arrayBuffer(),prior.data.arrayBuffer()]);
+                const [aa,bb]=await Promise.all([crypto.subtle.digest('SHA-256',a),crypto.subtle.digest('SHA-256',b)]);
+                if(new Uint8Array(aa).some((v,i)=>v!==new Uint8Array(bb)[i]))throw Error('저장된 증빙이 선택한 파일과 다릅니다.');
+            }
+            receipts.push({personId,kind,file,id:allocated.id});
+        }
+        if(!current())throw Error('강사비 입력이 바뀌었습니다. 다시 확인해 주세요.');
+        s.widget.applyEvidence(receipts);
+    })().finally(()=>{s.upload=null;});
+    return s.upload;
+}
+function buildApprovalInstructorExpense(mode) {
+    const s=approvalInstructorWork;
+    if(!s||s.key!==approvalInstructorWorkKey()||approvalInstructorMode()!==mode||document.getElementById('chkProxy')?.checked)
+        throw Error('본인 명의의 강사비 결재 정보를 다시 확인해 주세요.');
+    if(mode==='강사비') {
+        if(!s.widget||s.widget.files().size||!s.batchId)throw Error('상신 미리보기에서 강사별 증빙을 먼저 확인해 주세요.');
+        const payload=window.ApprovalInstructorBatch.collect(s.widget.snapshot(),{calculate:window.ApprovalInstructorFee.calculate,raw:ERPNumberInput.raw});
+        return {type:'강사비 지급결의',amount:payload.totals.net,label:'강사비 지급결의 · '+payload.cases.length+'건',
+          snapshot:{expense_sub_type:mode,payment_method:'bank',instructor_batch:{batch_id:s.batchId,payload}},
+          text:window.ApprovalInstructorBatch.approvalText(payload)};
+    }
+    if(!s.tax||s.tax.paid_month!==s.month||s.month!==document.getElementById('approvalInstructorPaidMonth').value||!s.tax.proofs.length)
+        throw Error('실제 지급월을 선택하고 지급 확인분을 먼저 불러와 주세요.');
+    const amount=Number(s.tax.national)+Number(s.tax.local);
+    if(!Number.isSafeInteger(amount)||amount<=0)throw Error('납부할 원천세 합계를 확인해 주세요.');
+    return {type:'강사비 원천세 결의',amount,label:'강사비 원천세 결의 ('+s.month+' 지급분)',
+       snapshot:{expense_sub_type:mode,instructor_tax:s.tax},
+       text:'실제 지급월 '+s.month+' · '+s.tax.count+'건\n소득세 '+formatMoney(s.tax.national)+'원 · 지방소득세 '+formatMoney(s.tax.local)+'원'};
+}
+
 function syncApprovalExpenseSubTypeOptions() {
     const select = document.getElementById('expenseSubType');
     if (!select) return;
@@ -12166,6 +12409,7 @@ function syncApprovalExpenseSubTypeOptions() {
     });
     // Never replace a selected draft value just because its authority is still loading.
     syncApprovalInstructorFeePilot();
+    syncApprovalInstructorWorkUi();
 } // End of syncApprovalExpenseSubTypeOptions
 
 function canUseSalaryExpense() {
@@ -12391,6 +12635,29 @@ function handleExpenseSubTypeChange(options = {}) {
 
     if (payoutWrap) payoutWrap.classList.add('hidden');
     resetApprovalPayoutState();
+
+    if (approvalInstructorMode()) {
+        salaryExpenseState=null;
+        withholdingExpenseState=null;
+        [divMonth,divLoad,divMethod,insuranceWrap,withholdingWrap,summary].forEach(node=>node?.classList.add('hidden'));
+        resetApprovalExpensePaymentUi();
+        if(amountLabel)amountLabel.innerText=mode==='강사비'?'실지급액 합계 (원)':'원천세 합계 (원)';
+        if(amountInput){
+            delete amountInput.dataset.insuranceAutoAmount;
+            delete amountInput.dataset.withholdingAutoAmount;
+            amountInput.dataset.instructorAutoAmount='1';
+            amountInput.placeholder='자동 계산';
+            amountInput.readOnly=true;
+        }
+        setApprovalInstructorAmount();
+        updateJeongyeolUi();
+        syncApprovalTitleInput('지출결의');
+        return;
+    }
+    if(amountInput?.dataset.instructorAutoAmount==='1'){
+        delete amountInput.dataset.instructorAutoAmount;
+        amountInput.value='';
+    }
 
     if (mode === '원천세') {
         salaryExpenseState = null;
@@ -14268,6 +14535,13 @@ function buildApprovalSubmitPreviewData() {
             const modeLabel = expenseAdjustmentMode === 'decrease' ? '감액' : '증액';
             title = getApprovalResolvedTitle(mainType, `[${modeLabel}] ${String(adjustmentTarget.title || '지출결의').trim()}`);
             appendDesc += `\n\n${buildApprovalExpenseAdjustmentAppendText(adjustmentTarget, expenseAdjustmentMode, finalAmt, balance)}`;
+        } else if (['강사비','강사비 원천세'].includes(expenseSubType)) {
+            const instructor=buildApprovalInstructorExpense(expenseSubType);
+            subType=instructor.type;
+            finalAmt=instructor.amount;
+            title=getApprovalResolvedTitle(mainType,instructor.label);
+            expenseSnapshotPayload=instructor.snapshot;
+            appendDesc+='\n\n'+instructor.text;
         } else if (expenseSubType === '급여') {
             if (!payrollMonth) throw new Error('급여 귀속월을 선택하세요.');
             if (!salaryExpenseState || !salaryExpenseState.loaded || salaryExpenseState.yearMonth !== payrollMonth) {
@@ -14514,6 +14788,7 @@ async function openApprovalSubmitPreview() {
         }
         const leaveBlock=getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock();
         if(leaveBlock){showAlert(leaveBlock);return;}
+        if(approvalInstructorMode()==='강사비')await prepareApprovalInstructorEvidence(true);
         const previewDoc = buildApprovalSubmitPreviewData();
         currentViewingDocId = null;
         invalidateApprovalSubmitPreview();
@@ -15982,6 +16257,11 @@ async function handleDraftSubmit(e,recovery=null) {
     if(approvalDraftSaving||approvalDraftLoadIntent?.reading)return showAlert('초안 저장이나 불러오기가 끝난 뒤 상신해 주세요.');
     const leaveBlock=getApprovalAnnualSubmitBlock() || getApprovalFormReadSubmitBlock();
     if(leaveBlock){syncApprovalSubmitControls();return showAlert(leaveBlock);}
+    if(approvalInstructorMode()==='강사비'&&!approvalSubmitPreviewState){
+        try { await prepareApprovalInstructorEvidence(true); }
+        catch(error){return showAlert(error.message);}
+        if(approvalInstructorMode()!=='강사비'||approvalSubmitAttempt||window.frameElement?.hidden)return;
+    }
     const submitAttempt={owner:approvalSubmitOwner(),actor:approvalSubmitActor(),preview:approvalSubmitPreviewState,
         focusTarget:approvalSubmitPreviewState?document.getElementById('btnSubmitFromPreview'):e.submitter};
     approvalSubmitAttempt=submitAttempt;
@@ -16148,6 +16428,15 @@ async function handleDraftSubmit(e,recovery=null) {
             const modeLabel = expenseAdjustmentMode === 'decrease' ? '감액' : '증액';
             title = getApprovalResolvedTitle(mainType, `[${modeLabel}] ${String(adjustmentTargetResult.targetDoc.title || '지출결의').trim()}`);
             appendDesc += `\n\n${buildApprovalExpenseAdjustmentAppendText(adjustmentTargetResult.targetDoc, expenseAdjustmentMode, finalAmt, adjustmentTargetResult.balance)}`;
+        } else if (['강사비','강사비 원천세'].includes(expenseSubType)) {
+            try{
+                const instructor=buildApprovalInstructorExpense(expenseSubType);
+                subType=instructor.type;
+                finalAmt=instructor.amount;
+                title=getApprovalResolvedTitle(mainType,instructor.label);
+                expenseSnapshotPayload=instructor.snapshot;
+                appendDesc+='\n\n'+instructor.text;
+            }catch(error){return showAlert(error.message);}
         } else if (expenseSubType === '급여') {
             if (!canUseSalaryExpense()) return showAlert("급여 연동 권한이 없습니다.");
             if (!payrollMonth) return showAlert("급여 귀속월을 선택하세요.");
@@ -17956,7 +18245,7 @@ function mapHistoryDocTypeGroup(docType) {
     if (raw.startsWith('구매요청')) return 'GENERAL_PROPOSAL';
     if (raw.startsWith('증명서발급')) return 'GENERAL_PROPOSAL';
     if (raw.startsWith('근무변경')) return 'GENERAL_PROPOSAL';
-    if (raw.startsWith('지출결의')) return 'EXPENSE';
+    if (raw.startsWith('지출결의')||['강사비 지급결의','강사비 원천세 결의'].includes(raw)) return 'EXPENSE';
     if (raw.startsWith('휴가')) return 'LEAVE';
     if (raw.startsWith('시간외근로') || raw.startsWith('야근') || raw.startsWith('휴일근로')) return 'ATTENDANCE';
     if (raw.startsWith('부양가족')) return 'DEPENDENT';
@@ -19563,6 +19852,110 @@ async function openRelView(docId) {
     void mountApprovalSecretaryDecision(contentEl, data, isCurrentView);
     void mountApprovalExecutionDetails(contentEl,data,isCurrentView);
     void mountApprovalTaxTaskLinks(contentEl, data);
+    void mountApprovalInstructorDetail(contentEl,data,isCurrentView);
+}
+
+async function mountApprovalInstructorDetail(host,doc,current) {
+    if(doc.doc_type!=='강사비 지급결의'||!approvalInstructorYongin())return;
+    const batch=doc.expense_snapshot?.instructor_batch?.payload;
+    if(!Array.isArray(batch?.payees)||!Array.isArray(batch?.cases))return;
+    const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
+    const panel=el('section','','border rounded-3 p-3 mt-3'), content=el('div'), status=el('div','','small mt-2');
+    status.setAttribute('role','status');
+    panel.append(el('h3','강사별 증빙과 지급 확인','h6'),content,status);
+    host.append(panel);
+    const canBook=()=>current()&&approvalInstructorYongin()&&permissionSet instanceof Set
+        && permissionSet.has('accounting.edit')&&['완료','실물결재완료'].includes(doc.status);
+    const read=async()=>{
+        const [a,b]=await Promise.all([_supabase.rpc('erp_instructor_evidence_for_doc',{p_document_id:doc.id}),
+           canBook()?_supabase.rpc('erp_instructor_payment_status',{p_document_id:doc.id}):{data:[]}]);
+        if(!current())return;
+        if(a.error||b.error)throw Error('강사비 증빙과 지급 상태를 불러오지 못했습니다.');
+        return {files:Array.isArray(a.data)?a.data:[], paid:Array.isArray(b.data)?b.data:[]};
+    };
+    async function render(){
+        const data=await read();
+        if(!data||!current())return;
+        content.replaceChildren();
+        for(const p of batch.payees){
+            const files=data.files.filter(f=>p.id===f.payee_id);
+            if(!files.length&&!canBook())continue;
+            const row=el('div','','border-top pt-2 pb-2');
+            const payeeTotal=batch.cases.filter(c=>c.payee_id===p.id).reduce((sum,c)=>sum+Number(c.net),0);
+            row.append(el('div',p.name+' · 실지급 '+formatMoney(payeeTotal)+'원','fw-semibold mb-1'));
+            for(const f of files){
+                const label=f.kind==='identity'?'신분증':'계좌사본';
+                const button=el('button',label+' 내려받기','btn btn-sm btn-outline-secondary me-2');
+                button.type='button';
+                button.onclick=async()=>{
+                    if(!current()||button.disabled)return;
+                    button.disabled=true;
+                    try{
+                        const {data:blob,error}=await _supabase.storage.from('instructor-evidence').download(f.path);
+                        if(!current())return;
+                        if(error||!(blob instanceof Blob))throw Error('FILE_ACCESS');
+                        const url=URL.createObjectURL(blob), a=el('a');
+                        a.href=url;a.download=label+'.'+f.file_ext;
+                        document.body.append(a);a.click();a.remove();
+                        setTimeout(()=>URL.revokeObjectURL(url),1000);
+                    }catch(_){if(current())status.textContent='증빙을 불러오지 못했습니다.';}
+                    finally{button.disabled=false;}
+                };
+                row.append(button);
+            }
+            if(canBook()){
+                const paid=data.paid.filter(r=>r.payee_id===p.id);
+                const allCases=batch.cases.filter(c=>c.payee_id===p.id);
+                for(const source of paid) {
+                    const n=Array.isArray(source.case_ids)?source.case_ids.length:0;
+                    row.append(el('p',source.verified?source.paid_on+' · '+n+'건 지급 확인됨':'지급 전표가 바뀌었습니다. 이 건은 원천세에 포함되지 않습니다.','small mb-0 mt-2'));
+                }
+                const unpaid=allCases.filter(c=>!paid.some(source=>source.case_ids?.includes(c.id)));
+                if (unpaid.length) {
+                    const caseFields=el('fieldset','','mt-2'), selects=[];
+                    caseFields.append(el('legend','같은 이체에 포함된 지급 건','small'));
+                    for(const c of unpaid) {
+                        const chooser=el('label','','d-flex align-items-center gap-2 small');
+                        const check=el('input','','form-check-input m-0');check.type='checkbox';
+                        check.checked=unpaid.length===1;
+                        chooser.append(check,document.createTextNode(c.title+' · '+formatMoney(c.net)+'원'));
+                        caseFields.append(chooser);selects.push({check,id:c.id});
+                    }
+                    row.append(caseFields);
+                    const label=el('label','지급 전표번호','form-label mb-0 mt-2');
+                    const tx=el('input','','form-control form-control-sm');tx.maxLength=64;
+                    const record=el('button','지급 확인','btn btn-sm btn-outline-primary mt-2');record.type='button';
+                    label.append(tx);row.append(label,record);
+                    record.onclick=async()=>{
+                        if(!canBook()||record.disabled)return;
+                        const value=tx.value.trim();
+                        if(!value){status.textContent='이 강사의 이체 전표번호를 입력해 주세요.';tx.focus();return;}
+                        const cases=selects.filter(c=>c.check.checked).map(c=>c.id);
+                        if(!cases.length){status.textContent='이 전표로 지급한 건을 선택해 주세요.';selects[0].check.focus();return;}
+                        record.disabled=true;tx.disabled=true;caseFields.disabled=true;
+                        try{
+                            const answer=await _supabase.rpc('erp_confirm_instructor_payment',{
+                                p_document_id:doc.id,p_payee_id:p.id,p_case_ids:cases,p_transaction:value
+                            });
+                            if(!current())return;
+                            if(answer.error||!answer.data?.proof_id){
+                                const hint=String(answer.error?.message||'');
+                                if(hint.includes('INSTRUCTOR_PAYMENT_NOT_VERIFIED'))throw Error('같은 조합의 보통예금 이체 전표와 승인된 실지급액이 일치하는지 확인해 주세요.');
+                                if(answer.error?.code==='23505')throw Error('이미 연결된 지급 전표입니다.');
+                                throw Error('지급 확인 결과를 확인하지 못했습니다. 같은 전표로 다시 확인해 주세요.');
+                            }
+                            await render();
+                            if(current())status.textContent='지급을 확인했습니다. 강사비 원천세에서 해당 지급월을 불러오세요.';
+                        }catch(e){if(current())status.textContent=e.message;}
+                        finally{record.disabled=false;tx.disabled=false;caseFields.disabled=false;}
+                    };
+                }
+            }
+            content.append(row);
+        }
+        panel.hidden=!content.childElementCount;
+    }
+    try{await render();}catch(e){if(current())status.textContent=e.message;}
 }
 
 let approvalSecretaryDetail = null;
