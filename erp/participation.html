@@ -261,6 +261,9 @@
     .booth-guestbook-search input{width:auto;flex:1 1 12rem;min-width:0}.booth-guestbook-table{overflow:auto;max-height:38vh}
     .booth-entry-dialog{box-sizing:border-box;width:min(38rem,calc(100% - 1.5rem));height:min(43rem,calc(100% - 1.5rem));max-width:none;max-height:none;overflow:auto;border:1px solid var(--line);border-radius:1rem;padding:1rem;background:#fff;overflow-wrap:anywhere}
     .booth-entry-dialog::backdrop{background:#14281dbb}.booth-entry-dialog [hidden]{display:none!important}
+    .education-review-dialog{width:min(40rem,calc(100% - 1.5rem));max-height:calc(100dvh - 1.5rem);overflow:auto;background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#212529)}
+    .education-review-dialog::backdrop{background:#14281dbb}
+    #educationDeleteReviewsBtn[hidden]{display:none!important}
     .booth-entry-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}.booth-entry-grid label{min-width:0}
     @media(max-width:560px){.booth-entry-grid{grid-template-columns:minmax(0,1fr)}}
     #boothGuestbookPrint{padding:1rem;margin-top:1rem;text-align:center;border:1px solid #bccdc1;border-radius:.75rem;background:white}
@@ -315,6 +318,7 @@
         </select>
         <input data-erp-query-control type="search" class="form-control" id="eventSearch" aria-label="교육·회의 목록 검색" placeholder="교육명·장소·외부 참가자 검색">
         <button type="button" class="btn btn-outline-secondary" id="refreshBtn">새로고침</button>
+        <button type="button" class="btn btn-outline-secondary" id="educationDeleteReviewsBtn" hidden>교육 삭제 요청</button>
         <button type="button" class="btn btn-primary" id="newEventBtn">신규 교육 입력</button>
       </div>
       <div class="event-list" id="eventList"></div>
@@ -3691,6 +3695,42 @@
       }
     } // End of saveEvent
 
+    let educationDeleteReviewAsset=null;
+    const educationDeleteReviewCoop='a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
+    async function openEducationDeleteReviews(trigger) {
+      const owner={...participationReadOwner};
+      const current=()=>PARTICIPATION_EDUCATION_VIEW && owner.coopId===educationDeleteReviewCoop
+        && !!owner.userId && participationReadStillCurrent(owner);
+      if(!current()||trigger.disabled)return;
+      trigger.disabled=true;
+      try{
+        if(!window.EducationDeleteReview&&!educationDeleteReviewAsset){
+          educationDeleteReviewAsset=new Promise((resolve,reject)=>{
+            const tag=document.createElement('script');
+            const end=good=>{clearTimeout(timer);if(good)resolve();else{tag.remove();reject(new Error());}};
+            const timer=setTimeout(()=>end(false),10000);
+            tag.onload=()=>end(!!window.EducationDeleteReview);tag.onerror=()=>end(false);
+            tag.src=new URL('participation_education_delete_review_v1.js',document.baseURI).href;
+            tag.integrity='sha384-xKYv3+1lGlk/CBaWsp6GWq3pZST9C7uB02/x2rq7NWwEvXY8Bze8Hr8ukGWozv/E';
+            tag.crossOrigin='anonymous';document.head.append(tag);
+          }).finally(()=>{educationDeleteReviewAsset=null;});
+        }
+        await educationDeleteReviewAsset;
+        if(!current())return;
+        window.EducationDeleteReview.open({client:_supabase,current,trigger,refreshEducation:()=>loadDashboard(false),
+          removeFiles:async paths=>{
+            if(!current())throw new Error();
+            const selected=[...new Set(paths.filter(Boolean).flatMap(path=>path.includes('/photo/')
+              ?[path,...CoopParticipationImages.paths(path)]:[path]))];
+            if(selected.length){
+              const {error}=await _supabase.storage.from(PARTICIPATION_BUCKET).remove(selected);
+              if(error)throw error;
+            }
+          }});
+      }catch(_){if(current())showAlert('pageAlert','교육 삭제 요청을 열지 못했습니다. 다시 시도해 주세요.');}
+      finally{trigger.disabled=false;}
+    }
+
     async function deleteEvent() {
       if (!formState.eventId || formState.saving) return;
       if (!(await window.CoopDialog.confirm('이 회의·교육 기록을 삭제할까요? 참석 이력과 첨부파일도 함께 삭제됩니다.'))) return;
@@ -3897,6 +3937,9 @@
       });
       if (!guard.ok) return;
       participationReadOwner = { userId:session.user.id, coopId:guard.runtime.coop_id, revision:participationReadOwner.revision + 1 };
+      const reviewButton=document.getElementById('educationDeleteReviewsBtn');
+      reviewButton.hidden=!PARTICIPATION_EDUCATION_VIEW || participationReadOwner.coopId!==educationDeleteReviewCoop;
+      reviewButton.onclick=()=>openEducationDeleteReviews(reviewButton);
       const stopBoothGuestbook = PARTICIPATION_EDUCATION_VIEW && window.location.hostname === 'www.yonginsolar.kr'
         ? window.BoothGuestbookAdmin?.start(_supabase, () => participationReadOwner) : null;
       const stopEventArchive = PARTICIPATION_EDUCATION_VIEW ? window.CoopEventArchive?.start(_supabase, () => participationReadOwner, {
@@ -3906,6 +3949,8 @@
         if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== participationReadOwner.userId)) {
           stopBoothGuestbook?.();
           stopEventArchive?.();
+          window.EducationDeleteReview?.close();
+          reviewButton.hidden=true;
           rememberEventDraft();eventDraftVisit++;
           eventModalInstance?.hide();
           participationReadOwner = { userId:null, coopId:null, revision:participationReadOwner.revision + 1 };
