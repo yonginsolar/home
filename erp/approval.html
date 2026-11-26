@@ -1329,6 +1329,27 @@
                   <div class="small text-muted mt-2">상신할 때 홈택스·위택스 신고/납부 증빙을 첨부하세요. 두 문서를 한 PDF로 합친 경우에도 첨부 1개로 인정합니다.</div>
                 </div>
               </div>
+              <div class="col-12" id="approvalInstructorPilot" hidden>
+                <details class="border rounded-3 bg-white p-3" ontoggle="openApprovalInstructorFeePilot()">
+                  <summary class="fw-semibold">강사비 원천징수 계산</summary>
+                  <div class="row g-2 mt-2">
+                    <div class="col-12 col-sm-6">
+                      <label class="form-label" for="approvalInstructorGross">강사비 총액 (원)</label>
+                      <input type="text" maxlength="12" inputmode="numeric" class="form-control" id="approvalInstructorGross" onkeydown="if(event.key==='Enter')event.preventDefault()">
+                    </div>
+                    <div class="col-12 col-sm-6">
+                      <label class="form-label" for="approvalInstructorRate">원천징수율</label>
+                      <select class="form-select" id="approvalInstructorRate">
+                        <option value="">선택</option><option value="3.3">3.3% · 사업소득</option><option value="8.8">8.8% · 기타소득 (건별 강연료)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <p class="small text-body-secondary mt-2 mb-1">강사 한 사람의 한 건씩 입력하세요. 계산 내역을 본문에 붙여도 결재 금액이나 신고 합계는 바뀌지 않습니다.</p>
+                  <output class="d-block small fw-semibold text-break mb-2" id="approvalInstructorResult" role="status"></output>
+                  <button type="button" id="approvalInstructorAppend" class="btn btn-outline-primary btn-sm" disabled>계산 내역을 본문에 붙이기</button>
+                  <span id="approvalInstructorStatus" class="small ms-2" role="status"></span>
+                </details>
+              </div>
               <div class="col-12 hidden" id="divPayoutExpense">
                 <div class="border rounded-3 bg-white p-3">
                   <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
@@ -12054,6 +12075,69 @@ function canUseApprovalExpenseSubType(value) {
     return false;
 } // End of canUseApprovalExpenseSubType
 
+let approvalInstructorAsset = null, approvalInstructorWidget = null, approvalInstructorOwner = '';
+function approvalInstructorFeeEligible() {
+    return approvalBootstrapReady && !approvalFormReadInvalidated && !isSunVillageApproval()
+        && getApprovalScopedCoopId()==='a4e65bb0-aa8e-4cef-a895-cd7865a67fef'
+        && permissionSet instanceof Set && permissionSet.has('accounting.edit')
+        && ['일반','원천세'].includes(document.getElementById('expenseSubType')?.value)
+        && getCurrentDraftMainType()==='지출결의';
+}
+function syncApprovalInstructorFeePilot() {
+    const panel = document.getElementById('approvalInstructorPilot');
+    const eligible = approvalInstructorFeeEligible();
+    panel.hidden = !eligible;
+    const owner = eligible ? JSON.stringify([approvalSubmitOwner(),approvalDraftComposerEpoch,document.getElementById('expenseSubType')?.value]) : '';
+    if (owner !== approvalInstructorOwner) {
+        approvalInstructorOwner = owner;
+        panel.querySelector('details').open = false;
+        approvalInstructorWidget?.reset();
+        document.getElementById('approvalInstructorStatus').textContent = '';
+    }
+}
+async function openApprovalInstructorFeePilot() {
+    const panel = document.getElementById('approvalInstructorPilot');
+    const details = panel.querySelector('details');
+    const owner = approvalInstructorOwner;
+    if (!details.open || !owner || !approvalInstructorFeeEligible() || approvalInstructorWidget) return;
+    if (!approvalInstructorAsset) approvalInstructorAsset = new Promise((resolve,reject)=>{
+        const tag=document.createElement('script');
+        const end=ok=>{clearTimeout(timer); if(ok)resolve();else{tag.remove();reject(new Error('APPROVAL_INSTRUCTOR_ASSET'));}};
+        const timer=setTimeout(()=>end(false),10000);
+        tag.onload=()=>end(!!window.ApprovalInstructorFee);
+        tag.onerror=()=>end(false);
+        tag.src=new URL('approval_instructor_fee_v1.js',document.baseURI).href;
+        tag.integrity='sha384-C6Xh94QkhEUX2x7wm7pJ8LFzJVzFqVcS2RU9TKeUejrtdlwtFEnrVXRxh48c8yIk';
+        tag.crossOrigin='anonymous';
+        document.head.append(tag);
+    }).finally(()=>{approvalInstructorAsset=null;});
+    const status=document.getElementById('approvalInstructorStatus');
+    try {
+        await approvalInstructorAsset;
+        if(owner!==approvalInstructorOwner || !details.open || !approvalInstructorFeeEligible() || approvalInstructorWidget) return;
+        const current=()=>details.open && activeApprovalTab==='draft' && !window.frameElement?.hidden
+            && !approvalDraftLoadIntent?.reading && !approvalDraftSaving && !approvalSubmitAttempt
+            && approvalInstructorFeeEligible()
+            && approvalInstructorOwner===JSON.stringify([approvalSubmitOwner(),approvalDraftComposerEpoch,document.getElementById('expenseSubType')?.value]);
+        approvalInstructorWidget=window.ApprovalInstructorFee.mount(panel,{current,attach(text){
+            if(!current())return;
+            const body=getApprovalEditorContent();
+            if(body.includes(text) || body.replace(/<br\s*\/?>/gi,'\n').includes(escapeHtml(text))){
+                status.textContent='같은 계산 내역이 이미 있습니다.';return;
+            }
+            if(body.trim()){
+                setApprovalEditorContent(mergeSystemAppendContent(body,'\n\n'+text,true));
+            } else {
+                setApprovalEditorContent(text);
+            }
+            getApprovalHtmlEditor()?.dispatchEvent(new Event('input',{bubbles:true}));
+            status.textContent='본문에 붙였습니다.';
+        }});
+    } catch (_) {
+        if(owner===approvalInstructorOwner)status.textContent='계산기를 불러오지 못했습니다. 닫았다 다시 열어 주세요.';
+    }
+}
+
 function syncApprovalExpenseSubTypeOptions() {
     const select = document.getElementById('expenseSubType');
     if (!select) return;
@@ -12063,6 +12147,7 @@ function syncApprovalExpenseSubTypeOptions() {
         option.disabled = !allowed;
     });
     // Never replace a selected draft value just because its authority is still loading.
+    syncApprovalInstructorFeePilot();
 } // End of syncApprovalExpenseSubTypeOptions
 
 function canUseSalaryExpense() {
@@ -13667,6 +13752,7 @@ function handleCategoryChange() {
     invalidateApprovalWithholdingRead('조회 기준이 바뀌었습니다. 다시 확인해 주세요.');
     window.ServiceContractApproval?.categoryChanged(document.getElementById('appCategory')?.value);
     syncApprovalExpenseDateUi();
+    syncApprovalInstructorFeePilot();
     const categoryEl = document.getElementById("appCategory");
     let rawType = String(categoryEl?.value || '').trim();
     if (isApprovalBusinessTripCancelCategory(rawType)) {

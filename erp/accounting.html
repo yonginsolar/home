@@ -181,6 +181,9 @@
     .asset-overview-table th, .asset-overview-table td { vertical-align: middle; word-break: keep-all; }
     .asset-review-row { border-top: 1px solid var(--erp-border, #dde4ed); padding: 14px 0; }
     .asset-review-row:first-child { border-top: 0; }
+    .accounting-rental-pilot-dialog{width:min(46rem,calc(100% - 1.5rem));max-height:calc(100dvh - 1.5rem);overflow:auto;background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#212529)}
+    .accounting-rental-pilot-dialog::backdrop{background:rgba(0,0,0,.5)}
+    .accounting-rental-pilot-dialog [hidden]{display:none!important}
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <link rel="stylesheet" href="./tab_workspace.css?v=1.0.0">
@@ -755,8 +758,7 @@
 	              <div id="accountingPilotTools" hidden>
 	                  <div class="d-flex flex-wrap align-items-center gap-1">
 	                      <span class="badge bg-secondary">용인 시범</span>
-	                      <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAccountingReviewPilot('rent',this)">임대 매출</button>
-	                      <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAccountingReviewPilot('instructor',this)">강사비 원천세</button>
+	                      <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAccountingRentalPilot(this)">임대 매출</button>
 	                  </div>
 	              </div>
 	          </div>
@@ -10647,13 +10649,13 @@ async function openAccountingLoanRegister(){
 }
 
 const ACCOUNTING_PILOT_COOP = 'a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
-let accountingPilotRuntimeCoop = '', accountingPilotLoading = null, accountingPilotOpening = false;
+let accountingPilotRuntimeCoop = '', accountingRentalLoading = null;
 function accountingPilotAllowed() {
     return accountingPilotRuntimeCoop === ACCOUNTING_PILOT_COOP && myInfo?.coop_id === ACCOUNTING_PILOT_COOP
         && accountingDataAuthorized && (canPerform('accounting.view') || canPerform('accounting.edit'));
 }
 function closeAccountingReviewPilot() {
-    window.CoopAccountingReviewPilot?.close();
+    window.CoopRentalPilot?.close();
 }
 function syncAccountingPilotAccess() {
     const allowed = accountingPilotAllowed();
@@ -10662,35 +10664,35 @@ function syncAccountingPilotAccess() {
     if (!allowed) closeAccountingReviewPilot();
 }
 window.addEventListener('pagehide', closeAccountingReviewPilot);
-async function openAccountingReviewPilot(mode, trigger) {
-    const scope = accountingReadScope('tabHistory', { valid: accountingPilotAllowed });
+async function openAccountingRentalPilot(trigger) {
+    const scope = accountingReadScope('tabHistory', {valid:accountingPilotAllowed});
     const current = () => accountingReadScopeCurrent(scope);
-    if (!current() || accountingPilotOpening || !['rent','instructor'].includes(mode)) return;
-    accountingPilotOpening = true;
+    if (!current() || trigger.disabled || !scope.owner?.auth_user_id) return;
+    trigger.disabled = true;
     try {
-        if (window.CoopAccountingReviewPilot?.version !== '1.0.0' && !accountingPilotLoading) {
-            accountingPilotLoading = new Promise((resolve, reject) => {
+        if (!window.CoopRentalPilot && !accountingRentalLoading) {
+            accountingRentalLoading = new Promise((resolve,reject) => {
                 const script = document.createElement('script');
-                const finish = ok => {
-                    clearTimeout(timer); script.onload = script.onerror = null;
-                    if (ok) resolve(); else { script.remove(); reject(Error('ACCOUNTING_PILOT_UNAVAILABLE')); }
+                const end = ok => {
+                    clearTimeout(timer);
+                    if (ok) resolve(); else {script.remove();reject(new Error('RENTAL_PILOT_ASSET'));}
                 };
-                const timer = setTimeout(() => finish(false), 10000);
-                script.onload = () => finish(window.CoopAccountingReviewPilot?.version === '1.0.0');
-                script.onerror = () => finish(false);
-                script.src = new URL('accounting_review_pilot_v1.js', document.baseURI).href;
-                script.integrity = 'sha384-J8riglJy37lY5MYtYXtA4xQGFc+abNKsgSGhx9KWeWzuGP4DbriMqDRnmY3z+eIa';
+                const timer = setTimeout(() => end(false),10000);
+                script.onload = () => end(!!window.CoopRentalPilot);
+                script.onerror = () => end(false);
+                script.src = new URL('accounting_rental_pilot_v1.js',document.baseURI).href;
+                script.integrity = 'sha384-EEkM1CSRz8hPg+lqh0U+xOz5vxmq8KQXRBkvmIJhOppTC97g6uy8M55RzYUT7Han';
                 script.crossOrigin = 'anonymous';
                 document.head.append(script);
-            }).finally(() => { accountingPilotLoading = null; });
+            }).finally(() => {accountingRentalLoading=null;});
         }
-        await accountingPilotLoading;
-        if (current()) window.CoopAccountingReviewPilot.open(mode, { coopId: scope.owner.coop_id, current, trigger });
+        await accountingRentalLoading;
+        if (current()) window.CoopRentalPilot.open({client:_supabase,coopId:scope.owner.coop_id,
+            userId:scope.owner.auth_user_id,current,trigger});
     } catch (_) {
-        if (current()) showAlert('검토 도구를 불러오지 못했습니다. 다시 시도해 주세요.');
-    } finally { accountingPilotOpening = false; }
+        if (current()) showAlert('임대 매출을 열지 못했습니다. 다시 시도해 주세요.');
+    } finally {trigger.disabled=false;}
 }
-
 function isCashLikeAccount(accountName) {
     const name = String(accountName || '');
     if (!name) return false;
