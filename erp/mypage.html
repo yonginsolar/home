@@ -2103,10 +2103,10 @@ const officialHolidayPromise=_supabase.from('ref_public_holidays')
 .select('holiday_date,name,source')
 .order('holiday_date',{ascending:true})
 .order('name',{ascending:true});
-const [l,bt,{data:e},{data:c},{data:officialHolidays,error:officialHolidayError}]=await Promise.all([leaveQuery,tripQuery,employeePromise,calendarQuery,officialHolidayPromise]);
+const [l,bt,{data:e,error:employeeReadError},{data:c},{data:officialHolidays,error:officialHolidayError}]=await Promise.all([leaveQuery,tripQuery,employeePromise,calendarQuery,officialHolidayPromise]);
 if(officialHolidayError) CoopSafeLog.error("official holiday load failed", officialHolidayError);
 const workSettings=Object.fromEntries(window.CoopLeaveCalendar.workSettingKeys.map(key=>[key,companyInfo[key]]));
-return {coopId,workSettings,leaveDocs:Array.isArray(l)?l:[],businessTripDocs:Array.isArray(bt)?bt:[],employeeRows:Array.isArray(e)?e:[],calendarRows:Array.isArray(c)?c:[],officialHolidayRows:Array.isArray(officialHolidays)?officialHolidays:[]};
+return {coopId,workSettings,leaveDocs:Array.isArray(l)?l:[],businessTripDocs:Array.isArray(bt)?bt:[],employeeRows:(safeScope==='google_ics'||!employeeReadError)&&Array.isArray(e)?e:[],calendarRows:Array.isArray(c)?c:[],officialHolidayRows:Array.isArray(officialHolidays)?officialHolidays:[]};
 }
 function getMypageBirthdayDates(value,fromYear,toYear=fromYear){
 const raw=typeof value==='string'?value.trim():'';
@@ -2136,7 +2136,7 @@ const dn=p.department?`(${p.department})`:'';
 const displayEmpNo=getMypageEmployeeDisplayNoValue(p);
 if(shouldIncludeMypageCalendarSource(scope,'birthdays')&&p.coop_id===source.coopId&&source.coopId&&source.coopId===myInfo.coop_id&&p.emp_id){
 for(const date of getMypageBirthdayDates(p.birth_date,bY-2,bY+2)){
-evts.push({title:`${p.emp_name}${dn} 🎂`,start:date,color:'#ffc107',textColor:'#000',allDay:true,extendedProps:{origin:{title:`${p.emp_name} 생일 🎂`,start_date:date,type:'birthday',visibility:'company',cal_memo:`${p.emp_name}님의 생일입니다.\n부서: ${p.department||'-'}`}}});
+evts.push({title:`${p.emp_name}${dn} 🎂`,start:date,color:'#ffc107',textColor:'#000',allDay:true,extendedProps:{staffBirthdayEmpId:p.emp_id,origin:{title:`${p.emp_name} 생일 🎂`,start_date:date,type:'birthday',visibility:'company',cal_memo:`${p.emp_name}님의 생일입니다.\n부서: ${p.department||'-'}`}}});
 }}
 if(shouldIncludeMypageCalendarSource(scope,'hire_anniversaries')&&p.hire_date){const hY=parseInt(p.hire_date.substring(0,4));yrs.forEach(y=>{const diff=y-hY;if(diff>0)evts.push({title:`${p.emp_name}${dn} 입사 ${diff}주년 🎉`,start:`${y}-${p.hire_date.slice(5,10)}`,color:'#0dcaf0',textColor:'#000',allDay:true,extendedProps:{origin:{title:`${p.emp_name} 입사 ${diff}주년 🎉`,start_date:`${y}-${p.hire_date.slice(5,10)}`,type:'event',visibility:'company',cal_memo:`${p.emp_name}님의 입사 ${diff}주년입니다.\n사번: ${displayEmpNo}\n입사일: ${p.hire_date}`}}})})}
 });
@@ -2335,18 +2335,28 @@ function clearMypageMemberBirthdays(){
   setMypageMemberBirthdayNotice();
 }
 window.addEventListener('pagehide',clearMypageMemberBirthdays);
-async function loadMypageMemberBirthdayEvents(calendar,isCurrent){
+function collectDisplayedStaffBirthdays(events){
+  const yearsByEmployee=new Map();
+  for(const event of events){
+    const empId=event.extendedProps?.staffBirthdayEmpId;
+    if(typeof empId!=='string'||!empId)continue;
+    if(!yearsByEmployee.has(empId))yearsByEmployee.set(empId,new Set());
+    yearsByEmployee.get(empId).add(Number(event.start.slice(0,4)));
+  }
+  return Array.from(yearsByEmployee,([emp_id,years])=>({emp_id,years:[...years]}));
+}
+async function loadMypageMemberBirthdayEvents(calendar,isCurrent,staffBirthdays){
   if(mypageMemberBirthdayRequest||!isCurrent()||!mypageDataAuthorized||!permissionSet.has('member.admin')||window.frameElement?.hidden)return;
   const request={owner:getMypageDataOwner(),controller:new AbortController()};
   mypageMemberBirthdayRequest=request;
   const current=()=>mypageMemberBirthdayRequest===request&&isCurrent()&&calendar===mypageCalendarInstance
     &&request.owner===getMypageDataOwner()&&mypageDataAuthorized&&permissionSet.has('member.admin')&&!window.frameElement?.hidden;
-  const retry=()=>{void loadMypageMemberBirthdayEvents(calendar,isCurrent);};
+  const retry=()=>{void loadMypageMemberBirthdayEvents(calendar,isCurrent,staffBirthdays);};
   const failed=()=>{if(current())setMypageMemberBirthdayNotice('조합원 생일을 불러오지 못했습니다.',retry);};
   setMypageMemberBirthdayNotice();
   const timer=setTimeout(()=>request.controller.abort(),10000);
   try{
-    const result=await _supabase.rpc('erp_calendar_member_birthdays').abortSignal(request.controller.signal);
+    const result=await _supabase.rpc('erp_calendar_member_birthdays_v2',{p_staff_birthdays:staffBirthdays}).abortSignal(request.controller.signal);
     if(!current())return;
     if(result.error?.code==='42501'){
       setMypageMemberBirthdayNotice('조합원 생일은 조합원 관리 권한이 있는 현직 직원에게만 표시됩니다.');
@@ -2354,16 +2364,20 @@ async function loadMypageMemberBirthdayEvents(calendar,isCurrent){
     }
     if(request.controller.signal.aborted||result.error||!Array.isArray(result.data)){failed();return;}
     const y=Number(formatMypageKstDate(new Date()).slice(0,4)), events=[];
+    let hasMemberBirthdays=false;
     for(const row of result.data){
       const name=typeof row?.name==='string'?row.name.trim():'';
       const day=typeof row?.month_day==='string'&&/^\d{2}-\d{2}$/.test(row.month_day)?row.month_day:'';
       if(!name||!day)continue;
+      hasMemberBirthdays=true;
+      const suppressedYears=Array.isArray(row.suppressed_years)?new Set(row.suppressed_years):null;
       for(const date of getMypageBirthdayDates(day,y-2,y+2)){
+        if(suppressedYears?.has(Number(date.slice(0,4))))continue;
         events.push({title:name+' 조합원 생일',start:date,allDay:true,color:'#6652a5'});
       }
     }
     if(current()&&events.length)calendar.addEventSource({id:MYPAGE_MEMBER_BIRTHDAY_SOURCE,events});
-    else if(current())setMypageMemberBirthdayNotice('등록된 조합원 생일이 없습니다.');
+    else if(current()&&!hasMemberBirthdays)setMypageMemberBirthdayNotice('등록된 조합원 생일이 없습니다.');
   }catch(_){failed();}
   finally{clearTimeout(timer);if(mypageMemberBirthdayRequest===request)mypageMemberBirthdayRequest=null;}
 }
@@ -2391,12 +2405,13 @@ if(!isCurrent())return;
 const source=await loadMypageCalendarSourceData('erp');
 if(!isCurrent())return;
 const evts=buildMypageCalendarDisplayEvents(source,'erp');
+const staffBirthdays=collectDisplayedStaffBirthdays(evts);
 const el=document.getElementById('calendar');
-if(mypageCalendarInstance){mypageCalendarInstance.getEventSources().forEach(source=>source.remove());mypageCalendarInstance.addEventSource(evts);mypageCalendarInstance.render();void loadMypageMemberBirthdayEvents(mypageCalendarInstance,isCurrent);return;}
+if(mypageCalendarInstance){mypageCalendarInstance.getEventSources().forEach(source=>source.remove());mypageCalendarInstance.addEventSource(evts);mypageCalendarInstance.render();void loadMypageMemberBirthdayEvents(mypageCalendarInstance,isCurrent,staffBirthdays);return;}
 mypageCalendarInstance=new FullCalendar.Calendar(el,{initialView:'dayGridMonth',locale:'ko',height:600,headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,listMonth'},buttonText:{month:'월간',list:'일정 목록'},buttonHints:{prev:'이전 달',next:'다음 달',today:'이번 달'},viewHint:'$0 보기',navLinkHint:'$0로 이동',closeHint:'닫기',timeHint:'시간',eventHint:'일정',moreLinkHint:'일정 $0개 더 보기',dayMaxEvents:true,
 displayEventEnd:true,eventTimeFormat:{hour:'2-digit',minute:'2-digit',hour12:false},events:evts,selectable:true,dateClick:function(i){openEventModal(null,i.dateStr)},eventClick:function(i){const props=i.event.extendedProps;if(props.origin){openEventModal(props.origin,null,props.manualOccurrence)}}});
 mypageCalendarInstance.render();
-void loadMypageMemberBirthdayEvents(mypageCalendarInstance,isCurrent);
+void loadMypageMemberBirthdayEvents(mypageCalendarInstance,isCurrent,staffBirthdays);
 }catch(_){if(isCurrent())showAlert('달력을 불러오지 못했습니다. 다른 탭으로 이동한 뒤 다시 열어 주세요.');}
 }
 function renderLeaveBadge(snapshot){
