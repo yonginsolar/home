@@ -130,8 +130,8 @@
   <link rel="stylesheet" href="/erp/workspace_search.css?v=1.1.0" integrity="sha384-R1QuYviT8jsKnL3rk2jYWceSjWFb3M6z5/OycbUDkGMmq2yTxnfUGIVS/Wbj2cVd" crossorigin="anonymous">
   <link rel="stylesheet" href="/erp/erp_palette.css?v=1.0.0" integrity="sha384-Q4SLjWvt6mfxBkeAZ7tJM0NA2HVAOsGJKBHupNsyjJ943mTY5sSRiDPFS8WQSY3j" crossorigin="anonymous" data-erp-palette-style>
   <script src="/erp/erp_palette.js?v=1.0.0" integrity="sha384-eqzWMk2JERd7XhuNeGNbJ48/w3Hit4umqaZoA6gO9BLNrCkvVuoF8YKOipNIJB1y" crossorigin="anonymous"></script>
-  <script src="/erp/workspace_feature_tabs.js?v=1.0.1" integrity="sha384-ShPswNA9jmdA4dBD5nokFNkYj1LewILn/ZcghtVXdu+zuGKb/BfsTOh2/VjaBkDl" crossorigin="anonymous" defer></script>
-  <script src="/erp/workspace_nav_v1_7.js" integrity="sha384-bq1/Qppdia+tn/uf48qFgnqUoF9BnVmIbZ8zv/rdioT0B2SeDo5m7TjHjiCp52jA" crossorigin="anonymous" defer></script>
+  <script src="/erp/workspace_feature_tabs_v1_2.js" integrity="sha384-uOEJwCOHnWBItbUzGaFiMTGmFcFJyUy8NfVFLgWugEGyS2pQoyanIGMmfndzQRDS" crossorigin="anonymous" defer></script>
+  <script src="/erp/workspace_nav_v1_8.js" integrity="sha384-MUDYLiLvy5yI+/e2PrKQB2Hgv4/nsG7COV45Cvyt5fqnxweDd1Q9kggzS3oOJFJj" crossorigin="anonymous" defer></script>
   <script src="/erp/workspace_search.js?v=1.1.0" integrity="sha384-/anB5A4+BzyC7jG5dDK4lqs31Zz5LZz5G7OeMcSFtfyB9VKcS0T3i3luIqyF7HON" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
@@ -323,29 +323,14 @@
           <span class="d-block small text-muted">선거 설정, 후보자·유권자 관리와 선호도 투표</span>
         </button>
 
-        <button class="btn btn-white btn-menu hidden" id="btnGovernanceHub" onclick="location.href='governance.html'">
-          🗂️ <strong>회의·문서 관리</strong>
-          <span class="d-block small text-muted">총회·이사회 자료와 시나리오 만들기, 의사록·문서함·전자서명</span>
+        <button class="btn btn-white btn-menu hidden" id="btnGovernanceHub" onclick="location.href=this.dataset.destination || 'governance.html'">
+          🗂️ <strong>회의·문서</strong>
+          <span class="d-block small text-muted">이사회·총회 진행, 문서 관리와 문서함</span>
         </button>
 
         <button class="btn btn-white btn-menu hidden" id="btnRegistryHub" data-mobile-task="registry" onclick="location.href='registry_hub.html'">
           📑 <strong>ERP 이용 가이드</strong>
           <span class="d-block small text-muted">자주 하는 업무의 순서와 화면별 활용법</span>
-        </button>
-
-        <button class="btn btn-white btn-menu hidden" id="btnMinutesAdmin" onclick="openMinutesRoute('minutes_admin')">
-          🗂️ <strong>의사록 관리</strong>
-          <span class="d-block small text-muted">회의록 작성, 서명자, 공개 처리</span>
-        </button>
-
-        <button class="btn btn-white btn-menu hidden" id="btnNoticesAdmin" onclick="openMinutesRoute('notices_admin')">
-          📢 <strong>공문 관리</strong>
-          <span class="d-block small text-muted">결재 완료 공문 게시와 문서함 연동</span>
-        </button>
-
-        <button class="btn btn-white btn-menu hidden" id="btnMaterialsAdmin" onclick="openMinutesRoute('materials_admin')">
-          📦 <strong>총회 자료 관리</strong>
-          <span class="d-block small text-muted">자료집 업로드와 배포 범위 관리</span>
         </button>
 
         <button class="btn btn-white btn-menu hidden" id="btnDocuments" onclick="openMinutesRoute('documents')">
@@ -2764,23 +2749,18 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     }
 
     const governanceButtons = [
-        document.getElementById('btnMinutesAdmin'),
-        document.getElementById('btnNoticesAdmin'),
-        document.getElementById('btnMaterialsAdmin'),
         document.getElementById('btnDocuments'),
         document.getElementById('btnSignature')
     ];
     governanceButtons.forEach(btn => btn?.classList.add('hidden'));
-    document.getElementById('btnGovernanceHub')?.classList.add('hidden');
-
-    const availableGovernanceButtons = [];
-    if (minutesEnabled && (hasAdminRoleFallback || canMemberAdmin === true || canSiteAdmin === true || canMinutesAdmin === true)) {
-        availableGovernanceButtons.push(
-            document.getElementById('btnMinutesAdmin'),
-            document.getElementById('btnNoticesAdmin'),
-            document.getElementById('btnMaterialsAdmin')
-        );
+    const governanceHub=document.getElementById('btnGovernanceHub');
+    governanceHub?.classList.add('hidden');
+    const showMeetingEntry=minutesEnabled&&(hasAdminRoleFallback||canMemberAdmin===true||canSiteAdmin===true||canMinutesAdmin===true);
+    if(governanceHub) {
+        const meeting='/minutes/meeting_workspace.html';
+        governanceHub.dataset.destination=showMeetingEntry?(window.ErpWorkspaceRoute?.address(meeting)||meeting):'governance.html';
     }
+    const availableGovernanceButtons = [];
     if (documentsEnabled) {
         availableGovernanceButtons.push(document.getElementById('btnDocuments'));
     }
@@ -2796,8 +2776,8 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         if (signatureEnabled) document.getElementById('btnMobileSignature')?.classList.remove('hidden');
     }
 
-    if (availableGovernanceButtons.length > 1 || canDocumentAdmin) {
-        document.getElementById('btnGovernanceHub')?.classList.remove('hidden');
+    if (showMeetingEntry || availableGovernanceButtons.length > 1 || canDocumentAdmin) {
+        governanceHub?.classList.remove('hidden');
     } else {
         availableGovernanceButtons.forEach(btn => btn?.classList.remove('hidden'));
     }
@@ -2918,9 +2898,6 @@ const ERP_MENU_BUTTON_ORDER_IDS = [
     'btnGovernanceHub',
     'btnRegistryHub',
     'btnVoteHub',
-    'btnMinutesAdmin',
-    'btnNoticesAdmin',
-    'btnMaterialsAdmin',
     'btnDocuments',
     'btnSignature',
     'btnAudit',
