@@ -18,7 +18,7 @@
   <script src="accounting_bank_compare_v1_2.js" integrity="sha384-+oNSxGYEzHB27HcYVRcvcVL2Ck3gOq/muhTR8vibdDbxt7ownOnbnRDyhr8BNO4A" crossorigin="anonymous"></script>
   <script src="accounting_payroll_recovery_v2.js?v=1.1.0" integrity="sha384-E21YgL5nld+cPHhFryWSP/PXrO4ctgS9j0iKoYdZd8immP7qjqu9ovbuMQLeVc/9" crossorigin="anonymous"></script>
   <script src="accounting_journal_typo.js?v=1.1.1" integrity="sha384-doIdycMuLRG8oxw5/ieVw8ij7JBthcg2jyqcg2RvEd0RUwE52IeizXx2N/WCPbRi" crossorigin="anonymous" defer></script>
-  <script src="workflow_assets_vat_unified_v1.js" integrity="sha384-I+7UO2hxg4fkQs2BfTzMIUP85CftM1+N98F6i2MVXVL7C8W3VDgj7g/sSfXIT+7/" crossorigin="anonymous"></script>
+  <script src="workflow_assets_withholding_v1.js" integrity="sha384-5RWfvVhhX9B2yjXPyvzCof3Bz1XRq8choQRtNLs8W70uoqjpA0prCDzFqIyDR090" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
   <link rel="stylesheet" href="financial_statements.css?v=1.1.1">
   <meta charset="UTF-8">
@@ -4539,15 +4539,15 @@ function appendApprovalWithholdingTaxEntries(entries, payload) {
         Operator: payload.operator
     };
     const paymentMonthLabel = normalizeAccountingYm(payload.paymentMonth) || '지급월 미확인';
-    if (national > 0) {
-        const description = `[급여원천세-국세] ${paymentMonthLabel} 지급분 근로소득세 납부`;
-        entries.push({ ...common, Type: '부채', Account: '예수금', Description: description, Debit: national, Credit: 0 });
-        entries.push({ ...common, Type: '자산', Account: '보통예금', Description: description, Debit: 0, Credit: national, Evidence_Type: '금융거래' });
-    }
-    if (local > 0) {
-        const description = `[급여원천세-지방세] ${paymentMonthLabel} 지급분 지방소득세 납부`;
-        entries.push({ ...common, Type: '부채', Account: '예수금', Description: description, Debit: local, Credit: 0 });
-        entries.push({ ...common, Type: '자산', Account: '보통예금', Description: description, Debit: 0, Credit: local, Evidence_Type: '금융거래' });
+    const instructorN=payload.instructorNational||0,instructorL=payload.instructorLocal||0;
+    for(const [amount,kind,category,taxName] of [
+        [national-instructorN,'급여','국세','근로소득세'],[local-instructorL,'급여','지방세','지방소득세'],
+        [instructorN,'강사비','국세','소득세'],[instructorL,'강사비','지방세','지방소득세']
+    ]){
+        if(amount<=0)continue;
+        const description=`[${kind}원천세-${category}] ${paymentMonthLabel} 지급분 ${taxName} 납부`;
+        entries.push({ ...common, Type:'부채',Account:'예수금',Description:description,Debit:amount,Credit:0 });
+        entries.push({ ...common, Type:'자산',Account:'보통예금',Description:description,Debit:0,Credit:amount,Evidence_Type:'금융거래' });
     }
 } // End of appendApprovalWithholdingTaxEntries
 
@@ -4767,7 +4767,7 @@ function isWithholdingTaxApproval(doc) {
 } // End of isWithholdingTaxApproval
 
 function parseApprovalWithholdingPaymentMonth(doc) {
-    const direct = normalizeAccountingYm(normalizeApprovalExpenseSnapshot(doc).withholding_tax?.payment_month);
+    const direct = normalizeAccountingYm(normalizeApprovalExpenseSnapshot(doc).withholding_tax?.payment_month||doc?.expense_snapshot?.instructor_tax?.paid_month);
     if (direct) return direct;
     const merged = getApprovalMergedText(doc);
     const matched = merged.match(/(20\d{2})\s*(?:년|[-./])\s*(0?[1-9]|1[0-2])\s*월?/u);
@@ -4782,10 +4782,27 @@ async function buildAccountingWithholdingTaxState(doc) {
     const amount = Math.max(0, Math.round(Number(doc?.amount || 0)));
     const paymentMonth = parseApprovalWithholdingPaymentMonth(doc);
     if (!paymentMonth) return { error: new Error('원천세 급여 지급월을 확인하지 못했습니다.'), data: null };
+    const instructor=doc?.expense_snapshot?.instructor_tax;
+    const instructorType=String(doc?.doc_type||'')==='강사비 원천세 결의';
+    let instructorNational=0,instructorLocal=0;
+    if(instructor||instructorType){
+        const valid=instructor?.paid_month===paymentMonth&&Array.isArray(instructor.proofs)&&instructor.proofs.length>0
+            &&instructor.count===instructor.proofs.length
+            &&[instructor.national,instructor.local].every(v=>Number.isSafeInteger(v)&&v>=0)
+            &&instructor.national+instructor.local>0;
+        if(!valid||(!instructorType&&!snapshot))return {error:new Error('저장된 강사비 원천세 근거를 확인하지 못했습니다.'),data:null};
+        instructorNational=instructor.national;instructorLocal=instructor.local;
+        if(instructorType){
+            if(instructorNational+instructorLocal!==amount)return {error:new Error('강사비 원천세 합계와 결재 금액이 다릅니다.'),data:null};
+            const filingMonth=addAccountingMonths(paymentMonth,1);
+            return {error:null,data:{paymentMonth,filingMonth,salaryMonth:'',dueDate:'',
+                nationalAmount:instructorNational,localAmount:instructorLocal,instructorNational,instructorLocal,legacy:false}};
+        }
+    }
 
     if (snapshot) {
-        const nationalAmount = Math.max(0, Math.round(Number(snapshot.actual_national_tax || 0)));
-        const localAmount = Math.max(0, Math.round(Number(snapshot.actual_local_tax || 0)));
+        const nationalAmount = Math.max(0, Math.round(Number(snapshot.actual_national_tax || 0)))+instructorNational;
+        const localAmount = Math.max(0, Math.round(Number(snapshot.actual_local_tax || 0)))+instructorLocal;
         const filingMonth = normalizeAccountingYm(snapshot.filing_month);
         const salaryMonth = normalizeAccountingYm(snapshot.salary_month);
         const dueDate = String(snapshot.due_date || '').trim();
@@ -4804,7 +4821,7 @@ async function buildAccountingWithholdingTaxState(doc) {
         // due_date is an approval's planned date, not proof of payment or an earliest sync date.
         return {
             error: null,
-            data: { paymentMonth, salaryMonth, filingMonth, dueDate, nationalAmount, localAmount, legacy: false }
+            data: { paymentMonth, salaryMonth, filingMonth, dueDate, nationalAmount, localAmount,instructorNational,instructorLocal, legacy: false }
         };
     }
 
@@ -5454,6 +5471,8 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
                 amount,
                 nationalAmount: tax.nationalAmount,
                 localAmount: tax.localAmount,
+                instructorNational:tax.instructorNational,
+                instructorLocal:tax.instructorLocal,
                 paymentMonth: tax.paymentMonth,
                 salaryMonth: tax.salaryMonth,
                 filingMonth: tax.filingMonth,
@@ -9595,7 +9614,7 @@ function confirmSync(type) {
                 `- 4대보험 자동이체 감액: ${previewPlanResult.insuranceCount > 0 ? `${previewPlanResult.insuranceDiscountTotal.toLocaleString()}원 / 실출금 ${previewPlanResult.insuranceCashTotal.toLocaleString()}원` : '대상 없음'}`,
                 `- 두루누리 직원 자동 배분: ${previewPlanResult.durunuriEmployeeCount || 0}명 (지원금 입력 문서만)`,
                 `- 급여 발생전표: ${previewPlanResult.salaryAccrualCount || 0}건 (귀속월 말 비용·공제·회사부담분)`,
-                `- 급여 원천세 납부전표: ${previewPlanResult.withholdingTaxCount || 0}건 (차)예수금 / (대)보통예금, 국세·지방세 별도 표시`,
+                `- 원천세 납부전표: ${previewPlanResult.withholdingTaxCount || 0}건 (차)예수금 / (대)보통예금, 급여·강사비 및 국세·지방세 구분`,
                 ...previewPlanResult.plans.filter(plan => plan.kind === 'withholding_tax').map(plan => `  · ${plan.description}: 실제 납부일 ${plan.date}`),
                 `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 ...previewPlanResult.plans.filter(plan => plan.kind === 'payment' && plan.salaryMonth)

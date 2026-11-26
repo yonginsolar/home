@@ -295,6 +295,10 @@ body{padding:18px 14px 28px}
 </div>
 <div class="tab-pane fade" id="tabCalendar">
 <div class="mypage-calendar-actions"><button class="btn btn-sm btn-primary" type="button" id="btnMypageCalendarGuide" onclick="openMypageCalendarGuide()">캘린더 자동 구독</button><button class="btn btn-sm btn-outline-secondary hidden" type="button" id="btnOpenMypageCalendarSettings" onclick="openMypageCalendarSubscriptionModal()">구독 설정</button></div>
+<div id="mypageMemberBirthdayNotice" class="small text-body-secondary mb-2" hidden>
+  <span id="mypageMemberBirthdayNoticeText" role="status"></span>
+  <button type="button" id="mypageMemberBirthdayRetry" class="btn btn-sm btn-outline-secondary ms-1" hidden>다시 불러오기</button>
+</div>
 <div id="calendar"></div></div>
 <div class="tab-pane fade" id="tabSalary">
 <div class="mypage-salary-tools mb-2">
@@ -2314,22 +2318,41 @@ finally{if(mypageCalendarDownload===run)mypageCalendarDownload=null;}
 let mypageCalendarInstance=null, mypageCalendarSequence=0,mypageCalendarVisit=0,mypageCalendarDownload=null;
 let mypageMemberBirthdayRequest=null;
 const MYPAGE_MEMBER_BIRTHDAY_SOURCE='erp-member-birthdays';
+function setMypageMemberBirthdayNotice(message='',retry=null){
+  const notice=document.getElementById('mypageMemberBirthdayNotice');
+  const text=document.getElementById('mypageMemberBirthdayNoticeText');
+  const button=document.getElementById('mypageMemberBirthdayRetry');
+  if(!notice||!text||!button)return;
+  notice.hidden=!message;
+  text.textContent=message;
+  button.hidden=!retry;
+  button.onclick=retry;
+}
 function clearMypageMemberBirthdays(){
   mypageMemberBirthdayRequest?.controller.abort();
   mypageMemberBirthdayRequest=null;
   mypageCalendarInstance?.getEventSourceById(MYPAGE_MEMBER_BIRTHDAY_SOURCE)?.remove();
+  setMypageMemberBirthdayNotice();
 }
 window.addEventListener('pagehide',clearMypageMemberBirthdays);
 async function loadMypageMemberBirthdayEvents(calendar,isCurrent){
-  if(!isCurrent()||!mypageDataAuthorized||!permissionSet.has('member.admin')||window.frameElement?.hidden)return;
+  if(mypageMemberBirthdayRequest||!isCurrent()||!mypageDataAuthorized||!permissionSet.has('member.admin')||window.frameElement?.hidden)return;
   const request={owner:getMypageDataOwner(),controller:new AbortController()};
   mypageMemberBirthdayRequest=request;
   const current=()=>mypageMemberBirthdayRequest===request&&isCurrent()&&calendar===mypageCalendarInstance
     &&request.owner===getMypageDataOwner()&&mypageDataAuthorized&&permissionSet.has('member.admin')&&!window.frameElement?.hidden;
+  const retry=()=>{void loadMypageMemberBirthdayEvents(calendar,isCurrent);};
+  const failed=()=>{if(current())setMypageMemberBirthdayNotice('조합원 생일을 불러오지 못했습니다.',retry);};
+  setMypageMemberBirthdayNotice();
   const timer=setTimeout(()=>request.controller.abort(),10000);
   try{
     const result=await _supabase.rpc('erp_calendar_member_birthdays').abortSignal(request.controller.signal);
-    if(!current()||request.controller.signal.aborted||result.error||!Array.isArray(result.data))return;
+    if(!current())return;
+    if(result.error?.code==='42501'){
+      setMypageMemberBirthdayNotice('조합원 생일은 조합원 관리 권한이 있는 현직 직원에게만 표시됩니다.');
+      return;
+    }
+    if(request.controller.signal.aborted||result.error||!Array.isArray(result.data)){failed();return;}
     const y=Number(formatMypageKstDate(new Date()).slice(0,4)), events=[];
     for(const row of result.data){
       const name=typeof row?.name==='string'?row.name.trim():'';
@@ -2340,7 +2363,8 @@ async function loadMypageMemberBirthdayEvents(calendar,isCurrent){
       }
     }
     if(current()&&events.length)calendar.addEventSource({id:MYPAGE_MEMBER_BIRTHDAY_SOURCE,events});
-  }catch(_){ /* Optional ERP-only events must not stop the rest of the calendar. */ }
+    else if(current())setMypageMemberBirthdayNotice('등록된 조합원 생일이 없습니다.');
+  }catch(_){failed();}
   finally{clearTimeout(timer);if(mypageMemberBirthdayRequest===request)mypageMemberBirthdayRequest=null;}
 }
 function invalidateMypageCalendarVisit(){mypageCalendarVisit++;mypageCalendarDownload=null;clearMypageMemberBirthdays();}
