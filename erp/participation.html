@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.5.2 | 교육 공용 입력 폼 -->
+<!-- Version: v1.5.3 | 외부 교육 연결 용인 한정 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.5.2 | participation.html');</script>
+  <script>console.log('[Version] v1.5.3 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -758,6 +758,7 @@
     const COOP_PUBLISHABLE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const HUMANITIES_INTEGRATION_URL = `${SUPABASE_URL}/functions/v1/erp-humanities-integration`;
     const HUMANITIES_PUBLIC_ORIGIN = 'https://humanities.yll.or.kr';
+    const YONGIN_COOP_ID = 'a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
     const KST_TIME_ZONE = 'Asia/Seoul';
     const FILE_SIZE_LIMIT = 20 * 1024 * 1024;
     const PHOTO_MAX_DIMENSION = 4096;
@@ -789,14 +790,15 @@
     let humanitiesImportReadRevision = 0;
     let humanitiesLinkReadRevision = 0;
     function humanitiesSourceOwner() { return JSON.stringify([participationReadOwner.userId,participationReadOwner.coopId,participationReadOwner.revision]); }
-    function canUseHumanitiesSource() { return !!participationReadOwner.userId && humanitiesSourceState.owner===humanitiesSourceOwner() && humanitiesSourceState.enabled; }
+    function isHumanitiesCoop() { return !!participationReadOwner.userId && participationReadOwner.coopId === YONGIN_COOP_ID; }
+    function canUseHumanitiesSource() { return isHumanitiesCoop() && humanitiesSourceState.owner===humanitiesSourceOwner() && humanitiesSourceState.enabled; }
     function renderHumanitiesSourceControls() {
       document.getElementById('humanitiesImportSection').classList.toggle('d-none', !canUseHumanitiesSource() || document.getElementById('eventType').value!=='EDUCATION' || !!formState.eventId);
-      document.getElementById('humanitiesSourceStatus').classList.toggle('d-none',humanitiesSourceState.owner!==humanitiesSourceOwner()||!humanitiesSourceState.failed||document.getElementById('eventType').value!=='EDUCATION');
+      document.getElementById('humanitiesSourceStatus').classList.toggle('d-none',!isHumanitiesCoop()||humanitiesSourceState.owner!==humanitiesSourceOwner()||!humanitiesSourceState.failed||document.getElementById('eventType').value!=='EDUCATION');
     }
     async function loadHumanitiesSource() {
       const owner=humanitiesSourceOwner(),coopId=participationReadOwner.coopId;
-      if(!participationReadOwner.userId||!coopId)return;
+      if(!isHumanitiesCoop())return;
       if(humanitiesSourceState.owner===owner&&humanitiesSourceState.pending)return humanitiesSourceState.pending;
       const revision=++humanitiesSourceState.revision;
       humanitiesSourceState.owner=owner;humanitiesSourceState.enabled=false;humanitiesSourceState.failed=false;renderHumanitiesSourceControls();
@@ -1606,8 +1608,12 @@
     } // End of educationQrLink
 
     async function callHumanitiesIntegration(action, payload = {}, signal) {
+      if (!isHumanitiesCoop()) throw new Error('이 조합은 외부 교육을 연결하지 않습니다.');
+      const owner = humanitiesSourceOwner();
       const { data:{ session } } = await _supabase.auth.getSession();
-      if (!session?.access_token) throw new Error('ERP 관리자 로그인이 필요합니다.');
+      if (!session?.access_token || session.user?.id !== participationReadOwner.userId || owner !== humanitiesSourceOwner()) {
+        throw new Error('ERP 관리자 로그인이 필요합니다.');
+      }
       const response = await fetch(HUMANITIES_INTEGRATION_URL, {
         method:'POST',
         signal,
@@ -3647,10 +3653,9 @@
     } // End of saveEvent
 
     let educationDeleteReviewAsset=null;
-    const educationDeleteReviewCoop='a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
     async function openEducationDeleteReviews(trigger) {
       const owner={...participationReadOwner};
-      const current=()=>PARTICIPATION_EDUCATION_VIEW && owner.coopId===educationDeleteReviewCoop
+      const current=()=>PARTICIPATION_EDUCATION_VIEW && owner.coopId===YONGIN_COOP_ID
         && !!owner.userId && participationReadStillCurrent(owner);
       if(!current()||trigger.disabled)return;
       trigger.disabled=true;
@@ -3755,7 +3760,7 @@
         ? '교육 신규 등록, QR 체크인·알림과 조합원 참가 관리를 한 곳에서 관리합니다.'
         : '이사회와 대의원 총회 참석·서명 현황을 문서관리 흐름에서 관리합니다.';
       document.getElementById('participationPageGuide').innerHTML = PARTICIPATION_EDUCATION_VIEW
-        ? '교육 내용을 직접 입력하거나, 연결된 외부 교육이 있으면 불러와 작성할 수 있습니다. 조합원의 개인별 참여 이력은 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 읽기 전용으로 확인합니다.'
+        ? '조합원의 개인별 참여 이력은 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 읽기 전용으로 확인합니다.'
         : '회의 기본 자료는 문서관리에서 준비하고, 이 화면에서는 이사회·대의원 총회 출석과 서명을 관리합니다. 개인별 이력은 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 읽기 전용으로 확인합니다.';
       const typeFilter = document.getElementById('eventTypeFilter');
       const eventTypeSelect = document.getElementById('eventType');
@@ -3897,7 +3902,7 @@
       if (!guard.ok) return;
       participationReadOwner = { userId:session.user.id, coopId:guard.runtime.coop_id, revision:participationReadOwner.revision + 1 };
       const reviewButton=document.getElementById('educationDeleteReviewsBtn');
-      reviewButton.hidden=!PARTICIPATION_EDUCATION_VIEW || participationReadOwner.coopId!==educationDeleteReviewCoop;
+      reviewButton.hidden=!PARTICIPATION_EDUCATION_VIEW || participationReadOwner.coopId!==YONGIN_COOP_ID;
       reviewButton.onclick=()=>openEducationDeleteReviews(reviewButton);
       const stopBoothGuestbook = PARTICIPATION_EDUCATION_VIEW && window.location.hostname === 'www.yonginsolar.kr'
         ? window.BoothGuestbookAdmin?.start(_supabase, () => participationReadOwner) : null;

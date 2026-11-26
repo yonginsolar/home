@@ -5736,7 +5736,7 @@ if(!hcrecReferralProfile&&helper?.isPublic(currentMemberCoopId))hcrecReferralPro
 }));
 hcrecReferralProfile?.sync();
 }
-const memberEducationPilotCoop = 'a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
+const YONGIN_COOP_ID = 'a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
 let memberEducationPilotOwner = null, memberEducationPilotAsset = null;
 function invalidateMemberEducationPilot() {
     memberEducationPilotOwner = null;
@@ -5746,7 +5746,7 @@ function invalidateMemberEducationPilot() {
 }
 async function syncMemberEducationPilot(currentProfileLoad) {
     const profile = getRootMemberProfileId(), actor = curAuth?.id;
-    const current = () => currentProfileLoad() && currentMemberCoopId === memberEducationPilotCoop
+    const current = () => currentProfileLoad() && currentMemberCoopId === YONGIN_COOP_ID
         && !!actor && curAuth?.id === actor && !!profile && curMem?.id === profile && getRootMemberProfileId() === profile
         && curMem?.auth_user_id === actor && isCoopRuntimeModuleEnabled('education');
     if (!current()) return;
@@ -7855,9 +7855,11 @@ return request;
 } // End of getParticipationSignedUrl
 
 async function loadMemberLinkedHumanitiesResources(memberUuid) {
-if (!memberUuid) return { resourcesByEvent:{}, warningsByEvent:{} };
+const empty = { resourcesByEvent:{}, warningsByEvent:{} };
+if (!memberUuid || currentMemberCoopId !== YONGIN_COOP_ID) return empty;
 try {
 const accessToken = await currentCoopAccessToken();
+if (currentMemberCoopId !== YONGIN_COOP_ID) return empty;
 const result = await callEducationIntegration(HUMANITIES_INTEGRATION_URL, COOP_PUBLISHABLE_KEY, {
 action:'member_linked_resources', member_uuid:memberUuid
 }, accessToken);
@@ -7871,7 +7873,7 @@ warningsByEvent: result?.warnings_by_event && typeof result.warnings_by_event ==
 };
 } catch (error) {
 CoopSafeLog.warn("linked Humanities resources unavailable:", error?.code || error?.message || error);
-return { resourcesByEvent:{}, warningsByEvent:{} };
+return empty;
 }
 } // End of loadMemberLinkedHumanitiesResources
 
