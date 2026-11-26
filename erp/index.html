@@ -131,7 +131,7 @@
   <link rel="stylesheet" href="/erp/erp_palette.css?v=1.0.0" integrity="sha384-Q4SLjWvt6mfxBkeAZ7tJM0NA2HVAOsGJKBHupNsyjJ943mTY5sSRiDPFS8WQSY3j" crossorigin="anonymous" data-erp-palette-style>
   <script src="/erp/erp_palette.js?v=1.0.0" integrity="sha384-eqzWMk2JERd7XhuNeGNbJ48/w3Hit4umqaZoA6gO9BLNrCkvVuoF8YKOipNIJB1y" crossorigin="anonymous"></script>
   <script src="/erp/workspace_feature_tabs.js?v=1.0.1" integrity="sha384-ShPswNA9jmdA4dBD5nokFNkYj1LewILn/ZcghtVXdu+zuGKb/BfsTOh2/VjaBkDl" crossorigin="anonymous" defer></script>
-  <script src="/erp/workspace_nav.js?v=20261121-coop-settings-2" integrity="sha384-XEGqT6cv05uEZWiSzEw8E0YdgyUeTDH2pH+rjs0Zl03YkXjWaemIUSdHZ6uAXAGA" crossorigin="anonymous" defer></script>
+  <script src="/erp/workspace_nav_v1_7.js" integrity="sha384-bq1/Qppdia+tn/uf48qFgnqUoF9BnVmIbZ8zv/rdioT0B2SeDo5m7TjHjiCp52jA" crossorigin="anonymous" defer></script>
   <script src="/erp/workspace_search.js?v=1.1.0" integrity="sha384-/anB5A4+BzyC7jG5dDK4lqs31Zz5LZz5G7OeMcSFtfyB9VKcS0T3i3luIqyF7HON" crossorigin="anonymous" defer></script>
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
@@ -329,8 +329,8 @@
         </button>
 
         <button class="btn btn-white btn-menu hidden" id="btnRegistryHub" data-mobile-task="registry" onclick="location.href='registry_hub.html'">
-          📑 <strong>등기·변경신고</strong>
-          <span class="d-block small text-muted">시청 변경신고와 변경등기 안내</span>
+          📑 <strong>ERP 이용 가이드</strong>
+          <span class="d-block small text-muted">자주 하는 업무의 순서와 화면별 활용법</span>
         </button>
 
         <button class="btn btn-white btn-menu hidden" id="btnMinutesAdmin" onclick="openMinutesRoute('minutes_admin')">
@@ -2507,6 +2507,16 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     const isCurrentMenuCheck = () => applyMenuPermissions.checkVersion === menuCheck;
     const isSiteMemberProfile = String(runtime?.runtime_profile || '') === 'site_member';
     const settingsEntries = [['btnCoopSettings', 'coopSettingsRoute'], ['btnInitialSetup', 'initialSetupRoute']];
+    const guideEntry = document.getElementById('btnRegistryHub');
+    const showGuideEntry = () => {
+        if (!guideEntry || !runtime?.coop_id || runtime.is_active === false) return;
+        guideEntry.classList.remove('hidden');
+        guideEntry.onclick = () => {
+            if (!isCurrentMenuCheck()) return;
+            if (canOpenRegistryHub(runtime)) location.href = 'registry_hub.html';
+            else window.open('/guides/', '_blank', 'noopener');
+        };
+    };
     const showSettingsEntries = () => {
         for (const [id, routeName] of settingsEntries) {
             const entry = document.getElementById(id);
@@ -2524,7 +2534,7 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         entry?.classList.add('hidden');
         if (entry) entry.onclick = null;
     }
-    document.getElementById('btnRegistryHub')?.classList.add('hidden');
+    guideEntry?.classList.add('hidden');
     document.getElementById('btnServiceContracts')?.classList.add('hidden');
     ['mobileDocumentsMenu', 'btnMobileDocuments', 'btnMobileSignature'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
     if (!isSiteMemberProfile) _supabase.rpc('erp_service_contract', { p_action: 'context' }).then(({ data, error }) => {
@@ -2656,7 +2666,7 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         if (canOpenMemberAdmin) document.getElementById('btnMemberAdmin')?.classList.remove('hidden');
         if (canOpenSiteAdmin) document.getElementById('btnSiteAdmin')?.classList.remove('hidden');
         if (canOpenAudit) document.getElementById('btnAudit')?.classList.remove('hidden');
-        if (canOpenRegistryHub(runtime)) document.getElementById('btnRegistryHub')?.classList.remove('hidden');
+        showGuideEntry();
         showSettingsEntries();
         applyMenuOrder();
         updateMenuOrderButtonVisibility(false);
@@ -2664,7 +2674,7 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     }
 
     applyHrMenuLabel(runtime);
-    if (canOpenRegistryHub(runtime)) document.getElementById('btnRegistryHub')?.classList.remove('hidden');
+    showGuideEntry();
 
     if (!approvalEnabled || (canApproval !== null && !canApproval)) document.getElementById('btnApproval')?.classList.add('hidden');
     if (!mypageEnabled || (canMypage !== null && !canMypage)) document.getElementById('btnMypage')?.classList.add('hidden');
