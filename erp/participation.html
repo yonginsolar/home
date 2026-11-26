@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.5.3 | 외부 교육 연결 용인 한정 -->
+<!-- Version: v1.5.4 | 교육 등록 설정 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.5.3 | participation.html');</script>
+  <script>console.log('[Version] v1.5.4 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -470,7 +470,7 @@
         <div id="educationDetailStatus" role="status" class="text-muted"></div>
         <div id="educationDetailContent" hidden>
           <h3 id="educationDetailName" class="fs-5"></h3>
-          <dl><dt>일시</dt><dd id="educationDetailTime"></dd><dt>장소</dt><dd id="educationDetailLocation"></dd><dt>강사</dt><dd id="educationDetailInstructor"></dd><dt>교육 내용</dt><dd id="educationDetailDescription" style="white-space:pre-wrap;overflow-wrap:anywhere"></dd></dl>
+          <dl><dt>일시</dt><dd id="educationDetailTime"></dd><dt>장소</dt><dd id="educationDetailLocation"></dd><dt>강사</dt><dd id="educationDetailInstructor"></dd><dt class="d-none" id="educationDetailInstructorProfileLabel">강사 프로필</dt><dd class="d-none" id="educationDetailInstructorProfile" style="white-space:pre-wrap;overflow-wrap:anywhere"></dd><dt>교육 내용</dt><dd id="educationDetailDescription" style="white-space:pre-wrap;overflow-wrap:anywhere"></dd></dl>
         </div>
         <button type="button" class="btn btn-outline-primary mt-3" id="educationDetailRetry" hidden>다시 불러오기</button>
       </div>
@@ -518,6 +518,27 @@
               <div class="form-text">의사록 본문에서 일시·장소·참석자를 자동으로 가져옵니다.</div>
             </div>
             <template id="eventFieldsSlot"></template>
+            <div class="col-12 d-none" id="educationPostcodePanel">
+              <div class="border rounded-3 p-2">
+                <div class="d-flex justify-content-between align-items-center">
+                  <strong>교육 장소 주소검색</strong>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" id="closeEducationPostcodeBtn">주소검색 닫기</button>
+                </div>
+                <div id="educationPostcodeResults"></div>
+              </div>
+            </div>
+            <div class="col-12 d-none" id="educationAddressDetailGroup">
+              <label class="form-label fw-bold" for="educationAddressDetail">상세주소</label>
+              <input type="text" class="form-control" id="educationAddressDetail" maxlength="200">
+            </div>
+            <div class="col-12 d-none" id="educationRegistrationOptions">
+              <label class="form-label fw-bold" for="educationInstructorProfile">강사 프로필</label>
+              <textarea class="form-control" id="educationInstructorProfile" rows="3" maxlength="1500"></textarea>
+              <div class="form-check form-switch mt-3">
+                <input type="checkbox" class="form-check-input" id="educationGuestRegistration" role="switch">
+                <label class="form-check-label" for="educationGuestRegistration">비조합원 신청 가능</label>
+              </div>
+            </div>
           </div>
 
           <div class="form-section">
@@ -743,6 +764,7 @@
   </div>
 
   <script src="/shared/education_event_form_v1.js" integrity="sha384-X9b9pAI1Nd8n7UkjAFZEjslKdfyei5mw0G6EquGotvT8X2OAnJze4Lv/v1UAn3Um" crossorigin="anonymous" defer></script>
+  <script src="/erp/workflow_assets_print_v4.js" integrity="sha384-BTXIW3vA3w0C0fYVv0ieFexaJTMR+PfA97OFkFwjejtZdpISj/ddDzT4cZWEF3eB" crossorigin="anonymous" defer></script>
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   </script>
@@ -837,7 +859,7 @@
     let newPhotoPreviewUrls = [];
     const signedFileUrlCache = new Map();
     const eventDrafts = new Map();
-    const eventDraftFields = ['eventType','eventTitle','eventStartsAt','eventEndsAt','eventLocation','educationContent','eventInstructor','sourceMinute','memberSearchInput','manualAttendeeName','manualAttendeeNote','includeHumanitiesManual'];
+    const eventDraftFields = ['eventType','eventTitle','eventStartsAt','eventEndsAt','eventLocation','educationAddressDetail','educationContent','eventInstructor','educationInstructorProfile','educationGuestRegistration','sourceMinute','memberSearchInput','manualAttendeeName','manualAttendeeNote','includeHumanitiesManual'];
     const eventDraftFileFields = ['materialFiles','photoFiles','rosterScanFiles'];
     let activeEventDraft = null;
     let eventDraftVisit = 0;
@@ -2277,7 +2299,7 @@
       const pageCount = Math.ceil(totalRowCount / rowsPerPage);
       const title = String(document.getElementById('eventTitle').value || '교육').trim();
       const schedule = educationQrPrintScheduleText();
-      const location = String(document.getElementById('eventLocation').value || '-').trim();
+      const location = educationPlace(document.getElementById('eventLocation').value,document.getElementById('educationAddressDetail').value) || '-';
       document.getElementById('educationRosterPrintPages').innerHTML = Array.from({ length:pageCount }, function(_, pageIndex) {
         const pageStart = pageIndex * rowsPerPage;
         const body = Array.from({ length:rowsPerPage }, function(__, rowIndex) {
@@ -2323,7 +2345,7 @@
       const printCode = document.getElementById('educationQrPrintCode');
       document.getElementById('educationQrPrintTitle').textContent = String(document.getElementById('eventTitle').value || '').trim() || '교육';
       document.getElementById('educationQrPrintSchedule').textContent = educationQrPrintScheduleText();
-      document.getElementById('educationQrPrintLocation').textContent = String(document.getElementById('eventLocation').value || '').trim() || '-';
+      document.getElementById('educationQrPrintLocation').textContent = educationPlace(document.getElementById('eventLocation').value,document.getElementById('educationAddressDetail').value) || '-';
       document.getElementById('educationQrPrintValidity').textContent = educationQrWindowText();
       syncParticipationPrintBranding();
       setEducationQrPrintOptionalRow('educationQrPrintInstructorRow', 'educationQrPrintInstructor', document.getElementById('eventInstructor').value);
@@ -2371,11 +2393,91 @@
       }
     } // End of rotateEducationQr
 
+    let educationPostcodeRevision = 0;
+    function closeEducationPostcode(restoreFocus = false) {
+      educationPostcodeRevision++;
+      document.getElementById('openEducationPostcodeBtn').disabled = false;
+      document.getElementById('openEducationPostcodeBtn').setAttribute('aria-expanded','false');
+      document.getElementById('educationPostcodePanel').classList.add('d-none');
+      document.getElementById('educationPostcodeResults').replaceChildren();
+      if (restoreFocus) document.getElementById('openEducationPostcodeBtn').focus();
+    }
+    async function openEducationPostcode() {
+      if (document.getElementById('eventType').value !== 'EDUCATION' || formState.saving) return;
+      const form = formState, visit = eventDraftVisit, owner = eventDraftOwner(), modal = document.getElementById('eventModal');
+      const revision = ++educationPostcodeRevision;
+      const location = document.getElementById('eventLocation');
+      const detail = document.getElementById('educationAddressDetail');
+      const before = [location.value, detail.value];
+      const button = document.getElementById('openEducationPostcodeBtn');
+      const panel = document.getElementById('educationPostcodePanel');
+      const results = document.getElementById('educationPostcodeResults');
+      const current = () => revision === educationPostcodeRevision && form === formState && !form.saving
+        && visit === eventDraftVisit && !!owner && owner === eventDraftOwner()
+        && modal.classList.contains('show') && !window.frameElement?.hidden
+        && document.getElementById('eventType').value === 'EDUCATION';
+      button.disabled = true;
+      button.setAttribute('aria-expanded','true');
+      panel.classList.remove('d-none');
+      try {
+        await window.ErpWorkflowAssets.load('postcode');
+        if (!current()) return;
+        new window.daum.Postcode({
+          width:'100%', height:360,
+          oncomplete(address) {
+            if (!current()) return;
+            if (before[0] !== location.value || before[1] !== detail.value) {
+              closeEducationPostcode(true);
+              return;
+            }
+            const selected = String((address.userSelectedType === 'R' ? address.roadAddress : address.jibunAddress) || '').trim();
+            if (!selected || selected.length > location.maxLength) {
+              closeEducationPostcode(true);
+              showAlert('formAlert','주소를 확인할 수 없습니다. 다시 검색하거나 장소를 직접 입력하세요.','warning');
+              return;
+            }
+            if (selected !== before[0]) {
+              detail.value = '';
+              detail.dispatchEvent(new Event('input',{bubbles:true}));
+            }
+            location.value = selected;
+            location.dispatchEvent(new Event('input',{bubbles:true}));
+            closeEducationPostcode();
+            detail.focus();
+          }
+        }).embed(results);
+        document.getElementById('closeEducationPostcodeBtn').focus();
+      } catch (_) {
+        if (!current()) return;
+        closeEducationPostcode(true);
+        showAlert('formAlert','주소검색을 열지 못했습니다. 다시 누르거나 장소를 직접 입력하세요.','warning');
+      }
+    }
+    function resetEducationRegistrationOptions(event = null) {
+      document.getElementById('educationAddressDetail').value = event?.education_address_detail || '';
+      document.getElementById('educationInstructorProfile').value = event?.education_instructor_profile || '';
+      document.getElementById('educationGuestRegistration').checked = event?.education_guest_registration === true;
+    }
+    function readEducationRegistrationOptions() {
+      return {
+        address_detail:document.getElementById('educationAddressDetail').value.trim(),
+        instructor_profile:document.getElementById('educationInstructorProfile').value.trim(),
+        guest_registration:document.getElementById('educationGuestRegistration').checked
+      };
+    }
+    function educationPlace(location,addressDetail) {
+      return [location,addressDetail].map(value=>String(value||'').trim()).filter(Boolean).join(' ');
+    }
+
     function setEventTypeUi(type) {
       const education = type === 'EDUCATION';
       renderHumanitiesSourceControls();
       document.getElementById('sourceMinuteGroup').classList.toggle('d-none', education);
       eventFields.setEducation(education);
+      closeEducationPostcode();
+      document.getElementById('openEducationPostcodeBtn').classList.toggle('d-none', !education);
+      document.getElementById('educationAddressDetailGroup').classList.toggle('d-none', !education);
+      document.getElementById('educationRegistrationOptions').classList.toggle('d-none', !education);
       document.getElementById('educationFilesSection').classList.remove('d-none');
       document.getElementById('materialFilesGroup').classList.toggle('d-none', !education);
       document.getElementById('rosterScanFilesGroup').classList.toggle('d-none', !education);
@@ -2432,6 +2534,7 @@
       document.getElementById('eventStartsAt').value = '';
       document.getElementById('eventEndsAt').value = '';
       document.getElementById('eventLocation').value = '';
+      resetEducationRegistrationOptions();
       document.getElementById('educationContent').value = '';
       document.getElementById('eventInstructor').value = '';
       document.getElementById('materialFiles').value = '';
@@ -2503,8 +2606,12 @@
         document.getElementById('educationDetailName').textContent = event.title || '교육';
         document.getElementById('educationDetailTime').textContent = event.ends_at
           ? `${formatKstDateTime(event.starts_at)} ~ ${formatKstDateTime(event.ends_at)}` : formatKstDateTime(event.starts_at);
-        document.getElementById('educationDetailLocation').textContent = event.location || '미입력';
+        document.getElementById('educationDetailLocation').textContent = educationPlace(event.location,event.education_address_detail) || '미입력';
         document.getElementById('educationDetailInstructor').textContent = event.instructor || '미입력';
+        const instructorProfile = document.getElementById('educationDetailInstructorProfile');
+        instructorProfile.textContent = event.education_instructor_profile || '';
+        instructorProfile.classList.toggle('d-none',!instructorProfile.textContent);
+        document.getElementById('educationDetailInstructorProfileLabel').classList.toggle('d-none',!instructorProfile.textContent);
         document.getElementById('educationDetailDescription').textContent = event.education_content || '미입력';
         status.textContent = '';
         content.hidden = false;
@@ -2639,6 +2746,7 @@
         document.getElementById('eventEndsAt').value = toKstLocalInput(event.ends_at);
         syncEventDateRange();
         document.getElementById('eventLocation').value = event.location || '';
+        resetEducationRegistrationOptions(event);
         document.getElementById('educationContent').value = event.education_content || '';
         document.getElementById('eventInstructor').value = event.instructor || '';
         document.getElementById('materialFiles').value = '';
@@ -3540,6 +3648,7 @@
       let values;
       try {
         values = validateEventForm();
+        if (values.type === 'EDUCATION') values.educationOptions = readEducationRegistrationOptions();
         validateFiles(document.getElementById('materialFiles').files, 'MATERIAL');
         validateFiles(document.getElementById('photoFiles').files, 'PHOTO');
         validateFiles(document.getElementById('rosterScanFiles').files, 'ROSTER_SCAN');
@@ -3576,18 +3685,34 @@
         });
         let eventId = null;
         if (importingHumanities) {
-          const imported = await callHumanitiesIntegration('admin_import_course', {
-            humanities_course_id:humanitiesImportState.selectedCourseId,
-            title:values.title,
-            starts_at:localInputToIso(values.startsAt),
-            ends_at:values.endsAt ? localInputToIso(values.endsAt) : null,
-            location:values.location,
-            education_content:values.educationContent,
-            instructor:values.instructor
-          });
-          eventId = imported.event_id || null;
+          const course = humanitiesImportState.selectedCourseId;
+          const baseInput = JSON.stringify([values.title,values.startsAt,values.endsAt,values.location,values.educationContent,values.instructor]);
+          if (savingForm.importedSettingsReceipt?.course === course) {
+            if (savingForm.importedSettingsReceipt.baseInput !== baseInput) {
+              throw new Error('이미 불러온 교육의 기본정보가 달라졌습니다. 목록에서 해당 교육을 열어 수정하세요.');
+            }
+            eventId = savingForm.importedSettingsReceipt.eventId;
+          } else {
+            const imported = await callHumanitiesIntegration('admin_import_course', {
+              humanities_course_id:course,
+              title:values.title,
+              starts_at:localInputToIso(values.startsAt),
+              ends_at:values.endsAt ? localInputToIso(values.endsAt) : null,
+              location:values.location,
+              education_content:values.educationContent,
+              instructor:values.instructor
+            });
+            eventId = imported.event_id || null;
+            if (eventId) savingForm.importedSettingsReceipt = {course,eventId,baseInput};
+          }
+          if (eventId) {
+            const {error}=await _supabase.rpc('education_configure_registration_v1',{
+              p_event_id:eventId,p_options:values.educationOptions
+            });
+            if (error) throw new Error('교육은 불러왔지만 등록 설정을 저장하지 못했습니다. 저장을 다시 누르면 설정만 확인합니다.');
+          }
         } else {
-          const { data, error } = await _supabase.rpc('participation_admin_save_event_v2', {
+          const payload = {
             p_event_id:formState.eventId,
             p_request_key:formState.requestKey,
             p_event_type:values.type,
@@ -3599,7 +3724,15 @@
             p_education_content:values.type === 'EDUCATION' ? values.educationContent : null,
             p_instructor:values.type === 'EDUCATION' ? values.instructor : null,
             p_attendance:attendance
-          });
+          };
+          let rpc = 'participation_admin_save_event_v2';
+          if (values.type === 'EDUCATION') {
+            rpc = 'education_save_registration_v1';
+            delete payload.p_event_type;
+            delete payload.p_source_minute_id;
+            payload.p_options = values.educationOptions;
+          }
+          const {data,error} = await _supabase.rpc(rpc,payload);
           if (error) throw error;
           eventId = data?.event_id || null;
         }
@@ -3754,6 +3887,23 @@
         return;
       }
       eventFields = sharedForm.mount(document.getElementById('eventFieldsSlot'));
+      const locationInput = eventFields.fields.get('location');
+      const addressGroup = document.createElement('div');
+      addressGroup.className = 'input-group';
+      const addressButton = document.createElement('button');
+      addressButton.type = 'button';
+      addressButton.id = 'openEducationPostcodeBtn';
+      addressButton.className = 'btn btn-outline-secondary d-none';
+      addressButton.textContent = '카카오 주소검색';
+      addressButton.setAttribute('aria-controls','educationPostcodePanel');
+      addressButton.setAttribute('aria-expanded','false');
+      locationInput.before(addressGroup);
+      addressGroup.append(locationInput,addressButton);
+      const addressDetail = document.getElementById('educationAddressDetailGroup');
+      locationInput.closest('.col-12').after(document.getElementById('educationPostcodePanel'), addressDetail);
+      addressButton.addEventListener('click',openEducationPostcode);
+      document.getElementById('closeEducationPostcodeBtn').addEventListener('click',()=>closeEducationPostcode(true));
+      document.getElementById('eventModal').addEventListener('hide.bs.modal',()=>closeEducationPostcode());
       document.body.classList.toggle('participation-embedded', PARTICIPATION_EMBEDDED);
       document.getElementById('participationPageTitle').textContent = PARTICIPATION_EDUCATION_VIEW ? '교육·행사 관리' : '회의 출석 관리';
       document.getElementById('participationPageSubtitle').textContent = PARTICIPATION_EDUCATION_VIEW
