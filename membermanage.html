@@ -5742,7 +5742,7 @@ function invalidateMemberEducationPilot() {
     memberEducationPilotOwner = null;
     document.getElementById('memberEducationPilotCard').classList.add('hidden');
     updateQuickLinksLayout();
-    window.MemberEducationPilot?.close();
+    window.MemberEducationPortal?.close();
 }
 async function syncMemberEducationPilot(currentProfileLoad) {
     const profile = getRootMemberProfileId(), actor = curAuth?.id;
@@ -5759,30 +5759,39 @@ async function syncMemberEducationPilot(currentProfileLoad) {
         updateQuickLinksLayout();
     } catch (_) { /* No feature access on an unknown response. */ }
 }
+function loadMemberEducationAsset(name,src,integrity) {
+    if (window[name]) return Promise.resolve();
+    return new Promise((resolve,reject) => {
+        const tag = document.createElement('script');
+        const end = ok => {
+            clearTimeout(timer);
+            if (ok) resolve(); else { tag.remove(); reject(new Error('EDUCATION_PILOT_ASSET')); }
+        };
+        const timer = setTimeout(() => end(false),10000);
+        tag.onload = () => end(!!window[name]);
+        tag.onerror = () => end(false);
+        tag.src = src;
+        tag.integrity = integrity;
+        tag.crossOrigin = 'anonymous';
+        document.head.append(tag);
+    });
+}
 async function openMemberEducationPilot(trigger) {
     const owner = memberEducationPilotOwner;
     const current = () => !!owner && owner === memberEducationPilotOwner && owner.current();
     if (!current() || trigger.disabled) return;
     trigger.disabled = true;
     try {
-        if (!window.MemberEducationPilot && !memberEducationPilotAsset) {
-            memberEducationPilotAsset = new Promise((resolve,reject) => {
-                const tag = document.createElement('script');
-                const end = ok => {
-                    clearTimeout(timer);
-                    if (ok) resolve(); else { tag.remove(); reject(new Error('EDUCATION_PILOT_ASSET')); }
-                };
-                const timer = setTimeout(() => end(false),10000);
-                tag.onload = () => end(!!window.MemberEducationPilot);
-                tag.onerror = () => end(false);
-                tag.src = '/shared/member_education_pilot_v2.js';
-                tag.integrity = 'sha384-V/+jYfSPzr83AOLDq1JoL23Rg5640Tf2AbKjONMuvtKmivInL0C+UJx04wgmEc1T';
-                tag.crossOrigin = 'anonymous';
-                document.head.append(tag);
+        if (!memberEducationPilotAsset && !(window.MemberEducationPortal && window.CoopEducationEventForm)) {
+            memberEducationPilotAsset = Promise.allSettled([
+                loadMemberEducationAsset('CoopEducationEventForm','/shared/education_event_form_v1.js','sha384-X9b9pAI1Nd8n7UkjAFZEjslKdfyei5mw0G6EquGotvT8X2OAnJze4Lv/v1UAn3Um'),
+                loadMemberEducationAsset('MemberEducationPortal','/shared/member_education_portal_v3.js','sha384-volLvdHlarL4XSDaqDohxNc0rQE2dm2HjZeq+pVgHSYio1zOsQn94siYr4iSaJM0')
+            ]).then(results => {
+                if (results.some(result => result.status !== 'fulfilled')) throw new Error('EDUCATION_PILOT_ASSET');
             }).finally(() => { memberEducationPilotAsset = null; });
         }
         await memberEducationPilotAsset;
-        if (current()) window.MemberEducationPilot.open({rpc:owner.rpc,current,trigger});
+        if (current()) window.MemberEducationPortal.open({rpc:owner.rpc,current,trigger});
     } catch (_) {
         if (current()) trigger.textContent = '교육 관리 다시 열기';
     } finally { trigger.disabled = false; }

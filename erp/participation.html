@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.5.1 | 박람회 전단·영상 비공개 원본 -->
+<!-- Version: v1.5.2 | 교육 공용 입력 폼 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.5.1 | participation.html');</script>
+  <script>console.log('[Version] v1.5.2 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -517,30 +517,7 @@
               <select class="form-select" id="sourceMinute"></select>
               <div class="form-text">의사록 본문에서 일시·장소·참석자를 자동으로 가져옵니다.</div>
             </div>
-            <div class="col-12">
-              <label class="form-label fw-bold" for="eventTitle">행사명</label>
-              <input type="text" class="form-control" id="eventTitle" maxlength="200">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-bold" for="eventStartsAt">시작 일시</label>
-              <input type="datetime-local" class="form-control" id="eventStartsAt">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-bold" for="eventEndsAt">종료 일시 <span id="endRequiredMark" class="text-danger d-none">*</span></label>
-              <input type="datetime-local" class="form-control" id="eventEndsAt">
-            </div>
-            <div class="col-12">
-              <label class="form-label fw-bold" for="eventLocation">장소</label>
-              <input type="text" class="form-control" id="eventLocation" maxlength="300">
-            </div>
-            <div class="col-md-8 d-none" id="educationContentGroup">
-              <label class="form-label fw-bold" for="educationContent">교육 내용</label>
-              <textarea class="form-control" id="educationContent" rows="3"></textarea>
-            </div>
-            <div class="col-md-4 d-none" id="instructorGroup">
-              <label class="form-label fw-bold" for="eventInstructor">강사</label>
-              <input type="text" class="form-control" id="eventInstructor" maxlength="200">
-            </div>
+            <template id="eventFieldsSlot"></template>
           </div>
 
           <div class="form-section">
@@ -765,6 +742,7 @@
     </div>
   </div>
 
+  <script src="/shared/education_event_form_v1.js" integrity="sha384-X9b9pAI1Nd8n7UkjAFZEjslKdfyei5mw0G6EquGotvT8X2OAnJze4Lv/v1UAn3Um" crossorigin="anonymous" defer></script>
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   </script>
@@ -846,6 +824,7 @@
     let pendingGuestLinkId = null;
     let pendingManualAttendeeLinkId = null;
     let eventModalInstance = null;
+    let eventFields = null;
     let educationDetailState = { revision:0, eventId:null, controller:null, trigger:null, open:false };
     let lightboxReturnFocus = null;
     let lightboxStoredPhoto = null;
@@ -1281,24 +1260,11 @@
     } // End of getKstYear
 
     function toKstLocalInput(value) {
-      if (!value) return '';
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return '';
-      const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone:KST_TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit',
-        hour:'2-digit', minute:'2-digit', hour12:false
-      }).formatToParts(date).reduce(function(acc, part) {
-        acc[part.type] = part.value;
-        return acc;
-      }, {});
-      return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+      return window.CoopEducationEventForm.localTime(value);
     } // End of toKstLocalInput
 
     function localInputToIso(value) {
-      const safe = String(value || '').trim();
-      if (!safe) return null;
-      const date = new Date(`${safe}:00+09:00`);
-      return Number.isNaN(date.getTime()) ? null : date.toISOString();
+      return window.CoopEducationEventForm.toIso(value);
     } // End of localInputToIso
 
     function normalizePersonName(value) {
@@ -2403,8 +2369,7 @@
       const education = type === 'EDUCATION';
       renderHumanitiesSourceControls();
       document.getElementById('sourceMinuteGroup').classList.toggle('d-none', education);
-      document.getElementById('educationContentGroup').classList.toggle('d-none', !education);
-      document.getElementById('instructorGroup').classList.toggle('d-none', !education);
+      eventFields.setEducation(education);
       document.getElementById('educationFilesSection').classList.remove('d-none');
       document.getElementById('materialFilesGroup').classList.toggle('d-none', !education);
       document.getElementById('rosterScanFilesGroup').classList.toggle('d-none', !education);
@@ -2419,7 +2384,6 @@
       document.getElementById('meetingImportHint').classList.toggle('d-none', education);
       document.getElementById('memberSearchObserverBtn').classList.toggle('d-none', education);
       document.getElementById('observerHelp').classList.toggle('d-none', education);
-      document.getElementById('endRequiredMark').classList.toggle('d-none', !education);
       document.getElementById('eventType').disabled = !!formState.eventId || PARTICIPATION_EDUCATION_VIEW;
       renderSourceOptions(type);
       renderAttendees();
@@ -3548,18 +3512,10 @@
 
     function validateEventForm() {
       const type = document.getElementById('eventType').value;
-      const title = String(document.getElementById('eventTitle').value || '').trim();
-      const startsAt = document.getElementById('eventStartsAt').value;
-      const endsAt = document.getElementById('eventEndsAt').value;
-      const location = String(document.getElementById('eventLocation').value || '').trim();
+      const { title, starts_at:startsAt, ends_at:endsAt, location,
+        education_content:educationContent, instructor } = eventFields.read({ education: type === 'EDUCATION' });
       const selectedSourceId = document.getElementById('sourceMinute').value || null;
       const sourceId = selectedSourceId === 'MANUAL' ? null : selectedSourceId;
-      const educationContent = String(document.getElementById('educationContent').value || '').trim();
-      const instructor = String(document.getElementById('eventInstructor').value || '').trim();
-      if (!title) throw new Error('행사명을 입력하세요.');
-      if (!startsAt) throw new Error('시작 일시를 입력하세요.');
-      if (!location) throw new Error('장소를 입력하세요.');
-      if (endsAt && localInputToIso(endsAt) < localInputToIso(startsAt)) throw new Error('종료 일시는 시작 일시보다 빠를 수 없습니다.');
       if (type !== 'EDUCATION' && !selectedSourceId) throw new Error('원본 의사록 또는 수기 입력을 선택하세요.');
       if (type !== 'EDUCATION') {
         const missingGroupAttendee = (formState.attendees || []).find(function(row) {
@@ -3568,11 +3524,6 @@
             && !String(row.actual_attendee_name || '').trim();
         });
         if (missingGroupAttendee) throw new Error(`${missingGroupAttendee.name}의 실제 참석자명을 입력하세요.`);
-      }
-      if (type === 'EDUCATION') {
-        if (!endsAt) throw new Error('교육 종료 일시를 입력하세요.');
-        if (!educationContent) throw new Error('교육 내용을 입력하세요.');
-        if (!instructor) throw new Error('강사를 입력하세요.');
       }
       return { type, title, startsAt, endsAt, location, sourceId, educationContent, instructor };
     } // End of validateEventForm
@@ -3790,6 +3741,14 @@
     } // End of loadDashboard
 
     async function initParticipationPage() {
+      const sharedForm = window.CoopEducationEventForm;
+      if (!sharedForm) {
+        document.getElementById('newEventBtn').disabled = true;
+        showLoading(false);
+        showAlert('pageAlert', '입력 화면을 불러오지 못했습니다. 페이지를 다시 열어 주세요.');
+        return;
+      }
+      eventFields = sharedForm.mount(document.getElementById('eventFieldsSlot'));
       document.body.classList.toggle('participation-embedded', PARTICIPATION_EMBEDDED);
       document.getElementById('participationPageTitle').textContent = PARTICIPATION_EDUCATION_VIEW ? '교육·행사 관리' : '회의 출석 관리';
       document.getElementById('participationPageSubtitle').textContent = PARTICIPATION_EDUCATION_VIEW
