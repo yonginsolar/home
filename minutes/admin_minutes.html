@@ -13,6 +13,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
   <script>console.log('[Version] ui.20261013.1 | admin_minutes.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
+  <script src="/shared/board_meeting_flow_v1.js" integrity="sha384-cMmWPxT1HeYpBSrNBMtWkNeI5Ru238uauNt88DZrYcpTANkVfBbcAh6snUiBqftp" crossorigin="anonymous"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -21,6 +22,13 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
+        body[data-board-stage] #tab-btn-materials,body[data-board-stage] #meeting-package-link{display:none}
+        body[data-board-stage] #minute-notice-import,body[data-board-stage] #assembly-minute-open{display:none!important}
+        body[data-board-stage]:not([data-board-stage="publish"]) [data-board-publish]{display:none}
+        body[data-board-stage]:not([data-board-stage="signature"]) [data-board-sign]{display:none}
+        #boardMinutesStatus{padding:10px 12px;border:1px solid #dce5df;border-radius:8px;margin:10px 0}
+        #boardAgendaResults label{display:flex;align-items:center;gap:.65rem;justify-content:space-between;flex-wrap:wrap;margin:.45rem 0}
+        #boardAgendaResults select{min-width:7.3rem}
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
         
         .container { max-width: 900px; margin: 0 auto; }
@@ -321,6 +329,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             <button id="tab-btn-materials" class="tab-btn" onclick="switchTab('materials')">총회 자료</button>
             <button id="meeting-package-link" class="tab-btn" onclick="ErpWorkspaceResume.navigate('./meeting_workspace.html')">회의 꾸러미 만들기</button>
         </div>
+        <div id="boardMinutesStatus" hidden role="status"></div>
 
         <div id="tab-minutes" class="tab-panel active">
         <div class="sub-tabs">
@@ -431,6 +440,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                     <button type="button" id="minute-editor-tab-html" class="tab-btn" onclick="switchMinuteEditorTab('html')">HTML 편집</button>
                 </div>
                 <div id="minute-editor-panel-visual" class="minute-editor-panel active">
+                    <section id="boardAgendaResults" hidden aria-label="이사회 안건 결과"></section>
                     <div id="in-content-visual" class="minute-visual-editor" contenteditable="true" data-placeholder="여기에 회의 내용을 입력하세요."></div>
                 </div>
                 <div id="minute-editor-panel-html" class="minute-editor-panel">
@@ -698,6 +708,65 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { loadMinuteSignatureAssets } from './signature_print_assets_v1.js';
         import { supabase } from '../shared/supabase-client.js';
+
+        let boardRoute=window.ErpBoardFlow?.parse(location.href);
+        let boardContext=null,boardContextVersion=0,boardDraftPrepared=false;
+        const boardResults=new Map(),boardResultChoices=['가결','부결','보류','보고','논의'];
+        const boardText=message=>{
+            const line=document.getElementById('boardMinutesStatus');
+            line.hidden=false;line.textContent=message;
+        };
+        async function refreshBoardContext(){
+            const ticket=++boardContextVersion,owner=minutesListOwner,coop=owner.coopId;
+            const row=await window.ErpBoardFlow.read(supabase,coop,boardRoute);
+            if(ticket!==boardContextVersion||owner.coopId!==minutesListOwner.coopId||owner.userId!==currentUserId)
+                throw Error('현재 이사회를 다시 열어 주세요.');
+            boardContext=row;
+            window.ErpBoardFlow.adopt(row);
+            if(row.status==='CANCELLED')boardText('무산된 이사회입니다.');
+            else if(!window.ErpBoardFlow.approved(row.approvalStatus))boardText('이사회의 소집 공문 결재가 완료된 뒤 이용할 수 있어요.');
+            else if(boardRoute.stage==='notice')boardText(row.noticePublished?'현재 이사회 공문이 게시되어 있습니다.':'결재 완료 · 게시 설정을 확인하세요.');
+            else if(!row.minuteId&&['signature','publish'].includes(boardRoute.stage))boardText('먼저 같은 이사회의 의사록을 저장해 주세요.');
+            else boardText(row.title);
+            return row;
+        }
+        async function openBoardMinuteEditor(){
+            const row=boardContext;
+            if(!row||row.minuteId||row.status==='CANCELLED'||!window.ErpBoardFlow.approved(row.approvalStatus))return;
+            await switchMinutesSubTab('editor');
+            if(row!==boardContext||!document.getElementById('sub-panel-editor').classList.contains('active'))return;
+            if(!boardDraftPrepared){
+                const type=document.getElementById('in-doc-type');
+                type.value='MINUTES';type.disabled=true;renderSignerOptions(allOfficials,'MINUTES');
+                const set=(id,value)=>{if(value!=null)document.getElementById(id).value=String(value);};
+                const time=value=>typeof value==='string'?value.slice(0,5):'';
+                set('in-title',row.title.endsWith('의사록')?row.title:row.title+' 의사록');set('in-notice-date',row.noticeDate);set('in-meeting-date',row.date);
+                set('in-start-time',time(row.start));set('in-end-time',time(row.end));set('in-location',row.location);
+                syncBoardMinuteScheduleConstraints();boardDraftPrepared=true;
+                renderBoardAgendaResults(row);
+            }
+            if(boardRoute.stage==='meeting')document.getElementById('in-start-time')?.focus({preventScroll:true});
+        }
+        function renderBoardAgendaResults(row){
+            const host=document.getElementById('boardAgendaResults');
+            const agendas=Array.isArray(row.agendas)?row.agendas:[];
+            host.hidden=!agendas.length;host.replaceChildren();
+            if(!agendas.length)return;
+            const title=document.createElement('strong');title.textContent='안건별 결과';host.append(title);
+            for(const agenda of agendas){
+                if(typeof agenda?.id!=='string'||typeof agenda.title!=='string')continue;
+                const line=document.createElement('label'),name=document.createElement('span'),select=document.createElement('select');
+                name.textContent=agenda.title;select.className='form-control';
+                ['결과 선택',...boardResultChoices].forEach(value=>select.append(new Option(value,value,false,value===boardResults.get(agenda.id))));
+                select.addEventListener('change',()=>boardResults.set(agenda.id,select.value));
+                line.append(name,select);host.append(line);
+            }
+        }
+        function buildBoardAgendaResultBlock(){
+            if(!boardRoute||!Array.isArray(boardContext?.agendas))return '';
+            const results=boardContext.agendas.filter(agenda=>boardResultChoices.includes(boardResults.get(agenda.id)));
+            return results.length?'<h4>안건별 결과</h4><ul>'+results.map(agenda=>'<li>'+escapeHtml(agenda.title)+' — '+escapeHtml(boardResults.get(agenda.id))+'</li>').join('')+'</ul>':'';
+        }
 
         function getErpHomeUrl() {
             return '/erp/';
@@ -2001,7 +2070,8 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             const startTime = document.getElementById('in-start-time')?.value || '';
             const endTime = document.getElementById('in-end-time')?.value || '';
             const location = (document.getElementById('in-location')?.value || '').trim();
-            const bodyHtml = getMinuteRenderedHtml(getMinuteEditorContent());
+            const rawBodyHtml = getMinuteRenderedHtml(getMinuteEditorContent());
+            const bodyHtml = rawBodyHtml && (rawBodyHtml + buildBoardAgendaResultBlock());
             const signerIds = getSelectedSignerIds();
             const directors = getCurrentDirectors();
             const signerSet = new Set(signerIds);
@@ -3590,6 +3660,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             }
 
             showToast('채널 설정이 반영되었습니다.');
+            if(boardRoute)await refreshBoardContext();
             await loadNotices();
             } catch (error) {
                 showToast('게시 설정을 확인하지 못했습니다. 목록을 다시 확인해 주세요.');
@@ -3600,7 +3671,10 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             const request = ++noticeListRequest;
             const container = document.getElementById('notice-list-area');
             if (!container) return;
-            const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals({ metadataOnly: true });
+            if(boardRoute&&(!boardContext||boardContext.status==='CANCELLED'||!window.ErpBoardFlow.approved(boardContext.approvalStatus))){
+                noticeItems=[];container.textContent='연결된 결재 완료 공문이 없습니다.';return;
+            }
+            const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals({ metadataOnly: true, approvalId:boardRoute?boardContext.approvalId:null });
             if (request !== noticeListRequest) return;
             if (error) {
                 container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">조회 오류</div>';
@@ -3644,6 +3718,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 notice: noticeMap.get(String(a.id)) || null,
                 minuteNotice: minuteByDocNo.get(String(a.doc_no || '').trim()) || null
             }));
+            if(boardRoute&&noticeItems.length)noticeUsageTab=OfficialNotice.normalize(noticeItems[0].approval.notice_usage)||'LEGACY';
             if (!noticeUsageTabTouched && !noticeItems.some(item => OfficialNotice.matches(item.approval.notice_usage, 'INTERNAL'))
                 && noticeItems.some(item => OfficialNotice.matches(item.approval.notice_usage, 'LEGACY'))) noticeUsageTab = 'LEGACY';
             renderNoticeUsageList();
@@ -3967,6 +4042,14 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             }
 
             // 3. 기본 탭 로드
+            if(boardRoute){
+                document.body.dataset.boardStage=boardRoute.stage;
+                try{await refreshBoardContext();}
+                catch(error){boardText(error.message);document.getElementById('sub-tab-editor').disabled=true;}
+                if(revision!==minutesInitRevision)return;
+                if(boardContext?.minuteId||(!['meeting','minutes'].includes(boardRoute.stage)&&boardRoute.stage!=='notice'))
+                    document.getElementById('sub-tab-editor').disabled=true;
+            }
             switchTab(ADMIN_MINUTES_SCOPE || 'minutes');
             window.ErpWorkspaceResume.register({modules:['minutes'],authorize:async runtime=>{
                 invalidateMinutesList();
@@ -3982,11 +4065,31 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 return runtime.effective_permissions.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
                     || await MinutesService.isAdmin(session.user.id,session.user.email);
             },refreshWhenDirty:()=>minutesListVisible(true),ownsReadRequests:true,refresh:async()=>{
+                if(boardRoute)await refreshBoardContext();
                 const pane=document.querySelector('.tab-panel.active')?.id;
                 if(pane==='tab-notices')await loadNotices();
                 else if(pane==='tab-materials')await loadAssemblyMaterials();
                 else await loadMinutes({allowHidden:true});
             }});
+            if(boardRoute){
+                const task=window.ErpWorkspaceTask;
+                const getAlias=value=>{
+                    const next=window.ErpBoardFlow.parse(value);
+                    if(!next||boardRoute.id!==next.id||boardContext?.id!==next.id)return null;
+                    const compose=['meeting','minutes'],published=['signature','publish'];
+                    if((compose.includes(boardRoute.stage)&&compose.includes(next.stage))
+                        ||(boardContext.minuteId&&published.includes(boardRoute.stage)&&published.includes(next.stage)))return next;
+                    return null;
+                };
+                task.canNavigateTaskRoute=value=>!!getAlias(value);
+                task.navigateTaskRoute=value=>{
+                    const next=getAlias(value);if(!next)return false;
+                    boardRoute=next;history.replaceState(history.state,'',next.href);
+                    document.body.dataset.boardStage=next.stage;
+                    return true;
+                };
+            }
+            if(boardRoute&&['meeting','minutes'].includes(boardRoute.stage))await openBoardMinuteEditor();
             // A new shell iframe may finish Auth while still parked. Its first
             // authorized read is allowed to prepare the hidden list; a genuinely
             // background document resumes through the visibility listener.
@@ -4007,8 +4110,11 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 if (completedEl) completedEl.textContent = String(completed);
             };
 
+            const boardList=()=>boardContext?.minuteId
+                ?MinutesService.getMinuteById(boardContext.minuteId).then(({data,error})=>({error,data:data?.doc_type==='MINUTES'?[data]:[]}))
+                :Promise.resolve({data:[],error:null});
             const [{ data: minutes, error: listError }, officials] = await Promise.all([
-                MinutesService.listMinutesAdmin({metadataOnly:true,docType:'MINUTES',signal:request.signal}),
+                boardRoute?boardList():MinutesService.listMinutesAdmin({metadataOnly:true,docType:'MINUTES',signal:request.signal}),
                 MinutesService.getOfficials({strict:true,signal:request.signal})
             ]);
             if (!isMinutesListCurrent(request)) return;
@@ -4176,17 +4282,17 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                         <div class="btn-group">
                             <button onclick="openMinutePreview('${m.id}')" class="btn btn-gray">🔎 미리보기</button>
                             ${canEditCopy ? `<button onclick="openMinuteEdit('${m.id}', true)" class="btn btn-gray">✏️ 문구 수정</button>` : ''}
-                            ${m.requires_sign && signedCount === 0 ? `<button onclick="openSignerEditor('${m.id}')" class="btn btn-blue">👥 서명자 수정</button>` : ''}
+                            ${m.requires_sign && signedCount === 0 ? `<button data-board-sign onclick="openSignerEditor('${m.id}')" class="btn btn-blue">👥 서명자 수정</button>` : ''}
                             ${m.meeting_outcome !== 'NOT_HELD' ? `<button onclick="openAttachPicker('${m.id}')" class="btn btn-gray">📎 첨부 업로드</button>` : ''}
                             ${m.meeting_outcome !== 'NOT_HELD' && Array.isArray(m.file_urls) && m.file_urls.length > 0 ? `<button onclick="clearAttachments('${m.id}')" class="btn btn-gray">🧹 첨부 초기화</button>` : ''}
-                            ${m.requires_sign && m.status === 'OPEN' && signedCount < totalCount ? `<button onclick="remindMinuteSigners('${m.id}')" class="btn btn-blue">🔔 리마인드</button>` : ''}
+                            ${m.requires_sign && m.status === 'OPEN' && signedCount < totalCount ? `<button data-board-sign onclick="remindMinuteSigners('${m.id}')" class="btn btn-blue">🔔 리마인드</button>` : ''}
                             ${m.requires_sign ? (m.status === 'OPEN'
-                                ? `<button onclick="toggleStatus('${m.id}', 'CLOSED', ${canClose})" class="btn btn-gray" ${canClose ? '' : 'disabled'}>${signedCount === 0 ? '👁️ 열람모드 전환' : '🔒 마감하기'}</button>`
-                                : `${signedCount === 0 ? `<button onclick="toggleStatus('${m.id}', 'OPEN')" class="btn btn-gray">▶️ 서명 개시</button>` : ''}`) : ''}
+                                ? `<button data-board-sign onclick="toggleStatus('${m.id}', 'CLOSED', ${canClose})" class="btn btn-gray" ${canClose ? '' : 'disabled'}>${signedCount === 0 ? '👁️ 열람모드 전환' : '🔒 마감하기'}</button>`
+                                : `${signedCount === 0 ? `<button data-board-sign onclick="toggleStatus('${m.id}', 'OPEN')" class="btn btn-gray">▶️ 서명 개시</button>` : ''}`) : ''}
                             ${isSignatureCompleted || m.meeting_outcome === 'NOT_HELD' ? `<button onclick="printMinute('${m.id}')" class="btn btn-blue">🖨️ 출력</button>` : ''}
                             ${m.published_at
-                                ? `<button onclick="togglePublish('${m.id}', false)" class="btn btn-gray">🙈 공개 취소</button>`
-                                : `<button onclick="togglePublish('${m.id}', true, ${canPublish})" class="btn ${canPublish ? 'btn-blue' : 'btn-outline'}" ${canPublish ? '' : 'disabled'}>📢 공개하기</button>`
+                                ? `<button data-board-publish onclick="togglePublish('${m.id}', false)" class="btn btn-gray">🙈 공개 취소</button>`
+                                : `<button data-board-publish onclick="togglePublish('${m.id}', true, ${canPublish})" class="btn ${canPublish ? 'btn-blue' : 'btn-outline'}" ${canPublish ? '' : 'disabled'}>📢 공개하기</button>`
                             }
                         </div>
                     </div>
@@ -4278,10 +4384,16 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
         let minuteCreatePending = false;
         window.createMinute = async () => {
             if (minuteCreatePending) return;
+            const ownBoard=boardRoute?boardContext:null;
+            const boardActor=currentUserId;
+            if(boardRoute&&(!ownBoard||ownBoard.status==='CANCELLED'||ownBoard.minuteId||!['meeting','minutes'].includes(boardRoute.stage)
+                ||!window.ErpBoardFlow.approved(ownBoard.approvalStatus)))return showToast('현재 이사회와 승인 공문을 다시 확인해 주세요.');
             minuteCreatePending = true;
             try {
             const draft = await collectMinuteDraft();
             if (draft.error) return showToast(draft.error);
+            if(ownBoard&&(draft.docType!=='MINUTES'||ownBoard.id!==boardContext?.id||ownBoard.coopId!==minutesListOwner.coopId))
+                return showToast('이사회와 현재 조합을 다시 확인해 주세요.');
 
             const fileInput = document.getElementById('in-files');
             const files = Array.from(fileInput?.files || []);
@@ -4295,7 +4407,13 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 fileUrls = urls;
             }
 
-            const { error } = await createOfficialMinuteWithDocNoRetry({
+            if(ownBoard&&(boardActor!==currentUserId||ownBoard.id!==boardContext?.id||ownBoard.coopId!==minutesListOwner.coopId
+                ||window.frameElement?.hidden))return showToast('현재 이사회에서 다시 저장해 주세요. 입력은 유지됩니다.');
+
+            const { error } = ownBoard ? await supabase.rpc('save_board_meeting_minute',{
+                p_package_id:ownBoard.id,p_approval_id:ownBoard.approvalId,p_title:draft.title,p_content:draft.content,
+                p_signers:draft.signerIds,p_files:fileUrls.length?JSON.stringify(fileUrls):null
+            }) : await createOfficialMinuteWithDocNoRetry({
                 title: draft.title,
                 content: draft.content,
                 doc_type: draft.docType,
@@ -4308,8 +4426,14 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 file_urls: fileUrls.length ? fileUrls : null,
                 signer_ids: draft.signerIds
             }, 5, draft.linked?.payload);
-            if(error) showToast(draft.linked ? assemblyMinuteApi.assemblyMinuteError(error,'의사록을 저장하지 못했습니다.') : error.message);
+            if(error) showToast(ownBoard&&error.code==='PT409'?'이사회에 의사록이 이미 연결됐는지 확인해 주세요. 작성 내용은 유지됩니다.':draft.linked ? assemblyMinuteApi.assemblyMinuteError(error,'의사록을 저장하지 못했습니다.') : error.message);
             else {
+                if(ownBoard){
+                    const checked=await refreshBoardContext();
+                    if(!checked.minuteId)throw Error('저장 결과를 확인하지 못했습니다. 입력은 그대로 유지합니다.');
+                    document.getElementById('sub-tab-editor').disabled=true;
+                    window.ErpWorkspaceResume?.checkpoint(document.getElementById('sub-panel-editor'));
+                }
                 showToast("등록되었습니다.");
                 minuteNoticeImporter?.reset();
                 resetAssemblyMinute();
@@ -4324,7 +4448,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 const fileInput = document.getElementById('in-files');
                 if (fileInput) fileInput.value = '';
                 loadMinutes();
-                loadNotices();
+                if(ownBoard)await switchMinutesSubTab('manage');else loadNotices();
             }
             } catch(error) { showToast(error?.message || '의사록을 저장하지 못했습니다.'); }
             finally { minuteCreatePending = false; }
@@ -4442,6 +4566,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
 
         // [기능] 상태 변경
         window.toggleStatus = async (id, status, allow = true) => {
+            if(boardRoute&&(boardContext?.minuteId!==id||boardRoute.stage!=='signature'))return;
             if (!allow) {
                 showToast('일부 서명이 진행된 문서는 마감할 수 없습니다.');
                 return;
@@ -4468,6 +4593,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                         return;
                     }
                 }
+                if(boardRoute)await refreshBoardContext().catch(error=>boardText(error.message));
                 loadMinutes();
             }
         };
@@ -4487,6 +4613,14 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
 
         // [기능] 공개/비공개
         window.togglePublish = async (id, publish, allow = true) => {
+            if(boardRoute){
+                if(id!==boardContext?.minuteId||boardRoute.stage!=='publish')return;
+                if(!await showConfirm(publish?'서명이 끝난 이사회 의사록을 조합원에게 공개할까요?':'이사회 의사록 공개를 취소할까요?'))return;
+                let checked;
+                try{checked=await refreshBoardContext();}catch(error){return showToast(error.message);}
+                if(checked.minuteId!==id||(publish&&(checked.minuteStatus!=='CLOSED'||!checked.required||checked.signed!==checked.required)))
+                    return showToast('서명 마감 상태를 확인해 주세요.');
+            }
             if (!allow) {
                 showToast('미서명자가 있어 공개할 수 없습니다.');
                 return;
@@ -4494,8 +4628,9 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             const { error } = await MinutesService.togglePublish(id, publish, currentUserId);
             if (error) showToast(error.message);
             else {
+                if(boardRoute)await refreshBoardContext().catch(error=>boardText(error.message));
                 loadMinutes();
-                loadAssemblyMaterials();
+                if(!boardRoute)loadAssemblyMaterials();
             }
         };
 
