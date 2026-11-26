@@ -1543,9 +1543,11 @@ transform: translateY(-2px);
 border: 2px solid #0d6efd !important;
 z-index: 5;
 }
-.portal-edu-pilot-dialog{width:min(36rem,calc(100% - 1.5rem));max-height:calc(100dvh - 1.5rem);overflow:auto;background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#212529)}
-.portal-edu-pilot-dialog::backdrop{background:rgba(0,0,0,.5)}
-.portal-edu-pilot-dialog [hidden]{display:none!important}
+.portal-education-workbench{width:min(73rem,calc(100% - .75rem));height:min(54rem,calc(100dvh - .75rem));max-height:none;padding:0;overflow:hidden;background:var(--bs-body-bg,#fff);color:var(--bs-body-color,#212529)}
+.portal-education-workbench[open]{display:flex;flex-direction:column}
+.portal-education-workbench::backdrop{background:rgba(0,0,0,.5)}
+.portal-education-workbench iframe{flex:1;width:100%;min-height:0;border:0}
+.portal-education-workbench iframe[hidden]{display:none!important}
 </style>
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-TR217L7JN9"></script>
@@ -5737,64 +5739,74 @@ if(!hcrecReferralProfile&&helper?.isPublic(currentMemberCoopId))hcrecReferralPro
 hcrecReferralProfile?.sync();
 }
 const YONGIN_COOP_ID = 'a4e65bb0-aa8e-4cef-a895-cd7865a67fef';
-let memberEducationPilotOwner = null, memberEducationPilotAsset = null;
+let memberEducationPilotOwner = null, memberEducationWindow = null;
 function invalidateMemberEducationPilot() {
     memberEducationPilotOwner = null;
     document.getElementById('memberEducationPilotCard').classList.add('hidden');
     updateQuickLinksLayout();
-    window.MemberEducationPortal?.close();
+    if(memberEducationWindow){
+        memberEducationWindow.dialog.close();
+        memberEducationWindow.dialog.remove();
+        memberEducationWindow=null;
+    }
+}
+function readMemberEducationAccess() {
+    return _supabase.rpc('education_flow_manage_v1',{p_action:'available',p_membership:true});
 }
 async function syncMemberEducationPilot(currentProfileLoad) {
-    const profile = getRootMemberProfileId(), actor = curAuth?.id;
-    const current = () => currentProfileLoad() && currentMemberCoopId === YONGIN_COOP_ID
+    const profile = getRootMemberProfileId(), actor = curAuth?.id, coop=currentMemberCoopId;
+    const current = () => currentProfileLoad() && !!coop && currentMemberCoopId === coop
         && !!actor && curAuth?.id === actor && !!profile && curMem?.id === profile && getRootMemberProfileId() === profile
         && curMem?.auth_user_id === actor && isCoopRuntimeModuleEnabled('education');
     if (!current()) return;
-    const rpc = args => _supabase.rpc('education_portal_pilot_v2', {...args,p_profile:profile});
     try {
-        const {data,error} = await rpc({p_action:'availability'});
-        if (error || !current() || data?.available !== true) return;
-        memberEducationPilotOwner = {current,rpc};
+        const {data,error}=await readMemberEducationAccess();
+        if (error || !current() || data?.available !== true || data.coop_id!==coop || data.profile_id!==profile) return;
+        memberEducationPilotOwner = {current,coop,profile};
         document.getElementById('memberEducationPilotCard').classList.remove('hidden');
         updateQuickLinksLayout();
     } catch (_) { /* No feature access on an unknown response. */ }
 }
-function loadMemberEducationAsset(name,src,integrity) {
-    if (window[name]) return Promise.resolve();
-    return new Promise((resolve,reject) => {
-        const tag = document.createElement('script');
-        const end = ok => {
-            clearTimeout(timer);
-            if (ok) resolve(); else { tag.remove(); reject(new Error('EDUCATION_PILOT_ASSET')); }
-        };
-        const timer = setTimeout(() => end(false),10000);
-        tag.onload = () => end(!!window[name]);
-        tag.onerror = () => end(false);
-        tag.src = src;
-        tag.integrity = integrity;
-        tag.crossOrigin = 'anonymous';
-        document.head.append(tag);
-    });
-}
 async function openMemberEducationPilot(trigger) {
-    const owner = memberEducationPilotOwner;
-    const current = () => !!owner && owner === memberEducationPilotOwner && owner.current();
-    if (!current() || trigger.disabled) return;
-    trigger.disabled = true;
-    try {
-        if (!memberEducationPilotAsset && !(window.MemberEducationPortal && window.CoopEducationEventForm)) {
-            memberEducationPilotAsset = Promise.allSettled([
-                loadMemberEducationAsset('CoopEducationEventForm','/shared/education_event_form_v1.js','sha384-X9b9pAI1Nd8n7UkjAFZEjslKdfyei5mw0G6EquGotvT8X2OAnJze4Lv/v1UAn3Um'),
-                loadMemberEducationAsset('MemberEducationPortal','/shared/member_education_portal_v3.js','sha384-volLvdHlarL4XSDaqDohxNc0rQE2dm2HjZeq+pVgHSYio1zOsQn94siYr4iSaJM0')
-            ]).then(results => {
-                if (results.some(result => result.status !== 'fulfilled')) throw new Error('EDUCATION_PILOT_ASSET');
-            }).finally(() => { memberEducationPilotAsset = null; });
+    const owner=memberEducationPilotOwner;
+    const current=()=>!!owner&&owner===memberEducationPilotOwner&&owner.current();
+    if(!current()||trigger.disabled)return;
+    trigger.disabled=true;
+    try{
+        const {data,error}=await readMemberEducationAccess();
+        if(!current())return;
+        if(error)throw error;
+        if(data?.available!==true||data.coop_id!==owner.coop||data.profile_id!==owner.profile){
+            invalidateMemberEducationPilot();return;
         }
-        await memberEducationPilotAsset;
-        if (current()) window.MemberEducationPortal.open({rpc:owner.rpc,current,trigger});
-    } catch (_) {
-        if (current()) trigger.textContent = '교육 관리 다시 열기';
-    } finally { trigger.disabled = false; }
+        if(!memberEducationWindow){
+            const dialog=document.createElement('dialog');
+            dialog.className='portal-education-workbench border-0 rounded-4 shadow';
+            const header=document.createElement('header');
+            header.className='d-flex justify-content-between align-items-center px-3 py-2 border-bottom';
+            const label=document.createElement('h2');
+            label.textContent='교육 관리';label.id='memberEducationWindowTitle';label.className='h5 mb-0';
+            dialog.setAttribute('aria-labelledby',label.id);
+            const close=document.createElement('button');
+            close.type='button';close.className='btn btn-outline-secondary btn-sm';close.textContent='닫기';
+            close.onclick=()=>dialog.close();
+            header.append(label,close);
+            const frame=document.createElement('iframe');
+            frame.title='교육·행사 관리';
+            frame.referrerPolicy='no-referrer';
+            frame.src='/erp/participation.html?view=education&embedded=1&educationPortal=1';
+            dialog.append(header,frame);document.body.append(dialog);
+            dialog.addEventListener('close',()=>{
+                frame.hidden=true;
+                if(current()&&trigger.isConnected)trigger.focus({preventScroll:true});
+            });
+            memberEducationWindow={dialog,frame};
+        }
+        memberEducationWindow.frame.hidden=false;
+        if(!memberEducationWindow.dialog.open)memberEducationWindow.dialog.showModal();
+    }catch(_){
+        if(current())trigger.textContent='교육 관리 다시 열기';
+    }finally{trigger.disabled=false;}
 }
 async function loadDashboardData(uuid, options = {}) {
 hcrecReferralProfile?.clear();

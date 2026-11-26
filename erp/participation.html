@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.5.4 | 교육 등록 설정 -->
+<!-- Version: v1.6.0 | 교육 QR · 공용 교육관리 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.5.4 | participation.html');</script>
+  <script>console.log('[Version] v1.6.0 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -208,6 +208,21 @@
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 <script src="/shared/booth_guestbook_admin.js?v=1.2.0" integrity="sha384-5WtMS6fw9k6+SBnRU3QejzkVFjiRgswC4vJRj3wYSn4LFamKTQYsyo1cAIKoL8Iz" crossorigin="anonymous" defer></script>
 <script src="/shared/participation_event_archive.js?v=1.2.0" integrity="sha384-9MO/3bc4guQJdIKhKnhytIEJo9OvSRLef3WQbiwzcHHI/xDnaFcukHxLcCkgqehB" crossorigin="anonymous" defer></script>
+  <style>
+    #educationFlowPrintSheet{display:none}
+    .participation-committee-portal #educationMemberSearch,.participation-committee-portal #erpInternalFilesDetails,
+    .participation-committee-portal #openSiteActivityDraftBtn,.participation-committee-portal #participationPageGuide,
+    .participation-committee-portal [data-link-manual-attendee],.participation-committee-portal [data-delete-manual-attendee],
+    .participation-committee-portal [data-link-guest],.participation-committee-portal [data-delete-guest],
+    .participation-committee-portal [data-remove-attendee],.participation-committee-portal [data-actual-attendee]{display:none!important}
+    .participation-committee-portal #participationArchiveTab,.participation-committee-portal #participationMainLink{display:none!important}
+    @media print{
+      body.print-education-flow > *{display:none!important}
+      body.print-education-flow #educationFlowPrintSheet{display:block!important;margin:18mm auto 0;text-align:center;color:#000;overflow-wrap:anywhere}
+      .education-flow-print-code{margin:16mm auto;width:110mm;height:110mm}
+      .education-flow-print-code img,.education-flow-print-code canvas{max-width:100%;height:auto}
+    }
+  </style>
   <style>
     #participationArchivePane [hidden],.archive-preview [hidden]{display:none!important}
     .archive-tablist:not([hidden]){display:flex;gap:.45rem;margin:0 0 1rem;padding:.35rem;border:1px solid var(--line);border-radius:1rem;background:#f6f9fa}
@@ -677,9 +692,12 @@
             </div>
           </div>
 
+          <details class="form-section" id="educationApplicationPanel" hidden>
+            <summary class="form-section-title mb-2">1. 사전 신청 QR</summary><div data-controls></div>
+          </details>
           <div class="form-section d-none" id="educationQrSection">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-              <div class="form-section-title mb-0">교육 출석</div>
+              <div class="form-section-title mb-0">2. 현장 출석 QR</div>
               <button type="button" class="btn btn-sm btn-outline-success d-none" id="printEducationRosterBtn">참석부 출력</button>
             </div>
             <div class="alert alert-success d-none mb-0" id="humanitiesLinkedQrMessage">모두의 인문학에서 불러온 교육입니다. 현장 체크인은 모두의 인문학 QR을 사용하고, ERP 참석부는 계속 출력할 수 있습니다.</div>
@@ -700,6 +718,9 @@
               </div>
             </div>
           </div>
+          <details class="form-section" id="educationFeedbackPanel" hidden>
+            <summary class="form-section-title mb-2">3. 익명 피드백 QR</summary><div data-controls></div>
+          </details>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-danger me-auto d-none" id="deleteEventBtn">행사 삭제</button>
@@ -763,7 +784,9 @@
     </div>
   </div>
 
+  <div id="educationFlowPrintSheet"></div>
   <script src="/shared/education_event_form_v1.js" integrity="sha384-X9b9pAI1Nd8n7UkjAFZEjslKdfyei5mw0G6EquGotvT8X2OAnJze4Lv/v1UAn3Um" crossorigin="anonymous" defer></script>
+  <script src="/erp/education_flow_controls_v1.js" integrity="sha384-FBMhJnFim0T7DPq+gbbzh07ksI76LWGpcZKMlGeRsf5xBop+a0QDtY44qXbEnlOQ" crossorigin="anonymous" defer></script>
   <script src="/erp/workflow_assets_print_v4.js" integrity="sha384-BTXIW3vA3w0C0fYVv0ieFexaJTMR+PfA97OFkFwjejtZdpISj/ddDzT4cZWEF3eB" crossorigin="anonymous" defer></script>
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -799,11 +822,15 @@
       }
     })();
     const PARTICIPATION_EDUCATION_VIEW = PARTICIPATION_VIEW === 'education';
+    const PARTICIPATION_COMMITTEE = PARTICIPATION_EDUCATION_VIEW && window.top!==window.self
+      && new URLSearchParams(window.location.search).get('educationPortal')==='1';
     const PARTICIPATION_ROUTE_ORIGINS = window.CoopRouteGuard
       ? window.CoopRouteGuard.buildSiteOrigins(window.location)
       : { publicOrigin:window.location.origin };
     const PARTICIPATION_PUBLIC_ORIGIN = String(PARTICIPATION_ROUTE_ORIGINS.publicOrigin || 'https://www.yonginsolar.kr').replace(/\/+$/, '');
 
+    const educationCommitteeRpc=(p_action,p_event=null,p_fields={})=>_supabase.rpc('education_committee_workbench_v1',{p_action,p_event,p_fields});
+    const educationFlowRpc=(p_action,p_event=null,p_fields={})=>_supabase.rpc('education_flow_manage_v1',{p_action,p_event,p_membership:PARTICIPATION_COMMITTEE,p_fields});
     let dashboardData = { coop_id:null, events:[], sources:[], officials:[] };
     let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
     let humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
@@ -812,7 +839,7 @@
     let humanitiesImportReadRevision = 0;
     let humanitiesLinkReadRevision = 0;
     function humanitiesSourceOwner() { return JSON.stringify([participationReadOwner.userId,participationReadOwner.coopId,participationReadOwner.revision]); }
-    function isHumanitiesCoop() { return !!participationReadOwner.userId && participationReadOwner.coopId === YONGIN_COOP_ID; }
+    function isHumanitiesCoop() { return !PARTICIPATION_COMMITTEE && !!participationReadOwner.userId && participationReadOwner.coopId === YONGIN_COOP_ID; }
     function canUseHumanitiesSource() { return isHumanitiesCoop() && humanitiesSourceState.owner===humanitiesSourceOwner() && humanitiesSourceState.enabled; }
     function renderHumanitiesSourceControls() {
       document.getElementById('humanitiesImportSection').classList.toggle('d-none', !canUseHumanitiesSource() || document.getElementById('eventType').value!=='EDUCATION' || !!formState.eventId);
@@ -849,6 +876,7 @@
     let pendingManualAttendeeLinkId = null;
     let eventModalInstance = null;
     let eventFields = null;
+    let educationFlowControls = null;
     let educationDetailState = { revision:0, eventId:null, controller:null, trigger:null, open:false };
     let lightboxReturnFocus = null;
     let lightboxStoredPhoto = null;
@@ -1190,6 +1218,7 @@
     async function loadParticipationBranding(coopId) {
       const safeCoopId = String(coopId || '').trim();
       if (!safeCoopId) return;
+      if (PARTICIPATION_COMMITTEE) return safeCoopId===participationReadOwner.coopId&&!window.frameElement?.hidden;
       if (participationBranding.loaded && participationBranding.coopId === safeCoopId) return true;
       if(participationBrandingPending?.coopId===safeCoopId)return participationBrandingPending.promise;
       const state={coopId:safeCoopId, companyName:'협동조합', logoUrl:'', loaded:false};
@@ -1612,7 +1641,8 @@
               ${required > 0 ? `<span class="stat-pill">서명 ${signed}/${required}</span>` : ''}
               ${fileCount > 0 ? `<span class="stat-pill">첨부 ${fileCount}</span>` : ''}
               ${PARTICIPATION_EDUCATION_VIEW ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-view-education="${escapeHtml(row.id)}">상세 보기</button>` : ''}
-              <button type="button" class="btn btn-sm btn-outline-primary" data-edit-event="${escapeHtml(row.id)}">확인·수정</button>
+              ${PARTICIPATION_EDUCATION_VIEW && row.ends_at && Date.parse(row.ends_at)<=Date.now() ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-copy-education="${escapeHtml(row.id)}">양식 복사</button>` : ''}
+              ${!PARTICIPATION_COMMITTEE || row.editable===true ? `<button type="button" class="btn btn-sm btn-outline-primary" data-edit-event="${escapeHtml(row.id)}">확인·수정</button>` : ''}
             </div>
           </article>`;
       }).join('');
@@ -1621,6 +1651,9 @@
       });
       list.querySelectorAll('[data-view-education]').forEach(function(button) {
         button.addEventListener('click', function() { openEducationDetail(button.dataset.viewEducation, button); });
+      });
+      list.querySelectorAll('[data-copy-education]').forEach(button=>{
+        button.addEventListener('click',()=>void copyEducationTemplate(button.dataset.copyEducation));
       });
     } // End of renderEvents
 
@@ -1757,8 +1790,11 @@
       const isEducation = document.getElementById('eventType').value === 'EDUCATION';
       section.classList.toggle('d-none', !isEducation);
       if (!isEducation) return;
-      button.disabled = !formState.eventId || formState.saving;
-      help.textContent = formState.eventId
+      const afterEnd=!!formState.flowInfo?.endsAt && Date.parse(formState.flowInfo.endsAt)<=Date.now();
+      button.disabled = !formState.eventId || formState.saving || (PARTICIPATION_COMMITTEE&&!afterEnd);
+      help.textContent = PARTICIPATION_COMMITTEE&&formState.eventId&&!afterEnd
+        ? '교육이 끝난 뒤 누락된 참석자를 추가할 수 있습니다.'
+        : formState.eventId
         ? 'QR 개인정보 동의 기록과 별도로 관리합니다. 이름과 비고는 교육일로부터 최대 6개월 뒤 삭제하며, 가입 후에는 관리자가 같은 사람인지 확인하고 연결합니다.'
         : '교육을 먼저 저장하면 비조합원 참석자를 추가할 수 있습니다. 저장이 끝나면 이 입력칸이 바로 활성화됩니다.';
     } // End of syncManualEducationAttendeeUi
@@ -2380,7 +2416,9 @@
       formState.saving = true;
       showLoading(true, '새 QR을 만드는 중...');
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_rotate_education_qr', { p_event_id:formState.eventId });
+        const { data, error } = await (PARTICIPATION_COMMITTEE
+          ?educationCommitteeRpc('rotate_attendance',formState.eventId)
+          :_supabase.rpc('participation_admin_rotate_education_qr', { p_event_id:formState.eventId }));
         if (error) throw error;
         formState.qrToken = data?.qr_token || null;
         renderEducationQr();
@@ -2468,6 +2506,12 @@
     function educationPlace(location,addressDetail) {
       return [location,addressDetail].map(value=>String(value||'').trim()).filter(Boolean).join(' ');
     }
+    function educationSavedFlowInfo(event) {
+      if(event.event_type!=='EDUCATION')return null;
+      return {id:event.id,title:event.title,endsAt:event.ends_at,revision:event.updated_at,
+        location:educationPlace(event.location,event.education_address_detail),
+        schedule:[formatKstDateTime(event.starts_at,''),formatKstDateTime(event.ends_at,'')].filter(Boolean).join(' ~ ')};
+    }
 
     function setEventTypeUi(type) {
       const education = type === 'EDUCATION';
@@ -2522,6 +2566,7 @@
       humanitiesPhotoRenderVersion += 1;linkedPhotoPaths = new Set();
       revokeNewPhotoPreviewUrls();
       formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
+      educationFlowControls?.reset();
       humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
       humanitiesImportState = { courses:[], loading:false, panelOpen:false, selectedCourseId:null };
       document.getElementById('includeHumanitiesManual').checked = false;
@@ -2597,7 +2642,9 @@
       const timer = setTimeout(() => controller.abort(), 15000);
       try {
         // The existing server RPC retains its Auth, host, tenant and education permission checks.
-        const { data, error } = await _supabase.rpc('participation_admin_get_event_v2', { p_event_id:eventId }).abortSignal(controller.signal);
+        const query = PARTICIPATION_COMMITTEE ? educationCommitteeRpc('get',eventId)
+          : _supabase.rpc('participation_admin_get_event_v2', { p_event_id:eventId });
+        const { data, error } = await (query.abortSignal ? query.abortSignal(controller.signal) : query);
         if (!current()) return;
         if (error) throw error;
         const event = data?.event;
@@ -2660,6 +2707,7 @@
         if(PARTICIPATION_EDUCATION_VIEW&&eventDraftDirty(draft)){
           const prepared=prepareEventDraftFiles(draft);restoreEventDraft(draft,prepared);
         }else{activeEventDraft=null;resetEventForm();bindEventDraft(key);}
+        educationFlowControls?.reset();
         eventModalInstance.show();
       } catch (error) {
         if(PARTICIPATION_EDUCATION_VIEW&&(revision!==eventOpenRevision||window.frameElement?.hidden))return;
@@ -2668,6 +2716,34 @@
         if (revision === eventOpenRevision) showLoading(false);
       }
     } // End of openNewEvent
+
+    async function copyEducationTemplate(eventId) {
+      if(!eventDraftOwner()||formState.saving)return;
+      const owner={...participationReadOwner};
+      const revision=++eventOpenRevision;
+      const draft=eventDrafts.get(eventDraftKey(null));
+      if(eventDraftDirty(draft)){
+        showAlert('pageAlert','작성 중인 새 교육 초안이 있습니다. 신규 교육 입력에서 먼저 저장하거나 버려 주세요.','warning');
+        return;
+      }
+      showLoading(true,'지난 교육 양식을 불러오는 중...');
+      try{
+        const {data,error}=await (PARTICIPATION_COMMITTEE ? educationCommitteeRpc('get',eventId)
+          :_supabase.rpc('participation_admin_get_event_v2',{p_event_id:eventId}));
+        const e=data?.event;
+        if(revision!==eventOpenRevision||!participationReadStillCurrent(owner))return;
+        if(error||!e||e.id!==eventId||e.event_type!=='EDUCATION'||!e.ends_at||Date.parse(e.ends_at)>Date.now())throw new Error();
+        activeEventDraft=null;resetEventForm();bindEventDraft(eventDraftKey(null));
+        document.getElementById('eventTitle').value=e.title||'';
+        document.getElementById('eventLocation').value=e.location||'';
+        document.getElementById('educationContent').value=e.education_content||'';
+        document.getElementById('eventInstructor').value=e.instructor||'';
+        resetEducationRegistrationOptions({...e,education_guest_registration:false});
+        rememberEventDraft();
+        eventModalInstance.show();
+      }catch(_){if(revision===eventOpenRevision&&participationReadStillCurrent(owner))showAlert('pageAlert','지난 교육 양식을 불러오지 못했습니다.');}
+      finally{if(revision===eventOpenRevision)showLoading(false);}
+    }
 
     async function openEditEvent(eventId, savedDraft = null) {
       if(PARTICIPATION_EDUCATION_VIEW&&(!eventDraftOwner()||formState.saving&&savedDraft!==activeEventDraft))return;
@@ -2682,19 +2758,24 @@
       showLoading(true, '행사 정보를 불러오는 중...');
       showAlert('pageAlert', '');
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_get_event_v2', { p_event_id:eventId });
+        const { data, error } = await (PARTICIPATION_COMMITTEE ? educationCommitteeRpc('get',eventId)
+          :_supabase.rpc('participation_admin_get_event_v2', { p_event_id:eventId }));
         if (error) throw error;
-        const { data:mediaData, error:mediaError } = await _supabase.rpc('participation_admin_get_event_media', { p_event_id:eventId });
+        const { data:mediaData, error:mediaError } = PARTICIPATION_COMMITTEE ? {}
+          : await _supabase.rpc('participation_admin_get_event_media', { p_event_id:eventId });
         if (mediaError) throw mediaError;
         const event = data?.event || null;
         if (!event) throw new Error('행사 정보를 찾을 수 없습니다.');
+        if(PARTICIPATION_COMMITTEE && event.editable!==true)throw new Error('내가 만든 교육만 수정할 수 있습니다.');
         if (event.event_type !== 'EDUCATION') await ensureMeetingContext();
         if (revision !== eventOpenRevision || !participationReadStillCurrent(owner)) return;
         if(draft&&snapshot!==eventDraftSignature(draft))return;
         if(prepared){
           draft.form.currentFiles=Array.isArray(mediaData?.files)?mediaData.files:(data.files||[]);
           draft.form.qrToken=event.qr_token||null;
+          draft.form.flowInfo=educationSavedFlowInfo(event);
           restoreEventDraft(draft,prepared);
+          educationFlowControls?.reset();
           await renderCurrentFiles();
           if(revision===eventOpenRevision&&participationReadStillCurrent(owner))eventModalInstance.show();
           return;
@@ -2731,6 +2812,7 @@
           manualRequestPayload:'',
           currentFiles:Array.isArray(mediaData?.files) ? mediaData.files : (data.files || []),
           qrToken:event.qr_token || null,
+          flowInfo:educationSavedFlowInfo(event),
           saving:false
         };
         humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
@@ -2759,12 +2841,13 @@
         document.getElementById('manualAttendeeNote').value = '';
         document.getElementById('siteActivityPhotoSearch').value = '';
         document.getElementById('siteActivityPhotoCandidates').innerHTML = '<div class="text-muted small">추천 소식을 찾는 중입니다.</div>';
-        document.getElementById('deleteEventBtn').classList.remove('d-none');
+        document.getElementById('deleteEventBtn').classList.toggle('d-none',PARTICIPATION_COMMITTEE&&event.delete_pending===true);
         showAlert('formAlert', '');
         setEventTypeUi(event.event_type);
         renderSourceOptions(event.event_type, event.source_minute_id || 'MANUAL');
-        await Promise.all([renderCurrentFiles(), loadHumanitiesLink(false), loadSiteActivityPhotoCandidates()]);
+        await Promise.all([renderCurrentFiles(),...(PARTICIPATION_COMMITTEE?[]:[loadHumanitiesLink(false),loadSiteActivityPhotoCandidates()])]);
         if (revision !== eventOpenRevision || !participationReadStillCurrent(owner)) return;
+        educationFlowControls?.reset();
         bindEventDraft(draftKey);
         eventModalInstance.show();
       } catch (error) {
@@ -3053,6 +3136,8 @@
         return;
       }
       if (formState.saving) return;
+      const targetForm=formState, targetOwner={...participationReadOwner}, targetVisit=eventDraftVisit;
+      const current=()=>formState===targetForm&&participationReadStillCurrent(targetOwner)&&targetVisit===eventDraftVisit;
       const nameInput = document.getElementById('manualAttendeeName');
       const noteInput = document.getElementById('manualAttendeeNote');
       const displayName = String(nameInput.value || '').replace(/\s+/g, ' ').trim();
@@ -3072,34 +3157,42 @@
       syncManualEducationAttendeeUi();
       showLoading(true, '비조합원 참석자를 수기 명부에 추가하는 중...');
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_add_manual_education_attendee', {
+        const { data, error } = await (PARTICIPATION_COMMITTEE
+          ? educationCommitteeRpc('manual',eventId,{name:displayName,note:note||null,request:formState.manualRequestKey})
+          : _supabase.rpc('participation_admin_add_manual_education_attendee', {
           p_event_id:eventId,
           p_display_name:displayName,
           p_note:note || null,
           p_request_key:formState.manualRequestKey
-        });
+        }));
         if (error) throw error;
+        if(!current())return;
         nameInput.value = '';
         noteInput.value = '';
         formState.manualRequestKey = null;
         formState.manualRequestPayload = '';
         formState.saving = false;
         await loadDashboard(false);
+        if(!current())return;
         await openEditEvent(eventId);
+        if(!participationReadStillCurrent(targetOwner)||targetVisit!==eventDraftVisit||formState.eventId!==eventId)return;
         showAlert(
           'formAlert',
           data?.duplicate ? '이미 처리된 요청이라 기존 수기 참석자 기록을 그대로 확인했습니다.' : '비조합원 참석자를 수기 명부에 추가했습니다.',
           data?.duplicate ? 'info' : 'success'
         );
       } catch (error) {
+        if(!current())return;
         const message = String(error?.message || '비조합원 참석자를 추가하지 못했습니다.');
         showAlert('formAlert', message.includes('RETENTION_EXPIRED')
           ? '교육일로부터 6개월이 지나 이름을 새로 보관할 수 없습니다.'
           : message, 'danger');
       } finally {
-        formState.saving = false;
-        syncManualEducationAttendeeUi();
-        showLoading(false);
+        targetForm.saving = false;
+        if(participationReadStillCurrent(targetOwner)&&targetVisit===eventDraftVisit){
+          syncManualEducationAttendeeUi();
+          showLoading(false);
+        }
       }
     } // End of addManualEducationAttendee
 
@@ -3711,6 +3804,15 @@
             });
             if (error) throw new Error('교육은 불러왔지만 등록 설정을 저장하지 못했습니다. 저장을 다시 누르면 설정만 확인합니다.');
           }
+        } else if (PARTICIPATION_COMMITTEE) {
+          const {data,error}=await educationCommitteeRpc('save',formState.eventId,{
+            request:formState.requestKey,expected:formState.flowInfo?.revision||null,
+            title:values.title,starts_at:localInputToIso(values.startsAt),ends_at:localInputToIso(values.endsAt),
+            location:values.location,instructor:values.instructor,education_content:values.educationContent,
+            options:values.educationOptions
+          });
+          if(error)throw new Error(error.code==='40001'?'다른 곳에서 수정한 교육입니다. 최신 내용을 확인해 주세요.':error.message);
+          eventId=data?.event_id||null;
         } else {
           const payload = {
             p_event_id:formState.eventId,
@@ -3788,7 +3890,7 @@
     let educationDeleteReviewAsset=null;
     async function openEducationDeleteReviews(trigger) {
       const owner={...participationReadOwner};
-      const current=()=>PARTICIPATION_EDUCATION_VIEW && owner.coopId===YONGIN_COOP_ID
+      const current=()=>PARTICIPATION_EDUCATION_VIEW && !PARTICIPATION_COMMITTEE
         && !!owner.userId && participationReadStillCurrent(owner);
       if(!current()||trigger.disabled)return;
       trigger.disabled=true;
@@ -3799,8 +3901,8 @@
             const end=good=>{clearTimeout(timer);if(good)resolve();else{tag.remove();reject(new Error());}};
             const timer=setTimeout(()=>end(false),10000);
             tag.onload=()=>end(!!window.EducationDeleteReview);tag.onerror=()=>end(false);
-            tag.src=new URL('participation_education_delete_review_v1.js',document.baseURI).href;
-            tag.integrity='sha384-xKYv3+1lGlk/CBaWsp6GWq3pZST9C7uB02/x2rq7NWwEvXY8Bze8Hr8ukGWozv/E';
+            tag.src=new URL('participation_education_delete_review_v2.js',document.baseURI).href;
+            tag.integrity='sha384-qbJh0TnQBpOXeLGm01ic5zCPgRCQRaBNtT9UFczuEfgea54DC/7wjnmaQjfphnaY';
             tag.crossOrigin='anonymous';document.head.append(tag);
           }).finally(()=>{educationDeleteReviewAsset=null;});
         }
@@ -3822,14 +3924,33 @@
 
     async function deleteEvent() {
       if (!formState.eventId || formState.saving) return;
-      if (!(await window.CoopDialog.confirm('이 회의·교육 기록을 삭제할까요? 참석 이력과 첨부파일도 함께 삭제됩니다.'))) return;
+      const targetForm=formState,targetOwner={...participationReadOwner},targetVisit=eventDraftVisit;
+      const current=()=>formState===targetForm&&participationReadStillCurrent(targetOwner)&&targetVisit===eventDraftVisit;
+      const message=PARTICIPATION_COMMITTEE
+        ?'이 교육을 삭제할까요? 신청·출석·피드백이나 첨부가 있으면 담당 직원에게 삭제를 요청합니다.'
+        :'이 회의·교육 기록을 삭제할까요? 참석 이력과 첨부파일도 함께 삭제됩니다.';
+      if (!(await window.CoopDialog.confirm(message))||!current()) return;
       formState.saving = true;
       document.getElementById('saveEventBtn').disabled = true;
       document.getElementById('deleteEventBtn').disabled = true;
       showLoading(true, '행사를 삭제하는 중...');
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_delete_event', { p_event_id:formState.eventId });
+        const { data, error } = await (PARTICIPATION_COMMITTEE
+          ?educationCommitteeRpc('remove',targetForm.eventId,{expected:targetForm.flowInfo?.revision})
+          :_supabase.rpc('participation_admin_delete_event', { p_event_id:formState.eventId }));
         if (error) throw error;
+        if(PARTICIPATION_COMMITTEE) {
+          if(!current())return;
+          if(!['pending','deleted'].includes(data?.state))throw new Error();
+          const pending=data.state==='pending';
+          if(!pending&&activeEventDraft){
+            for(const [key,draft] of eventDrafts){if(draft===activeEventDraft)eventDrafts.delete(key);}
+            activeEventDraft=null;
+          }
+          eventModalInstance.hide();await loadDashboard(false);
+          showAlert('pageAlert',pending?'교육 삭제를 요청했습니다.':'교육을 삭제했습니다.', 'success');
+          return;
+        }
         const storagePaths = [...(Array.isArray(data?.storage_paths) ? data.storage_paths.filter(Boolean).flatMap(function(path){return path.includes('/photo/')?[path,...CoopParticipationImages.paths(path)]:[path];}) : []),...linkedPhotoPaths];
         let storageWarning = '';
         if (storagePaths.length > 0) {
@@ -3855,7 +3976,7 @@
       showAlert('pageAlert', '');
       try {
         const owner = { ...participationReadOwner };
-        const { data, error } = await _supabase.rpc('participation_admin_list_events');
+        const { data, error } = await (PARTICIPATION_COMMITTEE?educationCommitteeRpc('list'):_supabase.rpc('participation_admin_list_events'));
         if (error) throw error;
         if (!participationReadStillCurrent(owner)) return;
         if (data?.coop_id !== owner.coopId) throw new Error('현재 조합을 다시 확인해 주세요.');
@@ -3887,6 +4008,14 @@
         return;
       }
       eventFields = sharedForm.mount(document.getElementById('eventFieldsSlot'));
+      if(PARTICIPATION_EDUCATION_VIEW)educationFlowControls=window.EducationFlowControls?.mount({
+        containers:{application:document.getElementById('educationApplicationPanel'),feedback:document.getElementById('educationFeedbackPanel')},
+        rpc:educationFlowRpc,origin:PARTICIPATION_PUBLIC_ORIGIN,
+        getRecord:()=>humanitiesLinkState.link?.status==='ACTIVE'?null:formState.flowInfo||null,
+        stillCurrent:r=>r===formState.flowInfo&&!!eventDraftOwner()&&!window.frameElement?.hidden&&!formState.saving
+          && document.getElementById('eventModal').classList.contains('show'),
+        confirm:message=>window.CoopDialog.confirm(message)
+      });
       const locationInput = eventFields.fields.get('location');
       const addressGroup = document.createElement('div');
       addressGroup.className = 'input-group';
@@ -3905,6 +4034,7 @@
       document.getElementById('closeEducationPostcodeBtn').addEventListener('click',()=>closeEducationPostcode(true));
       document.getElementById('eventModal').addEventListener('hide.bs.modal',()=>closeEducationPostcode());
       document.body.classList.toggle('participation-embedded', PARTICIPATION_EMBEDDED);
+      document.body.classList.toggle('participation-committee-portal', PARTICIPATION_COMMITTEE);
       document.getElementById('participationPageTitle').textContent = PARTICIPATION_EDUCATION_VIEW ? '교육·행사 관리' : '회의 출석 관리';
       document.getElementById('participationPageSubtitle').textContent = PARTICIPATION_EDUCATION_VIEW
         ? '교육 신규 등록, QR 체크인·알림과 조합원 참가 관리를 한 곳에서 관리합니다.'
@@ -3943,7 +4073,7 @@
       document.getElementById('eventModal').addEventListener('input',rememberEventDraft);
       document.getElementById('eventModal').addEventListener('change',rememberEventDraft);
       document.getElementById('eventModal').addEventListener('hide.bs.modal',rememberEventDraft);
-      const leaveEventDraft=()=>{rememberEventDraft();eventEditorReopen?.cancel();eventDraftVisit++;eventOpenRevision++;sourceReadRevision++;humanitiesLinkReadRevision++;};
+      const leaveEventDraft=()=>{rememberEventDraft();educationFlowControls?.reset();eventEditorReopen?.cancel();eventDraftVisit++;eventOpenRevision++;sourceReadRevision++;humanitiesLinkReadRevision++;};
       if(window.frameElement)new MutationObserver(()=>{if(window.frameElement.hidden)leaveEventDraft();}).observe(window.frameElement,{attributes:true,attributeFilter:['hidden']});
       window.addEventListener('pagehide',leaveEventDraft);
       window.addEventListener('beforeunload',event=>{rememberEventDraft();if(activeEventDraft&&eventDraftDirty(activeEventDraft)){event.preventDefault();event.returnValue='';}});
@@ -3964,6 +4094,7 @@
       });
       document.getElementById('sourceMinute').addEventListener('change', handleSourceMinuteChange);
       document.getElementById('eventModal').addEventListener('hidden.bs.modal', function() {
+        educationFlowControls?.reset();
         eventEditorClosing=false;
         storedPhotoRenderVersion += 1;closeImageLightbox();
         humanitiesPhotoRenderVersion += 1;
@@ -4041,22 +4172,33 @@
 
       const { data:{ session } } = await _supabase.auth.getSession();
       if (!session?.user) {
+        if(PARTICIPATION_COMMITTEE){showLoading(false);showAlert('pageAlert','조합원으로 다시 로그인해 주세요.');return;}
         location.href = `index.html?next=${encodeURIComponent(window.location.href)}`;
         return;
       }
-      const guard = await window.ErpRuntimeGuard.enforce(_supabase, {
-        moduleKeysAny:[PARTICIPATION_EDUCATION_VIEW ? 'education' : 'minutes'],
-        moduleLabel:PARTICIPATION_EDUCATION_VIEW ? '교육·행사 관리' : '회의 출석 관리',
-        redirectUrl:'index.html'
-      });
-      if (!guard.ok) return;
-      participationReadOwner = { userId:session.user.id, coopId:guard.runtime.coop_id, revision:participationReadOwner.revision + 1 };
+      let verifiedCoop;
+      if(PARTICIPATION_COMMITTEE){
+        const {data,error}=await educationFlowRpc('available');
+        if(error||data?.available!==true||!data.coop_id){
+          showLoading(false);showAlert('pageAlert','현재 교육위원 권한을 확인할 수 없습니다.');return;
+        }
+        verifiedCoop=data.coop_id;
+      }else{
+        const guard = await window.ErpRuntimeGuard.enforce(_supabase, {
+          moduleKeysAny:[PARTICIPATION_EDUCATION_VIEW ? 'education' : 'minutes'],
+          moduleLabel:PARTICIPATION_EDUCATION_VIEW ? '교육·행사 관리' : '회의 출석 관리',
+          redirectUrl:'index.html'
+        });
+        if (!guard.ok) return;
+        verifiedCoop=guard.runtime.coop_id;
+      }
+      participationReadOwner = { userId:session.user.id, coopId:verifiedCoop, revision:participationReadOwner.revision + 1 };
       const reviewButton=document.getElementById('educationDeleteReviewsBtn');
-      reviewButton.hidden=!PARTICIPATION_EDUCATION_VIEW || participationReadOwner.coopId!==YONGIN_COOP_ID;
+      reviewButton.hidden=!PARTICIPATION_EDUCATION_VIEW || PARTICIPATION_COMMITTEE;
       reviewButton.onclick=()=>openEducationDeleteReviews(reviewButton);
-      const stopBoothGuestbook = PARTICIPATION_EDUCATION_VIEW && window.location.hostname === 'www.yonginsolar.kr'
+      const stopBoothGuestbook = PARTICIPATION_EDUCATION_VIEW && !PARTICIPATION_COMMITTEE && window.location.hostname === 'www.yonginsolar.kr'
         ? window.BoothGuestbookAdmin?.start(_supabase, () => participationReadOwner) : null;
-      const stopEventArchive = PARTICIPATION_EDUCATION_VIEW ? window.CoopEventArchive?.start(_supabase, () => participationReadOwner, {
+      const stopEventArchive = PARTICIPATION_EDUCATION_VIEW && !PARTICIPATION_COMMITTEE ? window.CoopEventArchive?.start(_supabase, () => participationReadOwner, {
         onEducationLeave:()=>{leaveEventDraft();cancelEducationDetailRead();}
       }) : null;
       _supabase.auth.onAuthStateChange(function(event, nextSession) {
@@ -4081,7 +4223,7 @@
       document.getElementById('eventTypeFilter').value = PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'ALL';
       await loadDashboard(true);
       if(PARTICIPATION_EDUCATION_VIEW)void loadHumanitiesSource();
-      window.ErpWorkspaceResume.register({modules:[PARTICIPATION_EDUCATION_VIEW?'education':'minutes'],busy:()=>formState.saving,refresh:()=>{if(PARTICIPATION_EDUCATION_VIEW)void loadHumanitiesSource();return loadDashboard(false);}});
+      if(!PARTICIPATION_COMMITTEE) window.ErpWorkspaceResume.register({modules:[PARTICIPATION_EDUCATION_VIEW?'education':'minutes'],busy:()=>formState.saving,refresh:()=>{if(PARTICIPATION_EDUCATION_VIEW)void loadHumanitiesSource();return loadDashboard(false);}});
       const linkedEvent = new URLSearchParams(window.location.search).get('event') || '';
       if (PARTICIPATION_EDUCATION_VIEW && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(linkedEvent)) {
         await openEducationDetail(linkedEvent);
