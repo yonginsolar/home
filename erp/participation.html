@@ -502,6 +502,7 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title fs-5 fw-bold" id="eventModalTitle">행사 등록</h2>
+          <span class="badge text-bg-light border ms-2" id="externalEducationBadge" hidden>외부</span>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
         </div>
         <div class="modal-body">
@@ -956,6 +957,7 @@
       document.getElementById('eventModalTitle').textContent=education
         ? attendance?'출석 관리':formState.eventId?'교육 수정':'신규 교육 입력'
         : formState.eventId?'행사 확인·수정':'회의 등록';
+      document.getElementById('externalEducationBadge').hidden=!(education&&formState.externalEducation===true);
       const save=document.getElementById('saveEventBtn');
       save.textContent=attendance?'출석 변경 저장':'저장';
       save.classList.toggle('d-none',attendance&&PARTICIPATION_COMMITTEE);
@@ -1687,7 +1689,7 @@
         if (!PARTICIPATION_EDUCATION_VIEW && !['BOARD', 'DELEGATE_ASSEMBLY'].includes(row.event_type)) return false;
         if (type !== 'ALL' && row.event_type !== type) return false;
         if (!query) return true;
-        return `${row.title || ''} ${row.location || ''} ${eventTypeLabel(row.event_type)} ${row.attendee_search_text || ''}`.toLowerCase().includes(query);
+        return `${row.title || ''} ${row.location || ''} ${eventTypeLabel(row.event_type)} ${row.external_education===true?'외부':''} ${row.attendee_search_text || ''}`.toLowerCase().includes(query);
       });
       if (rows.length === 0) {
         const filtered = !!query || type !== (PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'ALL');
@@ -1710,7 +1712,7 @@
         return `
           <article class="event-row">
             <div>
-              <div class="event-title"><span class="type-badge ${eventTypeClass(row.event_type)}">${eventTypeLabel(row.event_type)}</span>${escapeHtml(row.title)}</div>
+              <div class="event-title"><span class="type-badge ${eventTypeClass(row.event_type)}">${eventTypeLabel(row.event_type)}</span>${row.external_education===true?'<span class="badge text-bg-light border me-1">외부</span>':''}${escapeHtml(row.title)}</div>
               <div class="event-meta"><span>🗓️ ${escapeHtml(timeText)}</span><span>📍 ${escapeHtml(row.location)}</span></div>
             </div>
             <div class="event-stats">
@@ -1846,7 +1848,7 @@
 
     function syncEducationMemberSearchVisibility() {
       const isEducation = document.getElementById('eventType').value === 'EDUCATION';
-      const activeLink = humanitiesLinkState.link?.status === 'ACTIVE';
+      const activeLink = formState.externalEducation===true || humanitiesLinkState.link?.status === 'ACTIVE';
       document.getElementById('educationMemberSearch').classList.remove('d-none');
       document.getElementById('educationMemberHelp').classList.toggle('d-none', !isEducation);
       const emptyState = document.querySelector('[data-education-empty-state]');
@@ -1934,7 +1936,7 @@
       const details = document.getElementById('erpInternalFilesDetails');
       const summary = document.getElementById('erpInternalFilesSummary');
       const isEducation = document.getElementById('eventType').value === 'EDUCATION';
-      const activeLink = humanitiesLinkState.link?.status === 'ACTIVE';
+      const activeLink = formState.externalEducation===true || humanitiesLinkState.link?.status === 'ACTIVE';
       if (isEducation) {
         summary.innerHTML = activeLink
           ? '협동조합 내부 자료·사진 <span class="text-muted fw-normal small">(필요한 경우만)</span>'
@@ -2038,7 +2040,7 @@
       });
     } // End of renderHumanitiesResources
 
-    async function loadHumanitiesLink(showMessage = false) {
+    async function loadHumanitiesLink(showMessage = false, keepFileSection = false) {
       const owner=humanitiesSourceOwner(),eventId=formState.eventId,opening=eventOpenRevision,revision=++humanitiesLinkReadRevision;
       const current=()=>owner===humanitiesSourceOwner()&&eventId===formState.eventId&&opening===eventOpenRevision&&revision===humanitiesLinkReadRevision;
       if (!formState.eventId || document.getElementById('eventType').value !== 'EDUCATION') {
@@ -2060,6 +2062,8 @@
         const searchQuery = String(document.getElementById('humanitiesCourseSearch').value || '').trim();
         const result = await callHumanitiesIntegration('admin_get', { event_id:eventId, search_query:searchQuery });
         if(!current()||!canUseHumanitiesSource())return;
+        const wasExternal=formState.externalEducation;
+        formState.externalEducation=result.link?.status==='ACTIVE';
         humanitiesLinkState = {
           link:result.link || null,
           course:result.humanities_course || null,
@@ -2070,8 +2074,11 @@
           panelOpen:showMessage || humanitiesLinkState.panelOpen,
           loaded:true
         };
+        if(wasExternal!==formState.externalEducation){
+          showEventEditorMode();educationFlowControls?.reset();
+        }
         renderHumanitiesLink();
-        renderHumanitiesResources(true);
+        renderHumanitiesResources(!keepFileSection);
         renderEducationQr();
         if (showMessage) {
           showAlert('humanitiesLinkAlert', humanitiesLinkState.candidates.length
@@ -2220,7 +2227,7 @@
       codeBox.innerHTML = '';
       codeBox.removeAttribute('title');
       rosterPrintButton.classList.toggle('d-none', !formState.eventId);
-      const activeHumanitiesLink = humanitiesLinkState.link?.status === 'ACTIVE';
+      const activeHumanitiesLink = formState.externalEducation===true || humanitiesLinkState.link?.status === 'ACTIVE';
       linkedMessage.classList.toggle('d-none', !activeHumanitiesLink);
       if (activeHumanitiesLink) {
         qrPanel.classList.add('d-none');
@@ -2875,6 +2882,7 @@
     async function openEditEvent(eventId, savedDraft = null, editorView='event', trigger=null) {
       if(trigger)eventEditorTrigger=trigger;
       const attendance=PARTICIPATION_EDUCATION_VIEW&&editorView==='attendance';
+      const fastEducationEdit=PARTICIPATION_EDUCATION_VIEW&&!attendance;
       if(PARTICIPATION_EDUCATION_VIEW&&(!eventDraftOwner()||formState.saving&&savedDraft!==activeEventDraft))return;
       rememberEventDraft();
       const revision = ++eventOpenRevision;
@@ -2892,7 +2900,7 @@
           :_supabase.rpc('participation_admin_get_event_v2', { p_event_id:eventId }));
         if(revision!==eventOpenRevision||!participationReadStillCurrent(owner))return;
         if (error) throw error;
-        const { data:mediaData, error:mediaError } = PARTICIPATION_COMMITTEE ? {}
+        const { data:mediaData, error:mediaError } = PARTICIPATION_COMMITTEE||fastEducationEdit ? {}
           : await _supabase.rpc('participation_admin_get_event_media', { p_event_id:eventId });
         if (mediaError) throw mediaError;
         const event = data?.event || null;
@@ -2903,14 +2911,24 @@
         if (revision !== eventOpenRevision || !participationReadStillCurrent(owner)) return;
         if(draft&&snapshot!==eventDraftSignature(draft))return;
         if(prepared){
-          draft.form.currentFiles=Array.isArray(mediaData?.files)?mediaData.files:(data.files||[]);
+          if(!fastEducationEdit)draft.form.currentFiles=Array.isArray(mediaData?.files)?mediaData.files:(data.files||[]);
           draft.form.qrToken=event.qr_token||null;
+          if(typeof event.external_education==='boolean'){
+            draft.form.externalEducation=event.external_education;
+            if(!event.external_education&&draft.linkState?.link?.status==='ACTIVE')
+              draft.linkState={...draft.linkState,link:null,course:null,sourceWarning:'',loaded:false};
+          }
           if(attendance){
             draft.form.flowInfo=educationSavedFlowInfo(event);
             refreshDraftAttendance(draft.form,data);
           }
           restoreEventDraft(draft,prepared);
           educationFlowControls?.reset();
+          if(fastEducationEdit){
+            eventModalInstance.show();
+            loadEducationEditPanels(formState,owner,revision);
+            return;
+          }
           await renderCurrentFiles();
           if(revision===eventOpenRevision&&participationReadStillCurrent(owner))eventModalInstance.show();
           return;
@@ -2931,6 +2949,7 @@
           currentFiles:Array.isArray(mediaData?.files) ? mediaData.files : (data.files || []),
           qrToken:event.qr_token || null,
           flowInfo:educationSavedFlowInfo(event),
+          externalEducation:event.external_education,
           saving:false
         };
         if(attendance)refreshDraftAttendance(formState,data);
@@ -2964,6 +2983,13 @@
         setEventTypeUi(event.event_type);
         showEventEditorMode();
         renderSourceOptions(event.event_type, event.source_minute_id || 'MANUAL');
+        if(fastEducationEdit){
+          educationFlowControls?.reset();
+          bindEventDraft(draftKey);
+          eventModalInstance.show();
+          loadEducationEditPanels(formState,owner,revision);
+          return;
+        }
         await Promise.all([renderCurrentFiles(),...(PARTICIPATION_COMMITTEE?[]:[loadHumanitiesLink(false),
           ...(!PARTICIPATION_EDUCATION_VIEW?[loadSiteActivityPhotoCandidates()]:[])])]);
         if (revision !== eventOpenRevision || !participationReadStillCurrent(owner)) return;
@@ -2977,6 +3003,33 @@
         if (revision === eventOpenRevision) showLoading(false);
       }
     } // End of openEditEvent
+
+    function loadEducationEditPanels(form,owner,revision) {
+      const current=()=>form===formState&&revision===eventOpenRevision&&participationReadStillCurrent(owner);
+      if(PARTICIPATION_COMMITTEE){void renderCurrentFiles(false);return;}
+      const target=document.getElementById('currentFiles'),remove=document.getElementById('deleteEventBtn');
+      async function media(){
+        form.mediaReady=false;remove.disabled=true;target.textContent='첨부파일을 불러오는 중입니다.';
+        try{
+          const {data,error}=await _supabase.rpc('participation_admin_get_event_media',{p_event_id:form.eventId});
+          if(!current())return;
+          if(error||!Array.isArray(data?.files))throw error||new Error();
+          form.currentFiles=data.files;form.mediaReady=true;
+          remove.disabled=false;
+          await renderCurrentFiles(false);
+        }catch(_){
+          if(!current())return;
+          const retry=document.createElement('button');
+          retry.type='button';retry.className='btn btn-sm btn-outline-secondary ms-2';retry.textContent='다시 확인';
+          retry.onclick=()=>{if(current())void media();};
+          target.replaceChildren(document.createTextNode('첨부파일을 불러오지 못했습니다.'),retry);
+        }
+      }
+      void media();
+      // Only linked ERP events need the external detail lookup on first edit.
+      // If an older database omits the flag, keep its old verification path.
+      if(form.externalEducation!==false)void loadHumanitiesLink(false,true);
+    }
 
     function meetingSourceInputSnapshot() {
       return JSON.stringify(['eventTitle','eventStartsAt','eventEndsAt','eventLocation'].map(function(id) {
@@ -3772,9 +3825,9 @@
       });
     } // End of renderNewPhotoPreviews
 
-    async function renderCurrentFiles() {
-      const renderVersion=++storedPhotoRenderVersion,eventId=formState.eventId;
-      const canContinue=()=>storedPhotoRenderVersion===renderVersion&&formState.eventId===eventId;
+    async function renderCurrentFiles(resetSections = true) {
+      const renderVersion=++storedPhotoRenderVersion,eventId=formState.eventId,opening=eventOpenRevision;
+      const canContinue=()=>storedPhotoRenderVersion===renderVersion&&formState.eventId===eventId&&eventOpenRevision===opening;
       const container = document.getElementById('currentFiles');
       const files = formState.currentFiles || [];
       const rosterContainer=document.getElementById('currentRosterFiles');
@@ -3790,7 +3843,7 @@
       }
       if (files.length === 0) {
         container.innerHTML = '<div class="text-muted small">등록된 첨부파일이 없습니다.</div>';
-        syncEducationFileSections(true);
+        syncEducationFileSections(resetSections);
         return;
       }
       const materials = files.filter(function(file) { return file.file_kind === 'MATERIAL'; });
@@ -3843,7 +3896,7 @@
           image.alt = '미리보기를 지원하지 않는 사진';
         }, { once:true });
       });
-      syncEducationFileSections(true);
+      syncEducationFileSections(resetSections);
     } // End of renderCurrentFiles
 
     function syncEventDateRange() {
@@ -4097,6 +4150,7 @@
     }
 
     async function deleteEvent() {
+      if(PARTICIPATION_EDUCATION_VIEW&&formState.editorView==='event'&&formState.mediaReady===false)return;
       if (!formState.eventId || formState.saving) return;
       const targetForm=formState,targetOwner={...participationReadOwner},targetVisit=eventDraftVisit;
       const current=()=>formState===targetForm&&participationReadStillCurrent(targetOwner)&&targetVisit===eventDraftVisit;
@@ -4188,7 +4242,7 @@
         lists:{application:document.getElementById('educationApplicationListPanel'),feedback:document.getElementById('educationFeedbackListPanel')},
         inAttendance:()=>isEducationAttendance(),
         rpc:educationFlowRpc,origin:PARTICIPATION_PUBLIC_ORIGIN,
-        getRecord:()=>humanitiesLinkState.link?.status==='ACTIVE'?null:formState.flowInfo||null,
+        getRecord:()=>formState.externalEducation===true||humanitiesLinkState.link?.status==='ACTIVE'?null:formState.flowInfo||null,
         stillCurrent:r=>r===formState.flowInfo&&!!eventDraftOwner()&&!window.frameElement?.hidden&&!formState.saving
           && document.getElementById('eventModal').classList.contains('show'),
         confirm:message=>window.CoopDialog.confirm(message)
