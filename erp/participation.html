@@ -1833,16 +1833,19 @@
       document.getElementById('educationMemberSearch').classList.remove('d-none');
       document.getElementById('educationMemberHelp').classList.toggle('d-none', !isEducation);
       const emptyState = document.querySelector('[data-education-empty-state]');
-      if (emptyState) {
-        emptyState.textContent = activeLink
-          ? '모두의 인문학 참석자를 불러오거나 위 검색으로 조합원을 추가할 수 있습니다.'
-          : '위 검색에서 정상 조합원을 참가자로 등록할 수 있습니다.';
-      }
+      if (emptyState) emptyState.textContent = educationAttendanceEmptyText(activeLink);
       const importButton = document.getElementById('importHumanitiesAttendeesBtn');
       importButton.classList.toggle('d-none', !isEducation || !activeLink || !formState.eventId);
       importButton.disabled = humanitiesAttendeeImportRunning || formState.saving;
       document.getElementById('includeHumanitiesManualWrap').classList.toggle('d-none', !isEducation || !activeLink || !formState.eventId);
     } // End of syncEducationMemberSearchVisibility
+
+    function educationAttendanceEmptyText(activeLink) {
+      if(PARTICIPATION_COMMITTEE)return '등록된 참석자가 없습니다.';
+      return activeLink
+        ? '모두의 인문학 참석자를 불러오거나 위 검색으로 조합원을 추가할 수 있습니다.'
+        : '위 검색에서 정상 조합원을 참가자로 등록할 수 있습니다.';
+    }
 
     function syncManualEducationAttendeeUi() {
       const section = document.getElementById('manualEducationAttendeeSection');
@@ -2184,7 +2187,7 @@
       const section = document.getElementById('educationQrSection');
       const type = document.getElementById('eventType').value;
       const education = type === 'EDUCATION';
-      section.classList.toggle('d-none', !education);
+      section.classList.toggle('d-none', !education || !formState.eventId);
       if (!education) return;
 
       const codeBox = document.getElementById('educationQrCode');
@@ -3083,10 +3086,7 @@
         ? `참석 ${(rows.length + guestRows.length + manualRows.length).toLocaleString()}명${guestRows.length + manualRows.length > 0 ? ` · 비조합원 ${(guestRows.length + manualRows.length).toLocaleString()}명` : ''}`
         : `대상 ${targets.length}명 · 참석 ${attended}명${additionalAttended > 0 ? ` · 배석 ${additionalAttended}명` : ''}`;
       if (rows.length === 0 && guestRows.length === 0 && manualRows.length === 0) {
-        const activeHumanitiesLink = humanitiesLinkState.link?.status === 'ACTIVE';
-        const educationEmptyMessage = activeHumanitiesLink
-          ? '모두의 인문학 참석자 불러오기를 누르거나 위 검색으로 조합원을 추가해 주세요.'
-          : '위 검색에서 정상 조합원을 참가자로 등록할 수 있습니다.';
+        const educationEmptyMessage = educationAttendanceEmptyText(humanitiesLinkState.link?.status === 'ACTIVE');
         list.innerHTML = `<div class="text-center text-muted py-4" ${type === 'EDUCATION' ? 'data-education-empty-state' : ''}>${type === 'EDUCATION' ? educationEmptyMessage : '의사록을 선택하거나 참석자·배석자를 검색해 추가하세요.'}</div>`;
         return;
       }
