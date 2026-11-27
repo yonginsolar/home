@@ -10,7 +10,7 @@
   <script>console.log('[Version] ui.20261013.1 | approval.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
-  <script src="/shared/meeting_flow_v2.js" integrity="sha384-NwV1K7sOKyiIdspkrQzjE89s7roX0bygpnNFDEnhI40WvLq5Gjkpm86A9lLbwKXd" crossorigin="anonymous"></script>
+  <script src="/shared/meeting_flow_v3.js" integrity="sha384-xrP1/o96J7il2hiiFp4/vmRbe6KoEgdlJILFsAwB8CYUWcEyKhuJgvuQE5p5YpkC" crossorigin="anonymous"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
   <script>console.log('[Version] v1.2.183 | approval.html');</script>
@@ -14455,6 +14455,7 @@ async function applyApprovalMeetingNotice() {
 }
 
 let boardApprovalReadVersion=0;
+let autoPreparedMeetingDraft='';
 async function refreshBoardApprovalEntry(){
     const context=window.ErpBoardFlow.parse(location.href);
     if(!context||context.stage!=='approval')return;
@@ -14477,7 +14478,7 @@ async function refreshBoardApprovalEntry(){
             if(!['반려','결재취소','취소','회수'].includes(state.approvalStatus))return;
         }
         if(!state.agendaReady){status.textContent='안건을 먼저 저장해 주세요.';return;}
-        if(assembly&&!state.materialsSaved){status.textContent='안건이 담긴 총회 자료집 초안을 먼저 저장해 주세요.';return;}
+        if(!state.materialsReady){status.textContent='안건이 담긴 회의자료를 먼저 확정해 주세요.';return;}
         if(!canImportApprovalMeeting('공문')||!canPerform('approval.submit'))return;
         action.textContent=label+' 소집 공문 작성';action.hidden=false;
         status.textContent=state.title;
@@ -14510,6 +14511,12 @@ async function refreshBoardApprovalEntry(){
             }catch(error){if(current())status.textContent=error.message||'공문을 불러오지 못했습니다.';}
             finally{action.disabled=false;}
         };
+        const autoOwner=JSON.stringify([actor,coopId,context.href]);
+        if(autoPreparedMeetingDraft!==autoOwner&&activeApprovalTab==='draft'&&!window.frameElement?.hidden
+            &&!hasMeaningfulApprovalDraftContentForReplacement()){
+            autoPreparedMeetingDraft=autoOwner;
+            await action.onclick();
+        }
     }catch(error){
         if(!current())return;
         window.ErpBoardFlow.adopt(null);status.textContent=error.message;

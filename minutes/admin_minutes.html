@@ -13,7 +13,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
   <script>console.log('[Version] ui.20261013.1 | admin_minutes.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
-  <script src="/shared/meeting_flow_v2.js" integrity="sha384-NwV1K7sOKyiIdspkrQzjE89s7roX0bygpnNFDEnhI40WvLq5Gjkpm86A9lLbwKXd" crossorigin="anonymous"></script>
+  <script src="/shared/meeting_flow_v3.js" integrity="sha384-xrP1/o96J7il2hiiFp4/vmRbe6KoEgdlJILFsAwB8CYUWcEyKhuJgvuQE5p5YpkC" crossorigin="anonymous"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -26,6 +26,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
         body[data-board-stage] #minute-notice-import,body[data-board-stage] #assembly-minute-open{display:none!important}
         body[data-board-stage]:not([data-board-stage="publish"]) [data-board-publish]{display:none}
         body[data-board-stage]:not([data-board-stage="signature"]) [data-board-sign]{display:none}
+        body[data-board-stage] .container > .tabs,body[data-board-stage="meeting"] #tab-minutes{display:none}
         #boardMinutesStatus{padding:10px 12px;border:1px solid #dce5df;border-radius:8px;margin:10px 0}
         #boardAgendaResults label{display:flex;align-items:center;gap:.65rem;justify-content:space-between;flex-wrap:wrap;margin:.45rem 0}
         #boardAgendaResults select{min-width:7.3rem}
@@ -331,6 +332,10 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
         </div>
         <div id="boardMinutesStatus" hidden role="status"></div>
         <button id="assemblyFlowAction" class="btn btn-gray" type="button" hidden></button>
+        <div id="guidedMeetingActions" class="btn-group" hidden>
+            <button id="guidedMeetingHeld" class="btn btn-blue" type="button">회의 진행함</button>
+            <button id="guidedMeetingNotHeld" class="btn btn-outline" type="button">회의 무산</button>
+        </div>
 
         <div id="tab-minutes" class="tab-panel active">
         <div class="sub-tabs">
@@ -731,9 +736,26 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
         }
         function showFlowContext(row){
             const action=document.getElementById('assemblyFlowAction');action.hidden=true;action.onclick=null;
+            const choices=document.getElementById('guidedMeetingActions');choices.hidden=true;
             if(row.status==='CANCELLED'){boardText('무산된 '+flowName()+'입니다.');return;}
             if(!window.ErpBoardFlow.approved(row.approvalStatus)){boardText('이 회의의 소집 공문 결재가 완료된 뒤 이용할 수 있어요.');return;}
-            if(boardRoute.stage==='notice'){boardText(row.noticePublished?'연결된 공문이 게시되어 있습니다.':'결재 완료 · 게시 설정을 확인하세요.');return;}
+            if(boardRoute.stage==='notice'){boardText(row.documentPublished?'소집 공문이 문서함에 게시됐습니다.':'결재 완료 · 소집 공문을 문서함에 게시하세요.');return;}
+            if(boardRoute.stage==='meeting'){
+                boardText(row.minuteId?'이 회의의 의사록이 등록됐습니다.':window.ErpBoardFlow.canRecord(row)
+                    ?'회의 결과를 선택하세요.':'소집 공문이 문서함에 게시되고 회의 날짜가 지나면 결과를 기록할 수 있어요.');
+                if(!window.ErpBoardFlow.canRecord(row))return;
+                const open=stage=>{
+                    if(boardContext!==row||boardRoute.stage!=='meeting'||window.frameElement?.hidden)return;
+                    window.ErpWorkspaceResume.navigate(window.ErpBoardFlow.url(row.id,stage,boardRoute.kind));
+                };
+                choices.hidden=false;
+                document.getElementById('guidedMeetingHeld').onclick=()=>open('minutes');
+                document.getElementById('guidedMeetingNotHeld').onclick=()=>open('outcome');
+                return;
+            }
+            if(boardRoute.stage==='minutes'&&!row.minuteId&&!window.ErpBoardFlow.canRecord(row)){
+                boardText('소집 공문이 문서함에 게시되고 회의 날짜가 지나면 의사록을 작성할 수 있어요.');return;
+            }
             if(boardRoute.stage==='followups'){
                 if(!assemblyFollowupPermission){boardText('후속 업무 확인 권한이 없습니다.');return;}
                 if(!row.minuteId||row.minuteStatus!=='CLOSED'||!(row.required>0)||row.signed!==row.required){boardText('서명을 마친 총회 의사록에서 후속 업무를 확인할 수 있어요.');return;}
@@ -747,7 +769,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
         }
         async function openBoardMinuteEditor(){
             const row=boardContext;
-            if(!row||row.minuteId||row.status==='CANCELLED'||!window.ErpBoardFlow.approved(row.approvalStatus))return;
+            if(boardRoute.stage!=='minutes'||!row||!window.ErpBoardFlow.canRecord(row))return;
             if(guidedAssembly()&&!row.materialsReady)return;
             await switchMinutesSubTab('editor');
             if(row!==boardContext||!document.getElementById('sub-panel-editor').classList.contains('active'))return;
@@ -3652,7 +3674,10 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             return await MinutesService.updateMinute(existingMinute.id, payload);
         }
 
-        window.applyNoticeChannels = async (id) => {
+        window.applyNoticeChannels = async (id, documentOnly = false) => {
+            const flowOwner=boardContext;
+            if(documentOnly&&(boardRoute?.stage!=='notice'||String(boardContext?.approvalId)!==String(id)
+                ||!window.ErpBoardFlow.approved(boardContext?.approvalStatus)))return;
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
             if (!item) return;
             let approval = item.approval || {};
@@ -3660,7 +3685,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             const key = getNoticeApprovalKey(approval.id);
             const state = getOrInitNoticeChannels(key, {});
             const noticeOn = !!state.notice;
-            const documentOn = !!state.document;
+            const documentOn = documentOnly || !!state.document;
             const purposeError = OfficialNotice.validateChannels(approval.notice_usage, noticeOn, documentOn);
             if (purposeError) { showToast(purposeError); return; }
             if (noticeApplyPending.has(key)) return;
@@ -3676,13 +3701,17 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             const current = await readNoticeDetails(id);
             approval = current.approval;
             notice = current.notice;
+            if(documentOnly&&(boardContext!==flowOwner||boardRoute?.stage!=='notice'||window.frameElement?.hidden
+                ||String(approval?.id)!==String(id)||!window.ErpBoardFlow.approved(approval?.status)))return;
             const currentPurposeError = OfficialNotice.validateChannels(approval.notice_usage, noticeOn, documentOn);
             if (currentPurposeError) { showToast(currentPurposeError); return; }
             const fileUrls = resolveNoticeFileUrls(approval, notice, includeAttach);
-            const { error: noticeError } = await syncNoticePortalChannel(approval, notice, noticeOn, fileUrls);
-            if (noticeError) {
-                showToast(noticeError.message || '공지 채널 반영 실패');
-                return;
+            if(!documentOnly){
+                const { error: noticeError } = await syncNoticePortalChannel(approval, notice, noticeOn, fileUrls);
+                if (noticeError) {
+                    showToast(noticeError.message || '공지 채널 반영 실패');
+                    return;
+                }
             }
 
             const { error: boxError } = await syncNoticeDocumentBoxChannel(approval, notice, documentOn, fileUrls);
@@ -3691,7 +3720,8 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 return;
             }
 
-            showToast('채널 설정이 반영되었습니다.');
+            if(documentOnly)state.document=true;
+            showToast(documentOnly?'소집 공문을 문서함에 게시했습니다.':'채널 설정이 반영되었습니다.');
             if(boardRoute)await refreshBoardContext();
             await loadNotices();
             } catch (error) {
@@ -3780,7 +3810,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 const approval = item.approval || {};
                 const notice = item.notice || null;
                 const external = OfficialNotice.normalize(approval.notice_usage) === 'EXTERNAL';
-                const boardConvocation = boardRoute?.kind === 'BOARD' && boardRoute.stage === 'notice'
+                const meetingConvocation = !!boardRoute && boardRoute.stage === 'notice'
                     && String(approval.id) === String(boardContext?.approvalId)
                     && window.ErpBoardFlow.approved(boardContext?.approvalStatus);
                 const attachCount = (resolveNoticeFileUrls(approval, notice, true) || []).length;
@@ -3823,8 +3853,10 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                         </div>
                         <div class="btn-group">
                             <button onclick="openNoticePreview('${approval.id}')" class="btn btn-gray">내용 보기</button>
-                            ${external || boardConvocation ? `<button onclick="printNoticeById('${approval.id}')" class="btn ${external ? 'btn-blue' : 'btn-outline'}">출력·PDF 저장</button>` : ''}
+                            ${external || meetingConvocation ? `<button onclick="printNoticeById('${approval.id}')" class="btn ${external ? 'btn-blue' : 'btn-outline'}">출력·PDF 저장</button>` : ''}
                             ${external ? `<button onclick="downloadNoticeAttachments('${approval.id}')" class="btn btn-outline" ${hasAttach ? '' : 'disabled'}>첨부 다운로드 (${attachCount})</button>` : `
+                            ${meetingConvocation&&!isDocumentPublished?`<button onclick="applyNoticeChannels('${approval.id}', true)" class="btn btn-blue">문서함에 게시</button>`:''}
+                            ${meetingConvocation?'<details><summary>게시 옵션</summary><div class="btn-group">':''}
                             <label class="channel-toggle">
                                 <input type="checkbox" ${channelState.notice ? 'checked' : ''} onchange="toggleNoticeChannel('${approval.id}', 'notice', this.checked)">
                                 홈페이지 공지
@@ -3837,7 +3869,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                                 <input type="checkbox" ${checked ? 'checked' : ''} ${hasAttach ? '' : 'disabled'} onchange="toggleNoticeAttach('${approval.id}', this.checked)">
                                 첨부 포함 (${attachCount})
                             </label>
-                            <button onclick="applyNoticeChannels('${approval.id}')" class="btn btn-blue">게시 설정 적용</button>`}
+                            <button onclick="applyNoticeChannels('${approval.id}')" class="btn btn-blue">게시 설정 적용</button>${meetingConvocation?'</div></details>':''}`}
                         </div>
                     </div>
                 `;
@@ -4083,7 +4115,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 try{await refreshBoardContext();}
                 catch(error){boardText(error.message);document.getElementById('sub-tab-editor').disabled=true;}
                 if(revision!==minutesInitRevision)return;
-                if(boardContext?.minuteId||(!['meeting','minutes'].includes(boardRoute.stage)&&boardRoute.stage!=='notice'))
+                if(boardContext?.minuteId||!['minutes','notice'].includes(boardRoute.stage))
                     document.getElementById('sub-tab-editor').disabled=true;
             }
             switchTab(ADMIN_MINUTES_SCOPE || 'minutes');
@@ -4112,9 +4144,8 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 const getAlias=value=>{
                     const next=window.ErpBoardFlow.parse(value);
                     if(!next||boardRoute.kind!==next.kind||boardRoute.id!==next.id||boardContext?.id!==next.id)return null;
-                    const compose=['meeting','minutes'],published=['signature','publish','followups'];
-                    if((compose.includes(boardRoute.stage)&&compose.includes(next.stage))
-                        ||(boardContext.minuteId&&published.includes(boardRoute.stage)&&published.includes(next.stage)))return next;
+                    const published=['signature','publish','followups'];
+                    if(boardContext.minuteId&&published.includes(boardRoute.stage)&&published.includes(next.stage))return next;
                     return null;
                 };
                 task.canNavigateTaskRoute=value=>!!getAlias(value);
@@ -4126,7 +4157,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                     return true;
                 };
             }
-            if(boardRoute&&['meeting','minutes'].includes(boardRoute.stage))await openBoardMinuteEditor();
+            if(boardRoute?.stage==='minutes')await openBoardMinuteEditor();
             // A new shell iframe may finish Auth while still parked. Its first
             // authorized read is allowed to prepare the hidden list; a genuinely
             // background document resumes through the visibility listener.
@@ -4423,8 +4454,8 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             if (minuteCreatePending) return;
             const ownBoard=boardRoute?boardContext:null;
             const boardActor=currentUserId;
-            if(boardRoute&&(!ownBoard||ownBoard.status==='CANCELLED'||ownBoard.minuteId||!['meeting','minutes'].includes(boardRoute.stage)
-                ||!window.ErpBoardFlow.approved(ownBoard.approvalStatus)))return showToast('현재 회의와 승인 공문을 다시 확인해 주세요.');
+            if(boardRoute&&(!ownBoard||boardRoute.stage!=='minutes'||!window.ErpBoardFlow.canRecord(ownBoard)))
+                return showToast('현재 회의와 승인 공문을 다시 확인해 주세요.');
             minuteCreatePending = true;
             try {
             const draft = await collectMinuteDraft();
@@ -4432,6 +4463,11 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             if(ownBoard&&(draft.docType!==(guidedAssembly()?'GENERAL_ASSEMBLY':'MINUTES')||ownBoard.id!==boardContext?.id||ownBoard.coopId!==minutesListOwner.coopId
                 ||(guidedAssembly()&&draft.linked?.payload?.package_id!==ownBoard.id)))
                 return showToast('선택한 회의와 현재 조합을 다시 확인해 주세요.');
+            if(ownBoard){
+                const fresh=await refreshBoardContext();
+                if(boardActor!==currentUserId||fresh.id!==ownBoard.id||boardRoute?.stage!=='minutes'||!window.ErpBoardFlow.canRecord(fresh)||window.frameElement?.hidden)
+                    return showToast('현재 회의의 게시·진행 상태를 다시 확인해 주세요. 입력은 유지됩니다.');
+            }
 
             const fileInput = document.getElementById('in-files');
             const files = Array.from(fileInput?.files || []);
