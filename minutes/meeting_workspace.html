@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.17.10 | 총회 시나리오 단계 본문 표시 -->
+<!-- Version: v1.17.11 | 총회 안건 배치와 감사 제출 -->
 <html lang="ko">
 <head>
   <script>window.__COOP_ROUTE_APP__ = 'erp';</script>
@@ -18,7 +18,7 @@
   <link rel="stylesheet" href="/minutes/meeting_workflow_manual_v12.css" integrity="sha384-aFkdOAcaw9wKXdPCXctLVyVLGsUPFzy9k+GYiR0bEFtejSTzzKjdPcqN+PAuUC/v" crossorigin="anonymous">
   <!-- Load the shared mount before this page can finish its permission check. -->
   <script src="/minutes/meeting_workflow_manual_v12_labels.js" integrity="sha384-kyMJmSttyo+5MXeUg41T6OtOE7tF4YAEsbv5pLXloMYZ0wc5lws5Ga1XSgOTTHom" crossorigin="anonymous"></script>
-  <script>console.log('[Version] v1.17.10 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.17.11 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
   <style>
     body[data-board-flow] .workspace{grid-template-columns:minmax(0,1fr)}
@@ -121,11 +121,24 @@
     .agenda-head { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
     .agenda-number { width:30px; height:30px; flex:0 0 auto; border-radius:50%; display:grid; place-items:center; background:#172033; color:#fff; font-weight:800; }
     .agenda-head select { width:140px; }
-    .agenda-head input { flex:1; }
+    .agenda-head input { flex:1; min-width:0; }
     .agenda-actions { display:flex; gap:5px; }
     .agenda-actions button { border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 9px; }
     .agenda-details { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .agenda-details textarea { min-height:80px; }
+    #assemblyBaseOrder { padding-inline-start:1.7rem; margin:12px 0; }
+    #assemblyBaseOrder li { padding:8px 0; border-bottom:1px solid var(--line); }
+    .assembly-agenda-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; }
+    .assembly-agenda-row > span { font-weight:700; overflow-wrap:anywhere; }
+    .assembly-agenda-row .bottom-actions { margin:0; justify-content:flex-start; }
+    #assemblyBaseChoices { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
+    .assembly-agenda-choice { display:flex; align-items:flex-start; gap:8px; margin:8px 0; }
+    .assembly-agenda-choice input { flex:none; width:auto; margin-top:3px; }
+    .assembly-agenda-choice span { min-width:0; overflow-wrap:anywhere; }
+    .assembly-agenda-source select { flex:1 1 15rem; min-width:0; }
+    [data-assembly-decision] select { display:block; margin-top:6px; }
+    #assemblyAuditDelivery { justify-content:flex-start; align-items:flex-end; }
+    #assemblyAuditDelivery label { display:grid; gap:6px; margin:0; }
     .comparison-option { grid-column:1/-1; display:flex; align-items:flex-start; gap:9px; border:1px solid #fed7aa; border-radius:10px; padding:11px 12px; background:#fff7ed; cursor:pointer; }
     .comparison-option[hidden] { display:none; }
     .comparison-option input { width:18px; height:18px; margin-top:2px; }
@@ -410,9 +423,10 @@
       .budget-row { grid-template-columns:1fr; padding:10px; border:1px solid var(--line); border-radius:9px; background:#fff; }
       .budget-row button { width:100%; height:36px; }
       .source-status-card:last-child:nth-child(odd) { grid-column:auto; }
-      .agenda-head { flex-wrap:wrap; }
-      .agenda-head select { width:calc(100% - 40px); }
-      .agenda-head input { flex-basis:100%; }
+      .agenda-head { display:grid;grid-template-columns:30px minmax(0,1fr); }
+      .agenda-head select { width:100%; }
+      .agenda-head input,.agenda-head .agenda-actions { grid-column:1/-1; }
+      .agenda-head .agenda-actions { justify-content:flex-end; }
       .rich-editor { padding:17px; min-height:420px; }
       #chapterEditor { min-height:0; padding:28px 22px; box-shadow:none; }
       #chapterEditor.chapter-cover,#chapterEditor.chapter-back { padding:28px 22px; }
@@ -511,7 +525,7 @@
               <div class="form-grid">
                 <div class="field">
                   <label for="meetingType">회의 종류</label>
-                  <select id="meetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회(대의원총회)</option></select>
+                  <select id="meetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회</option></select>
                 </div>
                 <div class="field" id="assemblyKindField" hidden>
                   <label for="assemblyKind">총회 구분</label>
@@ -525,7 +539,7 @@
                 </div>
                 <div class="field full">
                   <label for="meetingTitle">회의 제목</label>
-                  <input id="meetingTitle" placeholder="예: 2027년 제2차 정기 대의원총회">
+                  <input id="meetingTitle" placeholder="예: 2027년 제2차 정기총회">
                 </div>
                 <div class="field" id="fiscalYearField" hidden>
                   <label for="fiscalYear">불러올 결산연도</label>
@@ -547,15 +561,11 @@
               <h3 id="assemblyBeforeTitle">총회 전 점검</h3>
               <ul>
                 <li><strong id="assemblyNoticeDue">소집 통지</strong> <span id="assemblyNoticeState"></span></li>
-                <li id="assemblyAuditDueRow" hidden><strong id="assemblyAuditDue">감사에게 결산보고서 제출</strong> <span id="assemblyAuditState"></span> <button type="button" class="btn btn-sm" id="assemblyOpenAudit">연결 자료 보기</button></li>
+                <li id="assemblyAuditDueRow" hidden><strong id="assemblyAuditDue">감사에게 결산보고서 제출</strong> <span id="assemblyAuditState"></span> <button type="button" class="btn btn-small" id="assemblyOpenAudit">감사 제출 열기</button></li>
                 <li id="assemblyChairCheck">의장 확인</li>
                 <li>총회 당일: 의사록에 서명할 조합원 3명 이상을 선출하고 기록</li>
                 <li>대리 출석을 받는 총회: 위임장 회수와 출석 명부 대조</li>
               </ul>
-              <div id="assemblyAuditDelivery" class="bottom-actions" hidden>
-                <label>실제 제출일 <input type="date" id="assemblyAuditSentOn"></label>
-                <button type="button" class="btn" id="assemblyAuditRecord">제출 기록</button>
-              </div>
             </section>
             <div class="section-card">
               <h3>회의 구성 기준</h3>
@@ -608,7 +618,7 @@
               </details>
               <div class="field">
                 <label for="bookletPreviousSource">지난 총회 안건 틀</label>
-                <div class="bottom-actions"><select id="bookletPreviousSource"><option value="">지난 총회를 선택해 주세요</option></select><button type="button" class="btn" id="loadPreviousBooklet">지난 총회에서 가져오기</button></div>
+                <div class="bottom-actions assembly-agenda-source"><select id="bookletPreviousSource"><option value="">지난 총회를 선택해 주세요</option></select><button type="button" class="btn" id="loadPreviousBooklet">지난 총회에서 가져오기</button></div>
                 <div id="assemblyPastChoices" hidden></div>
               </div>
               <div class="booklet-input-grid">
@@ -637,6 +647,14 @@
           </section>
 
           <section class="step-panel" data-panel="audit" id="auditStepPanel" hidden>
+            <section class="section-card" aria-labelledby="assemblyAuditSubmissionTitle">
+              <h3 id="assemblyAuditSubmissionTitle">감사에게 결산보고서 제출</h3>
+              <div id="assemblyAuditSubmissionState" role="status"></div>
+              <div id="assemblyAuditDelivery" class="bottom-actions" hidden>
+                <label>실제 제출일 <input type="date" id="assemblyAuditSentOn"></label>
+                <button type="button" class="btn" id="assemblyAuditRecord">제출 기록</button>
+              </div>
+            </section>
             <div class="notice">결산자료를 바탕으로 감사보고서 초안을 확인하고 필요한 내용을 고친 뒤 감사에게 전자검토를 요청합니다. 감사의 전자서명이 시작되면 보고서 내용은 자동으로 잠깁니다.</div>
             <section class="assembly-source-panel">
               <div class="audit-step-head">
@@ -782,7 +800,7 @@
       <h2 id="newPackageTitle">새 회의 준비</h2>
       <p>회의 종류를 고르면 기존 회의를 기준으로 다음 회차와 제목을 제안합니다. 제안값은 지금 또는 작업공간에서 언제든 수정할 수 있습니다.</p>
       <div class="form-grid">
-        <div class="field"><label for="newMeetingType">회의 종류</label><select id="newMeetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회(대의원총회)</option></select></div>
+        <div class="field"><label for="newMeetingType">회의 종류</label><select id="newMeetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회</option></select></div>
         <div class="field" id="newAssemblyKindField" hidden><label for="newAssemblyKind">총회 구분</label><select id="newAssemblyKind"><option value="REGULAR">정기총회</option><option value="EXTRAORDINARY">임시총회</option></select></div>
         <div class="field"><label for="newMeetingNumber">회차</label><input id="newMeetingNumber" placeholder="예: 2026-7회"></div>
         <div class="field full"><label for="newMeetingTitle">회의 제목</label><input id="newMeetingTitle" placeholder="예: 2026년 제7차 이사회"></div>
@@ -793,6 +811,6 @@
   </div>
   <div class="toast" id="toast" role="status"></div>
   <script src="/erp/chatgpt_edit_guide.js?v=1.0.0" integrity="sha384-eVMu5C+DyenFdmrEBIL/DYTUL1zTmurBluHFpYAQSQxsuBEk0GPruzw0tt4Ae4bX" crossorigin="anonymous" defer></script>
-  <script type="module" src="./meeting_workspace_flow_v9.js" integrity="sha384-H9MWuEN/eq1TkT/e/Fzl+aMbD0l0CnCoCUoEsfizkW/fI9sUWCE4bR5dLePIG9Tq" crossorigin="anonymous"></script>
+  <script type="module" src="./meeting_workspace_flow_v10.js" integrity="sha384-JB83mTsLXwUVcuv+YqYOq5rxPdoL5dX6vWBLA/R44l+AectI9y5M1vxup0jBxSLz" crossorigin="anonymous"></script>
 </body>
 </html>
