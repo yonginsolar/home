@@ -18,12 +18,17 @@ export const assemblyDecisionTypes=Object.freeze({
  merger:'합병·분할',dissolve:'해산',suspend:'휴업·계속',priority:'다른 협동조합에 우선출자'
 });
 const supermajority=new Set(['charter','charter_registry','charter_name','charter_purpose','expulsion','refund','merger','dissolve','suspend','priority']);
+const delegatesCannotVote=new Set(['merger','dissolve']);
+export function assemblyVoteRequirement(type,{delegates=false}={}) {
+ if(delegates&&delegatesCannotVote.has(type))return '대의원총회에서 의결할 수 없음';
+ return supermajority.has(type)?'출석자 3분의 2 이상 찬성 필요':'';
+}
 export function votesNeeded(type,present,eligible) {
  if(!Number.isSafeInteger(present)||!Number.isSafeInteger(eligible)||present<=Math.floor(eligible/2)||present>eligible||eligible<1||!Object.hasOwn(assemblyDecisionTypes,type))return null;
  return supermajority.has(type)?Math.ceil(present*2/3):Math.floor(present/2)+1;
 }
 export function delegateVotesNeeded(type,present,eligible) {
- return ['merger','dissolve'].includes(type)?null:votesNeeded(type,present,eligible);
+ return delegatesCannotVote.has(type)?null:votesNeeded(type,present,eligible);
 }
 export function assemblyMinutePlan(plan, booklet={}) {
  return plan.map(item=>{

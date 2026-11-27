@@ -1,5 +1,5 @@
 /*
-Version: v1.9.2
+Version: v1.9.3
 Change: 2026-11-27 - Use the existing cooperative-scoped readers only for the active meeting section.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -65,9 +65,9 @@ async function readPackageSections(id, coopId, { section = 'full', includeAgenda
   const active = request => signal ? request.abortSignal(signal) : request;
   const materials = section === 'materials' || section === 'full';
   let documents = null;
-  if (materials || section === 'scenario') {
+  if (materials || section === 'scenario' || section === 'notice-draft') {
     documents = query('meeting_package_documents');
-    if (section === 'materials') documents = documents.eq('document_type','MATERIALS');
+    if (section === 'materials' || section === 'notice-draft') documents = documents.eq('document_type','MATERIALS');
     if (section === 'scenario') documents = documents.in('document_type',['SCENARIO','SCENARIO_SECRETARIAT']);
   }
   const empty = { data: null, error:null };

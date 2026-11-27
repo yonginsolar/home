@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.17.11 | 총회 안건 배치와 감사 제출 -->
+<!-- Version: v1.17.12 | 총회 공고 후 자료집 확정과 의결 기준 표시 -->
 <html lang="ko">
 <head>
   <script>window.__COOP_ROUTE_APP__ = 'erp';</script>
@@ -10,7 +10,7 @@
   <script>console.log('[Version] ui.20261013.1 | meeting_workspace.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
-  <script src="/shared/meeting_flow_v6.js" integrity="sha384-iVyppDMixY/4ciUzgYdWZM3wBjMx/3z4Vm/AS3CWNtz9FquAB0ROR+TouO2Guxha" crossorigin="anonymous"></script>
+  <script src="/shared/meeting_flow_v11.js" integrity="sha384-QWglDz6dBTQuiG09L+R4ddd+x2Z8rnrIoIZVERi3Wnf6QnL3CdG/6QvG5ZRC1Bx2" crossorigin="anonymous"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -18,7 +18,7 @@
   <link rel="stylesheet" href="/minutes/meeting_workflow_manual_v12.css" integrity="sha384-aFkdOAcaw9wKXdPCXctLVyVLGsUPFzy9k+GYiR0bEFtejSTzzKjdPcqN+PAuUC/v" crossorigin="anonymous">
   <!-- Load the shared mount before this page can finish its permission check. -->
   <script src="/minutes/meeting_workflow_manual_v12_labels.js" integrity="sha384-kyMJmSttyo+5MXeUg41T6OtOE7tF4YAEsbv5pLXloMYZ0wc5lws5Ga1XSgOTTHom" crossorigin="anonymous"></script>
-  <script>console.log('[Version] v1.17.11 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.17.12 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
   <style>
     body[data-board-flow] .workspace{grid-template-columns:minmax(0,1fr)}
@@ -244,6 +244,7 @@
     #chapterEditor.chapter-order .bill-list li strong { flex:0 0 auto; min-width:66px; padding:2px 8px; text-align:center; background:var(--booklet-cover-tint); border:1px solid var(--booklet-cover-line); border-radius:3px; color:var(--booklet-cover-primary); }
     #chapterEditor.chapter-bill > h2 { color:#111827; }
     .rich-editor .bill-content-card { margin:18px 0; overflow:hidden; border:1px solid #b8c7bf; border-radius:6px; background:#fff; }
+    .rich-editor .bill-vote-requirement { padding:8px 10px; border-left:3px solid var(--booklet-body-primary,#1b4d3e); background:var(--booklet-body-tint,#f4f7f5); color:#172033; }
     .rich-editor .bill-content-card > h3 { display:flex; align-items:center; gap:9px; margin:0; padding:11px 15px; border-bottom:1px solid #b8c7bf; background:#f4f7f5; color:#1b4d3e; }
     .rich-editor .bill-content-card > h3 > span { width:25px; height:25px; display:inline-grid; place-items:center; border-radius:4px; background:#1b4d3e; color:#fff; font-size:.82rem; }
     .rich-editor .bill-content-body { padding:15px 17px; }
@@ -557,16 +558,6 @@
               </div>
             </div>
 
-            <section class="section-card" id="assemblyBeforeCheck" hidden aria-labelledby="assemblyBeforeTitle">
-              <h3 id="assemblyBeforeTitle">총회 전 점검</h3>
-              <ul>
-                <li><strong id="assemblyNoticeDue">소집 통지</strong> <span id="assemblyNoticeState"></span></li>
-                <li id="assemblyAuditDueRow" hidden><strong id="assemblyAuditDue">감사에게 결산보고서 제출</strong> <span id="assemblyAuditState"></span> <button type="button" class="btn btn-small" id="assemblyOpenAudit">감사 제출 열기</button></li>
-                <li id="assemblyChairCheck">의장 확인</li>
-                <li>총회 당일: 의사록에 서명할 조합원 3명 이상을 선출하고 기록</li>
-                <li>대리 출석을 받는 총회: 위임장 회수와 출석 명부 대조</li>
-              </ul>
-            </section>
             <div class="section-card">
               <h3>회의 구성 기준</h3>
               <div class="form-grid">
@@ -643,18 +634,18 @@
             </section>
             <div id="agendaList"></div>
             <button type="button" class="btn" id="addAgendaButton">+ 안건 추가</button>
-            <div class="bottom-actions"><button type="button" class="btn btn-primary" id="saveAgendasButton">안건·자료집 입력 저장</button></div>
+            <div class="bottom-actions"><button type="button" class="btn btn-primary" id="saveAgendasButton">안건·자료집 입력 저장</button><button type="button" class="btn btn-primary" id="confirmAssemblyAgendas" hidden>안건 확인하고 소집 공문 열기</button></div>
           </section>
 
           <section class="step-panel" data-panel="audit" id="auditStepPanel" hidden>
-            <section class="section-card" aria-labelledby="assemblyAuditSubmissionTitle">
-              <h3 id="assemblyAuditSubmissionTitle">감사에게 결산보고서 제출</h3>
+            <details class="section-card" aria-labelledby="assemblyAuditSubmissionTitle">
+              <summary id="assemblyAuditSubmissionTitle">결산보고서 제출 기록</summary>
               <div id="assemblyAuditSubmissionState" role="status"></div>
               <div id="assemblyAuditDelivery" class="bottom-actions" hidden>
                 <label>실제 제출일 <input type="date" id="assemblyAuditSentOn"></label>
                 <button type="button" class="btn" id="assemblyAuditRecord">제출 기록</button>
               </div>
-            </section>
+            </details>
             <div class="notice">결산자료를 바탕으로 감사보고서 초안을 확인하고 필요한 내용을 고친 뒤 감사에게 전자검토를 요청합니다. 감사의 전자서명이 시작되면 보고서 내용은 자동으로 잠깁니다.</div>
             <section class="assembly-source-panel">
               <div class="audit-step-head">
@@ -700,6 +691,7 @@
 
           <section class="step-panel" data-panel="documents">
             <div class="notice" id="documentModeNotice">이사회는 기존 회의자료와 시나리오 형식으로 준비합니다. 총회 자료집은 기존 HTML 순서대로 챕터를 골라 한 부분씩 수정할 수 있습니다.</div>
+            <p id="assemblyMaterialTiming" class="help" hidden>소집 공문을 문서함에 게시한 뒤 자료집을 확정할 수 있어요.</p>
             <section class="assembly-source-panel" id="assemblySourcePanel" hidden>
               <div class="assembly-source-head">
                 <div><h3>정기총회 연동 자료</h3><p>문서함·회계·배당·감자·탈퇴 관리에서 정기총회에 필요한 자료를 확인합니다. 없는 조건부 안건은 자료집에서 자동으로 빠집니다.</p></div>
@@ -811,6 +803,6 @@
   </div>
   <div class="toast" id="toast" role="status"></div>
   <script src="/erp/chatgpt_edit_guide.js?v=1.0.0" integrity="sha384-eVMu5C+DyenFdmrEBIL/DYTUL1zTmurBluHFpYAQSQxsuBEk0GPruzw0tt4Ae4bX" crossorigin="anonymous" defer></script>
-  <script type="module" src="./meeting_workspace_flow_v10.js" integrity="sha384-JB83mTsLXwUVcuv+YqYOq5rxPdoL5dX6vWBLA/R44l+AectI9y5M1vxup0jBxSLz" crossorigin="anonymous"></script>
+  <script type="module" src="./meeting_workspace_flow_v11.js" integrity="sha384-gB01d9UmfN1y9AcVkvHgn4QDx2um9P3Pfh4y0wrYDOtZSP+Bcgr5U0fNT2Btkgf0" crossorigin="anonymous"></script>
 </body>
 </html>

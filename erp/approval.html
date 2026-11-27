@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.185 | 소집 공문 내부용과 총회 수신 대상 -->
+<!-- Version: v1.2.186 | 총회 최종 자료집 확정 전 소집 공문 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -13,7 +13,7 @@
   <script src="/shared/meeting_flow_v5.js" integrity="sha384-ydMSPe6aHgPvhsxHfGXz8Wpk8BbCnh/YXGh4bd8KhlvPlq61khxikSo6G5sVTRfz" crossorigin="anonymous"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.185 | approval.html');</script>
+  <script>console.log('[Version] v1.2.186 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -14558,13 +14558,13 @@ async function refreshBoardApprovalEntry(){
             return;
         }
         if(document.body.dataset.boardApproval==='unavailable'){status.textContent='이 조합에서 공문 양식을 사용할 수 없어요.';return;}
-        const waitingForMaterials=!state.agendaReady||!state.materialsReady;
+        const waitingForMaterials=!state.agendaReady||!(assembly?state.materialsSaved:state.materialsReady);
         if(!waitingForMaterials)document.body.dataset.boardApproval='ready';
         startApprovalDraftSources();
         void prepareApprovalDraftEntry();
         syncApprovalSubmitControls();
         action.textContent='회의 내용 불러오기';action.hidden=false;action.disabled=assembly&&waitingForMaterials;
-        const waitingText='회의자료를 확정하면 상신할 수 있어요.';
+        const waitingText=assembly?'안건 탭에서 안건을 확인하면 상신할 수 있어요.':'회의자료를 확정하면 상신할 수 있어요.';
         status.textContent=waitingForMaterials?waitingText:state.title;
         action.onclick=async ()=>{
             if(!current()||action.disabled||activeApprovalTab!=='draft'||window.frameElement?.hidden)return;
@@ -16473,7 +16473,7 @@ async function handleDraftSubmit(e,recovery=null) {
     e.preventDefault();
     const boardRoute=window.ErpBoardFlow?.parse(location.href);
     if(getMeetingApprovalRoute()&&document.body.dataset.boardApproval!=='ready')
-        return showAlert('회의자료를 확정하면 상신할 수 있어요.');
+        return showAlert(boardRoute?.kind==='GENERAL_ASSEMBLY'?'안건 탭에서 안건을 확인하면 상신할 수 있어요.':'회의자료를 확정하면 상신할 수 있어요.');
     if(boardRoute&&(getCurrentDraftMainType()!=='공문'||approvalMeetingNoticeLink?.kind!==boardRoute.kind
         ||approvalMeetingNoticeLink?.packageId!==boardRoute.id||approvalMeetingNoticeLink?.coopId!==getApprovalScopedCoopId()))
         return showAlert('현재 회의의 소집 공문을 연결한 뒤 상신해 주세요.');
