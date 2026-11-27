@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.2.36 | 회의 상태를 먼저 확인하고 필요한 단계만 로드 -->
+<!-- Version: v1.2.37 | 회의 상태 안내와 단계 탭 재확인 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -24,8 +24,8 @@
   <script src="/erp/workspace_search.js?v=1.1.0" integrity="sha384-/anB5A4+BzyC7jG5dDK4lqs31Zz5LZz5G7OeMcSFtfyB9VKcS0T3i3luIqyF7HON" crossorigin="anonymous" defer></script>
   <script src="/erp/workspace_feature_tabs_v1_2.js" integrity="sha384-uOEJwCOHnWBItbUzGaFiMTGmFcFJyUy8NfVFLgWugEGyS2pQoyanIGMmfndzQRDS" crossorigin="anonymous" defer></script>
   <script src="/erp/workspace_nav_v1_8.js" integrity="sha384-MUDYLiLvy5yI+/e2PrKQB2Hgv4/nsG7COV45Cvyt5fqnxweDd1Q9kggzS3oOJFJj" crossorigin="anonymous" defer></script>
-  <script src="/shared/meeting_flow_v8.js" integrity="sha384-uGXHuRzBQZYoG4T5Dio6TTJpttNw4C7WOHXHpcOAXGvaamwPbvuZ1CExP+0hSvQ1" crossorigin="anonymous" defer></script>
-  <script src="/erp/workspace_shell_board_v3.js" integrity="sha384-O6rNIESlYhsj5+Uwf3dVD8Y57rmU2OxkmI5n6upxrYDOq1Ca1movWIMEn5kK1rXS" crossorigin="anonymous" defer></script>
+  <script src="/shared/meeting_flow_v9.js" integrity="sha384-YuwO3nJaCgD/JrsUk58fj9Tt/91M8slqcZaPk6dX6vhGs3wCKdmB2Rs1tP+/s/Zy" crossorigin="anonymous" defer></script>
+  <script src="/erp/workspace_shell_board_v4.js" integrity="sha384-+SL7Qdv/EA0ksgVtgVI7w0OC4+u26csmdvzSnh5iOaFv6exee9P5A61q9r8VboI8" crossorigin="anonymous" defer></script>
   <style>
     @media screen{
       #erpWorkspaceContent:has(> #erpBoardFlowRail:not([hidden])){display:grid;grid-template: auto minmax(0,1fr) / minmax(0,1fr)}
@@ -35,8 +35,9 @@
       #erpWorkspaceContent:has(> #erpBoardFlowRail:not([hidden])) > iframe[inert]{visibility:hidden}
       #erpWorkspaceContent:has(> #erpBoardFlowRail:not([hidden])) > :is(#erpWorkspaceStatus,#erpWorkspaceError){position:relative;inset:auto;transform:none;align-self:start;margin:16px}
       #erpWorkspaceContent:has(> #erpBoardFlowRail:not([hidden])) > #erpWorkspaceStatus{justify-self:center}
-      #erpWorkspaceMeetingWaiting{align-self:start;max-width:640px;margin:16px;padding:16px;border:1px solid var(--erp-border,#dae5df);border-radius:12px;background:var(--erp-card,#fff);color:var(--erp-ink,#142c25)}
-      #erpWorkspaceMeetingWaiting p{margin:0 0 8px}
+      #erpWorkspaceMeetingWaiting{box-sizing:border-box;align-self:start;justify-self:center;width:calc(100% - 2 * clamp(12px,2.5vw,24px));max-width:900px;margin-top:clamp(12px,2.5vw,24px);padding:clamp(16px,2.5vw,24px);border:1px solid var(--erp-border-strong,#cfdfd6);border-radius:12px;background:var(--erp-card,#fff);color:var(--erp-ink,#142c25);overflow-wrap:anywhere}
+      #erpWorkspaceMeetingWaiting h2{display:inline-block;margin:0 0 8px;padding:4px 9px;border-radius:6px;background:var(--erp-primary-soft,#e3f3eb);color:var(--erp-primary-strong,#205840);font-size:.875rem;font-weight:700;line-height:1.4}
+      #erpWorkspaceMeetingWaiting p{margin:0;line-height:1.65;font-size:1rem}
     }
     #erpBoardFlowRail{flex:none;padding:10px 14px;color:var(--erp-ink,#142c25);background:var(--erp-card,#fff);border-bottom:1px solid var(--erp-border,#dae5df)}
     #erpBoardFlowRail strong{overflow-wrap:anywhere}
@@ -50,6 +51,7 @@
     #erpBoardFlowRail .erp-board-tabstrip button{flex:1 0 auto;min-height:38px;padding-inline:10px;white-space:nowrap}
     #erpBoardFlowRail .erp-board-tabstrip button,#erpBoardFlowRail .erp-board-tabstrip [aria-current=step]{font-weight:600}
     #erpBoardFlowRail .erp-board-tabstrip button:focus-visible{outline:2px solid var(--erp-primary,#256f54);outline-offset:-2px}
+    #erpBoardFlowRail .erp-board-current-stage[aria-disabled=false]:focus-visible{outline:2px solid var(--erp-primary,#256f54);outline-offset:-2px}
     @media(max-width:520px){#erpBoardFlowRail .erp-board-stages{grid-template-columns:repeat(4,minmax(0,1fr))}#erpBoardFlowRail{padding:8px}#erpBoardFlowRail button{padding:4px;overflow-wrap:anywhere}}
     @media print{#erpBoardFlowRail,#erpWorkspaceMeetingWaiting{display:none!important}}
   </style>
@@ -76,7 +78,10 @@
     <nav id="erpBoardFlowRail" aria-label="회의 진행 단계" hidden></nav>
     <p id="erpWorkspaceStatus" role="status">권한을 확인하고 있습니다…</p>
     <iframe id="erpWorkspaceFrame" title="ERP 업무 화면" hidden></iframe>
-    <section id="erpWorkspaceMeetingWaiting" hidden><p role="status"></p><button type="button">다시 확인</button></section>
+    <section id="erpWorkspaceMeetingWaiting" aria-labelledby="erpWorkspaceMeetingStatusLabel" hidden>
+      <h2 id="erpWorkspaceMeetingStatusLabel"></h2>
+      <p role="status"></p>
+    </section>
     <div id="erpWorkspaceError" role="alert" hidden>
       <p>화면을 불러오지 못했습니다.</p>
       <button type="button" id="erpWorkspaceRetry">다시 시도</button>
