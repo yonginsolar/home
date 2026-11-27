@@ -360,11 +360,13 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
                 <button id="meetingOpenAttendance" type="button" class="btn btn-gray">출석 QR 열기</button>
                 <button id="meetingCloseAttendance" type="button" class="btn btn-outline" hidden>출석 QR 닫기</button>
                 <button id="meetingReviewAttendance" type="button" class="btn btn-outline">비로그인 접수 확인</button>
+                <button id="meetingFamilyProxy" type="button" class="btn btn-outline" aria-expanded="false" aria-controls="meetingFamilyProxyPanel" hidden>가족 대리 출석</button>
             </div>
             <div id="meetingAttendanceStatus" role="status" hidden></div>
             <div id="meetingAttendanceCode"></div>
             <a id="meetingAttendanceLink" target="_blank" rel="noopener noreferrer" hidden>출석 화면 열기</a>
             <section id="meetingAttendanceReceipts" aria-label="비로그인 접수" hidden></section>
+            <section id="meetingFamilyProxyPanel" aria-label="가족 대리 출석" hidden></section>
         </div>
 
         <div id="tab-minutes" class="tab-panel active">
@@ -783,18 +785,26 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
             const text=document.getElementById('meetingAttendanceStatus'),code=document.getElementById('meetingAttendanceCode');
             const link=document.getElementById('meetingAttendanceLink');
             const review=document.getElementById('meetingReviewAttendance'),receipts=document.getElementById('meetingAttendanceReceipts');
+            const family=document.getElementById('meetingFamilyProxy'),familyPanel=document.getElementById('meetingFamilyProxyPanel');
             const permitted=['notice','meeting'].includes(stage)&&!row.minuteId&&row.status==='READY'
                 &&window.ErpBoardFlow.posted(row)&&(!guidedAssembly()||row.rosterMode==='members');
-            if(!permitted){attendanceView=null;panel.hidden=true;return;}
+            if(!permitted){attendanceView=null;panel.hidden=true;familyPanel.hidden=true;familyPanel.replaceChildren();return;}
             panel.hidden=false;
             if(attendanceView?.id===row.id&&attendanceView.stage===stage&&attendanceView.owner===minutesListOwner.coopId)return;
             const view={id:row.id,stage,owner:minutesListOwner.coopId,busy:false};attendanceView=view;
             const kst=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
             prepare.hidden=!guidedAssembly()||row.date<kst;
+            family.hidden=!guidedAssembly()||row.rosterMode!=='members';
+            familyPanel.hidden=true;familyPanel.replaceChildren();family.disabled=false;family.setAttribute('aria-expanded','false');
             open.hidden=row.date!==kst;close.hidden=link.hidden=receipts.hidden=true;text.hidden=true;code.replaceChildren();receipts.replaceChildren();
             const active=()=>attendanceView===view&&boardContext?.id===view.id&&minutesListOwner.coopId===view.owner
                 &&boardRoute.stage===view.stage&&!window.frameElement?.hidden;
             const say=value=>{text.textContent=value;text.hidden=!value;};
+            const rpc=async(p_action,p_payload={})=>{
+                const {data,error}=await supabase.rpc('assembly_minutes',{p_action,p_id:view.id,p_payload});
+                if(error)throw error;
+                return data;
+            };
             const run=async action=>{
                 if(view.busy||!active())return;
                 view.busy=true;for(const b of [prepare,open,close])b.disabled=true;
@@ -826,13 +836,21 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
                     if(!active())return;
                     receipts.hidden=false;
                     await module.renderGuestReceipts({root:receipts,current:()=>active()&&!receipts.hidden,
-                        confirm:showConfirm,rpc:async(p_action,p_payload={})=>{
-                            const {data,error}=await supabase.rpc('assembly_minutes',{p_action,p_id:view.id,p_payload});
-                            if(error)throw error;
-                            return data;
-                        }});
+                        confirm:showConfirm,rpc});
                 }catch(_){if(active())say('비로그인 접수 내역을 불러오지 못했습니다.');}
                 finally{if(active())review.disabled=false;}
+            };
+            family.onclick=async()=>{
+                if(!active()||family.hidden)return;
+                if(!familyPanel.hidden){familyPanel.hidden=true;familyPanel.replaceChildren();family.setAttribute('aria-expanded','false');return;}
+                family.disabled=true;
+                try{
+                    const module=await import('./meeting_family_proxy_v1.js');
+                    if(!active())return;
+                    familyPanel.hidden=false;family.setAttribute('aria-expanded','true');
+                    await module.renderFamilyProxy({root:familyPanel,current:()=>active()&&!familyPanel.hidden,confirm:showConfirm,rpc});
+                }catch(_){if(active())say('가족 대리 출석을 불러오지 못했습니다.');}
+                finally{if(active())family.disabled=false;}
             };
         }
         async function refreshBoardContext({initial=false}={}){
@@ -2375,8 +2393,8 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
             if (!location) return { error: '총회 장소를 입력하세요.' };
             const chairId=linked?.payload?.chair;
             const selectionError = memberMode
-                ? (!chairId || signerSet.size<3 || !signerSet.has(chairId) || signers.length!==signerSet.size
-                    ? '직접 참석한 조합원 중 위원장을 포함해 서명자 3명 이상을 선택하세요.' : '')
+                ? (!chairId || signerSet.size<memberSignerMinimum(assemblyMemberRoll) || !signerSet.has(chairId) || signers.length!==signerSet.size
+                    ? `의장 1명과 직접 참석한 조합원 중 추가 서명자 ${memberSignerMinimum(assemblyMemberRoll)-1}명 이상을 지정하세요.` : '')
                 : getGeneralAssemblySelectionError(delegates, attendeeIds, signerIds);
             if (selectionError) return { error: selectionError };
             const groupAttendeeError = getStructuredGroupAttendeeError(attendees, 'assemblyAttendeeIds');
@@ -2393,7 +2411,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
             const signatureRows = signers.map((off) => {
                 const name = escapeHtml(getOfficialName(off));
                 const spacedName = escapeHtml(buildSpacedOfficialName(getOfficialName(off)));
-                const role = memberMode ? (String(off.id)===chairId?'위원장':'의사록 기명날인인') :
+                const role = memberMode ? (String(off.id)===chairId?'의장':'의사록 기명날인인') :
                     (isGeneralAssemblyChairperson(off) ? '의장 이사장' : '의사록 기명날인인 대의원');
                 return `
                     <div style="display:grid; grid-template-columns:150pt minmax(0, 1fr); align-items:center; column-gap:10pt; min-height:48pt; page-break-inside:avoid;">
@@ -2756,6 +2774,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
         }
 
         let assemblyMinute = null, assemblyMinuteApi = null, assemblyFollowupPermission = false, assemblyMemberRoll=null;
+        const memberSignerMinimum=roll=>Math.max(4,Number(roll?.signer_minimum)||4);
         const assemblyImportFields = {title:'in-title',notice_date:'in-notice-date',meeting_date:'in-meeting-date',
             start_time:'in-start-time',end_time:'in-end-time',location:'in-location'};
         const loadAssemblyMinuteApi = () => import('./assembly_minute_flow_v3.js');
@@ -2778,10 +2797,11 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
                 name.textContent=`${person.name} · ${person.member_no}`;label.className='structured-official-check';label.append(input,name);attendance.append(label);
             }
             document.getElementById('assembly-attendee-help').textContent=`직접 출석 ${roll.in_person}명 · 위임 ${roll.represented}명`;
-            document.getElementById('signer-label').textContent='기명날인인 · 위원장 포함 3명 이상';
+            document.getElementById('signer-label').textContent=`의장 1명 + 기명날인인 ${memberSignerMinimum(roll)-1}명 이상`;
             const syncMemberSignerHelp=()=>{
+                const chair=wrap.querySelector('input[name="memberAssemblyChair"]:checked');
                 document.getElementById('signer-help').textContent=
-                    `직접 참석한 조합원 중 ${getSelectedSignerIds().length}명 선택`;
+                    `${chair?'의장 지정 완료':'의장 미지정'} · 추가 서명자 ${getSelectedSignerIds().length-Number(!!chair)}명 선택`;
             };
             wrap.replaceChildren();
             for(const person of roll.physical){
@@ -2792,8 +2812,8 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
                 input.checked=previousSigners.has(person.id)||previousChair===person.id;
                 label.append(input,document.createTextNode(`${person.name} · ${person.member_no}`));
                 chair.type='radio';chair.name='memberAssemblyChair';chair.value=person.id;chair.checked=previousChair===person.id;
-                chairLabel.append(chair,document.createTextNode('위원장'));
-                chair.setAttribute('aria-label',`${person.name} · ${person.member_no} 위원장`);
+                chairLabel.append(chair,document.createTextNode('의장'));
+                chair.setAttribute('aria-label',`${person.name} · ${person.member_no} 의장`);
                 chair.addEventListener('change',()=>{input.checked=true;syncMemberSignerHelp();});
                 input.addEventListener('change',()=>{
                     if(!input.checked&&chair.checked)input.checked=true;
