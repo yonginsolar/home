@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.6.0 | 교육 QR · 공용 교육관리 -->
+<!-- Version: v1.6.1 | 공용 교육 진행 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -507,6 +507,20 @@
         </div>
         <div class="modal-body">
           <div id="formAlert" class="alert d-none" role="alert" tabindex="-1"></div>
+          <section id="educationStageRail" class="border-bottom pb-2 mb-3" hidden aria-label="교육 진행 단계">
+            <div class="fw-bold text-break mb-2" id="educationStageTitle"></div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-sm btn-outline-primary" data-education-step="information">1. 교육 정보</button>
+              <button type="button" class="btn btn-sm btn-outline-primary" data-education-step="attendance">2. 신청·출석</button>
+              <button type="button" class="btn btn-sm btn-outline-primary" data-education-step="feedback">3. 피드백</button>
+            </div>
+            <div id="educationStageStatus" class="small mt-2" role="status" hidden></div>
+          </section>
+          <div id="educationStageAttendanceQr" hidden></div>
+          <div id="educationStageFeedback" hidden>
+            <p id="educationStageExternalFeedback" class="small text-muted" hidden>외부에서 불러온 교육의 피드백은 원래 교육에서 확인할 수 있습니다.</p>
+            <a id="educationStageInstructor" class="btn btn-sm btn-outline-primary mb-3" target="_blank" rel="noopener" hidden>강사비 결재 열기</a>
+          </div>
           <section id="eventInformation">
           <div class="border rounded-3 p-3 mb-3 d-none" id="educationTemplatePanel">
             <label class="form-label fw-bold" for="educationTemplateSource">양식 복사</label>
@@ -832,7 +846,7 @@
 
   <div id="educationFlowPrintSheet"></div>
   <script src="/shared/education_event_form_v1.js" integrity="sha384-X9b9pAI1Nd8n7UkjAFZEjslKdfyei5mw0G6EquGotvT8X2OAnJze4Lv/v1UAn3Um" crossorigin="anonymous" defer></script>
-  <script src="/erp/education_flow_controls_v5.js" integrity="sha384-iRBcYlPSFAFp9Rc/cMkDX2W2nxdP0emEQyeF9+HyQZyq0gVB5UOv0sYEP3rhZpZx" crossorigin="anonymous" defer></script>
+  <script src="/erp/education_flow_controls_v6.js" integrity="sha384-NutuKhhp/vDbj+DpYBcmXZ+rJ7VZIqF/h4XxX+tvPuEPzjYN1G06/uZyf2bo3CDB" crossorigin="anonymous" defer></script>
   <script src="/erp/workflow_assets_print_v4.js" integrity="sha384-BTXIW3vA3w0C0fYVv0ieFexaJTMR+PfA97OFkFwjejtZdpISj/ddDzT4cZWEF3eB" crossorigin="anonymous" defer></script>
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -942,6 +956,45 @@
     let eventEditorReopen = null;
     let eventEditorTrigger = null;
     let educationTemplateRevision = 0;
+    let educationInstructorAllowed=false;
+    const educationStageHomes=new Map();
+
+    function preferredEducationStage(row) {
+      const end=Date.parse(row.ends_at||'');
+      return Number.isFinite(end)&&end<=Date.now()?'feedback':'attendance';
+    }
+
+    function syncEducationStageRail(education) {
+      const step=education&&formState.eventId ? formState.educationStage||'' : '';
+      const rail=document.getElementById('educationStageRail');
+      const qr=document.getElementById('educationStageAttendanceQr');
+      const feedback=document.getElementById('educationStageFeedback');
+      const action=document.getElementById('educationStageInstructor');
+      rail.hidden=!step;qr.hidden=step!=='attendance';feedback.hidden=step!=='feedback';
+      document.getElementById('educationStageExternalFeedback').hidden=step!=='feedback'||formState.externalEducation!==true;
+      for(const [id,parent] of [['educationApplicationPanel',qr],['educationQrSection',qr],
+        ['educationFeedbackPanel',feedback],['educationFeedbackListPanel',feedback]]){
+        const node=document.getElementById(id);
+        if(!educationStageHomes.has(id)){
+          const marker=document.createComment('education stage');node.before(marker);educationStageHomes.set(id,marker);
+        }
+        const marker=educationStageHomes.get(id);
+        if(step){if(node.parentElement!==parent)parent.insertBefore(node,parent===feedback?action:null);}
+        else if(marker.nextSibling!==node)marker.after(node);
+      }
+      if(!step)return;
+      document.getElementById('educationStageTitle').textContent=formState.flowInfo?.title||'';
+      for(const button of rail.querySelectorAll('[data-education-step]')){
+        const active=button.dataset.educationStep===step;
+        button.classList.toggle('btn-primary',active);button.classList.toggle('btn-outline-primary',!active);
+        if(active)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');
+      }
+      const eligible=step==='feedback'&&educationInstructorAllowed&&!!formState.flowInfo?.instructor
+        && preferredEducationStage({ends_at:formState.flowInfo.endsAt})==='feedback';
+      action.hidden=!eligible;
+      if(eligible)action.href='approval.html?tab=draft&instructorEducation='+encodeURIComponent(formState.eventId);
+      else action.removeAttribute('href');
+    }
 
     function isEducationAttendance(form=formState) {
       return PARTICIPATION_EDUCATION_VIEW && form.editorView==='attendance';
@@ -949,25 +1002,28 @@
 
     function showEventEditorMode() {
       const attendance=isEducationAttendance(), education=PARTICIPATION_EDUCATION_VIEW;
-      document.getElementById('eventInformation').classList.toggle('d-none',attendance);
-      document.getElementById('eventResources').classList.toggle('d-none',attendance);
-      document.getElementById('eventAttendance').classList.toggle('d-none',education&&!attendance);
+      const feedback=education&&formState.educationStage==='feedback';
+      document.getElementById('eventInformation').classList.toggle('d-none',attendance||feedback);
+      document.getElementById('eventResources').classList.toggle('d-none',attendance||feedback);
+      document.getElementById('eventAttendance').classList.toggle('d-none',education&&(!attendance||feedback));
       document.getElementById('educationAttendanceOverview').classList.toggle('d-none',!attendance);
       document.getElementById('educationRosterFiles').classList.toggle('d-none',!attendance||PARTICIPATION_COMMITTEE);
       document.getElementById('eventModalTitle').textContent=education
-        ? attendance?'출석 관리':formState.eventId?'교육 수정':'신규 교육 입력'
+        ? formState.educationStage?'교육 진행':attendance?'출석 관리':formState.eventId?'교육 수정':'신규 교육 입력'
         : formState.eventId?'행사 확인·수정':'회의 등록';
       document.getElementById('externalEducationBadge').hidden=!(education&&formState.externalEducation===true);
       const save=document.getElementById('saveEventBtn');
       save.textContent=attendance?'출석 변경 저장':'저장';
-      save.classList.toggle('d-none',attendance&&PARTICIPATION_COMMITTEE);
-      document.getElementById('discardEventDraftBtn').classList.toggle('d-none',!education||attendance&&PARTICIPATION_COMMITTEE);
+      save.classList.toggle('d-none',feedback||attendance&&PARTICIPATION_COMMITTEE);
+      document.getElementById('discardEventDraftBtn').classList.toggle('d-none',!education||feedback||attendance&&PARTICIPATION_COMMITTEE);
+      if(feedback)document.getElementById('deleteEventBtn').classList.add('d-none');
       if (attendance) {
         document.getElementById('educationAttendanceName').textContent=document.getElementById('eventTitle').value;
         document.getElementById('educationAttendanceWhen').textContent=
           formatKstDateTime(formState.flowInfo?.startsAt)+' ~ '+formatKstDateTime(formState.flowInfo?.endsAt);
       }
       if (!education||attendance||formState.eventId) document.getElementById('educationTemplatePanel').classList.add('d-none');
+      syncEducationStageRail(education);
     }
 
     function waitEventEditorClose(revision) {
@@ -978,7 +1034,7 @@
         let done=false;
         const finish=value=>{if(done)return;done=true;modal.removeEventListener('hidden.bs.modal',hidden);document.removeEventListener('focusin',moved,true);document.removeEventListener('pointerdown',moved,true);window.removeEventListener('blur',blur);if(eventEditorReopen===pending)eventEditorReopen=null;resolve(value);};
         const hidden=()=>finish(revision===eventOpenRevision&&owner===eventDraftOwner()&&visit===eventDraftVisit&&!window.frameElement?.hidden);
-        const moved=event=>{if(!modal.contains(event.target)&&!event.target.closest?.('#newEventBtn,[data-edit-event],[data-manage-attendance]')&&event.target!==document.body)finish(false);};
+        const moved=event=>{if(!modal.contains(event.target)&&!event.target.closest?.('#newEventBtn,[data-edit-event],[data-education-journey]')&&event.target!==document.body)finish(false);};
         const blur=()=>finish(false),pending={cancel:()=>finish(false)};eventEditorReopen=pending;
         modal.addEventListener('hidden.bs.modal',hidden,{once:true});document.addEventListener('focusin',moved,true);document.addEventListener('pointerdown',moved,true);window.addEventListener('blur',blur);
       });
@@ -1047,7 +1103,7 @@
       if(draft!==activeEventDraft||draft.owner!==eventDraftOwner()||formState.saving||revision!==eventOpenRevision||visit!==eventDraftVisit||window.frameElement?.hidden)return;
       if(signature!==eventDraftSignature(draft)||eventDraftFileFields.some(id=>draft.files[id].length!==files[id].length||draft.files[id].some((file,i)=>file!==files[id][i])))return;
       const id=draft.form.eventId;
-      if(id){draft.discarding=true;try{await openEditEvent(id,null,draft.form.editorView);}finally{draft.discarding=false;}return;}
+      if(id){draft.discarding=true;try{await openEditEvent(id,null,draft.form.editorView,null,draft.form.educationStage||'');}finally{draft.discarding=false;}return;}
       for(const [key,value]of eventDrafts)if(value===draft)eventDrafts.delete(key);
       activeEventDraft=null;await openNewEvent();
     }
@@ -1721,8 +1777,8 @@
               ${required > 0 ? `<span class="stat-pill">서명 ${signed}/${required}</span>` : ''}
               ${fileCount > 0 ? `<span class="stat-pill">첨부 ${fileCount}</span>` : ''}
               ${PARTICIPATION_EDUCATION_VIEW ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-view-education="${escapeHtml(row.id)}">간략히 보기</button>` : ''}
-              ${!PARTICIPATION_COMMITTEE || row.editable===true ? `<button type="button" class="btn btn-sm btn-outline-primary" data-edit-event="${escapeHtml(row.id)}">${PARTICIPATION_EDUCATION_VIEW?'수정':'확인·수정'}</button>` : ''}
-              ${PARTICIPATION_EDUCATION_VIEW && (!PARTICIPATION_COMMITTEE||row.editable===true) ? `<button type="button" class="btn btn-sm btn-outline-primary" data-manage-attendance="${escapeHtml(row.id)}">출석 관리</button>` : ''}
+              ${!PARTICIPATION_EDUCATION_VIEW ? `<button type="button" class="btn btn-sm btn-outline-primary" data-edit-event="${escapeHtml(row.id)}">확인·수정</button>` : ''}
+              ${PARTICIPATION_EDUCATION_VIEW && (!PARTICIPATION_COMMITTEE||row.editable===true) ? `<button type="button" class="btn btn-sm btn-outline-primary" data-education-journey="${escapeHtml(row.id)}" data-first-step="${preferredEducationStage(row)}">교육 진행</button>` : ''}
             </div>
           </article>`;
       }).join('');
@@ -1732,8 +1788,8 @@
       list.querySelectorAll('[data-view-education]').forEach(function(button) {
         button.addEventListener('click', function() { openEducationDetail(button.dataset.viewEducation, button); });
       });
-      list.querySelectorAll('[data-manage-attendance]').forEach(button=>{
-        button.addEventListener('click',()=>void openEditEvent(button.dataset.manageAttendance,null,'attendance',button));
+      list.querySelectorAll('[data-education-journey]').forEach(button=>{
+        button.addEventListener('click',()=>void openEducationStage(button.dataset.educationJourney,button.dataset.firstStep,button));
       });
     } // End of renderEvents
 
@@ -2212,7 +2268,7 @@
       const type = document.getElementById('eventType').value;
       const education = type === 'EDUCATION';
       section.classList.toggle('d-none', !education || !formState.eventId);
-      if (!education) return;
+      if (!education||formState.educationStage&&formState.educationStage!=='attendance') return;
 
       const codeBox = document.getElementById('educationQrCode');
       const qrPanel = document.getElementById('educationQrPanel');
@@ -2577,7 +2633,7 @@
     }
     function educationSavedFlowInfo(event) {
       if(event.event_type!=='EDUCATION')return null;
-      return {id:event.id,title:event.title,startsAt:event.starts_at,endsAt:event.ends_at,revision:event.updated_at,
+      return {id:event.id,title:event.title,instructor:event.instructor,startsAt:event.starts_at,endsAt:event.ends_at,revision:event.updated_at,
         location:educationPlace(event.location,event.education_address_detail),
         schedule:[formatKstDateTime(event.starts_at,''),formatKstDateTime(event.ends_at,'')].filter(Boolean).join(' ~ ')};
     }
@@ -2876,10 +2932,15 @@
       form.manualAttendees=Array.isArray(data.manual_attendees)?data.manual_attendees:[];
     }
     function reopenParticipationRecord(eventId) {
-      return openEditEvent(eventId,null,formState.editorView||'event');
+      return openEditEvent(eventId,null,formState.editorView||'event',null,formState.educationStage||'');
     }
 
-    async function openEditEvent(eventId, savedDraft = null, editorView='event', trigger=null) {
+    function openEducationStage(eventId,stage,trigger) {
+      if(!PARTICIPATION_EDUCATION_VIEW||!['information','attendance','feedback'].includes(stage))return;
+      return openEditEvent(eventId,null,stage==='attendance'?'attendance':'event',trigger,stage);
+    }
+
+    async function openEditEvent(eventId, savedDraft = null, editorView='event', trigger=null,guidedStage='') {
       if(trigger)eventEditorTrigger=trigger;
       const attendance=PARTICIPATION_EDUCATION_VIEW&&editorView==='attendance';
       const fastEducationEdit=PARTICIPATION_EDUCATION_VIEW&&!attendance;
@@ -2892,8 +2953,14 @@
       let prepared;
       try{prepared=draft&&!draft.discarding&&eventDraftDirty(draft)?prepareEventDraftFiles(draft):null;}
       catch(_){showAlert('formAlert','첨부파일을 유지한 채 현재 초안을 계속 작성해 주세요.');return;}
-      showLoading(true, '행사 정보를 불러오는 중...');
+      const pane=document.getElementById('eventModal');
+      const inlineSwitch=!!guidedStage&&pane.classList.contains('show')&&String(formState.eventId)===String(eventId);
+      const stepStatus=document.getElementById('educationStageStatus');
+      if(inlineSwitch){
+        stepStatus.hidden=false;stepStatus.textContent='선택한 단계를 불러오는 중…';
+      }else showLoading(true, '행사 정보를 불러오는 중...');
       showAlert('pageAlert', '');
+      let stepFailure=false;
       try {
         const { data, error } = await (PARTICIPATION_COMMITTEE ? educationCommitteeRpc('get',eventId)
           :PARTICIPATION_EDUCATION_VIEW&&!attendance ? educationAdminEditorRpc('get',eventId)
@@ -2918,15 +2985,15 @@
             if(!event.external_education&&draft.linkState?.link?.status==='ACTIVE')
               draft.linkState={...draft.linkState,link:null,course:null,sourceWarning:'',loaded:false};
           }
-          if(attendance){
-            draft.form.flowInfo=educationSavedFlowInfo(event);
-            refreshDraftAttendance(draft.form,data);
-          }
+          draft.form.educationStage=guidedStage;
+          draft.form.flowInfo=educationSavedFlowInfo(event);
+          if(attendance)refreshDraftAttendance(draft.form,data);
           restoreEventDraft(draft,prepared);
           educationFlowControls?.reset();
           if(fastEducationEdit){
             eventModalInstance.show();
-            loadEducationEditPanels(formState,owner,revision);
+            if(guidedStage!=='feedback')loadEducationEditPanels(formState,owner,revision);
+            if(inlineSwitch)educationFlowControls?.activate();
             return;
           }
           await renderCurrentFiles();
@@ -2939,6 +3006,7 @@
         formState = {
           eventId:event.id,
           editorView,
+          educationStage:guidedStage,
           deletePending:PARTICIPATION_COMMITTEE&&event.delete_pending===true,
           requestKey:event.request_key || crypto.randomUUID(),
           attendees:PARTICIPATION_EDUCATION_VIEW?[]:participationAttendeeRows(data),
@@ -2987,7 +3055,8 @@
           educationFlowControls?.reset();
           bindEventDraft(draftKey);
           eventModalInstance.show();
-          loadEducationEditPanels(formState,owner,revision);
+          if(guidedStage!=='feedback')loadEducationEditPanels(formState,owner,revision);
+          if(inlineSwitch)educationFlowControls?.activate();
           return;
         }
         await Promise.all([renderCurrentFiles(),...(PARTICIPATION_COMMITTEE?[]:[loadHumanitiesLink(false),
@@ -2998,9 +3067,14 @@
         eventModalInstance.show();
       } catch (error) {
         if(PARTICIPATION_EDUCATION_VIEW&&(revision!==eventOpenRevision||!participationReadStillCurrent(owner)))return;
-        showAlert('pageAlert', error?.message || '행사 정보를 불러오지 못했습니다.');
+        if(inlineSwitch){
+          stepFailure=true;stepStatus.textContent='이 단계를 불러오지 못했습니다. 단계 버튼을 다시 눌러 주세요.';
+        }else showAlert('pageAlert', error?.message || '행사 정보를 불러오지 못했습니다.');
       } finally {
-        if (revision === eventOpenRevision) showLoading(false);
+        if(revision===eventOpenRevision){
+          if(!stepFailure){stepStatus.hidden=true;stepStatus.textContent='';}
+          showLoading(false);
+        }
       }
     } // End of openEditEvent
 
@@ -3968,7 +4042,7 @@
     }
 
     async function saveEvent() {
-      if (formState.saving) return;
+      if (formState.saving||formState.educationStage==='feedback') return;
       if(isEducationAttendance()){await saveEducationAttendance();return;}
       showAlert('formAlert', '');
       let values;
@@ -4087,10 +4161,10 @@
         if(PARTICIPATION_EDUCATION_VIEW&&(savingOwner!==eventDraftOwner()||savingVisit!==eventDraftVisit||window.frameElement?.hidden))return;
         if (values.type === 'EDUCATION') {
           if(changedAfterSave){showAlert('formAlert','교육을 저장했습니다. 추가로 작성한 내용은 아직 저장하지 않았습니다.','success');return;}
-          await openEditEvent(eventId,savingDraft);
+          await openEditEvent(eventId,savingDraft,'event',null,savingForm.educationStage||'information');
           showAlert('formAlert', importingHumanities
             ? '모두의 인문학 교육을 수정한 내용으로 저장하고 연동했습니다.'
-            : '교육을 저장했습니다. 첨부파일과 출석 QR을 확인할 수 있습니다.', 'success');
+            : '교육을 저장했습니다.', 'success');
         } else {
           eventModalInstance.hide();
           showAlert('pageAlert', '회의 참여 이력을 저장했습니다.', 'success');
@@ -4241,6 +4315,7 @@
         containers:{application:document.getElementById('educationApplicationPanel'),feedback:document.getElementById('educationFeedbackPanel')},
         lists:{application:document.getElementById('educationApplicationListPanel'),feedback:document.getElementById('educationFeedbackListPanel')},
         inAttendance:()=>isEducationAttendance(),
+        getStage:()=>formState.educationStage||'',
         rpc:educationFlowRpc,origin:PARTICIPATION_PUBLIC_ORIGIN,
         getRecord:()=>formState.externalEducation===true||humanitiesLinkState.link?.status==='ACTIVE'?null:formState.flowInfo||null,
         stillCurrent:r=>r===formState.flowInfo&&!!eventDraftOwner()&&!window.frameElement?.hidden&&!formState.saving
@@ -4290,6 +4365,15 @@
       document.getElementById('summaryDelegateCard').classList.toggle('d-none', PARTICIPATION_EDUCATION_VIEW);
       document.getElementById('summaryMeetingRateCard').classList.toggle('d-none', PARTICIPATION_EDUCATION_VIEW);
       eventModalInstance = bootstrap.Modal.getOrCreateInstance(document.getElementById('eventModal'));
+      document.getElementById('eventModal').addEventListener('shown.bs.modal',()=>educationFlowControls?.activate());
+      document.getElementById('educationStageRail').querySelectorAll('[data-education-step]').forEach(button=>{
+        button.addEventListener('click',()=>{
+          const selected=button.dataset.educationStep;
+          if(!formState.saving&&formState.eventId&&
+             (formState.educationStage!==selected||!document.getElementById('educationStageStatus').hidden))
+            void openEducationStage(formState.eventId,selected);
+        });
+      });
       document.getElementById('educationDetailRetry').addEventListener('click', function() {
         openEducationDetail(educationDetailState.eventId);
       });
@@ -4434,6 +4518,9 @@
         });
         if (!guard.ok) return;
         verifiedCoop=guard.runtime.coop_id;
+        const rights=guard.runtime.effective_permissions;
+        educationInstructorAllowed=verifiedCoop===YONGIN_COOP_ID && Array.isArray(rights)
+          && ['approval.view','approval.submit','accounting.edit'].every(key=>rights.includes(key));
       }
       participationReadOwner = { userId:session.user.id, coopId:verifiedCoop, revision:participationReadOwner.revision + 1 };
       const reviewButton=document.getElementById('educationDeleteReviewsBtn');
@@ -4453,6 +4540,7 @@
           rememberEventDraft();eventDraftVisit++;
           eventModalInstance?.hide();
           participationReadOwner = { userId:null, coopId:null, revision:participationReadOwner.revision + 1 };
+          educationInstructorAllowed=false;
           humanitiesSourceState.enabled=false;humanitiesSourceState.owner='';humanitiesSourceState.revision++;humanitiesSourceState.pending=null;humanitiesImportReadRevision++;renderHumanitiesSourceControls();
           meetingContextRevision++;
           meetingContextReady = false;

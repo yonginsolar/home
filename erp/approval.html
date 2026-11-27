@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.189 | 일반 승인과 전결 증빙 재확인 -->
+<!-- Version: v1.2.190 | 교육에서 강사비 결재로 연결 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -13,7 +13,7 @@
   <script src="/shared/meeting_flow_v5.js" integrity="sha384-ydMSPe6aHgPvhsxHfGXz8Wpk8BbCnh/YXGh4bd8KhlvPlq61khxikSo6G5sVTRfz" crossorigin="anonymous"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.189 | approval.html');</script>
+  <script>console.log('[Version] v1.2.190 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -11588,7 +11588,10 @@ window.onload = async function() {
         : getApprovalEntryDefaultTab();
     const initialTab = getApprovalInitialTab(window.ErpBoardFlow?.parse(location.href) ? 'draft' : resolvedInitialTab);
     if (!userChangedTabDuringBoot || initialTab !== activeApprovalTab) switchTab(initialTab, { skipLoad:true,skipCacheWrite:openingBoard });
-    if(initialTab==='draft'&&!openingBoard)void prepareApprovalDraftEntry();
+    if(initialTab==='draft'&&!openingBoard){
+        void prepareApprovalDraftEntry();
+        if(!userChangedTabDuringBoot)void openApprovalInstructorFromEducation();
+    }
     const entryTabRevision=approvalEntryTabRevision;
     const entryList=(initialTab==='todo'?approvalEntryWorkflow:Promise.resolve()).then(()=>{
         if(!openingBoard&&entryTabRevision===approvalEntryTabRevision&&!window.frameElement?.hidden)return loadApprovalTabData(initialTab,{render:true});
@@ -12354,13 +12357,42 @@ async function readApprovalInstructorEducation(current) {
         instructor:validText(e.instructor,100)
     })).filter(e=>e.id&&e.title&&e.at).sort((a,b)=>b.at.localeCompare(a.at)).slice(0,100);
 }
+
+async function openApprovalInstructorFromEducation() {
+    const id=new URLSearchParams(location.search).get('instructorEducation')||'';
+    if(!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)||!approvalInstructorWritable())return;
+    const owner=approvalSubmitOwner(),tabRevision=approvalEntryTabRevision;
+    const current=()=>owner===approvalSubmitOwner()&&tabRevision===approvalEntryTabRevision
+        &&activeApprovalTab==='draft'&&!window.frameElement?.hidden&&approvalInstructorWritable();
+    if(!await prepareApprovalDraftEntry()||!current())return;
+    if(hasMeaningfulApprovalDraftContentForReplacement())return showAlert('작성 중인 결재는 그대로 두었습니다. 강사비 양식에서 교육을 불러올 수 있어요.');
+    const inputRevision=approvalComposerInputRevision;
+    const unchanged=()=>current()&&inputRevision===approvalComposerInputRevision&&!hasMeaningfulApprovalDraftContentForReplacement();
+    try{
+        const education=(await readApprovalInstructorEducation(unchanged)).find(row=>row.id===id);
+        if(!unchanged())return;
+        if(!education){showAlert('선택한 교육을 불러올 수 없어요. 강사비 양식에서 직접 입력할 수 있습니다.');return;}
+        const category=document.getElementById('appCategory'),subtype=document.getElementById('expenseSubType');
+        if(!Array.from(category.options).some(option=>option.value==='지출결의'&&!option.disabled))return;
+        category.value='지출결의';handleCategoryChange();
+        if(!Array.from(subtype.options).some(option=>option.value==='강사비'&&!option.disabled))return;
+        subtype.value='강사비';handleExpenseSubTypeChange();
+        const revision=approvalComposerInputRevision;
+        await openApprovalInstructorBatch();
+        if(!current()||revision!==approvalComposerInputRevision||approvalInstructorMode()!=='강사비')return;
+        const widget=getApprovalInstructorWork().widget;
+        if(!widget?.addSelectedEducation(education)&&!widget?.snapshot()?.cases?.length)
+            showAlert('강사비 양식에서 교육을 직접 불러올 수 있어요.');
+    }catch(_){if(unchanged())showAlert('선택한 교육을 불러오지 못했어요. 강사비 양식에서 직접 입력할 수 있습니다.');}
+}
+
 async function openApprovalInstructorBatch() {
     if(approvalInstructorMode()!=='강사비')return;
     const s=getApprovalInstructorWork(), host=document.getElementById('approvalInstructorBatchEditor');
     if(s.widget)return;
     host.textContent='강사비 입력을 준비하고 있습니다…';
     if(!window.ApprovalInstructorBatch&&!approvalInstructorBatchRead)approvalInstructorBatchRead=loadApprovalInstructorScript(
-        'approval_instructor_batch_v2.js','sha384-oFsHWkXs4ONR6ixYvyQfIu+PfB6OBgZInp0F27x3NvetitPeVNJtVZgKb71rsBNv',()=>!!window.ApprovalInstructorBatch)
+        'approval_instructor_batch_v3.js','sha384-edjPbRx0AE2VZxcIKsop5cUxyTvjThqJ+cERGGq6/Z0cb2YdSyr6kiTMbLBZXVpJ',()=>!!window.ApprovalInstructorBatch)
         .finally(()=>{approvalInstructorBatchRead=null;});
     try{
         await Promise.all([loadApprovalInstructorCalculator(),approvalInstructorBatchRead]);
