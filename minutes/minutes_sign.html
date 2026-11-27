@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.41
+Version: v1.2.42
 Change: Open the submitted closing materials before reviewing an audit report.
 -->
 <html lang="ko">
@@ -10,7 +10,7 @@ Change: Open the submitted closing materials before reviewing an audit report.
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.41 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.42 | minutes_sign.html');</script>
     <link rel="stylesheet" href="./meeting_business_report_v1.css" integrity="sha384-kGlqK6YRKkB5nG7nMTuISUVJs6VZpJlN6lnjrMvLPfrhZQf6k7oLqkm+4UTthqmZ" crossorigin="anonymous">
     <link rel="stylesheet" href="./assembly_audit_document_v1.css" integrity="sha384-5k6dcj2BIQXZ7A8meZl2yJDYdD2Wdppx6C9LQKsngfoslQTzUKE2XSNU9614uRpZ" crossorigin="anonymous">
     <style>
@@ -442,7 +442,7 @@ Change: Open the submitted closing materials before reviewing an audit report.
         import { MinutesService } from './MinutesService.js?v=1.0.60';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { buildSignatureDisplay } from './signature_display.js?v=1.0.1';
-        import { createSignatureChoice, signatureSnapshot } from './signature_choice.js?v=1.0.0';
+        import { createSignatureChoice, signatureSnapshot } from './signature_choice_v2.js';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
@@ -597,15 +597,30 @@ Change: Open the submitted closing materials before reviewing an audit report.
             return String(params.get('minuteId') || params.get('id') || '').trim();
         })();
         let autoOpenedRequestedMinute = false;
+        let myAssignedMemberDocuments = new Map();
+        let signListRevision=0;
+        const memberPortal=(p_action,p_id=null,p_fields={})=>supabase.rpc('meeting_member_portal',{p_action,p_id,p_fields});
+        const memberSigningId=context=>`member-${context.memberPerson}`;
 
         const signatureChoice = createSignatureChoice({
             isCurrent: context => myAuthId === context.authId && currentMinuteId === context.minuteId
-                && Number(myOfficialId) === context.officialId && detailRequestVersion === context.version
+                && (context.memberPerson ? currentMinuteDoc?.member_person===context.memberPerson :
+                    Number(myOfficialId) === context.officialId) && detailRequestVersion === context.version
                 && !document.getElementById('detail-panel').classList.contains('hidden'),
-            prepare: (context, previous) => supabase.rpc('prepare_my_signature', {
+            prepare: async (context, previous) => {
+                if(context.memberPerson){
+                    const value=await memberPortal('sign_prepare',context.minuteId);
+                    if (!value.error && (value.data?.person!==context.memberPerson || value.data?.revision!==context.revision))
+                        return {error:{message:'SIGNATURE_DOCUMENT_CHANGED',code:'P0001'}};
+                    return value;
+                }
+                return supabase.rpc('prepare_my_signature', {
                 p_minute_id: context.minuteId, p_official_id: context.officialId,
                 p_snapshot: context.snapshot, p_previous: previous
-            }),
+                });
+            },
+            path:(context,id)=>context.memberPerson?
+                `signatures/${context.minuteId}/${memberSigningId(context)}_${id}.png`:'',
             loadImage: async path => {
                 const url = await resolveSignaturePreviewSource(path);
                 const response = await fetch(url);
@@ -619,8 +634,14 @@ Change: Open the submitted closing materials before reviewing an audit report.
                     const preview = await createSignaturePreviewBlob(url);
                     try {
                         await uploadSignaturePart(SIGNATURE_PREVIEW_BUCKET,
-                            getSignaturePreviewPath(context.minuteId, context.officialId, pending.id), preview);
+                            context.memberPerson?`${context.minuteId}/${memberSigningId(context)}/${pending.id}.png`:
+                                getSignaturePreviewPath(context.minuteId, context.officialId, pending.id), preview);
                     } catch (error) {
+                        if(context.memberPerson){
+                            const ready=await memberPortal('sign_assets',context.minuteId,{request:pending.id,path:pending.path});
+                            if(ready.error||ready.data!==true)throw error;
+                            return;
+                        }
                         const ready = await supabase.rpc('my_signature_assets_ready', {
                             p_minute_id:context.minuteId, p_official_id:context.officialId,
                             p_request_id:pending.id, p_path:pending.path
@@ -629,12 +650,20 @@ Change: Open the submitted closing materials before reviewing an audit report.
                     }
                 } finally { URL.revokeObjectURL(url); }
             },
-            complete: (context, pending) => supabase.rpc('complete_my_signature', {
+            complete: (context, pending) => context.memberPerson?memberPortal('sign_complete',context.minuteId,
+                {revision:pending.revision,request:pending.id,path:pending.path}):supabase.rpc('complete_my_signature', {
                 p_minute_id: context.minuteId, p_official_id: context.officialId,
                 p_revision: pending.revision, p_request_id: pending.id, p_path: pending.path
             }),
             onComplete: async context => {
                 if (myAuthId !== context.authId) return;
+                if(context.memberPerson){
+                    if(currentMinuteId!==context.minuteId||detailRequestVersion!==context.version)return;
+                    markLocallySigned(context.minuteId);
+                    showToast('서명을 완료했습니다.');
+                    await openDocumentById(context.minuteId);
+                    return;
+                }
                 await notifySignatureCompletionIfNeeded(context.minuteId);
                 if (myAuthId !== context.authId || currentMinuteId !== context.minuteId || detailRequestVersion !== context.version) return;
                 markLocallySigned(context.minuteId);
@@ -1415,16 +1444,19 @@ Change: Open the submitted closing materials before reviewing an audit report.
 
         async function loadSignList() {
             const listPanel = document.getElementById('list-panel');
+            const generation=++signListRevision, owner=myAuthId;
             listPanel.innerHTML = '';
             listPanel.appendChild(buildListHeader());
 
             try {
-                if (myOfficialIds.length === 0 && !isAdminUser) {
-                    appendListMessage(listPanel, '임원 전용 페이지입니다. 임원 본인 계정으로 로그인하세요.');
-                    return;
-                }
-
-                const signModeMinutes = (await MinutesService.listSignModeMinutes()).data || [];
+                const [legacy, member] = await Promise.all([
+                    myOfficialIds.length || isAdminUser ? MinutesService.listSignModeMinutes():Promise.resolve({data:[]}),
+                    auditReportList || window.ExpoRuntimeBridge ? Promise.resolve({data:[]}):
+                        Promise.resolve(memberPortal('sign_list')).catch(()=>({data:[]}))
+                ]);
+                if(generation!==signListRevision||owner!==myAuthId)return;
+                myAssignedMemberDocuments=new Map((Array.isArray(member.data)?member.data:[]).map(item=>[item.id,item]));
+                const signModeMinutes = legacy.data || [];
                 let targets = Array.isArray(signModeMinutes) ? signModeMinutes : [];
                 if(auditReportList)targets=targets.filter(doc=>doc?.doc_type==='AUDIT_REPORT');
 
@@ -1436,6 +1468,7 @@ Change: Open the submitted closing materials before reviewing an audit report.
                         return signerIds.length === 0 || signerIds.some(id => relevantIds.includes(String(id)));
                     });
                 }
+                targets=targets.filter(row=>!myAssignedMemberDocuments.has(row.id)).concat([...myAssignedMemberDocuments.values()]);
 
                 if (targets.length === 0) {
                     if (requestedMinuteId && !autoOpenedRequestedMinute) {
@@ -1446,11 +1479,12 @@ Change: Open the submitted closing materials before reviewing an audit report.
                     return;
                 }
 
-                const minuteIds = targets.map(m => m.id);
-                const { data: sigList } = await MinutesService.listSignaturesForMinutes(minuteIds);
+                const minuteIds = targets.filter(m=>!myAssignedMemberDocuments.has(m.id)).map(m => m.id);
+                const { data: sigList } = minuteIds.length?await MinutesService.listSignaturesForMinutes(minuteIds):{data:[]};
+                if(generation!==signListRevision||owner!==myAuthId)return;
                 const signedMap = new Map((sigList || []).map(s => [String(s.minute_id) + ':' + String(s.official_id), true]));
                 const viewModels = targets.map((m) => {
-                    const isSigned = myOfficialIds.length > 0
+                    const isSigned = myAssignedMemberDocuments.has(m.id)?m.member_signed===true||isLocallySigned(m.id):myOfficialIds.length > 0
                         ? (myOfficialIds.some(officialId => signedMap.get(String(m.id) + ':' + String(officialId))) || isLocallySigned(m.id))
                         : false;
                     const signProgress = getDocumentSignProgress(m, isSigned);
@@ -1562,7 +1596,8 @@ async function openDocumentById(id) {
             clearMinuteAttachments();
             clearSubmittedAuditPacket();
             try {
-                const { data: doc, error } = await MinutesService.getMinuteById(id);
+                const { data: doc, error } = myAssignedMemberDocuments.has(id)?
+                    await memberPortal('sign_read',id):await MinutesService.getMinuteById(id);
                 if (!current()) return;
                 if (error) throw error;
                 if (!doc || String(doc.id) !== String(id)) {
@@ -1595,7 +1630,7 @@ async function openDocumentById(id) {
 
                 await updateSignStatus(doc);
                 if (!current()) return;
-                await renderDocumentSignatures(doc);
+                if(!doc.member_person)await renderDocumentSignatures(doc);
                 if (!current()) return;
 
                 prepareSubmittedAuditPacket(doc,current);
@@ -1675,6 +1710,16 @@ async function openDocumentById(id) {
                 return;
             }
 
+            if(doc.member_person){
+                alreadySignedOnce=doc.member_signed===true;
+                const canSign=!alreadySignedOnce&&doc.status==='OPEN';
+                const progress=getDocumentSignProgress(doc,alreadySignedOnce);
+                statusEl.innerText=progress.detailText;
+                btn.innerText=canSign?'서명하기':alreadySignedOnce?'서명 완료':'열람 전용';
+                btn.disabled=!canSign;
+                setDetailModePill(!canSign,progress.label);
+                return;
+            }
             if (myOfficialIds.length === 0 && isAdminUser) {
                 statusEl.innerText = '관리자 권한으로 열람 중입니다. 서명은 임원만 가능합니다.';
                 btn.innerText = '임원만 서명 가능';
@@ -2040,6 +2085,14 @@ async function openDocumentById(id) {
             }
             if (alreadySignedOnce) {
                 showToast('이미 서명 완료된 문서입니다.');
+                return;
+            }
+            if(currentMinuteDoc?.member_person){
+                if(currentMinuteDoc.status!=='OPEN')return;
+                await signatureChoice.open({authId:myAuthId,coopId:currentMinuteDoc.coop_id,
+                    memberPerson:currentMinuteDoc.member_person,officialId:`member-${currentMinuteDoc.member_person}`,
+                    minuteId:currentMinuteId,version:detailRequestVersion,title:currentMinuteDoc.title,
+                    revision:currentMinuteDoc.revision});
                 return;
             }
             if (myOfficialIds.length === 0) return showToast('임원 계정만 서명이 가능합니다.');

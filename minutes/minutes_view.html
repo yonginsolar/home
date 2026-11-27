@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-		    Version: v1.0.81
+		    Version: v1.0.82
 		    Change: 2026-11-19 - Retain the ERP sidebar for the ERP document box entry.
 -->
 <html lang="ko">
@@ -1892,6 +1892,23 @@
             document.body.style.backgroundColor = '#f1f5f9';
 
             const signaturesTask = (async () => {
+                if(doc.doc_type==='GENERAL_ASSEMBLY'&&doc.requires_sign&&!doc.signer_ids?.length){
+                    const {data,error}=await supabase.rpc('meeting_member_portal',{
+                        p_action:'published_signers',p_id:targetId,p_fields:{}
+                    });
+                    if(requestVersion!==detailRequestVersion)return;
+                    if(!error&&Array.isArray(data)&&data.length>0){
+                        const panel=document.getElementById('signatures-panel'),list=document.getElementById('signatures-list');
+                        list.replaceChildren(...data.map(row=>{
+                            const card=document.createElement('div'),name=document.createElement('div'),stamp=document.createElement('div');
+                            card.className='signatures-item';name.className='signatures-name';stamp.className='signatures-status';
+                            name.textContent=row.chair?`${row.name} · 위원장`:row.name;
+                            stamp.textContent=`전자서명 · ${formatMinutesViewKstDateTime(row.signed_at)}`;
+                            card.append(name,stamp);return card;
+                        }));
+                        panel.style.display='';return;
+                    }
+                }
                 const [{ data: signatures }, officials] = await Promise.all([
                     MinutesService.listSignatureStatusesByMinuteId(targetId),
                     MinutesService.getOfficials()
