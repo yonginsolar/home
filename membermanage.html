@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.280
+Version: v1.0.281
 Change: 2026-11-24 - 조합원 포털 디지털 조합원증·4버튼 출자/신청·테마 리뉴얼 및 증명서 v1.2 연동.
 -->
 <html lang="ko">
@@ -3968,6 +3968,16 @@ error.code = String(result?.code || 'INTEGRATION_FAILED');
 error.fallback = result?.fallback === true;
 throw error;
 }
+const handoff = payload.action === 'complete_member_handoff' || payload.action === 'complete_authenticated_member_handoff';
+const checkin = payload.action === 'partner_checkin';
+if ((handoff && (result?.ok !== true || typeof result.receipt_token !== 'string' || !result.receipt_token.trim()))
+    || (checkin && (result?.ok !== true || !['CHECKED_IN', 'ALREADY_RECORDED'].includes(result.status)))) {
+const error = new Error(checkin
+    ? '출석 결과를 확인하지 못했어요. 교육 담당자에게 출석 여부를 확인해 주세요.'
+    : '조합원 확인 결과를 받지 못했어요. QR을 다시 확인해 주세요.');
+error.code = 'INTEGRATION_RESULT_UNCONFIRMED';
+throw error;
+}
 return result;
 } // End of callEducationIntegration
 
@@ -4103,7 +4113,9 @@ participant_name:name, phone, age_confirmed:true, privacy_consent:true,
 terms_version:HUMANITIES_CHECKIN_TERMS_VERSION,
 optional_handoff_token:getHumanitiesOptionalToken() || null
 });
-setEducationQrInlineStatus('조합원 확인과 모두의 인문학 체크인이 완료되었습니다. 돌아가는 중입니다.', 'success');
+setEducationQrInlineStatus(humanitiesResult.status === 'ALREADY_RECORDED'
+    ? '이미 출석한 교육입니다. 돌아가는 중입니다.'
+    : '조합원 확인과 모두의 인문학 체크인이 완료되었습니다. 돌아가는 중입니다.', 'success');
 window.location.replace(humanitiesReturnUrl({
 partner_status:'success', optional_warning:humanitiesResult?.optional_info_save_failed === true ? '1' : null
 }));
@@ -4139,7 +4151,8 @@ partner_fallback:'1', optional_handoff:getHumanitiesOptionalToken() || null
 return;
 }
 CoopSafeLog.error("education QR quick check-in failed:", error?.message || error);
-setEducationQrInlineStatus('출석을 등록하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
+setEducationQrInlineStatus(error?.code === 'INTEGRATION_RESULT_UNCONFIRMED'
+    ? error.message : '출석을 등록하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
 } finally {
 if (button) button.disabled = false;
 }
