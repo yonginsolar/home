@@ -62,7 +62,7 @@
   function nextStage(row,kind){
     if(row.status==='CANCELLED')return 'outcome';
     if(row.minuteId)return !signed(row)?'signature':!row.published||kind!==assembly?'publish':'followups';
-    if(!basics(row))return 'prepare';
+    if(!basics(row)||(kind===assembly&&!row.noticeDate))return 'prepare';
     if(!row.agendaReady)return 'agenda';
     if(!row.materialsReady&&!approved(row.approvalStatus))return 'materials';
     if(!posted(row))return approved(row.approvalStatus)?'notice':'approval';

@@ -10,7 +10,7 @@ import { createMeetingNotHeld } from './meeting_not_held_v2.js';
 import { listMeetingAnnexes, appendMeetingTextAnnexes, orderMeetingAnnexes, setMeetingAnnexLink, moveMeetingAnnex } from './meeting_annex_import.js?v=1.1.2';
 import { AGENDA_LOCK_REASON, BOARD_AGENDA_LOCK_REASON, protectMaterialAgendas, clearMaterialAgendaUi, guardMaterialAgendaInput } from './meeting_agenda_lock.js?v=1.2.0';
 import { buildAssemblyAgendaPlan, buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates_v1_8.js';
-import { assemblyBaseOptions, assemblyDecisionTypes, currentBaseOrder, agendaSkeleton } from './assembly_agenda_controls_v1.js';
+import { assemblyBaseOptions, assemblyDecisionTypes, assemblyMinutePlan, encodeAssemblyMinutePlan, currentBaseOrder, agendaSkeleton } from './assembly_agenda_controls_v1.js';
 import { labelPracticalScript } from './board_script_transfer.js?v=1.0.2';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 
@@ -257,8 +257,9 @@ function syncSavedMeetingProgress(patch={}) {
   if(!route||route.id!==snapshot?.id||row?.id!==route.id||row.meeting_type!==route.kind||snapshot.coopId!==state.runtime?.coop_id)return;
   const materials=documentSavedRows.get('MATERIALS');
   const materialsSaved=materials ? !!materials.content_html?.trim() : snapshot.materialsSaved;
+  const hasPlan=row.meeting_type!=='GENERAL_ASSEMBLY'||(materials ? /data-assembly-plan="[0-9a-f]+"/.test(materials.content_html||'') : snapshot.materialsReady);
   flow.adopt({...snapshot,title:row.title,date:row.meeting_date,noticeDate:row.notice_date,start:row.start_time,end:row.end_time,
-    location:row.location,status:row.status,materialsSaved,materialsReady:!!materialsSaved&&['READY','FINAL'].includes(row.status),...patch});
+    location:row.location,status:row.status,materialsSaved,materialsReady:!!materialsSaved&&!!hasPlan&&['READY','FINAL'].includes(row.status),...patch});
 }
 
 let scenarioReviewPending = null, scenarioReviewEpoch = 0;
@@ -2060,12 +2061,54 @@ function syncWorkingStateFromForms() {
   renderEditorHeader();
 }
 
+// Earlier regular booklets already contain their official default titles and
+// order, but predate the structured marker consumed by linked minutes.
+function savedRegularAssemblyPlan(row, material) {
+  if(row?.meeting_type!=='GENERAL_ASSEMBLY'||row.assembly_kind==='EXTRAORDINARY'||!material?.content_html)return null;
+  const source=document.createElement('template');source.innerHTML=material.content_html;
+  const chapters=[...source.content.querySelectorAll('.meeting-chapter.chapter-bill')];
+  if(chapters.length<1||chapters.length>100)return null;
+  const used=new Set(),plan=[];
+  for(const chapter of chapters){
+    const key=/^bill-[1-9][0-9]*-([a-z-]+)$/.exec(chapter.dataset.chapterId||'')?.[1];
+    const title=chapter.querySelector(':scope > h2')?.textContent?.trim();
+    if(!key||key==='additional'||!Object.hasOwn(assemblyBaseOptions,key)||used.has(key)||!title||title.length>300)return null;
+    used.add(key);plan.push({key,title});
+  }
+  return assemblyMinutePlan(plan,row.assembly_booklet_data);
+}
+
+const legacyMaterialRevisions=new WeakMap();
+function preserveSavedAssemblyMaterials(row) {
+  const saved=documentSavedRows.get('MATERIALS');
+  if(row?.meeting_type!=='GENERAL_ASSEMBLY'||row.assembly_kind==='EXTRAORDINARY'||!saved?.content_html)return false;
+  if(!legacyMaterialRevisions.has(saved)){
+    const maybeLegacy=!/data-assembly-plan="[0-9a-f]+"/.test(saved.content_html)||saved.content_html.includes('data-assembly-legacy="1"');
+    legacyMaterialRevisions.set(saved,maybeLegacy&&!!savedRegularAssemblyPlan(row,saved));
+  }
+  return legacyMaterialRevisions.get(saved);
+}
+
+function withLegacyAssemblyPlan(html,plan) {
+  const encoded=encodeAssemblyMinutePlan(plan),existing=/data-assembly-legacy="1"\s+data-assembly-plan="[0-9a-f]+"/;
+  if(existing.test(html))return html.replace(existing,'data-assembly-legacy="1" data-assembly-plan="'+encoded+'"');
+  // Put the metadata inside a heading of the saved chapter so that later
+  // chapter editing/compilation carries it along without changing visible text.
+  const chapter=/<(?:article|section)\b[^>]*class="[^"]*\bchapter-bill\b[^"]*"[^>]*>/i.exec(html);
+  if(!chapter)return null;
+  const from=chapter.index+chapter[0].length,heading=/<h[12]\b/i.exec(html.slice(from));
+  if(!heading)return null;
+  const to=from+heading.index+heading[0].length;
+  return html.slice(0,to)+' data-assembly-legacy="1" data-assembly-plan="'+encoded+'"'+html.slice(to);
+}
+
 function refreshAutoDrafts({ force = false, render = true } = {}) {
   if (!state.current || state.current.status==='CANCELLED') return;
   const activeExisting = state.documents.get(state.activeDocument) || {};
   const activeProtected = !force && (state.documentDirty || activeExisting.manually_edited === true);
   for (const row of generatedDocumentRows()) {
     const existing = state.documents.get(row.type) || {};
+    if(!force&&row.type==='MATERIALS'&&preserveSavedAssemblyMaterials(state.current))continue;
     if (!force && (existing.manually_edited === true || (row.type === state.activeDocument && state.documentDirty))) continue;
     state.documents.set(row.type, {
       ...existing,
@@ -2417,10 +2460,19 @@ async function completeMeetingMaterials() {
   if (!state.current||isScenarioStage()) return;
   const owner=pdfActionOwner();
   if(!$('meetingDate').value||!$('startTime').value||!$('meetingLocation').value.trim())throw new Error('회의 일시와 장소를 확인해 주세요.');
-  const agendas=collectAgendasFromDom();
-  if(!agendas.length||agendas.some(agenda=>!agenda.title?.trim()))throw new Error('안건 제목을 모두 입력해 주세요.');
+  if(state.current.meeting_type==='GENERAL_ASSEMBLY'&&!$('noticeDate').value)throw new Error('소집 공고일을 입력해 주세요.');
   if(state.documentDirty)rememberActiveDocument();
-  if(!state.documents.get('MATERIALS')?.content_html?.trim())throw new Error('확정할 회의자료를 확인해 주세요.');
+  const agendas=collectAgendasFromDom(),material=state.documents.get('MATERIALS');
+  if(!material?.content_html?.trim())throw new Error('확정할 회의자료를 확인해 주세요.');
+  const defaultPlan=agendas.length===0?savedRegularAssemblyPlan(state.current,material):null;
+  if(agendas.some(agenda=>!agenda.title?.trim())||(!agendas.length&&!defaultPlan))throw new Error('안건 제목을 모두 입력해 주세요.');
+  if(defaultPlan&&(!/data-assembly-plan="[0-9a-f]+"/.test(material.content_html)||material.content_html.includes('data-assembly-legacy="1"'))){
+    // The old HTML body stays as stored. Add only the metadata the existing
+    // linked-minutes reader needs, and only on the user's explicit confirmation.
+    const content=withLegacyAssemblyPlan(material.content_html,defaultPlan);
+    if(!content)throw Error('저장된 자료집에서 안건을 확인하지 못했어요. 회의자료를 다시 확인해 주세요.');
+    state.documents.set('MATERIALS',{...material,content_html:content});
+  }
   if(documentValue(state.documents.get('MATERIALS'))!==documentValue(documentSavedRows.get('MATERIALS')))state.pendingDocuments.add('MATERIALS');
   await saveWholeMeetingDraft({ quiet: true });
   if(!pdfActionStillCurrent(owner))return;
