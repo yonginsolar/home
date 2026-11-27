@@ -10,7 +10,7 @@
   <script>console.log('[Version] ui.20261013.1 | approval.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
-  <script src="/shared/meeting_flow_v3.js" integrity="sha384-wZLjjqnpUMzHouOfM+9jf3zrfB9e/fyXeQXBXZqeva70cAr/nHrfUQR3nmY91GLW" crossorigin="anonymous"></script>
+  <script src="/shared/meeting_flow_v4.js" integrity="sha384-pqtCHQSSNZpBVExVlGy1bHEHVHg5QUAp1RlbXPivZCyOuIQCJmJskMf/nqGvWO7p" crossorigin="anonymous"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
   <script>console.log('[Version] v1.2.183 | approval.html');</script>
@@ -944,7 +944,10 @@
     <span id="boardApprovalStatus" role="status"></span>
     <button type="button" id="boardApprovalAction" class="btn btn-sm btn-outline-primary"></button>
   </div>
-  <style>#boardApprovalEntry[hidden]{display:none!important}</style>
+  <style>
+    #boardApprovalEntry[hidden],body[data-board-approval="waiting"] #draftForm,
+    body[data-board-approval] .approval-tab-shell{display:none!important}
+  </style>
   <div id="view-draft">
     <form id="draftForm" onsubmit="handleDraftSubmit(event)">
 
@@ -14461,6 +14464,7 @@ async function refreshBoardApprovalEntry(){
     if(!context||context.stage!=='approval')return;
     const coopId=getApprovalScopedCoopId(),actor=myAuthUserId,ticket=++boardApprovalReadVersion;
     const assembly=context.kind==='GENERAL_ASSEMBLY',label=assembly?'총회':'이사회';
+    if(!assembly)document.body.dataset.boardApproval='waiting';
     const current=()=>ticket===boardApprovalReadVersion&&actor===myAuthUserId&&coopId===getApprovalScopedCoopId()
         &&window.ErpBoardFlow.parse(location.href)?.href===context.href;
     const shell=document.getElementById('boardApprovalEntry'),status=document.getElementById('boardApprovalStatus'),action=document.getElementById('boardApprovalAction');
@@ -14479,7 +14483,11 @@ async function refreshBoardApprovalEntry(){
         }
         if(!state.agendaReady){status.textContent='안건을 먼저 저장해 주세요.';return;}
         if(!state.materialsReady){status.textContent='안건이 담긴 회의자료를 먼저 확정해 주세요.';return;}
-        if(!canImportApprovalMeeting('공문')||!canPerform('approval.submit'))return;
+        if(!canImportApprovalMeeting('공문')||!canPerform('approval.submit')){
+            if(!assembly)status.textContent='소집 공문을 상신할 권한이 있는 담당자가 작성할 수 있어요.';
+            return;
+        }
+        if(!assembly)document.body.dataset.boardApproval='ready';
         action.textContent=label+' 소집 공문 작성';action.hidden=false;
         status.textContent=state.title;
         action.onclick=async ()=>{
