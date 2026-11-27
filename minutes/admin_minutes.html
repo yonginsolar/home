@@ -360,13 +360,13 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
                 <button id="meetingOpenAttendance" type="button" class="btn btn-gray">출석 QR 열기</button>
                 <button id="meetingCloseAttendance" type="button" class="btn btn-outline" hidden>출석 QR 닫기</button>
                 <button id="meetingReviewAttendance" type="button" class="btn btn-outline">비로그인 접수 확인</button>
-                <button id="meetingFamilyProxy" type="button" class="btn btn-outline" aria-expanded="false" aria-controls="meetingFamilyProxyPanel" hidden>가족 대리 출석</button>
+                <button id="meetingFamilyProxy" type="button" class="btn btn-outline" aria-expanded="false" aria-controls="meetingFamilyProxyPanel" hidden>위임 명단</button>
             </div>
             <div id="meetingAttendanceStatus" role="status" hidden></div>
             <div id="meetingAttendanceCode"></div>
             <a id="meetingAttendanceLink" target="_blank" rel="noopener noreferrer" hidden>출석 화면 열기</a>
             <section id="meetingAttendanceReceipts" aria-label="비로그인 접수" hidden></section>
-            <section id="meetingFamilyProxyPanel" aria-label="가족 대리 출석" hidden></section>
+            <section id="meetingFamilyProxyPanel" aria-label="위임 명단" hidden></section>
         </div>
 
         <div id="tab-minutes" class="tab-panel active">
@@ -788,15 +788,17 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
             const family=document.getElementById('meetingFamilyProxy'),familyPanel=document.getElementById('meetingFamilyProxyPanel');
             const permitted=['notice','meeting'].includes(stage)&&!row.minuteId&&row.status==='READY'
                 &&window.ErpBoardFlow.posted(row)&&(!guidedAssembly()||row.rosterMode==='members');
-            if(!permitted){attendanceView=null;panel.hidden=true;familyPanel.hidden=true;familyPanel.replaceChildren();return;}
+            const proxies=guidedAssembly()&&row.rosterMode==='members'&&row.status==='READY'
+                &&window.ErpBoardFlow.posted(row)&&['notice','meeting','minutes','publish'].includes(stage);
+            if(!permitted&&!proxies){attendanceView=null;panel.hidden=true;familyPanel.hidden=true;familyPanel.replaceChildren();return;}
             panel.hidden=false;
             if(attendanceView?.id===row.id&&attendanceView.stage===stage&&attendanceView.owner===minutesListOwner.coopId)return;
             const view={id:row.id,stage,owner:minutesListOwner.coopId,busy:false};attendanceView=view;
             const kst=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-            prepare.hidden=!guidedAssembly()||row.date<kst;
-            family.hidden=!guidedAssembly()||row.rosterMode!=='members';
+            prepare.hidden=!permitted||!guidedAssembly()||row.date<kst;
+            family.hidden=!proxies;
             familyPanel.hidden=true;familyPanel.replaceChildren();family.disabled=false;family.setAttribute('aria-expanded','false');
-            open.hidden=row.date!==kst;close.hidden=link.hidden=receipts.hidden=true;text.hidden=true;code.replaceChildren();receipts.replaceChildren();
+            open.hidden=!permitted||row.date!==kst;review.hidden=!permitted;close.hidden=link.hidden=receipts.hidden=true;text.hidden=true;code.replaceChildren();receipts.replaceChildren();
             const active=()=>attendanceView===view&&boardContext?.id===view.id&&minutesListOwner.coopId===view.owner
                 &&boardRoute.stage===view.stage&&!window.frameElement?.hidden;
             const say=value=>{text.textContent=value;text.hidden=!value;};
@@ -845,11 +847,12 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
                 if(!familyPanel.hidden){familyPanel.hidden=true;familyPanel.replaceChildren();family.setAttribute('aria-expanded','false');return;}
                 family.disabled=true;
                 try{
-                    const module=await import('./meeting_family_proxy_v1.js');
+                    const module=await import('./meeting_proxy_register_v1.js');
                     if(!active())return;
                     familyPanel.hidden=false;family.setAttribute('aria-expanded','true');
-                    await module.renderFamilyProxy({root:familyPanel,current:()=>active()&&!familyPanel.hidden,confirm:showConfirm,rpc});
-                }catch(_){if(active())say('가족 대리 출석을 불러오지 못했습니다.');}
+                    await module.renderProxyRegister({root:familyPanel,current:()=>active()&&!familyPanel.hidden,confirm:showConfirm,rpc,
+                        meeting:view.id,storage:()=>supabase.storage.from('meeting-package-files')});
+                }catch(_){if(active())say('위임 명단을 불러오지 못했습니다.');}
                 finally{if(active())family.disabled=false;}
             };
         }

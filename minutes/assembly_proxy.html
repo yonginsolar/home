@@ -11,14 +11,18 @@
  *{box-sizing:border-box}body{margin:0}main{max-width:750px;margin:1rem auto;padding:clamp(1rem,4vw,1.8rem);background:var(--paper)}header{border-bottom:2px solid var(--accent);margin-bottom:1rem}h1,h2,p,dd,dt{overflow-wrap:anywhere}h1{font-size:1.7rem;margin:.3rem 0 .6rem}h2{font-size:1.1rem}section,form{margin:.8rem 0}a{color:var(--accent)}[hidden]{display:none!important}.actions{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.7rem 0}
  input,button,select{font:inherit;min-height:44px;border:1px solid var(--line);border-radius:8px;padding:.5rem .65rem;background:var(--paper);color:var(--fg)}input,select{max-width:100%}button[type=submit],#confirm{border-color:var(--accent);font-weight:700}button[disabled]{opacity:.6}label{display:block;margin:.3rem 0}.result label{min-height:44px;border:1px solid var(--line);padding:.3rem .6rem;border-radius:8px;display:flex;gap:.55rem;align-items:center}.result input{min-height:0}
  dl>div{display:grid;grid-template-columns:minmax(5rem,28%) minmax(0,1fr);gap:.5rem;border-bottom:1px solid var(--line);padding:.4rem .2rem}dt{font-weight:650}dd{margin:0}
- #proxy-kind{margin:.8rem 0;border:1px solid var(--line);border-radius:8px;padding:.35rem .75rem}#proxy-kind label{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;margin:0 .8rem 0 0}#proxy-kind input{min-height:0}#family input{display:block;margin-top:.25rem}#proof-family-sign{margin-top:1.5rem;text-align:right}
+ #proxy-kind{margin:.8rem 0;border:1px solid var(--line);border-radius:8px;padding:.35rem .75rem}#proxy-kind label{display:inline-flex;align-items:center;gap:.35rem;min-height:44px;margin:0 .8rem 0 0}#proxy-kind input{min-height:0}#family input{display:block;margin-top:.25rem}#family-documents{color:var(--accent)}#proof-state{font-weight:700}
+ .print-list{width:100%;border-collapse:collapse;table-layout:fixed}.print-list thead{display:table-header-group}.print-list :is(th,td){text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:.45rem;overflow-wrap:anywhere}.print-list tr{break-inside:avoid}
+ .print-list th{word-break:keep-all}.print-list th:is(:nth-child(2),:nth-child(4)){width:24%}.print-list th:last-child{width:14%}
  @page{size:A4;margin:20mm 19mm}
- @media print{body,main{background:#fff;color:#17271f}body:not([data-print-ready]) main{display:none}main{padding:0;margin:0;max-width:none}header,#meeting-picker,#status,#editor,#proof-actions{display:none!important}#proof{margin:0}article{break-inside:avoid}}
+ @media print{.print-list th:is(:nth-child(2),:nth-child(4)){width:26%}.print-list th:nth-child(3){width:20%}.print-list th:last-child{width:12%}.print-list td{word-break:keep-all}.print-list td:is(:nth-child(2),:nth-child(4)){font-size:.8125rem;font-variant-numeric:tabular-nums}}
+ @media print{:root{color-scheme:light;--line:#a6b7ad}body,main{background:#fff;color:#17271f}body:not([data-print-ready]) main{display:none}main{padding:0;margin:0;max-width:none}header,#meeting-picker,#status,#editor,#proof-actions{display:none!important}#proof{margin:0}#proof:not(.list-proof){break-inside:avoid}}
  </style>
- <script type="module" src="./assembly_proxy_v3.js"></script>
+ <script defer src="../shared/coop_dialog_v1_1.js" integrity="sha384-tCpWFdciV61dadwPTtfT+U592nZW7YH8aTnSZPRUCI1CFUcPapI9LhOD3cewIuDE" crossorigin="anonymous"></script>
+ <script type="module" src="./assembly_proxy_v4.js" integrity="sha384-IqkVW4L2dAkLpY+y3mGmQa/1tAWzpJipGJJ76CWliAn2zTtiE5izQMSYDPf28rhA" crossorigin="anonymous"></script>
 </head>
 <body><main>
- <header><a href="/membermanage.html">내 정보</a><h1>총회 의결권 위임장</h1></header>
+ <header><a id="back" href="/membermanage.html">내 정보</a><h1 id="page-title">총회 의결권 위임</h1></header>
  <p id="status" role="status"></p>
  <section id="meeting-picker" hidden><label for="meeting">총회 선택</label><select id="meeting"><option value="">선택하세요</option></select></section>
  <section id="editor" hidden>
@@ -32,22 +36,22 @@
    <div class="actions"><input id="candidate-name" required maxlength="80" autocomplete="off"><button type="submit">검색</button></div>
   </form>
   <fieldset id="candidates" class="result" hidden><legend>대리인 선택</legend><div id="choices"></div></fieldset>
-  <div id="review" hidden><p id="review-text"></p><button id="confirm" type="button">본인 계정으로 위임 확인</button></div>
   </div>
   <form id="family" hidden autocomplete="off">
    <label for="family-name">가족 대리인 이름<input id="family-name" required maxlength="80" autocomplete="off"></label>
    <label for="family-birth">생년월일<input id="family-birth" type="date" required min="1900-01-01" autocomplete="off"></label>
-   <p id="family-document-list">총회 현장에서 위임장, 대리인 신분증, 동거 가족이 확인되는 주민등록등본을 보여주세요.</p>
-   <button type="submit">출력용 위임장 보기</button>
+   <p id="family-documents">현장 확인 서류: 대리인 신분증 · 동거 가족이 표시된 주민등록등본</p>
+   <button id="family-submit" type="submit">위임 제출</button>
   </form>
+  <div id="review" hidden><p id="review-text"></p><button id="confirm" type="button">위임 제출</button></div>
  </section>
  <article id="proof" hidden aria-labelledby="proof-title">
   <h2 id="proof-title">총회 의결권 위임장</h2>
   <p id="proof-state"></p>
   <p id="proof-statement">위임인은 대리인에게 아래 총회에 참석하여 의결권을 행사할 권한을 위임합니다.</p>
   <dl id="proof-fields"></dl>
-  <p id="proof-family-sign" hidden>위임인 서명: ____________________</p>
+  <div id="list-content" hidden></div>
  </article>
- <div class="actions" id="proof-actions" hidden><button id="print" type="button">위임장 인쇄</button><button id="withdraw" type="button" hidden>위임 철회</button><button id="edit-family" type="button" hidden>다시 작성</button></div>
+ <div class="actions" id="proof-actions" hidden><button id="print" type="button">위임장 인쇄</button><button id="withdraw" type="button" hidden>위임 철회</button></div>
 </main></body>
 </html>
