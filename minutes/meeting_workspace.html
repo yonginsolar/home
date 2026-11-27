@@ -10,7 +10,7 @@
   <script>console.log('[Version] ui.20261013.1 | meeting_workspace.html');</script>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
-  <script src="/shared/meeting_flow_v5.js" integrity="sha384-ydMSPe6aHgPvhsxHfGXz8Wpk8BbCnh/YXGh4bd8KhlvPlq61khxikSo6G5sVTRfz" crossorigin="anonymous"></script>
+  <script src="/shared/meeting_flow_v6.js" integrity="sha384-iVyppDMixY/4ciUzgYdWZM3wBjMx/3z4Vm/AS3CWNtz9FquAB0ROR+TouO2Guxha" crossorigin="anonymous"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -18,11 +18,14 @@
   <link rel="stylesheet" href="/minutes/meeting_workflow_manual_v12.css" integrity="sha384-aFkdOAcaw9wKXdPCXctLVyVLGsUPFzy9k+GYiR0bEFtejSTzzKjdPcqN+PAuUC/v" crossorigin="anonymous">
   <!-- Load the shared mount before this page can finish its permission check. -->
   <script src="/minutes/meeting_workflow_manual_v12_labels.js" integrity="sha384-kyMJmSttyo+5MXeUg41T6OtOE7tF4YAEsbv5pLXloMYZ0wc5lws5Ga1XSgOTTHom" crossorigin="anonymous"></script>
-  <script>console.log('[Version] v1.17.7 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.17.8 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
   <style>
     body[data-board-flow] .workspace{grid-template-columns:minmax(0,1fr)}
     body[data-board-flow] .workspace>.sidebar,body[data-board-flow] #newPackageButton{display:none}
+    .workspace:not(:has(>.editor:not([hidden]))){grid-template-columns:minmax(0,1fr)}
+    .workspace:not(:has(>.editor:not([hidden])))>.sidebar{position:static;width:100%;max-width:800px}
+    #meetingDetailStatus{margin-bottom:12px;line-height:1.6;overflow-wrap:anywhere}
     body[data-guided-stage] .step-tabs{display:none}
     #boardMaterialTools{position:relative}
     #boardMaterialTools summary{cursor:pointer}
@@ -87,7 +90,6 @@
     #notHeldSources,#inheritedPdfList{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
     .empty { padding:34px 18px; color:var(--muted); text-align:center; line-height:1.65; }
     .editor { min-width:0; }
-    .editor-placeholder { padding:65px 24px; text-align:center; color:var(--muted); }
     .editor-header { padding:18px 20px 0; }
     .editor-header-row { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
     .editor-header h2 { margin:0; font-size:1.22rem; }
@@ -440,6 +442,7 @@
       </div>
       <div class="top-actions">
         <button type="button" class="btn" id="backToDocuments">회의·문서 메뉴</button>
+        <button type="button" class="btn" id="standaloneMeetingPicker" hidden>회의 바꾸기</button>
         <button type="button" class="btn" id="meetingWorkflowGuide" aria-haspopup="dialog" hidden>회의 업무 가이드</button>
         <button type="button" class="btn btn-brand" id="newPackageButton" disabled>+ 새 회의</button>
       </div>
@@ -449,26 +452,23 @@
       <p id="meetingEntryMessage"></p>
       <button type="button" class="btn" id="retryMeetingEntry" hidden>다시 불러오기</button>
     </div>
+    <div id="meetingDetailStatus" role="status" aria-live="polite" hidden>
+      <p id="meetingDetailMessage"></p>
+      <button type="button" class="btn" id="retryMeetingDetail" hidden>다시 확인</button>
+    </div>
 
     <div class="workspace">
-      <aside class="panel sidebar">
-        <div id="meetingDetailStatus" role="status" aria-live="polite" hidden style="padding:12px;line-height:1.6;overflow-wrap:anywhere;">
-          <p id="meetingDetailMessage"></p>
-          <button type="button" class="btn" id="retryMeetingDetail" hidden>다시 확인</button>
-        </div>
-        <div class="panel-head"><h2>회의 목록</h2></div>
+      <aside class="panel sidebar" id="meetingPicker" hidden aria-labelledby="meetingPickerTitle">
+        <div class="panel-head"><h2 id="meetingPickerTitle">진행 중인 회의</h2></div>
         <p class="notice" id="assemblyBookletJumpHint" hidden>자료집을 볼 정기총회를 선택하세요.</p>
-        <div class="package-list" id="packageList"><div class="empty">목록을 불러오는 중입니다.</div></div>
+        <div class="package-list" id="packageList"></div>
         <details class="past-meetings" id="pastMeetings">
           <summary>지난 회의 <span id="pastMeetingCount">0</span></summary>
           <div class="package-list" id="pastPackageList"></div>
         </details>
       </aside>
 
-      <section class="panel editor" id="editorPanel">
-        <div class="editor-placeholder" id="editorPlaceholder">
-          회의를 선택하거나 <strong>새 회의</strong>를 눌러 시작하세요.
-        </div>
+      <section class="panel editor" id="editorPanel" hidden>
         <div id="editorBody" hidden>
           <div class="editor-header">
             <div class="editor-header-row">
@@ -789,6 +789,6 @@
   </div>
   <div class="toast" id="toast" role="status"></div>
   <script src="/erp/chatgpt_edit_guide.js?v=1.0.0" integrity="sha384-eVMu5C+DyenFdmrEBIL/DYTUL1zTmurBluHFpYAQSQxsuBEk0GPruzw0tt4Ae4bX" crossorigin="anonymous" defer></script>
-  <script type="module" src="./meeting_workspace_flow_v6.js" integrity="sha384-r9UbYLjTK4NnrqegNrAsilG50klBlzV1G1bYcAc6jW7pYtky6wnxZD0BBje66/IM" crossorigin="anonymous"></script>
+  <script type="module" src="./meeting_workspace_flow_v7.js" integrity="sha384-eWFvgiGHZ8pkOXjdqTenjU+3Rx+H5/gyOfIP0QkGGTRO+x0blt71ViQXeO9cr3hh" crossorigin="anonymous"></script>
 </body>
 </html>
