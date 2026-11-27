@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.220 | 두루누리 동일 조건 배분 -->
+<!-- Version: v1.0.221 | 4대보험 장부 조회 귀속월 보호 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.220 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.221 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -2123,7 +2123,7 @@ async function applyDurunuriAdjustmentsByMonth(rows, ym, options = {}) {
     }
 }
 
-async function getInsuranceLiabilitySummaryByMonths(targetMonths) {
+async function getInsuranceLiabilitySummaryByMonths(targetMonths, read) {
     const months = Array.isArray(targetMonths)
         ? targetMonths.map((value) => normalizeAccountingYm(value)).filter(Boolean)
         : [];
@@ -2135,10 +2135,13 @@ async function getInsuranceLiabilitySummaryByMonths(targetMonths) {
         ? months[0]
         : `${months[0]}~${months[months.length - 1]}`;
 
-    const { data, error } = await _supabase
+    let query = _supabase
         .from('hr_salary')
         .select('year_month,emp_id,is_accounted,pay_total,ded_pension,ded_health,ded_care,ded_employ,ded_income,ded_local,ded_advance,ded_capital,ded_total,co_total')
         .in('year_month', months);
+    if (read) query = query.abortSignal(read.controller.signal);
+    const { data, error } = await query;
+    if (read && !read.current()) return { cancelled: true };
     if (error) return { data: null, error };
     if (!data || data.length === 0) {
         return { data: null, error: new Error(`${periodLabel} 급여대장 데이터가 없습니다. 급여대장을 먼저 확정했는지 확인하세요.`) };
@@ -2161,6 +2164,7 @@ async function getInsuranceLiabilitySummaryByMonths(targetMonths) {
 
     const adjustedRows = [];
     for (const ym of months) {
+        if (read && !read.current()) return { cancelled: true };
         const monthRows = (data || []).filter((row) => String(row.year_month || '') === ym);
         if (!monthRows.length) continue;
         let monthAdjustedRows;
@@ -6221,6 +6225,7 @@ function handleAccountingAmountInput() {
         return;
     }
     if (document.getElementById('specialMode')?.value === 'insurance') {
+        if (insuranceBookAutoAmount?.field === document.getElementById('inputAmount')) insuranceBookAutoAmount = null;
         syncInsuranceAutoDebitDiscountUI();
     }
 }
@@ -7509,18 +7514,18 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
 
                 <div class="input-group input-group-sm mb-2">
                     <span class="input-group-text">귀속월</span>
-                    <input type="month" class="form-control" id="payTargetMonthStart" value="${lastMonthYM}">
+                    <input type="month" class="form-control" id="payTargetMonthStart" value="${lastMonthYM}" oninput="insuranceBookRangeChanged()">
                     <span class="input-group-text">~</span>
-                    <input type="month" class="form-control" id="payTargetMonthEnd" value="${lastMonthYM}">
+                    <input type="month" class="form-control" id="payTargetMonthEnd" value="${lastMonthYM}" oninput="insuranceBookRangeChanged()">
                     <button class="btn btn-dark" type="button" onclick="fetchLiabilitySum()">장부 조회</button>
                 </div>
                 <div class="x-small text-muted mb-2">한 달만 조회할 때는 시작/종료를 같게 두면 됩니다.</div>
 
                 <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-1">
                     <span class="small">장부상 납부액</span>
-                    <span id="txtBookVal" class="fw-bold fs-6 text-primary">0원</span>
+                    <span id="txtBookVal" class="fw-bold fs-6 text-primary">—</span>
                 </div>
-                <div id="txtDetailVal" class="x-small text-end text-muted mb-2">-</div>
+                <div id="txtDetailVal" class="x-small text-end text-muted mb-2" role="status">귀속월을 선택하고 장부 조회를 누르세요.</div>
 
                 <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-1">
                     <span class="small">정산대기 순액</span>
@@ -7545,10 +7550,6 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
                     <div class="x-small text-muted mt-1" id="insuranceAutoDebitDiscountStatus">설정 상태를 확인하는 중입니다.</div>
                     <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="insuranceSettingRetry" onclick="initializeInsuranceSpecialMode()">다시 조회</button>
                 </div>
-
-                <input type="hidden" id="hiddenBookVal" value="0">
-                <input type="hidden" id="hiddenYesu" value="0">
-                <input type="hidden" id="hiddenMigigeub" value="0">
 
                 <div class="form-text x-small text-danger fw-bold">* 아래 '금액' 란에는 감액 전 고지·결재 금액을 입력하세요.<br>* 체크 시 500원은 4대보험회사분 비용 차감, 나머지 차액만 선급금/미지급금 정산대기로 반영됩니다.</div>
             </div>`;
@@ -8490,7 +8491,9 @@ async function handleFormSubmit(e) {
     const cardName = isCard ? document.getElementById("cardSelect").value : "";
     const payerName = document.getElementById("payerName").value || "지출자";
 
-    const ctx = { item, fDate, project, type, settleMode, desc, totalAmt, useVAT, evidenceType, specialCode, isCard, cardName, payerName };
+    const insuranceBook = specialCode === 'insurance' ? currentInsuranceBook() : null;
+    if (specialCode === 'insurance' && !insuranceBook) return showAlert('장부 조회', '현재 귀속월의 장부를 먼저 조회하세요.');
+    const ctx = { item, fDate, project, type, settleMode, desc, totalAmt, useVAT, evidenceType, specialCode, isCard, cardName, payerName, insuranceBook };
     const dateWarning = getDateGuardMessage(fDate);
     const message = window.ERPWorkflowEase.buildEntryReview(ctx, {
         amountLabel: document.getElementById('inputAmountLabel').textContent,
@@ -8545,7 +8548,14 @@ async function submitAccounting(ctx) {
     // ==========================================
     if (hasSpecialHandler) {
         if (specialCode === 'insurance') { // 4대보험 납부
+            if (!ctx.insuranceBook || currentInsuranceBook() !== ctx.insuranceBook) {
+                return showAlert('장부 조회', '귀속월 또는 장부 조회 결과가 바뀌었습니다. 금액을 다시 확인하세요.');
+            }
             const settingResult = await loadInsuranceAutoDebitDiscountSetting();
+            if (!accountingEntryOwnerCurrent(saveContext)) return;
+            if (currentInsuranceBook() !== ctx.insuranceBook) {
+                return showAlert('장부 조회', '귀속월 또는 장부 조회 결과가 바뀌었습니다. 금액을 다시 확인하세요.');
+            }
             if (settingResult.error) {
                 return showAlert("오류", "자동이체 감액 설정 조회 실패: " + settingResult.error.message);
             }
@@ -8557,8 +8567,7 @@ async function submitAccounting(ctx) {
             );
             if (!paymentAmounts.valid) return showAlert("오류", paymentAmounts.error);
 
-            const bookYesu = Number(document.getElementById("hiddenYesu").value);
-            const bookMigigeub = Number(document.getElementById("hiddenMigigeub").value);
+            const { bookYesu, bookMigigeub } = ctx.insuranceBook;
             const bookTotal = bookYesu + bookMigigeub;
 
             if (bookTotal === 0 && totalAmt > 0) return showAlert("오류", "먼저 [장부 조회] 버튼을 눌러 부채 내역을 불러오세요.");
@@ -12100,35 +12109,53 @@ async function runInsurancePendingSettlement() {
     showConfirm('정산대기 일괄정산', msg, async () => { await applyInsurancePendingSettlement(); });
 }
 
-  // [신규] 4대보험 납부 시 장부상 부채(직원분+회사분) 조회 함수
-async function fetchLiabilitySum() {
-    const startYm = normalizeAccountingYm(document.getElementById("payTargetMonthStart")?.value || document.getElementById("payTargetMonth")?.value || '');
-    const endYm = normalizeAccountingYm(document.getElementById("payTargetMonthEnd")?.value || startYm);
-    if(!startYm) return showAlert("알림", "귀속 시작월을 선택하세요.");
-
-    const targetMonths = listAccountingMonthRange(startYm, endYm);
-    const summary = await getInsuranceLiabilitySummaryByMonths(targetMonths);
-    if (summary.error) return showAlert("오류", "조회 실패: " + summary.error.message);
-
-    const totalYesu = Number(summary.data.totalYesu || 0);
-    const totalMigigeub = Number(summary.data.totalMigigeub || 0);
-    const totalBook = Number(summary.data.totalBook || 0);
-    const periodLabel = summary.data.periodLabel;
-
-    // 화면 표시
-    document.getElementById("txtBookVal").innerText = totalBook.toLocaleString() + "원";
-    document.getElementById("txtDetailVal").innerText = `[${periodLabel}] (예수금: ${totalYesu.toLocaleString()} + 미지급비용: ${totalMigigeub.toLocaleString()})`;
-
-    // 숨겨진 필드에 값 저장 (저장 시 사용)
-    document.getElementById("hiddenBookVal").value = totalBook;
-    document.getElementById("hiddenYesu").value = totalYesu;
-    document.getElementById("hiddenMigigeub").value = totalMigigeub;
-
-    // 편의상 입력창에 장부금액을 넣어줌 (사용자가 고지서 금액으로 수정 가능)
-    document.getElementById("inputAmount").value = totalBook;
-
-
-    showAlert("조회 성공", `[${periodLabel}] 장부상 금액을 불러왔습니다.\n실제 고지서 금액과 다르다면 '금액' 란을 수정하세요.`);
+let insuranceBookResult = null, insuranceBookAutoAmount = null;
+function paintInsuranceBook(message, amount = '—') {
+    document.getElementById('txtBookVal').textContent = amount;
+    document.getElementById('txtDetailVal').textContent = message;
+}
+function insuranceBookRangeChanged() {
+    cancelAccountingRead('insurance-book');
+    if (insuranceBookAutoAmount?.start === document.getElementById('payTargetMonthStart')) {
+        const { field, value } = insuranceBookAutoAmount;
+        if (ERPNumberInput.raw(field.value) === value) field.value = '';
+    }
+    insuranceBookResult = insuranceBookAutoAmount = null;
+    paintInsuranceBook('이 귀속월의 장부를 조회하세요.');
+    syncInsuranceAutoDebitDiscountUI();
+}
+function currentInsuranceBook() {
+    return insuranceBookResult && accountingReadScopeCurrent(insuranceBookResult.scope) ? insuranceBookResult : null;
+}
+function fetchLiabilitySum() {
+    const start = document.getElementById('payTargetMonthStart');
+    const end = document.getElementById('payTargetMonthEnd');
+    if (!start || !end) return;
+    const startYm = normalizeAccountingYm(start.value);
+    const endYm = normalizeAccountingYm(end.value || start.value);
+    if (!startYm || !endYm || endYm < startYm) return paintInsuranceBook('귀속 시작월과 종료월을 확인하세요.');
+    const months = listAccountingMonthRange(startYm, endYm);
+    if (months.at(-1) !== endYm) return paintInsuranceBook('조회할 귀속월 범위를 줄여 주세요.');
+    const field = document.getElementById('inputAmount');
+    const scope = accountingReadScope('tabForm', { valid: () => document.getElementById('specialMode')?.value === 'insurance'
+        && document.getElementById('payTargetMonthStart') === start && document.getElementById('payTargetMonthEnd') === end
+        && normalizeAccountingYm(start.value) === startYm && normalizeAccountingYm(end.value || start.value) === endYm });
+    return runAccountingRead('insurance-book', JSON.stringify([scope.identity,startYm,endYm]), scope,
+        read => getInsuranceLiabilitySummaryByMonths(months, read), ({ data, error }) => {
+            if (error) return paintInsuranceBook(error.message || '장부를 불러오지 못했습니다. 다시 조회해 주세요.');
+            const bookYesu = Number(data.totalYesu), bookMigigeub = Number(data.totalMigigeub), total = Number(data.totalBook);
+            insuranceBookResult = { scope, bookYesu, bookMigigeub };
+            paintInsuranceBook(`[${data.periodLabel}] 예수금 ${bookYesu.toLocaleString()}원 · 미지급비용 ${bookMigigeub.toLocaleString()}원`, total.toLocaleString() + '원');
+            const written = ERPNumberInput.raw(field.value);
+            if (written === '' || (insuranceBookAutoAmount?.start === start && insuranceBookAutoAmount.field === field && insuranceBookAutoAmount.value === written)) {
+                field.value = total;
+                insuranceBookAutoAmount = { start, field, value: ERPNumberInput.raw(field.value) };
+                syncInsuranceAutoDebitDiscountUI();
+            }
+        }, message => paintInsuranceBook(message), { start: () => {
+            insuranceBookResult = null;
+            paintInsuranceBook('장부를 조회하고 있습니다.');
+        }, cancel: () => { if (scope.valid()) paintInsuranceBook('이 귀속월의 장부를 조회하세요.'); } });
 }
 </script>
 <div class="modal fade" id="capitalLinkModal" tabindex="-1" aria-labelledby="capitalLinkTitle" aria-hidden="true">
