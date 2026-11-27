@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.38
-Change: 2026-10-22 - Review an own previous signature or draw again before explicit completion.
+Version: v1.2.39
+Change: Let the existing auditor signing screen show submitted closing materials.
 -->
 <html lang="ko">
 <head>
@@ -10,7 +10,8 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.38 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.39 | minutes_sign.html');</script>
+    <link rel="stylesheet" href="./meeting_business_report_v1.css" integrity="sha384-kGlqK6YRKkB5nG7nMTuISUVJs6VZpJlN6lnjrMvLPfrhZQf6k7oLqkm+4UTthqmZ" crossorigin="anonymous">
     <style>
         body {
             margin: 0;
@@ -453,6 +454,10 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
                 <div class="detail-title" id="detail-title">-</div>
             </div>
             <div class="detail-meta" id="detail-meta">-</div>
+            <details id="auditPacketPanel" class="erp-auditor-sign-panel" hidden>
+                <summary id="auditPacketSummary">제출된 결산자료</summary>
+                <div id="auditPacketContent"></div>
+            </details>
             <div class="detail-content" id="detail-content"></div>
             <div id="signatures-panel" class="signatures-panel" style="display:none;">
                 <div class="signatures-title">전자서명 현황</div>
@@ -1371,11 +1376,48 @@ Change: 2026-10-22 - Review an own previous signature or draw again before expli
             pendingDetailVersion = null;
             signatureDisplayVersion++;
             clearMinuteAttachments();
+            clearSubmittedAuditPacket();
             document.getElementById('detail-panel').classList.add('hidden');
             document.getElementById('list-panel').style.display = 'block';
             setDetailModePill(false);
         }
         window.showList = showList;
+
+        function clearSubmittedAuditPacket() {
+            const panel=document.getElementById('auditPacketPanel');
+            panel.hidden=true;panel.open=false;
+            document.getElementById('auditPacketSummary').textContent='제출된 결산자료';
+            document.getElementById('auditPacketContent').replaceChildren();
+        }
+
+        function prepareSubmittedAuditPacket(doc,current) {
+            clearSubmittedAuditPacket();
+            const panel=document.getElementById('auditPacketPanel'),body=document.getElementById('auditPacketContent');
+            panel.ontoggle=null;
+            if(doc.doc_type!=='AUDIT_REPORT')return;
+            panel.hidden=false;
+            let loading=false,loaded=false;
+            panel.ontoggle=async()=>{
+                if(!panel.open||!current()||loading||loaded)return;
+                loading=true;body.textContent='결산자료를 불러오는 중입니다.';
+                try{
+                    const {data,error}=await supabase.rpc('erp_assembly_audit_packet',{p_action:'read',p_id:doc.id});
+                    if(!current())return;
+                    if(error)throw error;
+                    if(!data){loaded=true;body.textContent='이 감사보고서에 별도로 제출된 결산자료가 없습니다.';return;}
+                    const {auditorPacketMarkup}=await import('./meeting_business_report_v1.js');
+                    if(!current())return;
+                    const html=auditorPacketMarkup(data);
+                    if(!html)throw new Error('INVALID_AUDIT_PACKET');
+                    body.innerHTML=html;
+                    document.getElementById('auditPacketSummary').textContent=
+                        '제출된 결산자료 · '+formatMinutesSignKstDate(data.submitted_at);
+                    loaded=true;
+                }catch{
+                    if(current())body.textContent='결산자료를 불러오지 못했어요. 이 항목을 닫았다 다시 열어 주세요.';
+                }finally{loading=false;}
+            };
+        }
 
         function setDetailModePill(showWaitingView, label = '서명대기 · 열람중') {
             const pill = document.getElementById('detail-mode-pill');
@@ -1583,6 +1625,7 @@ async function openDocumentById(id) {
             const current = () => requestVersion === detailRequestVersion && authId === myAuthId && !window.frameElement?.hidden;
             signatureDisplayVersion++;
             clearMinuteAttachments();
+            clearSubmittedAuditPacket();
             try {
                 const { data: doc, error } = await MinutesService.getMinuteById(id);
                 if (!current()) return;
@@ -1618,6 +1661,7 @@ async function openDocumentById(id) {
                 await renderDocumentSignatures(doc);
                 if (!current()) return;
 
+                prepareSubmittedAuditPacket(doc,current);
                 document.getElementById('list-panel').style.display = 'none';
                 document.getElementById('detail-panel').classList.remove('hidden');
             } catch (err) {
