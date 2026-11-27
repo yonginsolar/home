@@ -3780,6 +3780,9 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 const approval = item.approval || {};
                 const notice = item.notice || null;
                 const external = OfficialNotice.normalize(approval.notice_usage) === 'EXTERNAL';
+                const boardConvocation = boardRoute?.kind === 'BOARD' && boardRoute.stage === 'notice'
+                    && String(approval.id) === String(boardContext?.approvalId)
+                    && window.ErpBoardFlow.approved(boardContext?.approvalStatus);
                 const attachCount = (resolveNoticeFileUrls(approval, notice, true) || []).length;
                 const existingAttach = Array.isArray(notice?.file_urls) && notice.file_urls.length > 0;
                 const hasAttach = attachCount > 0 || existingAttach;
@@ -3820,7 +3823,8 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                         </div>
                         <div class="btn-group">
                             <button onclick="openNoticePreview('${approval.id}')" class="btn btn-gray">내용 보기</button>
-                            ${external ? `<button onclick="printNoticeById('${approval.id}')" class="btn btn-blue">출력·PDF 저장</button><button onclick="downloadNoticeAttachments('${approval.id}')" class="btn btn-outline" ${hasAttach ? '' : 'disabled'}>첨부 다운로드 (${attachCount})</button>` : `
+                            ${external || boardConvocation ? `<button onclick="printNoticeById('${approval.id}')" class="btn ${external ? 'btn-blue' : 'btn-outline'}">출력·PDF 저장</button>` : ''}
+                            ${external ? `<button onclick="downloadNoticeAttachments('${approval.id}')" class="btn btn-outline" ${hasAttach ? '' : 'disabled'}>첨부 다운로드 (${attachCount})</button>` : `
                             <label class="channel-toggle">
                                 <input type="checkbox" ${channelState.notice ? 'checked' : ''} onchange="toggleNoticeChannel('${approval.id}', 'notice', this.checked)">
                                 홈페이지 공지
