@@ -1,5 +1,5 @@
 /*
-Version: v1.0.62
+Version: v1.0.63
 Change: 2026-11-19 - Share the existing visible cooperative resolver with the ERP document box access check.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -369,10 +369,11 @@ async function getCompanyInfo() {
     };
 }
 
+const minuteMetadata='id,title,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids,meeting_outcome';
 async function listMinutesAdmin(options = {}) {
     const coopId = await getVisibleCoopId({ signal:options.signal });
     if (options.metadataOnly) {
-        const columns='id,title,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids,meeting_outcome';
+        const columns=minuteMetadata;
         const rows=[];
         // Metadata pages preserve complete counts without downloading every document body.
         for(let offset=0;;offset+=500){
@@ -632,13 +633,13 @@ async function upsertNotice(payload) {
     return await supabase.rpc('upsert_notice_secure', payload);
 }
 
-async function getMinuteById(minuteId) {
-    const coopId = await getVisibleCoopId();
-    const { data, error } = await scopeByCoop(supabase
+async function getMinuteById(minuteId, { metadataOnly = false, signal } = {}) {
+    const coopId = await getVisibleCoopId({signal});
+    const { data, error } = await minuteReadQuery(scopeByCoop(supabase
         .from('minutes')
-        .select('*')
+        .select(metadataOnly ? 'coop_id,'+minuteMetadata : '*')
         .eq('id', minuteId), coopId)
-        .single();
+        .single(),signal);
     return { data, error };
 }
 
