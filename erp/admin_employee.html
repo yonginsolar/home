@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.216
+Version: v1.0.217
 Change: 2026-11-25 - 두루누리 동일 조건 배분.
 -->
 <html>
@@ -15,7 +15,7 @@ Change: 2026-11-25 - 두루누리 동일 조건 배분.
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.216 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.217 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
   <meta charset="UTF-8">
@@ -3120,6 +3120,52 @@ function buildHrApprovalRuleOptionMarkup(item) {
     `;
 }
 
+const HR_SECRETARY_ACTION_POLICY_KEY = 'approval_secretary_action_policy_v1';
+const HR_SECRETARY_ACTION_DOCS = [
+    '일반품의','공문','소집 공문','구매요청','증명서발급','근무변경','휴가','출장신청',
+    '시간외근로','야근','휴일근로','지출결의','지출결의(급여)','지출결의(4대보험)','지출결의(원천세)'
+];
+
+function buildSecretaryActionSettings() {
+    return `<fieldset class="col-12" id="secretaryActionSettings">
+      <legend class="fs-6 fw-bold mb-2">사무국장 결재</legend>
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" id="set_secretary_actions" type="checkbox">
+        <label class="form-check-label" for="set_secretary_actions">결재 화면에서 전결·이사장 별도 승인 사용</label>
+      </div>
+      <fieldset id="secretaryActionDocuments" class="row gx-3 gy-1 ms-1">
+        <legend class="small">허용할 문서</legend>
+        ${HR_SECRETARY_ACTION_DOCS.map((docType,i)=>`<div class="col-12 col-sm-6 col-lg-4">
+          <label class="form-check small" for="secretaryActionDoc${i}"><input type="checkbox" class="form-check-input"
+            id="secretaryActionDoc${i}" data-secretary-document="${i}"> ${docType}</label></div>`).join('')}
+      </fieldset>
+    </fieldset>`;
+}
+
+function secretaryActionSettingsFromUi() {
+    const master = document.getElementById('set_secretary_actions');
+    if (!master) return null;
+    const value={enabled:master.checked,disabled:HR_SECRETARY_ACTION_DOCS.filter((_,i)=>!document.getElementById('secretaryActionDoc'+i)?.checked)};
+    return JSON.stringify(value)===master.dataset.loadedPolicy ? null : value;
+}
+
+function syncSecretaryActionSettings() {
+    const master = document.getElementById('set_secretary_actions');
+    const docs = document.getElementById('secretaryActionDocuments');
+    if (!master || !docs) return;
+    let value=null;
+    try{value=JSON.parse(companyInfo[HR_SECRETARY_ACTION_POLICY_KEY]??'null');}catch(_){}
+    const configured=Object.hasOwn(companyInfo,HR_SECRETARY_ACTION_POLICY_KEY);
+    master.checked=!configured || (value?.enabled===true && Array.isArray(value.disabled));
+    HR_SECRETARY_ACTION_DOCS.forEach((docType,i)=>{
+        const el=document.getElementById('secretaryActionDoc'+i);
+        if(el)el.checked=!Array.isArray(value?.disabled)||!value.disabled.includes(docType);
+    });
+    master.dataset.loadedPolicy=JSON.stringify({enabled:master.checked,disabled:HR_SECRETARY_ACTION_DOCS.filter((_,i)=>!document.getElementById('secretaryActionDoc'+i)?.checked)});
+    master.onchange=()=>{docs.disabled=!master.checked;};
+    master.onchange();
+}
+
 function buildWorkforceLiteApprovalSettingsMarkup() {
     const docSwitches = WORKFORCE_LITE_APPROVAL_SETTING_CATALOG.map((item) => `
       <div class="col-12">
@@ -3139,10 +3185,12 @@ function buildWorkforceLiteApprovalSettingsMarkup() {
         </div>
         ${docSwitches}
         <div class="col-12"><hr class="my-2"></div>
+        ${buildSecretaryActionSettings()}
+        <div class="col-12"><hr class="my-2"></div>
         <div class="col-12">
           <div class="form-check form-switch mb-1">
             <input class="form-check-input" type="checkbox" id="set_secretary_jeongyeol_enabled">
-            <label class="form-check-label fw-bold" for="set_secretary_jeongyeol_enabled">사무국장 전결 사용</label>
+            <label class="form-check-label fw-bold" for="set_secretary_jeongyeol_enabled">상신 시 자동전결 사용</label>
           </div>
         </div>
         <div class="col-12">
@@ -3554,6 +3602,7 @@ function syncHrProfileCompanySettingsUi() {
     renderWorkforceLiteLeaveTypeRows();
     syncWorkforceLiteApprovalRuleFieldState();
     syncSecretaryJeongyeolFieldState();
+    syncSecretaryActionSettings();
     syncApprovalLineSettingsUi();
     syncTelegramApprovalSettingsUi();
     syncCalendarSettingsUi();
@@ -6561,6 +6610,10 @@ async function saveSettings() {
             coop_id: coopId,
             key: 'approval_secretary_attendance_enabled',
             value: document.getElementById('set_secretary_attendance_enabled')?.checked ? 'true' : 'false'
+        });
+        const secretaryActionPolicy = secretaryActionSettingsFromUi();
+        if (secretaryActionPolicy) cUpdates.push({
+            coop_id: coopId, key: HR_SECRETARY_ACTION_POLICY_KEY, value: JSON.stringify(secretaryActionPolicy)
         });
         cUpdates.push({
             coop_id: coopId,

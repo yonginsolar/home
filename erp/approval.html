@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.186 | 총회 최종 자료집 확정 전 소집 공문 -->
+<!-- Version: v1.2.188 | 이사장 별도 승인과 전결 증빙 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -13,7 +13,7 @@
   <script src="/shared/meeting_flow_v5.js" integrity="sha384-ydMSPe6aHgPvhsxHfGXz8Wpk8BbCnh/YXGh4bd8KhlvPlq61khxikSo6G5sVTRfz" crossorigin="anonymous"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.186 | approval.html');</script>
+  <script>console.log('[Version] v1.2.188 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -55,7 +55,7 @@
   <script src="insurance_payment.js?v=1.0.0"></script>
   <script src="approval_insurance_notice_v1_3.js" integrity="sha384-x5/6vg6+q38DmS9asr9tX4qpnPF6pnF6zOYa+3lNozwVZCWJlysIigvXbJIIFORk" crossorigin="anonymous"></script>
   <script src="approval_permission_request.js?v=1.2.2"></script>
-  <script src="workflow_assets_meeting_v1.js" integrity="sha384-bI9Rf40fEuIEdEgmHpFic6w4lpVJtJDxt8AAp6q0ZKGy0qgAV4fpl0D6psVf9WR1" crossorigin="anonymous"></script>
+  <script src="workflow_assets_meeting_v2.js" integrity="sha384-jbde/W+QlONaternMBkgAfII+/zBbho44eBlSFOpxB+kvWsf1uMFiRyWBOcHWzcM" crossorigin="anonymous"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
@@ -6411,6 +6411,10 @@ function isSunVillageReviewUser() {
         && String(myInfo?.emp_id || '') === String(approvalWorkflowContext?.reviewer?.emp_id || '');
 }
 
+function isOwnSunVillageSecretaryDraft(drafterId = getCurrentDraftDrafterEmpId()) {
+    return !window.ExpoRuntimeBridge && isSunVillageReviewUser() && String(drafterId||'')===String(myInfo?.emp_id||'');
+}
+
 function getApprovalPositiveActionLabel() {
     return isSunVillageReviewUser() ? '검토' : '승인';
 }
@@ -8843,6 +8847,7 @@ function buildDefaultApprovalLineTemplate() {
         const reviewer = normalizeApprovalDraftLineUser(approvalWorkflowContext.reviewer);
         const chair = normalizeApprovalDraftLineUser(approvalWorkflowContext.chair);
         if (isSunVillageSecretaryOnly() && reviewer?.emp_id) return [reviewer];
+        if (isOwnSunVillageSecretaryDraft() && chair?.emp_id) return [chair];
         return reviewer?.emp_id && chair?.emp_id ? [reviewer, chair] : [];
     }
     if (isMainCoopMoneyChairRequired() && isApprovalMoneyRelatedType(currentType)) {
@@ -9142,7 +9147,7 @@ function updateJeongyeolUi() {
         if (decision.applied) {
             hintEl.textContent = `적용중: ${decision.ruleLabel}`;
         } else if (isMainCoopMoneyChairRequired() && isApprovalMoneyRelatedType(mainType)) {
-            hintEl.textContent = '금액 관련 문서는 전결 대상이 아니며 이사장 결재가 필요합니다.';
+            hintEl.textContent = '금액 관련 문서의 결재선에는 이사장이 필요합니다.';
         } else if (canSecretaryControlAuto && autoDecision?.ruleLabel) {
             hintEl.textContent = `자동 전결 가능: ${autoDecision.ruleLabel}`;
         } else {
@@ -13729,7 +13734,8 @@ function syncRelViewActionArea(doc) {
             if (doc.approval_line?.[0]?.secretary_phone_only !== true) {
                 actions.push(`<button type="button" class="btn btn-success btn-sm" data-approval-positive onclick="procDoc(${Number(doc.id)}, '승인')">${getApprovalPositiveActionLabel()}</button>`);
             } else {
-                hintText = '문서 상단에서 전결하거나 여기에서 반려할 수 있습니다.';
+                hintText = doc.drafter_id===myInfo?.emp_id ? '문서 상단에서 이사장 별도 승인을 기록할 수 있습니다.'
+                    : '문서 상단에서 전결하거나 여기에서 반려할 수 있습니다.';
             }
             actions.push(`<button type="button" class="btn btn-danger btn-sm" onclick="procDoc(${Number(doc.id)}, '반려')">반려</button>`);
         }
@@ -15937,7 +15943,7 @@ function renderLinePreview() {
         el.innerText = isSunVillageApproval() ? getSunVillageApprovalNotReadyMessage() : "결재자를 추가해주세요.";
         return;
     }
-    const lineHtml = finalApprovers.map((u, i) => `<span class="line-step">${isSunVillageSecretaryOnly() ? '전결 · ' : isSunVillageApproval() ? (i === 0 ? '검토 · ' : '결재 · ') : ''}${escapeHtml(u.emp_name)} ${escapeHtml(u.position)}</span>` + (i < finalApprovers.length-1 ? '<span class="line-arrow">➡</span>' : '')).join("");
+    const lineHtml = finalApprovers.map((u, i) => `<span class="line-step">${isSunVillageSecretaryOnly() ? (isOwnSunVillageSecretaryDraft()?'별도 승인 기록 · ':'전결 · ') : isSunVillageApproval() ? (i === 0 && !isOwnSunVillageSecretaryDraft() ? '검토 · ' : '결재 · ') : ''}${escapeHtml(u.emp_name)} ${escapeHtml(u.position)}</span>` + (i < finalApprovers.length-1 ? '<span class="line-arrow">➡</span>' : '')).join("");
     const fixedLabel = escapeHtml(formatLabelWithEuroRo(jeongyeolLockReasonLabel || '결재자'));
     const lockHint = jeongyeolLineLocked ? `<div class="small text-primary mt-2">전결 적용으로 결재선이 ${fixedLabel} 고정되었습니다.</div>` : '';
     el.innerHTML = `${lineHtml}${lockHint}`;
@@ -16817,11 +16823,12 @@ async function handleDraftSubmit(e,recovery=null) {
     if (isSunVillageApproval()) {
         if (approvalWorkflowContext.ready !== true) return showAlert(getSunVillageApprovalNotReadyMessage());
         const required = buildDefaultApprovalLineTemplate();
-        if (required.length !== (isSunVillageSecretaryOnly() ? 1 : 2) || finalApprovers.length !== required.length
+        const ownSecretary=isOwnSunVillageSecretaryDraft(drafterId);
+        if (required.length !== (isSunVillageSecretaryOnly()||ownSecretary ? 1 : 2) || finalApprovers.length !== required.length
             || finalApprovers.some((approver, index) => String(approver?.emp_id) !== String(required[index]?.emp_id))) {
             return showAlert('마을 결재선을 다시 불러오도록 새로고침해 주세요.');
         }
-        if (required.some((approver) => String(approver?.emp_id) === String(drafterId))) {
+        if (!ownSecretary && required.some((approver) => String(approver?.emp_id) === String(drafterId))) {
             return showAlert('마을 문서는 담당자가 기안해야 합니다. 검토자나 최종 결재자는 본인 문서를 기안할 수 없습니다.');
         }
     }
@@ -16909,7 +16916,7 @@ async function handleDraftSubmit(e,recovery=null) {
         emp_id: u.emp_id,
         name: u.emp_name,
         position: u.position,
-        ...(isSunVillageApproval() ? { stage: isSunVillageSecretaryOnly() ? 'final_approval' : idx === 0 ? 'review' : 'final_approval' } : {}),
+        ...(isSunVillageApproval() ? { stage: isSunVillageSecretaryOnly()||isOwnSunVillageSecretaryDraft(drafterId)||idx>0 ? 'final_approval' : 'review' } : {}),
         status: '대기',
         comment: '',
         processed_at: null,
@@ -16945,7 +16952,7 @@ async function handleDraftSubmit(e,recovery=null) {
     };
     const submittedDraftId=currentApprovalDraftId;
     const submittedFirstApprover={...finalApprovers[0]};
-    const submissionNotificationKind=isSunVillageApproval()?'검토 요청':'결재 요청';
+    const submissionNotificationKind=isSunVillageApproval()&&!isOwnSunVillageSecretaryDraft(drafterId)?'검토 요청':'결재 요청';
     let fingerprint=null;
     const targetDraft=String(submittedDraftId||'');
     if(!window.ExpoRuntimeBridge){
@@ -17493,7 +17500,7 @@ async function processApprovalDocOnce(docId, action, reason = '', options = {}) 
 function usesAssignedApprovalTransition(doc, delegatedFrom) {
     if (delegatedFrom || doc.status === '실물결재대기') return false;
     if (!isSunVillageApproval()) return true;
-    // The server permits a one-step chair line only via an audited handoff.
+    // A one-step chair line is a server-verified handoff or secretary's own draft.
     // Its assigned RPC can complete a staff chair's row without giving the
     // browser access to completed rows beyond the existing RLS.
     const line = doc.approval_line;
@@ -20099,6 +20106,7 @@ async function openRelView(docId) {
     contentEl.appendChild(attachmentViewerEl);
     syncRelViewActionArea(data);
     void mountApprovalSecretaryDecision(contentEl, data, isCurrentView);
+    void mountSeparateChairApproval(contentEl, rawDoc, isCurrentView);
     void mountApprovalExecutionDetails(contentEl,data,isCurrentView);
     void mountApprovalTaxTaskLinks(contentEl, data);
     void mountApprovalInstructorDetail(contentEl,data,isCurrentView);
@@ -20211,22 +20219,69 @@ let approvalSecretaryDetail = null;
 let approvalSecretaryChoicePending = false;
 
 function canReadApprovalSecretaryChoice(doc) {
-    const hwaseongSecretary = ['erp.hcrec.kr', 'hcrec.kr', 'www.hcrec.kr'].includes(location.hostname) && isCurrentUserSecretaryGeneral();
+    if (!doc || doc.drafter_id===myInfo?.emp_id) return false;
+    const ordinarySecretary = isCurrentUserSecretaryGeneral();
     const first = doc.approval_line?.[0];
     const possibleHandoff = isSunVillageApproval() && first?.secretary_phone_only === true && doc.status === '진행중'
         && (isSunVillageReviewUser() || isChairmanApprovalUser());
     const possiblePhoneReview = isSunVillageApproval() && first?.secretary_phone_only === true && first.emp_id === myInfo?.emp_id;
-    if (!(hwaseongSecretary || isSunVillageReviewUser() || possibleHandoff || possiblePhoneReview)
+    if (!(ordinarySecretary || isSunVillageReviewUser() || possibleHandoff || possiblePhoneReview)
         || !canPerform('approval.process') || window.ExpoRuntimeBridge) return false;
     if (!myInfo?.emp_id || (!possibleHandoff && first?.emp_id !== myInfo.emp_id) ||
         (doc.status !== '진행중' && !(doc.status==='완료' && first?.secretary_decision === true))) return false;
     return true;
 }
 
-function approvalSecretaryDecisionRpc(doc, action, expected = null, reason = null) {
-    return _supabase.rpc('erp_secretary_decision', {
-        p_document_id: doc.id, p_action: action, p_expected: expected, p_reason: reason
+const APPROVAL_DECISION_EVIDENCE = 'approval-decision-evidence';
+const APPROVAL_DECISION_FILE_SUFFIX = /\.(png|jpe?g|webp|mp3|m4a|wav|pdf)$/i;
+
+function createApprovalDecisionEvidenceInput() {
+    const label=document.createElement('label');
+    label.className='d-block small mb-2';
+    label.textContent='증빙 파일 (선택, 최대 8개)';
+    const input=document.createElement('input');
+    input.type='file';input.multiple=true;input.className='form-control form-control-sm';
+    input.accept='.png,.jpg,.jpeg,.webp,.mp3,.m4a,.wav,.pdf';
+    label.append(input);
+    return {label,input};
+}
+
+function approvalDecisionFiles(input,doc) {
+    const files=Array.from(input?.files||[]);
+    const refs=files.map(file=>{
+        const ext=file.name.match(APPROVAL_DECISION_FILE_SUFFIX)?.[1]?.toLowerCase();
+        if(!ext||!file.size||file.size>20*1024*1024||file.name.length>150||/[\u0000-\u001f\u007f]/.test(file.name))
+            throw Error('APPROVAL_DECISION_FILE_FORMAT');
+        return {path:[getApprovalScopedCoopId(),myAuthUserId,doc.id,crypto.randomUUID()+'.'+ext].join('/'),name:file.name};
     });
+    if(files.length>8)throw Error('APPROVAL_DECISION_FILE_FORMAT');
+    return {files,refs,uploaded:0,uncertain:false};
+}
+
+async function prepareApprovalDecisionEvidence(state,current) {
+    while(state.uploaded<state.refs.length) {
+        if(!current())throw Error('APPROVAL_DECISION_VIEW_CHANGED');
+        const ref=state.refs[state.uploaded],file=state.files[state.uploaded];
+        if(state.uncertain) {
+            const check=await _supabase.storage.from(APPROVAL_DECISION_EVIDENCE).createSignedUrl(ref.path,15);
+            if(check.data?.signedUrl){state.uploaded++;state.uncertain=false;continue;}
+        }
+        const body=new FormData();
+        body.set('bucket',APPROVAL_DECISION_EVIDENCE);body.set('path',ref.path);
+        body.set('upsert','false');body.set('cacheControl','0');body.set('file',file,file.name);
+        state.uncertain=true;
+        const {data,error}=await _supabase.functions.invoke('checked-upload',{body});
+        if(error||data?.ok!==true)throw Error('APPROVAL_DECISION_UPLOAD_UNCONFIRMED');
+        state.uploaded++;state.uncertain=false;
+    }
+    if(!current())throw Error('APPROVAL_DECISION_VIEW_CHANGED');
+    return state.refs;
+}
+
+function approvalSecretaryDecisionRpc(doc, action, expected = null, reason = null, evidence = []) {
+    const args={p_document_id:doc.id,p_action:action,p_expected:expected,p_reason:reason};
+    if(evidence.length) return _supabase.rpc('erp_secretary_decision_with_evidence',{...args,p_evidence:evidence});
+    return _supabase.rpc('erp_secretary_decision',args);
 }
 
 async function dispatchApprovalSecretaryTelegram(receipt, owner) {
@@ -20242,8 +20297,8 @@ async function dispatchApprovalSecretaryTelegram(receipt, owner) {
     },{erpHost})));
 }
 
-async function runApprovalSecretaryDecision(doc, status, mode, memo, owner) {
-    const result=await approvalSecretaryDecisionRpc(doc,mode,status.version,memo);
+async function runApprovalSecretaryDecision(doc, status, mode, memo, owner, evidence=[]) {
+    const result=await approvalSecretaryDecisionRpc(doc,mode,status.version,memo,evidence);
     if (result.error) throw result.error;
     if (result.data?.ok!==true || result.data.phase!==mode) throw new Error('RESULT_UNCONFIRMED');
     if (mode==='direct') void dispatchApprovalSecretaryTelegram(result.data,owner);
@@ -20291,7 +20346,10 @@ function showApprovalSecretaryChoice(doc,status,isCurrent) {
     const select=mode=>dialog.querySelector('[data-mode="'+mode+'"]');
     const area=dialog.querySelector('[data-stage="direct"]'),memo=dialog.querySelector('textarea'),statusEl=dialog.querySelector('[role="status"]');
     const buttons=[...dialog.querySelectorAll('button')];
-    let busy=false, completed=false;
+    const files=createApprovalDecisionEvidenceInput();
+    if(status.evidence_supported===true)area.insertBefore(files.label,select('confirm'));
+    let busy=false, completed=false, prepared=null, attempted=null;
+    files.input.onchange=()=>{if(!attempted)prepared=null;};
     select('chair').hidden=status.chair_allowed!==true;
     select('direct').onclick=()=>{if(!busy && isCurrent()){area.hidden=false;memo.focus();}};
     select('cancel').onclick=()=>{if(!busy)dialog.close();};
@@ -20302,9 +20360,15 @@ function showApprovalSecretaryChoice(doc,status,isCurrent) {
     },{once:true});
     async function settle(mode){
         if (busy || !isCurrent() || owner!==getApprovalActionOwner()) return;
-        busy=true;statusEl.textContent='';buttons.forEach(b=>b.disabled=true);memo.disabled=true;
+        busy=true;statusEl.textContent='';buttons.forEach(b=>b.disabled=true);memo.disabled=true;files.input.disabled=true;
         try {
-            await runApprovalSecretaryDecision(doc,status,mode,mode==='direct'?memo.value:null,owner);
+            if(attempted && (attempted.mode!==mode || attempted.memo!==(mode==='direct'?memo.value:null))) {
+                statusEl.textContent='같은 선택으로 처리 결과를 먼저 확인해 주세요.';return;
+            }
+            const evidence=mode==='direct'&&status.evidence_supported===true
+                ? await prepareApprovalDecisionEvidence(prepared??=approvalDecisionFiles(files.input,doc),()=>isCurrent()&&owner===getApprovalActionOwner()):[];
+            attempted={mode,memo:mode==='direct'?memo.value:null};
+            await runApprovalSecretaryDecision(doc,status,mode,attempted.memo,owner,evidence);
             completed=true;dialog.close();
             if(!isCurrent())return;
             void Promise.allSettled([loadTodoList(),loadHistoryList()]);
@@ -20313,8 +20377,8 @@ function showApprovalSecretaryChoice(doc,status,isCurrent) {
             if (!isCurrent()) {dialog.close();return;}
             statusEl.textContent=error?.code==='PT409'
                 ? '문서 상태가 달라졌습니다. 문서를 다시 열어 확인해 주세요.'
-                : '처리 결과를 확인하지 못했습니다. 같은 선택으로 다시 확인해 주세요.';
-        } finally {busy=false;buttons.forEach(b=>b.disabled=false);memo.disabled=false;}
+                : approvalDecisionFailureMessage(error);
+        } finally {busy=false;buttons.forEach(b=>b.disabled=false);memo.disabled=files.input.disabled=!!attempted;}
     }
     select('chair').onclick=()=>settle('chair');
     select('confirm').onclick=()=>settle('direct');
@@ -20378,8 +20442,11 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
     feedback.className = 'small text-danger mt-2';
     feedback.setAttribute('role','status');
     if (status.phase !== 'handoff') section.append(label);
+    const files=createApprovalDecisionEvidenceInput();
+    if(status.evidence_supported===true && status.phase==='chair')section.append(files.label);
     section.append(row,feedback);
-    let busy = false;
+    let busy=false, prepared=null, attempted=null;
+    files.input.onchange=()=>{if(!attempted)prepared=null;};
     const choices = status.phase === 'handoff' ? [
         ['handoff','내 결재로 인계','btn-primary',status.chair_handoff
             ? '이 문서를 이사장 결재로 인계받을까요? 기존 승인 기록은 바뀌지 않습니다.'
@@ -20393,6 +20460,7 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
     if (status.can_handoff_chair === true) choices.push(['handoff_chair','이사장 결재로 인계','btn-outline-primary',
         '현재 연결된 이사장에게 이 문서를 인계할까요? 기존 결재 이력은 유지됩니다.']);
     for (const [mode,title,style,question] of choices) {
+        if(mode==='direct' && status.phase==='chair' && status.evidence_supported!==true)continue;
         if (mode === 'chair' && status.chair_allowed !== true) continue;
         const button = document.createElement('button');
         button.type = 'button';
@@ -20404,11 +20472,16 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
             if (busy || !isCurrentView() || status.phase===mode && mode !== 'handoff') return;
             busy=true;
             row.querySelectorAll('button').forEach(b=>b.disabled=true);
-            reason.disabled=true;
+            reason.disabled=files.input.disabled=true;
             const note=mode==='direct'?reason.value:null;
+            const owner=getApprovalActionOwner();
             try {
+                if(attempted&&attempted!==mode){feedback.textContent='같은 선택으로 처리 결과를 먼저 확인해 주세요.';return;}
                 if (!await window.CoopDialog.confirm(question) || !isCurrentView()) return;
-                await runApprovalSecretaryDecision(doc,status,mode,note,getApprovalActionOwner());
+                const evidence=mode==='direct'&&status.phase==='chair'&&status.evidence_supported===true
+                    ? await prepareApprovalDecisionEvidence(prepared??=approvalDecisionFiles(files.input,doc),()=>isCurrentView()&&owner===getApprovalActionOwner()):[];
+                attempted=mode;
+                await runApprovalSecretaryDecision(doc,status,mode,note,owner,evidence);
                 if (!isCurrentView()) return;
                 feedback.classList.remove('text-danger');
                 feedback.textContent='처리 결과를 확인했습니다.';
@@ -20420,11 +20493,11 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
                 feedback.classList.add('text-danger');
                 feedback.textContent = error?.code==='PT409'
                     ? '문서 상태나 연동이 달라졌습니다. 문서를 다시 열어 확인해 주세요.'
-                    : '처리 결과를 확인하지 못했습니다. 같은 선택으로 다시 확인해 주세요.';
+                    : approvalDecisionFailureMessage(error);
             } finally {
                 busy=false;
                 if (isCurrentView()) {
-                    reason.disabled=false;
+                    reason.disabled=files.input.disabled=!!attempted;
                     row.querySelectorAll('button').forEach(b=>b.disabled=b.dataset.secretaryChoice===status.phase && status.phase !== 'handoff');
                 }
             }
@@ -20436,8 +20509,127 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
     }
 }
 
+function approvalDecisionFailureMessage(error) {
+    if(error?.message==='APPROVAL_DECISION_FILE_FORMAT'||error?.code==='22023')
+        return '이미지·녹음·PDF를 최대 8개, 파일당 20MB까지 첨부할 수 있습니다.';
+    if(error?.message==='APPROVAL_DECISION_UPLOAD_UNCONFIRMED')
+        return '증빙 저장을 확인하지 못했습니다. 선택한 파일은 유지됩니다.';
+    return '처리 결과를 확인하지 못했습니다. 같은 내용으로 다시 확인해 주세요.';
+}
+
+async function mountSeparateChairApproval(content, doc, current) {
+    const empId=String(myInfo?.emp_id||'');
+    if (!empId || String(doc?.drafter_id||'')!==empId || doc.status!=='진행중' || !(isCurrentUserSecretaryGeneral()||isSunVillageReviewUser())
+        || !canPerform('approval.process') || window.ExpoRuntimeBridge || !window.HTMLDialogElement) return;
+    const call=fields=>_supabase.rpc('erp_record_separate_chair_approval',{p_id:doc.id,...fields});
+    let inspection;
+    try {
+        const {data,error}=await call({p_action:'inspect',p_seen:doc});
+        if(error||data?.available!==true||typeof data.version!=='string'||!current())return;
+        inspection=data;
+    } catch (_) { return; }
+    const section=document.createElement('section');
+    section.className='p-3 mb-3 border rounded';
+    const open=document.createElement('button');open.type='button';open.className='btn btn-sm btn-primary';open.textContent='이사장 별도 승인';
+    const dialog=document.createElement('dialog');dialog.className='p-3 rounded border bg-body text-body';
+    dialog.style.width='min(440px,calc(100% - 24px))';
+    dialog.setAttribute('aria-label','이사장 별도 승인');
+    dialog.innerHTML=`<form><h5>이사장 별도 승인</h5><p class="small text-muted text-break" data-document></p>
+        <label class="d-block mb-2">승인일<input type="date" name="approvedOn" class="form-control" required></label>
+        <label class="d-block mb-2">메모 (선택)<textarea name="memo" class="form-control" rows="2" maxlength="1000"></textarea></label>
+        <p role="status" class="small text-danger mb-2"></p>
+        <div class="d-flex flex-wrap gap-2 justify-content-end"><button type="button" class="btn btn-secondary" data-close>취소</button>
+        <button type="submit" class="btn btn-primary">승인 기록 저장</button></div></form>`;
+    const form=dialog.querySelector('form'),date=form.elements.approvedOn,memo=form.elements.memo;
+    const feedback=dialog.querySelector('[role="status"]');
+    const save=form.querySelector('[type="submit"]'),cancel=form.querySelector('[data-close]');
+    const files=createApprovalDecisionEvidenceInput();
+    form.insertBefore(files.label,feedback);
+    const validDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value||'');
+    if(validDate(inspection.earliest))date.min=inspection.earliest;
+    if(validDate(inspection.today)){date.max=inspection.today;date.value=inspection.today;}
+    dialog.querySelector('[data-document]').textContent=[doc.doc_no,doc.title].filter(Boolean).join(' · ');
+    let busy=false,request=null,prepared=null;
+    files.input.onchange=()=>{if(!request)prepared=null;};
+    open.addEventListener('click',()=>{if(!busy&&current()&&!dialog.open){dialog.showModal();date.focus();}});
+    cancel.addEventListener('click',()=>{if(!busy)dialog.close();});
+    dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
+    dialog.addEventListener('close',()=>{if(current())open.focus({preventScroll:true});});
+    form.addEventListener('submit',async event=>{
+        event.preventDefault();
+        if (busy||!dialog.open||!current()||!form.reportValidity())return;
+        const fields={p_approved_on:date.value,p_memo:memo.value.trim()||null};
+        if(request&&JSON.stringify(fields)!==request.values){feedback.textContent='먼저 이전 입력으로 처리 결과를 확인해 주세요.';return;}
+        const owner=getApprovalActionOwner();
+        busy=true;save.disabled=cancel.disabled=date.disabled=memo.disabled=files.input.disabled=true;feedback.textContent='';
+        try {
+            const evidence=await prepareApprovalDecisionEvidence(prepared??=approvalDecisionFiles(files.input,doc),()=>current()&&owner===getApprovalActionOwner());
+            request??={values:JSON.stringify(fields),key:crypto.randomUUID()};
+            const {data,error}=await call({p_action:'record',p_expected:inspection.version,p_request:request.key,p_evidence:evidence,...fields});
+            if(!current())return;
+            if(error)throw error;
+            if(data?.ok!==true||data.status!=='완료')throw Error('UNCONFIRMED');
+            dialog.close();
+            void Promise.allSettled([loadTodoList(),loadHistoryList()]);
+            if (window.ErpBoardFlow?.parse(location.href)?.stage==='approval')void refreshBoardApprovalEntry();
+            if(current())await openRelView(doc.id);
+        } catch (error) {
+            if(!current())return;
+            if (error?.code==='22023')request=null;
+            feedback.textContent=error?.code==='PT409'?'문서가 바뀌었습니다. 현재 문서를 다시 열어 주세요.'
+                :error?.code==='22023'?'승인일·메모·증빙 파일을 확인해 주세요.':approvalDecisionFailureMessage(error);
+        } finally {busy=false;save.disabled=cancel.disabled=false;date.disabled=memo.disabled=files.input.disabled=!!request;}
+    });
+    section.append(open,dialog);
+    if(current())content.prepend(section);
+}
+
+function renderApprovalDecisionEvidence(record,doc,refs) {
+    if (!Array.isArray(refs)||!refs.length) return;
+    const entries=document.createElement('div');entries.className='d-flex gap-1 flex-wrap mt-2';
+    const status=document.createElement('div');status.className='small text-danger mt-1';status.setAttribute('role','status');
+    const context=approvalAttachmentReadContext();
+    for(const item of refs) {
+        if(typeof item?.name!=='string'||typeof item.path!=='string'||item.path.split('/')[2]!==String(doc.id))continue;
+        const button=document.createElement('button');button.type='button';
+        button.className='btn btn-sm btn-outline-secondary text-break';button.textContent=item.name;
+        button.onclick=async()=>{
+            if(button.disabled||!context())return;
+            button.disabled=true;status.textContent='';
+            try{
+                const {data,error}=await _supabase.storage.from(APPROVAL_DECISION_EVIDENCE)
+                    .createSignedUrl(item.path,60,{download:item.name});
+                if(!button.isConnected||!context())return;
+                if(error||!data?.signedUrl)throw Error('EVIDENCE_UNAVAILABLE');
+                const a=document.createElement('a');a.href=data.signedUrl;a.download=item.name;a.rel='noopener noreferrer';
+                document.body.append(a);a.click();a.remove();
+            }catch(_){if(button.isConnected&&context())status.textContent='증빙을 내려받을 수 없습니다.';}
+            finally{button.disabled=false;}
+        };
+        entries.append(button);
+    }
+    if(entries.childElementCount)record.append(entries,status);
+}
+
 function renderSecretaryDecisionRecord(content, doc) {
     const step = Array.isArray(doc?.approval_line) ? doc.approval_line[0] : null;
+    if (Array.isArray(step?.secretary_decision_evidence_history) && step.secretary_decision_evidence_history.length) {
+        const history=document.createElement('section');history.className='p-3 mb-3 border rounded';
+        const title=document.createElement('div');title.className='fw-bold';title.textContent='이전 전결 증빙';
+        history.append(title);renderApprovalDecisionEvidence(history,doc,step.secretary_decision_evidence_history);
+        content.append(history);
+    }
+    const separate=step?.secretary_decision;
+    if (separate?.kind==='separate_chair_approval') {
+        const record=document.createElement('section');record.className='p-3 mb-3 border rounded';
+        const title=document.createElement('div');title.className='fw-bold';
+        title.textContent=separate.recorded_by?'이사장 승인 · '+separate.recorded_by+' 기록':'이사장 승인';
+        const date=document.createElement('div');date.className='small';date.textContent=separate.approved_on||'';
+        record.append(title,date);
+        if(separate.memo){const memo=document.createElement('div');memo.className='small mt-2 text-break';memo.style.whiteSpace='pre-wrap';memo.textContent=separate.memo;record.append(memo);}
+        renderApprovalDecisionEvidence(record,doc,separate.evidence);
+        content.append(record);return;
+    }
     if (step?.secretary_decision !== true) return;
     const record = document.createElement('div');
     record.className = 'p-3 mb-3 border rounded';
@@ -20452,6 +20644,7 @@ function renderSecretaryDecisionRecord(content, doc) {
         memo.textContent = step.secretary_decision_memo;
         record.append(memo);
     }
+    renderApprovalDecisionEvidence(record,doc,step.secretary_decision_evidence);
     content.append(record);
 }
 
