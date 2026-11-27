@@ -11544,6 +11544,7 @@ window.onload = async function() {
         return;
     }
     if (!approvalRuntimeGate.ok) return;
+    if(openingBoard)boardApprovalRuntime=approvalRuntimeGate.runtime;
     approvalPermissionRequestBase = Array.isArray(approvalRuntimeGate.runtime?.base_effective_permissions)
         ? new Set(approvalRuntimeGate.runtime.base_effective_permissions) : permissionSet;
     _supabase.auth.onAuthStateChange?.((event, session) => {
@@ -11700,7 +11701,7 @@ window.onload = async function() {
         }
         const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'approval',moduleLabel:'전자결재',redirectUrl:'index.html'});
         if (!gate.ok) throw new Error('ERP_TASK_ACCESS_DENIED');
-        if(openingBoard){await refreshBoardApprovalEntry();return;}
+        if(openingBoard){boardApprovalRuntime=gate.runtime;await refreshBoardApprovalEntry();return;}
         const summary = await _supabase.rpc('erp_get_approval_bootstrap_summary');
         if (summary.error) throw new Error('ERP_TASK_REFRESH_FAILED');
         applyApprovalBootstrapSummary(summary.data);
@@ -14497,6 +14498,7 @@ async function applyApprovalMeetingNotice() {
 
 let boardApprovalReadVersion=0;
 let autoPreparedMeetingDraft='';
+let boardApprovalRuntime=null;
 async function refreshBoardApprovalEntry(){
     const context=window.ErpBoardFlow.parse(location.href);
     if(!context||context.stage!=='approval')return;
@@ -14560,7 +14562,9 @@ async function refreshBoardApprovalEntry(){
             try{
                 const [source,runtime]=await Promise.all([
                     _supabase.rpc(assembly?'get_meeting_call_notice_source':'get_meeting_call_notice_source_v2',{p_package_id:context.id}),
-                    _supabase.rpc('get_my_erp_runtime'),window.ErpWorkflowAssets.load('meetingNotice')
+                    !assembly&&boardApprovalRuntime?.coop_id===coopId&&boardApprovalRuntime.coop_name
+                        ?{data:boardApprovalRuntime}:_supabase.rpc('get_my_erp_runtime'),
+                    window.ErpWorkflowAssets.load('meetingNotice')
                 ]);
                 if(!still())return;
                 const m=source.data?.meeting,fingerprint=source.data?.agenda_state?.fingerprint;

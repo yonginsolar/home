@@ -28,6 +28,10 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
         body[data-board-stage]:not([data-board-stage="signature"]) [data-board-sign]{display:none}
         body[data-board-stage] .container > .tabs,
         body[data-board-stage="meeting"]:not([data-combined-minute]) #tab-minutes{display:none}
+        body[data-board-notice] :is(.container > .tabs,#tab-minutes,#tab-notices .filter-chip-row,#tab-notices h3){display:none!important}
+        body[data-board-notice]:not([data-board-waiting]) #tab-notices{display:block}
+        body[data-board-notice] #boardNoticeOptions{flex-basis:100%}
+        body[data-board-notice] #boardNoticeOptions summary{cursor:pointer}
         #guidedMeetingActions[hidden]{display:none!important}
         body[data-board-waiting] #tab-minutes,body[data-board-waiting] #tab-notices,
         body[data-board-awaiting-signature] [data-board-publish]{display:none!important}
@@ -320,10 +324,15 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
 <script src="/shared/modal_scroll.js?v=1.0.0" integrity="sha384-Eh9AmJF4ObRpqEmF5bUjTeUpLb2ID9o6lidlEzx94LKwItIxTRqGs+xRmQLzc5uB" crossorigin="anonymous" defer></script>
 </head>
 <body>
+    <script>
+      { const route=window.ErpBoardFlow?.parse(location.href);
+        if(route?.kind==='BOARD'&&route.stage==='notice')document.body.dataset.boardNotice=''; }
+    </script>
 
     <div class="container">
         <div class="header" style="flex-wrap:wrap;gap:10px">
             <h2 id="page-title" style="margin:0;">문서 관리</h2>
+            <script>if(document.body.hasAttribute('data-board-notice'))document.getElementById('page-title').textContent='소집 공고';</script>
             <a class="btn btn-gray" href="/erp/document_retention.html?kind=minutes" target="_blank" rel="noopener">📁 보존·파기 검토 ↗</a>
             <button onclick="location.href='/erp/'" class="btn btn-gray" data-erp-home-link>메인으로</button>
         </div>
@@ -723,6 +732,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
         let boardContext=null,boardContextVersion=0,boardDraftPrepared=false;
         const guidedAssembly=()=>boardRoute?.kind==='GENERAL_ASSEMBLY';
         const guidedBoard=()=>boardRoute?.kind==='BOARD';
+        const scopedBoardNotice=()=>guidedBoard()&&boardRoute.stage==='notice';
         const flowName=()=>guidedAssembly()?'총회':'이사회';
         const boardResults=new Map(),boardResultChoices=['가결','부결','보류','보고','논의'];
         const boardText=message=>{
@@ -1132,7 +1142,9 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
 
         function applyAdminMinutesScopeUi() {
             const titleEl = document.getElementById('page-title');
-            if (titleEl && ADMIN_MINUTES_SCOPE_META[ADMIN_MINUTES_SCOPE]) {
+            if(titleEl&&scopedBoardNotice()){
+                titleEl.textContent=document.title='소집 공고';
+            }else if (titleEl && ADMIN_MINUTES_SCOPE_META[ADMIN_MINUTES_SCOPE]) {
                 titleEl.textContent = ADMIN_MINUTES_SCOPE_META[ADMIN_MINUTES_SCOPE].title;
                 document.title = ADMIN_MINUTES_SCOPE_META[ADMIN_MINUTES_SCOPE].title.replace(/^[^\\s]+\\s*/, '');
             }
@@ -3743,6 +3755,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
 
         window.applyNoticeChannels = async (id, documentOnly = false) => {
             const flowOwner=boardContext;
+            const scoped=scopedBoardNotice();
             if(documentOnly&&(boardRoute?.stage!=='notice'||String(boardContext?.approvalId)!==String(id)
                 ||!window.ErpBoardFlow.approved(boardContext?.approvalStatus)))return;
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
@@ -3751,18 +3764,19 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             let notice = item.notice || null;
             const key = getNoticeApprovalKey(approval.id);
             const state = getOrInitNoticeChannels(key, {});
-            const noticeOn = !!state.notice;
+            if(scoped&&!documentOnly&&!item.optionsReady)return;
+            const noticeOn = scoped&&documentOnly?false:!!state.notice;
             const documentOn = documentOnly || !!state.document;
             const purposeError = OfficialNotice.validateChannels(approval.notice_usage, noticeOn, documentOn);
             if (purposeError) { showToast(purposeError); return; }
             if (noticeApplyPending.has(key)) return;
 
-            if (documentOn && !getNoticeDocNo(approval, notice)) {
+            if (documentOn && !(scoped&&documentOnly) && !getNoticeDocNo(approval, notice)) {
                 showToast('문서함 채널 게시를 위해 문서번호가 필요합니다.');
                 return;
             }
 
-            const includeAttach = !!noticeAttachMap[key];
+            const selectedAttachments=noticeAttachMap[key];
             noticeApplyPending.add(key);
             try {
             const current = await readNoticeDetails(id);
@@ -3772,6 +3786,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 ||String(approval?.id)!==String(id)||!window.ErpBoardFlow.approved(approval?.status)))return;
             const currentPurposeError = OfficialNotice.validateChannels(approval.notice_usage, noticeOn, documentOn);
             if (currentPurposeError) { showToast(currentPurposeError); return; }
+            const includeAttach=scoped?(selectedAttachments??(Array.isArray(notice?.file_urls)&&notice.file_urls.length>0)):!!selectedAttachments;
             const fileUrls = resolveNoticeFileUrls(approval, notice, includeAttach);
             if(!documentOnly){
                 const { error: noticeError } = await syncNoticePortalChannel(approval, notice, noticeOn, fileUrls);
@@ -3787,7 +3802,21 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 return;
             }
 
-            if(documentOnly)state.document=true;
+            if(documentOnly&&!scoped)state.document=true;
+            if(scoped){
+                if(boardContext!==flowOwner||window.frameElement?.hidden)return;
+                const updated=await refreshBoardContext();
+                if(String(updated.approvalId)!==String(id)||!window.ErpBoardFlow.approved(updated.approvalStatus)){
+                    await loadNotices();return;
+                }
+                state.document=updated.documentPublished===true;
+                if(!documentOnly)await loadBoardNoticeOptions(item,{refresh:true});
+                else renderNoticeUsageList();
+                showToast(state.document===documentOn
+                    ?documentOnly?'소집 공문을 문서함에 게시했습니다.':'채널 설정이 반영되었습니다.'
+                    :'문서함 게시 상태를 다시 확인해 주세요.');
+                return;
+            }
             showToast(documentOnly?'소집 공문을 문서함에 게시했습니다.':'채널 설정이 반영되었습니다.');
             if(boardRoute)await refreshBoardContext();
             await loadNotices();
@@ -3803,14 +3832,29 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             if(boardRoute&&(!boardContext||boardContext.status==='CANCELLED'||!window.ErpBoardFlow.approved(boardContext.approvalStatus))){
                 noticeItems=[];container.textContent='연결된 결재 완료 공문이 없습니다.';return;
             }
-            const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals({ metadataOnly: true, approvalId:boardRoute?boardContext.approvalId:null });
+            const scoped=scopedBoardNotice(),approvalId=boardRoute?boardContext.approvalId:null;
+            if(scoped&&!approvalId){noticeItems=[];container.textContent='연결된 소집 공문이 없습니다.';return;}
+            const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals({ metadataOnly: true, approvalId });
             if (request !== noticeListRequest) return;
+            if(scoped&&(!scopedBoardNotice()||String(boardContext?.approvalId)!==String(approvalId)))return;
+            if(scoped)noticeItems=[];
             if (error) {
-                container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">조회 오류</div>';
+                if(scoped){
+                    container.textContent='소집 공문을 불러오지 못했습니다. ';
+                    const retry=document.createElement('button');retry.type='button';retry.className='btn btn-gray';
+                    retry.textContent='다시 확인';retry.onclick=()=>void loadNotices();container.append(retry);
+                }else container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">조회 오류</div>';
                 return;
             }
             if (!approvals || approvals.length === 0) {
                 container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">결재 완료 공문이 없습니다.</div>';
+                return;
+            }
+            if(scoped){
+                const approval=approvals.find(a=>String(a.id)===String(approvalId));
+                noticeItems=approval?[{approval,notice:null}]:[];
+                if(approval)getOrInitNoticeChannels(getNoticeApprovalKey(approval.id)).document=boardContext.documentPublished===true;
+                renderNoticeUsageList();
                 return;
             }
 
@@ -3853,6 +3897,25 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             renderNoticeUsageList();
         }
 
+        async function loadBoardNoticeOptions(item,{refresh=false}={}){
+            if(!scopedBoardNotice()||!noticeItems.includes(item)||item.optionsPending||(item.optionsReady&&!refresh))return;
+            const owner=minutesListOwner,request=noticeListRequest,approvalId=item.approval.id;
+            const current=()=>scopedBoardNotice()&&noticeListRequest===request&&minutesListOwner===owner
+                &&noticeItems.includes(item)&&String(boardContext?.approvalId)===String(approvalId);
+            item.optionsPending=true;item.optionsError=false;item.optionsReady=false;
+            renderNoticeUsageList();
+            try{
+                const {data,error}=await MinutesService.listNoticesByApprovalIds([approvalId],{metadataOnly:true});
+                if(!current())return;
+                if(error)throw error;
+                item.notice=data?.[0]||null;item.optionsReady=true;
+                const state=getOrInitNoticeChannels(getNoticeApprovalKey(approvalId));
+                state.notice=item.notice?.status==='published';
+                state.document=boardContext.documentPublished===true;
+            }catch(_){if(current())item.optionsError=true;}
+            finally{item.optionsPending=false;if(current())renderNoticeUsageList();}
+        }
+
         window.setNoticeUsageTab = tab => {
             if (!['INTERNAL', 'EXTERNAL', 'LEGACY'].includes(tab)) return;
             noticeUsageTab = tab;
@@ -3862,7 +3925,11 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
 
         function renderNoticeUsageList() {
             const container = document.getElementById('notice-list-area');
-            for (const tab of ['INTERNAL', 'EXTERNAL', 'LEGACY']) {
+            const scoped=scopedBoardNotice(),optionsOpen=scoped&&document.getElementById('boardNoticeOptions')?.open;
+            const focused=scoped&&document.activeElement;
+            const returnToSummary=focused?.matches?.('#boardNoticeOptions > summary,#boardNoticeRetry');
+            const returnToAction=focused?.matches?.('[data-board-notice-post]');
+            for (const tab of scoped?[]:['INTERNAL', 'EXTERNAL', 'LEGACY']) {
                 const count = noticeItems.filter(item => OfficialNotice.matches(item.approval.notice_usage, tab)).length;
                 const button = document.getElementById('notice-tab-' + tab);
                 button.textContent = `${tab === 'LEGACY' ? '기존 공문' : OfficialNotice.label(tab)} (${count})`;
@@ -3870,7 +3937,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 button.classList.toggle('active', noticeUsageTab === tab);
                 button.setAttribute('aria-selected', String(noticeUsageTab === tab));
             }
-            const visibleItems = noticeItems.filter(item => OfficialNotice.matches(item.approval.notice_usage, noticeUsageTab));
+            const visibleItems = scoped?noticeItems:noticeItems.filter(item => OfficialNotice.matches(item.approval.notice_usage, noticeUsageTab));
             container.innerHTML = '';
             if (!visibleItems.length) container.textContent = '결재 완료 공문이 없습니다.';
             for (const item of visibleItems) {
@@ -3885,12 +3952,12 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 const hasAttach = attachCount > 0 || existingAttach;
                 const key = getNoticeApprovalKey(approval.id);
                 const checked = (noticeAttachMap[key] !== undefined) ? noticeAttachMap[key] : existingAttach;
-                noticeAttachMap[key] = checked;
+                if(!scoped||item.optionsReady)noticeAttachMap[key] = checked;
 
                 const docNoRaw = getNoticeDocNo(approval, notice);
                 const minuteNotice = item.minuteNotice;
                 const isNoticePublished = notice?.status === 'published';
-                const isDocumentPublished = !!minuteNotice?.published_at;
+                const isDocumentPublished = scoped?boardContext.documentPublished===true:!!minuteNotice?.published_at;
                 const channelState = getOrInitNoticeChannels(key, {
                     // 저장된 실제 게시 상태를 그대로 기본값으로 사용한다.
                     notice: isNoticePublished,
@@ -3904,12 +3971,16 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                 const dateValue = approval.processed_at || approval.created_at;
                 const dateLabel = formatMinutesAdminKstDate(dateValue);
                 const statusLabel = approval.status ? escapeHtml(approval.status) : '-';
+                const boardOptionText=item.optionsError?'게시 옵션을 확인하지 못했습니다.':item.optionsPending?'게시 옵션 확인 중…':'';
+                const optionStatus=scoped&&!item.optionsReady
+                    ? '<span role="status">'+boardOptionText+'</span>'+(item.optionsError?'<button type="button" class="btn btn-outline" id="boardNoticeRetry">다시 확인</button>':'')
+                    : '';
                 const html = `
                     <div class="minute-item">
                         <div class="minute-header">
                             <div>
                                 <div style="display:flex; align-items:center; gap:8px;">
-                                    ${external ? '<span class="status-badge badge-closed">외부용</span>' : `<span class="status-badge ${noticeBadgeClass}">${noticeBadgeLabel}</span><span class="status-badge ${boxBadgeClass}">${boxBadgeLabel}</span>`}
+                                    ${external ? '<span class="status-badge badge-closed">외부용</span>' : `${!scoped||item.optionsReady?`<span class="status-badge ${noticeBadgeClass}">${noticeBadgeLabel}</span>`:''}<span class="status-badge ${boxBadgeClass}">${boxBadgeLabel}</span>`}
                                     <strong style="font-size:1.05rem;">${escapeHtml(approval.title || '공문')}</strong>
                                     ${docNo}
                                 </div>
@@ -3919,11 +3990,12 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                             </div>
                         </div>
                         <div class="btn-group">
-                            <button onclick="openNoticePreview('${approval.id}')" class="btn btn-gray">내용 보기</button>
+                            <button ${scoped?'data-board-notice-view':''} onclick="openNoticePreview('${approval.id}')" class="btn btn-gray">내용 보기</button>
                             ${external || meetingConvocation ? `<button onclick="printNoticeById('${approval.id}')" class="btn ${external ? 'btn-blue' : 'btn-outline'}">출력·PDF 저장</button>` : ''}
                             ${external ? `<button onclick="downloadNoticeAttachments('${approval.id}')" class="btn btn-outline" ${hasAttach ? '' : 'disabled'}>첨부 다운로드 (${attachCount})</button>` : `
-                            ${meetingConvocation&&!isDocumentPublished?`<button onclick="applyNoticeChannels('${approval.id}', true)" class="btn btn-blue">문서함에 게시</button>`:''}
-                            ${meetingConvocation?'<details><summary>게시 옵션</summary><div class="btn-group">':''}
+                            ${meetingConvocation&&!isDocumentPublished?`<button ${scoped?'data-board-notice-post':''} onclick="applyNoticeChannels('${approval.id}', true)" class="btn btn-blue">문서함에 게시</button>`:''}
+                            ${meetingConvocation?`<details ${scoped?'id="boardNoticeOptions"':''} ${optionsOpen?'open':''}><summary>게시 옵션</summary><div class="btn-group">`:''}
+                            ${scoped&&!item.optionsReady?optionStatus:`
                             <label class="channel-toggle">
                                 <input type="checkbox" ${channelState.notice ? 'checked' : ''} onchange="toggleNoticeChannel('${approval.id}', 'notice', this.checked)">
                                 홈페이지 공지
@@ -3936,11 +4008,18 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
                                 <input type="checkbox" ${checked ? 'checked' : ''} ${hasAttach ? '' : 'disabled'} onchange="toggleNoticeAttach('${approval.id}', this.checked)">
                                 첨부 포함 (${attachCount})
                             </label>
-                            <button onclick="applyNoticeChannels('${approval.id}')" class="btn btn-blue">게시 설정 적용</button>${meetingConvocation?'</div></details>':''}`}
+                            <button onclick="applyNoticeChannels('${approval.id}')" class="btn btn-blue">게시 설정 적용</button>`}${meetingConvocation?'</div></details>':''}`}
                         </div>
                     </div>
                 `;
                 container.insertAdjacentHTML('beforeend', html);
+                if(scoped){
+                    const details=document.getElementById('boardNoticeOptions');
+                    details?.addEventListener('toggle',()=>{if(details.open&&!item.optionsError)void loadBoardNoticeOptions(item);});
+                    document.getElementById('boardNoticeRetry')?.addEventListener('click',()=>void loadBoardNoticeOptions(item));
+                    if(returnToSummary)details?.querySelector('summary')?.focus({preventScroll:true});
+                    if(returnToAction)container.querySelector('[data-board-notice-post],[data-board-notice-view]')?.focus({preventScroll:true});
+                }
             }
         }
         function showToast(msg) {
@@ -4251,9 +4330,17 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             const boardList=()=>boardContext?.minuteId
                 ?MinutesService.getMinuteById(boardContext.minuteId).then(({data,error})=>({error,data:data?.doc_type===(guidedAssembly()?'GENERAL_ASSEMBLY':'MINUTES')?[data]:[]}))
                 :Promise.resolve({data:[],error:null});
-            const [{ data: minutes, error: listError }, officials] = await Promise.all([
+            const linkedBoardMinute=guidedBoard()?boardContext?.minuteId:null;
+            if(linkedBoardMinute){
+                // Establish the existing read scope once before independent reads.
+                const visibleCoop=await MinutesService.getVisibleCoopId({signal:request.signal});
+                if(!isMinutesListCurrent(request))return;
+                if(!visibleCoop||visibleCoop!==request.owner.coopId)throw Error('현재 조합의 의사록을 열어 주세요.');
+            }
+            const [{ data: minutes, error: listError }, officials, boardSignatures] = await Promise.all([
                 boardRoute?boardList():MinutesService.listMinutesAdmin({metadataOnly:true,docType:'MINUTES',signal:request.signal}),
-                MinutesService.getOfficials({strict:true,signal:request.signal})
+                MinutesService.getOfficials({strict:true,signal:request.signal}),
+                linkedBoardMinute?MinutesService.listSignaturesForMinutes([linkedBoardMinute],{signal:request.signal}):null
             ]);
             if (!isMinutesListCurrent(request)) return;
             if (listError) throw listError;
@@ -4279,7 +4366,7 @@ Change: 2026-11-26 - 준비한 총회와 안건 결과를 기존 의사록에 �
             const delegateList = sortDelegateOrder((allOfficials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate'));
             const minuteIds = searchedMinutes.map(m => m.id);
             setMinutesListMessage('서명 현황을 불러오는 중…');
-            const { data: sigList, error: signatureError } = await MinutesService.listSignaturesForMinutes(minuteIds,{signal:request.signal});
+            const { data: sigList, error: signatureError } = boardSignatures??await MinutesService.listSignaturesForMinutes(minuteIds,{signal:request.signal});
             if (!isMinutesListCurrent(request)) return;
             if (signatureError) throw signatureError;
             minutesCache = new Map((minutes || []).map(m => [m.id, m]));
