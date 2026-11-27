@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.188 | 이사장 별도 승인과 전결 증빙 -->
+<!-- Version: v1.2.189 | 일반 승인과 전결 증빙 재확인 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -13,7 +13,7 @@
   <script src="/shared/meeting_flow_v5.js" integrity="sha384-ydMSPe6aHgPvhsxHfGXz8Wpk8BbCnh/YXGh4bd8KhlvPlq61khxikSo6G5sVTRfz" crossorigin="anonymous"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.188 | approval.html');</script>
+  <script>console.log('[Version] v1.2.189 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -20234,6 +20234,40 @@ function canReadApprovalSecretaryChoice(doc) {
 
 const APPROVAL_DECISION_EVIDENCE = 'approval-decision-evidence';
 const APPROVAL_DECISION_FILE_SUFFIX = /\.(png|jpe?g|webp|mp3|m4a|wav|pdf)$/i;
+const approvalDecisionDrafts = new Map();
+let approvalDecisionDraftOwner = '';
+
+function approvalDecisionDraft(doc,kind,owner=getApprovalActionOwner()) {
+    if(approvalDecisionDraftOwner!==owner) {
+        approvalDecisionDrafts.clear();
+        approvalDecisionDraftOwner=owner;
+    }
+    const key=JSON.stringify([owner,doc.id,kind]);
+    if(!approvalDecisionDrafts.has(key))approvalDecisionDrafts.set(key,{key,files:[],prepared:null,request:null,recheck:false});
+    return approvalDecisionDrafts.get(key);
+}
+
+function clearApprovalDecisionDraft(draft) {
+    if(approvalDecisionDrafts.get(draft.key)===draft)approvalDecisionDrafts.delete(draft.key);
+}
+
+function bindApprovalDecisionDraftFiles(field,draft) {
+    if(draft.files.length)field.input.files=buildAttachmentFileTransfer(draft.files).files;
+    field.input.addEventListener('change',()=>{
+        if(draft.request)return;
+        draft.files=Array.from(field.input.files||[]);
+        draft.prepared=null;
+        draft.recheck=false;
+    });
+}
+
+// Only bounds this tab's wait. A timed-out upload or record may still finish server-side.
+function waitApprovalDecision(work,controller) {
+    return waitApprovalLegacyRead(Promise.resolve().then(()=>{
+        if(controller.signal.aborted)throw Error('APPROVAL_DECISION_VIEW_CHANGED');
+        return work();
+    }),controller);
+}
 
 function createApprovalDecisionEvidenceInput() {
     const label=document.createElement('label');
@@ -20246,8 +20280,7 @@ function createApprovalDecisionEvidenceInput() {
     return {label,input};
 }
 
-function approvalDecisionFiles(input,doc) {
-    const files=Array.from(input?.files||[]);
+function approvalDecisionFiles(files,doc) {
     const refs=files.map(file=>{
         const ext=file.name.match(APPROVAL_DECISION_FILE_SUFFIX)?.[1]?.toLowerCase();
         if(!ext||!file.size||file.size>20*1024*1024||file.name.length>150||/[\u0000-\u001f\u007f]/.test(file.name))
@@ -20258,19 +20291,23 @@ function approvalDecisionFiles(input,doc) {
     return {files,refs,uploaded:0,uncertain:false};
 }
 
-async function prepareApprovalDecisionEvidence(state,current) {
+async function prepareApprovalDecisionEvidence(state,current,controller) {
     while(state.uploaded<state.refs.length) {
         if(!current())throw Error('APPROVAL_DECISION_VIEW_CHANGED');
         const ref=state.refs[state.uploaded],file=state.files[state.uploaded];
         if(state.uncertain) {
-            const check=await _supabase.storage.from(APPROVAL_DECISION_EVIDENCE).createSignedUrl(ref.path,15);
+            const check=await waitApprovalDecision(()=>_supabase.storage.from(APPROVAL_DECISION_EVIDENCE).createSignedUrl(ref.path,15),controller);
+            if(!current())throw Error('APPROVAL_DECISION_VIEW_CHANGED');
             if(check.data?.signedUrl){state.uploaded++;state.uncertain=false;continue;}
+            if(!(Number(check.status||check.error?.status||check.error?.statusCode)===404
+                || /\b(object|resource) not found\b/i.test(check.error?.message||'')))throw Error('APPROVAL_DECISION_UPLOAD_UNCONFIRMED');
         }
         const body=new FormData();
         body.set('bucket',APPROVAL_DECISION_EVIDENCE);body.set('path',ref.path);
         body.set('upsert','false');body.set('cacheControl','0');body.set('file',file,file.name);
         state.uncertain=true;
-        const {data,error}=await _supabase.functions.invoke('checked-upload',{body});
+        const {data,error}=await waitApprovalDecision(()=>_supabase.functions.invoke('checked-upload',{body}),controller);
+        if(!current())throw Error('APPROVAL_DECISION_VIEW_CHANGED');
         if(error||data?.ok!==true)throw Error('APPROVAL_DECISION_UPLOAD_UNCONFIRMED');
         state.uploaded++;state.uncertain=false;
     }
@@ -20310,7 +20347,7 @@ async function maybeOpenApprovalSecretaryChoice(doc,isCurrent) {
     if (approvalSecretaryChoicePending || document.getElementById('approvalSecretaryChoiceDialog')) return true;
     approvalSecretaryChoicePending=true;
     try {
-        const result=await approvalSecretaryDecisionRpc(doc,'inspect');
+        const result=await waitApprovalLegacyRead(approvalSecretaryDecisionRpc(doc,'inspect'),new AbortController());
         if (!isCurrent()) return true;
         if (result.error) throw result.error;
         const status=result.data;
@@ -20319,7 +20356,13 @@ async function maybeOpenApprovalSecretaryChoice(doc,isCurrent) {
         showApprovalSecretaryChoice(doc,status,isCurrent);
         return true;
     } catch (_) {
-        if (isCurrent()) showAlert('전결 가능 여부를 확인하지 못했습니다. 문서를 다시 열어 확인해 주세요.');
+        if(!isCurrent())return true;
+        // With a real next approver, the existing assigned-approval path can
+        // continue on its own. A phone-only line must never be treated as ordinary.
+        const line=doc.approval_line;
+        if(Array.isArray(line)&&line[0]?.emp_id===myInfo?.emp_id&&line[0].secretary_phone_only!==true
+            &&line[1]?.emp_id&&line[1].emp_id!==myInfo.emp_id&&line[1].status==='대기')return false;
+        showAlert('전결 가능 여부를 확인하지 못했습니다. 문서를 다시 열어 확인해 주세요.');
         return true;
     } finally { approvalSecretaryChoicePending=false; }
 }
@@ -20345,45 +20388,66 @@ function showApprovalSecretaryChoice(doc,status,isCurrent) {
     </div>`;
     const select=mode=>dialog.querySelector('[data-mode="'+mode+'"]');
     const area=dialog.querySelector('[data-stage="direct"]'),memo=dialog.querySelector('textarea'),statusEl=dialog.querySelector('[role="status"]');
-    const buttons=[...dialog.querySelectorAll('button')];
     const files=createApprovalDecisionEvidenceInput();
     if(status.evidence_supported===true)area.insertBefore(files.label,select('confirm'));
-    let busy=false, completed=false, prepared=null, attempted=null;
-    files.input.onchange=()=>{if(!attempted)prepared=null;};
+    const draft=approvalDecisionDraft(doc,'secretary',owner);
+    bindApprovalDecisionDraftFiles(files,draft);
+    memo.value=draft.note||'';
+    memo.addEventListener('input',()=>{if(!draft.request)draft.note=memo.value;});
+    let operation=null,completed=false,closed=false;
+    const current=()=>!closed&&dialog.open&&isCurrent()&&owner===getApprovalActionOwner();
+    const sync=()=>{
+        const retry=draft.recheck||!!draft.request;
+        select('confirm').textContent=retry?'처리 결과 확인':'전결 확정';
+        select('chair').textContent=draft.request?.mode==='chair'?'처리 결과 확인':'승인 후 이사장에게 상신';
+        select('chair').disabled=!!operation||draft.request?.mode==='direct';
+        select('direct').disabled=!!operation||draft.request?.mode==='chair';
+        select('confirm').disabled=!!operation;
+        select('cancel').textContent=operation||retry?'닫기':'취소';
+        memo.disabled=files.input.disabled=!!operation||!!draft.request;
+    };
+    files.input.addEventListener('change',sync);
+    area.hidden=!(draft.request?.mode==='direct'||draft.files.length||draft.note);
     select('chair').hidden=status.chair_allowed!==true;
-    select('direct').onclick=()=>{if(!busy && isCurrent()){area.hidden=false;memo.focus();}};
-    select('cancel').onclick=()=>{if(!busy)dialog.close();};
-    dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
-    dialog.addEventListener('close',()=>{
+    select('direct').onclick=()=>{if(!operation&&current()){area.hidden=false;memo.focus();}};
+    const closeChoice=()=>{
+        closed=true;operation?.abort();dialog.close();
         dialog.remove();
         if(!completed && isCurrent() && focused?.isConnected) focused.focus();
-    },{once:true});
+    };
+    select('cancel').onclick=closeChoice;
+    dialog.addEventListener('cancel',event=>{event.preventDefault();closeChoice();});
     async function settle(mode){
-        if (busy || !isCurrent() || owner!==getApprovalActionOwner()) return;
-        busy=true;statusEl.textContent='';buttons.forEach(b=>b.disabled=true);memo.disabled=true;files.input.disabled=true;
+        if(operation||!current()||draft.request&&draft.request.mode!==mode)return;
+        const controller=operation=new AbortController(),note=mode==='direct'?memo.value:null;
+        if(mode==='direct')draft.note=note;
+        statusEl.textContent=mode==='direct'&&draft.files.length?'증빙을 확인하고 있습니다.':'처리 결과를 확인하고 있습니다.';
+        sync();
         try {
-            if(attempted && (attempted.mode!==mode || attempted.memo!==(mode==='direct'?memo.value:null))) {
-                statusEl.textContent='같은 선택으로 처리 결과를 먼저 확인해 주세요.';return;
-            }
+            if(mode==='direct'&&draft.files.length)draft.recheck=true;
             const evidence=mode==='direct'&&status.evidence_supported===true
-                ? await prepareApprovalDecisionEvidence(prepared??=approvalDecisionFiles(files.input,doc),()=>isCurrent()&&owner===getApprovalActionOwner()):[];
-            attempted={mode,memo:mode==='direct'?memo.value:null};
-            await runApprovalSecretaryDecision(doc,status,mode,attempted.memo,owner,evidence);
-            completed=true;dialog.close();
-            if(!isCurrent())return;
+                ? await prepareApprovalDecisionEvidence(draft.prepared??=approvalDecisionFiles(draft.files,doc),current,controller):[];
+            if(!current())return;
+            draft.request??={mode,note,version:status.version,evidence};
+            const request=draft.request;
+            await waitApprovalDecision(()=>runApprovalSecretaryDecision(doc,{version:request.version},mode,request.note,owner,request.evidence),controller);
+            clearApprovalDecisionDraft(draft);
+            if(!current())return;
+            completed=true;closeChoice();
             void Promise.allSettled([loadTodoList(),loadHistoryList()]);
             await openRelView(doc.id);
         } catch (error) {
-            if (!isCurrent()) {dialog.close();return;}
+            if(!current())return;
+            if(['PT409','22023'].includes(error?.code))draft.request=null;
             statusEl.textContent=error?.code==='PT409'
                 ? '문서 상태가 달라졌습니다. 문서를 다시 열어 확인해 주세요.'
-                : approvalDecisionFailureMessage(error);
-        } finally {busy=false;buttons.forEach(b=>b.disabled=false);memo.disabled=files.input.disabled=!!attempted;}
+                : approvalDecisionFailureMessage(error,!draft.request);
+        } finally {operation=null;if(current())sync();}
     }
     select('chair').onclick=()=>settle('chair');
     select('confirm').onclick=()=>settle('direct');
     document.body.append(dialog);
-    if (typeof dialog.showModal==='function') {dialog.showModal();select('cancel').focus();}
+    if (typeof dialog.showModal==='function') {dialog.showModal();sync();select('cancel').focus();}
     else {dialog.remove();showAlert('결재 방식 선택창을 열 수 없습니다.');}
 }
 
@@ -20445,8 +20509,26 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
     const files=createApprovalDecisionEvidenceInput();
     if(status.evidence_supported===true && status.phase==='chair')section.append(files.label);
     section.append(row,feedback);
-    let busy=false, prepared=null, attempted=null;
-    files.input.onchange=()=>{if(!attempted)prepared=null;};
+    const owner=getApprovalActionOwner();
+    let draft=approvalDecisionDraft(doc,'secretary',owner);
+    if(draft.request?.mode===status.phase){
+        clearApprovalDecisionDraft(draft);
+        draft=approvalDecisionDraft(doc,'secretary',owner);
+    }
+    bindApprovalDecisionDraftFiles(files,draft);
+    reason.value=draft.note||'';
+    reason.addEventListener('input',()=>{if(!draft.request)draft.note=reason.value;});
+    let operation=null;
+    const current=()=>isCurrentView()&&owner===getApprovalActionOwner();
+    const sync=()=>{
+        reason.disabled=files.input.disabled=!!operation||!!draft.request;
+        row.querySelectorAll('button').forEach(b=>{
+            const mode=b.dataset.secretaryChoice;
+            b.textContent=draft.request?.mode===mode||mode==='direct'&&draft.recheck&&!draft.request?'처리 결과 확인':b.dataset.originalLabel;
+            b.disabled=!!operation||mode===status.phase&&mode!=='handoff'||!!draft.request&&draft.request.mode!==mode;
+        });
+    };
+    files.input.addEventListener('change',sync);
     const choices = status.phase === 'handoff' ? [
         ['handoff','내 결재로 인계','btn-primary',status.chair_handoff
             ? '이 문서를 이사장 결재로 인계받을까요? 기존 승인 기록은 바뀌지 않습니다.'
@@ -20467,52 +20549,58 @@ async function mountApprovalSecretaryDecision(content, doc, isCurrentView) {
         button.className = 'btn btn-sm ' + style;
         button.textContent = title;
         button.dataset.secretaryChoice = mode;
+        button.dataset.originalLabel = title;
         button.disabled = status.phase === mode && mode !== 'handoff';
         button.addEventListener('click',async () => {
-            if (busy || !isCurrentView() || status.phase===mode && mode !== 'handoff') return;
-            busy=true;
-            row.querySelectorAll('button').forEach(b=>b.disabled=true);
-            reason.disabled=files.input.disabled=true;
+            if(operation||!current()||button.disabled)return;
+            const controller=operation=new AbortController();
+            const modal=section.closest('#relViewModal'),stop=()=>controller.abort();
+            modal?.addEventListener('hide.bs.modal',stop,{once:true});
             const note=mode==='direct'?reason.value:null;
-            const owner=getApprovalActionOwner();
+            sync();
             try {
-                if(attempted&&attempted!==mode){feedback.textContent='같은 선택으로 처리 결과를 먼저 확인해 주세요.';return;}
-                if (!await window.CoopDialog.confirm(question) || !isCurrentView()) return;
+                const retry=draft.request?.mode===mode||mode==='direct'&&draft.recheck;
+                if(!retry&&!await window.CoopDialog.confirm(question))return;
+                if(!current()||controller.signal.aborted)return;
+                if(mode==='direct'){draft.note=note;if(draft.files.length)draft.recheck=true;}
+                feedback.textContent=mode==='direct'&&draft.files.length?'증빙을 확인하고 있습니다.':'처리 결과를 확인하고 있습니다.';
                 const evidence=mode==='direct'&&status.phase==='chair'&&status.evidence_supported===true
-                    ? await prepareApprovalDecisionEvidence(prepared??=approvalDecisionFiles(files.input,doc),()=>isCurrentView()&&owner===getApprovalActionOwner()):[];
-                attempted=mode;
-                await runApprovalSecretaryDecision(doc,status,mode,note,owner,evidence);
-                if (!isCurrentView()) return;
+                    ? await prepareApprovalDecisionEvidence(draft.prepared??=approvalDecisionFiles(draft.files,doc),current,controller):[];
+                if(!current())return;
+                draft.request??={mode,note,version:status.version,evidence};
+                const request=draft.request;
+                await waitApprovalDecision(()=>runApprovalSecretaryDecision(doc,{version:request.version},mode,request.note,owner,request.evidence),controller);
+                clearApprovalDecisionDraft(draft);
+                if (!current()) return;
                 feedback.classList.remove('text-danger');
                 feedback.textContent='처리 결과를 확인했습니다.';
                 void Promise.allSettled([loadTodoList(),loadHistoryList()]);
                 // Refresh this document only; do not reload the ERP tab.
                 if (isCurrentView()) await openRelView(doc.id);
             } catch (error) {
-                if (!isCurrentView()) return;
+                if (!current()) return;
+                if(['PT409','22023'].includes(error?.code))draft.request=null;
                 feedback.classList.add('text-danger');
                 feedback.textContent = error?.code==='PT409'
                     ? '문서 상태나 연동이 달라졌습니다. 문서를 다시 열어 확인해 주세요.'
-                    : approvalDecisionFailureMessage(error);
+                    : approvalDecisionFailureMessage(error,!draft.request);
             } finally {
-                busy=false;
-                if (isCurrentView()) {
-                    reason.disabled=files.input.disabled=!!attempted;
-                    row.querySelectorAll('button').forEach(b=>b.disabled=b.dataset.secretaryChoice===status.phase && status.phase !== 'handoff');
-                }
+                operation=null;modal?.removeEventListener('hide.bs.modal',stop);
+                if(current())sync();
             }
         });
         row.append(button);
     }
     if (isCurrentView()) {
         content.prepend(section);
+        sync();
     }
 }
 
-function approvalDecisionFailureMessage(error) {
+function approvalDecisionFailureMessage(error,checkingFiles=false) {
     if(error?.message==='APPROVAL_DECISION_FILE_FORMAT'||error?.code==='22023')
         return '이미지·녹음·PDF를 최대 8개, 파일당 20MB까지 첨부할 수 있습니다.';
-    if(error?.message==='APPROVAL_DECISION_UPLOAD_UNCONFIRMED')
+    if(error?.message==='APPROVAL_DECISION_UPLOAD_UNCONFIRMED'||checkingFiles&&error?.code==='APPROVAL_READ_TIMEOUT')
         return '증빙 저장을 확인하지 못했습니다. 선택한 파일은 유지됩니다.';
     return '처리 결과를 확인하지 못했습니다. 같은 내용으로 다시 확인해 주세요.';
 }
@@ -20522,9 +20610,10 @@ async function mountSeparateChairApproval(content, doc, current) {
     if (!empId || String(doc?.drafter_id||'')!==empId || doc.status!=='진행중' || !(isCurrentUserSecretaryGeneral()||isSunVillageReviewUser())
         || !canPerform('approval.process') || window.ExpoRuntimeBridge || !window.HTMLDialogElement) return;
     const call=fields=>_supabase.rpc('erp_record_separate_chair_approval',{p_id:doc.id,...fields});
+    const owner=getApprovalActionOwner();
     let inspection;
     try {
-        const {data,error}=await call({p_action:'inspect',p_seen:doc});
+        const {data,error}=await waitApprovalLegacyRead(call({p_action:'inspect',p_seen:doc}),new AbortController());
         if(error||data?.available!==true||typeof data.version!=='string'||!current())return;
         inspection=data;
     } catch (_) { return; }
@@ -20549,36 +20638,62 @@ async function mountSeparateChairApproval(content, doc, current) {
     if(validDate(inspection.earliest))date.min=inspection.earliest;
     if(validDate(inspection.today)){date.max=inspection.today;date.value=inspection.today;}
     dialog.querySelector('[data-document]').textContent=[doc.doc_no,doc.title].filter(Boolean).join(' · ');
-    let busy=false,request=null,prepared=null;
-    files.input.onchange=()=>{if(!request)prepared=null;};
-    open.addEventListener('click',()=>{if(!busy&&current()&&!dialog.open){dialog.showModal();date.focus();}});
-    cancel.addEventListener('click',()=>{if(!busy)dialog.close();});
-    dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
+    const draft=approvalDecisionDraft(doc,'chair-record',owner);
+    bindApprovalDecisionDraftFiles(files,draft);
+    if(draft.approvedOn!==undefined)date.value=draft.approvedOn;
+    memo.value=draft.note||'';
+    date.addEventListener('input',()=>{if(!draft.request)draft.approvedOn=date.value;});
+    memo.addEventListener('input',()=>{if(!draft.request)draft.note=memo.value;});
+    let operation=null,view=0;
+    const currentDialog=()=>dialog.open&&current()&&owner===getApprovalActionOwner();
+    const sync=()=>{
+        const retry=draft.recheck||!!draft.request;
+        save.textContent=retry?'처리 결과 확인':'승인 기록 저장';
+        save.disabled=!!operation;
+        cancel.textContent=operation||retry?'닫기':'취소';
+        date.disabled=memo.disabled=files.input.disabled=!!operation||!!draft.request;
+    };
+    files.input.addEventListener('change',sync);
+    open.addEventListener('click',()=>{
+        if(current()&&!dialog.open){view++;dialog.showModal();sync();(date.disabled?save:date).focus();}
+    });
+    const stop=()=>{view++;operation?.abort();operation=null;};
+    cancel.addEventListener('click',()=>{stop();dialog.close();});
+    dialog.addEventListener('cancel',stop);
     dialog.addEventListener('close',()=>{if(current())open.focus({preventScroll:true});});
     form.addEventListener('submit',async event=>{
         event.preventDefault();
-        if (busy||!dialog.open||!current()||!form.reportValidity())return;
-        const fields={p_approved_on:date.value,p_memo:memo.value.trim()||null};
-        if(request&&JSON.stringify(fields)!==request.values){feedback.textContent='먼저 이전 입력으로 처리 결과를 확인해 주세요.';return;}
-        const owner=getApprovalActionOwner();
-        busy=true;save.disabled=cancel.disabled=date.disabled=memo.disabled=files.input.disabled=true;feedback.textContent='';
+        if (operation||!currentDialog()||!form.reportValidity())return;
+        const ticket=view,isOpen=()=>ticket===view&&currentDialog();
+        draft.approvedOn=date.value;draft.note=memo.value;
+        const fields={p_approved_on:draft.approvedOn,p_memo:draft.note.trim()||null};
+        const controller=operation=new AbortController();
+        feedback.textContent=draft.files.length?'증빙을 확인하고 있습니다.':'처리 결과를 확인하고 있습니다.';
+        sync();
         try {
-            const evidence=await prepareApprovalDecisionEvidence(prepared??=approvalDecisionFiles(files.input,doc),()=>current()&&owner===getApprovalActionOwner());
-            request??={values:JSON.stringify(fields),key:crypto.randomUUID()};
-            const {data,error}=await call({p_action:'record',p_expected:inspection.version,p_request:request.key,p_evidence:evidence,...fields});
-            if(!current())return;
+            if(draft.files.length)draft.recheck=true;
+            const evidence=await prepareApprovalDecisionEvidence(draft.prepared??=approvalDecisionFiles(draft.files,doc),isOpen,controller);
+            if(!isOpen())return;
+            draft.request??={fields,key:crypto.randomUUID(),version:inspection.version,evidence};
+            const request=draft.request;
+            const {data,error}=await waitApprovalDecision(()=>call({p_action:'record',p_expected:request.version,p_request:request.key,p_evidence:request.evidence,...request.fields}),controller);
             if(error)throw error;
             if(data?.ok!==true||data.status!=='완료')throw Error('UNCONFIRMED');
+            clearApprovalDecisionDraft(draft);
+            if(!isOpen())return;
             dialog.close();
             void Promise.allSettled([loadTodoList(),loadHistoryList()]);
             if (window.ErpBoardFlow?.parse(location.href)?.stage==='approval')void refreshBoardApprovalEntry();
             if(current())await openRelView(doc.id);
         } catch (error) {
-            if(!current())return;
-            if (error?.code==='22023')request=null;
+            if(!isOpen())return;
+            if (['22023','PT409'].includes(error?.code))draft.request=null;
             feedback.textContent=error?.code==='PT409'?'문서가 바뀌었습니다. 현재 문서를 다시 열어 주세요.'
-                :error?.code==='22023'?'승인일·메모·증빙 파일을 확인해 주세요.':approvalDecisionFailureMessage(error);
-        } finally {busy=false;save.disabled=cancel.disabled=false;date.disabled=memo.disabled=files.input.disabled=!!request;}
+                :error?.code==='22023'?'승인일·메모·증빙 파일을 확인해 주세요.':approvalDecisionFailureMessage(error,!draft.request);
+        } finally {
+            if(operation===controller)operation=null;
+            if(isOpen())sync();
+        }
     });
     section.append(open,dialog);
     if(current())content.prepend(section);
