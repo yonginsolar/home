@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.2.96
+Version: v1.2.97
 Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구는 사용할 때 로드.
 -->
 <html lang="ko">
@@ -18,7 +18,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>문서 관리</title>
-    <script>console.log('[Version] v1.2.96 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.97 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -331,7 +331,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
     </script>
     <script>
       { const route=window.ErpBoardFlow?.parse(location.href);
-        if(route?.kind==='BOARD'&&route.stage==='notice')document.body.dataset.boardNotice=''; }
+        if(route?.stage==='notice')document.body.dataset.boardNotice=''; }
     </script>
 
     <div class="container">
@@ -744,8 +744,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
         let boardRoute=window.ErpBoardFlow?.parse(location.href);
         let boardContext=null,boardContextVersion=0,boardDraftPrepared=false;
         const guidedAssembly=()=>boardRoute?.kind==='GENERAL_ASSEMBLY';
-        const guidedBoard=()=>boardRoute?.kind==='BOARD';
-        const scopedBoardNotice=()=>guidedBoard()&&boardRoute.stage==='notice';
+        const scopedMeetingNotice=()=>boardRoute?.stage==='notice';
         const flowName=()=>guidedAssembly()?'총회':'이사회';
         const boardResults=new Map(),boardResultChoices=['가결','부결','보류','보고','논의'];
         const boardText=message=>{
@@ -775,72 +774,40 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
             action.disabled=false;
             document.body.toggleAttribute('data-board-waiting',!!reason);
             if(reason){boardText(reason);return;}
-            if(guidedBoard()){
-                action.disabled=false;
-                delete document.body.dataset.boardWaiting;
-                delete document.body.dataset.boardAwaitingSignature;
-                document.body.toggleAttribute('data-combined-minute',stage==='meeting'&&!!row.minuteId);
-                const wait=message=>{document.body.dataset.boardWaiting='';boardText(message);};
-                if(row.status==='CANCELLED'){
-                    if(stage==='meeting'){
-                        action.hidden=false;action.textContent='무산 기록 보기';
-                        action.onclick=()=>window.ErpWorkspaceResume.navigate(flow.url(row.id,'outcome',boardRoute.kind));
-                    }
-                    wait('무산된 이사회입니다.');return;
+            delete document.body.dataset.boardAwaitingSignature;
+            document.body.toggleAttribute('data-combined-minute',stage==='meeting'&&!!row.minuteId);
+            const wait=message=>{document.body.dataset.boardWaiting='';boardText(message);};
+            const open=(next,record=false)=>{
+                if(boardContext===row&&boardRoute.stage===stage&&!window.frameElement?.hidden)
+                    window.ErpWorkspaceResume.navigate(flow.url(row.id,next,boardRoute.kind,{record}));
+            };
+            if(row.status==='CANCELLED'){
+                if(stage==='meeting'){
+                    action.hidden=false;action.textContent='무산 기록 보기';action.onclick=()=>open('outcome');
                 }
-                if(stage==='meeting'&&!row.minuteId){
-                    choices.hidden=false;
-                    const held=document.getElementById('guidedMeetingHeld'),notHeld=document.getElementById('guidedMeetingNotHeld');
-                    held.disabled=notHeld.disabled=!flow.canRecord(row);
-                    held.textContent='진행함 · 의사록 작성';
-                    notHeld.textContent='무산 기록';
-                    if(flow.canRecord(row)){
-                        boardText('이사회 결과를 선택하세요.');
-                        const open=(stage,record=false)=>{
-                            if(boardContext===row&&boardRoute.stage==='meeting'&&!window.frameElement?.hidden)
-                                window.ErpWorkspaceResume.navigate(flow.url(row.id,stage,boardRoute.kind,{record}));
-                        };
-                        held.onclick=()=>open('minutes',true);notHeld.onclick=()=>open('outcome');
-                    }else{
-                        held.onclick=notHeld.onclick=null;
-                        boardText(!flow.posted(row)?'소집 공고 후, 회의 날짜가 지나면 결과를 기록할 수 있어요.':
-                            !row.meetingDatePassed?'회의 날짜가 지나면 결과를 기록할 수 있어요.':'회의자료와 결과 기록 상태를 확인해 주세요.');
-                    }
-                    return;
-                }
-                if(stage==='notice'){
-                    if(flow.posted(row)){
-                        action.hidden=false;action.disabled=false;action.textContent='시나리오 만들기·인쇄';
-                        action.onclick=()=>{
-                            if(boardContext===row&&boardRoute.stage==='notice'&&!window.frameElement?.hidden)
-                                window.ErpWorkspaceResume.navigate(flow.url(row.id,'scenario',boardRoute.kind));
-                        };
-                    }
-                }else if(stage==='minutes'&&!row.minuteId&&(!boardRoute.record||!flow.canRecord(row))){
-                    action.hidden=false;action.disabled=false;action.textContent='회의 결과 선택';
-                    action.onclick=()=>window.ErpWorkspaceResume.navigate(flow.url(row.id,'meeting',boardRoute.kind));
-                    wait('‘진행함’을 선택하면 의사록을 작성할 수 있어요.');return;
-                }
+                wait('무산된 '+flowName()+'입니다.');return;
             }
-            if(row.status==='CANCELLED'){boardText('무산된 '+flowName()+'입니다.');return;}
-            if(!window.ErpBoardFlow.approved(row.approvalStatus)){boardText('이 회의의 소집 공문 결재가 완료된 뒤 이용할 수 있어요.');return;}
-            if(boardRoute.stage==='notice'){boardText(row.documentPublished?'소집 공문이 문서함에 게시됐습니다.':'결재 완료 · 소집 공문을 문서함에 게시하세요.');return;}
-            if(boardRoute.stage==='meeting'){
-                boardText(row.minuteId?'이 회의의 의사록이 등록됐습니다.':window.ErpBoardFlow.canRecord(row)
-                    ?'회의 결과를 선택하세요.':'소집 공문이 문서함에 게시되고 회의 날짜가 지나면 결과를 기록할 수 있어요.');
-                if(!window.ErpBoardFlow.canRecord(row))return;
-                const open=stage=>{
-                    if(boardContext!==row||boardRoute.stage!=='meeting'||window.frameElement?.hidden)return;
-                    window.ErpWorkspaceResume.navigate(window.ErpBoardFlow.url(row.id,stage,boardRoute.kind,{record:stage==='minutes'}));
-                };
+            if(stage==='meeting'&&!row.minuteId){
                 choices.hidden=false;
-                document.getElementById('guidedMeetingHeld').onclick=()=>open('minutes');
-                document.getElementById('guidedMeetingNotHeld').onclick=()=>open('outcome');
+                const held=document.getElementById('guidedMeetingHeld'),notHeld=document.getElementById('guidedMeetingNotHeld');
+                held.disabled=notHeld.disabled=!flow.canRecord(row);
+                held.textContent='진행함 · 의사록 작성';notHeld.textContent='무산 기록';
+                held.onclick=()=>open('minutes',true);notHeld.onclick=()=>open('outcome');
+                boardText(flowName()+' 결과를 선택하세요.');
                 return;
             }
-            if(boardRoute.stage==='minutes'&&!row.minuteId&&!window.ErpBoardFlow.canRecord(row)){
-                boardText('소집 공문이 문서함에 게시되고 회의 날짜가 지나면 의사록을 작성할 수 있어요.');return;
+            if(stage==='minutes'&&!row.minuteId&&(!flow.canRecord(row)||(!guidedAssembly()&&!boardRoute.record))){
+                action.hidden=false;action.textContent='회의 결과 선택';action.onclick=()=>open('meeting');
+                wait('‘진행함’을 선택하면 의사록을 작성할 수 있어요.');return;
             }
+            if(!flow.approved(row.approvalStatus)){boardText('이 회의의 소집 공문 결재가 완료된 뒤 이용할 수 있어요.');return;}
+            if(stage==='notice'){
+                if(flow.posted(row)){
+                    action.hidden=false;action.textContent='시나리오 만들기·인쇄';action.onclick=()=>open('scenario');
+                }
+                boardText(row.documentPublished?'소집 공문이 문서함에 게시됐습니다.':'결재 완료 · 소집 공문을 문서함에 게시하세요.');return;
+            }
+            if(stage==='meeting'){boardText('이 회의의 의사록이 등록됐습니다.');return;}
             if(boardRoute.stage==='followups'){
                 if(!assemblyFollowupPermission){boardText('후속 업무 확인 권한이 없습니다.');return;}
                 if(!row.minuteId||row.minuteStatus!=='CLOSED'||!(row.required>0)||row.signed!==row.required){boardText('서명을 마친 총회 의사록에서 후속 업무를 확인할 수 있어요.');return;}
@@ -1154,7 +1121,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
 
         function applyAdminMinutesScopeUi() {
             const titleEl = document.getElementById('page-title');
-            if(titleEl&&scopedBoardNotice()){
+            if(titleEl&&scopedMeetingNotice()){
                 titleEl.textContent=document.title='소집 공고';
             }else if(titleEl&&boardRoute&&ADMIN_MINUTES_SCOPE==='minutes'){
                 const stageTitle={meeting:'회의 결과·의사록',minutes:'의사록',signature:'서명',publish:'의사록 공개',followups:'의결 후 할 일'}[boardRoute.stage];
@@ -3782,7 +3749,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
 
         window.applyNoticeChannels = async (id, documentOnly = false) => {
             const flowOwner=boardContext;
-            const scoped=scopedBoardNotice();
+            const scoped=scopedMeetingNotice();
             if(documentOnly&&(boardRoute?.stage!=='notice'||String(boardContext?.approvalId)!==String(id)
                 ||!window.ErpBoardFlow.approved(boardContext?.approvalStatus)))return;
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
@@ -3859,11 +3826,11 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
             if(boardRoute&&(!boardContext||boardContext.status==='CANCELLED'||!window.ErpBoardFlow.approved(boardContext.approvalStatus))){
                 noticeItems=[];container.textContent='연결된 결재 완료 공문이 없습니다.';return;
             }
-            const scoped=scopedBoardNotice(),approvalId=boardRoute?boardContext.approvalId:null;
+            const scoped=scopedMeetingNotice(),approvalId=boardRoute?boardContext.approvalId:null;
             if(scoped&&!approvalId){noticeItems=[];container.textContent='연결된 소집 공문이 없습니다.';return;}
             const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals({ metadataOnly: true, approvalId });
             if (request !== noticeListRequest) return;
-            if(scoped&&(!scopedBoardNotice()||String(boardContext?.approvalId)!==String(approvalId)))return;
+            if(scoped&&(!scopedMeetingNotice()||String(boardContext?.approvalId)!==String(approvalId)))return;
             if(scoped)noticeItems=[];
             if (error) {
                 if(scoped){
@@ -3925,9 +3892,9 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
         }
 
         async function loadBoardNoticeOptions(item,{refresh=false}={}){
-            if(!scopedBoardNotice()||!noticeItems.includes(item)||item.optionsPending||(item.optionsReady&&!refresh))return;
+            if(!scopedMeetingNotice()||!noticeItems.includes(item)||item.optionsPending||(item.optionsReady&&!refresh))return;
             const owner=minutesListOwner,request=noticeListRequest,approvalId=item.approval.id;
-            const current=()=>scopedBoardNotice()&&noticeListRequest===request&&minutesListOwner===owner
+            const current=()=>scopedMeetingNotice()&&noticeListRequest===request&&minutesListOwner===owner
                 &&noticeItems.includes(item)&&String(boardContext?.approvalId)===String(approvalId);
             item.optionsPending=true;item.optionsError=false;item.optionsReady=false;
             renderNoticeUsageList();
@@ -3952,7 +3919,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
 
         function renderNoticeUsageList() {
             const container = document.getElementById('notice-list-area');
-            const scoped=scopedBoardNotice(),optionsOpen=scoped&&document.getElementById('boardNoticeOptions')?.open;
+            const scoped=scopedMeetingNotice(),optionsOpen=scoped&&document.getElementById('boardNoticeOptions')?.open;
             const focused=scoped&&document.activeElement;
             const returnToSummary=focused?.matches?.('#boardNoticeOptions > summary,#boardNoticeRetry');
             const returnToAction=focused?.matches?.('[data-board-notice-post]');
@@ -4294,7 +4261,7 @@ Change: 2026-11-27 - 회의 단계에 필요한 자료만 읽고 출력 도구�
                 try{await refreshBoardContext({initial:true});}
                 catch(error){
                     boardText(error.message);document.getElementById('sub-tab-editor').disabled=true;
-                    if(guidedBoard())document.body.dataset.boardWaiting='';
+                    document.body.dataset.boardWaiting='';
                 }
                 if(revision!==minutesInitRevision)return;
                 if(boardContext?.minuteId||!['minutes','notice'].includes(boardRoute.stage))

@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.2.183 | 회의 내용 불러오기는 공문에서만 -->
+<!-- Version: v1.2.184 | 이사회·총회 소집 공문 전용 진입 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -13,7 +13,7 @@
   <script src="/shared/meeting_flow_v5.js" integrity="sha384-ydMSPe6aHgPvhsxHfGXz8Wpk8BbCnh/YXGh4bd8KhlvPlq61khxikSo6G5sVTRfz" crossorigin="anonymous"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.183 | approval.html');</script>
+  <script>console.log('[Version] v1.2.184 | approval.html');</script>
   <script src="accounting_expense_execution.js?v=1.1.0" integrity="sha384-UlbejU9isU/NsuV8xF5I2SpBuMmU88qgi5T09hZG3/R5u9YM+bTMlzGGltiIw2Z5" crossorigin="anonymous"></script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
@@ -3349,7 +3349,7 @@ function clearApprovalDraftLocalFiles() {
 
 function collectApprovalDraftFormPayload() {
     const category = getCurrentDraftMainType();
-    const boardRoute = getBoardApprovalRoute();
+    const meetingRoute = getMeetingApprovalRoute();
     const proposalSubjectEl = document.getElementById('proposalSubject');
     const noticeSubjectEl = document.getElementById('noticeSubject');
     const selectedHalf = document.querySelector('input[name="ampm"]:checked');
@@ -3358,7 +3358,7 @@ function collectApprovalDraftFormPayload() {
     return {
         version: 1,
         category,
-        ...(boardRoute?{board_package_id:boardRoute.id}:{}),
+        ...(meetingRoute?{[meetingDraftPackageKey(meetingRoute)]:meetingRoute.id}:{}),
         proxy: {
             enabled: !!document.getElementById('chkProxy')?.checked,
             target_emp_id: String(document.getElementById('proxyTargetSelect')?.value || '').trim()
@@ -3517,23 +3517,24 @@ function getApprovalDraftErrorMessage(error, fallback = '임시저장 처리 중
 
 async function fetchApprovalDraftList() {
     const actor=approvalSubmitActor();
-    const board=getBoardApprovalRoute();
+    const meeting=getMeetingApprovalRoute();
     let query = _supabase
         .from('erp_approval_drafts')
         .select('id, doc_type, draft_title, form_payload, attachment_links, created_at, updated_at');
-    if(board)query=query.eq('doc_type','공문');
+    if(meeting)query=query.eq('doc_type','공문');
     const { data, error }=await query.order('updated_at',{ascending:false});
     if (error) throw error;
-    approvalDraftCache = Array.isArray(data) ? data.filter(row=>matchesBoardApprovalDraft(row,board)).map(row=>({...row,
+    approvalDraftCache = Array.isArray(data) ? data.filter(row=>matchesMeetingApprovalDraft(row,meeting)).map(row=>({...row,
         attachment_links:filterApprovalDraftRemovedAttachments(row.attachment_links,row.id,actor)})) : [];
     return approvalDraftCache;
 } // End of fetchApprovalDraftList
 
-function matchesBoardApprovalDraft(row,board=getBoardApprovalRoute()){
-    if(!board)return true;
+const meetingDraftPackageKey=route=>route.kind==='BOARD'?'board_package_id':'assembly_package_id';
+function matchesMeetingApprovalDraft(row,meeting=getMeetingApprovalRoute()){
+    if(!meeting)return true;
     const payload=row?.form_payload,link=payload?.fields?.notice_meeting_link;
-    return row?.doc_type==='공문'&&(payload?.board_package_id===board.id||
-        (link?.kind==='BOARD'&&link.packageId===board.id&&link.coopId===getApprovalScopedCoopId()));
+    return row?.doc_type==='공문'&&(payload?.[meetingDraftPackageKey(meeting)]===meeting.id||
+        (link?.kind===meeting.kind&&link.packageId===meeting.id&&link.coopId===getApprovalScopedCoopId()));
 }
 
 function renderApprovalDraftList() {
@@ -3920,7 +3921,7 @@ async function loadApprovalDraftFromServer(draftId) {
         if (error || !data) return showAlert(getApprovalDraftErrorMessage(error, '임시저장 문서를 불러오지 못했습니다.'));
         draftRow = data;
     }
-    if(!matchesBoardApprovalDraft(draftRow))return showAlert('현재 이사회의 공문 초안만 불러올 수 있어요.');
+    if(!matchesMeetingApprovalDraft(draftRow))return showAlert('현재 회의의 공문 초안만 불러올 수 있어요.');
 
     const draftModalEl = document.getElementById('approvalDraftModal');
     const confirmModalEl = document.getElementById('confirmModal');
@@ -4247,7 +4248,7 @@ async function loadApprovalDraftFromServer(draftId) {
         rememberApprovalDraftStatusState();
         syncApprovalDraftStatusText();
         switchTab('draft');
-        if(getBoardApprovalRoute())syncApprovalSubmitControls();
+        if(getMeetingApprovalRoute())syncApprovalSubmitControls();
         if (String(fields.expense_sub_type || '').trim() === '원천세') void loadApprovalWithholdingExpense({keepDraftValues:true});
     } catch (error) {
         if(!isApprovalDraftLoadCurrent(intent) && !(intent.restoring && approvalDraftLoadIntent===intent
@@ -6064,7 +6065,7 @@ function renderApprovalCategoryOptions() {
 
     const previousValue = String(categoryEl.value || '').trim();
     const groups = getWorkforceLiteApprovalDocGroups();
-    if(isBoardApprovalRoute()){
+    if(isMeetingApprovalRoute()){
         const allowed=groups.some(group=>group.items.some(item=>item.value==='공문'));
         categoryEl.replaceChildren(new Option(allowed?'공문':'사용 가능한 공문 양식이 없습니다',allowed?'공문':''));
         return;
@@ -10436,7 +10437,7 @@ function isApprovalTemplateContextCurrent(context) {
         && context.category === getCurrentApprovalCategory() && context.permission === canPerform('approval.submit')
         && !!myInfo?.emp_id && activeApprovalTab === 'draft' && !window.frameElement?.hidden
         && (document.getElementById('approvalTemplateModal')?.classList.contains('show')
-            || (isBoardApprovalRoute()&&approvalTemplateModalInstance?._isShown===true));
+            || (isMeetingApprovalRoute()&&approvalTemplateModalInstance?._isShown===true));
 }
 
 function invalidateApprovalTemplateRead() {
@@ -10579,7 +10580,7 @@ async function openApprovalTemplatePicker() {
     const current = () => approvalTemplateRead === read && isApprovalTemplateContextCurrent(context);
     read.promise = (async () => {
     try {
-    const board=getBoardApprovalRoute();
+    const board=getMeetingApprovalRoute();
     let query=_supabase
         .from('ref_approval')
         .select('id, doc_type, title, content, created_at, receiver, via')
@@ -11453,7 +11454,7 @@ let approvalEntryStarted=false;
 window.onload = async function() {
     if(approvalEntryStarted)return;
     approvalEntryStarted=true;
-    const openingBoard=isBoardApprovalRoute();
+    const openingBoard=isMeetingApprovalRoute();
     if(openingBoard){
         document.body.dataset.boardApproval='checking';
         document.getElementById('approvalPageHeading').textContent='소집 공문 결재';
@@ -11715,15 +11716,15 @@ window.onload = async function() {
 document.addEventListener('DOMContentLoaded',()=>{void window.onload();},{once:true});
 
 let approvalEntryWorkflow,approvalEntryCompany,approvalDraftEntry,approvalEntryTabRevision=0;
-const getBoardApprovalRoute=()=>{const route=window.ErpBoardFlow?.parse(location.href);return route?.kind==='BOARD'&&route.stage==='approval'?route:null;};
-const isBoardApprovalRoute=()=>!!getBoardApprovalRoute();
+const getMeetingApprovalRoute=()=>{const route=window.ErpBoardFlow?.parse(location.href);return route?.stage==='approval'?route:null;};
+const isMeetingApprovalRoute=()=>!!getMeetingApprovalRoute();
 function startApprovalDraftSources(){
     approvalEntryWorkflow??=loadApprovalWorkflowContext();
     approvalEntryCompany??=loadApprovalCompanyInfo();
 }
 function prepareApprovalDraftEntry(){
     const owner=approvalFormReadOwner();
-    const board=isBoardApprovalRoute();
+    const board=isMeetingApprovalRoute();
     if(!owner||activeApprovalTab!=='draft'||window.frameElement?.hidden||(board&&!approvalEntryWorkflow))return Promise.resolve(false);
     if(!approvalDraftEntry||approvalDraftEntry.owner!==owner){
         const entry={owner,ready:false,applied:false,promise:null};
@@ -14500,19 +14501,17 @@ let boardApprovalReadVersion=0;
 let autoPreparedMeetingDraft='';
 let boardApprovalRuntime=null;
 async function refreshBoardApprovalEntry(){
-    const context=window.ErpBoardFlow.parse(location.href);
-    if(!context||context.stage!=='approval')return;
+    const context=getMeetingApprovalRoute();
+    if(!context)return;
     const coopId=getApprovalScopedCoopId(),actor=myAuthUserId,ticket=++boardApprovalReadVersion;
     const assembly=context.kind==='GENERAL_ASSEMBLY',label=assembly?'총회':'이사회';
-    if(!assembly){
-        document.body.dataset.boardApproval=document.getElementById('appCategory').value==='공문'?'waiting':'unavailable';
-        syncApprovalSubmitControls();
-    }
+    document.body.dataset.boardApproval=document.getElementById('appCategory').value==='공문'?'waiting':'unavailable';
+    syncApprovalSubmitControls();
     const current=()=>ticket===boardApprovalReadVersion&&actor===myAuthUserId&&coopId===getApprovalScopedCoopId()
-        &&(assembly||!approvalFormReadInvalidated)
+        &&!approvalFormReadInvalidated
         &&window.ErpBoardFlow.parse(location.href)?.href===context.href;
     const shell=document.getElementById('boardApprovalEntry'),status=document.getElementById('boardApprovalStatus'),action=document.getElementById('boardApprovalAction');
-    shell.hidden=false;action.hidden=true;status.textContent=assembly?'연결 공문을 확인하는 중…':'회의자료를 확인하는 중…';
+    shell.hidden=false;action.hidden=true;action.disabled=false;status.textContent='회의자료를 확인하는 중…';
     try {
         const state=await window.ErpBoardFlow.read(_supabase,coopId,context);
         if(!current())return;
@@ -14524,7 +14523,6 @@ async function refreshBoardApprovalEntry(){
             action.textContent='연결 공문 보기';action.hidden=false;
             action.onclick=async ()=>{
                 if(!current()||action.disabled||window.frameElement?.hidden)return;
-                if(assembly){void openRelView(existing);return;}
                 action.disabled=true;
                 try{
                     approvalEntryWorkflow??=loadApprovalWorkflowContext();
@@ -14535,23 +14533,19 @@ async function refreshBoardApprovalEntry(){
             };
             if(!['반려','결재취소','취소','회수'].includes(state.approvalStatus))return;
         }
-        if(assembly&&!state.agendaReady){status.textContent='안건을 먼저 저장해 주세요.';return;}
-        if(assembly&&!state.materialsReady){status.textContent='안건이 담긴 회의자료를 먼저 확정해 주세요.';return;}
         if(!canImportApprovalMeeting('공문')||!canPerform('approval.submit')){
-            if(!assembly)status.textContent='소집 공문을 상신할 권한이 있는 담당자가 작성할 수 있어요.';
+            status.textContent='소집 공문을 상신할 권한이 있는 담당자가 작성할 수 있어요.';
             return;
         }
-        if(!assembly){
-            if(document.body.dataset.boardApproval==='unavailable'){status.textContent='이 조합에서 공문 양식을 사용할 수 없어요.';return;}
-            if(state.agendaReady&&state.materialsReady)document.body.dataset.boardApproval='ready';
-            startApprovalDraftSources();
-            void prepareApprovalDraftEntry();
-            syncApprovalSubmitControls();
-        }
-        action.textContent=assembly?label+' 소집 공문 작성':'회의 내용 불러오기';action.hidden=false;
-        const waitingForBoardMaterial=!assembly&&(!state.agendaReady||!state.materialsReady);
+        if(document.body.dataset.boardApproval==='unavailable'){status.textContent='이 조합에서 공문 양식을 사용할 수 없어요.';return;}
+        const waitingForMaterials=!state.agendaReady||!state.materialsReady;
+        if(!waitingForMaterials)document.body.dataset.boardApproval='ready';
+        startApprovalDraftSources();
+        void prepareApprovalDraftEntry();
+        syncApprovalSubmitControls();
+        action.textContent='회의 내용 불러오기';action.hidden=false;action.disabled=assembly&&waitingForMaterials;
         const waitingText='회의자료를 확정하면 상신할 수 있어요.';
-        status.textContent=waitingForBoardMaterial?waitingText:state.title;
+        status.textContent=waitingForMaterials?waitingText:state.title;
         action.onclick=async ()=>{
             if(!current()||action.disabled||activeApprovalTab!=='draft'||window.frameElement?.hidden)return;
             if(!assembly&&!state.agendaReady){status.textContent='저장된 안건이 아직 없어요.';return;}
@@ -14562,7 +14556,7 @@ async function refreshBoardApprovalEntry(){
             try{
                 const [source,runtime]=await Promise.all([
                     _supabase.rpc(assembly?'get_meeting_call_notice_source':'get_meeting_call_notice_source_v2',{p_package_id:context.id}),
-                    !assembly&&boardApprovalRuntime?.coop_id===coopId&&boardApprovalRuntime.coop_name
+                    boardApprovalRuntime?.coop_id===coopId&&boardApprovalRuntime.coop_name
                         ?{data:boardApprovalRuntime}:_supabase.rpc('get_my_erp_runtime'),
                     window.ErpWorkflowAssets.load('meetingNotice')
                 ]);
@@ -14581,13 +14575,13 @@ async function refreshBoardApprovalEntry(){
                 markApprovalTitleInputDirty('notice');setApprovalEditorContent(draft.content);
                 setApprovalMeetingNoticeLink({packageId:m.id,fingerprint,kind:context.kind,coopId,title:m.title});
                 syncApprovalDraftStatusText();
-                if(!assembly)syncApprovalSubmitControls();
-                status.textContent=waitingForBoardMaterial?waitingText:label+'에 저장된 안건을 연결했습니다.';
+                syncApprovalSubmitControls();
+                status.textContent=waitingForMaterials?waitingText:label+'에 저장된 안건을 연결했습니다.';
             }catch(error){if(current())status.textContent=error.message||'공문을 불러오지 못했습니다.';}
             finally{action.disabled=false;}
         };
         const autoOwner=JSON.stringify([actor,coopId,context.href]);
-        if(!waitingForBoardMaterial&&autoPreparedMeetingDraft!==autoOwner&&activeApprovalTab==='draft'&&!window.frameElement?.hidden
+        if(!waitingForMaterials&&autoPreparedMeetingDraft!==autoOwner&&activeApprovalTab==='draft'&&!window.frameElement?.hidden
             &&!hasMeaningfulApprovalDraftContentForReplacement()){
             autoPreparedMeetingDraft=autoOwner;
             await action.onclick();
@@ -14595,7 +14589,7 @@ async function refreshBoardApprovalEntry(){
     }catch(error){
         if(!current())return;
         window.ErpBoardFlow.adopt(null);status.textContent=error.message;
-        action.textContent='다시 확인';action.hidden=false;action.onclick=()=>void refreshBoardApprovalEntry();
+        action.textContent='다시 확인';action.hidden=false;action.disabled=false;action.onclick=()=>void refreshBoardApprovalEntry();
     }
 }
 
@@ -15208,7 +15202,7 @@ function getApprovalFormReadSubmitBlock() {
     return '';
 }
 function syncApprovalSubmitControls() {
-    const route=getBoardApprovalRoute();
+    const route=getMeetingApprovalRoute();
     const boardBlock=route
         &&(document.body.dataset.boardApproval!=='ready'||approvalMeetingNoticeLink?.packageId!==route.id||approvalMeetingNoticeLink?.coopId!==getApprovalScopedCoopId())
         ?'현재 회의의 소집 공문을 불러온 뒤 상신할 수 있어요.':'';
@@ -16456,7 +16450,7 @@ function getApprovalSubmitTrigger(e) {
 async function handleDraftSubmit(e,recovery=null) {
     e.preventDefault();
     const boardRoute=window.ErpBoardFlow?.parse(location.href);
-    if(getBoardApprovalRoute()&&document.body.dataset.boardApproval!=='ready')
+    if(getMeetingApprovalRoute()&&document.body.dataset.boardApproval!=='ready')
         return showAlert('회의자료를 확정하면 상신할 수 있어요.');
     if(boardRoute&&(getCurrentDraftMainType()!=='공문'||approvalMeetingNoticeLink?.kind!==boardRoute.kind
         ||approvalMeetingNoticeLink?.packageId!==boardRoute.id||approvalMeetingNoticeLink?.coopId!==getApprovalScopedCoopId()))
