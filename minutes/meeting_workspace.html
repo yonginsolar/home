@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.17.12 | 총회 공고 후 자료집 확정과 의결 기준 표시 -->
+<!-- Version: v1.17.14 | 총회 안건 목록과 감사보고서 발송 요청일 -->
 <html lang="ko">
 <head>
   <script>window.__COOP_ROUTE_APP__ = 'erp';</script>
@@ -18,7 +18,7 @@
   <link rel="stylesheet" href="/minutes/meeting_workflow_manual_v12.css" integrity="sha384-aFkdOAcaw9wKXdPCXctLVyVLGsUPFzy9k+GYiR0bEFtejSTzzKjdPcqN+PAuUC/v" crossorigin="anonymous">
   <!-- Load the shared mount before this page can finish its permission check. -->
   <script src="/minutes/meeting_workflow_manual_v12_labels.js" integrity="sha384-kyMJmSttyo+5MXeUg41T6OtOE7tF4YAEsbv5pLXloMYZ0wc5lws5Ga1XSgOTTHom" crossorigin="anonymous"></script>
-  <script>console.log('[Version] v1.17.12 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.17.14 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
   <style>
     body[data-board-flow] .workspace{grid-template-columns:minmax(0,1fr)}
@@ -130,6 +130,13 @@
     #assemblyBaseOrder li { padding:8px 0; border-bottom:1px solid var(--line); }
     .assembly-agenda-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; }
     .assembly-agenda-row > span { font-weight:700; overflow-wrap:anywhere; }
+    .assembly-agenda-row .assembly-agenda-link { font-weight:700; white-space:normal; text-align:start; }
+    .assembly-agenda-summary { cursor:pointer; font-weight:800; line-height:1.5; overflow-wrap:anywhere; }
+    .assembly-agenda-summary small { color:var(--muted); font-weight:600; }
+    .assembly-agenda-summary:focus-visible { outline:2px solid var(--brand, currentColor); outline-offset:3px; }
+    details.agenda-card[open] > .agenda-head { margin-top:14px; }
+    .assembly-agenda-editor { margin-top:8px; padding:10px; border:1px solid var(--line); border-radius:9px; }
+    .assembly-agenda-editor[open] > summary { margin-bottom:10px; }
     .assembly-agenda-row .bottom-actions { margin:0; justify-content:flex-start; }
     #assemblyBaseChoices { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
     .assembly-agenda-choice { display:flex; align-items:flex-start; gap:8px; margin:8px 0; }
@@ -607,20 +614,23 @@
                   <dt>차입금 한도</dt><dd>차입이 필요할 때만 정관과 실제 자금 계획을 확인해 금액·산정 기준·목적을 적습니다. 예시에 맞추기 위해 차입 계획을 만들 필요는 없습니다.</dd>
                 </dl>
               </details>
-              <div class="field">
-                <label for="bookletPreviousSource">지난 총회 안건 틀</label>
-                <div class="bottom-actions assembly-agenda-source"><select id="bookletPreviousSource"><option value="">지난 총회를 선택해 주세요</option></select><button type="button" class="btn" id="loadPreviousBooklet">지난 총회에서 가져오기</button></div>
+              <details class="assembly-agenda-editor" name="assembly-agenda-edit" id="assemblyPreviousAgendaEditor">
+                <summary class="assembly-agenda-summary">지난 총회 안건 틀 가져오기</summary>
+                <div class="bottom-actions assembly-agenda-source"><select id="bookletPreviousSource" aria-label="지난 총회"><option value="">지난 총회를 선택해 주세요</option></select><button type="button" class="btn" id="loadPreviousBooklet">지난 총회에서 가져오기</button></div>
                 <div id="assemblyPastChoices" hidden></div>
-              </div>
+              </details>
+              <details class="assembly-agenda-editor" name="assembly-agenda-edit" id="assemblyReportEditor">
+              <summary class="assembly-agenda-summary">사업보고</summary>
               <div class="booklet-input-grid">
                 <div class="field"><label for="businessReportIntro">사업보고 개요</label><textarea id="businessReportIntro" placeholder="해당 연도의 사업 추진 방향과 성과를 요약해 주세요."></textarea></div>
                 <div class="field"><label for="businessReportHighlights">주요 사업 추진 실적</label><textarea id="businessReportHighlights" placeholder="한 줄에 한 항목씩 입력하세요."></textarea><div class="help">자료집에서는 입력한 순서대로 번호 목록으로 표시합니다.</div></div>
+              </div>
+              </details>
+              <details class="assembly-agenda-editor" name="assembly-agenda-edit" id="assemblyPlanEditor">
+              <summary class="assembly-agenda-summary">사업계획·예산</summary>
+              <div class="booklet-input-grid">
                 <div class="field"><label for="businessPlanGoal">다음 연도 사업 목표</label><textarea id="businessPlanGoal" placeholder="총회에서 승인할 사업 목표를 입력하세요."></textarea></div>
                 <div class="field"><label for="businessPlanDetails">주요 사업 계획</label><textarea id="businessPlanDetails" placeholder="한 줄에 한 사업씩 입력하세요."></textarea></div>
-                <div class="field"><label for="borrowingLimit">차입금 최고한도액</label><input id="borrowingLimit" class="money-input" inputmode="numeric" placeholder="0"></div>
-                <div class="field"><label for="borrowingRule">또는 한도 산정 기준</label><input id="borrowingRule" placeholder="예: 출자금 납입 총액의 5배"></div>
-                <div class="field"><label for="borrowingPurpose">차입 목적</label><input id="borrowingPurpose" placeholder="예: 발전소 건립 시설자금"></div>
-                <div class="field full"><label for="otherAgendaText">기타안건 주요 내용</label><textarea id="otherAgendaText" placeholder="정해진 내용이 없으면 비워 두세요. 자료집에는 총회 당일 제안 사항을 논의한다고 표시합니다."></textarea></div>
               </div>
               <div class="budget-editor">
                 <div class="budget-editor-head"><h4>수입 예산</h4><button type="button" class="btn btn-small" data-budget-add="income">+ 수입 항목</button></div>
@@ -631,6 +641,19 @@
                 <div id="expenseBudgetRows"></div>
               </div>
               <div class="budget-summary" id="budgetSummary"></div>
+              </details>
+              <details class="assembly-agenda-editor" name="assembly-agenda-edit" id="assemblyBorrowingEditor">
+              <summary class="assembly-agenda-summary">차입금 최고한도</summary>
+              <div class="booklet-input-grid">
+                <div class="field"><label for="borrowingLimit">차입금 최고한도액</label><input id="borrowingLimit" class="money-input" inputmode="numeric" placeholder="0"></div>
+                <div class="field"><label for="borrowingRule">또는 한도 산정 기준</label><input id="borrowingRule" placeholder="예: 출자금 납입 총액의 5배"></div>
+                <div class="field"><label for="borrowingPurpose">차입 목적</label><input id="borrowingPurpose" placeholder="예: 발전소 건립 시설자금"></div>
+              </div>
+              </details>
+              <details class="assembly-agenda-editor" name="assembly-agenda-edit" id="assemblyOtherEditor">
+              <summary class="assembly-agenda-summary">기타 안건</summary>
+              <div class="field"><label for="otherAgendaText">기타안건 주요 내용</label><textarea id="otherAgendaText" placeholder="정해진 내용이 없으면 비워 두세요. 자료집에는 총회 당일 제안 사항을 논의한다고 표시합니다."></textarea></div>
+              </details>
             </section>
             <div id="agendaList"></div>
             <button type="button" class="btn" id="addAgendaButton">+ 안건 추가</button>
@@ -665,6 +688,7 @@
               <div class="audit-step-actions">
                 <button type="button" class="btn btn-primary" id="requestAuditReviewButton">수정 내용으로 전자검토 요청</button>
               </div>
+              <p class="help" id="auditReviewReceipt" role="status" hidden></p>
             </section>
             <section class="audit-change-panel" id="auditChangePanel" hidden>
               <h3>📞 전화·구두 수정 요청</h3>
@@ -803,6 +827,6 @@
   </div>
   <div class="toast" id="toast" role="status"></div>
   <script src="/erp/chatgpt_edit_guide.js?v=1.0.0" integrity="sha384-eVMu5C+DyenFdmrEBIL/DYTUL1zTmurBluHFpYAQSQxsuBEk0GPruzw0tt4Ae4bX" crossorigin="anonymous" defer></script>
-  <script type="module" src="./meeting_workspace_flow_v11.js" integrity="sha384-gB01d9UmfN1y9AcVkvHgn4QDx2um9P3Pfh4y0wrYDOtZSP+Bcgr5U0fNT2Btkgf0" crossorigin="anonymous"></script>
+  <script type="module" src="./meeting_workspace_flow_v12.js" integrity="sha384-TSszhRm1TnPbvzi5YQBARC69UURSVTO/fiwXW8HbGY7csbMiaVZIMduuEYSnaIV7" crossorigin="anonymous"></script>
 </body>
 </html>
