@@ -1,6 +1,6 @@
 /*
-Version: v1.9.1
-Change: 2026-10-27 - Use automatic imported call-notice association without a second linking workflow.
+Version: v1.9.2
+Change: 2026-11-27 - Use the existing cooperative-scoped readers only for the active meeting section.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { createMeetingDocumentEdits } from './meeting_document_edits.js?v=1.0.3';
@@ -60,33 +60,53 @@ async function listMeetingHistory() {
   return { data: data || [], error };
 }
 
-async function getPackage(id) {
-  const { coop_id: coopId } = await getRuntime();
-  const [packageResult, agendaResult, documentResult, attachmentResult, lockResult, outcomeResult] = await Promise.all([
-    scope(supabase.from('meeting_packages').select('*').eq('id', id), coopId).maybeSingle(),
-    scope(supabase.from('meeting_package_agendas').select('*').eq('package_id', id), coopId)
+async function readPackageSections(id, coopId, { section = 'full', includeAgendas = section !== 'prepare', signal } = {}) {
+  const query = table => scope(supabase.from(table).select('*').eq('package_id', id), coopId);
+  const active = request => signal ? request.abortSignal(signal) : request;
+  const materials = section === 'materials' || section === 'full';
+  let documents = null;
+  if (materials || section === 'scenario') {
+    documents = query('meeting_package_documents');
+    if (section === 'materials') documents = documents.eq('document_type','MATERIALS');
+    if (section === 'scenario') documents = documents.in('document_type',['SCENARIO','SCENARIO_SECRETARIAT']);
+  }
+  const empty = { data: null, error:null };
+  const [agendaResult, documentResult, attachmentResult, outcomeResult] = await Promise.all([
+    includeAgendas ? active(query('meeting_package_agendas')
       .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true }),
-    scope(supabase.from('meeting_package_documents').select('*').eq('package_id', id), coopId)
-      .order('document_type', { ascending: true }),
-    scope(supabase.from('meeting_package_pdf_attachments').select('*').eq('package_id', id), coopId)
+      .order('created_at', { ascending: true })) : empty,
+    documents ? active(documents.order('document_type', { ascending: true })) : empty,
+    materials ? active(query('meeting_package_pdf_attachments')
       .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true }),
-    getAgendaState(id),
-    notHeld('state', {packageId:id,coopId}, {}, null)
+      .order('created_at', { ascending: true })) : empty,
+    materials ? notHeld('state', {packageId:id,coopId}, {}, null) : empty
   ]);
-  const error = packageResult.error || agendaResult.error || documentResult.error || attachmentResult.error || lockResult.error || outcomeResult.error;
+  const error = agendaResult.error || documentResult.error || attachmentResult.error || outcomeResult.error;
   return {
     data: error ? null : {
-      package: packageResult.data || null,
       agendas: agendaResult.data || [],
       documents: documentResult.data || [],
       pdfAttachments: [...(attachmentResult.data || []),...(outcomeResult.data?.inheritedAttachments||[])],
-      notHeld: outcomeResult.data,
-      agendaLock: lockResult.data
+      notHeld: outcomeResult.data
     },
     error
   };
+}
+
+async function getPackageSections(id, options) {
+  const { coop_id: coopId } = await getRuntime();
+  return readPackageSections(id,coopId,options);
+}
+
+async function getPackage(id, options = {}) {
+  const { coop_id: coopId } = await getRuntime();
+  const [pack, lock, sections] = await Promise.all([
+    scope(supabase.from('meeting_packages').select('*').eq('id', id), coopId).maybeSingle(),
+    getAgendaState(id),
+    readPackageSections(id,coopId,options)
+  ]);
+  const error = pack.error || lock.error || sections.error;
+  return { data:error ? null : {...sections.data,package:pack.data||null,agendaLock:lock.data},error };
 }
 
 async function uploadPdfAttachment(packageId, file, payload, current) {
@@ -294,6 +314,7 @@ export const MeetingPackageService = {
   listPackages,
   listMeetingHistory,
   getPackage,
+  getPackageSections,
   createPackage,
   acknowledgePackageCreation,
   updatePackage,
