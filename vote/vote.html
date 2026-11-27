@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.14
+Version: v1.0.15
 Change: 2026-10-19 - Distinguish ballot selection from submitting a vote.
 -->
 <html lang="ko" data-election-ui="vote" data-election-role="member">
@@ -940,7 +940,7 @@ voteBtn.addEventListener('click', () => {
     function alertAndClose(msg) {
         loadingScreen.style.display = 'none';
         showModal('알림', msg, () => {
-            tryCloseWindow(); // window.close() 대신 사용
+            tryCloseWindow({ message: msg });
         });
     }
 // [1] 만 나이 계산 함수 (YYMMDD-1... 형식 파싱)
@@ -1067,7 +1067,7 @@ voteBtn.addEventListener('click', () => {
         modal.style.display = 'flex';
     };
     // [신규] 강력한 창 닫기 시도 및 실패 시 안내 화면 처리
-    function tryCloseWindow() {
+    function tryCloseWindow({ completed = false, message = '' } = {}) {
         // 1. 창 닫기 시도
         window.close();
 
@@ -1086,7 +1086,8 @@ voteBtn.addEventListener('click', () => {
                     font-family: sans-serif;
                 ">
                     <div class="vote-close-fallback-card" style="background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 90%;">
-                        <h2 style="color: #2563eb; margin: 0 0 1rem 0;">투표가 완료되었습니다</h2>
+                        <h2 id="vote-close-title" tabindex="-1" style="color: #2563eb; margin: 0 0 1rem 0;"></h2>
+                        <p id="vote-close-reason" style="white-space: pre-line;" hidden></p>
                         <p class="vote-close-fallback-copy" style="color: #4b5563; line-height: 1.6; margin-bottom: 2rem;">
                             브라우저 보안 정책으로 인해 창이 자동으로 닫히지 않았습니다.<br>
                             상단의 <strong>X</strong> 버튼을 눌러 창을 닫아주세요.
@@ -1105,12 +1106,18 @@ voteBtn.addEventListener('click', () => {
                     </div>
                 </div>
             `;
+            const title = document.getElementById('vote-close-title');
+            title.textContent = completed ? '투표가 완료되었습니다' : '투표소 안내';
+            const reason = document.getElementById('vote-close-reason');
+            reason.textContent = message;
+            reason.hidden = !message;
+            title.focus();
         }, 100);
     }
 
     // [추가] 완료 화면 닫기 버튼 이벤트 연결
     document.getElementById('btn-close-final').addEventListener('click', () => {
-        tryCloseWindow();
+        tryCloseWindow({ completed: true });
     });
         initPage();
     </script>
