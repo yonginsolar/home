@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.224 | 전자(세금)계산서 작성·미리보기 -->
+<!-- Version: v1.0.225 | 숨김 전자(세금)계산서 거래처·공급자 조회 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.224 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.225 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -18,7 +18,7 @@
   <script src="accounting_bank_compare_v1_2.js" integrity="sha384-+oNSxGYEzHB27HcYVRcvcVL2Ck3gOq/muhTR8vibdDbxt7ownOnbnRDyhr8BNO4A" crossorigin="anonymous"></script>
   <script src="accounting_payroll_recovery_v2.js?v=1.1.0" integrity="sha384-E21YgL5nld+cPHhFryWSP/PXrO4ctgS9j0iKoYdZd8immP7qjqu9ovbuMQLeVc/9" crossorigin="anonymous"></script>
   <script src="accounting_journal_typo.js?v=1.1.1" integrity="sha384-doIdycMuLRG8oxw5/ieVw8ij7JBthcg2jyqcg2RvEd0RUwE52IeizXx2N/WCPbRi" crossorigin="anonymous" defer></script>
-  <script src="workflow_assets_tax_invoice_v1.js" integrity="sha384-Iq7n+ducJfRXZpqN0/BuxcqdXr0+Z6fHSUO3LmMy43h+DzUXwAs7FYsbtHKIATFk" crossorigin="anonymous"></script>
+  <script src="workflow_assets_tax_invoice_v2.js" integrity="sha384-khISr3ik2opU0KAGl616q8SVNVNQ3SQlYfDU7rOmX5rSsZqWzuJ2jjCpr9lqagML" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
   <link rel="stylesheet" href="financial_statements.css?v=1.1.1">
   <meta charset="UTF-8">
@@ -2595,7 +2595,9 @@ async function mountAccountingTaxInvoice() {
     const scope=accountingReadScope('tabTaxInvoice',{valid:accountingTaxInvoiceAllowed});
     const current=()=>accountingReadScopeCurrent(scope);
     if(!scope.pane||!current())return;
-    if(accountingTaxInvoiceView&&accountingTaxInvoiceOwner?.owner===scope.owner&&accountingTaxInvoiceOwner.identity===scope.identity)return;
+    if(accountingTaxInvoiceView&&accountingTaxInvoiceOwner?.owner===scope.owner&&accountingTaxInvoiceOwner.identity===scope.identity){
+        accountingTaxInvoiceView.resume();return;
+    }
     const host=document.getElementById('accountingTaxInvoicePanel');
     const status=document.getElementById('accountingTaxInvoiceStatus');
     accountingTaxInvoiceView?.destroy();
@@ -2607,7 +2609,29 @@ async function mountAccountingTaxInvoice() {
         const assets=window.ErpWorkflowAssets;
         await Promise.all([assets.load('taxInvoiceDraft'),assets.load('taxInvoiceDraftStyle')]);
         if(!current()||accountingTaxInvoiceView)return;
-        accountingTaxInvoiceView=window.CoopTaxInvoiceDraft.mount({host,current,issuerName:accountingFormalName,today:formatAccountingKstDate()});
+        accountingTaxInvoiceView=window.CoopTaxInvoiceDraft.mount({
+            host,current,issuerName:accountingFormalName,today:formatAccountingKstDate(),
+            lookupBuyer:async (businessNumber,signal)=>{
+                if(!current())throw Error('INVOICE_SCOPE');
+                const {data,error}=await _supabase.functions.invoke('erp-invoice-party-lookup',{
+                    body:{businessNumber},signal,timeout:10000
+                });
+                if(error||!data||!current())throw Error('INVOICE_LOOKUP');
+                return data;
+            },
+            loadIssuer:async signal=>{
+                const coopId=scope.owner.coop_id;
+                const keys=['bizNum','company_name','chairman_name','company_address','company_email','company_contact_email'];
+                const {data,error}=await _supabase.from('ref_company_info').select('coop_id,key,value')
+                    .eq('coop_id',coopId).in('key',keys).abortSignal(signal);
+                if(error||!current()||!Array.isArray(data)||data.some(r=>r.coop_id!==coopId||!keys.includes(r.key)))throw Error('INVOICE_ISSUER');
+                const values=Object.fromEntries(data.map(r=>[r.key,String(r.value||'').trim()]));
+                const number=(values.bizNum||'').replace(/[-\s]/g,'');
+                // Invoice-specific branch/industry/item are not assumed from generic company settings.
+                return {number:/^\d{10}$/.test(number)?number:'',name:values.company_name||accountingFormalName,
+                    person:values.chairman_name,address:values.company_address,email:values.company_email||values.company_contact_email};
+            }
+        });
         accountingTaxInvoiceOwner=scope;
         status.hidden=true;
         status.textContent='';
