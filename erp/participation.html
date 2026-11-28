@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.6.2 | 공용 교육 운영 -->
+<!-- Version: v1.6.3 | 의사록 출석 동명이인 확인 -->
 <html lang="ko">
 <head>
   <meta name="erp-input-labels-revision" content="20261115.1">
@@ -12,7 +12,7 @@
   <script src="/erp/workspace_resume.js?v=20261010-9-uimodal-20261013-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.6.0 | participation.html');</script>
+  <script>console.log('[Version] v1.6.3 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1626,13 +1626,26 @@
       }));
       const parsedNames = new Set(attendeeEntryMap.keys());
       const matchedNames = new Set();
+      const ambiguousNames = new Set();
+      const countNames = roster => {
+        const counts = new Map();
+        for (const official of roster) {
+          const name = normalizePersonName(official.name);
+          if (name) counts.set(name,(counts.get(name) || 0) + 1);
+        }
+        return counts;
+      };
+      const targetNameCounts = countNames(officials);
       const signedOfficialIds = new Set((source?.signed_official_ids || []).map(String));
       const signedMemberIds = new Set((source?.signed_member_ids || []).map(String));
       const attendees = officials.map(function(official) {
         const normalized = normalizePersonName(official.name);
-        const attended = parsedNames.has(normalized);
+        const named = !!normalized && parsedNames.has(normalized);
+        const needsIdentityConfirmation = named && targetNameCounts.get(normalized) > 1;
+        const attended = named && !needsIdentityConfirmation;
         const parsedEntry = attendeeEntryMap.get(normalized) || null;
-        if (attended) matchedNames.add(normalized);
+        if (named) matchedNames.add(normalized);
+        if (needsIdentityConfirmation) ambiguousNames.add(official.name);
         return {
           member_id:official.member_uuid,
           official_id:official.official_id,
@@ -1641,7 +1654,8 @@
           member_type:official.member_type,
           role:official.role,
           is_target:true,
-          attendance_status:attended ? 'ATTENDED' : 'ABSENT',
+          attendance_status:needsIdentityConfirmation ? 'PENDING' : attended ? 'ATTENDED' : 'ABSENT',
+          needs_identity_confirmation:needsIdentityConfirmation,
           check_in_method:'MINUTES',
           checked_in_at:attended ? localInputToIso(parsed.startsAt) : null,
           actual_attendee_name:attended && isGroupMemberType(official.member_type)
@@ -1666,13 +1680,17 @@
       }));
       const additionalParsedNames = new Set(additionalEntryMap.keys());
       const additionalOfficials = meetingOfficialsPool(eventType, parsed.startsAt, source).filter(function(official) {
-        return !targetMemberIds.has(personKey({ member_id:official.member_uuid, official_id:official.official_id }))
-          && additionalParsedNames.has(normalizePersonName(official.name));
+        const name = normalizePersonName(official.name);
+        return !!name && !targetMemberIds.has(personKey({ member_id:official.member_uuid, official_id:official.official_id }))
+          && additionalParsedNames.has(name);
       });
+      const extraNameCounts = countNames(additionalOfficials);
       additionalOfficials.forEach(function(official) {
         const normalized = normalizePersonName(official.name);
+        const needsIdentityConfirmation = extraNameCounts.get(normalized) > 1;
         const parsedEntry = additionalEntryMap.get(normalized) || null;
         matchedNames.add(normalized);
+        if (needsIdentityConfirmation) ambiguousNames.add(official.name);
         targetMemberIds.add(personKey({ member_id:official.member_uuid, official_id:official.official_id }));
         attendees.push({
           member_id:official.member_uuid,
@@ -1682,10 +1700,11 @@
           member_type:official.member_type,
           role:official.role,
           is_target:false,
-          attendance_status:'ATTENDED',
+          attendance_status:needsIdentityConfirmation ? 'PENDING' : 'ATTENDED',
+          needs_identity_confirmation:needsIdentityConfirmation,
           check_in_method:'MINUTES',
-          checked_in_at:localInputToIso(parsed.startsAt),
-          actual_attendee_name:isGroupMemberType(official.member_type)
+          checked_in_at:needsIdentityConfirmation ? null : localInputToIso(parsed.startsAt),
+          actual_attendee_name:!needsIdentityConfirmation && isGroupMemberType(official.member_type)
             ? String(parsedEntry?.actualAttendeeName || '').trim()
             : '',
           note:'',
@@ -1701,7 +1720,7 @@
       }).concat(additionalEntries.filter(function(entry) {
         return !matchedNames.has(normalizePersonName(entry.name));
       })).map(function(entry) { return entry.displayName || entry.name; });
-      return { attendees, unmatched };
+      return { attendees, unmatched, ambiguous:[...ambiguousNames] };
     } // End of buildMeetingAttendees
 
     function renderSummary() {
@@ -3172,6 +3191,7 @@
       const messages = [];
       if (missing.length > 0) messages.push(`자동 추출하지 못한 항목: ${missing.join(', ')}`);
       if (built.unmatched.length > 0) messages.push(`명단과 자동 연결되지 않은 참석자: ${built.unmatched.join(', ')}`);
+      if (built.ambiguous.length > 0) messages.push(`동명이인의 참석 여부를 확인해 주세요: ${built.ambiguous.join(', ')}`);
       showAlert('formAlert', messages.join('\n'), messages.length > 0 ? 'warning' : 'success');
       if (messages.length === 0) showAlert('formAlert', '의사록에서 일시·장소·참석자를 가져왔습니다.', 'success');
       renderAttendees();
@@ -3274,7 +3294,7 @@
             </select>`;
         return `
           <div class="attendee-row" data-attendee-index="${index}">
-            <div class="attendee-name">${escapeHtml(row.name)}${type !== 'EDUCATION' && row.is_target === false ? ' <span class="badge text-bg-light">배석자</span>' : ''}${qrCheckInBadge}<div class="attendee-meta">${escapeHtml(row.role || row.member_type || '')}${row.member_number ? ` · ${escapeHtml(row.member_number)}` : ''}${qrCheckInTimeHtml}${type === 'EDUCATION' ? '' : `<br>${signatureHtml}`}</div></div>
+            <div class="attendee-name">${escapeHtml(row.name)}${type !== 'EDUCATION' && row.is_target === false ? ' <span class="badge text-bg-light">배석자</span>' : ''}${row.needs_identity_confirmation && row.attendance_status === 'PENDING' ? ' <span class="badge text-bg-warning">동명이인 확인</span>' : ''}${qrCheckInBadge}<div class="attendee-meta">${escapeHtml(row.role || row.member_type || '')}${row.member_number ? ` · ${escapeHtml(row.member_number)}` : ''}${qrCheckInTimeHtml}${type === 'EDUCATION' ? '' : `<br>${signatureHtml}`}</div></div>
             ${statusHtml}
             ${actualAttendeeHtml}
             <button type="button" class="btn btn-sm btn-outline-danger" data-remove-attendee>제외</button>
@@ -3991,6 +4011,8 @@
       const sourceId = selectedSourceId === 'MANUAL' ? null : selectedSourceId;
       if (type !== 'EDUCATION' && !selectedSourceId) throw new Error('원본 의사록 또는 수기 입력을 선택하세요.');
       if (type !== 'EDUCATION') {
+        const unresolved = (formState.attendees || []).find(row => row.needs_identity_confirmation && row.attendance_status === 'PENDING');
+        if (unresolved) throw new Error(`${unresolved.name} 동명이인의 참석 여부를 선택해 주세요.`);
         const missingGroupAttendee = (formState.attendees || []).find(function(row) {
           return isGroupMemberType(row.member_type)
             && row.attendance_status === 'ATTENDED'
@@ -4065,7 +4087,8 @@
       showLoading(true, '행사를 저장하는 중...');
       try {
         const importingHumanities = values.type === 'EDUCATION' && !formState.eventId && !!humanitiesImportState.selectedCourseId;
-        const attendance = formState.attendees.map(function(row) {
+        const attendance = formState.attendees.filter(row => values.type === 'EDUCATION' || row.is_target !== false
+          || !row.needs_identity_confirmation || row.attendance_status === 'ATTENDED').map(function(row) {
           const education = values.type === 'EDUCATION';
           return {
             member_id:row.member_id,
