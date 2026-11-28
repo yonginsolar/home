@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.139 | 화성 햇빛소득마을 로그인 인계 보완 -->
+<!-- Version: v1.0.140 | ERP 시작 메뉴 즐겨찾기 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261119-coop-plant-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.139 | index.html');</script>
+  <script>console.log('[Version] v1.0.140 | index.html');</script>
 <script src="work_overview_v130.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -107,6 +107,29 @@
     body.erp-menu-screen #currentVersionArea { text-align: center; }
     body.erp-menu-screen #menuButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     body.erp-menu-screen .btn-menu { min-height: 92px; margin-bottom: 0; }
+    #menuButtons > .erp-menu-tile { position: relative; min-width: 0; }
+    #menuButtons > .erp-menu-tile:has(> .btn-menu.hidden) { display: none; }
+    #menuButtons .erp-menu-tile > .btn-menu { width: 100%; height: 100%; margin: 0; }
+    #menuButtons .erp-menu-tile > .btn-menu:hover { transform: none; }
+    #menuButtons[data-personal-menu] .erp-menu-tile > .btn-menu { padding-inline-end: 3.5rem; }
+    #menuButtons[data-personal-menu] .erp-menu-tile > .btn-menu:has(.menu-attention-badge:not(.hidden)) { padding-inline-end: 6.2rem; }
+    #menuButtons[data-personal-menu] .erp-menu-tile .menu-attention-badge { inset-inline-end: 3.45rem; }
+    #menuButtons .erp-menu-star {
+      display: none; position: absolute; inset-inline-end: .35rem; top: calc(50% - 22px);
+      place-items: center; width: 44px; height: 44px; padding: 0; z-index: 1;
+      border: 0; border-radius: 8px; background: transparent; color: var(--erp-muted, #526075);
+      font: 1.35rem/1 system-ui, sans-serif;
+    }
+    #menuButtons[data-personal-menu] .erp-menu-star { display: grid; }
+    #menuButtons .erp-menu-star::before { content: "☆"; }
+    #menuButtons .erp-menu-star[aria-pressed="true"] { color: #8a5a00; }
+    #menuButtons .erp-menu-star[aria-pressed="true"]::before { content: "★"; }
+    #menuButtons .erp-menu-star:hover { background: var(--erp-primary-soft, #eef4fa); }
+    #menuButtons .erp-menu-star:focus-visible { outline: 2px solid var(--erp-primary, #264d78); outline-offset: -2px; }
+    #menuButtons > .erp-menu-divider { display: none; grid-column: 1 / -1; margin-block: .2rem; border-top: 1px solid var(--erp-border, #dce4ee); }
+    @media screen and (min-width: 992px) {
+      #menuButtons:has(> .erp-menu-tile[data-favorite] > .btn-menu:not(.hidden)):has(> .erp-menu-tile:not([data-favorite]) > .btn-menu:not(.hidden)) > .erp-menu-divider { display: block; }
+    }
     .erp-home-section { margin-bottom: 1.25rem; min-width: 0; }
     .erp-home-section-title { font-size: 1.12rem; line-height: 1.4; font-weight: 750; margin: 0 0 .65rem; }
     #erpToday:not(:has(#workOverview > *, #menuTaskStatus:not(.hidden))) { display: none; }
@@ -120,6 +143,8 @@
     @media screen and (max-width: 991.98px) {
       body.erp-menu-screen #menuButtons { grid-template-columns: 1fr; }
       body.erp-menu-screen .btn-menu { min-height: auto; }
+      body[data-erp-mobile-task="menu"] #menuButtons > .erp-menu-tile:has(> .btn-menu:not([data-mobile-task])) { display: none; }
+      #menuButtons:has(> .erp-menu-tile[data-favorite] > .btn-menu[data-mobile-task]:not(.hidden)):has(> .erp-menu-tile:not([data-favorite]) > .btn-menu[data-mobile-task]:not(.hidden)) > .erp-menu-divider { display: block; }
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
@@ -359,6 +384,7 @@
         </button>
       </div>
 
+      <p id="menuFavoriteStatus" class="visually-hidden small text-danger mt-2 mb-0" role="status"></p>
       <div id="mobileDocumentsMenu" class="hidden erp-mobile-only">
         <button type="button" class="btn btn-white btn-menu hidden" id="btnMobileDocuments" onclick="openMinutesRoute('documents')">📂 <strong>문서함</strong><span class="d-block small text-muted">공지·정관·회의자료와 첨부 확인</span></button>
         <button type="button" class="btn btn-outline-primary hidden" id="btnMobileSignature" onclick="openMinutesRoute('signature')">전자서명 요청 확인</button>
@@ -522,6 +548,7 @@ let landingLoadSequence = 0;
 let cancelLandingOrderPaint;
 let menuOrderSaving = false;
 let menuOrderCanCustomize = false;
+const landingFavorites = { key: null, ids: new Set(), confirmed: new Set(), saves: new Map(), tiles: new Map(), divider: null, pending: new Map() };
 let workspaceSwitchContext = null;
 let workspaceSwitchInFlight = false;
 let workspaceHandoffReceiverActive = false;
@@ -796,6 +823,8 @@ function renderWorkspaceSwitcher(context) {
         const companyDesc = document.getElementById('btnAdminDesc');
         if (companyTitle) companyTitle.textContent = '마을 기본정보';
         if (companyDesc) companyDesc.textContent = '마을 법인명, 이사장, 사업자번호와 연락처 관리';
+        const favoriteEntry = landingFavorites.tiles.get('btnAdmin');
+        if (favoriteEntry) updateLandingStar(favoriteEntry);
     }
     const villageWorkspaces = allWorkspaces.filter(item => item?.is_management_coop !== true);
     workspaceSwitchContext = incomingContext ? { ...incomingContext, workspaces: villageWorkspaces } : null;
@@ -1804,6 +1833,10 @@ window.onload = async function() {
         if (nextId !== previousId) {
             landingFeatureSearchActor=null;
             verifiedWorkOverviewOwner=null;
+            if (landingFavorites.key) {
+                clearLandingFavorites();
+                applyMenuOrder();
+            }
             window.ErpWorkOverview?.clear();
             if(landingWasVisible)updateWorkOverviewAttention(null,'loading');
         }
@@ -1967,12 +2000,12 @@ async function loadUserInfo(user) {
     // This read also classifies headquarters vs. village. Keep that gate, but
     // run it alongside the other verified entry reads instead of after them.
     const workspaceContextRead = readWorkspaceSwitchContext();
-    const [permissions, nextPlatform, nextRuntime] = await Promise.all([
+    const [permissions, nextPlatform, landingContext] = await Promise.all([
         loadPermissions(data), loadPlatformContext(), loadCoopRuntime()
     ]);
     const current = () => landingLoad === landingLoadSequence && currentAuthUser?.id === authUserId && myInfo === data;
     if (!current()) return;
-    [permissionSet, platformContext, coopRuntime] = [permissions, nextPlatform, nextRuntime];
+    [permissionSet, platformContext, coopRuntime] = [permissions, nextPlatform, landingContext?.runtime || null];
     applyErpBranding(coopRuntime?.coop_name || '');
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
 
@@ -1997,6 +2030,7 @@ async function loadUserInfo(user) {
     const workspaceContext = await workspaceContextRead;
     if (!current()) return;
     landingFeatureSearchActor = currentAuthUser?.id === authUserId ? authUserId : null;
+    bindLandingFavorites(landingContext?.favorites);
     applyMenuPermissions(data, platformContext, coopRuntime);
     renderWorkspaceSwitcher(workspaceContext);
     void loadSunVillageManagementEntry();
@@ -2035,12 +2069,13 @@ async function loadPlatformContext() {
 
 async function loadCoopRuntime() {
     try {
-        const { data, error } = await _supabase.rpc('get_my_erp_runtime');
-        if (error) {
-            console.error('get_my_erp_runtime failed:', error);
-            return null;
-        }
-        return data || null;
+        const { data, error } = await _supabase.rpc('erp_get_landing_runtime');
+        if (!error && data && Object.hasOwn(data, 'runtime')) return data;
+        // Keep the old menu usable while the new RPC is absent or not yet in the schema cache.
+        if (!['PGRST202', '42883'].includes(error?.code)) throw error || new Error('LANDING_RUNTIME_UNAVAILABLE');
+        const fallback = await _supabase.rpc('get_my_erp_runtime');
+        if (fallback.error) throw fallback.error;
+        return { runtime: fallback.data || null, favorites: null };
     } catch (err) {
         console.error('get_my_erp_runtime exception:', err);
         return null;
@@ -2217,6 +2252,172 @@ function getMenuButtonsContainer() {
     return document.getElementById('menuButtons');
 }
 
+function getLandingFavoritesKey() {
+    const actor = landingFeatureSearchActor;
+    const coop = myInfo?.coop_id;
+    return actor && actor === currentAuthUser?.id && coop && coopRuntime?.coop_id === coop ? JSON.stringify([coop, actor]) : null;
+}
+
+function bindLandingFavorites(saved) {
+    const key = Array.isArray(saved) ? getLandingFavoritesKey() : null;
+    if (key && key === landingFavorites.key && landingFavorites.saves.size) return;
+    clearLandingFavorites();
+    if (!key) return;
+    landingFavorites.key = key;
+    landingFavorites.ids = new Set(saved.filter(id => ERP_MENU_BUTTON_ORDER_IDS.includes(id)));
+    landingFavorites.confirmed = new Set(landingFavorites.ids);
+}
+
+function setLandingFavoriteStatus(message, error = false) {
+    const status = document.getElementById('menuFavoriteStatus');
+    if (!status) return;
+    status.classList.toggle('visually-hidden', !error);
+    status.textContent = message;
+}
+
+function clearLandingFavorites() {
+    landingFavorites.key = null;
+    landingFavorites.ids.clear();
+    landingFavorites.confirmed.clear();
+    landingFavorites.saves.clear();
+    landingFavorites.pending.clear();
+    getMenuButtonsContainer()?.removeAttribute('data-personal-menu');
+    for (const entry of landingFavorites.tiles.values()) {
+        entry.motion?.cancel();
+        entry.tile.removeAttribute('data-favorite');
+    }
+    setLandingFavoriteStatus('');
+}
+
+function isLandingMenuInUse(container) {
+    return container.matches(':hover') || container.contains(document.activeElement);
+}
+
+function updateLandingStar(entry) {
+    entry.star.setAttribute('aria-label', getMenuButtonLabel(entry.button.id) + ' 즐겨찾기');
+    entry.star.setAttribute('aria-pressed', String(landingFavorites.ids.has(entry.button.id)));
+}
+
+function initLandingFavorites(container) {
+    const key = landingFavorites.key;
+    if (!key && !landingFavorites.divider) return;
+    if (container.hasAttribute('data-personal-menu') !== Boolean(key)) container.toggleAttribute('data-personal-menu', !!key);
+    if (landingFavorites.divider) return;
+    for (const id of ERP_MENU_BUTTON_ORDER_IDS) {
+        const button = document.getElementById(id);
+        if (button?.parentElement !== container) continue;
+        const tile = document.createElement('div');
+        tile.className = 'erp-menu-tile';
+        const star = document.createElement('button');
+        star.type = 'button';
+        star.className = 'erp-menu-star';
+        star.addEventListener('click', () => toggleLandingFavorite(id));
+        button.replaceWith(tile);
+        tile.append(button, star);
+        landingFavorites.tiles.set(id, { tile, button, star, motion: null });
+    }
+    const divider = document.createElement('div');
+    divider.className = 'erp-menu-divider';
+    divider.setAttribute('aria-hidden', 'true');
+    container.append(divider);
+    landingFavorites.divider = divider;
+    const drain = () => queueMicrotask(() => {
+        if (!landingFavorites.pending.size || isLandingMenuInUse(container)) return;
+        const pending = [...landingFavorites.pending];
+        landingFavorites.pending.clear();
+        for (const [button, scope] of pending) {
+            if (scope.user === myInfo && scope.auth === currentAuthUser?.id
+                && scope.check === applyMenuPermissions.checkVersion && !document.getElementById('menuArea').classList.contains('hidden')) {
+                revealLandingMenuButton(button);
+            }
+        }
+    });
+    container.addEventListener('pointerleave', drain);
+    container.addEventListener('focusout', drain);
+}
+
+function moveLandingMenuNodes(container, nodes) {
+    const focused = container.contains(document.activeElement) ? document.activeElement : null;
+    let next = container.firstElementChild;
+    for (const node of nodes) {
+        if (node === next) next = next.nextElementSibling;
+        else container.insertBefore(node, next);
+    }
+    if (focused && focused !== document.activeElement) focused.focus({ preventScroll: true });
+}
+
+function toggleLandingFavorite(id) {
+    const key = getLandingFavoritesKey();
+    const entry = landingFavorites.tiles.get(id);
+    const area = document.getElementById('menuArea');
+    if (!key || key !== landingFavorites.key || !entry || entry.button.classList.contains('hidden') || area.classList.contains('hidden')) return;
+    const adding = !landingFavorites.ids.has(id);
+    if (adding) landingFavorites.ids.add(id);
+    else landingFavorites.ids.delete(id);
+    paintLandingFavoriteMove(entry.tile);
+    setLandingFavoriteStatus('');
+    const existing = landingFavorites.saves.get(id);
+    if (existing) {
+        existing.favorite = adding;
+        ++existing.revision;
+        return;
+    }
+    const job = { key, actor: currentAuthUser.id, coop: myInfo.coop_id, favorite: adding, revision: 0 };
+    landingFavorites.saves.set(id, job);
+    void saveLandingFavorite(id, job);
+}
+
+async function saveLandingFavorite(id, job) {
+    const current = () => landingFavorites.saves.get(id) === job && job.key === landingFavorites.key && job.key === getLandingFavoritesKey();
+    try {
+        while (current()) {
+            const { favorite, revision } = job;
+            let saved = false;
+            try {
+                const { data, error } = await _supabase.rpc('erp_set_landing_menu_favorite', {
+                    p_coop_id: job.coop, p_auth_user_id: job.actor, p_menu_id: id, p_favorite: favorite
+                }).abortSignal(AbortSignal.timeout(8000));
+                saved = !error && data === favorite;
+            } catch (_) { /* A late or missing receipt is not confirmed. */ }
+            if (!current()) return;
+            if (saved) {
+                if (favorite) landingFavorites.confirmed.add(id);
+                else landingFavorites.confirmed.delete(id);
+            }
+            // Serialize the final intent for this menu; requests for other menus are independent.
+            if (revision !== job.revision && (!saved || job.favorite !== favorite)) continue;
+            if (saved) setLandingFavoriteStatus(getMenuButtonLabel(id) + (favorite ? ' 즐겨찾기에 추가' : ' 즐겨찾기 해제'));
+            else {
+                if (landingFavorites.confirmed.has(id)) landingFavorites.ids.add(id);
+                else landingFavorites.ids.delete(id);
+                paintLandingFavoriteMove(landingFavorites.tiles.get(id).tile);
+                setLandingFavoriteStatus('즐겨찾기 저장을 확인하지 못했어요. 별을 눌러 다시 시도해 주세요.', true);
+            }
+            break;
+        }
+    } finally {
+        if (landingFavorites.saves.get(id) === job) landingFavorites.saves.delete(id);
+    }
+}
+
+function paintLandingFavoriteMove(tile) {
+    const animate = typeof tile.animate === 'function' && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Read geometry only on an explicit click, in two batches around the DOM move.
+    const before = animate ? [...landingFavorites.tiles.values()].map(item => [item, item.tile.getBoundingClientRect()]) : [];
+    for (const item of landingFavorites.tiles.values()) item.motion?.cancel();
+    applyMenuOrder();
+    const moved = before.filter(([, start]) => start.width && start.height).map(([item, start]) => [item, start, item.tile.getBoundingClientRect()]);
+    for (const [item, start, end] of moved) {
+        const x = start.left - end.left, y = start.top - end.top;
+        if (!end.width || (Math.abs(x) < 1 && Math.abs(y) < 1)) continue;
+        const motion = item.tile.animate([{ transform: `translate(${x}px,${y}px)` }, { transform: 'none' }], {
+            duration: 170, easing: 'cubic-bezier(.2,.65,.3,1)'
+        });
+        item.motion = motion;
+        motion.onfinish = motion.oncancel = () => { if (item.motion === motion) item.motion = null; };
+    }
+}
+
 function getDefaultMenuOrder() {
     return window.ErpWorkspace?.defaultOrder(ERP_MENU_BUTTON_ORDER_IDS, getMenuButtonLabel)
         || ERP_MENU_BUTTON_ORDER_IDS.slice().sort((a,b)=>getMenuButtonLabel(a).localeCompare(getMenuButtonLabel(b),'ko-KR'));
@@ -2367,7 +2568,7 @@ function paintVerifiedMenuOrder(current) {
     cancelLandingOrderPaint = () => controller.abort();
     const paint = () => {
         if (!current() || document.getElementById('menuArea').classList.contains('hidden')) return controller.abort();
-        if (container.matches(':hover') || container.contains(document.activeElement)) return;
+        if (isLandingMenuInUse(container)) return;
         controller.abort();
         applyMenuOrder();
         renderMenuOrderList();
@@ -2379,24 +2580,38 @@ function paintVerifiedMenuOrder(current) {
 function applyMenuOrder() {
     const container = getMenuButtonsContainer();
     if (!container) return;
-    const order = readMenuOrder();
-    const buttonMap = new Map();
-    ERP_MENU_BUTTON_ORDER_IDS.forEach(id => {
+    initLandingFavorites(container);
+    const pinned = [], regular = [];
+    for (const id of readMenuOrder()) {
         const el = document.getElementById(id);
-        if (el) buttonMap.set(id, el);
-    });
-    order.forEach(id => {
-        const el = buttonMap.get(id);
-        if (el) container.appendChild(el);
-    });
+        if (!el) continue;
+        const entry = landingFavorites.tiles.get(id);
+        if (!entry) {
+            if (el.parentElement === container) regular.push(el);
+            continue;
+        }
+        const favorite = landingFavorites.ids.has(id);
+        entry.tile.toggleAttribute('data-favorite', favorite);
+        updateLandingStar(entry);
+        (favorite ? pinned : regular).push(entry.tile);
+    }
+    moveLandingMenuNodes(container, landingFavorites.divider ? [...pinned, landingFavorites.divider, ...regular] : regular);
 }
 
 function revealLandingMenuButton(button) {
     if (!button?.classList.contains('hidden')) return;
     const container = getMenuButtonsContainer();
+    const entry = landingFavorites.tiles.get(button.id);
+    const tile = entry?.tile || button;
+    const pinned = !!entry && landingFavorites.ids.has(button.id);
+    if (entry) updateLandingStar(entry);
     // A late permission reply must not replace a tile already under the pointer.
-    if (button.parentElement === container && !document.getElementById('menuArea').classList.contains('hidden')) {
-        container.appendChild(button);
+    if (tile.parentElement === container && !document.getElementById('menuArea').classList.contains('hidden')) {
+        if (pinned && isLandingMenuInUse(container)) {
+            landingFavorites.pending.set(button, { user: myInfo, auth: currentAuthUser?.id, check: applyMenuPermissions.checkVersion });
+            return;
+        }
+        container.insertBefore(tile, pinned ? landingFavorites.divider : null);
     }
     button.classList.remove('hidden');
 }
@@ -2843,7 +3058,10 @@ function updateLandingFeatureSearch() {
     landingFeatureSearch.refresh();
 }
 function showScreen(id) {
-    if(id!=='menuArea') cancelLandingOrderPaint?.();
+    if(id!=='menuArea') {
+        cancelLandingOrderPaint?.();
+        clearLandingFavorites();
+    }
     if(id==='menuArea' && !retiredGraceAccess) window.ErpWorkOverview?.mount({
         client:_supabase,context:()=>verifiedWorkOverviewOwner?.employee===myInfo&&verifiedWorkOverviewOwner?.auth===currentAuthUser?.id
           ?{coop_id:myInfo.coop_id,actor:String(myInfo.id||myInfo.emp_id||myInfo.auth_user_id||''),auth:currentAuthUser.id,permissions:permissionSet}:null,
