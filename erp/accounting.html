@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.225 | 숨김 전자(세금)계산서 거래처·공급자 조회 -->
+<!-- Version: v1.0.226 | 숨김 전자(세금)계산서 공급자 업태·종목 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.225 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.226 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -2621,15 +2621,24 @@ async function mountAccountingTaxInvoice() {
             },
             loadIssuer:async signal=>{
                 const coopId=scope.owner.coop_id;
-                const keys=['bizNum','company_name','chairman_name','company_address','company_email','company_contact_email'];
-                const {data,error}=await _supabase.from('ref_company_info').select('coop_id,key,value')
-                    .eq('coop_id',coopId).in('key',keys).abortSignal(signal);
-                if(error||!current()||!Array.isArray(data)||data.some(r=>r.coop_id!==coopId||!keys.includes(r.key)))throw Error('INVOICE_ISSUER');
-                const values=Object.fromEntries(data.map(r=>[r.key,String(r.value||'').trim()]));
-                const number=(values.bizNum||'').replace(/[-\s]/g,'');
-                // Invoice-specific branch/industry/item are not assumed from generic company settings.
-                return {number:/^\d{10}$/.test(number)?number:'',name:values.company_name||accountingFormalName,
-                    person:values.chairman_name,address:values.company_address,email:values.company_email||values.company_contact_email};
+                const {data,error}=await _supabase.rpc('erp_invoice_issuer_profile').abortSignal(signal);
+                if(!current())throw Error('INVOICE_ISSUER');
+                let values=data;
+                if(error){
+                    if(!['PGRST202','42883'].includes(error.code))throw Error('INVOICE_ISSUER');
+                    // An older database still supplies the existing basics during a staged rollback.
+                    const keys=['bizNum','company_name','chairman_name','company_address','company_email','company_contact_email'];
+                    const fallback=await _supabase.from('ref_company_info').select('coop_id,key,value')
+                        .eq('coop_id',coopId).in('key',keys).abortSignal(signal);
+                    if(fallback.error||!current()||!Array.isArray(fallback.data)||fallback.data.some(r=>r.coop_id!==coopId||!keys.includes(r.key)))throw Error('INVOICE_ISSUER');
+                    values={...Object.fromEntries(fallback.data.map(r=>[r.key,r.value])),coop_id:coopId};
+                }
+                if(values?.coop_id!==coopId)throw Error('INVOICE_ISSUER');
+                const value=key=>typeof values[key]==='string'?values[key].trim():'';
+                const number=value('bizNum').replace(/[-\s]/g,''),branch=value('company_branch_number');
+                return {number:/^\d{10}$/.test(number)?number:'',name:value('company_name')||accountingFormalName,
+                    person:value('chairman_name'),address:value('company_address'),email:value('company_email')||value('company_contact_email'),
+                    business:value('company_business_type'),item:value('company_business_item'),branch:/^[0-9]{4}$/.test(branch)?branch:''};
             }
         });
         accountingTaxInvoiceOwner=scope;

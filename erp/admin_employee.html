@@ -1,7 +1,7 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
 <!--
-Version: v1.0.217
+Version: v1.0.218
 Change: 2026-11-25 - 두루누리 동일 조건 배분.
 -->
 <html>
@@ -15,7 +15,7 @@ Change: 2026-11-25 - 두루누리 동일 조건 배분.
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261107-first-ready-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.217 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.218 | admin_employee.html');</script>
   <script src="contract_followup.js?v=1.0.3" defer></script>
   <link rel="stylesheet" href="ai_connection.css?v=1.3.0">
   <meta charset="UTF-8">
@@ -6390,7 +6390,8 @@ function readHrCapitalPreview() {
 
 // 조합 기본정보 is independent of other settings and their reads.
 const COOP_PROFILE_DETAIL_FIELDS = [['set_contactName','company_contact_name'],['set_contactPhone','company_contact_phone'],['set_contactEmail','company_contact_email'],['set_estDate','estDate']];
-const COOP_PROFILE_FIELDS = [['set_orgName','company_name'],['set_ceoName','chairman_name'],['set_bizNum','bizNum'],['set_corpNum','corporate_registration_number'],['set_address','company_address'],...COOP_PROFILE_DETAIL_FIELDS];
+const COOP_PROFILE_INVOICE_FIELDS = [['set_businessType','company_business_type'],['set_businessItem','company_business_item'],['set_branchNumber','company_branch_number']];
+const COOP_PROFILE_FIELDS = [['set_orgName','company_name'],['set_ceoName','chairman_name'],['set_bizNum','bizNum'],['set_corpNum','corporate_registration_number'],['set_address','company_address'],...COOP_PROFILE_DETAIL_FIELDS,...COOP_PROFILE_INVOICE_FIELDS];
 function coopProfileValues(data) {
     return Object.fromEntries(COOP_PROFILE_FIELDS.map(([id,key])=>{const value=String(data ? data[key] ?? '' : document.getElementById(id)?.value ?? '').trim();return [key,key==='corporate_registration_number'&&/^[0-9]{6}-?[0-9]{7}$/.test(value)?value.replace('-',''):value];}));
 }
@@ -6416,6 +6417,8 @@ function coopProfileNotice(message,retry=false,result=false) {
 function commitCoopProfileRead(owner,result,values,{checkpoint=false}={}) {
     if (typeof result?.revision!=='string' || !result.data) throw Error('COOP_PROFILE_READ_INVALID');
     const baseline=coopProfileValues(result.data);
+    const invoiceFields=document.getElementById('coopProfileInvoiceFields');
+    if(invoiceFields) invoiceFields.hidden=!COOP_PROFILE_INVOICE_FIELDS.every(([,key])=>Object.hasOwn(result.data,key));
     Object.assign(companyInfo,result.data);
     companyProfileState={owner,revision:result.revision,baseline,review:false};
     window.ERPCoopProfileHistory?.render(document.getElementById('companyIdentityHeading')?.closest('section'),result.history,owner);
@@ -6442,6 +6445,10 @@ async function operateCoopBasicProfile(action) {
     const draft=coopProfileValues();
     const payload=action==='save'?helper.changedValues(state.baseline,draft):{};
     if(action==='save' && payload.corporate_registration_number && !/^[0-9]{6}-?[0-9]{7}$/.test(payload.corporate_registration_number))return coopProfileNotice('사업자등록번호와 구분해 법인등록번호 13자리를 입력해 주세요.');
+    if(action==='save' && payload.company_branch_number && !/^[0-9]{4}$/.test(payload.company_branch_number)){
+        document.getElementById('set_branchNumber')?.focus();
+        return coopProfileNotice('종사업장번호는 숫자 4자리로 입력해 주세요.');
+    }
     if (action==='save' && !Object.keys(payload).length) return coopProfileNotice('변경된 기본정보가 없습니다.');
     coopProfileOperation=true;
     const controls=[...COOP_PROFILE_FIELDS.map(([id])=>document.getElementById(id)),document.getElementById('coopProfileSave'),document.getElementById('coopProfileRetry')]
@@ -6533,6 +6540,10 @@ function ensureCoopProfileFields() {
     if (!identity) return;
     identity.id = 'companyIdentityPanel';
     identity.parentElement.setAttribute('data-first-profile','');
+    const invoice=document.createElement('div');
+    invoice.id='coopProfileInvoiceFields';invoice.hidden=true;
+    invoice.innerHTML='<div class="row g-3 mt-0"><div class="col-md-4"><label for="set_businessType" class="form-label">업태</label><input id="set_businessType" class="form-control" maxlength="100"></div><div class="col-md-4"><label for="set_businessItem" class="form-label">종목</label><input id="set_businessItem" class="form-control" maxlength="100"></div><div class="col-md-4"><label for="set_branchNumber" class="form-label">종사업장번호 <span class="text-muted">(선택)</span></label><input id="set_branchNumber" class="form-control" inputmode="numeric" maxlength="4" pattern="[0-9]{4}"></div></div>';
+    identity.querySelector('.coop-setting-body').append(invoice);
     const panel = document.createElement('section'); panel.id = 'companyProfileDetails'; panel.className = 'coop-setting-panel';
     panel.innerHTML = '<h3 class="coop-setting-heading" id="companyProfileDetailsHeading">📅 설립일 · 공식 연락처</h3><div class="coop-setting-body"><div class="row g-3"><div class="col-md-6"><label for="set_estDate" class="form-label">설립일</label><input id="set_estDate" type="date" class="form-control"></div><div class="col-md-6"><label for="set_contactName" class="form-label">공식 담당자</label><input id="set_contactName" class="form-control" maxlength="100"></div><div class="col-md-6"><label for="set_contactPhone" class="form-label">공식 전화번호</label><input id="set_contactPhone" type="tel" class="form-control" maxlength="40"></div><div class="col-md-6"><label for="set_contactEmail" class="form-label">공식 이메일</label><input id="set_contactEmail" type="email" class="form-control" maxlength="254"></div></div></div>';
     panel.setAttribute('aria-labelledby','companyProfileDetailsHeading'); identity.after(panel);

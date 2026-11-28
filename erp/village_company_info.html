@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!doctype html>
-<!-- Version: v1.1.7 -->
+<!-- Version: v1.1.8 -->
 <html lang="ko">
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -63,6 +63,11 @@
           <div class="col-md-6"><label for="company_contact_phone" class="form-label">대표 연락처</label><input id="company_contact_phone" type="tel" class="form-control" maxlength="40"></div>
           <div class="col-md-6"><label for="company_contact_email" class="form-label">대표 이메일</label><input id="company_contact_email" type="email" class="form-control" maxlength="160"></div>
         </div>
+        <div id="invoiceIssuerFields" hidden><div class="row g-3 mt-0">
+          <div class="col-md-4"><label for="company_business_type" class="form-label">업태</label><input id="company_business_type" class="form-control" maxlength="100"></div>
+          <div class="col-md-4"><label for="company_business_item" class="form-label">종목</label><input id="company_business_item" class="form-control" maxlength="100"></div>
+          <div class="col-md-4"><label for="company_branch_number" class="form-label">종사업장번호 <span class="text-muted">(선택)</span></label><input id="company_branch_number" class="form-control" inputmode="numeric" maxlength="4" pattern="[0-9]{4}"></div>
+        </div></div>
         <div class="section-rule"></div>
         <h2 class="section-title">출자 및 납입 안내</h2>
         <div class="row g-3">
@@ -89,14 +94,17 @@
     window._client = client;
     const statusBox = document.getElementById('status');
     const form = document.getElementById('companyForm');
+    const invoiceProfileKeys = ['company_business_type','company_business_item','company_branch_number'];
     const keys = [
       'company_name', 'chairman_name', 'bizNum', 'company_address', 'estDate', 'company_contact_name',
       'company_contact_phone', 'company_contact_email', 'member_export_share_unit_amount',
-      'member_capital_deposit_bank', 'member_capital_deposit_account', 'member_capital_deposit_holder'
+      'member_capital_deposit_bank', 'member_capital_deposit_account', 'member_capital_deposit_holder', ...invoiceProfileKeys
     ];
     let coopId = null;
     let profileRevision = null;
-    const profileKeys = ['company_name','chairman_name','bizNum','company_address','estDate','company_contact_name','company_contact_phone','company_contact_email'];
+    const profileKeys = ['company_name','chairman_name','bizNum','company_address','estDate','company_contact_name','company_contact_phone','company_contact_email',...invoiceProfileKeys];
+    let invoiceProfileReady = false;
+    let invoiceProfileBaseline = {};
     let saving = false;
     let imagePaths = { seal_url: '', logo_horizontal_url: '' };
     let previewObjectUrls = { sealFile: '', logoFile: '' };
@@ -244,12 +252,15 @@
           return;
         }
         coopId = String(coopResult.data);
-        const { data, error } = await client.from('ref_company_info').select('key,value').eq('coop_id', coopId).in('key', [...keys, 'orgName', 'ceoName', 'address', 'company_contact', 'company_email', 'seal_url', 'logo_horizontal_url']);
+        const { data, error } = await client.from('ref_company_info').select('key,value').eq('coop_id', coopId).in('key', [...keys.filter(key=>!invoiceProfileKeys.includes(key)), 'orgName', 'ceoName', 'address', 'company_contact', 'company_email', 'seal_url', 'logo_horizontal_url']);
         if (error) throw error;
         const info = Object.fromEntries((data || []).map(row => [row.key, row.value || '']));
         const profile = await client.rpc('erp_coop_profile');
         if (profile.error) throw profile.error;
         Object.assign(info,profile.data.data); profileRevision = profile.data.revision;
+        invoiceProfileReady = invoiceProfileKeys.every(key=>Object.hasOwn(profile.data.data,key));
+        if(invoiceProfileReady) invoiceProfileBaseline=Object.fromEntries(invoiceProfileKeys.map(key=>[key,profile.data.data[key]]));
+        document.getElementById('invoiceIssuerFields').hidden = !invoiceProfileReady;
         for (const key of keys) document.getElementById(key).value = info[key] || '';
         imagePaths = { seal_url: info.seal_url || '', logo_horizontal_url: info.logo_horizontal_url || '' };
         const brandingResult = await client.rpc('erp_coop_branding',{p_action:'get',p_data:{}});
@@ -291,9 +302,11 @@
           faviconField.sync(saved);
           confirmed=true;
         }
-        const profileSaved = await client.rpc('erp_coop_profile',{p_action:'save',p_data:Object.fromEntries(profileKeys.map(key=>[key,values[key]])),p_expected_revision:profileRevision});
+        const editableProfileKeys=profileKeys.filter(key=>!invoiceProfileKeys.includes(key)||(invoiceProfileReady&&values[key]!==invoiceProfileBaseline[key]));
+        const profileSaved = await client.rpc('erp_coop_profile',{p_action:'save',p_data:Object.fromEntries(editableProfileKeys.map(key=>[key,values[key]])),p_expected_revision:profileRevision});
         if (profileSaved.error) throw profileSaved.error;
         profileRevision = profileSaved.data.revision;
+        if(invoiceProfileReady) invoiceProfileBaseline=Object.fromEntries(invoiceProfileKeys.map(key=>[key,profileSaved.data.data[key]]));
         confirmed=true;
         const updates = keys.filter(key => key !== 'member_export_share_unit_amount' && !profileKeys.includes(key)).map(key => ({ coop_id: coopId, key, value: values[key] }));
         if (newSealPath) updates.push({ coop_id: coopId, key: 'seal_url', value: newSealPath });
