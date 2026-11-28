@@ -1,6 +1,6 @@
 <!-- UI modal revision: 20261013.1 — preserve business versions, authority and drafts. -->
 <!DOCTYPE html>
-<!-- Version: v1.0.223 | 두루누리 예외 조정 귀속월 보호 -->
+<!-- Version: v1.0.224 | 전자(세금)계산서 작성·미리보기 -->
 <html>
 <head>
 <script src="/shared/scroll_boundary.js?v=1.0.0" integrity="sha384-fqNN2ow5EMuREbLDIkp51xpEzsGn8uYWfXPsFeMNLBTWCP5IbGJk4Mu33BnbOlLH" crossorigin="anonymous" defer></script>
@@ -10,7 +10,7 @@
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261020-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.223 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.224 | accounting.html');</script>
   <script src="accounting_reclass_bulk.js?v=1.0.1"></script>
   <script src="accounting_asset_review.js?v=1.0.1"></script>
   <script src="accounting_capital_links.js?v=1.0.1" integrity="sha384-cmfHTkcexQkbsQax6KGZkOh7JWKrxAkTuhJh5t7vvUAf8E2+pVkZWRcnpEyL7JIL" crossorigin="anonymous"></script>
@@ -18,7 +18,7 @@
   <script src="accounting_bank_compare_v1_2.js" integrity="sha384-+oNSxGYEzHB27HcYVRcvcVL2Ck3gOq/muhTR8vibdDbxt7ownOnbnRDyhr8BNO4A" crossorigin="anonymous"></script>
   <script src="accounting_payroll_recovery_v2.js?v=1.1.0" integrity="sha384-E21YgL5nld+cPHhFryWSP/PXrO4ctgS9j0iKoYdZd8immP7qjqu9ovbuMQLeVc/9" crossorigin="anonymous"></script>
   <script src="accounting_journal_typo.js?v=1.1.1" integrity="sha384-doIdycMuLRG8oxw5/ieVw8ij7JBthcg2jyqcg2RvEd0RUwE52IeizXx2N/WCPbRi" crossorigin="anonymous" defer></script>
-  <script src="workflow_assets_withholding_v1.js" integrity="sha384-5RWfvVhhX9B2yjXPyvzCof3Bz1XRq8choQRtNLs8W70uoqjpA0prCDzFqIyDR090" crossorigin="anonymous"></script>
+  <script src="workflow_assets_tax_invoice_v1.js" integrity="sha384-Iq7n+ducJfRXZpqN0/BuxcqdXr0+Z6fHSUO3LmMy43h+DzUXwAs7FYsbtHKIATFk" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261017-1">
   <link rel="stylesheet" href="financial_statements.css?v=1.1.1">
   <meta charset="UTF-8">
@@ -259,6 +259,10 @@
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 신고·결산 매뉴얼</button></li>
   </ul>
 
+  <template id="accountingTaxInvoiceTemplate">
+    <li class="nav-item" id="accountingTaxInvoiceNav"><button type="button" class="nav-link" data-bs-toggle="tab" data-bs-target="#tabTaxInvoice" role="tab" aria-controls="tabTaxInvoice">전자(세금)계산서</button></li>
+    <div class="tab-pane fade" id="tabTaxInvoice" role="tabpanel" aria-label="전자(세금)계산서"><div id="accountingTaxInvoiceStatus" class="small text-muted" role="status" hidden></div><div id="accountingTaxInvoicePanel"></div></div>
+  </template>
   <div class="tab-content no-print">
     <div class="tab-pane fade" id="tabTaxes"><div id="accountingTaxPanel"></div></div>
     <div class="tab-pane fade" id="tabStatements"><div id="financialStatementsPanel"></div></div>
@@ -1544,7 +1548,7 @@ function bindAccountingReadLifecycle() {
     document.getElementById('reportModal').addEventListener('hidden.bs.modal',()=>accountingReportSaveUI?.leave());
     const frame=window.frameElement;
     if(frame)new MutationObserver(records=>{
-        if(frame.hidden||records.some(record=>record.oldValue===null)){leaveAccountingApprovalSync();accountingGuideView?.leave();}
+        if(frame.hidden||records.some(record=>record.oldValue===null)){leaveAccountingApprovalSync();accountingGuideView?.leave();accountingTaxInvoiceView?.leave();}
         if(frame.hidden){closingActionRevision++;expireDiscards();}
         if(frame.hidden||records.some(record=>record.oldValue===null))cancelAccountingRead('master');
         cancelStale();
@@ -1553,6 +1557,7 @@ function bindAccountingReadLifecycle() {
     window.addEventListener('pagehide',event=>{invalidateAddResult(event);expireDiscards();accountingReportSaveUI?.leave();capitalLinkUI?.leave();for(const kind of [...accountingReadTasks.keys()])cancelAccountingRead(kind);});
     window.addEventListener('pagehide',leaveAccountingApprovalSync);
     window.addEventListener('pagehide',()=>accountingGuideView?.leave());
+    window.addEventListener('pagehide',()=>accountingTaxInvoiceView?.leave());
     window.addEventListener('beforeunload',event=>{
         if(capitalLinkUI?.isBusy()||accountingReportSaveUI?.hasUnresolved()||assetReviewUI?.isBusy()||approvalReclassBulkUI?.isBusy()||hasUnsavedClosingDraft()||[...document.querySelectorAll('[data-accounting-key]')].some(n=>n.dataset.accountingOwner===accountingReadIdentity()&&accountingRowDirty(n))){event.preventDefault();event.returnValue='';}
     });
@@ -2341,6 +2346,12 @@ window.onload = async function() {
     accountingDataAuthorized = true;
     accountingPilotRuntimeCoop = String(accountingRuntimeGate.runtime.coop_id || '');
     syncAccountingPilotAccess();
+    syncAccountingTaxInvoiceAccess();
+    window.addEventListener('beforeunload',event=>{
+        if(accountingTaxInvoiceAllowed()&&accountingTaxInvoiceOwner?.identity===accountingReadIdentity()&&accountingTaxInvoiceView?.hasDraft()){
+            event.preventDefault();event.returnValue='';
+        }
+    });
     document.querySelector('[data-bs-target="#tabHistory"]')?.addEventListener('hide.bs.tab',closeAccountingReviewPilot);
     document.getElementById('btnClosingReport').disabled = !(canPerform('accounting.view') || canPerform('accounting.edit'));
     const guideTab=document.querySelector('[data-bs-target="#tabGuide"]');
@@ -2354,6 +2365,10 @@ window.onload = async function() {
             syncAccountingPilotAccess();
             ++accountingCardsReadSequence;
             accountingGuideAuthInvalid=true;accountingGuideView?.destroy();accountingGuideView=null;
+        }
+        if(event==='SIGNED_OUT'||(accountingReportActorUid&&actor&&accountingReportActorUid!==actor)) {
+            accountingTaxInvoiceAuthInvalid=true;
+            syncAccountingTaxInvoiceAccess();
         }
         guideAuthActor=actor;
     });
@@ -2547,6 +2562,58 @@ async function mountAccountingGuide() {
         }
     })().finally(() => { accountingGuideLoading = null; });
     return accountingGuideLoading;
+}
+
+// Keep the editor closed in every tenant until verified production issuance is ready for an explicit release.
+const ACCOUNTING_TAX_INVOICE_ISSUANCE_READY = false;
+let accountingTaxInvoiceView=null, accountingTaxInvoiceOwner=null, accountingTaxInvoiceAuthInvalid=false;
+function accountingTaxInvoiceAllowed() {
+    return ACCOUNTING_TAX_INVOICE_ISSUANCE_READY && !accountingTaxInvoiceAuthInvalid && !window.ExpoRuntimeBridge && accountingDataAuthorized && !!accountingReadIdentity()
+        && accountingPilotRuntimeCoop===String(myInfo.coop_id) && canPerform('accounting.edit');
+}
+function syncAccountingTaxInvoiceAccess() {
+    const nav=document.getElementById('accountingTaxInvoiceNav');
+    if(!accountingTaxInvoiceAllowed()){
+        accountingTaxInvoiceView?.destroy();
+        accountingTaxInvoiceView=null;
+        accountingTaxInvoiceOwner=null;
+        if(nav)bootstrap.Tab.getInstance(nav.firstElementChild)?.dispose();
+        nav?.remove();
+        document.getElementById('tabTaxInvoice')?.remove();
+        return;
+    }
+    if(nav)return;
+    const [newNav,pane]=document.getElementById('accountingTaxInvoiceTemplate').content.cloneNode(true).children;
+    const tab=newNav.firstElementChild;
+    tab.addEventListener('shown.bs.tab',mountAccountingTaxInvoice);
+    tab.addEventListener('hide.bs.tab',()=>accountingTaxInvoiceView?.leave());
+    const reference=document.getElementById('tabTaxes');
+    reference.after(pane);
+    document.querySelector('[data-bs-target="#tabTaxes"]').parentElement.after(newNav);
+}
+async function mountAccountingTaxInvoice() {
+    const scope=accountingReadScope('tabTaxInvoice',{valid:accountingTaxInvoiceAllowed});
+    const current=()=>accountingReadScopeCurrent(scope);
+    if(!scope.pane||!current())return;
+    if(accountingTaxInvoiceView&&accountingTaxInvoiceOwner?.owner===scope.owner&&accountingTaxInvoiceOwner.identity===scope.identity)return;
+    const host=document.getElementById('accountingTaxInvoicePanel');
+    const status=document.getElementById('accountingTaxInvoiceStatus');
+    accountingTaxInvoiceView?.destroy();
+    accountingTaxInvoiceView=null;
+    accountingTaxInvoiceOwner=null;
+    status.hidden=false;
+    status.textContent='작성 화면을 불러오는 중입니다.';
+    try{
+        const assets=window.ErpWorkflowAssets;
+        await Promise.all([assets.load('taxInvoiceDraft'),assets.load('taxInvoiceDraftStyle')]);
+        if(!current()||accountingTaxInvoiceView)return;
+        accountingTaxInvoiceView=window.CoopTaxInvoiceDraft.mount({host,current,issuerName:accountingFormalName,today:formatAccountingKstDate()});
+        accountingTaxInvoiceOwner=scope;
+        status.hidden=true;
+        status.textContent='';
+    }catch(_){
+        if(current())status.textContent='작성 화면을 불러오지 못했습니다. 다른 탭으로 갔다가 다시 열어 주세요.';
+    }
 }
 
 // Helper
