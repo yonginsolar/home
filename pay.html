@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.3
+Version: v1.0.4
 Change: Mark account helper page as noindex and add description metadata.
 -->
 <html lang="ko">
@@ -138,27 +138,29 @@ Change: Mark account helper page as noindex and add description metadata.
         const guide = await CoopCapitalDepositGuide.read();
         document.title = guide.coop_name + ' 출자금 입금 안내';
         const params = new URLSearchParams(window.location.search);
-        const rawAmount = String(params.get('amount') || '').replace(/,/g, '');
-        const amount = /^\d{1,10}$/.test(rawAmount) && Number(rawAmount) > 0 && Number(rawAmount) <= 1000000000
-            ? Number(rawAmount) : Number(guide.minimum || 0);
+        const amounts = params.getAll('amount');
+        const rawAmount = (amounts[0] || '').trim();
+        const parsedAmount = /^(?:\d{1,10}|\d{1,3}(?:,\d{3}){1,3})$/.test(rawAmount) ? Number(rawAmount.replace(/,/g, '')) : 0;
+        const invalidAmount = amounts.length > 0 && (amounts.length !== 1 || parsedAmount <= 0 || parsedAmount > 1000000000);
+        const amount = amounts.length ? (invalidAmount ? 0 : parsedAmount) : Number(guide.minimum || 0);
         const userName = String(params.get('name') || '').slice(0, 100);
         document.getElementById('displayAmount').textContent = amount > 0 ? amount.toLocaleString('ko-KR') : '—';
         document.getElementById('depositBank').textContent = guide.bank || '';
         document.getElementById('depositAccount').textContent = guide.account || '';
         document.getElementById('depositHolder').textContent = guide.holder ? '예금주: ' + guide.holder : '';
         const mobile = document.querySelector('p.desc .mobile-only-btn');
-        mobile.textContent = (userName ? userName + ' 조합원님, ' : '') + '아래 계좌로 입금해 주세요.';
+        mobile.textContent = invalidAmount ? '' : (userName ? userName + ' 조합원님, ' : '') + '아래 계좌로 입금해 주세요.';
         if (!guide.bank || !guide.account || !guide.holder) {
             CONFIG.accountNo = ''; status.textContent = '출자금 납입 계좌가 아직 등록되지 않았습니다.'; return;
         }
         CONFIG.accountNo = String(guide.account).replace(/[^0-9]/g, '');
         document.getElementById('copyAccountButton').disabled = !CONFIG.accountNo;
-        const tossUrl = window.CoopCapitalToss?.url(guide,amount);
+        const tossUrl = !invalidAmount && window.CoopCapitalToss?.url(guide,amount);
         if (tossUrl) {
             toss.href = tossUrl;
             toss.style.removeProperty('display');
         }
-        status.textContent = '';
+        status.textContent = invalidAmount ? '입금하기 전에 납입 금액을 확인해 주세요.' : '';
         } catch (_) {
             CONFIG.accountNo = ''; status.textContent = '입금 안내를 불러오지 못했습니다. 다시 확인해 주세요.';
             document.getElementById('depositRetry').hidden = false;
